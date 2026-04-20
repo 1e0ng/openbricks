@@ -56,6 +56,7 @@ _TEST_MODULES = [
     "tests.test_config",
     "tests.test_drivebase",
     "tests.test_hub",
+    "tests.test_ssd1306",
 ]
 
 

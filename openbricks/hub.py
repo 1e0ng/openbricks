@@ -49,20 +49,27 @@ class PushButton(Button):
 
 
 class ESP32DevkitHub(Hub):
-    """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BOOT button on GPIO 0."""
+    """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BOOT button on GPIO 0.
 
-    def __init__(self, led_pin=2, button_pin=0):
+    Pass an optional ``display`` (any ``Display``-conformant driver, e.g.
+    ``openbricks.drivers.ssd1306.SSD1306``) to attach an OLED.
+    """
+
+    def __init__(self, led_pin=2, button_pin=0, display=None):
         self.led = SimpleLED(led_pin)
         self.button = PushButton(button_pin, active_low=True)
+        self.display = display
 
 
 class ESP32S3DevkitHub(Hub):
     """ESP32-S3 DevKitC-1 onboard hub: BOOT button on GPIO 0.
 
     The DevKitC-1 has no plain digital LED (only a WS2812 RGB). If
-    you've wired an external LED, pass its pin as ``led_pin``.
+    you've wired an external LED, pass its pin as ``led_pin``. Optional
+    ``display`` attaches any ``Display``-conformant driver.
     """
 
-    def __init__(self, led_pin=None, button_pin=0):
+    def __init__(self, led_pin=None, button_pin=0, display=None):
         self.led = SimpleLED(led_pin) if led_pin is not None else None
         self.button = PushButton(button_pin, active_low=True)
+        self.display = display

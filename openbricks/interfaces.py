@@ -130,6 +130,36 @@ class Button:
         raise NotImplementedError
 
 
+class Display:
+    """A pixel-addressable framebuffer display (e.g. an SSD1306 OLED).
+
+    Implementations provide a FrameBuffer-style surface — at minimum
+    ``text``, ``pixel``, ``fill``, and ``show`` — plus the ``clear``
+    convenience defined here.
+    """
+
+    width = 0
+    height = 0
+
+    def text(self, s, x, y, c=1):
+        raise NotImplementedError
+
+    def pixel(self, x, y, c):
+        raise NotImplementedError
+
+    def fill(self, c):
+        raise NotImplementedError
+
+    def show(self):
+        """Flush the RAM buffer to the physical display."""
+        raise NotImplementedError
+
+    def clear(self):
+        """Erase the framebuffer and push a blank frame to the display."""
+        self.fill(0)
+        self.show()
+
+
 class Hub:
     """Board-level peripherals baked into a specific MCU devkit.
 

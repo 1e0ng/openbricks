@@ -75,6 +75,13 @@ class ESP32DevkitHubTests(unittest.TestCase):
         self.assertEqual(hub.led._pin.pin, 5)
         self.assertEqual(hub.button._pin.pin, 9)
 
+    def test_display_kwarg_attaches_display(self):
+        from machine import I2C
+        from openbricks.drivers.ssd1306 import SSD1306
+        from openbricks.interfaces import Display
+        hub = ESP32DevkitHub(display=SSD1306(I2C(0)))
+        self.assertIsInstance(hub.display, Display)
+
 
 class ESP32S3DevkitHubTests(unittest.TestCase):
     def test_no_onboard_led_by_default(self):
