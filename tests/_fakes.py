@@ -157,12 +157,14 @@ class Pin:
     OUT = "OUT"
     IN = "IN"
     PULL_UP = "PULL_UP"
+    PULL_DOWN = "PULL_DOWN"
     IRQ_RISING = 1
     IRQ_FALLING = 2
 
     def __init__(self, pin, mode=None, pull=None, value=0):
         self.pin = pin
         self.mode = mode
+        self.pull = pull
         self._value = value
         self._irq_handler = None
 

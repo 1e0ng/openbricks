@@ -55,6 +55,7 @@ _TEST_MODULES = [
     "tests.test_jgb37_520",
     "tests.test_config",
     "tests.test_drivebase",
+    "tests.test_hub",
 ]
 
 
