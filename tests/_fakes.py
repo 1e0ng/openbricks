@@ -157,12 +157,14 @@ class Pin:
     OUT = "OUT"
     IN = "IN"
     PULL_UP = "PULL_UP"
+    PULL_DOWN = "PULL_DOWN"
     IRQ_RISING = 1
     IRQ_FALLING = 2
 
     def __init__(self, pin, mode=None, pull=None, value=0):
         self.pin = pin
         self.mode = mode
+        self.pull = pull
         self._value = value
         self._irq_handler = None
 
@@ -325,3 +327,8 @@ class _FakeMachineModule:
 
 
 sys.modules["machine"] = _FakeMachineModule
+
+# Note: the SSD1306 fake is intentionally not installed here. It lives
+# in ``tests/_fakes_ssd1306.py`` so that test modules not touching the
+# display (e.g. ``test_observer``, which allocates close to MP's heap
+# limit for its variance test) don't pay its memory cost.

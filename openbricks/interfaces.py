@@ -102,3 +102,8 @@ class ColorSensor:
     def ambient(self):
         """Return ambient / clear-channel intensity in 0..100."""
         raise NotImplementedError
+
+# Hub-layer interfaces (StatusLED, Button, Display, Hub) live in
+# ``openbricks.hub`` alongside their concrete implementations so that
+# tests which don't touch the hub don't pay the class-loading cost on
+# MicroPython's tight unix heap.
