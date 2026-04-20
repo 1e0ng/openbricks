@@ -87,7 +87,7 @@ static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
     m_del(mp_obj_t, snap, n);
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_on_tick_obj, mp_on_tick);
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_on_tick_obj, mp_on_tick);
 
 // -----------------------------------------------------------------------
 // Timer lifecycle helpers. machine.Timer is accessed lazily via the
@@ -153,7 +153,7 @@ static mp_obj_t mp_register(mp_obj_t self_in, mp_obj_t callback) {
     mp_obj_list_append(self->callbacks, callback);
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(mp_register_obj, mp_register);
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_register_obj, mp_register);
 
 static mp_obj_t mp_unregister(mp_obj_t self_in, mp_obj_t callback) {
     (void)self_in;
@@ -172,33 +172,33 @@ static mp_obj_t mp_unregister(mp_obj_t self_in, mp_obj_t callback) {
     // Silent if not registered (matches the Python fake).
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(mp_unregister_obj, mp_unregister);
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_unregister_obj, mp_unregister);
 
 static mp_obj_t mp_start(mp_obj_t self_in) {
     (void)self_in;
     mp_do_start(mp_get());
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_start_obj, mp_start);
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_start_obj, mp_start);
 
 static mp_obj_t mp_stop(mp_obj_t self_in) {
     (void)self_in;
     mp_do_stop(mp_get());
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_stop_obj, mp_stop);
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_stop_obj, mp_stop);
 
 static mp_obj_t mp_tick(mp_obj_t self_in) {
     (void)self_in;
     return mp_on_tick(mp_const_none);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_tick_obj, mp_tick);
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_tick_obj, mp_tick);
 
 static mp_obj_t mp_is_running(mp_obj_t self_in) {
     (void)self_in;
     return mp_obj_new_bool(mp_get()->timer != mp_const_none);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_is_running_obj, mp_is_running);
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_is_running_obj, mp_is_running);
 
 static mp_obj_t mp_configure(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     (void)n_args; (void)pos_args;
@@ -219,7 +219,7 @@ static mp_obj_t mp_configure(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     }
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_KW(mp_configure_obj, 1, mp_configure);
+static MP_DEFINE_CONST_FUN_OBJ_KW(mp_configure_obj, 1, mp_configure);
 
 static mp_obj_t mp_reset(mp_obj_t self_in) {
     (void)self_in;
@@ -231,13 +231,13 @@ static mp_obj_t mp_reset(mp_obj_t self_in) {
     self->period_ms = DEFAULT_PERIOD_MS;
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_reset_obj, mp_reset);
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_reset_obj, mp_reset);
 
 // -----------------------------------------------------------------------
 // Type definition — hidden from Python; the singleton is the only
 // instance users ever touch.
 
-STATIC const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
+static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_register),   MP_ROM_PTR(&mp_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_unregister), MP_ROM_PTR(&mp_unregister_obj) },
     { MP_ROM_QSTR(MP_QSTR_start),      MP_ROM_PTR(&mp_start_obj) },
@@ -247,7 +247,7 @@ STATIC const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_configure),  MP_ROM_PTR(&mp_configure_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset),      MP_ROM_PTR(&mp_reset_obj) },
 };
-STATIC MP_DEFINE_CONST_DICT(motor_process_locals_dict, motor_process_locals_dict_table);
+static MP_DEFINE_CONST_DICT(motor_process_locals_dict, motor_process_locals_dict_table);
 
 MP_DEFINE_CONST_OBJ_TYPE(
     openbricks_motor_process_type,
@@ -259,11 +259,11 @@ MP_DEFINE_CONST_OBJ_TYPE(
 // -----------------------------------------------------------------------
 // Module registration
 
-STATIC const mp_rom_map_elem_t openbricks_native_globals_table[] = {
+static const mp_rom_map_elem_t openbricks_native_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),      MP_ROM_QSTR(MP_QSTR__openbricks_native) },
     { MP_ROM_QSTR(MP_QSTR_motor_process), MP_ROM_PTR(&motor_process_singleton) },
 };
-STATIC MP_DEFINE_CONST_DICT(openbricks_native_globals, openbricks_native_globals_table);
+static MP_DEFINE_CONST_DICT(openbricks_native_globals, openbricks_native_globals_table);
 
 const mp_obj_module_t openbricks_native_cmodule = {
     .base    = { &mp_type_module },
