@@ -9,8 +9,14 @@ control loop. For a robot with good encoders (JGB37-520) the simple P
 controller plus encoder feedback is good enough to drive in straight lines
 on a flat floor.
 
-Future work: the ``_tick()`` loop is where you'd hook in a proper trajectory
-planner + state observer à la pbio's ``servo.c`` + ``trajectory.c``.
+Closed-loop motors (e.g. ``JGB37Motor``) run their control step on the
+shared ``MotorProcess`` scheduler — ``DriveBase.straight`` / ``turn`` start
+and stop that scheduler around each blocking move. Open-loop motors (e.g.
+``L298NMotor`` without an encoder) have no-op ``start`` / ``stop`` and fall
+through to a rated-speed ``run(power)`` in ``_run_at_dps``.
+
+Future work: a trapezoidal trajectory planner and a true 2-DOF coupled
+drivebase controller land in M2 and M4 of the roadmap respectively.
 """
 
 import math
@@ -80,22 +86,27 @@ class DriveBase:
         direction = 1 if distance_mm >= 0 else -1
         speed = self._straight_speed_dps * direction
 
-        while True:
-            left_deg = self._left.angle()
-            right_deg = self._right.angle()
-            avg = (left_deg + right_deg) / 2
-            if direction > 0 and avg >= target_wheel_deg:
-                break
-            if direction < 0 and avg <= target_wheel_deg:
-                break
+        self._left.start()
+        self._right.start()
+        try:
+            while True:
+                left_deg = self._left.angle()
+                right_deg = self._right.angle()
+                avg = (left_deg + right_deg) / 2
+                if direction > 0 and avg >= target_wheel_deg:
+                    break
+                if direction < 0 and avg <= target_wheel_deg:
+                    break
 
-            # Simple straight-line correction: nudge speeds to keep angles equal.
-            err = left_deg - right_deg
-            kp = 1.0
-            self._run_at_dps(self._left, speed - kp * err)
-            self._run_at_dps(self._right, speed + kp * err)
-            time.sleep_ms(10)
-
+                # Simple straight-line correction: nudge speeds to keep angles equal.
+                err = left_deg - right_deg
+                kp = 1.0
+                self._run_at_dps(self._left, speed - kp * err)
+                self._run_at_dps(self._right, speed + kp * err)
+                time.sleep_ms(10)
+        finally:
+            self._left.stop()
+            self._right.stop()
         self.stop()
 
     def turn(self, angle_deg):
@@ -110,15 +121,20 @@ class DriveBase:
         direction = 1 if angle_deg >= 0 else -1
         speed = self._turn_rate_dps  # magnitude
 
-        while True:
-            left = self._left.angle() * (-direction)   # left reverses on left turn
-            right = self._right.angle() * direction    # right advances on left turn
-            if left >= wheel_deg_each and right >= wheel_deg_each:
-                break
-            self._run_at_dps(self._left, -speed * direction)
-            self._run_at_dps(self._right, speed * direction)
-            time.sleep_ms(10)
-
+        self._left.start()
+        self._right.start()
+        try:
+            while True:
+                left = self._left.angle() * (-direction)   # left reverses on left turn
+                right = self._right.angle() * direction    # right advances on left turn
+                if left >= wheel_deg_each and right >= wheel_deg_each:
+                    break
+                self._run_at_dps(self._left, -speed * direction)
+                self._run_at_dps(self._right, speed * direction)
+                time.sleep_ms(10)
+        finally:
+            self._left.stop()
+            self._right.stop()
         self.stop()
 
     # ---- helpers ----

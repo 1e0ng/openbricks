@@ -57,6 +57,18 @@ class Motor:
         """Rotate by ``target_angle`` degrees at ``deg_per_s``, blocking if ``wait``."""
         raise NotImplementedError
 
+    # --- Optional scheduler lifecycle ---
+    # Closed-loop drivers register a per-tick control step with
+    # ``openbricks.tools.scheduler.MotorProcess`` when ``start()`` is
+    # called, and unregister (and coast the H-bridge) on ``stop()``.
+    # Open-loop drivers leave the default no-op implementations.
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
 
 class Servo:
     """A position-controlled servo (angle-addressable)."""

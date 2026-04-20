@@ -14,9 +14,15 @@ The constructor takes ``counts_per_output_rev`` so you can tune it to your
 specific gearbox variant. 1320 is a common default for JGB37-520 with 1:30
 gearing.
 
-The closed-loop methods use a very simple P controller on speed. For a
-Pybricks-quality experience you'd want a full state observer + trapezoidal
-trajectory planner — see ``docs/architecture.md``.
+Closed-loop control runs on the cooperative scheduler
+(``openbricks.tools.scheduler.MotorProcess``): ``start()`` registers a
+per-tick control step; ``run_speed()`` just updates the target; the tick
+body does the P-control math and commands the H-bridge. ``stop()``
+unregisters and coasts the motor. ``run_angle()`` blocks on a ``sleep_ms``
+loop while the scheduler drives the motor.
+
+For Pybricks-quality control you'd want a full state observer + trajectory
+planner — see ``docs/architecture.md``. Those land in M2/M3 of the roadmap.
 """
 
 import time
@@ -24,6 +30,7 @@ import time
 from openbricks.drivers.encoder import QuadratureEncoder
 from openbricks.drivers.l298n import L298NMotor
 from openbricks.interfaces import Motor
+from openbricks.tools.scheduler import MotorProcess
 
 
 class JGB37Motor(Motor):
@@ -41,6 +48,8 @@ class JGB37Motor(Motor):
         self._kp = kp
         self._last_count = 0
         self._last_time_ms = time.ticks_ms()
+        self._target_dps = 0.0
+        self._scheduled = False
 
     # --- Open-loop passthroughs ---
     def run(self, power):
@@ -52,7 +61,7 @@ class JGB37Motor(Motor):
     def coast(self):
         self._driver.coast()
 
-    # --- Closed-loop ---
+    # --- Closed-loop state ---
     def angle(self):
         """Output-shaft angle in degrees."""
         return self._enc.count() * 360 / self._counts_per_rev
@@ -73,38 +82,75 @@ class JGB37Motor(Motor):
         return (d_count * 360_000) / (self._counts_per_rev * dt)
 
     def run_speed(self, deg_per_s):
-        """
-        Hold a target shaft speed using a single P-control step.
-        Call repeatedly in a loop. Non-blocking.
-        """
+        """Set the target shaft speed. The scheduler's control step drives the
+        H-bridge toward it; this call itself is non-blocking and does no I/O.
+        Calling ``run_speed`` without first ``start()``-ing the motor is
+        allowed but no control runs until the scheduler is active."""
+        self._target_dps = float(deg_per_s)
+
+    def _control_step(self):
+        """Scheduler tick body: P-control on measured speed."""
         measured = self._measure_speed_dps()
-        error = deg_per_s - measured
+        error = self._target_dps - measured
         # Feed-forward: roughly deg_per_s / rated_speed * 100. Rated speed
         # varies by motor; we use 300 deg/s as a sane default. Retune kp +
         # this constant for your specific gearbox.
-        feedforward = deg_per_s / 300.0 * 100.0
+        feedforward = self._target_dps / 300.0 * 100.0
         power = feedforward + self._kp * error
         if power > 100:
             power = 100
         elif power < -100:
             power = -100
-        self.run(power)
+        self._driver.run(power)
 
+    # --- Scheduler lifecycle ---
+    def start(self):
+        """Register the control step with the motor scheduler and start it.
+        Idempotent."""
+        if self._scheduled:
+            return
+        # Reset the speed-measurement baselines so the first tick sees a real
+        # dt rather than the time since construction.
+        self._last_count = self._enc.count()
+        self._last_time_ms = time.ticks_ms()
+        proc = MotorProcess.instance()
+        proc.register(self._control_step)
+        proc.start()
+        self._scheduled = True
+
+    def stop(self):
+        """Unregister the control step and coast the motor. Idempotent."""
+        if not self._scheduled:
+            return
+        MotorProcess.instance().unregister(self._control_step)
+        self._scheduled = False
+        self._target_dps = 0.0
+        self._driver.coast()
+
+    # --- Blocking high-level moves ---
     def run_angle(self, deg_per_s, target_angle, wait=True):
-        """Rotate by ``target_angle`` degrees at approximately ``deg_per_s``."""
-        start = self.angle()
+        """Rotate by ``target_angle`` degrees at approximately ``deg_per_s``.
+
+        Uses the scheduler — the H-bridge is driven by periodic control
+        ticks, and this method simply sleeps until the encoder reaches the
+        target. With ``wait=False`` the scheduler keeps driving; the caller
+        is responsible for eventually calling ``stop()``.
+        """
         direction = 1 if target_angle >= 0 else -1
-        end = start + target_angle
-        deg_per_s = abs(deg_per_s) * direction
+        end = self.angle() + target_angle
+        self.start()
+        self.run_speed(abs(deg_per_s) * direction)
 
         if not wait:
-            # Fire and forget — caller is responsible for stopping.
-            self.run_speed(deg_per_s)
             return
 
-        # Blocking loop with ~100 Hz update rate.
-        while (direction > 0 and self.angle() < end) or \
-              (direction < 0 and self.angle() > end):
-            self.run_speed(deg_per_s)
+        while True:
+            a = self.angle()
+            if direction > 0 and a >= end:
+                break
+            if direction < 0 and a <= end:
+                break
             time.sleep_ms(10)
+
         self.brake()
+        self.stop()
