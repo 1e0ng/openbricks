@@ -17,8 +17,14 @@ Design:
 * **Period is fixed at 10 ms by default** — a 100 Hz control loop is ample
   for gear motors at this API's accuracy. Set via ``MotorProcess(period_ms=…)``
   before the first ``instance()`` call, or via ``configure()``.
-* **Idempotent.** ``start()`` / ``stop()`` are safe to call repeatedly.
-  Registering the same callable twice is a no-op.
+* **Automatic lifecycle.** ``register()`` starts the timer when the first
+  callback arrives; ``unregister()`` stops it when the last one leaves.
+  User code (and examples) should never need to call ``start()`` /
+  ``stop()`` themselves — just subscribe a motor via ``Motor.start()`` and
+  the scheduler runs exactly while work is pending.
+* **Manual lifecycle is still allowed.** ``start()`` / ``stop()`` remain
+  public for the rare power-user case (benchmarks, custom periodic work
+  that isn't a subscribed callback); both are idempotent.
 * **Tick under test.** ``tick()`` fires all registered callables
   synchronously — useful when a test wants to run exactly one beat without
   sleeping.
@@ -55,16 +61,23 @@ class MotorProcess:
         self._period_ms = int(period_ms)
 
     # ---- subscription ----
+    # Registering a callback also starts the timer; unregistering the last
+    # one stops it. Users never need to touch start()/stop() for the normal
+    # motor-driven case.
 
     def register(self, callback):
         if callback not in self._callbacks:
             self._callbacks.append(callback)
+        if self._timer is None and self._callbacks:
+            self.start()
 
     def unregister(self, callback):
         try:
             self._callbacks.remove(callback)
         except ValueError:
             pass
+        if not self._callbacks and self._timer is not None:
+            self.stop()
 
     # ---- lifecycle ----
 

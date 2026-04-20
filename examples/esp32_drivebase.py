@@ -24,18 +24,14 @@ Wiring (edit the GPIOs to match your board):
         ENC A-> GPIO 34   (input-only pin is fine)
         ENC B-> GPIO 35
 
-The closed-loop control loop runs on the shared ``MotorProcess`` scheduler,
-driven by ``machine.Timer`` at 100 Hz. ``DriveBase.straight`` / ``.turn``
-start and stop the scheduler around each move automatically, but you can
-``.start()`` it once for the whole program if you prefer one timer warm the
-entire time — which also lets you mix scheduler-driven ``drive()`` calls
-with blocking ``straight()`` / ``turn()`` seamlessly.
+Closed-loop control runs on a shared background timer at 100 Hz. It starts
+automatically the first time a motor registers and stops when the last one
+unsubscribes — no scheduler management needed in user code.
 """
 
 from openbricks.drivers.jgb37_520 import JGB37Motor
 from openbricks.robotics import DriveBase
 from openbricks.tools import wait
-from openbricks.tools.scheduler import MotorProcess
 
 
 left = JGB37Motor(
@@ -53,16 +49,8 @@ right = JGB37Motor(
 db = DriveBase(left, right, wheel_diameter_mm=65, axle_track_mm=120)
 db.settings(straight_speed=200, turn_rate=120)
 
-# Keep the control loop running across all moves so the scheduler doesn't
-# thrash its timer between each call. ``stop()`` at the end returns the
-# hardware timer so nothing else contends for it.
-scheduler = MotorProcess.instance()
-scheduler.start()
-try:
-    for _ in range(4):
-        db.straight(500)
-        wait(200)
-        db.turn(90)
-        wait(200)
-finally:
-    scheduler.stop()
+for _ in range(4):
+    db.straight(500)
+    wait(200)
+    db.turn(90)
+    wait(200)

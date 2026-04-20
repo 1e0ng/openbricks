@@ -105,21 +105,26 @@ class JGB37Motor(Motor):
 
     # --- Scheduler lifecycle ---
     def start(self):
-        """Register the control step with the motor scheduler and start it.
-        Idempotent."""
+        """Register the control step with the motor scheduler. Idempotent.
+
+        The scheduler auto-starts the moment the first callback is
+        registered, so callers never need to touch ``MotorProcess`` directly.
+        """
         if self._scheduled:
             return
         # Reset the speed-measurement baselines so the first tick sees a real
         # dt rather than the time since construction.
         self._last_count = self._enc.count()
         self._last_time_ms = time.ticks_ms()
-        proc = MotorProcess.instance()
-        proc.register(self._control_step)
-        proc.start()
+        MotorProcess.instance().register(self._control_step)
         self._scheduled = True
 
     def stop(self):
-        """Unregister the control step and coast the motor. Idempotent."""
+        """Unregister the control step and coast the motor. Idempotent.
+
+        The scheduler auto-stops when the last motor unregisters, so no
+        hardware timer is left running in the idle case.
+        """
         if not self._scheduled:
             return
         MotorProcess.instance().unregister(self._control_step)

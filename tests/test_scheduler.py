@@ -109,6 +109,35 @@ class TestMotorProcess(unittest.TestCase):
         proc.stop()
         self.assertEqual(cb.count, 1)
 
+    def test_register_auto_starts_timer(self):
+        proc = MotorProcess.instance()
+        self.assertFalse(proc.is_running())
+        proc.register(_TickCounter())
+        self.assertTrue(proc.is_running())
+
+    def test_unregister_last_auto_stops_timer(self):
+        proc = MotorProcess.instance()
+        a, b = _TickCounter(), _TickCounter()
+        proc.register(a)
+        proc.register(b)
+        self.assertTrue(proc.is_running())
+        proc.unregister(a)
+        self.assertTrue(proc.is_running())  # ``b`` is still subscribed
+        proc.unregister(b)
+        self.assertFalse(proc.is_running())  # empty -> auto-stop
+
+    def test_autostart_fires_callbacks_during_sleep(self):
+        """Same shape as ``test_start_fires_callbacks_during_sleep`` but
+        without any manual ``start()`` / ``stop()`` — proves users never
+        need to touch scheduler lifecycle."""
+        proc = MotorProcess.instance()
+        cb = _TickCounter()
+        proc.register(cb)
+        time.sleep_ms(100)
+        proc.unregister(cb)
+        self.assertEqual(cb.count, 10)
+        self.assertFalse(proc.is_running())
+
     def test_10000_tick_soak_no_drift(self):
         """Exit criterion: 10 000 periodic ticks arrive on time with no
         accumulated drift. The virtual clock's deadline walker fires timer
