@@ -27,3 +27,10 @@ void openbricks_motor_process_register_c(openbricks_tick_fn_t fn, void *ctx);
 
 // Unsubscribe. Silent if the (fn, ctx) pair isn't registered.
 void openbricks_motor_process_unregister_c(openbricks_tick_fn_t fn, void *ctx);
+
+// Monotonic millisecond clock that advances by ``period_ms`` each tick.
+// Used by servo / drivebase to measure elapsed trajectory time in a way
+// that's deterministic on both firmware (tracking the timer cadence)
+// and tests (where the virtual clock drives the timer, so real wall
+// time never advances inside a simulated tick).
+mp_int_t openbricks_motor_process_now_ms(void);

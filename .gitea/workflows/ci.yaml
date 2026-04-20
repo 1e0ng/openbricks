@@ -11,17 +11,24 @@ jobs:
     runs-on: mac-runner
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Show Python version
-        run: python3 --version
-
-      - name: Install coverage
-        run: python3 -m pip install --quiet coverage
-
-      - name: Run tests with coverage
+      - name: Init MicroPython sub-submodules
         run: |
-          python3 -m coverage run --source=openbricks -m unittest discover -s tests -t .
-          python3 -m coverage report
+          git -C native/micropython submodule update --init \
+            lib/berkeley-db-1.xx lib/micropython-lib lib/mbedtls
 
-      - name: Byte-compile the library
-        run: python3 -m compileall openbricks/
+      - name: Build mpy-cross
+        run: make -C native/micropython/mpy-cross -j
+
+      - name: Build unix MicroPython with openbricks user_c_module
+        run: |
+          make -C native/micropython/ports/unix \
+            VARIANT=standard \
+            USER_C_MODULES=$(pwd)/native/user_c_modules \
+            -j
+
+      - name: Run test suite under unix MicroPython
+        run: |
+          ./native/micropython/ports/unix/build-standard/micropython tests/run.py
