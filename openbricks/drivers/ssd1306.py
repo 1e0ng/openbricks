@@ -15,7 +15,7 @@ The ``ssd1306`` module is frozen into each board's firmware image (see
 flashed hardware.
 """
 
-from openbricks.interfaces import Display
+from openbricks.hub import Display
 
 
 class SSD1306(Display):

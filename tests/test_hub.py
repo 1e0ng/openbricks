@@ -1,17 +1,20 @@
 # SPDX-License-Identifier: MIT
 """Tests for openbricks.hub — LED / Button drivers and per-board Hubs."""
 
-import tests._fakes  # noqa: F401
+import tests._fakes            # noqa: F401
+import tests._fakes_ssd1306    # noqa: F401  (needed for the display-kwarg test)
 
 import unittest
 
 from openbricks.hub import (
+    Button,
     ESP32DevkitHub,
     ESP32S3DevkitHub,
+    Hub,
     PushButton,
     SimpleLED,
+    StatusLED,
 )
-from openbricks.interfaces import Button, Hub, StatusLED
 
 
 class SimpleLEDTests(unittest.TestCase):
@@ -78,7 +81,7 @@ class ESP32DevkitHubTests(unittest.TestCase):
     def test_display_kwarg_attaches_display(self):
         from machine import I2C
         from openbricks.drivers.ssd1306 import SSD1306
-        from openbricks.interfaces import Display
+        from openbricks.hub import Display
         hub = ESP32DevkitHub(display=SSD1306(I2C(0)))
         self.assertIsInstance(hub.display, Display)
 

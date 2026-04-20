@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: MIT
 """Tests for openbricks.drivers.ssd1306 — thin wrapper over micropython-lib."""
 
-import tests._fakes  # noqa: F401
+import tests._fakes            # noqa: F401
+import tests._fakes_ssd1306    # noqa: F401
 
 import unittest
 
 from machine import I2C
 
 from openbricks.drivers.ssd1306 import SSD1306
-from openbricks.interfaces import Display
+from openbricks.hub import Display
 
 
 class SSD1306Tests(unittest.TestCase):

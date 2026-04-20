@@ -17,7 +17,70 @@ subclass one of these or pass explicit pin overrides.
 
 from machine import Pin
 
-from openbricks.interfaces import Button, Hub, StatusLED
+
+# ---- abstract base classes ----
+#
+# Colocated with the concrete implementations to keep ``interfaces.py``
+# small — every ``import openbricks`` loads that module, and MicroPython's
+# unix-port heap is tight enough that extra class defs there have
+# pushed unrelated tests over the allocation limit in the past.
+
+
+class StatusLED:
+    """A user-visible status LED on the hub.
+
+    Plain single-colour LEDs implement ``on`` / ``off``. Addressable RGB
+    LEDs (WS2812 and friends) additionally implement ``rgb``.
+    """
+
+    def on(self):
+        raise NotImplementedError
+
+    def off(self):
+        raise NotImplementedError
+
+    def rgb(self, r, g, b):
+        """Set colour (each channel 0..255). Raises on non-addressable LEDs."""
+        raise NotImplementedError
+
+
+class Button:
+    """A momentary pushbutton on the hub."""
+
+    def pressed(self):
+        """Return ``True`` while the button is held down."""
+        raise NotImplementedError
+
+
+class Display:
+    """A pixel-addressable framebuffer display (e.g. an SSD1306 OLED)."""
+
+    width = 0
+    height = 0
+
+    def text(self, s, x, y, c=1):
+        raise NotImplementedError
+
+    def pixel(self, x, y, c):
+        raise NotImplementedError
+
+    def fill(self, c):
+        raise NotImplementedError
+
+    def show(self):
+        raise NotImplementedError
+
+    def clear(self):
+        self.fill(0)
+        self.show()
+
+
+class Hub:
+    """Board-level peripherals baked into a specific MCU devkit."""
+
+    led = None      # StatusLED
+    button = None   # Button
+    display = None  # optional — Display or None
 
 
 class SimpleLED(StatusLED):

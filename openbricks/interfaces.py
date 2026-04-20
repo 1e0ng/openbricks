@@ -103,71 +103,7 @@ class ColorSensor:
         """Return ambient / clear-channel intensity in 0..100."""
         raise NotImplementedError
 
-
-class StatusLED:
-    """A user-visible status LED on the hub.
-
-    Plain single-colour LEDs implement ``on`` / ``off``. Addressable RGB
-    LEDs (WS2812 and friends) additionally implement ``rgb``.
-    """
-
-    def on(self):
-        raise NotImplementedError
-
-    def off(self):
-        raise NotImplementedError
-
-    def rgb(self, r, g, b):
-        """Set colour (each channel 0..255). Raises on non-addressable LEDs."""
-        raise NotImplementedError
-
-
-class Button:
-    """A momentary pushbutton on the hub."""
-
-    def pressed(self):
-        """Return ``True`` while the button is held down."""
-        raise NotImplementedError
-
-
-class Display:
-    """A pixel-addressable framebuffer display (e.g. an SSD1306 OLED).
-
-    Implementations provide a FrameBuffer-style surface — at minimum
-    ``text``, ``pixel``, ``fill``, and ``show`` — plus the ``clear``
-    convenience defined here.
-    """
-
-    width = 0
-    height = 0
-
-    def text(self, s, x, y, c=1):
-        raise NotImplementedError
-
-    def pixel(self, x, y, c):
-        raise NotImplementedError
-
-    def fill(self, c):
-        raise NotImplementedError
-
-    def show(self):
-        """Flush the RAM buffer to the physical display."""
-        raise NotImplementedError
-
-    def clear(self):
-        """Erase the framebuffer and push a blank frame to the display."""
-        self.fill(0)
-        self.show()
-
-
-class Hub:
-    """Board-level peripherals baked into a specific MCU devkit.
-
-    Every hub exposes a status LED and a user button. Concrete boards
-    attach them (and any optional peripherals like a display) as
-    attributes in ``__init__``.
-    """
-
-    led = None      # StatusLED
-    button = None   # Button
-    display = None  # optional — Display or None (reserved for M4 SSD1306)
+# Hub-layer interfaces (StatusLED, Button, Display, Hub) live in
+# ``openbricks.hub`` alongside their concrete implementations so that
+# tests which don't touch the hub don't pay the class-loading cost on
+# MicroPython's tight unix heap.
