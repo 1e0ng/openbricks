@@ -26,19 +26,14 @@ class _FakeClosedLoopMotor(Motor):
     """Minimal closed-loop ``Motor`` for driving ``DriveBase`` in tests.
 
     ``run_speed`` sets an internal target; ``step(seconds)`` advances the
-    simulated shaft angle at that rate. The test patches ``time.sleep_ms`` so
-    every tick of the DriveBase loop advances both motors together.
-
-    ``start`` / ``stop`` are recorded so tests can assert DriveBase manages
-    the scheduler lifecycle around each blocking move.
+    simulated shaft angle at that rate. The test patches ``time.sleep_ms``
+    so every iteration of the DriveBase loop advances both motors together.
     """
 
     def __init__(self, scale=1.0):
         self._angle_deg = 0.0
         self._target_dps = 0.0
         self._scale = scale
-        self.start_calls = 0
-        self.stop_calls = 0
 
     def run(self, power):
         # Not exercised in the closed-loop path; present so the interface is
@@ -59,12 +54,6 @@ class _FakeClosedLoopMotor(Motor):
 
     def run_speed(self, deg_per_s):
         self._target_dps = float(deg_per_s)
-
-    def start(self):
-        self.start_calls += 1
-
-    def stop(self):
-        self.stop_calls += 1
 
     def step(self, seconds):
         self._angle_deg += self._target_dps * self._scale * seconds
@@ -189,33 +178,6 @@ class TestDriveBaseClosedLoop(unittest.TestCase):
         self.assertEqual(db._straight_speed_dps, 400)
         self.assertEqual(db._turn_rate_dps, 360)
 
-    def test_straight_manages_motor_scheduler_lifecycle(self):
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.straight(100)
-
-        self.assertEqual(left.start_calls, 1)
-        self.assertEqual(right.start_calls, 1)
-        self.assertEqual(left.stop_calls, 1)
-        self.assertEqual(right.stop_calls, 1)
-
-    def test_turn_manages_motor_scheduler_lifecycle(self):
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.turn(90)
-
-        self.assertEqual(left.start_calls, 1)
-        self.assertEqual(right.start_calls, 1)
-        self.assertEqual(left.stop_calls, 1)
-        self.assertEqual(right.stop_calls, 1)
-
-
 class TestDriveBaseWithJGB37(unittest.TestCase):
     """End-to-end: DriveBase + the real JGB37 driver wired to the fake
     scheduler. Validates that the M1 refactor ticks the control loop while
@@ -239,14 +201,15 @@ class TestDriveBaseWithJGB37(unittest.TestCase):
 
         # Simulate both encoders incrementing in lock-step with the
         # scheduler by registering our own tick that advances them.
-        def spin_encoders(_t=None):
+        def spin_encoders():
             left._enc._count += 13
             right._enc._count += 13
 
         proc = MotorProcess.instance()
 
-        # We register our encoder-spinner before DriveBase starts the motors
-        # — DriveBase.straight will register each motor's _control_step too.
+        # Register the encoder spinner; DriveBase.straight will register
+        # each motor's _control_step on the first run_speed call and
+        # unregister them via brake() at the end.
         proc.register(spin_encoders)
 
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
@@ -256,11 +219,12 @@ class TestDriveBaseWithJGB37(unittest.TestCase):
         target = 50 / (math.pi * 56) * 360
         self.assertGreaterEqual((left.angle() + right.angle()) / 2, target)
 
-        # After straight() returns, both motors should have unregistered.
+        # After straight() returns, both motors' control steps are
+        # detached (brake() unregisters them).
         self.assertNotIn(left._control_step, proc._callbacks)
         self.assertNotIn(right._control_step, proc._callbacks)
-        self.assertFalse(left._scheduled)
-        self.assertFalse(right._scheduled)
+        self.assertFalse(left._active)
+        self.assertFalse(right._active)
 
 
 if __name__ == "__main__":

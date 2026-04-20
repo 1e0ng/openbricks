@@ -27,7 +27,7 @@ class TestJGB37Motor(unittest.TestCase):
         MotorProcess.reset()
         Timer.reset_for_test()
 
-    def test_open_loop_run_passes_through_to_h_bridge(self):
+    def test_run_passes_through_to_h_bridge(self):
         m = _make_motor()
         m.run(50)
         self.assertEqual(m._driver._in1.value(), 1)
@@ -56,15 +56,13 @@ class TestJGB37Motor(unittest.TestCase):
         m.reset_angle(0)
         self.assertEqual(m._enc._count, 0)
 
-    def test_run_speed_sets_target_but_does_not_command_bridge(self):
+    def test_run_speed_sets_target_without_immediate_drive(self):
         m = _make_motor()
         m.run_speed(300)
-        # The target is set, but without a scheduler tick the H-bridge should
-        # still be idle.
+        # Target is set and the motor is attached; the next scheduler tick
+        # (not yet fired) is what commands the H-bridge.
         self.assertEqual(m._target_dps, 300.0)
-        self.assertEqual(m._driver._in1.value(), 0)
-        self.assertEqual(m._driver._in2.value(), 0)
-        self.assertEqual(m._driver._pwm.duty(), 0)
+        self.assertTrue(m._active)
 
     def test_control_step_positive_clamps_to_full_forward(self):
         m = _make_motor()
@@ -82,71 +80,70 @@ class TestJGB37Motor(unittest.TestCase):
         self.assertEqual(m._driver._in2.value(), 1)
         self.assertEqual(m._driver._pwm.duty(), 1023)
 
-    def test_control_step_zero_stops_motor(self):
+    def test_run_speed_attaches_to_scheduler(self):
         m = _make_motor()
-        m.run_speed(0)
-        m._control_step()
-        self.assertEqual(m._driver._in1.value(), 0)
-        self.assertEqual(m._driver._in2.value(), 0)
-        self.assertEqual(m._driver._pwm.duty(), 0)
-
-    def test_start_registers_control_step_with_scheduler(self):
-        m = _make_motor()
-        m.start()
+        m.run_speed(100)
         self.assertIn(m._control_step, MotorProcess.instance()._callbacks)
-        self.assertTrue(MotorProcess.instance().is_running())
 
-    def test_start_is_idempotent(self):
+    def test_run_speed_is_idempotent_for_registration(self):
         m = _make_motor()
-        m.start()
-        m.start()
-        # The singleton's dedupe keeps the callback list at length 1.
+        m.run_speed(100)
+        m.run_speed(150)
         self.assertEqual(
             MotorProcess.instance()._callbacks.count(m._control_step), 1,
         )
+        self.assertEqual(m._target_dps, 150.0)
 
-    def test_stop_unregisters_and_coasts(self):
+    def test_brake_detaches_and_brakes(self):
         m = _make_motor()
         m.run_speed(300)
-        m.start()
-        m._control_step()  # engage the bridge
+        m._control_step()
         self.assertEqual(m._driver._pwm.duty(), 1023)
 
-        m.stop()
+        m.brake()
         self.assertNotIn(m._control_step, MotorProcess.instance()._callbacks)
+        self.assertFalse(m._active)
+        self.assertEqual(m._driver._in1.value(), 1)
+        self.assertEqual(m._driver._in2.value(), 1)
+
+    def test_coast_detaches_and_coasts(self):
+        m = _make_motor()
+        m.run_speed(300)
+        m.coast()
+        self.assertNotIn(m._control_step, MotorProcess.instance()._callbacks)
+        self.assertFalse(m._active)
         self.assertEqual(m._driver._in1.value(), 0)
         self.assertEqual(m._driver._in2.value(), 0)
         self.assertEqual(m._driver._pwm.duty(), 0)
-        self.assertEqual(m._target_dps, 0.0)
+
+    def test_run_open_loop_detaches(self):
+        m = _make_motor()
+        m.run_speed(300)
+        self.assertTrue(m._active)
+        m.run(50)
+        self.assertFalse(m._active)
+        self.assertNotIn(m._control_step, MotorProcess.instance()._callbacks)
 
     def test_scheduler_drives_bridge_during_sleep(self):
         m = _make_motor()
-        m.start()
         m.run_speed(300)
         # A single tick period (10 ms) elapses -> one _control_step call.
         time.sleep_ms(10)
         self.assertEqual(m._driver._in1.value(), 1)
         self.assertEqual(m._driver._pwm.duty(), 1023)
-        m.stop()
+        m.brake()
 
     def test_run_angle_reaches_target_when_encoder_is_fed(self):
         m = _make_motor()
-        # Simulate the encoder incrementing in lock-step with the scheduler
-        # by registering our own tick that advances the count. The scheduler
-        # fires both callbacks each tick.
-        step_count = [0]
 
-        def fake_rotation(_t=None):
-            # Advance the encoder by 13 counts per tick -> roughly
-            # 13 * 360 / 1320 = 3.55 deg per tick. Over 100 ms (10 ticks)
-            # the motor covers ~35.5 deg.
+        # Simulate the encoder advancing every scheduler tick.
+        def fake_rotation():
             m._enc._count += 13
-            step_count[0] += 1
 
         MotorProcess.instance().register(fake_rotation)
         m.run_angle(300, 90)  # block until we reach +90 deg.
         self.assertGreaterEqual(m.angle(), 90)
-        self.assertFalse(m._scheduled)  # run_angle stopped the motor
+        self.assertFalse(m._active)  # run_angle braked, which detaches
 
 
 if __name__ == "__main__":

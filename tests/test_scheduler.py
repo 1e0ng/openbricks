@@ -1,8 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Tests for the cooperative motor scheduler.
 
-Exit criterion for M1: 10 000 simulated ticks without the scheduler losing
-beats or drifting off the nominal 10 ms period.
+The scheduler is always-on, pbio-style: the first call to ``instance()``
+starts the timer, and the timer runs for the life of the interpreter.
+Motors just flip between "actively controlled" and "idle" by registering
+or unregistering their tick callback.
+
+Exit criterion for M1: 10 000 simulated ticks without the scheduler
+losing beats or drifting off the nominal 10 ms period.
 """
 
 import tests._fakes  # noqa: F401
@@ -33,6 +38,10 @@ class TestMotorProcess(unittest.TestCase):
         b = MotorProcess.instance()
         self.assertIs(a, b)
 
+    def test_instance_auto_starts_timer(self):
+        proc = MotorProcess.instance()
+        self.assertTrue(proc.is_running())
+
     def test_register_unique(self):
         proc = MotorProcess.instance()
         cb = _TickCounter()
@@ -62,36 +71,48 @@ class TestMotorProcess(unittest.TestCase):
         proc.tick()
         self.assertEqual(a.count, 0)
 
-    def test_start_fires_callbacks_during_sleep(self):
+    def test_register_then_sleep_fires_during_sleep(self):
+        """No manual start()/stop() — ``instance()`` already started the
+        timer. Registering a callback is all a motor needs to do to get
+        ticks."""
         proc = MotorProcess.instance()
         cb = _TickCounter()
         proc.register(cb)
-        proc.start()
-        # 10 ms tick period; sleep 100 ms should fire ~10 times.
         time.sleep_ms(100)
-        proc.stop()
         self.assertEqual(cb.count, 10)
+
+    def test_unregister_keeps_timer_running(self):
+        """Unlike the previous auto-lifecycle design, unregistering the
+        last callback does not stop the scheduler. Matches pbio's
+        always-on model."""
+        proc = MotorProcess.instance()
+        cb = _TickCounter()
+        proc.register(cb)
+        self.assertTrue(proc.is_running())
+        proc.unregister(cb)
+        self.assertTrue(proc.is_running())
 
     def test_start_is_idempotent(self):
         proc = MotorProcess.instance()
-        proc.start()
+        # Already running from instance() auto-start.
+        proc.start()  # no-op
         self.assertTrue(proc.is_running())
-        proc.start()  # second call is a no-op
+
+    def test_stop_and_restart(self):
+        """``stop()`` / ``start()`` are exposed for the rare power-user
+        case — pause the entire scheduler, then resume."""
+        proc = MotorProcess.instance()
         proc.stop()
         self.assertFalse(proc.is_running())
+        proc.start()
+        self.assertTrue(proc.is_running())
 
-    def test_stop_before_start_is_silent(self):
-        proc = MotorProcess.instance()
-        proc.stop()  # should not raise
-
-    def test_configure_changes_period(self):
+    def test_configure_changes_period_while_running(self):
         proc = MotorProcess.instance()
         proc.configure(period_ms=5)
         cb = _TickCounter()
         proc.register(cb)
-        proc.start()
         time.sleep_ms(100)
-        proc.stop()
         # 5 ms period, 100 ms sleep -> 20 ticks.
         self.assertEqual(cb.count, 20)
 
@@ -104,39 +125,8 @@ class TestMotorProcess(unittest.TestCase):
             proc.unregister(oneshot)
 
         proc.register(oneshot)
-        proc.start()
         time.sleep_ms(100)
-        proc.stop()
         self.assertEqual(cb.count, 1)
-
-    def test_register_auto_starts_timer(self):
-        proc = MotorProcess.instance()
-        self.assertFalse(proc.is_running())
-        proc.register(_TickCounter())
-        self.assertTrue(proc.is_running())
-
-    def test_unregister_last_auto_stops_timer(self):
-        proc = MotorProcess.instance()
-        a, b = _TickCounter(), _TickCounter()
-        proc.register(a)
-        proc.register(b)
-        self.assertTrue(proc.is_running())
-        proc.unregister(a)
-        self.assertTrue(proc.is_running())  # ``b`` is still subscribed
-        proc.unregister(b)
-        self.assertFalse(proc.is_running())  # empty -> auto-stop
-
-    def test_autostart_fires_callbacks_during_sleep(self):
-        """Same shape as ``test_start_fires_callbacks_during_sleep`` but
-        without any manual ``start()`` / ``stop()`` — proves users never
-        need to touch scheduler lifecycle."""
-        proc = MotorProcess.instance()
-        cb = _TickCounter()
-        proc.register(cb)
-        time.sleep_ms(100)
-        proc.unregister(cb)
-        self.assertEqual(cb.count, 10)
-        self.assertFalse(proc.is_running())
 
     def test_10000_tick_soak_no_drift(self):
         """Exit criterion: 10 000 periodic ticks arrive on time with no
@@ -146,9 +136,7 @@ class TestMotorProcess(unittest.TestCase):
         proc = MotorProcess.instance()
         cb = _TickCounter()
         proc.register(cb)
-        proc.start()
         time.sleep_ms(100_000)
-        proc.stop()
         self.assertEqual(cb.count, 10_000)
 
 
