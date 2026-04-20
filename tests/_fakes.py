@@ -2,10 +2,21 @@
 """
 Fake MicroPython hardware primitives for desktop-CPython testing.
 
-Importing this module installs a realistic ``machine`` module into
-``sys.modules`` so driver imports succeed without any MCU. Every test file
-that touches a driver should ``import tests._fakes  # noqa: F401`` at the
-very top, before any ``openbricks.*`` imports.
+Importing this module (via ``tests/conftest.py``) installs two things
+under ``sys.modules`` so that ``openbricks`` drivers and the native
+scheduler can run under CPython without an MCU:
+
+* A ``machine`` module with ``Pin`` / ``PWM`` / ``I2C`` / ``UART`` /
+  ``Timer`` fakes and MicroPython-style ``time`` shims (``ticks_ms`` /
+  ``sleep_ms`` on a virtual clock).
+* An ``_openbricks_native`` module providing a ``motor_process``
+  singleton — the Python behaviour spec the C implementation in
+  ``native/user_c_modules/openbricks/motor_process.c`` must match.
+  ``openbricks/_native.py`` re-exports from this module.
+
+The virtual clock's ``sleep_ms`` walks deadline-by-deadline, firing
+registered ``Timer`` callbacks at each tick boundary, so scheduler-driven
+control integrates naturally with driver code that sleeps.
 """
 
 import sys
@@ -13,41 +24,53 @@ import time as _real_time
 import types
 
 
-# ---- MicroPython ``time`` shims ----
-# MicroPython exposes ``ticks_ms`` / ``ticks_us`` / ``ticks_diff`` / ``sleep_ms``
-# / ``sleep_us`` on the ``time`` module. CPython doesn't. We monkey-patch the
-# stdlib module so that driver code written against the MicroPython API can
-# run under the test suite without modification. Sleeps are no-ops to keep
-# tests fast.
+# ---- virtual clock ----
+
+_virtual_ms = [0]
+
+
+def _ticks_ms():
+    return _virtual_ms[0]
+
+
+def _ticks_us():
+    return _virtual_ms[0] * 1000
+
+
+def _ticks_diff(a, b):
+    return a - b
+
+
+def _advance_virtual_clock(ms):
+    """Advance the clock by ``ms``, firing timer callbacks at their
+    scheduled deadlines along the way."""
+    target = _virtual_ms[0] + int(ms)
+    while True:
+        nf = Timer._next_fire_time()
+        if nf is None or nf > target:
+            _virtual_ms[0] = target
+            return
+        _virtual_ms[0] = nf
+        Timer._fire_due(nf)
+
+
+def _sleep_ms(ms):
+    _advance_virtual_clock(ms)
+
+
+def _sleep_us(us):
+    _advance_virtual_clock(max(1, int(us) // 1000))
+
 
 if not hasattr(_real_time, "ticks_ms"):
-    # Virtual clock: sleep_ms advances it, ticks_ms reads it. This makes
-    # timeout-polling loops in drivers (e.g. st3215) deterministic and fast,
-    # and keeps jgb37_520's ``_measure_speed_dps`` returning 0 when no time
-    # has passed, which is what the tests expect.
-    _virtual_ms = [0]
-
-    def _ticks_ms():
-        return _virtual_ms[0]
-
-    def _ticks_us():
-        return _virtual_ms[0] * 1000
-
-    def _ticks_diff(a, b):
-        return a - b
-
-    def _sleep_ms(ms):
-        _virtual_ms[0] += int(ms)
-
-    def _sleep_us(us):
-        # Round up so every sleep makes measurable progress.
-        _virtual_ms[0] += max(1, int(us) // 1000)
-
     _real_time.ticks_ms = _ticks_ms
     _real_time.ticks_us = _ticks_us
     _real_time.ticks_diff = _ticks_diff
     _real_time.sleep_ms = _sleep_ms
     _real_time.sleep_us = _sleep_us
+
+
+# ---- machine.* fakes ----
 
 
 class Pin:
@@ -129,10 +152,310 @@ class UART:
         return chunk
 
 
-# Install (overwrite any previous fake, including MagicMock stand-ins).
+class Timer:
+    """MicroPython-ish Timer.
+
+    The real ``machine.Timer`` schedules a callback on a hardware timer ISR.
+    The fake keeps a class-level list of active timers and integrates with
+    the virtual clock: ``sleep_ms`` walks the clock forward through each
+    timer's next deadline and fires its callback there, so periodic
+    scheduler loops tick deterministically during user sleeps.
+    """
+
+    PERIODIC = 1
+    ONE_SHOT = 0
+
+    _instances = []
+
+    def __init__(self, timer_id=-1):
+        self._id = timer_id
+        self._callback = None
+        self._period_ms = 0
+        self._mode = Timer.PERIODIC
+        self._last_fire_ms = 0
+        self._active = False
+        Timer._instances.append(self)
+
+    def init(self, period=0, mode=None, callback=None):
+        self._period_ms = int(period)
+        self._mode = mode if mode is not None else Timer.PERIODIC
+        self._callback = callback
+        self._last_fire_ms = _virtual_ms[0]
+        self._active = True
+
+    def deinit(self):
+        self._callback = None
+        self._active = False
+
+    @classmethod
+    def _next_fire_time(cls):
+        nf = None
+        for t in cls._instances:
+            if not t._active or t._period_ms <= 0 or t._callback is None:
+                continue
+            nft = t._last_fire_ms + t._period_ms
+            if nf is None or nft < nf:
+                nf = nft
+        return nf
+
+    @classmethod
+    def _fire_due(cls, until_ms):
+        for t in list(cls._instances):
+            if not t._active or t._period_ms <= 0 or t._callback is None:
+                continue
+            while t._active and t._last_fire_ms + t._period_ms <= until_ms:
+                t._last_fire_ms += t._period_ms
+                cb = t._callback
+                if cb is not None:
+                    cb(t)
+                if t._mode == cls.ONE_SHOT:
+                    t._active = False
+                    t._callback = None
+                    break
+
+    @classmethod
+    def reset_for_test(cls):
+        """Clear all timer state. Call in setUp of tests that install timers."""
+        cls._instances = []
+
+
+# Install the fake machine module (overwriting any earlier stand-in).
 _machine = types.ModuleType("machine")
 _machine.Pin = Pin
 _machine.PWM = PWM
 _machine.I2C = I2C
 _machine.UART = UART
+_machine.Timer = Timer
 sys.modules["machine"] = _machine
+
+
+# ---- _openbricks_native fake ----
+# Mirrors native/user_c_modules/openbricks/motor_process.c. The C
+# implementation is the authoritative version for firmware; this Python
+# copy is what desktop unit tests run against. They must stay in sync —
+# tests in tests/test_scheduler.py exercise this class, and the on-device
+# test suite (M2) will run the same assertions against the C module.
+
+
+_DEFAULT_PERIOD_MS = 1   # 1 kHz, matching motor_process.c
+
+
+class _MotorProcess:
+    """Module-level singleton: only one instance is ever exposed, via
+    ``_openbricks_native.motor_process``. Users should not instantiate
+    directly (the C version hides the type entirely)."""
+
+    def __init__(self, period_ms=_DEFAULT_PERIOD_MS):
+        self._period_ms = int(period_ms)
+        self._callbacks = []       # Python callables (slow path)
+        self._c_callbacks = []     # internal (fn, ctx) pairs (fast path)
+        self._timer = None
+
+    # --- Python subscription ---
+
+    def register(self, callback):
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+        if self._timer is None:
+            self.start()   # pbio-style: auto-start on first subscription, never auto-stop
+
+    def unregister(self, callback):
+        try:
+            self._callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    # --- internal C-callback path (mirrors openbricks_motor_process_register_c) ---
+
+    def _register_c(self, fn, ctx):
+        key = (fn, ctx)
+        if key not in self._c_callbacks:
+            self._c_callbacks.append(key)
+        if self._timer is None:
+            self.start()
+
+    def _unregister_c(self, fn, ctx):
+        try:
+            self._c_callbacks.remove((fn, ctx))
+        except ValueError:
+            pass
+
+    # --- lifecycle ---
+
+    def start(self):
+        if self._timer is not None:
+            return
+        self._timer = Timer(-1)
+        self._timer.init(
+            period=self._period_ms,
+            mode=Timer.PERIODIC,
+            callback=self._on_tick,
+        )
+
+    def stop(self):
+        if self._timer is None:
+            return
+        self._timer.deinit()
+        self._timer = None
+
+    def is_running(self):
+        return self._timer is not None
+
+    def configure(self, period_ms):
+        self._period_ms = int(period_ms)
+        if self._timer is not None:
+            self.stop()
+            self.start()
+
+    # --- tick ---
+
+    def tick(self):
+        self._on_tick(None)
+
+    def _on_tick(self, _timer):
+        # Fast path: C callbacks. (fn, ctx) pairs.
+        for fn, ctx in list(self._c_callbacks):
+            fn(ctx)
+        # Slow path: Python callables. Snapshot so callbacks can unregister.
+        for cb in list(self._callbacks):
+            cb()
+
+    # --- test helper ---
+
+    def reset(self):
+        """Stop the timer, clear all subscribers, restore default period.
+        Tests call this in setUp to isolate state. Not part of the C
+        firmware API."""
+        self.stop()
+        self._callbacks = []
+        self._c_callbacks = []
+        self._period_ms = _DEFAULT_PERIOD_MS
+
+
+# Servo — the Python fake of ``_openbricks_native.Servo``. Mirrors
+# native/user_c_modules/openbricks/servo.c line-for-line so desktop tests
+# lock in semantics the C version must match.
+
+_DUTY_MAX = 1023
+_POWER_CLAMP = 100.0
+_RATED_DPS = 300.0
+
+
+class _Servo:
+    def __init__(self, in1, in2, pwm, encoder,
+                 counts_per_rev=1320, invert=False, kp=0.3):
+        self._in1 = in1
+        self._in2 = in2
+        self._pwm = pwm
+        self._encoder = encoder
+        self._counts_per_rev = int(counts_per_rev)
+        self._invert = bool(invert)
+        self._kp = float(kp)
+        self._target_dps = 0.0
+        self._active = False
+        self._last_count = 0
+        self._last_time_ms = _real_time.ticks_ms()
+
+    # --- hardware primitives ---
+
+    def _drive_power(self, power):
+        if power > _POWER_CLAMP:
+            power = _POWER_CLAMP
+        elif power < -_POWER_CLAMP:
+            power = -_POWER_CLAMP
+        effective = -power if self._invert else power
+        if effective > 0:
+            self._in1.value(1)
+            self._in2.value(0)
+        elif effective < 0:
+            self._in1.value(0)
+            self._in2.value(1)
+        else:
+            self._in1.value(0)
+            self._in2.value(0)
+        duty = int(abs(effective) * _DUTY_MAX / 100.0)
+        if duty > _DUTY_MAX:
+            duty = _DUTY_MAX
+        elif duty < 0:
+            duty = 0
+        self._pwm.duty(duty)
+
+    def _brake_bridge(self):
+        self._in1.value(1)
+        self._in2.value(1)
+        self._pwm.duty(_DUTY_MAX)
+
+    def _coast_bridge(self):
+        self._in1.value(0)
+        self._in2.value(0)
+        self._pwm.duty(0)
+
+    # --- control tick ---
+
+    def _control_tick(self, _ctx):
+        count = self._encoder._count
+        now = _real_time.ticks_ms()
+        dt = now - self._last_time_ms
+        measured = 0.0
+        if dt > 0:
+            d_count = count - self._last_count
+            measured = (d_count * 360_000.0) / (self._counts_per_rev * dt)
+        self._last_count = count
+        self._last_time_ms = now
+
+        error = self._target_dps - measured
+        ff = self._target_dps / _RATED_DPS * _POWER_CLAMP
+        self._drive_power(ff + self._kp * error)
+
+    # --- attach / detach ---
+
+    def _attach(self):
+        if self._active:
+            return
+        self._last_count = self._encoder._count
+        self._last_time_ms = _real_time.ticks_ms()
+        _motor_process_singleton._register_c(self._control_tick, self)
+        self._active = True
+
+    def _detach(self):
+        if not self._active:
+            return
+        _motor_process_singleton._unregister_c(self._control_tick, self)
+        self._active = False
+        self._target_dps = 0.0
+
+    # --- Python-facing methods ---
+
+    def run_speed(self, deg_per_s):
+        self._target_dps = float(deg_per_s)
+        self._attach()
+
+    def run(self, power):
+        self._detach()
+        self._drive_power(float(power))
+
+    def brake(self):
+        self._detach()
+        self._brake_bridge()
+
+    def coast(self):
+        self._detach()
+        self._coast_bridge()
+
+    def angle(self):
+        return self._encoder._count * 360.0 / self._counts_per_rev
+
+    def reset_angle(self, angle=0):
+        new_count = int(float(angle) * self._counts_per_rev / 360.0)
+        self._encoder._count = new_count
+        self._last_count = new_count
+        self._last_time_ms = _real_time.ticks_ms()
+
+
+# Install the native module fake.
+_motor_process_singleton = _MotorProcess()
+
+_openbricks_native = types.ModuleType("_openbricks_native")
+_openbricks_native.motor_process = _motor_process_singleton
+_openbricks_native.Servo = _Servo
+sys.modules["_openbricks_native"] = _openbricks_native

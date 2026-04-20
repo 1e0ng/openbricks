@@ -10,20 +10,23 @@ Typical spec sheet values (varies by gear ratio variant):
     * Gear ratio (example): 1:30  -> output shaft CPR = 11 * 30 * 4 = 1320 edges
       (multiply by 4 because we count both edges on both channels)
 
-The constructor takes ``counts_per_output_rev`` so you can tune it to your
-specific gearbox variant. 1320 is a common default for JGB37-520 with 1:30
-gearing.
-
-The closed-loop methods use a very simple P controller on speed. For a
-Pybricks-quality experience you'd want a full state observer + trapezoidal
-trajectory planner — see ``docs/architecture.md``.
+This class is a thin Python wrapper over the C ``Servo`` type in
+``_openbricks_native`` (see ``native/user_c_modules/openbricks/servo.c``).
+The wrapper's job is to build the hardware handles (Pin / PWM / encoder)
+from pin numbers and pass them to the native servo — the closed-loop
+control tick runs in C at the ``motor_process`` tick rate (1 kHz default).
 """
 
 import time
 
+from machine import Pin, PWM
+
+from openbricks._native import Servo
 from openbricks.drivers.encoder import QuadratureEncoder
-from openbricks.drivers.l298n import L298NMotor
 from openbricks.interfaces import Motor
+
+_PWM_FREQ_HZ = 20_000
+_DEFAULT_KP = 0.3
 
 
 class JGB37Motor(Motor):
@@ -33,78 +36,63 @@ class JGB37Motor(Motor):
         encoder_a, encoder_b,
         counts_per_output_rev=1320,
         invert=False,
-        kp=0.3,
+        kp=_DEFAULT_KP,
     ):
-        self._driver = L298NMotor(in1=in1, in2=in2, pwm=pwm, invert=invert)
+        self._in1 = Pin(in1, Pin.OUT, value=0)
+        self._in2 = Pin(in2, Pin.OUT, value=0)
+        self._pwm = PWM(Pin(pwm), freq=_PWM_FREQ_HZ, duty=0)
         self._enc = QuadratureEncoder(encoder_a, encoder_b)
-        self._counts_per_rev = counts_per_output_rev
-        self._kp = kp
-        self._last_count = 0
-        self._last_time_ms = time.ticks_ms()
+        self._servo = Servo(
+            in1=self._in1,
+            in2=self._in2,
+            pwm=self._pwm,
+            encoder=self._enc,
+            counts_per_rev=counts_per_output_rev,
+            invert=invert,
+            kp=kp,
+        )
 
-    # --- Open-loop passthroughs ---
+    # --- Open-loop passthroughs (native Servo detaches from scheduler) ---
     def run(self, power):
-        self._driver.run(power)
+        self._servo.run(float(power))
 
     def brake(self):
-        self._driver.brake()
+        self._servo.brake()
 
     def coast(self):
-        self._driver.coast()
+        self._servo.coast()
 
-    # --- Closed-loop ---
+    # --- Closed-loop state ---
     def angle(self):
-        """Output-shaft angle in degrees."""
-        return self._enc.count() * 360 / self._counts_per_rev
+        return self._servo.angle()
 
     def reset_angle(self, angle=0):
-        self._enc.reset(int(angle * self._counts_per_rev / 360))
-
-    def _measure_speed_dps(self):
-        """Instantaneous speed in degrees per second, from encoder deltas."""
-        now = time.ticks_ms()
-        dt = time.ticks_diff(now, self._last_time_ms)
-        if dt <= 0:
-            return 0.0
-        count = self._enc.count()
-        d_count = count - self._last_count
-        self._last_count = count
-        self._last_time_ms = now
-        return (d_count * 360_000) / (self._counts_per_rev * dt)
+        self._servo.reset_angle(float(angle))
 
     def run_speed(self, deg_per_s):
-        """
-        Hold a target shaft speed using a single P-control step.
-        Call repeatedly in a loop. Non-blocking.
-        """
-        measured = self._measure_speed_dps()
-        error = deg_per_s - measured
-        # Feed-forward: roughly deg_per_s / rated_speed * 100. Rated speed
-        # varies by motor; we use 300 deg/s as a sane default. Retune kp +
-        # this constant for your specific gearbox.
-        feedforward = deg_per_s / 300.0 * 100.0
-        power = feedforward + self._kp * error
-        if power > 100:
-            power = 100
-        elif power < -100:
-            power = -100
-        self.run(power)
+        """Enter closed-loop speed control with the given target (deg/s)."""
+        self._servo.run_speed(float(deg_per_s))
 
     def run_angle(self, deg_per_s, target_angle, wait=True):
-        """Rotate by ``target_angle`` degrees at approximately ``deg_per_s``."""
-        start = self.angle()
+        """Rotate by ``target_angle`` degrees at approximately ``deg_per_s``.
+
+        The native scheduler ticks the servo in C while this method sleeps.
+        With ``wait=False`` the caller is responsible for eventually
+        calling ``brake()`` or ``coast()``.
+        """
         direction = 1 if target_angle >= 0 else -1
-        end = start + target_angle
-        deg_per_s = abs(deg_per_s) * direction
+        end = self.angle() + target_angle
+        self.run_speed(abs(deg_per_s) * direction)
 
         if not wait:
-            # Fire and forget — caller is responsible for stopping.
-            self.run_speed(deg_per_s)
             return
 
-        # Blocking loop with ~100 Hz update rate.
-        while (direction > 0 and self.angle() < end) or \
-              (direction < 0 and self.angle() > end):
-            self.run_speed(deg_per_s)
+        while True:
+            a = self.angle()
+            if direction > 0 and a >= end:
+                break
+            if direction < 0 and a <= end:
+                break
             time.sleep_ms(10)
+
         self.brake()
