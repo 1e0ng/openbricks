@@ -15,8 +15,13 @@ jobs:
       - name: Show Python version
         run: python3 --version
 
-      - name: Run unit tests
-        run: python3 -m unittest discover -s tests -t .
+      - name: Install coverage
+        run: python3 -m pip install --quiet coverage
+
+      - name: Run tests with coverage
+        run: |
+          python3 -m coverage run --source=openbricks -m unittest discover -s tests -t .
+          python3 -m coverage report
 
       - name: Byte-compile the library
         run: python3 -m compileall openbricks/

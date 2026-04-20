@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write        # allow the coverage job to push a badge update on main
+  pull-requests: write   # allow the coverage job to post a sticky PR comment
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -25,3 +29,98 @@ jobs:
 
       - name: Byte-compile the library
         run: python -m compileall openbricks/
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: pip install coverage
+
+      - name: Run tests with coverage
+        run: |
+          coverage run --source=openbricks -m unittest discover -s tests -t .
+          coverage report > coverage.txt
+          cat coverage.txt
+          PCT=$(coverage report --format=total)
+          echo "COVERAGE_PCT=$PCT" >> $GITHUB_ENV
+          echo "Total coverage: ${PCT}%"
+
+      - name: Post sticky coverage comment on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          MARKER='<!-- coverage-comment -->'
+          {
+            echo "$MARKER"
+            echo "## Test coverage"
+            echo ""
+            echo "Total: **${COVERAGE_PCT}%**"
+            echo ""
+            echo '```'
+            cat coverage.txt
+            echo '```'
+            echo ""
+            echo "_Updated on every push to this branch._"
+          } > body.md
+
+          existing=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -n1)
+
+          if [ -n "$existing" ]; then
+            echo "Updating comment $existing"
+            gh api "repos/${REPO}/issues/comments/${existing}" \
+              -X PATCH -F body=@body.md >/dev/null
+          else
+            echo "Creating new comment"
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file body.md
+          fi
+
+      - name: Update coverage badge on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if   [ "$COVERAGE_PCT" -ge 90 ]; then COLOR=brightgreen
+          elif [ "$COVERAGE_PCT" -ge 80 ]; then COLOR=green
+          elif [ "$COVERAGE_PCT" -ge 70 ]; then COLOR=yellowgreen
+          elif [ "$COVERAGE_PCT" -ge 60 ]; then COLOR=yellow
+          elif [ "$COVERAGE_PCT" -ge 50 ]; then COLOR=orange
+          else                                  COLOR=red
+          fi
+
+          NEW_BADGE="![coverage](https://img.shields.io/badge/coverage-${COVERAGE_PCT}%25-${COLOR})"
+
+          python - <<PY
+          import pathlib, re
+          p = pathlib.Path("README.md")
+          text = p.read_text()
+          pattern = re.compile(r'!\[coverage\]\(https://img\.shields\.io/badge/coverage-[^)]+\)')
+          new = "${NEW_BADGE}"
+          if pattern.search(text):
+              text = pattern.sub(new, text)
+          else:
+              # Insert after the first H1.
+              text = re.sub(r'(^# [^\n]+\n)', r'\1\n' + new + '\n', text, count=1, flags=re.M)
+          p.write_text(text)
+          PY
+
+          if git diff --quiet README.md; then
+            echo "Badge already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "ci: update coverage badge to ${COVERAGE_PCT}% [skip ci]"
+          git push origin HEAD:main || echo "::warning::push rejected — branch protection likely blocks the bot"
