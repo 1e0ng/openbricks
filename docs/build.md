@@ -36,10 +36,6 @@ idf.py --version     # ESP-IDF v5.5.4
 
 > **Note.** If you're running an older MicroPython pin (e.g. v1.28.0), you'll need ESP-IDF v5.2.x — v1.28 pre-dates the MP commits that add 5.4+ support. Check `git -C native/micropython log --oneline -1` first.
 
-#### RP2040
-
-Planned for M4. Not supported yet.
-
 ## Building
 
 From the repo root:

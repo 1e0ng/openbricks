@@ -6,14 +6,11 @@
 # Usage:
 #   ./scripts/build_firmware.sh esp32       # default
 #   ./scripts/build_firmware.sh esp32s3     # ESP32-S3 (Xtensa LX7, native USB)
-#   ./scripts/build_firmware.sh rp2040      # (M4+)
 #
 # Requirements:
 #   * ``native/micropython`` submodule initialised:
 #         git submodule update --init --recursive native/micropython
-#   * Platform toolchain installed (see docs/build.md):
-#         - ESP32: ESP-IDF 5.x on PATH via $IDF_PATH + `get_idf`
-#         - RP2040: pico-sdk (later milestones)
+#   * ESP-IDF 5.x on PATH via $IDF_PATH + ``get_idf`` (see docs/build.md).
 
 set -euo pipefail
 
@@ -57,12 +54,8 @@ case "${PLATFORM}" in
         echo
         echo "done — firmware at ${PORT_DIR}/build-${BOARD}/firmware.bin"
         ;;
-    rp2040)
-        echo "rp2040 support lands in M4; not implemented yet"
-        exit 1
-        ;;
     *)
-        echo "usage: $0 [esp32|esp32s3|rp2040]"
+        echo "usage: $0 [esp32|esp32s3]"
         exit 1
         ;;
 esac

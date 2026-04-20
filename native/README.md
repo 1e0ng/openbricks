@@ -35,4 +35,4 @@ All pbio-parity control code, in C, baked into the firmware image:
 
 ## What's coming
 
-Everything in [`docs/architecture.md`](../docs/architecture.md) from M4 onward: hub abstraction (LED / buttons / optional SSD1306 OLED), a second platform (RP2040), 1.0 polish + release.
+M4 (hub abstraction — status LED, user button, optional SSD1306 OLED) is on `main`. Remaining: M5 — 1.0 polish + release (version bump, CHANGELOG, docs audit).
