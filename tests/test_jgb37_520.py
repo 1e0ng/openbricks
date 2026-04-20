@@ -137,6 +137,51 @@ class TestJGB37Motor(unittest.TestCase):
         m.run_angle(300, 90)
         self.assertGreaterEqual(m.angle(), 90)
 
+    # --- trajectory-driven moves ---
+
+    def test_run_angle_uses_trajectory_and_stops_cleanly(self):
+        """run_angle routes through servo.run_target, which samples a
+        trapezoidal profile inside the 1 kHz tick. Simulating the encoder
+        with a float accumulator that tracks target_dps (rather than a
+        P-controlled response), a 90 deg move should land within 2% of
+        target — the exit criterion for M2's overshoot bound."""
+        m = _make_motor()
+
+        # Float accumulator -> int count so slow-speed ticks aren't
+        # rounded to zero and cruise ticks aren't rounded up.
+        counts_accum = [0.0]
+
+        def step_from_target():
+            dps = m._servo._target_dps
+            counts_accum[0] += dps * m._servo._counts_per_rev / 360_000.0
+            m._enc._count = int(counts_accum[0])
+
+        motor_process.register(step_from_target)
+        m.run_angle(200, 90, accel_dps2=720)
+
+        final = m.angle()
+        # Overshoot bound: within 2% of 90 deg.
+        self.assertGreaterEqual(final, 88.2)
+        self.assertLess(final, 91.8)
+        self.assertTrue(m._servo.is_done())
+
+    def test_run_angle_negative_delta(self):
+        m = _make_motor()
+
+        counts_accum = [0.0]
+
+        def step_from_target():
+            dps = m._servo._target_dps
+            counts_accum[0] += dps * m._servo._counts_per_rev / 360_000.0
+            m._enc._count = int(counts_accum[0])
+
+        motor_process.register(step_from_target)
+        m.run_angle(200, -90)
+
+        final = m.angle()
+        self.assertLessEqual(final, -88.2)
+        self.assertGreater(final, -91.8)
+
     # --- internal structure ---
 
     def test_wrapper_holds_a_native_servo(self):

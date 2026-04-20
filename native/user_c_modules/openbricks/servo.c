@@ -23,10 +23,12 @@
 #include "py/mphal.h"
 
 #include "motor_process.h"
+#include "trajectory.h"
 
 #define DUTY_MAX    1023               // 10-bit PWM (ESP32 default; matches L298N driver)
 #define POWER_CLAMP ((mp_float_t)100.0)
 #define RATED_DPS   ((mp_float_t)300.0) // feed-forward normaliser; tune per gearbox
+#define DEFAULT_ACCEL ((mp_float_t)720.0)  // deg/s^2 if run_target omits accel
 
 typedef struct _servo_obj_t {
     mp_obj_base_t base;
@@ -50,6 +52,13 @@ typedef struct _servo_obj_t {
     // Control state
     mp_float_t target_dps;
     bool       active;
+
+    // Trajectory tracking: when traj_active is true, the tick samples
+    // `trajectory` at (now - traj_start_ms) to derive target_dps.
+    trajectory_obj_t trajectory;
+    uint32_t         traj_start_ms;
+    bool             traj_active;
+    bool             traj_done;
 
     // Speed measurement state (for finite-difference velocity estimate).
     mp_int_t last_count;
@@ -127,6 +136,20 @@ static void servo_coast_bridge(servo_obj_t *self) {
 static void servo_control_tick(void *ctx) {
     servo_obj_t *self = (servo_obj_t *)ctx;
 
+    // If we're tracking a trajectory, sample it to get the current
+    // velocity setpoint before the P-control loop runs.
+    if (self->traj_active) {
+        mp_float_t elapsed_s = (mp_float_t)(mp_hal_ticks_ms() - self->traj_start_ms) / (mp_float_t)1000.0;
+        if (elapsed_s >= self->trajectory.t_total) {
+            self->target_dps = 0.0;
+            self->traj_done  = true;
+        } else {
+            mp_float_t pos, vel;
+            openbricks_trajectory_sample(&self->trajectory, elapsed_s, &pos, &vel);
+            self->target_dps = vel;
+        }
+    }
+
     mp_int_t count = servo_read_count(self);
     mp_int_t now   = mp_hal_ticks_ms();
     mp_int_t dt    = now - self->last_time_ms;
@@ -165,8 +188,10 @@ static void servo_detach(servo_obj_t *self) {
         return;
     }
     openbricks_motor_process_unregister_c(servo_control_tick, self);
-    self->active     = false;
-    self->target_dps = 0.0;
+    self->active      = false;
+    self->target_dps  = 0.0;
+    self->traj_active = false;
+    self->traj_done   = true;
 }
 
 // -----------------------------------------------------------------------
@@ -174,11 +199,42 @@ static void servo_detach(servo_obj_t *self) {
 
 static mp_obj_t servo_run_speed(mp_obj_t self_in, mp_obj_t dps_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    self->target_dps = mp_obj_get_float(dps_in);
+    self->target_dps  = mp_obj_get_float(dps_in);
+    self->traj_active = false;
+    self->traj_done   = true;
     servo_attach(self);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(servo_run_speed_obj, servo_run_speed);
+
+// servo.run_target(delta_deg, cruise_dps, accel_dps2=DEFAULT_ACCEL)
+static mp_obj_t servo_run_target(size_t n_args, const mp_obj_t *args) {
+    servo_obj_t *self     = MP_OBJ_TO_PTR(args[0]);
+    mp_float_t delta_deg  = mp_obj_get_float(args[1]);
+    mp_float_t cruise_dps = mp_obj_get_float(args[2]);
+    mp_float_t accel      = (n_args > 3) ? mp_obj_get_float(args[3]) : DEFAULT_ACCEL;
+
+    // The trajectory operates on positions, not deltas — build it from
+    // the current shaft angle.
+    mp_int_t count = servo_read_count(self);
+    mp_float_t start = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
+    mp_float_t target = start + delta_deg;
+
+    openbricks_trajectory_init(&self->trajectory, start, target, cruise_dps, accel);
+    self->traj_start_ms = mp_hal_ticks_ms();
+    self->traj_active   = true;
+    self->traj_done     = false;
+    self->target_dps    = 0.0;   // first tick will sample the profile
+    servo_attach(self);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(servo_run_target_obj, 3, 4, servo_run_target);
+
+static mp_obj_t servo_is_done(mp_obj_t self_in) {
+    servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_bool(self->traj_done);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(servo_is_done_obj, servo_is_done);
 
 static mp_obj_t servo_run(mp_obj_t self_in, mp_obj_t power_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -268,6 +324,9 @@ static mp_obj_t servo_make_new(const mp_obj_type_t *type,
 
     self->target_dps   = 0.0;
     self->active       = false;
+    self->traj_active  = false;
+    self->traj_done    = true;
+    self->traj_start_ms = 0;
     self->last_count   = 0;
     self->last_time_ms = (mp_int_t)mp_hal_ticks_ms();
 
@@ -279,6 +338,8 @@ static mp_obj_t servo_make_new(const mp_obj_type_t *type,
 
 static const mp_rom_map_elem_t servo_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_run_speed),   MP_ROM_PTR(&servo_run_speed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_run_target),  MP_ROM_PTR(&servo_run_target_obj) },
+    { MP_ROM_QSTR(MP_QSTR_is_done),     MP_ROM_PTR(&servo_is_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_run),         MP_ROM_PTR(&servo_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_brake),       MP_ROM_PTR(&servo_brake_obj) },
     { MP_ROM_QSTR(MP_QSTR_coast),       MP_ROM_PTR(&servo_coast_obj) },
