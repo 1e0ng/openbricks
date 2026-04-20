@@ -6,7 +6,7 @@
 
 Pybricks gives LEGO users a delightful Python API, but it only runs on a handful of LEGO hubs with LEGO-branded motors and sensors. `openbricks` takes the same shape — a custom MicroPython firmware that bakes the robotics library into the runtime — and targets commodity components you can buy off the shelf.
 
-Like Pybricks, openbricks is a **firmware you flash to an MCU**, not a library you `pip install` on top of stock MicroPython. That means we own the runtime: background control loops, hardware timers, and (eventually) native C extensions all live inside the firmware image. The three-layer API you write code against (drivers → abstract interfaces → robotics) is what `import openbricks` gives you out of the box.
+Like Pybricks, openbricks is a **firmware you flash to an MCU**, not a library you `pip install` on top of stock MicroPython. That means we own the runtime: background control loops, hardware timers, and native C extensions all live inside the firmware image. The motor scheduler and per-motor state machine are already in C (see `native/user_c_modules/openbricks/`); the state observer, trapezoidal trajectory planner, and 2-DOF drivebase controller get the same treatment in upcoming milestones. The three-layer API you write code against (drivers → abstract interfaces → robotics) is what `import openbricks` gives you out of the box.
 
 ## What's in the box
 
@@ -88,9 +88,9 @@ print(robot.sensors["color"].rgb())
 
 ## Status
 
-Early scaffold. Core architecture is in place, every bundled driver works end to end, and the closed-loop motor scheduler ticks on a background `machine.Timer` so control runs independently of user code. Production-quality control (state observer, trapezoidal trajectory planning à la Pybricks' `pbio`) is the next batch of roadmap work — see `docs/architecture.md` for how those slot in and `docs/` in general for the plan.
+Early but real. Every bundled driver works end to end; the closed-loop motor scheduler is a C extension (`_openbricks_native`) ticking at 1 kHz off `machine.Timer`, with the per-motor state machine also in C. Firmware build scripts live under `native/` and `scripts/build_firmware.sh` — see `docs/build.md` for ESP-IDF setup.
 
-Firmware build scripts aren't in the repo yet; for now you can run openbricks on a stock MicroPython build too, since it's pure Python. The firmware distinction matters most for the next milestones: a native C-module port of the hot control path, and platform-specific peripherals (hub status LED, battery monitoring) that only make sense when we own the image.
+Production-quality control (Kalman-flavored state observer, trapezoidal trajectory planning, 2-DOF drivebase coupling — all line-by-line ports of pbio's MIT C code) is the next batch of roadmap work. See `docs/architecture.md` for how those slot into the existing scheduler.
 
 ## License
 

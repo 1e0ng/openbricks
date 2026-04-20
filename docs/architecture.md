@@ -43,10 +43,10 @@ the `DriveBase` class asks for "a `Motor`" and doesn't know or care what's
 underneath.
 
 This is the same split Pybricks has: `pbio/include/pbio/*.h` is the interface,
-`pbio/src/*.c` is the library, `pbio/drv/*` is the driver layer. We collapse
-the library layer into the interface layer for now because MicroPython-level
-code is fast enough at 100 Hz, and the full pbio-equivalent C implementation
-is on the roadmap.
+`pbio/src/*.c` is the library, `pbio/drv/*` is the driver layer. We take the
+same approach in C — `native/user_c_modules/openbricks/` holds the hot control
+code that runs at the scheduler tick rate. Targeted pbio-parity on control
+quality is the reason that code is C and not Python.
 
 ## Where Pybricks puts the real work (and where we are catching up)
 
@@ -62,19 +62,21 @@ minimally today. Each is a planned milestone:
    We set a constant speed and stop when we're there.
 3. **Cooperative multitasking** (`pbio/src/motor_process.c`, `os.c`) — a
    1 kHz motor tick scheduled off a timer interrupt, independent of the
-   user program. **Landed for openbricks in M1:** `MotorProcess` runs
-   always-on at 100 Hz via `machine.Timer`, with the same "motors
-   subscribe a control step, the process iterates them each beat" shape.
+   user program. **Landed for openbricks in M1** (`native/user_c_modules/openbricks/motor_process.c`):
+   the scheduler runs always-on at 1 kHz via `machine.Timer` and dispatches
+   tick callbacks via direct function-pointer calls for native subscribers
+   (`Servo` today; observer / trajectory / drivebase in M2–M3). Python-callable
+   subscribers are still supported on a slower path for user extensibility.
 4. **Drivebase coupling** (`pbio/src/drivebase.c`) — the two wheels are
    controlled as one 2-DOF system, not two independent 1-DOF motors, which
    matters a lot for straight-line accuracy. We approximate this with a
    small correction term and it mostly works on flat floors.
 
-The natural endpoint is a C module baked into the firmware image that ports
-`pbio`'s observer + trajectory code. Because openbricks ships its own
-MicroPython firmware (just like Pybricks), this is a straightforward
-`user_c_modules` addition rather than an external dependency the user has to
-install. `pbio` is MIT-licensed, so the port is legally painless too.
+The scheduler landed in C in M1 (the `_openbricks_native` user_c_module,
+baked into the firmware image via `native/boards/openbricks_esp32/`); the
+remaining three items follow the same model. `pbio` is MIT-licensed, so we
+can port observer / trajectory / drivebase line-for-line with attribution —
+no clean-room implementation needed.
 
 ## The configuration layer
 
@@ -96,20 +98,14 @@ loader looks it up by that name.
 
 ## What's next
 
-Near-term additions to prioritize:
-
-- Trapezoidal trajectory planner and Kalman-style state observer (items 1–2
-  above), feeding into the existing `MotorProcess` tick.
-- True 2-DOF coupled drivebase controller (item 4) on top of the planner +
-  observer.
-- Distance sensor interface + driver for HC-SR04 and VL53L0X.
-- IR remote receiver driver (any NEC-protocol IR module).
-- A `hub` abstraction (battery, status LED, buttons) — now concretely in
-  reach because we ship the firmware image and can add native hub
-  primitives rather than rely on whatever GPIO happens to be available.
-- Firmware build scripts that pin the MicroPython version, freeze the
-  openbricks modules, and produce per-platform images (ESP32 first).
-
-Further out, and the point at which this project earns the comparison to
-Pybricks: a C-extension port of `pbio`'s observer + trajectory, compiled
-into the firmware via `user_c_modules`.
+- **M2:** port pbio's `observer.c` + `trajectory.c` to C. The existing
+  native `Servo` gets upgraded to sample the trapezoidal profile and use
+  the observer estimate instead of finite-differencing the encoder.
+  Delivers items 1 and 2 above.
+- **M3:** port pbio's `drivebase.c` — the 2-DOF coupled controller that
+  keeps straight-line accuracy under asymmetric friction (item 4).
+- **M4:** distance sensor and IR-remote interfaces (pure Python — they're
+  not on the hot path).
+- **M5:** `hub` abstraction (battery, LED, buttons) and a second firmware
+  image (RP2040) to validate the build seam.
+- **M6:** 1.0 polish + release with per-platform firmware images.
