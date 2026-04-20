@@ -408,6 +408,39 @@ class _TrapezoidalProfile:
         return self._triangular
 
 
+# Observer — Python mirror of
+# native/user_c_modules/openbricks/observer.c. Two-state (position,
+# velocity) α-β filter. Tests exercise this fake; the C version must
+# match its behaviour byte-for-byte (same gains → same outputs).
+
+
+class _Observer:
+    def __init__(self, alpha=0.5, beta=0.15):
+        self._alpha = float(alpha)
+        self._beta = float(beta)
+        self._pos = 0.0
+        self._vel = 0.0
+
+    def reset(self, pos=0.0):
+        self._pos = float(pos)
+        self._vel = 0.0
+
+    def update(self, measured_pos, dt):
+        if dt <= 0.0:
+            return (self._pos, self._vel)
+        pos_pred = self._pos + self._vel * dt
+        residual = float(measured_pos) - pos_pred
+        self._pos = pos_pred + self._alpha * residual
+        self._vel = self._vel + (self._beta / dt) * residual
+        return (self._pos, self._vel)
+
+    def position(self):
+        return self._pos
+
+    def velocity(self):
+        return self._vel
+
+
 # Servo — the Python fake of ``_openbricks_native.Servo``. Mirrors
 # native/user_c_modules/openbricks/servo.c line-for-line so desktop tests
 # lock in semantics the C version must match.
@@ -430,12 +463,13 @@ class _Servo:
         self._kp = float(kp)
         self._target_dps = 0.0
         self._active = False
-        self._last_count = 0
         self._last_time_ms = _real_time.ticks_ms()
         # Trajectory tracking (None = plain run_speed mode).
         self._trajectory = None
         self._traj_start_ms = 0
         self._traj_done = True
+        # α-β state observer — same defaults as servo.c.
+        self._observer = _Observer(alpha=0.5, beta=0.15)
 
     # --- hardware primitives ---
 
@@ -475,9 +509,8 @@ class _Servo:
 
     def _control_tick(self, _ctx):
         # If we're tracking a trajectory, sample it to get the current
-        # velocity setpoint. Position is tracked via encoder; the
-        # feedforward+P loop is on velocity only (observer + position
-        # feedback land in M2b).
+        # velocity setpoint. Position feedback from observer/trajectory
+        # lands later once the loop is tuned.
         if self._trajectory is not None:
             elapsed_s = (_real_time.ticks_ms() - self._traj_start_ms) / 1000.0
             if elapsed_s >= self._trajectory.duration():
@@ -487,15 +520,16 @@ class _Servo:
                 _pos, vel = self._trajectory.sample(elapsed_s)
                 self._target_dps = vel
 
+        # Observer update — smoothed velocity estimate from encoder
+        # position. Replaces the M1 finite-difference.
         count = self._encoder._count
+        measured_pos = count * 360.0 / self._counts_per_rev
         now = _real_time.ticks_ms()
-        dt = now - self._last_time_ms
-        measured = 0.0
-        if dt > 0:
-            d_count = count - self._last_count
-            measured = (d_count * 360_000.0) / (self._counts_per_rev * dt)
-        self._last_count = count
+        dt_s = (now - self._last_time_ms) / 1000.0
         self._last_time_ms = now
+        if dt_s > 0:
+            self._observer.update(measured_pos, dt_s)
+        measured = self._observer.velocity()
 
         error = self._target_dps - measured
         ff = self._target_dps / _RATED_DPS * _POWER_CLAMP
@@ -506,7 +540,10 @@ class _Servo:
     def _attach(self):
         if self._active:
             return
-        self._last_count = self._encoder._count
+        # Re-baseline the observer on attach so the first tick doesn't
+        # see a huge phantom residual from a stale last-known position.
+        pos = self._encoder._count * 360.0 / self._counts_per_rev
+        self._observer.reset(pos)
         self._last_time_ms = _real_time.ticks_ms()
         _motor_process_singleton._register_c(self._control_tick, self)
         self._active = True
@@ -562,7 +599,7 @@ class _Servo:
     def reset_angle(self, angle=0):
         new_count = int(float(angle) * self._counts_per_rev / 360.0)
         self._encoder._count = new_count
-        self._last_count = new_count
+        self._observer.reset(float(angle))
         self._last_time_ms = _real_time.ticks_ms()
 
 
@@ -573,4 +610,5 @@ _openbricks_native = types.ModuleType("_openbricks_native")
 _openbricks_native.motor_process = _motor_process_singleton
 _openbricks_native.Servo = _Servo
 _openbricks_native.TrapezoidalProfile = _TrapezoidalProfile
+_openbricks_native.Observer = _Observer
 sys.modules["_openbricks_native"] = _openbricks_native
