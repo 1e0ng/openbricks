@@ -24,6 +24,7 @@
 
 #include "motor_process.h"
 #include "trajectory.h"
+#include "observer.h"
 
 #define DUTY_MAX    1023               // 10-bit PWM (ESP32 default; matches L298N driver)
 #define POWER_CLAMP ((mp_float_t)100.0)
@@ -60,8 +61,12 @@ typedef struct _servo_obj_t {
     bool             traj_active;
     bool             traj_done;
 
-    // Speed measurement state (for finite-difference velocity estimate).
-    mp_int_t last_count;
+    // α-β state observer — smooths velocity from noisy encoder reads.
+    // See observer.c; default gains (α=0.5, β=0.15) are reasonable for
+    // 1 kHz control. Users can pass in a pre-tuned Observer instead.
+    observer_obj_t observer;
+
+    // Time baseline for observer updates.
     mp_int_t last_time_ms;
 } servo_obj_t;
 
@@ -150,18 +155,18 @@ static void servo_control_tick(void *ctx) {
         }
     }
 
+    // Read encoder as position (deg) and feed the observer.
     mp_int_t count = servo_read_count(self);
-    mp_int_t now   = mp_hal_ticks_ms();
-    mp_int_t dt    = now - self->last_time_ms;
+    mp_float_t measured_pos = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
 
-    mp_float_t measured_dps = 0.0;
-    if (dt > 0) {
-        mp_int_t d_count = count - self->last_count;
-        measured_dps = ((mp_float_t)d_count * 360000.0)
-                     / ((mp_float_t)self->counts_per_rev * (mp_float_t)dt);
-    }
-    self->last_count   = count;
+    mp_int_t now   = mp_hal_ticks_ms();
+    mp_float_t dt_s = (mp_float_t)(now - self->last_time_ms) / (mp_float_t)1000.0;
     self->last_time_ms = now;
+
+    if (dt_s > 0.0) {
+        openbricks_observer_update(&self->observer, measured_pos, dt_s);
+    }
+    mp_float_t measured_dps = self->observer.vel_hat;
 
     mp_float_t error = self->target_dps - measured_dps;
     mp_float_t ff    = self->target_dps / RATED_DPS * POWER_CLAMP;
@@ -177,7 +182,12 @@ static void servo_attach(servo_obj_t *self) {
     if (self->active) {
         return;
     }
-    self->last_count   = servo_read_count(self);
+    // Re-baseline the observer to the current shaft angle, with zero
+    // velocity — otherwise the first tick sees a huge residual because
+    // last-time-ms is stale from whenever the servo was idle.
+    mp_int_t count = servo_read_count(self);
+    mp_float_t pos = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
+    openbricks_observer_reset(&self->observer, pos);
     self->last_time_ms = mp_hal_ticks_ms();
     openbricks_motor_process_register_c(servo_control_tick, self);
     self->active = true;
@@ -274,9 +284,9 @@ static mp_obj_t servo_reset_angle(size_t n_args, const mp_obj_t *args) {
     mp_int_t new_count = (mp_int_t)(angle * (mp_float_t)self->counts_per_rev / 360.0);
     // encoder._count = new_count
     mp_store_attr(self->encoder, MP_QSTR__count, MP_OBJ_NEW_SMALL_INT(new_count));
-    // Re-baseline the speed measurement too, so the first tick after a
-    // reset_angle() doesn't see a huge phantom delta.
-    self->last_count   = new_count;
+    // Re-baseline the observer and the time stamp, so the first tick
+    // after a reset_angle() doesn't see a huge phantom delta.
+    openbricks_observer_reset(&self->observer, angle);
     self->last_time_ms = mp_hal_ticks_ms();
     return mp_const_none;
 }
@@ -327,8 +337,11 @@ static mp_obj_t servo_make_new(const mp_obj_type_t *type,
     self->traj_active  = false;
     self->traj_done    = true;
     self->traj_start_ms = 0;
-    self->last_count   = 0;
     self->last_time_ms = (mp_int_t)mp_hal_ticks_ms();
+
+    // Default observer tuning — caller can use a standalone Observer
+    // type later if they want different gains per motor.
+    openbricks_observer_init(&self->observer, 0.5, 0.15);
 
     return MP_OBJ_FROM_PTR(self);
 }
