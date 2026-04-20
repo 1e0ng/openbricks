@@ -332,6 +332,82 @@ class _MotorProcess:
         self._period_ms = _DEFAULT_PERIOD_MS
 
 
+# TrapezoidalProfile — Python mirror of
+# native/user_c_modules/openbricks/trajectory.c. Same math, same edge
+# cases, same public API.
+
+
+import math as _math
+
+
+class _TrapezoidalProfile:
+    def __init__(self, start, target, cruise_dps, accel_dps2):
+        self._start = float(start)
+        self._distance = float(target) - float(start)
+        self._cruise = abs(float(cruise_dps))
+        self._accel = abs(float(accel_dps2))
+        self._direction = -1.0 if self._distance < 0 else 1.0
+        D = abs(self._distance)
+
+        if D == 0.0 or self._cruise == 0.0 or self._accel == 0.0:
+            self._t_ramp = 0.0
+            self._t_cruise = 0.0
+            self._t_total = 0.0
+            self._d_ramp = 0.0
+            self._v_peak = 0.0
+            self._triangular = False
+            return
+
+        t_ramp_full = self._cruise / self._accel
+        d_ramp_full = 0.5 * self._accel * t_ramp_full * t_ramp_full
+
+        if 2.0 * d_ramp_full <= D:
+            self._triangular = False
+            self._t_ramp = t_ramp_full
+            self._d_ramp = d_ramp_full
+            self._v_peak = self._cruise
+            self._t_cruise = (D - 2.0 * d_ramp_full) / self._cruise
+            self._t_total = 2.0 * self._t_ramp + self._t_cruise
+        else:
+            self._triangular = True
+            t_peak = _math.sqrt(D / self._accel)
+            self._t_ramp = t_peak
+            self._t_cruise = 0.0
+            self._t_total = 2.0 * t_peak
+            self._v_peak = self._accel * t_peak
+            self._d_ramp = 0.5 * self._accel * t_peak * t_peak
+
+    def sample(self, t_s):
+        t_s = float(t_s)
+        D = abs(self._distance)
+        if t_s <= 0.0:
+            abs_pos, abs_vel = 0.0, 0.0
+        elif t_s >= self._t_total:
+            abs_pos, abs_vel = D, 0.0
+        elif t_s < self._t_ramp:
+            abs_vel = self._accel * t_s
+            abs_pos = 0.5 * self._accel * t_s * t_s
+        elif not self._triangular and t_s < self._t_ramp + self._t_cruise:
+            abs_vel = self._v_peak
+            abs_pos = self._d_ramp + self._v_peak * (t_s - self._t_ramp)
+        else:
+            decel_start = self._t_ramp if self._triangular else self._t_ramp + self._t_cruise
+            td = t_s - decel_start
+            abs_vel = self._v_peak - self._accel * td
+            if abs_vel < 0.0:
+                abs_vel = 0.0
+            d_before = self._d_ramp if self._triangular else self._d_ramp + self._v_peak * self._t_cruise
+            abs_pos = d_before + self._v_peak * td - 0.5 * self._accel * td * td
+        return (self._start + self._direction * abs_pos,
+                self._direction * abs_vel)
+
+    def duration(self):
+        return self._t_total
+
+    def is_triangular(self):
+        return self._triangular
+
+
 # Servo — the Python fake of ``_openbricks_native.Servo``. Mirrors
 # native/user_c_modules/openbricks/servo.c line-for-line so desktop tests
 # lock in semantics the C version must match.
@@ -339,6 +415,7 @@ class _MotorProcess:
 _DUTY_MAX = 1023
 _POWER_CLAMP = 100.0
 _RATED_DPS = 300.0
+_DEFAULT_ACCEL = 720.0   # deg/s^2; matches servo.c default
 
 
 class _Servo:
@@ -355,6 +432,10 @@ class _Servo:
         self._active = False
         self._last_count = 0
         self._last_time_ms = _real_time.ticks_ms()
+        # Trajectory tracking (None = plain run_speed mode).
+        self._trajectory = None
+        self._traj_start_ms = 0
+        self._traj_done = True
 
     # --- hardware primitives ---
 
@@ -393,6 +474,19 @@ class _Servo:
     # --- control tick ---
 
     def _control_tick(self, _ctx):
+        # If we're tracking a trajectory, sample it to get the current
+        # velocity setpoint. Position is tracked via encoder; the
+        # feedforward+P loop is on velocity only (observer + position
+        # feedback land in M2b).
+        if self._trajectory is not None:
+            elapsed_s = (_real_time.ticks_ms() - self._traj_start_ms) / 1000.0
+            if elapsed_s >= self._trajectory.duration():
+                self._target_dps = 0.0
+                self._traj_done = True
+            else:
+                _pos, vel = self._trajectory.sample(elapsed_s)
+                self._target_dps = vel
+
         count = self._encoder._count
         now = _real_time.ticks_ms()
         dt = now - self._last_time_ms
@@ -423,12 +517,32 @@ class _Servo:
         _motor_process_singleton._unregister_c(self._control_tick, self)
         self._active = False
         self._target_dps = 0.0
+        self._trajectory = None
+        self._traj_done = True
 
     # --- Python-facing methods ---
 
     def run_speed(self, deg_per_s):
         self._target_dps = float(deg_per_s)
+        self._trajectory = None
+        self._traj_done = True
         self._attach()
+
+    def run_target(self, delta_deg, cruise_dps, accel_dps2=_DEFAULT_ACCEL):
+        """Follow a trapezoidal profile by ``delta_deg`` (signed) at the
+        given cruise speed + acceleration. Non-blocking; poll is_done()."""
+        start = self.angle()
+        self._trajectory = _TrapezoidalProfile(
+            start, start + float(delta_deg),
+            float(cruise_dps), float(accel_dps2),
+        )
+        self._traj_start_ms = _real_time.ticks_ms()
+        self._traj_done = False
+        self._target_dps = 0.0   # first tick will sample the profile
+        self._attach()
+
+    def is_done(self):
+        return self._traj_done
 
     def run(self, power):
         self._detach()
@@ -458,4 +572,5 @@ _motor_process_singleton = _MotorProcess()
 _openbricks_native = types.ModuleType("_openbricks_native")
 _openbricks_native.motor_process = _motor_process_singleton
 _openbricks_native.Servo = _Servo
+_openbricks_native.TrapezoidalProfile = _TrapezoidalProfile
 sys.modules["_openbricks_native"] = _openbricks_native

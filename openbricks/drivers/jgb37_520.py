@@ -73,26 +73,28 @@ class JGB37Motor(Motor):
         """Enter closed-loop speed control with the given target (deg/s)."""
         self._servo.run_speed(float(deg_per_s))
 
-    def run_angle(self, deg_per_s, target_angle, wait=True):
-        """Rotate by ``target_angle`` degrees at approximately ``deg_per_s``.
+    def run_angle(self, deg_per_s, target_angle, wait=True,
+                  accel_dps2=720.0):
+        """Rotate by ``target_angle`` degrees, following a trapezoidal
+        profile at up to ``deg_per_s``.
 
-        The native scheduler ticks the servo in C while this method sleeps.
-        With ``wait=False`` the caller is responsible for eventually
-        calling ``brake()`` or ``coast()``.
+        The native servo builds the profile once and the scheduler samples
+        it at 1 kHz, so acceleration / cruise / deceleration phases are
+        smooth and the move stops cleanly at the target without overshoot
+        (apart from small integration error).
+
+        With ``wait=False`` the scheduler keeps running the profile; the
+        caller can poll ``self._servo.is_done()`` or eventually call
+        ``brake()`` / ``coast()``.
         """
-        direction = 1 if target_angle >= 0 else -1
-        end = self.angle() + target_angle
-        self.run_speed(abs(deg_per_s) * direction)
+        self._servo.run_target(float(target_angle),
+                               abs(float(deg_per_s)),
+                               float(accel_dps2))
 
         if not wait:
             return
 
-        while True:
-            a = self.angle()
-            if direction > 0 and a >= end:
-                break
-            if direction < 0 and a <= end:
-                break
+        while not self._servo.is_done():
             time.sleep_ms(10)
 
         self.brake()
