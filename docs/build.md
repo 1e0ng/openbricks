@@ -62,19 +62,21 @@ Output tree: `native/micropython/ports/esp32/build-openbricks_<target>/`
 
 ## Flashing
 
-Use `esptool.py` (swap `--chip` and the build path for the S3):
+Use `esptool.py`. The combined `firmware.bin` is all you need — **just pay attention to the offset, it differs by chip**. Always `erase_flash` first on a new chip so stale bytes from a prior flash attempt can't linger.
 
 ```
-# Original ESP32 — firmware starts at 0x1000
+# Classic ESP32 — bootloader at 0x1000
+esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX erase_flash
 esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX --baud 460800 \
-    write_flash -z 0x1000 \
-    native/micropython/ports/esp32/build-openbricks_esp32/firmware.bin
+    write_flash -z 0x1000 openbricks-esp32-firmware.bin
 
-# ESP32-S3 — firmware starts at 0x0 (second-stage bootloader sits lower)
+# ESP32-S3 — bootloader at 0x0
+esptool.py --chip esp32s3 --port /dev/tty.usbmodemXXXX erase_flash
 esptool.py --chip esp32s3 --port /dev/tty.usbmodemXXXX --baud 460800 \
-    write_flash -z 0x0 \
-    native/micropython/ports/esp32/build-openbricks_esp32s3/firmware.bin
+    write_flash -z 0x0 openbricks-esp32s3-firmware.bin
 ```
+
+> **Common footgun.** Flashing the S3 `firmware.bin` at `0x1000` (classic-ESP32 offset) leaves `0x0..0xFFF` untouched; the S3 ROM boots from `0x0` and fails with `Invalid image block, can't boot`. Always match the offset to the chip.
 
 Or, if you built with `idf.py`:
 
