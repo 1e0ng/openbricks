@@ -5,7 +5,8 @@
 #
 # Usage:
 #   ./scripts/build_firmware.sh esp32       # default
-#   ./scripts/build_firmware.sh rp2040      # (M5+)
+#   ./scripts/build_firmware.sh esp32s3     # ESP32-S3 (Xtensa LX7, native USB)
+#   ./scripts/build_firmware.sh rp2040      # (M4+)
 #
 # Requirements:
 #   * ``native/micropython`` submodule initialised:
@@ -30,8 +31,8 @@ if [[ ! -d "${MICROPY_DIR}" ]] || [[ -z "$(ls -A "${MICROPY_DIR}" 2>/dev/null)" 
 fi
 
 case "${PLATFORM}" in
-    esp32)
-        BOARD="openbricks_esp32"
+    esp32|esp32s3)
+        BOARD="openbricks_${PLATFORM}"
         if [[ ! -d "${BOARDS_DIR}/${BOARD}" ]]; then
             echo "error: board ${BOARD} not found in ${BOARDS_DIR}"
             exit 1
@@ -57,11 +58,11 @@ case "${PLATFORM}" in
         echo "done — firmware at ${PORT_DIR}/build-${BOARD}/firmware.bin"
         ;;
     rp2040)
-        echo "rp2040 support lands in M5; not implemented yet"
+        echo "rp2040 support lands in M4; not implemented yet"
         exit 1
         ;;
     *)
-        echo "usage: $0 [esp32|rp2040]"
+        echo "usage: $0 [esp32|esp32s3|rp2040]"
         exit 1
         ;;
 esac
