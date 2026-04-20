@@ -69,12 +69,12 @@ typedef struct _drivebase_obj_t {
     // Active profiles — either can be inactive (no progress on that
     // axis) while the other drives the motion.
     trajectory_obj_t fwd;
-    uint32_t         fwd_start_ms;
+    mp_int_t         fwd_start_ms;    // matches openbricks_motor_process_now_ms() width (64-bit on unix)
     bool             fwd_active;
     mp_float_t       fwd_hold;        // captured at move-start; used when fwd_active=false
 
     trajectory_obj_t turn;
-    uint32_t         turn_start_ms;
+    mp_int_t         turn_start_ms;
     bool             turn_active;
     mp_float_t       turn_hold;       // captured at move-start; used when turn_active=false
 
@@ -93,7 +93,7 @@ static void drivebase_control_tick(void *ctx) {
     mp_float_t fwd_target = 0.0;
     mp_float_t fwd_ff_vel = 0.0;
     if (self->fwd_active) {
-        mp_float_t elapsed = (mp_float_t)(mp_hal_ticks_ms() - self->fwd_start_ms) / (mp_float_t)1000.0;
+        mp_float_t elapsed = (mp_float_t)(openbricks_motor_process_now_ms() - self->fwd_start_ms) / (mp_float_t)1000.0;
         if (elapsed >= self->fwd.t_total) {
             fwd_target = self->fwd.start + self->fwd.direction * (self->fwd.distance < 0 ? -self->fwd.distance : self->fwd.distance);
             fwd_ff_vel = 0.0;
@@ -112,7 +112,7 @@ static void drivebase_control_tick(void *ctx) {
     mp_float_t turn_target = 0.0;
     mp_float_t turn_ff_vel = 0.0;
     if (self->turn_active) {
-        mp_float_t elapsed = (mp_float_t)(mp_hal_ticks_ms() - self->turn_start_ms) / (mp_float_t)1000.0;
+        mp_float_t elapsed = (mp_float_t)(openbricks_motor_process_now_ms() - self->turn_start_ms) / (mp_float_t)1000.0;
         if (elapsed >= self->turn.t_total) {
             turn_target = self->turn.start + self->turn.direction * (self->turn.distance < 0 ? -self->turn.distance : self->turn.distance);
             turn_ff_vel = 0.0;
@@ -162,8 +162,8 @@ static void drivebase_register(drivebase_obj_t *self) {
     mp_float_t rp = (mp_float_t)rc * (mp_float_t)360.0 / (mp_float_t)self->right->counts_per_rev;
     openbricks_observer_reset(&self->left->observer,  lp);
     openbricks_observer_reset(&self->right->observer, rp);
-    self->left->last_time_ms  = mp_hal_ticks_ms();
-    self->right->last_time_ms = mp_hal_ticks_ms();
+    self->left->last_time_ms  = openbricks_motor_process_now_ms();
+    self->right->last_time_ms = openbricks_motor_process_now_ms();
 
     // Hand both servos into speed-mode by bumping their target to 0 and
     // ensuring they're active on motor_process. (Calling their Python
@@ -233,7 +233,7 @@ static mp_obj_t db_straight(mp_obj_t self_in, mp_obj_t distance_in, mp_obj_t spe
     mp_float_t diff_pos = (self->left->observer.pos_hat - self->right->observer.pos_hat) / (mp_float_t)2.0;
     openbricks_trajectory_init(&self->fwd, sum_pos, sum_pos + distance_deg,
                                 speed_dps, DEFAULT_ACCEL);
-    self->fwd_start_ms = mp_hal_ticks_ms();
+    self->fwd_start_ms = openbricks_motor_process_now_ms();
     self->fwd_active   = true;
 
     // Hold heading at whatever it was when the move started; the
@@ -270,7 +270,7 @@ static mp_obj_t db_turn(mp_obj_t self_in, mp_obj_t angle_in, mp_obj_t rate_in) {
     mp_float_t sum_pos  = (self->left->observer.pos_hat + self->right->observer.pos_hat) / (mp_float_t)2.0;
     openbricks_trajectory_init(&self->turn, diff_pos, diff_pos + signed_delta,
                                 rate_wheel_dps, DEFAULT_ACCEL);
-    self->turn_start_ms = mp_hal_ticks_ms();
+    self->turn_start_ms = openbricks_motor_process_now_ms();
     self->turn_active   = true;
 
     // Forward stays at current sum — any disturbance that drifts us

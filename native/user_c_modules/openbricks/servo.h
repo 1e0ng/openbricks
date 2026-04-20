@@ -44,8 +44,13 @@ typedef struct _servo_obj_t {
     // Per-motor trajectory tracking. Not used while a drivebase owns
     // this servo (the drivebase samples its own profile and writes
     // ``target_dps`` directly).
+    //
+    // ``traj_start_ms`` is mp_int_t (not uint32_t) so it matches
+    // ``mp_hal_ticks_ms()``'s return width on 64-bit MP ports — a
+    // narrower type truncated the value and produced bogus elapsed
+    // times.
     trajectory_obj_t trajectory;
-    uint32_t         traj_start_ms;
+    mp_int_t         traj_start_ms;
     bool             traj_active;
     bool             traj_done;
 

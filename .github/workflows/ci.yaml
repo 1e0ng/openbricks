@@ -7,120 +7,42 @@ on:
     branches: [main]
 
 permissions:
-  contents: write        # allow the coverage job to push a badge update on main
-  pull-requests: write   # allow the coverage job to post a sticky PR comment
+  contents: read
+  pull-requests: write
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.9", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python (for mpy-cross build)
         uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -t .
-
-      - name: Byte-compile the library
-        run: python -m compileall openbricks/
-
-  coverage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install coverage
-        run: pip install coverage
-
-      - name: Run tests with coverage
+      - name: Install build dependencies
         run: |
-          coverage run --source=openbricks -m unittest discover -s tests -t .
-          coverage report > coverage.txt
-          cat coverage.txt
-          PCT=$(coverage report --format=total)
-          echo "COVERAGE_PCT=$PCT" >> $GITHUB_ENV
-          echo "Total coverage: ${PCT}%"
+          sudo apt-get update
+          sudo apt-get install -y build-essential libffi-dev pkg-config
 
-      - name: Post sticky coverage comment on PR
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
+      - name: Init MicroPython sub-submodules (berkeley-db, lib, mbedtls)
         run: |
-          MARKER='<!-- coverage-comment -->'
-          {
-            echo "$MARKER"
-            echo "## Test coverage"
-            echo ""
-            echo "Total: **${COVERAGE_PCT}%**"
-            echo ""
-            echo '```'
-            cat coverage.txt
-            echo '```'
-            echo ""
-            echo "_Updated on every push to this branch._"
-          } > body.md
+          git -C native/micropython submodule update --init \
+            lib/berkeley-db-1.xx lib/micropython-lib lib/mbedtls
 
-          existing=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
-            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -n1)
+      - name: Build mpy-cross
+        run: make -C native/micropython/mpy-cross -j
 
-          if [ -n "$existing" ]; then
-            echo "Updating comment $existing"
-            gh api "repos/${REPO}/issues/comments/${existing}" \
-              -X PATCH -F body=@body.md >/dev/null
-          else
-            echo "Creating new comment"
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file body.md
-          fi
-
-      - name: Update coverage badge on main
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Build unix MicroPython with openbricks user_c_module
         run: |
-          if   [ "$COVERAGE_PCT" -ge 90 ]; then COLOR=brightgreen
-          elif [ "$COVERAGE_PCT" -ge 80 ]; then COLOR=green
-          elif [ "$COVERAGE_PCT" -ge 70 ]; then COLOR=yellowgreen
-          elif [ "$COVERAGE_PCT" -ge 60 ]; then COLOR=yellow
-          elif [ "$COVERAGE_PCT" -ge 50 ]; then COLOR=orange
-          else                                  COLOR=red
-          fi
+          make -C native/micropython/ports/unix \
+            VARIANT=standard \
+            USER_C_MODULES=$(pwd)/native/user_c_modules \
+            -j
 
-          NEW_BADGE="![coverage](https://img.shields.io/badge/coverage-${COVERAGE_PCT}%25-${COLOR})"
-
-          python - <<PY
-          import pathlib, re
-          p = pathlib.Path("README.md")
-          text = p.read_text()
-          pattern = re.compile(r'!\[coverage\]\(https://img\.shields\.io/badge/coverage-[^)]+\)')
-          new = "${NEW_BADGE}"
-          if pattern.search(text):
-              text = pattern.sub(new, text)
-          else:
-              # Insert after the first H1.
-              text = re.sub(r'(^# [^\n]+\n)', r'\1\n' + new + '\n', text, count=1, flags=re.M)
-          p.write_text(text)
-          PY
-
-          if git diff --quiet README.md; then
-            echo "Badge already up to date."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          git commit -m "ci: update coverage badge to ${COVERAGE_PCT}% [skip ci]"
-          git push origin HEAD:main || echo "::warning::push rejected — branch protection likely blocks the bot"
+      - name: Run test suite under unix MicroPython
+        run: |
+          ./native/micropython/ports/unix/build-standard/micropython tests/run.py

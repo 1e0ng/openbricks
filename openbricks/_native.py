@@ -12,5 +12,10 @@ implementation detail.
 """
 
 from _openbricks_native import (  # noqa: F401
-    motor_process, Servo, TrapezoidalProfile, Observer, DriveBase,
+    motor_process,
+    Servo,
+    TrapezoidalProfile,
+    Observer,
+    DriveBase,
 )
+

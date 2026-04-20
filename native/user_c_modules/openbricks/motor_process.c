@@ -68,6 +68,17 @@ motor_process_obj_t motor_process_singleton = {
 static c_callback_slot_t c_callbacks[MAX_C_CALLBACKS];
 static size_t n_c_callbacks = 0;
 
+// Tick-driven monotonic clock. Advances by ``period_ms`` each time
+// ``_on_tick`` fires — so time measurements in downstream C code
+// (servo / drivebase) track the tick cadence rather than real wall
+// time. This makes virtual-clock tests deterministic: each simulated
+// tick advances the clock by exactly one period, same as on firmware.
+static mp_int_t virtual_now_ms = 0;
+
+mp_int_t openbricks_motor_process_now_ms(void) {
+    return virtual_now_ms;
+}
+
 static motor_process_obj_t *mp_get(void) {
     motor_process_obj_t *self = &motor_process_singleton;
     if (self->callbacks == MP_OBJ_NULL) {
@@ -123,6 +134,10 @@ static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
     (void)timer_arg;
     motor_process_obj_t *self = mp_get();
 
+    // Advance the tick-driven clock before firing callbacks so subscribers
+    // see a consistent "now" for their deltas.
+    virtual_now_ms += self->period_ms;
+
     // Fast path: native C callbacks. Tight loop, no MP allocation.
     for (size_t i = 0; i < n_c_callbacks; i++) {
         c_callbacks[i].fn(c_callbacks[i].ctx);
@@ -151,28 +166,38 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mp_on_tick_obj, mp_on_tick);
 // Timer lifecycle helpers. machine.Timer is accessed lazily via the
 // ``machine`` module so we don't hard-depend on its header.
 
-static mp_obj_t mp_machine_timer_class(void) {
-    mp_obj_t machine_mod = mp_import_name(MP_QSTR_machine, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
-    return mp_load_attr(machine_mod, MP_QSTR_Timer);
-}
-
 static void mp_do_start(motor_process_obj_t *self) {
     if (self->timer != mp_const_none) {
         return;
     }
-    mp_obj_t timer_cls = mp_machine_timer_class();
-    mp_obj_t periodic  = mp_load_attr(timer_cls, MP_QSTR_PERIODIC);
-    self->timer        = mp_call_function_1(timer_cls, MP_OBJ_NEW_SMALL_INT(-1));
+    // Try to create a machine.Timer. On ports that don't ship a Timer
+    // (unix MP, for example), leave self->timer as mp_const_none — the
+    // scheduler is still usable via explicit ``tick()`` calls, which
+    // is how the test suite exercises it.
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t machine_mod = mp_import_name(MP_QSTR_machine, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t timer_cls   = mp_load_attr(machine_mod, MP_QSTR_Timer);
+        mp_obj_t periodic    = mp_load_attr(timer_cls, MP_QSTR_PERIODIC);
+        mp_obj_t timer       = mp_call_function_1(timer_cls, MP_OBJ_NEW_SMALL_INT(-1));
+        mp_obj_t init_method = mp_load_attr(timer, MP_QSTR_init);
 
-    mp_obj_t init_method = mp_load_attr(self->timer, MP_QSTR_init);
-
-    mp_obj_t args[] = {
-        init_method,
-        MP_OBJ_NEW_QSTR(MP_QSTR_period),   MP_OBJ_NEW_SMALL_INT(self->period_ms),
-        MP_OBJ_NEW_QSTR(MP_QSTR_mode),     periodic,
-        MP_OBJ_NEW_QSTR(MP_QSTR_callback), MP_OBJ_FROM_PTR(&mp_on_tick_obj),
-    };
-    mp_call_method_n_kw(0, 3, args);
+        // mp_call_method_n_kw expects args = [func, self_or_NULL, positionals..., kw keys/vals].
+        // Our ``init_method`` is already bound to the timer instance, so we
+        // pass self = MP_OBJ_NULL and let MP skip the self-prepend.
+        mp_obj_t args[] = {
+            init_method,
+            MP_OBJ_NULL,
+            MP_OBJ_NEW_QSTR(MP_QSTR_period),   MP_OBJ_NEW_SMALL_INT(self->period_ms),
+            MP_OBJ_NEW_QSTR(MP_QSTR_mode),     periodic,
+            MP_OBJ_NEW_QSTR(MP_QSTR_callback), MP_OBJ_FROM_PTR(&mp_on_tick_obj),
+        };
+        mp_call_method_n_kw(0, 3, args);
+        self->timer = timer;
+        nlr_pop();
+    }
+    // else: machine.Timer unavailable — swallow the exception and keep
+    // the singleton usable via tick().
 }
 
 static void mp_do_stop(motor_process_obj_t *self) {
@@ -266,6 +291,27 @@ static mp_obj_t mp_configure(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(mp_configure_obj, 1, mp_configure);
 
+static mp_obj_t mp_period_ms(mp_obj_t self_in) {
+    (void)self_in;
+    return MP_OBJ_NEW_SMALL_INT(mp_get()->period_ms);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_period_ms_obj, mp_period_ms);
+
+static mp_obj_t mp_is_registered(mp_obj_t self_in, mp_obj_t callback) {
+    (void)self_in;
+    motor_process_obj_t *self = mp_get();
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_list_get(self->callbacks, &n, &items);
+    for (size_t i = 0; i < n; i++) {
+        if (mp_obj_equal(items[i], callback)) {
+            return mp_const_true;
+        }
+    }
+    return mp_const_false;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_is_registered_obj, mp_is_registered);
+
 static mp_obj_t mp_reset(mp_obj_t self_in) {
     (void)self_in;
     motor_process_obj_t *self = mp_get();
@@ -274,6 +320,7 @@ static mp_obj_t mp_reset(mp_obj_t self_in) {
     mp_call_function_0(clear);
     self->period_ms   = DEFAULT_PERIOD_MS;
     n_c_callbacks     = 0;
+    virtual_now_ms    = 0;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_reset_obj, mp_reset);
@@ -283,14 +330,16 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mp_reset_obj, mp_reset);
 // instance users ever touch.
 
 static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_register),   MP_ROM_PTR(&mp_register_obj) },
-    { MP_ROM_QSTR(MP_QSTR_unregister), MP_ROM_PTR(&mp_unregister_obj) },
-    { MP_ROM_QSTR(MP_QSTR_start),      MP_ROM_PTR(&mp_start_obj) },
-    { MP_ROM_QSTR(MP_QSTR_stop),       MP_ROM_PTR(&mp_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_tick),       MP_ROM_PTR(&mp_tick_obj) },
-    { MP_ROM_QSTR(MP_QSTR_is_running), MP_ROM_PTR(&mp_is_running_obj) },
-    { MP_ROM_QSTR(MP_QSTR_configure),  MP_ROM_PTR(&mp_configure_obj) },
-    { MP_ROM_QSTR(MP_QSTR_reset),      MP_ROM_PTR(&mp_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_register),      MP_ROM_PTR(&mp_register_obj) },
+    { MP_ROM_QSTR(MP_QSTR_unregister),    MP_ROM_PTR(&mp_unregister_obj) },
+    { MP_ROM_QSTR(MP_QSTR_start),         MP_ROM_PTR(&mp_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop),          MP_ROM_PTR(&mp_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tick),          MP_ROM_PTR(&mp_tick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_is_running),    MP_ROM_PTR(&mp_is_running_obj) },
+    { MP_ROM_QSTR(MP_QSTR_configure),     MP_ROM_PTR(&mp_configure_obj) },
+    { MP_ROM_QSTR(MP_QSTR_period_ms),     MP_ROM_PTR(&mp_period_ms_obj) },
+    { MP_ROM_QSTR(MP_QSTR_is_registered), MP_ROM_PTR(&mp_is_registered_obj) },
+    { MP_ROM_QSTR(MP_QSTR_reset),         MP_ROM_PTR(&mp_reset_obj) },
 };
 static MP_DEFINE_CONST_DICT(motor_process_locals_dict, motor_process_locals_dict_table);
 

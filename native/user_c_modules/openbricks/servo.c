@@ -104,7 +104,7 @@ static void servo_control_tick(void *ctx) {
     // If we're tracking a trajectory, sample it to get the current
     // velocity setpoint before the P-control loop runs.
     if (self->traj_active) {
-        mp_float_t elapsed_s = (mp_float_t)(mp_hal_ticks_ms() - self->traj_start_ms) / (mp_float_t)1000.0;
+        mp_float_t elapsed_s = (mp_float_t)(openbricks_motor_process_now_ms() - self->traj_start_ms) / (mp_float_t)1000.0;
         if (elapsed_s >= self->trajectory.t_total) {
             self->target_dps = 0.0;
             self->traj_done  = true;
@@ -119,7 +119,7 @@ static void servo_control_tick(void *ctx) {
     mp_int_t count = servo_read_count(self);
     mp_float_t measured_pos = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
 
-    mp_int_t now   = mp_hal_ticks_ms();
+    mp_int_t now   = openbricks_motor_process_now_ms();
     mp_float_t dt_s = (mp_float_t)(now - self->last_time_ms) / (mp_float_t)1000.0;
     self->last_time_ms = now;
 
@@ -148,7 +148,7 @@ static void servo_attach(servo_obj_t *self) {
     mp_int_t count = servo_read_count(self);
     mp_float_t pos = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
     openbricks_observer_reset(&self->observer, pos);
-    self->last_time_ms = mp_hal_ticks_ms();
+    self->last_time_ms = openbricks_motor_process_now_ms();
     openbricks_motor_process_register_c(servo_control_tick, self);
     self->active = true;
 }
@@ -191,7 +191,7 @@ static mp_obj_t servo_run_target(size_t n_args, const mp_obj_t *args) {
     mp_float_t target = start + delta_deg;
 
     openbricks_trajectory_init(&self->trajectory, start, target, cruise_dps, accel);
-    self->traj_start_ms = mp_hal_ticks_ms();
+    self->traj_start_ms = openbricks_motor_process_now_ms();
     self->traj_active   = true;
     self->traj_done     = false;
     self->target_dps    = 0.0;   // first tick will sample the profile
@@ -205,6 +205,18 @@ static mp_obj_t servo_is_done(mp_obj_t self_in) {
     return mp_obj_new_bool(self->traj_done);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_is_done_obj, servo_is_done);
+
+static mp_obj_t servo_target_dps(mp_obj_t self_in) {
+    servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_float(self->target_dps);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(servo_target_dps_obj, servo_target_dps);
+
+static mp_obj_t servo_is_active(mp_obj_t self_in) {
+    servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_bool(self->active);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(servo_is_active_obj, servo_is_active);
 
 static mp_obj_t servo_run(mp_obj_t self_in, mp_obj_t power_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -247,7 +259,7 @@ static mp_obj_t servo_reset_angle(size_t n_args, const mp_obj_t *args) {
     // Re-baseline the observer and the time stamp, so the first tick
     // after a reset_angle() doesn't see a huge phantom delta.
     openbricks_observer_reset(&self->observer, angle);
-    self->last_time_ms = mp_hal_ticks_ms();
+    self->last_time_ms = openbricks_motor_process_now_ms();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(servo_reset_angle_obj, 1, 2, servo_reset_angle);
@@ -297,7 +309,7 @@ static mp_obj_t servo_make_new(const mp_obj_type_t *type,
     self->traj_active  = false;
     self->traj_done    = true;
     self->traj_start_ms = 0;
-    self->last_time_ms = (mp_int_t)mp_hal_ticks_ms();
+    self->last_time_ms = (mp_int_t)openbricks_motor_process_now_ms();
 
     // Default observer tuning — caller can use a standalone Observer
     // type later if they want different gains per motor.
@@ -313,6 +325,8 @@ static const mp_rom_map_elem_t servo_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_run_speed),   MP_ROM_PTR(&servo_run_speed_obj) },
     { MP_ROM_QSTR(MP_QSTR_run_target),  MP_ROM_PTR(&servo_run_target_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_done),     MP_ROM_PTR(&servo_is_done_obj) },
+    { MP_ROM_QSTR(MP_QSTR_target_dps),  MP_ROM_PTR(&servo_target_dps_obj) },
+    { MP_ROM_QSTR(MP_QSTR_is_active),   MP_ROM_PTR(&servo_is_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_run),         MP_ROM_PTR(&servo_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_brake),       MP_ROM_PTR(&servo_brake_obj) },
     { MP_ROM_QSTR(MP_QSTR_coast),       MP_ROM_PTR(&servo_coast_obj) },

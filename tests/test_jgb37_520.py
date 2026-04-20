@@ -150,10 +150,11 @@ class TestJGB37Motor(unittest.TestCase):
         # Float accumulator -> int count so slow-speed ticks aren't
         # rounded to zero and cruise ticks aren't rounded up.
         counts_accum = [0.0]
+        cpr = 1320   # matches the default counts_per_output_rev
 
         def step_from_target():
-            dps = m._servo._target_dps
-            counts_accum[0] += dps * m._servo._counts_per_rev / 360_000.0
+            dps = m._servo.target_dps()
+            counts_accum[0] += dps * cpr / 360_000.0
             m._enc._count = int(counts_accum[0])
 
         motor_process.register(step_from_target)
@@ -169,10 +170,11 @@ class TestJGB37Motor(unittest.TestCase):
         m = _make_motor()
 
         counts_accum = [0.0]
+        cpr = 1320
 
         def step_from_target():
-            dps = m._servo._target_dps
-            counts_accum[0] += dps * m._servo._counts_per_rev / 360_000.0
+            dps = m._servo.target_dps()
+            counts_accum[0] += dps * cpr / 360_000.0
             m._enc._count = int(counts_accum[0])
 
         motor_process.register(step_from_target)
