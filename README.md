@@ -4,8 +4,6 @@
 
 Pybricks gives LEGO users a delightful Python API, but it only runs on a handful of LEGO hubs with LEGO-branded motors and sensors. `openbricks` borrows the three-layer architecture (drivers → abstract interfaces → robotics) and applies it to commodity components you can buy off the shelf.
 
-The name is a placeholder — rename the `openbricks/` package and the references in `README.md`, `package.json`, and `examples/` to whatever you like.
-
 ## What's in the box
 
 **Supported MCUs out of the box**
