@@ -92,7 +92,7 @@ Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal traje
 
 **Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Grab `openbricks-esp32-firmware.bin` and flash with `esptool.py` — see `docs/build.md`.
 
-Next on the roadmap: distance sensor drivers (M4), hub abstraction and a second platform (RP2040, M5), 1.0 polish + release (M6).
+Next on the roadmap: hub abstraction and a second platform (RP2040, M4), 1.0 polish + release (M5).
 
 ## License
 

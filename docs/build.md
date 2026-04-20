@@ -38,7 +38,7 @@ idf.py --version     # ESP-IDF v5.5.4
 
 #### RP2040
 
-Planned for M5. Not supported yet.
+Planned for M4. Not supported yet.
 
 ## Building
 
