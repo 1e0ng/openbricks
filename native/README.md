@@ -34,4 +34,4 @@ All pbio-parity control code, in C, baked into the firmware image:
 
 ## What's coming
 
-Everything in [`docs/architecture.md`](../docs/architecture.md) from M4 onward: distance + IR-remote sensor drivers, hub abstraction (battery / LED / buttons), a second platform (RP2040), 1.0 polish + release.
+Everything in [`docs/architecture.md`](../docs/architecture.md) from M4 onward: hub abstraction (battery / LED / buttons / optional SSD1306 OLED), a second platform (RP2040), 1.0 polish + release.

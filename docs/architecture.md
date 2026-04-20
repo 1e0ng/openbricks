@@ -99,16 +99,14 @@ loader looks it up by that name.
 M1 / M2 / M3 (scheduler, observer, trajectory, 2-DOF drivebase, all in C)
 are landed. The remaining roadmap:
 
-- **M4** — distance sensor and IR-remote interfaces. Pure Python; these
-  aren't on the hot path and don't need C.
-- **M5** — `hub` abstraction (battery monitor, status LED, buttons, and an
+- **M4** — `hub` abstraction (battery monitor, status LED, buttons, and an
   optional SSD1306 OLED display for on-robot text/graphics) and a second
   firmware image (RP2040) to validate the build seam.
-- **M6** — 1.0 polish + release with per-platform firmware images
+- **M5** — 1.0 polish + release with per-platform firmware images
   published through GitHub Releases (already wired up in
   `.github/workflows/ci.yaml` for the main branch).
 
 Upgrading the α-β observer to a pbio-style model-based observer (with
 voltage/current coupling and a motor model) is later work — a precision
-lift we pick up once M4 / M5 drivers are in place and we can measure
-real hardware performance.
+lift we pick up once M4 hub work lands and we can measure real
+hardware performance.
