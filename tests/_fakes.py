@@ -237,7 +237,7 @@ sys.modules["machine"] = _machine
 # test suite (M2) will run the same assertions against the C module.
 
 
-_DEFAULT_PERIOD_MS = 10
+_DEFAULT_PERIOD_MS = 1   # 1 kHz, matching motor_process.c
 
 
 class _MotorProcess:
@@ -247,18 +247,36 @@ class _MotorProcess:
 
     def __init__(self, period_ms=_DEFAULT_PERIOD_MS):
         self._period_ms = int(period_ms)
-        self._callbacks = []
+        self._callbacks = []       # Python callables (slow path)
+        self._c_callbacks = []     # internal (fn, ctx) pairs (fast path)
         self._timer = None
 
-    # --- subscription ---
+    # --- Python subscription ---
 
     def register(self, callback):
         if callback not in self._callbacks:
             self._callbacks.append(callback)
+        if self._timer is None:
+            self.start()   # pbio-style: auto-start on first subscription, never auto-stop
 
     def unregister(self, callback):
         try:
             self._callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    # --- internal C-callback path (mirrors openbricks_motor_process_register_c) ---
+
+    def _register_c(self, fn, ctx):
+        key = (fn, ctx)
+        if key not in self._c_callbacks:
+            self._c_callbacks.append(key)
+        if self._timer is None:
+            self.start()
+
+    def _unregister_c(self, fn, ctx):
+        try:
+            self._c_callbacks.remove((fn, ctx))
         except ValueError:
             pass
 
@@ -295,7 +313,10 @@ class _MotorProcess:
         self._on_tick(None)
 
     def _on_tick(self, _timer):
-        # Snapshot the list so callbacks may unregister themselves.
+        # Fast path: C callbacks. (fn, ctx) pairs.
+        for fn, ctx in list(self._c_callbacks):
+            fn(ctx)
+        # Slow path: Python callables. Snapshot so callbacks can unregister.
         for cb in list(self._callbacks):
             cb()
 
@@ -307,10 +328,134 @@ class _MotorProcess:
         firmware API."""
         self.stop()
         self._callbacks = []
+        self._c_callbacks = []
         self._period_ms = _DEFAULT_PERIOD_MS
 
 
+# Servo — the Python fake of ``_openbricks_native.Servo``. Mirrors
+# native/user_c_modules/openbricks/servo.c line-for-line so desktop tests
+# lock in semantics the C version must match.
+
+_DUTY_MAX = 1023
+_POWER_CLAMP = 100.0
+_RATED_DPS = 300.0
+
+
+class _Servo:
+    def __init__(self, in1, in2, pwm, encoder,
+                 counts_per_rev=1320, invert=False, kp=0.3):
+        self._in1 = in1
+        self._in2 = in2
+        self._pwm = pwm
+        self._encoder = encoder
+        self._counts_per_rev = int(counts_per_rev)
+        self._invert = bool(invert)
+        self._kp = float(kp)
+        self._target_dps = 0.0
+        self._active = False
+        self._last_count = 0
+        self._last_time_ms = _real_time.ticks_ms()
+
+    # --- hardware primitives ---
+
+    def _drive_power(self, power):
+        if power > _POWER_CLAMP:
+            power = _POWER_CLAMP
+        elif power < -_POWER_CLAMP:
+            power = -_POWER_CLAMP
+        effective = -power if self._invert else power
+        if effective > 0:
+            self._in1.value(1)
+            self._in2.value(0)
+        elif effective < 0:
+            self._in1.value(0)
+            self._in2.value(1)
+        else:
+            self._in1.value(0)
+            self._in2.value(0)
+        duty = int(abs(effective) * _DUTY_MAX / 100.0)
+        if duty > _DUTY_MAX:
+            duty = _DUTY_MAX
+        elif duty < 0:
+            duty = 0
+        self._pwm.duty(duty)
+
+    def _brake_bridge(self):
+        self._in1.value(1)
+        self._in2.value(1)
+        self._pwm.duty(_DUTY_MAX)
+
+    def _coast_bridge(self):
+        self._in1.value(0)
+        self._in2.value(0)
+        self._pwm.duty(0)
+
+    # --- control tick ---
+
+    def _control_tick(self, _ctx):
+        count = self._encoder._count
+        now = _real_time.ticks_ms()
+        dt = now - self._last_time_ms
+        measured = 0.0
+        if dt > 0:
+            d_count = count - self._last_count
+            measured = (d_count * 360_000.0) / (self._counts_per_rev * dt)
+        self._last_count = count
+        self._last_time_ms = now
+
+        error = self._target_dps - measured
+        ff = self._target_dps / _RATED_DPS * _POWER_CLAMP
+        self._drive_power(ff + self._kp * error)
+
+    # --- attach / detach ---
+
+    def _attach(self):
+        if self._active:
+            return
+        self._last_count = self._encoder._count
+        self._last_time_ms = _real_time.ticks_ms()
+        _motor_process_singleton._register_c(self._control_tick, self)
+        self._active = True
+
+    def _detach(self):
+        if not self._active:
+            return
+        _motor_process_singleton._unregister_c(self._control_tick, self)
+        self._active = False
+        self._target_dps = 0.0
+
+    # --- Python-facing methods ---
+
+    def run_speed(self, deg_per_s):
+        self._target_dps = float(deg_per_s)
+        self._attach()
+
+    def run(self, power):
+        self._detach()
+        self._drive_power(float(power))
+
+    def brake(self):
+        self._detach()
+        self._brake_bridge()
+
+    def coast(self):
+        self._detach()
+        self._coast_bridge()
+
+    def angle(self):
+        return self._encoder._count * 360.0 / self._counts_per_rev
+
+    def reset_angle(self, angle=0):
+        new_count = int(float(angle) * self._counts_per_rev / 360.0)
+        self._encoder._count = new_count
+        self._last_count = new_count
+        self._last_time_ms = _real_time.ticks_ms()
+
+
 # Install the native module fake.
+_motor_process_singleton = _MotorProcess()
+
 _openbricks_native = types.ModuleType("_openbricks_native")
-_openbricks_native.motor_process = _MotorProcess()
+_openbricks_native.motor_process = _motor_process_singleton
+_openbricks_native.Servo = _Servo
 sys.modules["_openbricks_native"] = _openbricks_native

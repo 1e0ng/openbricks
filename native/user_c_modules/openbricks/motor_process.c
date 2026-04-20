@@ -3,10 +3,19 @@
 // openbricks — motor_process.c
 //
 // The cooperative motor scheduler. A singleton owning a machine.Timer
-// that fires periodically and invokes every registered Python callable
-// once per tick.
+// that fires at the configured period (1 ms by default — 1 kHz, matching
+// pbio). Each tick fires two callback lists in order:
 //
-// Public API (module: _openbricks_native, attribute: motor_process):
+//   1. Fast path: native C callbacks registered via motor_process.h.
+//      These are plain function-pointer calls, ~1 µs each. All
+//      openbricks-provided closed-loop drivers (servo.c, and later
+//      observer / trajectory / hub) live here.
+//   2. Slow path: Python callables registered via the public API below.
+//      Each call pays MicroPython dispatch overhead (~25 µs). Intended
+//      for user-extensible hooks (e.g. a sensor logger), not for the
+//      hot control loop.
+//
+// Public Python API (module: _openbricks_native, attribute: motor_process):
 //
 //     motor_process.register(callback)      -> None
 //     motor_process.unregister(callback)    -> None
@@ -17,38 +26,47 @@
 //     motor_process.configure(period_ms=N)  -> None
 //     motor_process.reset()                 -> None      (test helper)
 //
-// The Python equivalent in tests/_fakes.py mirrors this behaviour exactly;
-// desktop tests exercise that fake, the firmware exercises this C module,
-// and both must pass the same tests in tests/test_scheduler.py.
+// Internal C API: see motor_process.h. Sibling C modules use that to
+// subscribe their tick bodies without going through Python.
 //
-// pbio reference: pbio/src/motor_process.c + pbio/src/os.c. This is a
-// simplified port — just the tick + subscription dispatch; observer /
-// trajectory / servo state machine land in M2.
+// The Python equivalent in tests/_fakes.py mirrors this behaviour exactly;
+// desktop tests exercise that fake, the firmware exercises this C module.
 
 #include "py/runtime.h"
 #include "py/objlist.h"
 #include "py/mphal.h"
 
-#define DEFAULT_PERIOD_MS 10
+#include "motor_process.h"
+
+#define DEFAULT_PERIOD_MS 1
+#define MAX_C_CALLBACKS   8   // raise if the fleet of native controllers grows
 
 // -----------------------------------------------------------------------
 // Singleton state
 
-typedef struct _motor_process_obj_t {
+struct _motor_process_obj_t {
     mp_obj_base_t base;
-    mp_obj_t      callbacks;   // mp_obj_list_t of callables
+    mp_obj_t      callbacks;   // mp_obj_list_t of Python callables
     mp_obj_t      timer;       // machine.Timer instance or mp_const_none
     mp_int_t      period_ms;
-} motor_process_obj_t;
+};
+
+typedef struct {
+    openbricks_tick_fn_t fn;
+    void *ctx;
+} c_callback_slot_t;
 
 extern const mp_obj_type_t openbricks_motor_process_type;
 
-static motor_process_obj_t motor_process_singleton = {
+motor_process_obj_t motor_process_singleton = {
     .base       = { &openbricks_motor_process_type },
     .callbacks  = MP_OBJ_NULL,   // initialised lazily
     .timer      = MP_OBJ_NULL,
     .period_ms  = DEFAULT_PERIOD_MS,
 };
+
+static c_callback_slot_t c_callbacks[MAX_C_CALLBACKS];
+static size_t n_c_callbacks = 0;
 
 static motor_process_obj_t *mp_get(void) {
     motor_process_obj_t *self = &motor_process_singleton;
@@ -60,20 +78,60 @@ static motor_process_obj_t *mp_get(void) {
 }
 
 // -----------------------------------------------------------------------
+// Internal C API (see motor_process.h)
+
+// Forward declaration — mp_do_start is defined later in this file.
+static void mp_do_start(motor_process_obj_t *self);
+
+void openbricks_motor_process_register_c(openbricks_tick_fn_t fn, void *ctx) {
+    for (size_t i = 0; i < n_c_callbacks; i++) {
+        if (c_callbacks[i].fn == fn && c_callbacks[i].ctx == ctx) {
+            return;  // already registered
+        }
+    }
+    if (n_c_callbacks >= MAX_C_CALLBACKS) {
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("openbricks: too many C tick callbacks"));
+    }
+    c_callbacks[n_c_callbacks].fn  = fn;
+    c_callbacks[n_c_callbacks].ctx = ctx;
+    n_c_callbacks++;
+    // pbio-style: the scheduler runs any time there's work. Once started,
+    // it stays running for the life of the interpreter (no auto-stop).
+    mp_do_start(mp_get());
+}
+
+void openbricks_motor_process_unregister_c(openbricks_tick_fn_t fn, void *ctx) {
+    for (size_t i = 0; i < n_c_callbacks; i++) {
+        if (c_callbacks[i].fn == fn && c_callbacks[i].ctx == ctx) {
+            for (size_t j = i; j + 1 < n_c_callbacks; j++) {
+                c_callbacks[j] = c_callbacks[j + 1];
+            }
+            n_c_callbacks--;
+            return;
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
 // Tick dispatch. Registered as the machine.Timer callback (which receives
-// the Timer instance as its single argument). Iterates a snapshot of the
-// callback list so a callback may unregister itself mid-tick.
+// the Timer instance as its single argument). C callbacks fire first;
+// Python callbacks second via a stack snapshot so self-unregistration
+// mid-tick is safe.
 
 static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
     (void)timer_arg;
     motor_process_obj_t *self = mp_get();
 
+    // Fast path: native C callbacks. Tight loop, no MP allocation.
+    for (size_t i = 0; i < n_c_callbacks; i++) {
+        c_callbacks[i].fn(c_callbacks[i].ctx);
+    }
+
+    // Slow path: Python callbacks.
     size_t n;
     mp_obj_t *items;
     mp_obj_list_get(self->callbacks, &n, &items);
-
-    // Copy into a stack snapshot so ``unregister`` during iteration is safe.
-    // For MP heap hygiene prefer alloca-style over another mp_obj_list_new.
     if (n == 0) {
         return mp_const_none;
     }
@@ -108,20 +166,11 @@ static void mp_do_start(motor_process_obj_t *self) {
 
     mp_obj_t init_method = mp_load_attr(self->timer, MP_QSTR_init);
 
-    // Call timer.init(period=<ms>, mode=PERIODIC, callback=<mp_on_tick_obj>)
-    mp_map_elem_t kwargs[3];
-    kwargs[0].key   = MP_OBJ_NEW_QSTR(MP_QSTR_period);
-    kwargs[0].value = MP_OBJ_NEW_SMALL_INT(self->period_ms);
-    kwargs[1].key   = MP_OBJ_NEW_QSTR(MP_QSTR_mode);
-    kwargs[1].value = periodic;
-    kwargs[2].key   = MP_OBJ_NEW_QSTR(MP_QSTR_callback);
-    kwargs[2].value = MP_OBJ_FROM_PTR(&mp_on_tick_obj);
-
     mp_obj_t args[] = {
         init_method,
-        kwargs[0].key, kwargs[0].value,
-        kwargs[1].key, kwargs[1].value,
-        kwargs[2].key, kwargs[2].value,
+        MP_OBJ_NEW_QSTR(MP_QSTR_period),   MP_OBJ_NEW_SMALL_INT(self->period_ms),
+        MP_OBJ_NEW_QSTR(MP_QSTR_mode),     periodic,
+        MP_OBJ_NEW_QSTR(MP_QSTR_callback), MP_OBJ_FROM_PTR(&mp_on_tick_obj),
     };
     mp_call_method_n_kw(0, 3, args);
 }
@@ -141,7 +190,6 @@ static void mp_do_stop(motor_process_obj_t *self) {
 static mp_obj_t mp_register(mp_obj_t self_in, mp_obj_t callback) {
     (void)self_in;
     motor_process_obj_t *self = mp_get();
-    // Dedupe: only append if not present.
     size_t n;
     mp_obj_t *items;
     mp_obj_list_get(self->callbacks, &n, &items);
@@ -151,6 +199,7 @@ static mp_obj_t mp_register(mp_obj_t self_in, mp_obj_t callback) {
         }
     }
     mp_obj_list_append(self->callbacks, callback);
+    mp_do_start(self);   // pbio-style auto-start on first subscription
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mp_register_obj, mp_register);
@@ -163,13 +212,11 @@ static mp_obj_t mp_unregister(mp_obj_t self_in, mp_obj_t callback) {
     mp_obj_list_get(self->callbacks, &n, &items);
     for (size_t i = 0; i < n; i++) {
         if (mp_obj_equal(items[i], callback)) {
-            // Remove in place by calling list.remove() on the Python object.
             mp_obj_t rm = mp_load_attr(self->callbacks, MP_QSTR_remove);
             mp_call_function_1(rm, callback);
             return mp_const_none;
         }
     }
-    // Silent if not registered (matches the Python fake).
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mp_unregister_obj, mp_unregister);
@@ -201,7 +248,6 @@ static mp_obj_t mp_is_running(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_is_running_obj, mp_is_running);
 
 static mp_obj_t mp_configure(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    (void)n_args; (void)pos_args;
     static const mp_arg_t allowed[] = {
         { MP_QSTR_period_ms, MP_ARG_INT | MP_ARG_REQUIRED, {.u_int = DEFAULT_PERIOD_MS} },
     };
@@ -212,7 +258,6 @@ static mp_obj_t mp_configure(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     motor_process_obj_t *self = mp_get();
     self->period_ms = parsed[0].u_int;
 
-    // If the timer is running, restart so the new period takes effect.
     if (self->timer != mp_const_none) {
         mp_do_stop(self);
         mp_do_start(self);
@@ -225,10 +270,10 @@ static mp_obj_t mp_reset(mp_obj_t self_in) {
     (void)self_in;
     motor_process_obj_t *self = mp_get();
     mp_do_stop(self);
-    // Empty the callbacks list.
     mp_obj_t clear = mp_load_attr(self->callbacks, MP_QSTR_clear);
     mp_call_function_0(clear);
-    self->period_ms = DEFAULT_PERIOD_MS;
+    self->period_ms   = DEFAULT_PERIOD_MS;
+    n_c_callbacks     = 0;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_reset_obj, mp_reset);
@@ -255,19 +300,3 @@ MP_DEFINE_CONST_OBJ_TYPE(
     MP_TYPE_FLAG_NONE,
     locals_dict, &motor_process_locals_dict
 );
-
-// -----------------------------------------------------------------------
-// Module registration
-
-static const mp_rom_map_elem_t openbricks_native_globals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___name__),      MP_ROM_QSTR(MP_QSTR__openbricks_native) },
-    { MP_ROM_QSTR(MP_QSTR_motor_process), MP_ROM_PTR(&motor_process_singleton) },
-};
-static MP_DEFINE_CONST_DICT(openbricks_native_globals, openbricks_native_globals_table);
-
-const mp_obj_module_t openbricks_native_cmodule = {
-    .base    = { &mp_type_module },
-    .globals = (mp_obj_dict_t *)&openbricks_native_globals,
-};
-
-MP_REGISTER_MODULE(MP_QSTR__openbricks_native, openbricks_native_cmodule);

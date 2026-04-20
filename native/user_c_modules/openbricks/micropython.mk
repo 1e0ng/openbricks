@@ -6,4 +6,6 @@
 USERMOD_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 
 SRC_USERMOD += $(USERMOD_DIR)/motor_process.c
+SRC_USERMOD += $(USERMOD_DIR)/servo.c
+SRC_USERMOD += $(USERMOD_DIR)/openbricks_module.c
 CFLAGS_USERMOD += -I$(USERMOD_DIR)

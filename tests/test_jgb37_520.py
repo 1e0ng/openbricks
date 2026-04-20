@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: MIT
-"""Tests for the JGB37-520 closed-loop motor driver."""
+"""Tests for the JGB37-520 closed-loop motor driver.
+
+The driver is a thin Python wrapper over ``_openbricks_native.Servo``
+(either the C implementation on firmware, or the Python fake installed
+by ``tests/_fakes.py`` on desktop). Behavioural tests therefore exercise
+the Servo type itself via the wrapper.
+"""
 
 import tests._fakes  # noqa: F401
 
@@ -27,119 +33,117 @@ class TestJGB37Motor(unittest.TestCase):
         motor_process.reset()
         Timer.reset_for_test()
 
+    # --- open-loop behaviour ---
+
     def test_run_passes_through_to_h_bridge(self):
         m = _make_motor()
         m.run(50)
-        self.assertEqual(m._driver._in1.value(), 1)
-        self.assertEqual(m._driver._in2.value(), 0)
-        self.assertGreater(m._driver._pwm.duty(), 0)
+        self.assertEqual(m._in1.value(), 1)
+        self.assertEqual(m._in2.value(), 0)
+        self.assertEqual(m._pwm.duty(), 511)  # 50% of 1023
 
-    def test_brake_and_coast_passthrough(self):
+    def test_run_reverse(self):
+        m = _make_motor()
+        m.run(-75)
+        self.assertEqual(m._in1.value(), 0)
+        self.assertEqual(m._in2.value(), 1)
+
+    def test_brake_shorts_both_terminals(self):
         m = _make_motor()
         m.brake()
-        self.assertEqual(m._driver._in1.value(), 1)
-        self.assertEqual(m._driver._in2.value(), 1)
+        self.assertEqual(m._in1.value(), 1)
+        self.assertEqual(m._in2.value(), 1)
+        self.assertEqual(m._pwm.duty(), 1023)
+
+    def test_coast_floats_terminals(self):
+        m = _make_motor()
+        m.run(100)
         m.coast()
-        self.assertEqual(m._driver._pwm.duty(), 0)
+        self.assertEqual(m._in1.value(), 0)
+        self.assertEqual(m._in2.value(), 0)
+        self.assertEqual(m._pwm.duty(), 0)
+
+    def test_power_clamped(self):
+        m = _make_motor()
+        m.run(9999)
+        self.assertLessEqual(m._pwm.duty(), 1023)
+
+    def test_invert_swaps_direction(self):
+        m = _make_motor(invert=True)
+        m.run(50)
+        self.assertEqual(m._in1.value(), 0)
+        self.assertEqual(m._in2.value(), 1)
+
+    # --- encoder + angle ---
 
     def test_angle_from_encoder_count(self):
         m = _make_motor()
-        # 1320 counts per output rev -> 660 counts = 180 deg.
-        m._enc._count = 660
+        m._enc._count = 660   # half a rev at 1320 cpr
         self.assertAlmostEqual(m.angle(), 180.0, places=6)
 
     def test_reset_angle_sets_encoder_count(self):
         m = _make_motor()
         m.reset_angle(90)
-        # 90 deg * 1320 / 360 = 330 counts.
         self.assertEqual(m._enc._count, 330)
         m.reset_angle(0)
         self.assertEqual(m._enc._count, 0)
 
-    def test_run_speed_sets_target_and_attaches(self):
-        m = _make_motor()
-        m.run_speed(300)
-        self.assertEqual(m._target_dps, 300.0)
-        self.assertTrue(m._active)
+    # --- closed-loop: run_speed attaches, brake/coast/run detach ---
 
-    def test_control_step_positive_clamps_to_full_forward(self):
-        m = _make_motor()
-        m.run_speed(300)
-        m._control_step()
-        self.assertEqual(m._driver._in1.value(), 1)
-        self.assertEqual(m._driver._in2.value(), 0)
-        self.assertEqual(m._driver._pwm.duty(), 1023)
-
-    def test_control_step_negative_clamps_to_full_reverse(self):
-        m = _make_motor()
-        m.run_speed(-300)
-        m._control_step()
-        self.assertEqual(m._driver._in1.value(), 0)
-        self.assertEqual(m._driver._in2.value(), 1)
-        self.assertEqual(m._driver._pwm.duty(), 1023)
-
-    def test_run_speed_registers_control_step_with_scheduler(self):
+    def test_run_speed_attaches_and_auto_starts_scheduler(self):
         m = _make_motor()
         m.run_speed(100)
-        self.assertIn(m._control_step, motor_process._callbacks)
+        self.assertTrue(motor_process.is_running())
 
-    def test_run_speed_is_idempotent_for_registration(self):
-        m = _make_motor()
-        m.run_speed(100)
-        m.run_speed(150)
-        self.assertEqual(
-            motor_process._callbacks.count(m._control_step), 1,
-        )
-        self.assertEqual(m._target_dps, 150.0)
-
-    def test_brake_detaches_and_brakes(self):
+    def test_brake_after_run_speed_brakes_bridge(self):
         m = _make_motor()
         m.run_speed(300)
-        m._control_step()
-        self.assertEqual(m._driver._pwm.duty(), 1023)
-
         m.brake()
-        self.assertNotIn(m._control_step, motor_process._callbacks)
-        self.assertFalse(m._active)
-        self.assertEqual(m._driver._in1.value(), 1)
-        self.assertEqual(m._driver._in2.value(), 1)
+        self.assertEqual(m._in1.value(), 1)
+        self.assertEqual(m._in2.value(), 1)
 
-    def test_coast_detaches_and_coasts(self):
+    def test_coast_after_run_speed_releases_bridge(self):
         m = _make_motor()
         m.run_speed(300)
         m.coast()
-        self.assertNotIn(m._control_step, motor_process._callbacks)
-        self.assertFalse(m._active)
-        self.assertEqual(m._driver._pwm.duty(), 0)
+        self.assertEqual(m._in1.value(), 0)
+        self.assertEqual(m._in2.value(), 0)
+        self.assertEqual(m._pwm.duty(), 0)
 
-    def test_run_open_loop_detaches(self):
+    def test_scheduler_drives_bridge_at_1khz(self):
+        """At the default 1 ms period, one sleep_ms(1) yields one tick of
+        control. With target=300, measured=0, feedforward+P saturates at
+        +100% -> full-forward H-bridge."""
         m = _make_motor()
         m.run_speed(300)
-        self.assertTrue(m._active)
-        m.run(50)
-        self.assertFalse(m._active)
-        self.assertNotIn(m._control_step, motor_process._callbacks)
-
-    def test_scheduler_drives_bridge_during_sleep(self):
-        m = _make_motor()
-        m.run_speed(300)
-        # First attach starts the scheduler; one 10 ms tick period elapses.
-        time.sleep_ms(10)
-        self.assertEqual(m._driver._in1.value(), 1)
-        self.assertEqual(m._driver._pwm.duty(), 1023)
+        time.sleep_ms(1)
+        self.assertEqual(m._in1.value(), 1)
+        self.assertEqual(m._in2.value(), 0)
+        self.assertEqual(m._pwm.duty(), 1023)
         m.brake()
 
     def test_run_angle_reaches_target_when_encoder_is_fed(self):
+        """Simulate the encoder advancing on each tick by registering a
+        Python callback that mutates the count. The C-path control step
+        fires first (drives the bridge), then the Python callback fires
+        (advances the encoder); run_angle's blocking loop exits once the
+        angle crosses target."""
         m = _make_motor()
 
-        # Simulate the encoder advancing every scheduler tick.
-        def fake_rotation():
+        def spin():
             m._enc._count += 13
 
-        motor_process.register(fake_rotation)
-        m.run_angle(300, 90)  # block until we reach +90 deg.
+        motor_process.register(spin)
+        m.run_angle(300, 90)
         self.assertGreaterEqual(m.angle(), 90)
-        self.assertFalse(m._active)  # run_angle braked, which detaches
+
+    # --- internal structure ---
+
+    def test_wrapper_holds_a_native_servo(self):
+        m = _make_motor()
+        # ``_servo`` is the native handle; tests that want to inspect it
+        # can reach in like this.
+        self.assertIsNotNone(m._servo)
 
 
 if __name__ == "__main__":

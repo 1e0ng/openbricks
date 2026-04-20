@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: MIT
 """Tests for the cooperative motor scheduler.
 
-These exercise ``openbricks._native.motor_process`` — the Python fake
-installed by ``tests/_fakes.py`` on desktop, the C module compiled into
-the firmware on device. Both must pass the same assertions; the C
-implementation lives at ``native/user_c_modules/openbricks/motor_process.c``.
+Exercises ``openbricks._native.motor_process`` — the Python fake
+installed by ``tests/_fakes.py`` on desktop, and the C module compiled
+into the firmware on device (``native/user_c_modules/openbricks/motor_process.c``).
+Both must pass the same assertions.
 
-Exit criterion for M1: 10 000 simulated ticks without the scheduler
-losing beats or drifting off the nominal 10 ms period.
+The scheduler is pbio-style always-on: the first subscription
+(``register`` or the internal ``_register_c``) starts the timer, and it
+stays running for the life of the interpreter.
 """
 
 import tests._fakes  # noqa: F401
@@ -41,7 +42,7 @@ class TestMotorProcess(unittest.TestCase):
         self.assertEqual(cb.count, 1)
 
     def test_unregister_silent_if_not_registered(self):
-        motor_process.unregister(lambda: None)  # no-op
+        motor_process.unregister(lambda: None)
 
     def test_tick_fires_all_registered(self):
         a, b = _TickCounter(), _TickCounter()
@@ -58,37 +59,50 @@ class TestMotorProcess(unittest.TestCase):
         motor_process.tick()
         self.assertEqual(a.count, 0)
 
-    def test_start_fires_callbacks_during_sleep(self):
+    def test_register_auto_starts_timer(self):
+        """pbio-style: first subscription brings the scheduler online."""
+        self.assertFalse(motor_process.is_running())
+        motor_process.register(_TickCounter())
+        self.assertTrue(motor_process.is_running())
+
+    def test_register_then_sleep_fires_during_sleep(self):
+        """At the default 1 ms period, sleeping 100 ms fires 100 ticks."""
         cb = _TickCounter()
         motor_process.register(cb)
-        motor_process.start()
-        # 10 ms tick period; sleep 100 ms should fire 10 times exactly.
         time.sleep_ms(100)
-        motor_process.stop()
-        self.assertEqual(cb.count, 10)
+        self.assertEqual(cb.count, 100)
+
+    def test_unregister_keeps_timer_running(self):
+        """Unregistering the last callback does NOT stop the scheduler —
+        pbio-style always-on. User code never needs start/stop."""
+        motor_process.register(_TickCounter())
+        self.assertTrue(motor_process.is_running())
+        motor_process.unregister(_TickCounter())   # different cb; silent
+        # Bring us back to empty.
+        cb = _TickCounter()
+        motor_process.register(cb)
+        motor_process.unregister(cb)
+        self.assertTrue(motor_process.is_running())
 
     def test_start_is_idempotent(self):
         motor_process.start()
         self.assertTrue(motor_process.is_running())
-        motor_process.start()  # second call is a no-op
-        motor_process.stop()
-        self.assertFalse(motor_process.is_running())
+        motor_process.start()
+        self.assertTrue(motor_process.is_running())
 
     def test_stop_before_start_is_silent(self):
-        motor_process.stop()  # no-op
+        motor_process.stop()
 
     def test_configure_changes_period(self):
         motor_process.configure(period_ms=5)
         cb = _TickCounter()
         motor_process.register(cb)
-        motor_process.start()
         time.sleep_ms(100)
-        motor_process.stop()
         # 5 ms period, 100 ms sleep -> 20 ticks.
         self.assertEqual(cb.count, 20)
 
     def test_configure_while_running_restarts_timer(self):
-        motor_process.start()
+        motor_process.register(_TickCounter())   # auto-starts at 1 ms
         motor_process.configure(period_ms=5)
         self.assertTrue(motor_process.is_running())
 
@@ -100,21 +114,17 @@ class TestMotorProcess(unittest.TestCase):
             motor_process.unregister(oneshot)
 
         motor_process.register(oneshot)
-        motor_process.start()
         time.sleep_ms(100)
-        motor_process.stop()
         self.assertEqual(cb.count, 1)
 
     def test_10000_tick_soak_no_drift(self):
         """Exit criterion: 10 000 periodic ticks arrive on time with no
-        accumulated drift. The virtual clock's deadline walker fires timer
-        callbacks *at* each nominal deadline, so a 100 000 ms sleep with a
-        10 ms period must yield exactly 10 000 fires."""
+        accumulated drift. Run at 10 ms period for test speed; the C
+        version targets 1 ms in production and hits the same contract."""
+        motor_process.configure(period_ms=10)
         cb = _TickCounter()
         motor_process.register(cb)
-        motor_process.start()
         time.sleep_ms(100_000)
-        motor_process.stop()
         self.assertEqual(cb.count, 10_000)
 
 
