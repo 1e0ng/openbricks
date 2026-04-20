@@ -16,14 +16,14 @@ The MicroPython source tracks a master commit under `native/micropython/`. Bumps
 
 ### 2. Install the target toolchain
 
-#### ESP32 (current target)
+#### ESP32 / ESP32-S3 (current targets)
 
 Install **ESP-IDF v5.5.4** (or newer in the 5.5 line). MicroPython master supports ESP-IDF 5.3 through 5.5; we recommend 5.5.4 because that's what CI builds against and what the maintainer tests on hardware.
 
 ```
 mkdir -p ~/esp && cd ~/esp
 git clone -b v5.5.4 --recursive https://github.com/espressif/esp-idf.git esp-idf-v5.5
-cd esp-idf-v5.5 && ./install.sh esp32
+cd esp-idf-v5.5 && ./install.sh esp32,esp32s3
 source export.sh          # sets $IDF_PATH; needs to happen in every shell
 ```
 
@@ -45,12 +45,13 @@ Planned for M4. Not supported yet.
 From the repo root:
 
 ```
-./scripts/build_firmware.sh esp32
+./scripts/build_firmware.sh esp32      # original ESP32 (Xtensa LX6)
+./scripts/build_firmware.sh esp32s3    # ESP32-S3  (Xtensa LX7, native USB)
 ```
 
-The script checks `native/micropython` is populated and `$IDF_PATH` is set, then builds `mpy-cross` once and produces the ESP32 image with `BOARD=openbricks_esp32` and `USER_C_MODULES=$(pwd)/native/user_c_modules`.
+The script checks `native/micropython` is populated and `$IDF_PATH` is set, then builds `mpy-cross` once and produces the image for the selected target with `BOARD=openbricks_<target>` and `USER_C_MODULES=$(pwd)/native/user_c_modules`.
 
-Output tree: `native/micropython/ports/esp32/build-openbricks_esp32/`
+Output tree: `native/micropython/ports/esp32/build-openbricks_<target>/`
 
 | File | Purpose |
 |---|---|
@@ -61,12 +62,18 @@ Output tree: `native/micropython/ports/esp32/build-openbricks_esp32/`
 
 ## Flashing
 
-Use `esptool.py`:
+Use `esptool.py` (swap `--chip` and the build path for the S3):
 
 ```
+# Original ESP32 — firmware starts at 0x1000
 esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX --baud 460800 \
     write_flash -z 0x1000 \
     native/micropython/ports/esp32/build-openbricks_esp32/firmware.bin
+
+# ESP32-S3 — firmware starts at 0x0 (second-stage bootloader sits lower)
+esptool.py --chip esp32s3 --port /dev/tty.usbmodemXXXX --baud 460800 \
+    write_flash -z 0x0 \
+    native/micropython/ports/esp32/build-openbricks_esp32s3/firmware.bin
 ```
 
 Or, if you built with `idf.py`:
@@ -106,7 +113,7 @@ The runner spawns one MP subprocess per test module for state isolation. Expecte
 GitHub Actions runs two jobs on every push / PR (see `.github/workflows/ci.yaml`):
 
 - **`test`** — builds the unix MP binary with the `_openbricks_native` user_c_module and runs `tests/run.py`. No ESP-IDF needed.
-- **`firmware-esp32`** — builds the ESP32 image inside the `espressif/idf:v5.5.4` container, then uploads `firmware.bin` + bootloader + partition-table as a workflow artifact.
+- **`firmware`** — a matrix job (targets: `esp32`, `esp32s3`) that builds each image inside the `espressif/idf:v5.5.4` container, then uploads `firmware.bin` + bootloader + partition-table for each target as a workflow artifact.
 
 Successful PRs produce a flashable image downloadable from the Actions run.
 

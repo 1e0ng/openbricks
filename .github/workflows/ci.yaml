@@ -42,8 +42,12 @@ jobs:
       - name: Run test suite under unix MicroPython
         run: ./native/micropython/ports/unix/build-standard/micropython tests/run.py
 
-  firmware-esp32:
+  firmware:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32, esp32s3]
     # Espressif's official ESP-IDF image — pinned to v5.5.4, matched
     # to the MicroPython master commit the ``native/micropython``
     # submodule tracks.
@@ -66,24 +70,25 @@ jobs:
       - name: Build mpy-cross
         run: make -C native/micropython/mpy-cross -j
 
-      - name: Build ESP32 firmware image
+      - name: Build firmware image (${{ matrix.target }})
         shell: bash
         run: |
           # The espressif/idf container sets $IDF_PATH but GitHub Actions
           # bypasses its entrypoint, so idf.py isn't on $PATH yet.
           . "$IDF_PATH/export.sh"
-          ./scripts/build_firmware.sh esp32
+          ./scripts/build_firmware.sh ${{ matrix.target }}
 
       - name: Stage release files
         id: meta
         shell: bash
         run: |
+          TARGET=${{ matrix.target }}
           mkdir -p release-out
-          BUILD_DIR=native/micropython/ports/esp32/build-openbricks_esp32
-          cp $BUILD_DIR/firmware.bin                          release-out/openbricks-esp32-firmware.bin
-          cp $BUILD_DIR/bootloader/bootloader.bin             release-out/openbricks-esp32-bootloader.bin
-          cp $BUILD_DIR/partition_table/partition-table.bin   release-out/openbricks-esp32-partition-table.bin
-          cp $BUILD_DIR/micropython.bin                       release-out/openbricks-esp32-application.bin
+          BUILD_DIR=native/micropython/ports/esp32/build-openbricks_${TARGET}
+          cp $BUILD_DIR/firmware.bin                          release-out/openbricks-${TARGET}-firmware.bin
+          cp $BUILD_DIR/bootloader/bootloader.bin             release-out/openbricks-${TARGET}-bootloader.bin
+          cp $BUILD_DIR/partition_table/partition-table.bin   release-out/openbricks-${TARGET}-partition-table.bin
+          cp $BUILD_DIR/micropython.bin                       release-out/openbricks-${TARGET}-application.bin
 
           # Tag name for versioned releases, or short SHA for rolling
           # ``latest`` pre-releases on main.
@@ -97,22 +102,25 @@ jobs:
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openbricks-esp32-${{ steps.meta.outputs.version }}
+          name: openbricks-${{ matrix.target }}-${{ steps.meta.outputs.version }}
           path: release-out/
           if-no-files-found: error
 
   release:
     runs-on: ubuntu-latest
-    needs: [test, firmware-esp32]
+    needs: [test, firmware]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download firmware artifact
+      # Download every matrix artifact (openbricks-esp32-*, openbricks-esp32s3-*, …)
+      # and merge them into a single release-out/ directory.
+      - name: Download firmware artifacts
         uses: actions/download-artifact@v4
         with:
-          name: openbricks-esp32-${{ needs.firmware-esp32.outputs.version }}
+          pattern: openbricks-*-${{ needs.firmware.outputs.version }}
           path: release-out/
+          merge-multiple: true
 
       # Rolling ``latest`` pre-release for every push to main — the
       # GitHub-native way to expose the "head of main" firmware image
@@ -132,7 +140,12 @@ jobs:
 
             Commit: ${{ github.sha }}
             ESP-IDF: v5.5.4
-            Flash `openbricks-esp32-firmware.bin` via `esptool.py` — see `docs/build.md`.
+
+            Images:
+            - `openbricks-esp32-firmware.bin` — original ESP32 (Xtensa LX6)
+            - `openbricks-esp32s3-firmware.bin` — ESP32-S3 (Xtensa LX7, native USB)
+
+            Flash with `esptool.py` — see `docs/build.md`.
           files: release-out/*
           # action-gh-release is idempotent: re-running replaces the
           # release's assets in place.

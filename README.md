@@ -12,7 +12,8 @@ Like Pybricks, openbricks is a **firmware you flash to an MCU**, not a library y
 
 **Target platforms for the firmware build**
 
-- ESP32 (primary target)
+- ESP32 (Xtensa LX6) — primary target
+- ESP32-S3 (Xtensa LX7, native USB) — first-class, built alongside ESP32 in CI
 - Roadmap: RP2040, nRF52. Each platform ships as a separate firmware image.
 
 **Bundled component drivers**
