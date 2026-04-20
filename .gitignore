@@ -27,5 +27,11 @@ build/
 dist/
 *.egg-info/
 
+# Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # Local robot configs (users often keep calibration in here)
 robot.local.json

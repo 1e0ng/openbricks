@@ -1,5 +1,7 @@
 # openbricks
 
+![coverage](https://img.shields.io/badge/coverage-89%25-brightgreen)
+
 > A Pybricks-style MicroPython robotics library for **open hardware** — bring your own MCU, your own motors, your own sensors.
 
 Pybricks gives LEGO users a delightful Python API, but it only runs on a handful of LEGO hubs with LEGO-branded motors and sensors. `openbricks` borrows the three-layer architecture (drivers → abstract interfaces → robotics) and applies it to commodity components you can buy off the shelf.
