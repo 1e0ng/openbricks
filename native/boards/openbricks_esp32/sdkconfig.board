@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+# openbricks-specific ESP-IDF sdkconfig overrides.
+#
+# BLE is off — see mpconfigboard.cmake for the reason. Everything else
+# comes from ESP32_GENERIC's sdkconfig.base.
+
+CONFIG_BT_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=n

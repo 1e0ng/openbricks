@@ -88,9 +88,11 @@ print(robot.sensors["color"].rgb())
 
 ## Status
 
-Early but real. Every bundled driver works end to end; the closed-loop motor scheduler is a C extension (`_openbricks_native`) ticking at 1 kHz off `machine.Timer`, with the per-motor state machine also in C. Firmware build scripts live under `native/` and `scripts/build_firmware.sh` — see `docs/build.md` for ESP-IDF setup.
+Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, and 2-DOF coupled drivebase all live as `user_c_modules` inside the firmware. Every bundled driver works end to end; the 85-test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
 
-Production-quality control (Kalman-flavored state observer, trapezoidal trajectory planning, 2-DOF drivebase coupling — all line-by-line ports of pbio's MIT C code) is the next batch of roadmap work. See `docs/architecture.md` for how those slot into the existing scheduler.
+**Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Grab `openbricks-esp32-firmware.bin` and flash with `esptool.py` — see `docs/build.md`.
+
+Next on the roadmap: distance + IR-remote sensor drivers (M4), hub abstraction and a second platform (RP2040, M5), 1.0 polish + release (M6).
 
 ## License
 
