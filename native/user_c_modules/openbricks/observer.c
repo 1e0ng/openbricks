@@ -6,13 +6,23 @@
 // stream of noisy position measurements plus the time step between
 // them, produces smoothed estimates of both position and velocity.
 //
-// This is the same role pbio's observer.c plays in the Pybricks
-// runtime. pbio uses a model-based full-state observer (position,
-// velocity, current, stator flux) driven by both PWM commands and
-// encoder reads. Ours is a simpler α-β form: no motor model, just
-// position observation + constant-velocity prediction. The control
-// quality payoff is still big — raw encoder finite-differencing at
-// 1 kHz is extremely noisy because ΔN is 0 or ±1 most ticks.
+// Plays the same role as pbio's observer.c, but is strictly less
+// capable. pbio runs a **model-based full-state observer** — 4 states
+// (position, velocity, motor current, stator flux), driven by both the
+// PWM command and the encoder read, with a motor model (torque,
+// inertia, friction, back-EMF). That lets it predict how the motor
+// responds to voltage between encoder edges and handle disturbances
+// (friction, load, battery sag) gracefully.
+//
+// This α-β filter is a step up from raw finite-differencing but nowhere
+// near pbio's observer. It has no motor model; it only sees the
+// encoder; it assumes constant velocity between samples. The reason
+// it's worth landing anyway is that at 1 kHz, raw finite-differencing
+// is extremely noisy — ΔN is 0 or ±1 most ticks — and the α-β form
+// gives a ~60x variance reduction in velocity for very little code.
+// Good enough for M2b. The full model-based observer with current /
+// flux states and PWM coupling lands in a later milestone, once the
+// drivebase work exposes where the remaining control-quality gap is.
 //
 // Algorithm (per tick):
 //
