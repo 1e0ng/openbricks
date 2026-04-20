@@ -8,13 +8,22 @@
 
 set(IDF_TARGET esp32)
 
+# Start from MicroPython's ESP32 base SDK config and our board overrides.
+# We deliberately skip ``sdkconfig.ble`` — MicroPython v1.28.0's nimble
+# glue doesn't compile cleanly against ESP-IDF 5.4's new ble_hs_state
+# API. openbricks doesn't use BLE today, so dropping it sidesteps the
+# incompatibility. Re-add when either MP gets the fix upstream or we
+# pin to ESP-IDF 5.2/5.3.
 set(SDKCONFIG_DEFAULTS
     boards/sdkconfig.base
-    boards/sdkconfig.ble
+    ${MICROPY_BOARD_DIR}/sdkconfig.board
 )
 
 # Freeze the openbricks/ package into the image.
 set(MICROPY_FROZEN_MANIFEST ${MICROPY_BOARD_DIR}/manifest.py)
 
-# Register the openbricks user_c_module (the native motor scheduler).
-set(USER_C_MODULES ${CMAKE_SOURCE_DIR}/../../user_c_modules/openbricks/micropython.cmake)
+# ``USER_C_MODULES`` is passed in by ``scripts/build_firmware.sh`` (or by
+# the caller of ``make``) — we don't re-declare it here because the
+# relative-path form that used to live below got broken by MicroPython's
+# source-directory layout, and an absolute path is cleaner to inject
+# from the build script anyway.

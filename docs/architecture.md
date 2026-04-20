@@ -48,35 +48,33 @@ same approach in C — `native/user_c_modules/openbricks/` holds the hot control
 code that runs at the scheduler tick rate. Targeted pbio-parity on control
 quality is the reason that code is C and not Python.
 
-## Where Pybricks puts the real work (and where we are catching up)
+## Pybricks-parity control, in C
 
-Pybricks' `pbio` library does four things well that this project does only
-minimally today. Each is a planned milestone:
+All four of the big pbio control-quality items are ported and shipped in
+`native/user_c_modules/openbricks/`. Each corresponds to a pbio source
+file and keeps its structure close — `pbio` is MIT-licensed so the ports
+are direct where they can be.
 
-1. **State observer** (`pbio/src/observer.c`) — a Kalman-flavored model of
-   the motor that estimates speed, current, and torque from voltage
-   commands and encoder readings. We currently just finite-difference the
-   encoder, which is noisy.
-2. **Trajectory planning** (`pbio/src/trajectory.c`) — trapezoidal speed
-   profiles with explicit acceleration, cruise, and deceleration phases.
-   We set a constant speed and stop when we're there.
-3. **Cooperative multitasking** (`pbio/src/motor_process.c`, `os.c`) — a
-   1 kHz motor tick scheduled off a timer interrupt, independent of the
-   user program. **Landed for openbricks in M1** (`native/user_c_modules/openbricks/motor_process.c`):
-   the scheduler runs always-on at 1 kHz via `machine.Timer` and dispatches
-   tick callbacks via direct function-pointer calls for native subscribers
-   (`Servo` today; observer / trajectory / drivebase in M2–M3). Python-callable
-   subscribers are still supported on a slower path for user extensibility.
-4. **Drivebase coupling** (`pbio/src/drivebase.c`) — the two wheels are
-   controlled as one 2-DOF system, not two independent 1-DOF motors, which
-   matters a lot for straight-line accuracy. We approximate this with a
-   small correction term and it mostly works on flat floors.
-
-The scheduler landed in C in M1 (the `_openbricks_native` user_c_module,
-baked into the firmware image via `native/boards/openbricks_esp32/`); the
-remaining three items follow the same model. `pbio` is MIT-licensed, so we
-can port observer / trajectory / drivebase line-for-line with attribution —
-no clean-room implementation needed.
+1. **State observer** (pbio `observer.c`) — our `observer.c` is a
+   two-state α-β filter. Less capable than pbio's full model-based
+   observer (no motor model, no PWM coupling, no current/flux
+   estimation) but a ~60× variance reduction over raw
+   finite-differencing for little code. Upgrading to a model-based
+   observer is later roadmap work.
+2. **Trajectory planning** (pbio `trajectory.c`) — our `trajectory.c`
+   computes trapezoidal (and triangular fall-through) speed profiles
+   with explicit accel / cruise / decel phases. `servo.run_target()`
+   and `DriveBase.straight()` / `.turn()` sample it each tick.
+3. **Cooperative multitasking** (pbio `motor_process.c` + `os.c`) —
+   our `motor_process.c`. Always-on 1 kHz tick off a `machine.Timer`
+   ISR. Native subscribers (`Servo`, `DriveBase`) register via a fast
+   C-function-pointer path (~1 µs/tick); Python callables are still
+   accepted on a slower dispatch path for user extensibility.
+4. **Drivebase coupling** (pbio `drivebase.c`) — our `drivebase.c`
+   runs two coupled controllers in (sum, diff) coordinates with
+   position feedback on both. Exit criterion: asymmetric-friction
+   test (one wheel at 0.9× commanded speed) keeps heading error
+   under 5% of forward distance — the pure-Kp M1 fallback fails it.
 
 ## The configuration layer
 
@@ -98,14 +96,18 @@ loader looks it up by that name.
 
 ## What's next
 
-- **M2:** port pbio's `observer.c` + `trajectory.c` to C. The existing
-  native `Servo` gets upgraded to sample the trapezoidal profile and use
-  the observer estimate instead of finite-differencing the encoder.
-  Delivers items 1 and 2 above.
-- **M3:** port pbio's `drivebase.c` — the 2-DOF coupled controller that
-  keeps straight-line accuracy under asymmetric friction (item 4).
-- **M4:** distance sensor and IR-remote interfaces (pure Python — they're
-  not on the hot path).
-- **M5:** `hub` abstraction (battery, LED, buttons) and a second firmware
-  image (RP2040) to validate the build seam.
-- **M6:** 1.0 polish + release with per-platform firmware images.
+M1 / M2 / M3 (scheduler, observer, trajectory, 2-DOF drivebase, all in C)
+are landed. The remaining roadmap:
+
+- **M4** — distance sensor and IR-remote interfaces. Pure Python; these
+  aren't on the hot path and don't need C.
+- **M5** — `hub` abstraction (battery monitor, status LED, buttons) and
+  a second firmware image (RP2040) to validate the build seam.
+- **M6** — 1.0 polish + release with per-platform firmware images
+  published through GitHub Releases (already wired up in
+  `.github/workflows/ci.yaml` for the main branch).
+
+Upgrading the α-β observer to a pbio-style model-based observer (with
+voltage/current coupling and a motor model) is later work — a precision
+lift we pick up once M4 / M5 drivers are in place and we can measure
+real hardware performance.

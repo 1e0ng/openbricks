@@ -9,5 +9,8 @@ include("$(PORT_DIR)/boards/manifest.py")
 
 package(
     "openbricks",
-    base_path="$(MPY_DIR)/../../..",  # resolve relative to the repo root
+    # $(MPY_DIR) is native/micropython/, so two levels up is the repo
+    # root. ``package("openbricks", base_path=<root>)`` freezes exactly
+    # the ``openbricks/`` Python package — not the whole repo.
+    base_path="$(MPY_DIR)/../..",
 )
