@@ -2,16 +2,18 @@
 
 ![coverage](https://img.shields.io/badge/coverage-84%25-green)
 
-> A Pybricks-style MicroPython robotics library for **open hardware** — bring your own MCU, your own motors, your own sensors.
+> A Pybricks-style MicroPython firmware for **open hardware** — commodity MCUs, commodity motors, commodity sensors.
 
-Pybricks gives LEGO users a delightful Python API, but it only runs on a handful of LEGO hubs with LEGO-branded motors and sensors. `openbricks` borrows the three-layer architecture (drivers → abstract interfaces → robotics) and applies it to commodity components you can buy off the shelf.
+Pybricks gives LEGO users a delightful Python API, but it only runs on a handful of LEGO hubs with LEGO-branded motors and sensors. `openbricks` takes the same shape — a custom MicroPython firmware that bakes the robotics library into the runtime — and targets commodity components you can buy off the shelf.
+
+Like Pybricks, openbricks is a **firmware you flash to an MCU**, not a library you `pip install` on top of stock MicroPython. That means we own the runtime: background control loops, hardware timers, and native C extensions all live inside the firmware image. The motor scheduler and per-motor state machine are already in C (see `native/user_c_modules/openbricks/`); the state observer, trapezoidal trajectory planner, and 2-DOF drivebase controller get the same treatment in upcoming milestones. The three-layer API you write code against (drivers → abstract interfaces → robotics) is what `import openbricks` gives you out of the box.
 
 ## What's in the box
 
-**Supported MCUs out of the box**
+**Target platforms for the firmware build**
 
 - ESP32 (primary target)
-- Any MicroPython port that exposes `machine.Pin`, `machine.PWM`, `machine.I2C`, `machine.UART` should work with minor adjustments.
+- Roadmap: RP2040, nRF52. Each platform ships as a separate firmware image.
 
 **Bundled component drivers**
 
@@ -23,9 +25,11 @@ Pybricks gives LEGO users a delightful Python API, but it only runs on a handful
 | TCS34725 | RGB + clear color sensor | `drivers.tcs34725` |
 | ST-3215-C018 | Serial bus servo (FeeTech/SCServo protocol) | `drivers.st3215` |
 
-New drivers just need to implement one of the abstract interfaces in `openbricks/interfaces.py`. Drop a file into `openbricks/drivers/`, register it in `openbricks/config.py`, and the config loader will pick it up.
+New drivers just need to implement one of the abstract interfaces in `openbricks/interfaces.py`. Drop a file into `openbricks/drivers/`, register it in `openbricks/config.py`, and rebuild the firmware.
 
 ## Quick start
+
+Once the firmware is flashed, `openbricks` is already importable at the REPL:
 
 **Option 1 — Wire it up in Python:**
 
@@ -84,7 +88,9 @@ print(robot.sensors["color"].rgb())
 
 ## Status
 
-This is an early scaffold. Core architecture is in place and simple drivers (L298N, TCS34725, BNO055 read-only, ST-3215 basic protocol) work end to end. Closed-loop motor control is intentionally minimal — a trapezoidal profile with encoder feedback. Production-quality control (state observer, trajectory planning à la Pybricks' `pbio`) is future work; see `docs/architecture.md` for where it would slot in.
+Early but real. Every bundled driver works end to end; the closed-loop motor scheduler is a C extension (`_openbricks_native`) ticking at 1 kHz off `machine.Timer`, with the per-motor state machine also in C. Firmware build scripts live under `native/` and `scripts/build_firmware.sh` — see `docs/build.md` for ESP-IDF setup.
+
+Production-quality control (Kalman-flavored state observer, trapezoidal trajectory planning, 2-DOF drivebase coupling — all line-by-line ports of pbio's MIT C code) is the next batch of roadmap work. See `docs/architecture.md` for how those slot into the existing scheduler.
 
 ## License
 
