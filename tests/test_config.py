@@ -4,12 +4,25 @@
 import tests._fakes  # noqa: F401
 
 import json
-import tempfile
 import unittest
 
 import openbricks.config as config
 import openbricks.platforms.esp32 as esp32
 import openbricks.robotics as robotics
+
+
+_TMP_COUNTER = [0]
+
+
+def _write_tmp_json(data):
+    """Drop ``data`` as JSON into a unique /tmp file; return the path.
+    Replaces ``tempfile.NamedTemporaryFile`` (missing on MicroPython
+    unix). Each call gets a fresh filename within the test process."""
+    _TMP_COUNTER[0] += 1
+    path = "/tmp/openbricks_test_config_%d.json" % _TMP_COUNTER[0]
+    with open(path, "w") as f:
+        json.dump(data, f)
+    return path
 
 
 SAMPLE_CONFIG = {
@@ -55,10 +68,7 @@ class TestLoader(unittest.TestCase):
         esp32.make_i2c = lambda **kw: ("i2c_handle", kw)
         esp32.make_uart = lambda **kw: ("uart_handle", kw)
 
-        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-        json.dump(SAMPLE_CONFIG, tmp)
-        tmp.close()
-        self.path = tmp.name
+        self.path = _write_tmp_json(SAMPLE_CONFIG)
 
     def tearDown(self):
         config._DRIVER_REGISTRY.clear()
@@ -90,20 +100,16 @@ class TestLoader(unittest.TestCase):
     def test_unknown_driver_raises(self):
         bad = dict(SAMPLE_CONFIG)
         bad["motors"] = {"nope": {"driver": "does_not_exist"}}
-        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-        json.dump(bad, tmp)
-        tmp.close()
+        path = _write_tmp_json(bad)
         with self.assertRaises(ValueError):
-            config.load_robot(tmp.name)
+            config.load_robot(path)
 
     def test_unknown_bus_raises(self):
         bad = json.loads(json.dumps(SAMPLE_CONFIG))  # deep copy
         bad["sensors"]["imu"]["bus"] = "does_not_exist"
-        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-        json.dump(bad, tmp)
-        tmp.close()
+        path = _write_tmp_json(bad)
         with self.assertRaises(ValueError):
-            config.load_robot(tmp.name)
+            config.load_robot(path)
 
 
 if __name__ == "__main__":

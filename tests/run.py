@@ -2,29 +2,32 @@
 """Test runner for openbricks.
 
 Runs every test module against the real C implementation in the
-``_openbricks_native`` user_c_module. Designed for both:
+``_openbricks_native`` user_c_module. Two modes:
 
-- **MicroPython unix port** (production test runtime) — invoked as
-  ``native/micropython/ports/unix/build-standard/micropython tests/run.py``
-  from the repo root (or any cwd — the runner computes paths from its
-  own location).
-- **CPython** (fallback for iteration on pure-Python drivers) —
-  invoked as ``python3 tests/run.py``.
+* **Orchestrator** — invoked with no arguments. Walks ``_TEST_MODULES``
+  and spawns a fresh MicroPython subprocess per module. Module-level
+  isolation means C-side state (the ``motor_process`` singleton, the
+  fake ``Timer._instances`` list, observer buffers, etc.) is reset by
+  process death between modules. Cross-module interactions that
+  caused earlier segfaults can't happen.
 
-On CPython, tests that depend on ``_openbricks_native`` skip
-gracefully because that module doesn't exist there.
+* **Worker** — invoked with a module name as ``sys.argv[1]``. Runs
+  just that module's tests via ``unittest.main``. This is what the
+  orchestrator shells out to.
 
-No Python mirrors of the native logic exist — every native-dependent
-test exercises the real C code.
+Invoke as::
+
+    ./native/micropython/ports/unix/build-standard/micropython tests/run.py
+
+or, equivalently on CPython (for non-native tests during iteration)::
+
+    python3 tests/run.py
 """
 
 import sys
+import os
 
-# MicroPython puts the script's directory at ``sys.path[0]`` when
-# running ``micropython tests/run.py``. Replace it with the repo root
-# (the parent of tests/) so ``import tests.*`` and ``import openbricks.*``
-# resolve via the package layout. Also add the micropython-lib unittest
-# path so ``import unittest`` works on the MP side.
+
 _tests_dir = sys.path[0]
 _idx = _tests_dir.rfind("/")
 _repo_root = _tests_dir[:_idx] if _idx > 0 else "."
@@ -34,20 +37,10 @@ _repo_root = _tests_dir[:_idx] if _idx > 0 else "."
 # layouts.
 sys.path[0] = _repo_root
 if "tests" in sys.modules:
-    # MP may have cached a namespace entry keyed on the old path.
     del sys.modules["tests"]
 
-# Install hardware fakes BEFORE extending sys.path with
-# micropython-lib's unittest — otherwise MP (observed on v1.28) fails
-# to find ``tests`` past the newly-prepended unittest entry.
+# Hardware fakes before any openbricks driver imports them.
 import tests._fakes  # noqa: F401
-
-sys.path.insert(0, _repo_root + "/native/micropython/lib/micropython-lib/python-stdlib/unittest")
-import unittest
-
-# micropython-lib's unittest doesn't ship assertGreater / assertLess;
-# fill them in so our tests can use the full familiar vocabulary.
-tests._fakes._install_unittest_shims()
 
 
 _TEST_MODULES = [
@@ -65,38 +58,56 @@ _TEST_MODULES = [
 ]
 
 
-def _load_module(name):
-    """Import ``name`` and return the module object, or None if a
-    dependency is unavailable on this runtime."""
-    try:
-        return __import__(name, None, None, [""])
-    except ImportError as e:
-        print("SKIP %s: %s" % (name, e))
-        return None
+def _run_orchestrator():
+    """Spawn one MP subprocess per module. Each runs tests/run.py with
+    the module name as argv[1] and inherits a clean C state."""
+    py = sys.executable
+    if py is None or not py:
+        print("ERROR: sys.executable is empty; run tests/run.py under a named interpreter.")
+        sys.exit(2)
+
+    any_failed = False
+    for name in _TEST_MODULES:
+        print("\n=== %s ===" % name)
+        # os.system forwards stdout/stderr; the child's exit code is in
+        # the low byte of the return value (POSIX encoding).
+        cmd = py + " " + _repo_root + "/tests/run.py " + name
+        rc = os.system(cmd)
+        # Non-zero return in any module means failure or crash.
+        if rc != 0:
+            any_failed = True
+            print("*** %s: child exited non-zero (0x%x)" % (name, rc))
+
+    print("\n--- openbricks test summary ---")
+    if any_failed:
+        print("FAIL: one or more modules had failures/errors.")
+        sys.exit(1)
+    print("all modules passed.")
+    sys.exit(0)
+
+
+def _run_worker(module_name):
+    """Run tests for ``module_name`` in-process."""
+    # Lazily add the unittest path so the orchestrator side doesn't
+    # perturb module resolution of ``tests.*``.
+    sys.path.insert(0, _repo_root + "/native/micropython/lib/micropython-lib/python-stdlib/unittest")
+    import unittest
+    tests._fakes._install_unittest_shims()
+    mod = __import__(module_name, None, None, [""])
+    result = unittest.main(module=mod)
+    # Return non-zero if anything failed.
+    if result is None:
+        sys.exit(0)
+    fails = len(getattr(result, "failures", []))
+    errs = len(getattr(result, "errors", []))
+    sys.exit(0 if (fails == 0 and errs == 0) else 1)
 
 
 def main():
-    total_failures = 0
-    total_errors = 0
-    total_run = 0
-
-    for name in _TEST_MODULES:
-        mod = _load_module(name)
-        if mod is None:
-            continue
-        print("\n=== %s ===" % name)
-        result = unittest.main(module=mod)
-        if result is None:
-            continue
-        # micropython-lib's unittest.TestRunner.run returns a
-        # TestResult-like object with these attributes.
-        total_failures += len(getattr(result, "failures", []))
-        total_errors   += len(getattr(result, "errors", []))
-        total_run      += getattr(result, "testsRun", 0)
-
-    print("\n--- openbricks test summary ---")
-    print("run=%d, failures=%d, errors=%d" % (total_run, total_failures, total_errors))
-    sys.exit(0 if (total_failures == 0 and total_errors == 0) else 1)
+    if len(sys.argv) > 1:
+        _run_worker(sys.argv[1])
+    else:
+        _run_orchestrator()
 
 
 if __name__ == "__main__":
