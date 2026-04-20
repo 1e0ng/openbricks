@@ -99,8 +99,8 @@ loader looks it up by that name.
 M1 / M2 / M3 (scheduler, observer, trajectory, 2-DOF drivebase, all in C)
 are landed. The remaining roadmap:
 
-- **M4** — distance sensor and IR-remote interfaces. Pure Python; these
-  aren't on the hot path and don't need C.
+- **M4** — distance sensor interfaces (HC-SR04, VL53L0X). Pure Python;
+  these aren't on the hot path and don't need C.
 - **M5** — `hub` abstraction (battery monitor, status LED, buttons, and an
   optional SSD1306 OLED display for on-robot text/graphics) and a second
   firmware image (RP2040) to validate the build seam.
