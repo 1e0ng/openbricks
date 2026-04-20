@@ -67,7 +67,12 @@ jobs:
         run: make -C native/micropython/mpy-cross -j
 
       - name: Build ESP32 firmware image
-        run: ./scripts/build_firmware.sh esp32
+        shell: bash
+        run: |
+          # The espressif/idf container sets $IDF_PATH but GitHub Actions
+          # bypasses its entrypoint, so idf.py isn't on $PATH yet.
+          . "$IDF_PATH/export.sh"
+          ./scripts/build_firmware.sh esp32
 
       - name: Stage release files
         id: meta
