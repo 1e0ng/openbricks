@@ -15,7 +15,7 @@ Owning the firmware shapes several decisions:
 - Hot control code can be compiled in as a native C extension later without
   a separate install step.
 - We can extend or add `machine`-level primitives (custom timers, a hub
-  abstraction, battery monitoring) because we build the `machine` module.
+  abstraction) because we build the `machine` module.
 
 ## Four layers
 
@@ -99,9 +99,9 @@ loader looks it up by that name.
 M1 / M2 / M3 (scheduler, observer, trajectory, 2-DOF drivebase, all in C)
 are landed. The remaining roadmap:
 
-- **M4** — `hub` abstraction (battery monitor, status LED, buttons, and an
-  optional SSD1306 OLED display for on-robot text/graphics) and a second
-  firmware image (RP2040) to validate the build seam.
+- **M4** — `hub` abstraction (status LED, buttons, and an optional SSD1306
+  OLED display for on-robot text/graphics) and a second firmware image
+  (RP2040) to validate the build seam.
 - **M5** — 1.0 polish + release with per-platform firmware images
   published through GitHub Releases (already wired up in
   `.github/workflows/ci.yaml` for the main branch).
