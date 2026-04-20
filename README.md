@@ -14,7 +14,8 @@ Like Pybricks, openbricks is a **firmware you flash to an MCU**, not a library y
 
 - ESP32 (Xtensa LX6) — primary target
 - ESP32-S3 (Xtensa LX7, native USB) — first-class, built alongside ESP32 in CI
-- Roadmap: RP2040, nRF52. Each platform ships as a separate firmware image.
+
+Each platform ships as a separate firmware image.
 
 **Bundled component drivers**
 
@@ -93,7 +94,7 @@ Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal traje
 
 **Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Grab `openbricks-esp32-firmware.bin` and flash with `esptool.py` — see `docs/build.md`.
 
-Next on the roadmap: hub abstraction and a second platform (RP2040, M4), 1.0 polish + release (M5).
+Next on the roadmap: 1.0 polish + release (M5). The M4 hub abstraction (status LED, user button, optional SSD1306 OLED) is on `main`.
 
 ## License
 

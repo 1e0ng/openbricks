@@ -100,13 +100,13 @@ M1 / M2 / M3 (scheduler, observer, trajectory, 2-DOF drivebase, all in C)
 are landed. The remaining roadmap:
 
 - **M4** — `hub` abstraction (status LED, buttons, and an optional SSD1306
-  OLED display for on-robot text/graphics) and a second firmware image
-  (RP2040) to validate the build seam.
+  OLED display for on-robot text/graphics). Already landed on `main`;
+  ESP32 + ESP32-S3 firmware images ship as separate binaries from the
+  same codebase, so the dual-platform build seam is already validated.
 - **M5** — 1.0 polish + release with per-platform firmware images
   published through GitHub Releases (already wired up in
   `.github/workflows/ci.yaml` for the main branch).
 
 Upgrading the α-β observer to a pbio-style model-based observer (with
 voltage/current coupling and a motor model) is later work — a precision
-lift we pick up once M4 hub work lands and we can measure real
-hardware performance.
+lift we pick up once we can measure real hardware performance.
