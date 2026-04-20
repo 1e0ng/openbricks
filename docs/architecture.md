@@ -78,13 +78,9 @@ The registry pattern here mirrors Pybricks' `MP_REGISTER_MODULE` for
 MicroPython modules: each driver self-registers with a human name, and the
 loader looks it up by that name.
 
-## Naming and what's next
+## What's next
 
-`openbricks` is a placeholder — if the project grows, pick something that
-isn't trivially confusable with Pybricks. Candidates that read well in code:
-`openhub`, `commonbricks`, `roverpy`, `everyhub`.
-
-Near-term additions I'd prioritize:
+Near-term additions to prioritize:
 
 - Distance sensor interface + driver for HC-SR04 and VL53L0X.
 - IR remote receiver driver (any NEC-protocol IR module).

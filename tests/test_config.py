@@ -96,6 +96,15 @@ class TestLoader(unittest.TestCase):
         with self.assertRaises(ValueError):
             config.load_robot(tmp.name)
 
+    def test_unknown_bus_raises(self):
+        bad = json.loads(json.dumps(SAMPLE_CONFIG))  # deep copy
+        bad["sensors"]["imu"]["bus"] = "does_not_exist"
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(bad, tmp)
+        tmp.close()
+        with self.assertRaises(ValueError):
+            config.load_robot(tmp.name)
+
 
 if __name__ == "__main__":
     unittest.main()

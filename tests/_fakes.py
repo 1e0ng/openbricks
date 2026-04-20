@@ -9,7 +9,45 @@ very top, before any ``openbricks.*`` imports.
 """
 
 import sys
+import time as _real_time
 import types
+
+
+# ---- MicroPython ``time`` shims ----
+# MicroPython exposes ``ticks_ms`` / ``ticks_us`` / ``ticks_diff`` / ``sleep_ms``
+# / ``sleep_us`` on the ``time`` module. CPython doesn't. We monkey-patch the
+# stdlib module so that driver code written against the MicroPython API can
+# run under the test suite without modification. Sleeps are no-ops to keep
+# tests fast.
+
+if not hasattr(_real_time, "ticks_ms"):
+    # Virtual clock: sleep_ms advances it, ticks_ms reads it. This makes
+    # timeout-polling loops in drivers (e.g. st3215) deterministic and fast,
+    # and keeps jgb37_520's ``_measure_speed_dps`` returning 0 when no time
+    # has passed, which is what the tests expect.
+    _virtual_ms = [0]
+
+    def _ticks_ms():
+        return _virtual_ms[0]
+
+    def _ticks_us():
+        return _virtual_ms[0] * 1000
+
+    def _ticks_diff(a, b):
+        return a - b
+
+    def _sleep_ms(ms):
+        _virtual_ms[0] += int(ms)
+
+    def _sleep_us(us):
+        # Round up so every sleep makes measurable progress.
+        _virtual_ms[0] += max(1, int(us) // 1000)
+
+    _real_time.ticks_ms = _ticks_ms
+    _real_time.ticks_us = _ticks_us
+    _real_time.ticks_diff = _ticks_diff
+    _real_time.sleep_ms = _sleep_ms
+    _real_time.sleep_us = _sleep_us
 
 
 class Pin:
