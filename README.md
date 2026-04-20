@@ -1,6 +1,6 @@
 # openbricks
 
-![coverage](https://img.shields.io/badge/coverage-89%25-brightgreen)
+![coverage](https://img.shields.io/badge/coverage-84%25-green)
 
 > A Pybricks-style MicroPython robotics library for **open hardware** — bring your own MCU, your own motors, your own sensors.
 
