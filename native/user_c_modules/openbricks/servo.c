@@ -23,52 +23,12 @@
 #include "py/mphal.h"
 
 #include "motor_process.h"
-#include "trajectory.h"
-#include "observer.h"
+#include "servo.h"
 
 #define DUTY_MAX    1023               // 10-bit PWM (ESP32 default; matches L298N driver)
 #define POWER_CLAMP ((mp_float_t)100.0)
 #define RATED_DPS   ((mp_float_t)300.0) // feed-forward normaliser; tune per gearbox
 #define DEFAULT_ACCEL ((mp_float_t)720.0)  // deg/s^2 if run_target omits accel
-
-typedef struct _servo_obj_t {
-    mp_obj_base_t base;
-
-    // Hardware handles (Python objects).
-    mp_obj_t in1_pin;
-    mp_obj_t in2_pin;
-    mp_obj_t pwm;
-    mp_obj_t encoder;
-
-    // Cached bound methods — saves mp_load_attr per tick.
-    mp_obj_t in1_value;
-    mp_obj_t in2_value;
-    mp_obj_t pwm_duty;
-
-    // Configuration
-    mp_int_t   counts_per_rev;
-    mp_float_t kp;
-    bool       invert;
-
-    // Control state
-    mp_float_t target_dps;
-    bool       active;
-
-    // Trajectory tracking: when traj_active is true, the tick samples
-    // `trajectory` at (now - traj_start_ms) to derive target_dps.
-    trajectory_obj_t trajectory;
-    uint32_t         traj_start_ms;
-    bool             traj_active;
-    bool             traj_done;
-
-    // α-β state observer — smooths velocity from noisy encoder reads.
-    // See observer.c; default gains (α=0.5, β=0.15) are reasonable for
-    // 1 kHz control. Users can pass in a pre-tuned Observer instead.
-    observer_obj_t observer;
-
-    // Time baseline for observer updates.
-    mp_int_t last_time_ms;
-} servo_obj_t;
 
 extern const mp_obj_type_t openbricks_servo_type;
 

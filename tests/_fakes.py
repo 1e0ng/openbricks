@@ -603,6 +603,156 @@ class _Servo:
         self._last_time_ms = _real_time.ticks_ms()
 
 
+# DriveBase — Python mirror of
+# native/user_c_modules/openbricks/drivebase.c. Runs two coupled
+# trajectories (forward progress + heading), writes per-servo
+# target_dps each tick. The individual servos still run their own
+# feedforward+P velocity loop; the drivebase is a setpoint source.
+
+
+_DB_DEFAULT_ACCEL = 720.0
+_DB_DEFAULT_KP_SUM = 2.0
+_DB_DEFAULT_KP_DIFF = 5.0
+
+
+class _DriveBase:
+    def __init__(self, left, right, wheel_diameter_mm, axle_track_mm,
+                 kp_sum=None, kp_diff=None):
+        if not isinstance(left, _Servo) or not isinstance(right, _Servo):
+            raise TypeError("left and right must be Servo instances")
+        self._left = left
+        self._right = right
+        self._wheel_circ = _math.pi * float(wheel_diameter_mm)
+        self._axle = float(axle_track_mm)
+        self._kp_sum  = _DB_DEFAULT_KP_SUM  if kp_sum  is None else float(kp_sum)
+        self._kp_diff = _DB_DEFAULT_KP_DIFF if kp_diff is None else float(kp_diff)
+
+        self._fwd = None
+        self._fwd_start_ms = 0
+        self._fwd_active = False
+        self._fwd_hold = 0.0
+
+        self._turn = None
+        self._turn_start_ms = 0
+        self._turn_active = False
+        self._turn_hold = 0.0
+
+        self._registered = False
+        self._done = True
+
+    # --- Python-facing methods ---
+
+    def straight(self, distance_mm, speed_mm_s):
+        distance_mm = float(distance_mm)
+        speed_mm_s = float(speed_mm_s)
+        distance_deg = distance_mm / self._wheel_circ * 360.0
+        speed_dps = abs(speed_mm_s) / self._wheel_circ * 360.0
+
+        sum_pos  = (self._left._observer.position() + self._right._observer.position()) / 2.0
+        diff_pos = (self._left._observer.position() - self._right._observer.position()) / 2.0
+        self._fwd = _TrapezoidalProfile(sum_pos, sum_pos + distance_deg,
+                                        speed_dps, _DB_DEFAULT_ACCEL)
+        self._fwd_start_ms = _real_time.ticks_ms()
+        self._fwd_active = True
+        # Hold heading at whatever it was when the move started.
+        self._turn_hold  = diff_pos
+        self._turn_active = False
+        self._register()
+
+    def turn(self, angle_deg, rate_dps):
+        angle_deg = float(angle_deg)
+        rate_dps = float(rate_dps)
+        arc_mm = abs(angle_deg) * _math.pi / 180.0 * (self._axle / 2.0)
+        wheel_deg = arc_mm / self._wheel_circ * 360.0
+        # +θ body turn (left / CCW) → left_pos decreases, right_pos
+        # increases → diff_pos = (left - right)/2 DECREASES.
+        signed_delta = -wheel_deg if angle_deg >= 0 else wheel_deg
+
+        rate_arc_mm_s = abs(rate_dps) * _math.pi / 180.0 * (self._axle / 2.0)
+        rate_wheel_dps = rate_arc_mm_s / self._wheel_circ * 360.0
+
+        diff_pos = (self._left._observer.position() - self._right._observer.position()) / 2.0
+        sum_pos  = (self._left._observer.position() + self._right._observer.position()) / 2.0
+        self._turn = _TrapezoidalProfile(diff_pos, diff_pos + signed_delta,
+                                          rate_wheel_dps, _DB_DEFAULT_ACCEL)
+        self._turn_start_ms = _real_time.ticks_ms()
+        self._turn_active = True
+        self._fwd_hold   = sum_pos
+        self._fwd_active = False
+        self._register()
+
+    def stop(self):
+        self._fwd_active = False
+        self._turn_active = False
+        self._done = True
+        self._unregister()
+
+    def is_done(self):
+        return self._done
+
+    # --- control tick ---
+
+    def _control_tick(self, _ctx):
+        # Forward profile (or hold).
+        if self._fwd_active:
+            elapsed = (_real_time.ticks_ms() - self._fwd_start_ms) / 1000.0
+            if elapsed >= self._fwd.duration():
+                fwd_target = self._fwd.sample(self._fwd.duration())[0]
+                fwd_ff_vel = 0.0
+                self._fwd_hold = fwd_target
+                self._fwd_active = False
+            else:
+                fwd_target, fwd_ff_vel = self._fwd.sample(elapsed)
+        else:
+            fwd_target = self._fwd_hold
+            fwd_ff_vel = 0.0
+
+        # Turn profile (or hold).
+        if self._turn_active:
+            elapsed = (_real_time.ticks_ms() - self._turn_start_ms) / 1000.0
+            if elapsed >= self._turn.duration():
+                turn_target = self._turn.sample(self._turn.duration())[0]
+                turn_ff_vel = 0.0
+                self._turn_hold = turn_target
+                self._turn_active = False
+            else:
+                turn_target, turn_ff_vel = self._turn.sample(elapsed)
+        else:
+            turn_target = self._turn_hold
+            turn_ff_vel = 0.0
+
+        if not self._fwd_active and not self._turn_active:
+            self._done = True
+
+        sum_pos  = (self._left._observer.position() + self._right._observer.position()) / 2.0
+        diff_pos = (self._left._observer.position() - self._right._observer.position()) / 2.0
+
+        sum_err  = fwd_target  - sum_pos
+        diff_err = turn_target - diff_pos
+
+        fwd_cmd  = fwd_ff_vel  + self._kp_sum  * sum_err
+        diff_cmd = turn_ff_vel + self._kp_diff * diff_err
+
+        # diff_pos = (left - right)/2; diff_cmd is desired
+        # (left_vel - right_vel)/2. Positive → left speeds up.
+        self._left._target_dps  = fwd_cmd + diff_cmd
+        self._right._target_dps = fwd_cmd - diff_cmd
+
+    def _register(self):
+        if self._registered:
+            self._done = False
+            return
+        _motor_process_singleton._register_c(self._control_tick, self)
+        self._registered = True
+        self._done = False
+
+    def _unregister(self):
+        if not self._registered:
+            return
+        _motor_process_singleton._unregister_c(self._control_tick, self)
+        self._registered = False
+
+
 # Install the native module fake.
 _motor_process_singleton = _MotorProcess()
 
@@ -611,4 +761,5 @@ _openbricks_native.motor_process = _motor_process_singleton
 _openbricks_native.Servo = _Servo
 _openbricks_native.TrapezoidalProfile = _TrapezoidalProfile
 _openbricks_native.Observer = _Observer
+_openbricks_native.DriveBase = _DriveBase
 sys.modules["_openbricks_native"] = _openbricks_native
