@@ -212,8 +212,8 @@ class TestDriveBaseNative2DOF(unittest.TestCase):
             dt_s = motor_process.period_ms() / 1000.0
             left_acc[0]  += left._servo.target_dps()  * left_scale  * dt_s * cpr_over_360
             right_acc[0] += right._servo.target_dps() * right_scale * dt_s * cpr_over_360
-            left._enc._count  = int(left_acc[0])
-            right._enc._count = int(right_acc[0])
+            left._enc.reset(int(left_acc[0]))
+            right._enc.reset(int(right_acc[0]))
 
         motor_process.register(tick)
 

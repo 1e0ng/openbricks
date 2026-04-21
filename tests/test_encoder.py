@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
-"""Tests for the quadrature encoder utility, using shared hardware fakes."""
+"""Tests for the native ``QuadratureEncoder`` C type."""
 
 import tests._fakes  # noqa: F401  (must import before any openbricks.* import)
 
 import unittest
 
-from openbricks.drivers.encoder import QuadratureEncoder
+from openbricks._native import QuadratureEncoder
 
 
 def _fire(pin):
@@ -21,7 +21,7 @@ class TestQuadratureEncoder(unittest.TestCase):
     def test_forward_cycle_counts_plus_four(self):
         # A leads B: A rises, B rises, A falls, B falls.
         enc = QuadratureEncoder(pin_a=1, pin_b=2)
-        a, b = enc._pin_a, enc._pin_b
+        a, b = enc.pin_a(), enc.pin_b()
 
         a.value(1); _fire(a)           # a!=b  -> +1
         b.value(1); _fire(b)           # a==b  -> +1
@@ -33,7 +33,7 @@ class TestQuadratureEncoder(unittest.TestCase):
     def test_reverse_cycle_counts_minus_four(self):
         # B leads A: B rises, A rises, B falls, A falls.
         enc = QuadratureEncoder(pin_a=1, pin_b=2)
-        a, b = enc._pin_a, enc._pin_b
+        a, b = enc.pin_a(), enc.pin_b()
 
         b.value(1); _fire(b)           # a!=b  -> -1
         a.value(1); _fire(a)           # a==b  -> -1
@@ -44,7 +44,8 @@ class TestQuadratureEncoder(unittest.TestCase):
 
     def test_reset_sets_count(self):
         enc = QuadratureEncoder(pin_a=1, pin_b=2)
-        enc._count = 123
+        enc.reset(123)
+        self.assertEqual(enc.count(), 123)
         enc.reset()
         self.assertEqual(enc.count(), 0)
         enc.reset(500)

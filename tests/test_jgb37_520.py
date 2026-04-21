@@ -78,15 +78,15 @@ class TestJGB37Motor(unittest.TestCase):
 
     def test_angle_from_encoder_count(self):
         m = _make_motor()
-        m._enc._count = 660   # half a rev at 1320 cpr
+        m._enc.reset(660)    # half a rev at 1320 cpr
         self.assertAlmostEqual(m.angle(), 180.0, places=6)
 
     def test_reset_angle_sets_encoder_count(self):
         m = _make_motor()
         m.reset_angle(90)
-        self.assertEqual(m._enc._count, 330)
+        self.assertEqual(m._enc.count(), 330)
         m.reset_angle(0)
-        self.assertEqual(m._enc._count, 0)
+        self.assertEqual(m._enc.count(), 0)
 
     # --- closed-loop: run_speed attaches, brake/coast/run detach ---
 
@@ -131,7 +131,7 @@ class TestJGB37Motor(unittest.TestCase):
         m = _make_motor()
 
         def spin():
-            m._enc._count += 13
+            m._enc.reset(m._enc.count() + 13)
 
         motor_process.register(spin)
         m.run_angle(300, 90)
@@ -155,7 +155,7 @@ class TestJGB37Motor(unittest.TestCase):
         def step_from_target():
             dps = m._servo.target_dps()
             counts_accum[0] += dps * cpr / 360_000.0
-            m._enc._count = int(counts_accum[0])
+            m._enc.reset(int(counts_accum[0]))
 
         motor_process.register(step_from_target)
         m.run_angle(200, 90, accel_dps2=720)
@@ -175,7 +175,7 @@ class TestJGB37Motor(unittest.TestCase):
         def step_from_target():
             dps = m._servo.target_dps()
             counts_accum[0] += dps * cpr / 360_000.0
-            m._enc._count = int(counts_accum[0])
+            m._enc.reset(int(counts_accum[0]))
 
         motor_process.register(step_from_target)
         m.run_angle(200, -90)

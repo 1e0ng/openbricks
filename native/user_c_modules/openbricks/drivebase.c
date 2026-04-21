@@ -156,8 +156,10 @@ static void drivebase_register(drivebase_obj_t *self) {
     }
     // Re-baseline each servo's observer so the first tick doesn't see
     // a phantom residual, and ensure they're subscribed.
-    mp_int_t lc = mp_obj_get_int(mp_load_attr(self->left->encoder,  MP_QSTR__count));
-    mp_int_t rc = mp_obj_get_int(mp_load_attr(self->right->encoder, MP_QSTR__count));
+    // Use each servo's cached encoder.count bound method (uniform across
+    // QuadratureEncoder / PCNTEncoder / any future type).
+    mp_int_t lc = mp_obj_get_int(mp_call_function_0(self->left->encoder_count));
+    mp_int_t rc = mp_obj_get_int(mp_call_function_0(self->right->encoder_count));
     mp_float_t lp = (mp_float_t)lc * (mp_float_t)360.0 / (mp_float_t)self->left->counts_per_rev;
     mp_float_t rp = (mp_float_t)rc * (mp_float_t)360.0 / (mp_float_t)self->right->counts_per_rev;
     openbricks_observer_reset(&self->left->observer,  lp);

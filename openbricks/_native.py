@@ -18,5 +18,6 @@ from _openbricks_native import (  # noqa: F401
     Observer,
     DriveBase,
     PCNTEncoder,
+    QuadratureEncoder,
 )
 
