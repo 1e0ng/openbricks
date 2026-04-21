@@ -4,7 +4,7 @@ Long-press on the hub button toggles BLE on/off.
 
 Wires a ``machine.Timer``-driven poll loop (default 50 ms) against a
 ``Button``-conformant object, watches for a sustained hold longer than
-``long_press_ms`` (default 2 seconds), and calls
+``long_press_ms`` (default 1 second), and calls
 ``openbricks.bluetooth.toggle()`` once per press. State is persisted
 via NVS by the ``bluetooth`` module, so the new value survives reboots.
 
@@ -29,7 +29,7 @@ import time
 from machine import Timer
 
 
-DEFAULT_LONG_PRESS_MS = 2000
+DEFAULT_LONG_PRESS_MS = 1000
 DEFAULT_POLL_MS       = 50
 
 
@@ -42,7 +42,7 @@ class BluetoothToggleButton:
                 (the ``Button`` / ``PushButton`` from ``openbricks.hub``
                 both qualify).
             long_press_ms: how long the button must stay pressed before
-                the toggle fires. Default 2000 ms matches Pybricks.
+                the toggle fires. Default 1000 ms.
             poll_ms: polling period. Default 50 ms (20 Hz) — well under
                 human reaction time, negligible CPU.
             timer_id: ``machine.Timer`` ID. Default -1 uses the virtual
