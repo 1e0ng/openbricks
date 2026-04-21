@@ -42,6 +42,75 @@ jobs:
       - name: Run test suite under unix MicroPython
         run: ./native/micropython/ports/unix/build-standard/micropython tests/run.py
 
+  coverage:
+    runs-on: ubuntu-latest
+    # C coverage for the openbricks user_c_module, following the same
+    # pattern MicroPython itself uses (ports/unix VARIANT=coverage +
+    # gcov + codecov-action). Python coverage isn't attempted — our
+    # tests run under unix MicroPython, where coverage.py doesn't apply.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libffi-dev pkg-config lcov
+
+      - name: Init MicroPython sub-submodules
+        run: |
+          git -C native/micropython submodule update --init \
+            lib/berkeley-db-1.xx lib/micropython-lib lib/mbedtls
+
+      - name: Build mpy-cross
+        run: make -C native/micropython/mpy-cross -j
+
+      - name: Build unix MicroPython (coverage variant) with openbricks
+        run: |
+          make -C native/micropython/ports/unix \
+            VARIANT=coverage \
+            USER_C_MODULES=$(pwd)/native/user_c_modules \
+            -j
+
+      - name: Run test suite against coverage binary
+        # The coverage variant is debug-built and runs ~5× slower than
+        # standard; partial runs still produce useful .gcda files, so we
+        # tolerate non-zero exit here and rely on the standard `test`
+        # job above to gate merges on pass/fail.
+        run: |
+          ./native/micropython/ports/unix/build-coverage/micropython tests/run.py || true
+
+      - name: Run gcov over openbricks C sources
+        run: |
+          cd native/micropython/ports/unix
+          for src in "$GITHUB_WORKSPACE"/native/user_c_modules/openbricks/*.c; do
+            gcov -o build-coverage/openbricks "$src" || true
+          done
+          ls *.gcov | head
+
+      - name: Collect + filter lcov report
+        run: |
+          cd native/micropython/ports/unix
+          # Capture only files under our user_c_modules tree — exclude
+          # MicroPython core, system headers, extmod, etc.
+          lcov --capture --directory build-coverage/openbricks \
+               --output-file coverage.info \
+               --ignore-errors source,unused,format,graph,mismatch,gcov \
+               --rc geninfo_unexecuted_blocks=1
+          lcov --extract coverage.info '*/native/user_c_modules/openbricks/*.c' \
+               --output-file coverage.info \
+               --ignore-errors unused
+          lcov --list coverage.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: native/micropython/ports/unix/coverage.info
+          flags: c-core
+          disable_search: true
+          fail_ci_if_error: false
+
   firmware:
     runs-on: ubuntu-latest
     strategy:
