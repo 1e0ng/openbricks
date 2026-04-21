@@ -21,8 +21,7 @@ import time
 
 from machine import Pin, PWM
 
-from openbricks._native import Servo
-from openbricks.drivers.encoder import QuadratureEncoder
+from openbricks._native import QuadratureEncoder, Servo
 from openbricks.interfaces import Motor
 
 _PWM_FREQ_HZ = 20_000
@@ -41,7 +40,7 @@ class JGB37Motor(Motor):
         self._in1 = Pin(in1, Pin.OUT, value=0)
         self._in2 = Pin(in2, Pin.OUT, value=0)
         self._pwm = PWM(Pin(pwm), freq=_PWM_FREQ_HZ, duty=0)
-        self._enc = QuadratureEncoder(encoder_a, encoder_b)
+        self._enc = QuadratureEncoder(pin_a=encoder_a, pin_b=encoder_b)
         self._servo = Servo(
             in1=self._in1,
             in2=self._in2,

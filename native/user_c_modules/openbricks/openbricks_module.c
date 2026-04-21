@@ -18,6 +18,7 @@ extern const mp_obj_type_t openbricks_trajectory_type;
 extern const mp_obj_type_t openbricks_observer_type;
 extern const mp_obj_type_t openbricks_drivebase_type;
 extern const mp_obj_type_t openbricks_pcnt_encoder_type;
+extern const mp_obj_type_t openbricks_encoder_type;
 
 static const mp_rom_map_elem_t openbricks_native_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),           MP_ROM_QSTR(MP_QSTR__openbricks_native) },
@@ -27,6 +28,7 @@ static const mp_rom_map_elem_t openbricks_native_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Observer),           MP_ROM_PTR(&openbricks_observer_type) },
     { MP_ROM_QSTR(MP_QSTR_DriveBase),          MP_ROM_PTR(&openbricks_drivebase_type) },
     { MP_ROM_QSTR(MP_QSTR_PCNTEncoder),        MP_ROM_PTR(&openbricks_pcnt_encoder_type) },
+    { MP_ROM_QSTR(MP_QSTR_QuadratureEncoder),  MP_ROM_PTR(&openbricks_encoder_type) },
 };
 static MP_DEFINE_CONST_DICT(openbricks_native_globals, openbricks_native_globals_table);
 
