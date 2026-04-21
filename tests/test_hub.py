@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for openbricks.hub — LED / Button drivers and per-board Hubs."""
 
-import tests._fakes  # noqa: F401
+import tests._fakes            # noqa: F401
+import tests._fakes_neopixel   # noqa: F401  (S3 hub default LED uses neopixel)
 
 import unittest
 
@@ -10,6 +11,7 @@ from openbricks.hub import (
     ESP32DevkitHub,
     ESP32S3DevkitHub,
     Hub,
+    NeoPixelLED,
     PushButton,
     SimpleLED,
     StatusLED,
@@ -77,20 +79,47 @@ class ESP32DevkitHubTests(unittest.TestCase):
         self.assertEqual(hub.button._pin.pin, 9)
 
 
+class NeoPixelLEDTests(unittest.TestCase):
+    def test_rgb_scales_by_brightness(self):
+        led = NeoPixelLED(48, brightness=0.5)
+        led.rgb(200, 100, 40)
+        self.assertEqual(led._np[0], (100, 50, 20))
+
+    def test_off_zeros_the_pixel(self):
+        led = NeoPixelLED(48, brightness=1.0)
+        led.rgb(200, 100, 40)
+        led.off()
+        self.assertEqual(led._np[0], (0, 0, 0))
+
+    def test_on_restores_last_color(self):
+        led = NeoPixelLED(48, brightness=1.0)
+        led.rgb(10, 20, 30)
+        led.off()
+        led.on()
+        self.assertEqual(led._np[0], (10, 20, 30))
+
+
 class ESP32S3DevkitHubTests(unittest.TestCase):
-    def test_no_onboard_led_by_default(self):
+    def test_onboard_led_is_neopixel(self):
         hub = ESP32S3DevkitHub()
-        self.assertIsNone(hub.led)
+        self.assertIsInstance(hub.led, NeoPixelLED)
         self.assertIsInstance(hub.button, Button)
 
     def test_button_default_pin(self):
         hub = ESP32S3DevkitHub()
         self.assertEqual(hub.button._pin.pin, 0)
 
-    def test_external_led_attached_when_pin_given(self):
+    def test_led_default_pin_is_48(self):
+        hub = ESP32S3DevkitHub()
+        self.assertEqual(hub.led._np.pin.pin, 48)
+
+    def test_led_pin_override(self):
         hub = ESP32S3DevkitHub(led_pin=21)
-        self.assertIsInstance(hub.led, SimpleLED)
-        self.assertEqual(hub.led._pin.pin, 21)
+        self.assertEqual(hub.led._np.pin.pin, 21)
+
+    def test_led_pin_none_disables(self):
+        hub = ESP32S3DevkitHub(led_pin=None)
+        self.assertIsNone(hub.led)
 
 
 if __name__ == "__main__":

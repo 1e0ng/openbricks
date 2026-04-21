@@ -76,6 +76,39 @@ class SimpleLED(StatusLED):
         self._pin.value(0 if self._active_high else 1)
 
 
+class NeoPixelLED(StatusLED):
+    """Single-pixel WS2812 / NeoPixel driver — the onboard LED on ESP32-S3
+    DevKitC-1 and most modern ESP32-S3 compact boards.
+
+    Unlike ``SimpleLED`` this one implements ``rgb(r, g, b)`` too, which is
+    what the Bluetooth-toggle button uses for blue / yellow feedback.
+
+    ``brightness`` scales every channel on write (0.0 – 1.0). 0.2 is a
+    comfortable indoor default — the raw WS2812 at full brightness is
+    dazzling.
+    """
+
+    def __init__(self, pin, brightness=0.2):
+        import neopixel  # only available on firmware; tests install a fake
+        self._np          = neopixel.NeoPixel(Pin(pin), 1)
+        self._brightness  = float(brightness)
+        self._last_rgb    = (255, 255, 255)  # used by on() after an off()
+        self.off()
+
+    def on(self):
+        self.rgb(*self._last_rgb)
+
+    def off(self):
+        self._np[0] = (0, 0, 0)
+        self._np.write()
+
+    def rgb(self, r, g, b):
+        self._last_rgb = (int(r), int(g), int(b))
+        b_ = self._brightness
+        self._np[0] = (int(r * b_), int(g * b_), int(b * b_))
+        self._np.write()
+
+
 class PushButton(Button):
     """Digital pushbutton with configurable active level and internal pull."""
 
@@ -98,12 +131,15 @@ class ESP32DevkitHub(Hub):
 
 
 class ESP32S3DevkitHub(Hub):
-    """ESP32-S3 DevKitC-1 onboard hub: BOOT button on GPIO 0.
+    """ESP32-S3 DevKitC-1 onboard hub: WS2812 RGB LED on GPIO 48,
+    BOOT button on GPIO 0.
 
-    The DevKitC-1 has no plain digital LED (only a WS2812 RGB). If
-    you've wired an external LED, pass its pin as ``led_pin``.
+    ``led_pin`` defaults to 48 (the DevKitC-1 onboard WS2812). Pass
+    ``led_pin=None`` to disable the LED entirely, or any other GPIO for a
+    WS2812 wired elsewhere. ``brightness`` (0.0 – 1.0) scales channel
+    values on write; default 0.2 is comfortable indoors.
     """
 
-    def __init__(self, led_pin=None, button_pin=0):
-        self.led = SimpleLED(led_pin) if led_pin is not None else None
+    def __init__(self, led_pin=48, button_pin=0, brightness=0.2):
+        self.led = NeoPixelLED(led_pin, brightness=brightness) if led_pin is not None else None
         self.button = PushButton(button_pin, active_low=True)

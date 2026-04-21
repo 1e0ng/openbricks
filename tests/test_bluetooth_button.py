@@ -123,5 +123,83 @@ class BluetoothToggleButtonTests(unittest.TestCase):
         self.assertEqual(_FakeNVS._STORE["openbricks"]["ble_enabled"], 0)
 
 
+class _RecordingLED:
+    """``StatusLED``-like stub that records every ``rgb()`` call."""
+
+    def __init__(self):
+        self.last_rgb = None
+        self.calls = []
+
+    def rgb(self, r, g, b):
+        self.last_rgb = (r, g, b)
+        self.calls.append((r, g, b))
+
+
+class BluetoothToggleButtonLEDTests(unittest.TestCase):
+    def setUp(self):
+        _FakeNVS._reset_for_test()
+        _FakeBLE._reset_for_test()
+        Timer.reset_for_test()
+
+    def test_start_paints_blue_when_ble_enabled(self):
+        btn = _StubButton()
+        led = _RecordingLED()
+        # Default state (never written) is enabled.
+        BluetoothToggleButton(btn, led=led, long_press_ms=1000, poll_ms=50).start()
+        self.assertEqual(led.last_rgb, (0, 0, 255))
+
+    def test_start_paints_yellow_when_ble_disabled(self):
+        btn = _StubButton()
+        led = _RecordingLED()
+        # Pre-persist an "off" state.
+        from openbricks import bluetooth
+        bluetooth.set_enabled(False)
+        BluetoothToggleButton(btn, led=led, long_press_ms=1000, poll_ms=50).start()
+        self.assertEqual(led.last_rgb, (255, 200, 0))
+
+    def test_toggle_recolors_the_led(self):
+        btn = _StubButton()
+        led = _RecordingLED()
+        helper = BluetoothToggleButton(btn, led=led, long_press_ms=500, poll_ms=50)
+        helper.start()  # starts blue (on)
+
+        # Long-press → toggles to off → LED should flip to yellow.
+        btn.pressed_value = True
+        time.sleep_ms(700)
+        btn.pressed_value = False
+
+        self.assertEqual(led.last_rgb, (255, 200, 0))
+
+        # A second long-press flips back to on → blue.
+        time.sleep_ms(100)
+        btn.pressed_value = True
+        time.sleep_ms(700)
+        btn.pressed_value = False
+
+        self.assertEqual(led.last_rgb, (0, 0, 255))
+
+    def test_no_led_is_fine(self):
+        """With led=None, no LED calls should be attempted; toggle still fires."""
+        btn = _StubButton()
+        helper = BluetoothToggleButton(btn, led=None, long_press_ms=500, poll_ms=50)
+        helper.start()
+
+        btn.pressed_value = True
+        time.sleep_ms(700)
+        btn.pressed_value = False
+
+        self.assertFalse(_FakeBLE().active())
+
+    def test_custom_colors(self):
+        btn = _StubButton()
+        led = _RecordingLED()
+        BluetoothToggleButton(
+            btn, led=led, long_press_ms=1000, poll_ms=50,
+            color_on=(0, 255, 0), color_off=(255, 0, 0),
+        ).start()
+        # Default state = on → custom green.
+        self.assertEqual(led.last_rgb, (0, 255, 0))
+
+
 if __name__ == "__main__":
     unittest.main()
