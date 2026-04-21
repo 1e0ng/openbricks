@@ -27,6 +27,27 @@ if [[ ! -d "${MICROPY_DIR}" ]] || [[ -z "$(ls -A "${MICROPY_DIR}" 2>/dev/null)" 
     exit 1
 fi
 
+# Apply any patches from native/patches/ to the MP submodule. Each
+# ``*.patch`` is git-apply'd (idempotently — if it's already applied we
+# skip it) before the build starts. See native/patches/README.md.
+PATCHES_DIR="${NATIVE_DIR}/patches"
+if [[ -d "${PATCHES_DIR}" ]]; then
+    shopt -s nullglob
+    for patch in "${PATCHES_DIR}"/*.patch; do
+        name="$(basename "${patch}")"
+        if git -C "${MICROPY_DIR}" apply --check --reverse "${patch}" 2>/dev/null; then
+            echo ">>> patch already applied: ${name} (skipping)"
+        elif git -C "${MICROPY_DIR}" apply --check "${patch}" 2>/dev/null; then
+            echo ">>> applying patch: ${name}"
+            git -C "${MICROPY_DIR}" apply "${patch}"
+        else
+            echo "warning: patch ${name} neither applies cleanly nor is already applied."
+            echo "         MP master may have moved past it. Inspect manually."
+        fi
+    done
+    shopt -u nullglob
+fi
+
 case "${PLATFORM}" in
     esp32|esp32s3)
         BOARD="openbricks_${PLATFORM}"

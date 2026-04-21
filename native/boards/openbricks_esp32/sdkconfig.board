@@ -1,8 +1,15 @@
 # SPDX-License-Identifier: MIT
-# openbricks-specific ESP-IDF sdkconfig overrides.
+# openbricks-specific ESP-IDF sdkconfig overrides for ESP32.
 #
-# BLE is off — see mpconfigboard.cmake for the reason. Everything else
-# comes from ESP32_GENERIC's sdkconfig.base.
+# WiFi is disabled deliberately. openbricks doesn't use WLAN today and
+# turning it off:
+#   * removes 2.4 GHz RF contention with BLE (which stays on for the
+#     mpremote-over-BLE code-transfer workflow),
+#   * shrinks the firmware image (WLAN pulls in ~300 KB of lwIP +
+#     wpa_supplicant),
+#   * removes the network_wlan.c compile surface that previously broke
+#     builds with ESP-IDF version mismatches.
+CONFIG_ESP_WIFI_ENABLED=n
 
-CONFIG_BT_ENABLED=n
-CONFIG_BT_NIMBLE_ENABLED=n
+# BLE stays on — configured in sdkconfig.ble (included from
+# mpconfigboard.cmake).

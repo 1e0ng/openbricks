@@ -8,12 +8,13 @@
 
 set(IDF_TARGET esp32s3)
 
-# Start from MicroPython's ESP32 base SDK config plus SPIRAM (most S3
-# dev boards ship with octal or hex PSRAM) plus our board overrides.
-# BLE is left off via sdkconfig.board to stay parallel with the ESP32
-# image (we don't use BLE today).
+# Start from MicroPython's ESP32 base SDK config, plus SPIRAM (most S3
+# dev boards ship with octal or hex PSRAM), plus BLE (NimBLE stack,
+# configured in sdkconfig.ble — pins it to core 1 and raises the task
+# stack to 6 KB for Python-level IRQ handlers), then our board overrides.
 set(SDKCONFIG_DEFAULTS
     boards/sdkconfig.base
+    boards/sdkconfig.ble
     boards/sdkconfig.spiram_sx
     ${MICROPY_BOARD_DIR}/sdkconfig.board
 )
