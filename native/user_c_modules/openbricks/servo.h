@@ -28,6 +28,8 @@ typedef struct _servo_obj_t {
     mp_obj_t in1_value;
     mp_obj_t in2_value;
     mp_obj_t pwm_duty;
+    mp_obj_t encoder_count;   // bound encoder.count — called every tick
+    mp_obj_t encoder_reset;   // bound encoder.reset — called from reset_angle
 
     // Configuration.
     mp_int_t   counts_per_rev;
