@@ -17,5 +17,6 @@ from _openbricks_native import (  # noqa: F401
     TrapezoidalProfile,
     Observer,
     DriveBase,
+    PCNTEncoder,
 )
 

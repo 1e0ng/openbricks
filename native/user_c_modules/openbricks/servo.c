@@ -36,7 +36,10 @@ extern const mp_obj_type_t openbricks_servo_type;
 // Hardware primitives — called from the C tick body.
 
 static inline mp_int_t servo_read_count(servo_obj_t *self) {
-    return mp_obj_get_int(mp_load_attr(self->encoder, MP_QSTR__count));
+    // Call encoder.count() — cheap compared to mp_load_attr every tick,
+    // and lets encoders (like the PCNT-backed one) compute the total
+    // dynamically from hardware instead of shadowing it in an attribute.
+    return mp_obj_get_int(mp_call_function_0(self->encoder_count));
 }
 
 static inline void servo_write_in1(servo_obj_t *self, int value) {
@@ -254,8 +257,9 @@ static mp_obj_t servo_reset_angle(size_t n_args, const mp_obj_t *args) {
     servo_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     mp_float_t angle = (n_args > 1) ? mp_obj_get_float(args[1]) : 0.0;
     mp_int_t new_count = (mp_int_t)(angle * (mp_float_t)self->counts_per_rev / 360.0);
-    // encoder._count = new_count
-    mp_store_attr(self->encoder, MP_QSTR__count, MP_OBJ_NEW_SMALL_INT(new_count));
+    // encoder.reset(new_count) — uniform across all encoder drivers,
+    // including ones that back ``_count`` with a hardware peripheral.
+    mp_call_function_1(self->encoder_reset, MP_OBJ_NEW_SMALL_INT(new_count));
     // Re-baseline the observer and the time stamp, so the first tick
     // after a reset_angle() doesn't see a huge phantom delta.
     openbricks_observer_reset(&self->observer, angle);
@@ -300,9 +304,11 @@ static mp_obj_t servo_make_new(const mp_obj_type_t *type,
                          : 0.3;
 
     // Cache bound methods so the tick body does pure calls.
-    self->in1_value = mp_load_attr(self->in1_pin, MP_QSTR_value);
-    self->in2_value = mp_load_attr(self->in2_pin, MP_QSTR_value);
-    self->pwm_duty  = mp_load_attr(self->pwm,     MP_QSTR_duty);
+    self->in1_value     = mp_load_attr(self->in1_pin, MP_QSTR_value);
+    self->in2_value     = mp_load_attr(self->in2_pin, MP_QSTR_value);
+    self->pwm_duty      = mp_load_attr(self->pwm,     MP_QSTR_duty);
+    self->encoder_count = mp_load_attr(self->encoder, MP_QSTR_count);
+    self->encoder_reset = mp_load_attr(self->encoder, MP_QSTR_reset);
 
     self->target_dps   = 0.0;
     self->active       = false;

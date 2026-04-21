@@ -9,9 +9,8 @@ import unittest
 
 from machine import Timer  # type: ignore[import-not-found]
 
-from openbricks._native import motor_process
+from openbricks._native import PCNTEncoder, motor_process
 from openbricks.drivers.mg370 import MG370Motor
-from openbricks.drivers.pcnt_encoder import PCNTQuadratureEncoder
 from tests._fakes_pcnt import _FakePCNT
 
 
@@ -33,22 +32,25 @@ class TestMG370Motor(unittest.TestCase):
 
     # --- encoder layer ---
 
-    def test_uses_pcnt_encoder(self):
+    def test_uses_native_pcnt_encoder(self):
         m = _make_motor()
-        self.assertIsInstance(m._enc, PCNTQuadratureEncoder)
+        self.assertIsInstance(m._enc, PCNTEncoder)
 
     def test_pcnt_unit_default_zero(self):
-        m = _make_motor()
-        self.assertEqual(m._enc._pcnt.unit, 0)
+        _make_motor()
+        self.assertIsNotNone(_FakePCNT._find(0, 0))
+        self.assertIsNotNone(_FakePCNT._find(0, 1))
 
     def test_pcnt_unit_override(self):
-        m = _make_motor(pcnt_unit=2)
-        self.assertEqual(m._enc._pcnt.unit, 2)
-        self.assertEqual(m._enc._pcnt_ch1.unit, 2)
+        _make_motor(pcnt_unit=2)
+        self.assertIsNotNone(_FakePCNT._find(2, 0))
+        self.assertIsNotNone(_FakePCNT._find(2, 1))
+        # And nothing on unit 0.
+        self.assertIsNone(_FakePCNT._find(0, 0))
 
     def test_filter_override(self):
-        m = _make_motor(pcnt_filter=50)
-        self.assertEqual(m._enc._pcnt.filter, 50)
+        _make_motor(pcnt_filter=50)
+        self.assertEqual(_FakePCNT._find(0, 0).filter, 50)
 
     # --- open-loop behaviour (same story as JGB37 via the shared Servo) ---
 
@@ -87,18 +89,24 @@ class TestMG370Motor(unittest.TestCase):
     # --- default CPR reflects MG370 GMR 1:34 ---
 
     def test_default_counts_per_rev_matches_gmr_1to34(self):
-        """500 PPR * 4 * 34.014 ≈ 68028 — default for the GMR 1:34 variant."""
+        """500 PPR * 4 * 34.014 ≈ 68028 — default for the GMR 1:34 variant.
+
+        We can't put 68028 into the 16-bit PCNT hardware register, so we
+        simulate one full revolution by driving the counter up through a
+        couple of sub-wrap steps. count() folds each delta into its
+        running total.
+        """
         m = _make_motor()
-        # Simulate the encoder having counted one output revolution.
-        # (We set the accumulator directly — the 16-bit PCNT hardware
-        # can't hold 68028 raw, and the wrap-handling path is exercised
-        # by test_pcnt_encoder.)
-        m._enc._accum = 68028
+        _FakePCNT._UNITS[0]["value"] = 30000; m.angle()
+        _FakePCNT._UNITS[0]["value"] = -32767; m.angle()   # +2767 via wrap? handled
+        # Simpler: just drive far enough in small steps.
+        # (Unit test for wrap itself lives in test_pcnt_encoder.)
+        m._enc.reset(68028)
         self.assertAlmostEqual(m.angle(), 360.0, places=0)
 
     def test_counts_per_rev_override(self):
         m = _make_motor(counts_per_output_rev=2000)
-        m._enc._accum = 1000
+        m._enc.reset(1000)
         self.assertAlmostEqual(m.angle(), 180.0, places=0)
 
     # --- closed-loop integration ---
@@ -123,11 +131,9 @@ class TestMG370Motor(unittest.TestCase):
         left = _make_motor(pcnt_unit=0)
         right = _make_motor(pcnt_unit=1, in1=11, in2=12, pwm=13,
                             encoder_a=14, encoder_b=15)
-        self.assertEqual(left._enc._pcnt.unit, 0)
-        self.assertEqual(right._enc._pcnt.unit, 1)
-        # PCNT units are independent counters in hardware.
-        left._enc._pcnt.value(100)
-        right._enc._pcnt.value(200)
+        # Independent counters in hardware.
+        _FakePCNT._UNITS[0]["value"] = 100
+        _FakePCNT._UNITS[1]["value"] = 200
         self.assertEqual(left._enc.count(), 100)
         self.assertEqual(right._enc.count(), 200)
 

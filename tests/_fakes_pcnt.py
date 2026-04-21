@@ -1,16 +1,20 @@
 # SPDX-License-Identifier: MIT
 """
-Optional ``esp32.PCNT`` fake for tests exercising ``PCNTQuadratureEncoder``.
+Optional ``esp32.PCNT`` fake for tests exercising the native
+``PCNTEncoder`` C type.
 
 Kept separate from ``tests/_fakes`` so modules that don't touch PCNT
 don't pay the memory cost on MicroPython's tight unix heap (same pattern
 as ``tests/_fakes_ssd1306``). Import alongside ``tests._fakes`` only
-from ``test_pcnt_encoder``.
+from test modules that need ``esp32.PCNT``.
 
 The fake mirrors the real ``esp32.PCNT`` API: two channels of the same
 ``unit`` share one counter. ``value()`` / ``start()`` / ``stop()`` behave
 as expected so tests can drive the "hardware" counter and observe how
-the openbricks wrapper reacts.
+the native encoder reacts.
+
+Instances are tracked in ``_FakePCNT._INSTANCES`` so tests can pluck
+out the two channels the encoder just created and assert their config.
 """
 
 import sys
@@ -34,6 +38,9 @@ class _FakePCNT:
     # Per-unit shared "hardware" state. Channels 0 and 1 of the same unit
     # see the same counter.
     _UNITS = {}
+    # Every instance ever created this test. Tests can filter by unit/channel
+    # to pull out the exact PCNT object our encoder wrapper just built.
+    _INSTANCES = []
 
     def __init__(self, unit, channel=0, pin=None, rising=None, falling=None,
                  mode_pin=None, mode_low=None, mode_high=None,
@@ -50,6 +57,7 @@ class _FakePCNT:
         self.max = max
         self.filter = filter
         _FakePCNT._UNITS.setdefault(unit, {"value": 0, "started": False})
+        _FakePCNT._INSTANCES.append(self)
 
     def value(self, v=None):
         if v is None:
@@ -72,6 +80,14 @@ class _FakePCNT:
     @classmethod
     def _reset_for_test(cls):
         cls._UNITS = {}
+        cls._INSTANCES = []
+
+    @classmethod
+    def _find(cls, unit, channel):
+        for inst in cls._INSTANCES:
+            if inst.unit == unit and inst.channel == channel:
+                return inst
+        return None
 
 
 class _FakeESP32Module:
