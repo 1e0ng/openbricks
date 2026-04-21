@@ -22,6 +22,7 @@ Each platform ships as a separate firmware image.
 | Component | Type | Driver module |
 |-----------|------|---------------|
 | L298N H-bridge | DC motor driver (open loop) | `drivers.l298n` |
+| TB6612FNG H-bridge | MOSFET H-bridge, 3.3 V-logic, drop-in IN1/IN2/PWM (alias of `L298NMotor`) | `drivers.tb6612` |
 | JGB37-520 | DC gear motor with quadrature encoder (closed loop, via L298N) | `drivers.jgb37_520` |
 | BNO055 | 9-DOF IMU with onboard sensor fusion | `drivers.bno055` |
 | TCS34725 | RGB + clear color sensor | `drivers.tcs34725` |

@@ -40,6 +40,11 @@ def _make_l298n(**kwargs):
     return L298NMotor(**kwargs)
 
 
+def _make_tb6612(**kwargs):
+    from openbricks.drivers.tb6612 import TB6612Motor
+    return TB6612Motor(**kwargs)
+
+
 def _make_jgb37(**kwargs):
     from openbricks.drivers.jgb37_520 import JGB37Motor
     return JGB37Motor(**kwargs)
@@ -67,6 +72,7 @@ def _make_st3215(**kwargs):
 
 _DRIVER_REGISTRY = {
     "l298n":    _make_l298n,
+    "tb6612":   _make_tb6612,
     "jgb37_520": _make_jgb37,
     "mg370":    _make_mg370,
     "bno055":   _make_bno055,
