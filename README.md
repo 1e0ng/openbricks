@@ -30,13 +30,11 @@ Each platform ships as a separate firmware image.
 | ST-3215-C018 | Serial bus servo (FeeTech/SCServo protocol) | `drivers.st3215` |
 | SSD1306 | 128×64 / 128×32 monochrome OLED display over I2C | `drivers.ssd1306` |
 
-New drivers just need to implement one of the abstract interfaces in `openbricks/interfaces.py`. Drop a file into `openbricks/drivers/`, register it in `openbricks/config.py`, and rebuild the firmware.
+New drivers just need to implement one of the abstract interfaces in `openbricks/interfaces.py`. Drop a file into `openbricks/drivers/` and rebuild the firmware — users import it directly.
 
 ## Quick start
 
-Once the firmware is flashed, `openbricks` is already importable at the REPL:
-
-**Option 1 — Wire it up in Python:**
+Once the firmware is flashed, `openbricks` is already importable at the REPL. Wire it up in Python, Pybricks-style:
 
 ```python
 from machine import I2C, Pin
@@ -58,38 +56,7 @@ print(color.rgb())         # (r, g, b) 0-255
 print(imu.heading())       # degrees
 ```
 
-**Option 2 — Declarative config:**
-
-Drop a `robot.json` next to `main.py`:
-
-```json
-{
-  "platform": "esp32",
-  "i2c": { "i2c0": { "sda": 21, "scl": 22, "freq": 400000 } },
-  "motors": {
-    "left":  { "driver": "l298n", "in1": 25, "in2": 26, "pwm": 27 },
-    "right": { "driver": "l298n", "in1": 14, "in2": 12, "pwm": 13 }
-  },
-  "sensors": {
-    "imu":   { "driver": "bno055",   "bus": "i2c0" },
-    "color": { "driver": "tcs34725", "bus": "i2c0" }
-  },
-  "drivebase": {
-    "left": "left", "right": "right",
-    "wheel_diameter_mm": 56, "axle_track_mm": 114
-  }
-}
-```
-
-Then:
-
-```python
-from openbricks.config import load_robot
-robot = load_robot("robot.json")
-
-robot.drivebase.straight(500)
-print(robot.sensors["color"].rgb())
-```
+See `examples/full_robot.py` for a longer end-to-end demo.
 
 ## Status
 

@@ -38,9 +38,9 @@ The two middle layers are what make this different from "a pile of MicroPython
 scripts." Interfaces (`openbricks/interfaces.py`) define the contract each
 family of component obeys; drivers implement that contract; everything above
 the interface line depends only on interfaces, not on specific chips. That's
-why swapping an L298N motor for an ST-3215 servo needs only a config change —
-the `DriveBase` class asks for "a `Motor`" and doesn't know or care what's
-underneath.
+why swapping an L298N motor for an ST-3215 servo only changes the driver
+you instantiate — the `DriveBase` class asks for "a `Motor`" and doesn't
+know or care what's underneath.
 
 This is the same split Pybricks has: `pbio/include/pbio/*.h` is the interface,
 `pbio/src/*.c` is the library, `pbio/drv/*` is the driver layer. We take the
@@ -75,24 +75,6 @@ are direct where they can be.
    position feedback on both. Exit criterion: asymmetric-friction
    test (one wheel at 0.9× commanded speed) keeps heading error
    under 5% of forward distance — the pure-Kp M1 fallback fails it.
-
-## The configuration layer
-
-The config layer (`openbricks/config.py`) turns a JSON description of the
-robot into instantiated objects. The design goals:
-
-- **Users edit one file.** Hardware changes shouldn't require code changes.
-- **Drivers are plug-in.** A new driver is one file in `drivers/` plus one
-  line in `_DRIVER_REGISTRY` (or a runtime `register_driver()` call from
-  user code for out-of-tree drivers).
-- **Buses are shared.** Multiple sensors on the same I2C bus should share
-  one `machine.I2C` handle, not fight for the peripheral.
-- **No magic.** The JSON maps 1:1 to Python kwargs. If a driver accepts
-  `invert=True`, you write `"invert": true` in JSON. No schema DSL.
-
-The registry pattern here mirrors Pybricks' `MP_REGISTER_MODULE` for
-MicroPython modules: each driver self-registers with a human name, and the
-loader looks it up by that name.
 
 ## What's next
 
