@@ -58,6 +58,7 @@ _TEST_MODULES = [
     "tests.test_hub",
     "tests.test_ssd1306",
     "tests.test_pcnt_encoder",
+    "tests.test_mg370",
 ]
 
 

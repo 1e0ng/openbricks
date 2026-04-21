@@ -45,6 +45,11 @@ def _make_jgb37(**kwargs):
     return JGB37Motor(**kwargs)
 
 
+def _make_mg370(**kwargs):
+    from openbricks.drivers.mg370 import MG370Motor
+    return MG370Motor(**kwargs)
+
+
 def _make_bno055(bus, address=0x28, **_ignored):
     from openbricks.drivers.bno055 import BNO055
     return BNO055(bus, address=address)
@@ -63,6 +68,7 @@ def _make_st3215(**kwargs):
 _DRIVER_REGISTRY = {
     "l298n":    _make_l298n,
     "jgb37_520": _make_jgb37,
+    "mg370":    _make_mg370,
     "bno055":   _make_bno055,
     "tcs34725": _make_tcs34725,
     "st3215":   _make_st3215,
