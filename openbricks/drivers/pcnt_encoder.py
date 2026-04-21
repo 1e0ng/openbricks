@@ -23,8 +23,12 @@ read.
 ``native/user_c_modules/openbricks/servo.c``) gets the live total on
 every tick without needing a separate ``.count()`` call.
 
-Note that this driver is **ESP32-only** — it imports the ``esp32`` module
-at module load time.
+Works on the whole Espressif ESP32 **family** — both openbricks targets
+(ESP32 classic with 8 PCNT units, ESP32-S3 with 4 PCNT units) expose the
+same ``esp32.PCNT`` API and run this driver unchanged. It won't work on
+non-Espressif MCUs (STM32, RP2040) because those don't ship the ``esp32``
+module. ESP32-C3 / C6 dropped PCNT in favour of a newer MCPWM-based
+capture architecture and aren't covered here yet.
 """
 
 import esp32
