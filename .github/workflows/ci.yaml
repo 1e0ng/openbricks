@@ -56,7 +56,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libffi-dev pkg-config lcov
+          sudo apt-get install -y build-essential libffi-dev pkg-config
 
       - name: Init MicroPython sub-submodules
         run: |
@@ -75,9 +75,11 @@ jobs:
 
       - name: Run test suite against coverage binary
         # The coverage variant is debug-built and runs ~5× slower than
-        # standard; partial runs still produce useful .gcda files, so we
-        # tolerate non-zero exit here and rely on the standard `test`
-        # job above to gate merges on pass/fail.
+        # standard; the extra CPU time makes a few integration tests
+        # that are timing-sensitive fail under coverage. Partial runs
+        # still produce useful ``.gcda`` files, so we tolerate non-zero
+        # exit here and rely on the standard ``test`` job above to gate
+        # merges on pass/fail.
         run: |
           ./native/micropython/ports/unix/build-coverage/micropython tests/run.py || true
 
@@ -87,28 +89,25 @@ jobs:
           for src in "$GITHUB_WORKSPACE"/native/user_c_modules/openbricks/*.c; do
             gcov -o build-coverage/openbricks "$src" || true
           done
-          ls *.gcov | head
 
-      - name: Collect + filter lcov report
+      - name: Stage openbricks gcov output for Codecov
+        # Copy just our .gcov files to a dedicated directory — keeps
+        # Codecov from indexing hundreds of MicroPython-core reports
+        # that got generated alongside ours. Matches the gcov files
+        # produced above 1:1.
         run: |
-          cd native/micropython/ports/unix
-          # Capture only files under our user_c_modules tree — exclude
-          # MicroPython core, system headers, extmod, etc.
-          lcov --capture --directory build-coverage/openbricks \
-               --output-file coverage.info \
-               --ignore-errors source,unused,format,graph,mismatch,gcov \
-               --rc geninfo_unexecuted_blocks=1
-          lcov --extract coverage.info '*/native/user_c_modules/openbricks/*.c' \
-               --output-file coverage.info \
-               --ignore-errors unused
-          lcov --list coverage.info
+          mkdir -p coverage-out
+          for f in drivebase encoder motor_process observer pcnt_encoder servo trajectory; do
+            cp "native/micropython/ports/unix/${f}.c.gcov" "coverage-out/" || true
+          done
+          ls coverage-out/
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: native/micropython/ports/unix/coverage.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: coverage-out
           flags: c-core
-          disable_search: true
           fail_ci_if_error: false
 
   firmware:
