@@ -66,6 +66,17 @@ typedef struct _drivebase_obj_t {
     mp_float_t kp_sum;     // on forward-position error
     mp_float_t kp_diff;    // on heading-position error
 
+    // Optional IMU for gyro-based heading feedback. When ``use_gyro``
+    // is true and ``imu`` is attached, the tick reads heading from the
+    // IMU instead of computing it from the encoder differential —
+    // slip-immune and unaffected by asymmetric friction. ``heading_offset_deg``
+    // is captured at each move-start so heading is measured relative
+    // to "wherever the robot was pointing when this move began."
+    mp_obj_t   imu;                 // IMU driver (any ``.heading()``-capable object), or MP_OBJ_NULL
+    mp_obj_t   imu_heading_fn;      // cached bound imu.heading, called once per tick
+    bool       use_gyro;            // false by default — user opts in via use_gyro(True)
+    mp_float_t heading_offset_deg;  // body heading captured at move-start
+
     // Active profiles — either can be inactive (no progress on that
     // axis) while the other drives the motion.
     trajectory_obj_t fwd;
@@ -130,9 +141,30 @@ static void drivebase_control_tick(void *ctx) {
         self->done = true;
     }
 
-    // Actual sum / diff positions from each servo's observer.
+    // Actual sum / diff positions. ``sum_pos`` is always encoder-derived
+    // (forward progress is not slip-immune via gyro alone). ``diff_pos``
+    // (heading, in wheel-degrees) comes from the IMU when ``use_gyro`` is
+    // active — slip-immune, drift-corrected by fusion — or from the
+    // encoder differential as the fallback.
     mp_float_t sum_pos  = (self->left->observer.pos_hat + self->right->observer.pos_hat) / (mp_float_t)2.0;
-    mp_float_t diff_pos = (self->left->observer.pos_hat - self->right->observer.pos_hat) / (mp_float_t)2.0;
+    mp_float_t diff_pos;
+    if (self->use_gyro && self->imu_heading_fn != MP_OBJ_NULL) {
+        mp_float_t body = mp_obj_get_float(mp_call_function_0(self->imu_heading_fn));
+        mp_float_t delta = body - self->heading_offset_deg;
+        // BNO055 heading() wraps at ±180 — snap the delta into the same
+        // range so a move that crosses the boundary doesn't see a
+        // spurious ±360 jump.
+        if (delta >  (mp_float_t)180.0) delta -= (mp_float_t)360.0;
+        if (delta < (mp_float_t)-180.0) delta += (mp_float_t)360.0;
+        // Body-degrees → wheel-degree differential:
+        //   α = β * A * π / C   where A = axle, C = wheel circumference.
+        // Positive body heading (CCW) → negative diff_pos (left retreats,
+        // right advances, so (L - R)/2 < 0), so the sign flips.
+        diff_pos = -delta * self->axle_track_mm * (mp_float_t)M_PI /
+                   self->wheel_circumference_mm;
+    } else {
+        diff_pos = (self->left->observer.pos_hat - self->right->observer.pos_hat) / (mp_float_t)2.0;
+    }
 
     mp_float_t sum_err  = fwd_target  - sum_pos;
     mp_float_t diff_err = turn_target - diff_pos;
@@ -150,9 +182,23 @@ static void drivebase_control_tick(void *ctx) {
 // ---------------------------------------------------------------------
 // Lifecycle helpers
 
+// Capture the current IMU heading as the zero reference. Called at move
+// start (via drivebase_register) and whenever use_gyro flips on, so the
+// controller treats "now" as heading 0 regardless of where the robot
+// happens to be pointing at that moment.
+static void drivebase_rebaseline_heading(drivebase_obj_t *self) {
+    if (self->imu_heading_fn == MP_OBJ_NULL) {
+        return;
+    }
+    self->heading_offset_deg = mp_obj_get_float(mp_call_function_0(self->imu_heading_fn));
+}
+
 static void drivebase_register(drivebase_obj_t *self) {
     if (self->registered) {
         return;
+    }
+    if (self->use_gyro) {
+        drivebase_rebaseline_heading(self);
     }
     // Re-baseline each servo's observer so the first tick doesn't see
     // a phantom residual, and ensure they're subscribed.
@@ -295,6 +341,24 @@ static mp_obj_t db_stop(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(db_stop_obj, db_stop);
 
+static mp_obj_t db_use_gyro(mp_obj_t self_in, mp_obj_t enable_in) {
+    drivebase_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    bool enable = mp_obj_is_true(enable_in);
+    if (enable && self->imu_heading_fn == MP_OBJ_NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("no imu attached; construct DriveBase(imu=...) first"));
+    }
+    // Toggling on: capture offset so current heading becomes the zero.
+    // Toggling off: nothing to do; the encoder path takes over on the
+    // next tick with no state to clear.
+    bool transitioning_on = enable && !self->use_gyro;
+    self->use_gyro = enable;
+    if (transitioning_on) {
+        drivebase_rebaseline_heading(self);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(db_use_gyro_obj, db_use_gyro);
+
 static mp_obj_t db_is_done(mp_obj_t self_in) {
     drivebase_obj_t *self = MP_OBJ_TO_PTR(self_in);
     return mp_obj_new_bool(self->done);
@@ -307,12 +371,13 @@ static MP_DEFINE_CONST_FUN_OBJ_1(db_is_done_obj, db_is_done);
 static mp_obj_t db_make_new(const mp_obj_type_t *type,
                              size_t n_args, size_t n_kw,
                              const mp_obj_t *all_args) {
-    enum { ARG_left, ARG_right, ARG_wheel_d, ARG_axle, ARG_kp_sum, ARG_kp_diff };
+    enum { ARG_left, ARG_right, ARG_wheel_d, ARG_axle, ARG_imu, ARG_kp_sum, ARG_kp_diff };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_left,              MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_right,             MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_wheel_diameter_mm, MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_axle_track_mm,     MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_imu,               MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_kp_sum,            MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_kp_diff,           MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
     };
@@ -351,6 +416,16 @@ static mp_obj_t db_make_new(const mp_obj_type_t *type,
     self->fwd_start_ms = 0;
     self->turn_start_ms = 0;
 
+    // IMU (optional). If provided, cache the ``heading`` bound method so
+    // the control tick can call it without mp_load_attr every time.
+    self->imu                = parsed[ARG_imu].u_obj;
+    self->imu_heading_fn     = MP_OBJ_NULL;
+    self->use_gyro           = false;
+    self->heading_offset_deg = 0.0;
+    if (self->imu != MP_OBJ_NULL && self->imu != mp_const_none) {
+        self->imu_heading_fn = mp_load_attr(self->imu, MP_QSTR_heading);
+    }
+
     return MP_OBJ_FROM_PTR(self);
 }
 
@@ -358,10 +433,11 @@ static mp_obj_t db_make_new(const mp_obj_type_t *type,
 // Type definition
 
 static const mp_rom_map_elem_t db_locals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_straight), MP_ROM_PTR(&db_straight_obj) },
-    { MP_ROM_QSTR(MP_QSTR_turn),     MP_ROM_PTR(&db_turn_obj) },
-    { MP_ROM_QSTR(MP_QSTR_stop),     MP_ROM_PTR(&db_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_is_done),  MP_ROM_PTR(&db_is_done_obj) },
+    { MP_ROM_QSTR(MP_QSTR_straight),  MP_ROM_PTR(&db_straight_obj) },
+    { MP_ROM_QSTR(MP_QSTR_turn),      MP_ROM_PTR(&db_turn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop),      MP_ROM_PTR(&db_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_is_done),   MP_ROM_PTR(&db_is_done_obj) },
+    { MP_ROM_QSTR(MP_QSTR_use_gyro),  MP_ROM_PTR(&db_use_gyro_obj) },
 };
 static MP_DEFINE_CONST_DICT(db_locals_dict, db_locals_dict_table);
 
