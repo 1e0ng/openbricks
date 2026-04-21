@@ -8,8 +8,8 @@ Wiring (any I2C SSD1306, typically 128x64 at address 0x3C):
     --------------------------   --------------------------
     OLED VCC -> 3.3V             OLED VCC -> 3.3V
     OLED GND -> GND              OLED GND -> GND
-    OLED SDA -> GPIO 21          OLED SDA -> GPIO 8
-    OLED SCL -> GPIO 22          OLED SCL -> GPIO 9
+    OLED SDA -> GPIO 21          OLED SDA -> GPIO 15
+    OLED SCL -> GPIO 22          OLED SCL -> GPIO 16
 
 Set ``SDA_PIN`` / ``SCL_PIN`` below to match your board.
 
@@ -33,13 +33,25 @@ from openbricks.drivers.ssd1306 import SSD1306
 from openbricks.hub import ESP32DevkitHub
 
 # ----- wiring -----
-SDA_PIN = 21     # change to 8 on ESP32-S3 DevKitC-1
-SCL_PIN = 22     # change to 9 on ESP32-S3 DevKitC-1
+SDA_PIN = 21     # ESP32 DevKitC-V4 default; use 15 on ESP32-S3 DevKitC-1
+SCL_PIN = 22     # ESP32 DevKitC-V4 default; use 16 on ESP32-S3 DevKitC-1
 OLED_ADDR = 0x3C
 
+
+def init_display(sda_pin, scl_pin, addr=OLED_ADDR, width=128, height=64,
+                 i2c_id=0, freq=400_000):
+    """Build an I2C bus on the given pins and return a fresh SSD1306.
+
+    Factored out so user code can wire up the display in one call — and
+    so other examples can reuse the same init without copy-pasting the
+    I2C/Pin boilerplate.
+    """
+    i2c = I2C(i2c_id, sda=Pin(sda_pin), scl=Pin(scl_pin), freq=freq)
+    return SSD1306(i2c, addr=addr, width=width, height=height)
+
+
 # ----- init -----
-i2c = I2C(0, sda=Pin(SDA_PIN), scl=Pin(SCL_PIN), freq=400_000)
-display = SSD1306(i2c, addr=OLED_ADDR)
+display = init_display(SDA_PIN, SCL_PIN)
 hub = ESP32DevkitHub(display=display)
 
 # ----- main loop -----
