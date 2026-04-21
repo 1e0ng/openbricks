@@ -61,6 +61,7 @@ _TEST_MODULES = [
     "tests.test_pcnt_encoder",
     "tests.test_mg370",
     "tests.test_tb6612",
+    "tests.test_bluetooth",
 ]
 
 
