@@ -2,11 +2,11 @@
 # openbricks-specific ESP-IDF sdkconfig overrides for ESP32-S3.
 #
 # QIO flash mode + 80 MHz matches MicroPython's ESP32_GENERIC_S3 baseline,
-# which is what every S3 devkit we care about supports. BLE disabled for
-# parity with the ESP32 image.
-
+# which is what every S3 devkit we care about supports.
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
-CONFIG_BT_ENABLED=n
-CONFIG_BT_NIMBLE_ENABLED=n
+# WiFi is disabled — we don't use WLAN today; turning it off removes
+# 2.4 GHz RF contention with BLE (which stays on for the mpremote-over-
+# BLE code-transfer workflow) and shrinks the firmware image.
+CONFIG_ESP_WIFI_ENABLED=n

@@ -8,14 +8,14 @@
 
 set(IDF_TARGET esp32)
 
-# Start from MicroPython's ESP32 base SDK config and our board overrides.
-# We deliberately skip ``sdkconfig.ble`` — MicroPython v1.28.0's nimble
-# glue doesn't compile cleanly against ESP-IDF 5.4's new ble_hs_state
-# API. openbricks doesn't use BLE today, so dropping it sidesteps the
-# incompatibility. Re-add when either MP gets the fix upstream or we
-# pin to ESP-IDF 5.2/5.3.
+# Start from MicroPython's ESP32 base SDK config, layer BLE support
+# (NimBLE stack — enables ``bluetooth.BLE()`` for REPL over BLE and the
+# mpremote-style code transfer workflow), then our board overrides.
+# The sdkconfig.ble file pins NimBLE to core 1 and raises its stack to
+# 6 KB so Python-level IRQ handlers have room to run.
 set(SDKCONFIG_DEFAULTS
     boards/sdkconfig.base
+    boards/sdkconfig.ble
     ${MICROPY_BOARD_DIR}/sdkconfig.board
 )
 

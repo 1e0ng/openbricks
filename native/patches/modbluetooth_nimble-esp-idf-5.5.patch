@@ -1,0 +1,24 @@
+diff --git a/extmod/nimble/modbluetooth_nimble.c b/extmod/nimble/modbluetooth_nimble.c
+index 6b000f77f..ff1fd0203 100644
+--- a/extmod/nimble/modbluetooth_nimble.c
++++ b/extmod/nimble/modbluetooth_nimble.c
+@@ -584,9 +584,19 @@ void nimble_reset_gatts_bss(void) {
+     // These variables are defined in ble_hs.c and are only ever incremented
+     // (during service registration) and never reset.
+     // See https://github.com/apache/mynewt-nimble/issues/896
++    //
++    // ESP-IDF 5.5+ redefines these three as preprocessor macros in
++    // ble_hs_priv.h (expanded to fields of ``ble_hs_state_ctx``). In that
++    // case ``extern uint16_t name;`` fails to parse because the macro
++    // substitutes inside the declaration. The ``#ifndef`` guard keeps the
++    // extern-form on older ESP-IDF (where the identifiers are plain
++    // variables) and relies on macro expansion of the assignments below
++    // on newer ESP-IDF. Assignments work either way.
++#ifndef ble_hs_max_attrs
+     extern uint16_t ble_hs_max_attrs;
+     extern uint16_t ble_hs_max_services;
+     extern uint16_t ble_hs_max_client_configs;
++#endif
+     ble_hs_max_attrs = 0;
+     ble_hs_max_services = 0;
+     ble_hs_max_client_configs = 0;
