@@ -31,7 +31,8 @@ from openbricks._native import DriveBase as _NativeDriveBase
 
 
 class DriveBase:
-    def __init__(self, left, right, wheel_diameter_mm, axle_track_mm):
+    def __init__(self, left, right, wheel_diameter_mm, axle_track_mm,
+                 imu=None):
         """
         Args:
             left, right: Motor instances. The wrapper reaches through to
@@ -42,6 +43,12 @@ class DriveBase:
                 path.
             wheel_diameter_mm: wheel diameter in millimeters.
             axle_track_mm: distance between the two wheel contact points.
+            imu: optional ``IMU``-conformant object (any driver with a
+                ``.heading()`` method returning body heading in degrees —
+                the bundled ``BNO055`` qualifies). When provided, call
+                ``drivebase.use_gyro(True)`` to have the heading loop
+                read from the IMU instead of computing from the encoder
+                differential. Slip-immune.
         """
         self._left = left
         self._right = right
@@ -59,6 +66,7 @@ class DriveBase:
                 right=right_servo,
                 wheel_diameter_mm=wheel_diameter_mm,
                 axle_track_mm=axle_track_mm,
+                imu=imu,
             )
         else:
             self._native = None
@@ -73,6 +81,19 @@ class DriveBase:
             self._straight_speed_dps = straight_speed
         if turn_rate is not None:
             self._turn_rate_dps = turn_rate
+
+    def use_gyro(self, enable):
+        """Switch the heading feedback source between encoder-diff (default)
+        and the attached IMU (when True). Pybricks-style.
+
+        Requires an ``imu=`` argument to the constructor. With the gyro,
+        heading is slip-immune — wheel slip or wildly asymmetric friction
+        won't throw the robot off course, because the IMU sees actual body
+        rotation regardless of what the wheels did.
+        """
+        if self._native is None:
+            raise RuntimeError("use_gyro requires closed-loop motors (native DriveBase)")
+        self._native.use_gyro(bool(enable))
 
     # ---- non-blocking open-loop ----
     def drive(self, speed_mm_s, turn_rate_dps):

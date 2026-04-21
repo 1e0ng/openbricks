@@ -46,10 +46,20 @@
 
 struct _motor_process_obj_t {
     mp_obj_base_t base;
-    mp_obj_t      callbacks;   // mp_obj_list_t of Python callables
-    mp_obj_t      timer;       // machine.Timer instance or mp_const_none
     mp_int_t      period_ms;
+    // ``callbacks`` (mp_obj_list_t of Python callables) and ``timer``
+    // (machine.Timer instance or mp_const_none) are NOT stored here:
+    // because ``motor_process_singleton`` is a C-level static, any
+    // mp_obj_t stored in it is invisible to the GC. Under the
+    // coverage/debug build the GC collects the list out from under us,
+    // producing spurious "'float' object has no attribute 'clear'" crashes
+    // when we later try to use it. Putting them behind
+    // MP_REGISTER_ROOT_POINTER below means the GC traces them and the
+    // objects they point to survive collection.
 };
+
+MP_REGISTER_ROOT_POINTER(mp_obj_t openbricks_mp_callbacks);
+MP_REGISTER_ROOT_POINTER(mp_obj_t openbricks_mp_timer);
 
 typedef struct {
     openbricks_tick_fn_t fn;
@@ -60,8 +70,6 @@ extern const mp_obj_type_t openbricks_motor_process_type;
 
 motor_process_obj_t motor_process_singleton = {
     .base       = { &openbricks_motor_process_type },
-    .callbacks  = MP_OBJ_NULL,   // initialised lazily
-    .timer      = MP_OBJ_NULL,
     .period_ms  = DEFAULT_PERIOD_MS,
 };
 
@@ -81,9 +89,9 @@ mp_int_t openbricks_motor_process_now_ms(void) {
 
 static motor_process_obj_t *mp_get(void) {
     motor_process_obj_t *self = &motor_process_singleton;
-    if (self->callbacks == MP_OBJ_NULL) {
-        self->callbacks = mp_obj_new_list(0, NULL);
-        self->timer     = mp_const_none;
+    if (MP_STATE_PORT(openbricks_mp_callbacks) == MP_OBJ_NULL) {
+        MP_STATE_PORT(openbricks_mp_callbacks) = mp_obj_new_list(0, NULL);
+        MP_STATE_PORT(openbricks_mp_timer)     = mp_const_none;
     }
     return self;
 }
@@ -146,7 +154,7 @@ static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
     // Slow path: Python callbacks.
     size_t n;
     mp_obj_t *items;
-    mp_obj_list_get(self->callbacks, &n, &items);
+    mp_obj_list_get(MP_STATE_PORT(openbricks_mp_callbacks), &n, &items);
     if (n == 0) {
         return mp_const_none;
     }
@@ -167,11 +175,11 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mp_on_tick_obj, mp_on_tick);
 // ``machine`` module so we don't hard-depend on its header.
 
 static void mp_do_start(motor_process_obj_t *self) {
-    if (self->timer != mp_const_none) {
+    if (MP_STATE_PORT(openbricks_mp_timer) != mp_const_none) {
         return;
     }
     // Try to create a machine.Timer. On ports that don't ship a Timer
-    // (unix MP, for example), leave self->timer as mp_const_none — the
+    // (unix MP, for example), leave MP_STATE_PORT(openbricks_mp_timer) as mp_const_none — the
     // scheduler is still usable via explicit ``tick()`` calls, which
     // is how the test suite exercises it.
     nlr_buf_t nlr;
@@ -193,7 +201,7 @@ static void mp_do_start(motor_process_obj_t *self) {
             MP_OBJ_NEW_QSTR(MP_QSTR_callback), MP_OBJ_FROM_PTR(&mp_on_tick_obj),
         };
         mp_call_method_n_kw(0, 3, args);
-        self->timer = timer;
+        MP_STATE_PORT(openbricks_mp_timer) = timer;
         nlr_pop();
     }
     // else: machine.Timer unavailable — swallow the exception and keep
@@ -201,12 +209,12 @@ static void mp_do_start(motor_process_obj_t *self) {
 }
 
 static void mp_do_stop(motor_process_obj_t *self) {
-    if (self->timer == mp_const_none) {
+    if (MP_STATE_PORT(openbricks_mp_timer) == mp_const_none) {
         return;
     }
-    mp_obj_t deinit = mp_load_attr(self->timer, MP_QSTR_deinit);
+    mp_obj_t deinit = mp_load_attr(MP_STATE_PORT(openbricks_mp_timer), MP_QSTR_deinit);
     mp_call_function_0(deinit);
-    self->timer = mp_const_none;
+    MP_STATE_PORT(openbricks_mp_timer) = mp_const_none;
 }
 
 // -----------------------------------------------------------------------
@@ -217,13 +225,13 @@ static mp_obj_t mp_register(mp_obj_t self_in, mp_obj_t callback) {
     motor_process_obj_t *self = mp_get();
     size_t n;
     mp_obj_t *items;
-    mp_obj_list_get(self->callbacks, &n, &items);
+    mp_obj_list_get(MP_STATE_PORT(openbricks_mp_callbacks), &n, &items);
     for (size_t i = 0; i < n; i++) {
         if (mp_obj_equal(items[i], callback)) {
             return mp_const_none;
         }
     }
-    mp_obj_list_append(self->callbacks, callback);
+    mp_obj_list_append(MP_STATE_PORT(openbricks_mp_callbacks), callback);
     mp_do_start(self);   // pbio-style auto-start on first subscription
     return mp_const_none;
 }
@@ -231,13 +239,13 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mp_register_obj, mp_register);
 
 static mp_obj_t mp_unregister(mp_obj_t self_in, mp_obj_t callback) {
     (void)self_in;
-    motor_process_obj_t *self = mp_get();
+    (void)mp_get();   // lazy init
     size_t n;
     mp_obj_t *items;
-    mp_obj_list_get(self->callbacks, &n, &items);
+    mp_obj_list_get(MP_STATE_PORT(openbricks_mp_callbacks), &n, &items);
     for (size_t i = 0; i < n; i++) {
         if (mp_obj_equal(items[i], callback)) {
-            mp_obj_t rm = mp_load_attr(self->callbacks, MP_QSTR_remove);
+            mp_obj_t rm = mp_load_attr(MP_STATE_PORT(openbricks_mp_callbacks), MP_QSTR_remove);
             mp_call_function_1(rm, callback);
             return mp_const_none;
         }
@@ -268,7 +276,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mp_tick_obj, mp_tick);
 
 static mp_obj_t mp_is_running(mp_obj_t self_in) {
     (void)self_in;
-    return mp_obj_new_bool(mp_get()->timer != mp_const_none);
+    (void)mp_get();   // ensure lazy init has run before reading timer state
+    return mp_obj_new_bool(MP_STATE_PORT(openbricks_mp_timer) != mp_const_none);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_is_running_obj, mp_is_running);
 
@@ -283,7 +292,7 @@ static mp_obj_t mp_configure(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     motor_process_obj_t *self = mp_get();
     self->period_ms = parsed[0].u_int;
 
-    if (self->timer != mp_const_none) {
+    if (MP_STATE_PORT(openbricks_mp_timer) != mp_const_none) {
         mp_do_stop(self);
         mp_do_start(self);
     }
@@ -299,10 +308,10 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mp_period_ms_obj, mp_period_ms);
 
 static mp_obj_t mp_is_registered(mp_obj_t self_in, mp_obj_t callback) {
     (void)self_in;
-    motor_process_obj_t *self = mp_get();
+    (void)mp_get();
     size_t n;
     mp_obj_t *items;
-    mp_obj_list_get(self->callbacks, &n, &items);
+    mp_obj_list_get(MP_STATE_PORT(openbricks_mp_callbacks), &n, &items);
     for (size_t i = 0; i < n; i++) {
         if (mp_obj_equal(items[i], callback)) {
             return mp_const_true;
@@ -316,7 +325,7 @@ static mp_obj_t mp_reset(mp_obj_t self_in) {
     (void)self_in;
     motor_process_obj_t *self = mp_get();
     mp_do_stop(self);
-    mp_obj_t clear = mp_load_attr(self->callbacks, MP_QSTR_clear);
+    mp_obj_t clear = mp_load_attr(MP_STATE_PORT(openbricks_mp_callbacks), MP_QSTR_clear);
     mp_call_function_0(clear);
     self->period_ms   = DEFAULT_PERIOD_MS;
     n_c_callbacks     = 0;
