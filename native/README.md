@@ -35,4 +35,4 @@ All pbio-parity control code, in C, baked into the firmware image:
 
 ## What's coming
 
-M4 (hub abstraction — status LED, user button, optional SSD1306 OLED) is on `main`. Remaining: M5 — 1.0 polish + release (version bump, CHANGELOG, docs audit).
+M4 (hub abstraction — status LED, user button — plus the SSD1306 OLED driver) is on `main`. Remaining: M5 — 1.0 polish + release (version bump, CHANGELOG, docs audit).

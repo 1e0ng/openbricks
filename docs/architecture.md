@@ -99,10 +99,11 @@ loader looks it up by that name.
 M1 / M2 / M3 (scheduler, observer, trajectory, 2-DOF drivebase, all in C)
 are landed. The remaining roadmap:
 
-- **M4** — `hub` abstraction (status LED, buttons, and an optional SSD1306
-  OLED display for on-robot text/graphics). Already landed on `main`;
-  ESP32 + ESP32-S3 firmware images ship as separate binaries from the
-  same codebase, so the dual-platform build seam is already validated.
+- **M4** — `hub` abstraction (status LED, user button) plus an SSD1306
+  OLED driver (wired via I2C, used alongside the hub rather than through
+  it). Already landed on `main`; ESP32 + ESP32-S3 firmware images ship as
+  separate binaries from the same codebase, so the dual-platform build
+  seam is already validated.
 - **M5** — 1.0 polish + release with per-platform firmware images
   published through GitHub Releases (already wired up in
   `.github/workflows/ci.yaml` for the main branch).

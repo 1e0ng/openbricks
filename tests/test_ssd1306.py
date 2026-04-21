@@ -9,14 +9,9 @@ import unittest
 from machine import I2C
 
 from openbricks.drivers.ssd1306 import SSD1306
-from openbricks.hub import Display
 
 
 class SSD1306Tests(unittest.TestCase):
-    def test_is_display(self):
-        d = SSD1306(I2C(0))
-        self.assertIsInstance(d, Display)
-
     def test_default_dimensions_128x64(self):
         d = SSD1306(I2C(0))
         self.assertEqual(d.width, 128)

@@ -51,8 +51,10 @@ def init_display(sda_pin, scl_pin, addr=OLED_ADDR, width=128, height=64,
 
 
 # ----- init -----
+# The display is an I2C component, separate from the hub's board-level
+# peripherals (LED, button). Instantiate it directly and use it directly.
 display = init_display(SDA_PIN, SCL_PIN)
-hub = ESP32DevkitHub(display=display)
+hub = ESP32DevkitHub()
 
 # ----- main loop -----
 seconds = 0
@@ -60,12 +62,12 @@ while True:
     if hub.button.pressed():
         seconds = 0
 
-    hub.display.fill(0)
-    hub.display.text("hello, openbricks", 0, 0)
-    hub.display.text("uptime:", 0, 20)
-    hub.display.text("%d s" % seconds, 0, 32)
-    hub.display.text("(BOOT to reset)", 0, 52)
-    hub.display.show()
+    display.fill(0)
+    display.text("hello, openbricks", 0, 0)
+    display.text("uptime:", 0, 20)
+    display.text("%d s" % seconds, 0, 32)
+    display.text("(BOOT to reset)", 0, 52)
+    display.show()
 
     time.sleep(1)
     seconds += 1
