@@ -11,8 +11,10 @@ Concrete hubs:
   board's onboard LED is a WS2812 (not a plain digital LED), so no LED
   is attached by default — wire an external one and pass ``led_pin``.
 
-Boards with more hardware (SSD1306 OLED, additional buttons, …) either
-subclass one of these or pass explicit pin overrides.
+External I2C components like SSD1306 OLEDs are **not** part of the hub
+— they're wired to any I2C bus the user chooses, instantiated directly
+from ``openbricks.drivers.ssd1306`` or similar, and used alongside the
+hub rather than through it.
 """
 
 from machine import Pin
@@ -52,35 +54,11 @@ class Button:
         raise NotImplementedError
 
 
-class Display:
-    """A pixel-addressable framebuffer display (e.g. an SSD1306 OLED)."""
-
-    width = 0
-    height = 0
-
-    def text(self, s, x, y, c=1):
-        raise NotImplementedError
-
-    def pixel(self, x, y, c):
-        raise NotImplementedError
-
-    def fill(self, c):
-        raise NotImplementedError
-
-    def show(self):
-        raise NotImplementedError
-
-    def clear(self):
-        self.fill(0)
-        self.show()
-
-
 class Hub:
     """Board-level peripherals baked into a specific MCU devkit."""
 
     led = None      # StatusLED
     button = None   # Button
-    display = None  # optional — Display or None
 
 
 class SimpleLED(StatusLED):
@@ -112,27 +90,20 @@ class PushButton(Button):
 
 
 class ESP32DevkitHub(Hub):
-    """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BOOT button on GPIO 0.
+    """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BOOT button on GPIO 0."""
 
-    Pass an optional ``display`` (any ``Display``-conformant driver, e.g.
-    ``openbricks.drivers.ssd1306.SSD1306``) to attach an OLED.
-    """
-
-    def __init__(self, led_pin=2, button_pin=0, display=None):
+    def __init__(self, led_pin=2, button_pin=0):
         self.led = SimpleLED(led_pin)
         self.button = PushButton(button_pin, active_low=True)
-        self.display = display
 
 
 class ESP32S3DevkitHub(Hub):
     """ESP32-S3 DevKitC-1 onboard hub: BOOT button on GPIO 0.
 
     The DevKitC-1 has no plain digital LED (only a WS2812 RGB). If
-    you've wired an external LED, pass its pin as ``led_pin``. Optional
-    ``display`` attaches any ``Display``-conformant driver.
+    you've wired an external LED, pass its pin as ``led_pin``.
     """
 
-    def __init__(self, led_pin=None, button_pin=0, display=None):
+    def __init__(self, led_pin=None, button_pin=0):
         self.led = SimpleLED(led_pin) if led_pin is not None else None
         self.button = PushButton(button_pin, active_low=True)
-        self.display = display

@@ -4,21 +4,22 @@ SSD1306 OLED driver — thin wrapper around ``micropython-lib``'s
 ``ssd1306.SSD1306_I2C``.
 
 The micropython-lib driver is already battle-tested and subclasses
-``framebuf.FrameBuffer``, so we re-expose it through the openbricks
-``Display`` interface. The four core methods (``text``, ``pixel``,
-``fill``, ``show``) delegate explicitly; every other FrameBuffer
-primitive (``rect``, ``line``, ``hline``, ``scroll``, ``contrast``, …)
-reaches through via ``__getattr__``.
+``framebuf.FrameBuffer``. We re-expose its core methods (``text``,
+``pixel``, ``fill``, ``show``) explicitly and delegate the rest
+(``rect``, ``line``, ``hline``, ``scroll``, ``contrast``, …) via
+``__getattr__``. An extra ``clear()`` convenience erases the buffer
+and pushes a blank frame.
 
 The ``ssd1306`` module is frozen into each board's firmware image (see
 ``native/boards/*/manifest.py``), so ``import`` works out of the box on
 flashed hardware.
+
+A Display is an external I2C component, not part of the hub — instantiate
+one directly wherever you want to draw text / pixels.
 """
 
-from openbricks.hub import Display
 
-
-class SSD1306(Display):
+class SSD1306:
     """128×64 (or 128×32) SSD1306 OLED on I2C."""
 
     def __init__(self, i2c, addr=0x3C, width=128, height=64):
@@ -37,6 +38,10 @@ class SSD1306(Display):
         self._impl.fill(c)
 
     def show(self):
+        self._impl.show()
+
+    def clear(self):
+        self._impl.fill(0)
         self._impl.show()
 
     # Anything not explicitly overridden (rect, line, contrast, invert,

@@ -94,7 +94,7 @@ Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal traje
 
 **Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Grab `openbricks-esp32-firmware.bin` and flash with `esptool.py` — see `docs/build.md`.
 
-Next on the roadmap: 1.0 polish + release (M5). The M4 hub abstraction (status LED, user button, optional SSD1306 OLED) is on `main`.
+Next on the roadmap: 1.0 polish + release (M5). The M4 hub abstraction (status LED, user button) and the SSD1306 OLED driver are both on `main`.
 
 ## License
 
