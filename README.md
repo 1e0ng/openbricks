@@ -23,10 +23,12 @@ Each platform ships as a separate firmware image.
 |-----------|------|---------------|
 | L298N H-bridge | DC motor driver (open loop) | `drivers.l298n` |
 | TB6612FNG H-bridge | MOSFET H-bridge, 3.3 V-logic, drop-in IN1/IN2/PWM (alias of `L298NMotor`) | `drivers.tb6612` |
-| JGB37-520 | DC gear motor with quadrature encoder (closed loop, via L298N) | `drivers.jgb37_520` |
+| JGB37-520 | DC gear motor with quadrature Hall encoder (closed loop via native `QuadratureEncoder` — GPIO IRQ) | `drivers.jgb37_520` |
+| MG370 GMR | DC gear motor with 500-PPR GMR quadrature encoder (closed loop via native `PCNTEncoder` — ESP32 PCNT hardware counter) | `drivers.mg370` |
 | BNO055 | 9-DOF IMU with onboard sensor fusion | `drivers.bno055` |
 | TCS34725 | RGB + clear color sensor | `drivers.tcs34725` |
 | ST-3215-C018 | Serial bus servo (FeeTech/SCServo protocol) | `drivers.st3215` |
+| SSD1306 | 128×64 / 128×32 monochrome OLED display over I2C | `drivers.ssd1306` |
 
 New drivers just need to implement one of the abstract interfaces in `openbricks/interfaces.py`. Drop a file into `openbricks/drivers/`, register it in `openbricks/config.py`, and rebuild the firmware.
 
@@ -91,7 +93,7 @@ print(robot.sensors["color"].rgb())
 
 ## Status
 
-Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, and 2-DOF coupled drivebase all live as `user_c_modules` inside the firmware. Every bundled driver works end to end; the 85-test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
+Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, 2-DOF coupled drivebase, and both quadrature encoders (software-IRQ and hardware-PCNT) all live as `user_c_modules` inside the firmware — the entire tick body is C, nothing on the hot path goes through a Python frame. Every bundled driver works end to end; the 136-test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
 
 **Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Grab `openbricks-esp32-firmware.bin` and flash with `esptool.py` — see `docs/build.md`.
 
