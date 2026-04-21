@@ -12,5 +12,6 @@ SRC_USERMOD += $(USERMOD_DIR)/servo.c
 SRC_USERMOD += $(USERMOD_DIR)/drivebase.c
 SRC_USERMOD += $(USERMOD_DIR)/pcnt_encoder.c
 SRC_USERMOD += $(USERMOD_DIR)/encoder.c
+SRC_USERMOD += $(USERMOD_DIR)/bno055.c
 SRC_USERMOD += $(USERMOD_DIR)/openbricks_module.c
 CFLAGS_USERMOD += -I$(USERMOD_DIR)
