@@ -49,9 +49,9 @@ right = L298NMotor(in1=14, in2=12, pwm=13)
 imu   = BNO055(i2c)
 color = TCS34725(i2c)
 
-db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-db.straight(500)           # mm
-db.turn(90)                # degrees
+robot = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+robot.straight(500)        # mm
+robot.turn(90)             # degrees
 print(color.rgb())         # (r, g, b) 0-255
 print(imu.heading())       # degrees
 ```
