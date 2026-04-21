@@ -1,0 +1,15 @@
+diff --git a/ports/esp32/main.c b/ports/esp32/main.c
+index 12835f313..2ca0121f0 100644
+--- a/ports/esp32/main.c
++++ b/ports/esp32/main.c
+@@ -149,6 +149,10 @@ soft_reset:
+ 
+     // run boot-up scripts
+     pyexec_frozen_module("_boot.py", false);
++    // openbricks: bring up the BLE-toggle watcher + LED feedback before
++    // any user boot.py / main.py runs, so the LED reflects BLE state
++    // even when the user's main.py is empty (or missing).
++    pyexec_frozen_module("openbricks_boot.py", false);
+     int ret = pyexec_file_if_exists("boot.py");
+ 
+     #if MICROPY_HW_ENABLE_USBDEV

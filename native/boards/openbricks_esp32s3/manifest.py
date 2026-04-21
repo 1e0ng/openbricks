@@ -12,3 +12,11 @@ package(
     "openbricks",
     base_path="$(MPY_DIR)/../..",
 )
+
+# openbricks_boot.py: runs on every boot, triggers the BLE-toggle
+# + LED auto-wiring before any user main.py runs. See the matching
+# patch in native/patches/ that adds the pyexec_frozen_module call.
+module(
+    "openbricks_boot.py",
+    base_path="$(MPY_DIR)/../../native/boards",
+)

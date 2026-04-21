@@ -18,3 +18,11 @@ package(
     # the ``openbricks/`` Python package — not the whole repo.
     base_path="$(MPY_DIR)/../..",
 )
+
+# openbricks_boot.py: runs on every boot (invoked from main.c via the
+# patch in native/patches/), imports openbricks, triggers the BLE-toggle
+# + LED auto-wiring before any user main.py runs.
+module(
+    "openbricks_boot.py",
+    base_path="$(MPY_DIR)/../../native/boards",
+)
