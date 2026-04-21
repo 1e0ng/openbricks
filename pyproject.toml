@@ -4,7 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openbricks"
-version = "0.5.0"
+# Single source of truth: openbricks/__init__.py::__version__. setuptools
+# reads it via AST parse so there's no build-time import cost and no
+# duplicate number to keep in sync between pyproject.toml and the package.
+dynamic = ["version"]
 description = "A Pybricks-style MicroPython robotics library for open hardware."
 readme = "README.md"
 license = { text = "MIT" }
@@ -19,6 +22,9 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["coverage"]
+
+[tool.setuptools.dynamic]
+version = { attr = "openbricks.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["openbricks*"]
