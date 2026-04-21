@@ -3,8 +3,13 @@
 
 import tests._fakes            # noqa: F401
 import tests._fakes_neopixel   # noqa: F401  (S3 hub default LED uses neopixel)
+import tests._fakes_ble        # noqa: F401  (hub auto-wires BLE by default)
 
 import unittest
+
+from machine import Timer
+
+from tests._fakes_ble import _FakeBLE, _FakeNVS
 
 from openbricks.hub import (
     Button,
@@ -62,19 +67,22 @@ class PushButtonTests(unittest.TestCase):
 
 
 class ESP32DevkitHubTests(unittest.TestCase):
+    # bluetooth=False on the structural tests so we test hub wiring in
+    # isolation without pulling the BLE auto-wire into the frame.
+
     def test_is_a_hub_with_led_and_button(self):
-        hub = ESP32DevkitHub()
+        hub = ESP32DevkitHub(bluetooth=False)
         self.assertIsInstance(hub, Hub)
         self.assertIsInstance(hub.led, StatusLED)
         self.assertIsInstance(hub.button, Button)
 
     def test_default_pins(self):
-        hub = ESP32DevkitHub()
+        hub = ESP32DevkitHub(bluetooth=False)
         self.assertEqual(hub.led._pin.pin, 2)
         self.assertEqual(hub.button._pin.pin, 0)
 
     def test_pin_overrides(self):
-        hub = ESP32DevkitHub(led_pin=5, button_pin=9)
+        hub = ESP32DevkitHub(led_pin=5, button_pin=9, bluetooth=False)
         self.assertEqual(hub.led._pin.pin, 5)
         self.assertEqual(hub.button._pin.pin, 9)
 
@@ -101,25 +109,55 @@ class NeoPixelLEDTests(unittest.TestCase):
 
 class ESP32S3DevkitHubTests(unittest.TestCase):
     def test_onboard_led_is_neopixel(self):
-        hub = ESP32S3DevkitHub()
+        hub = ESP32S3DevkitHub(bluetooth=False)
         self.assertIsInstance(hub.led, NeoPixelLED)
         self.assertIsInstance(hub.button, Button)
 
     def test_button_default_pin(self):
-        hub = ESP32S3DevkitHub()
+        hub = ESP32S3DevkitHub(bluetooth=False)
         self.assertEqual(hub.button._pin.pin, 0)
 
     def test_led_default_pin_is_48(self):
-        hub = ESP32S3DevkitHub()
+        hub = ESP32S3DevkitHub(bluetooth=False)
         self.assertEqual(hub.led._np.pin.pin, 48)
 
     def test_led_pin_override(self):
-        hub = ESP32S3DevkitHub(led_pin=21)
+        hub = ESP32S3DevkitHub(led_pin=21, bluetooth=False)
         self.assertEqual(hub.led._np.pin.pin, 21)
 
     def test_led_pin_none_disables(self):
-        hub = ESP32S3DevkitHub(led_pin=None)
+        hub = ESP32S3DevkitHub(led_pin=None, bluetooth=False)
         self.assertIsNone(hub.led)
+
+
+class HubBluetoothAutoWireTests(unittest.TestCase):
+    """Default ``bluetooth=True`` should restore persisted state, start the
+    long-press watcher, and (on RGB-capable hubs) paint the LED."""
+
+    def setUp(self):
+        _FakeNVS._reset_for_test()
+        _FakeBLE._reset_for_test()
+        Timer.reset_for_test()
+
+    def test_s3_hub_default_activates_ble_and_paints_led_blue(self):
+        hub = ESP32S3DevkitHub()
+        self.assertIsNotNone(hub.bluetooth_toggle)
+        self.assertTrue(_FakeBLE().active())             # default-on restored
+        self.assertEqual(hub.led._np[0], (0, 0, 51))     # (0,0,255) scaled by 0.2
+
+    def test_s3_hub_bluetooth_false_opts_out(self):
+        hub = ESP32S3DevkitHub(bluetooth=False)
+        self.assertIsNone(hub.bluetooth_toggle)
+        # BLE stack was never touched; no timer installed.
+        self.assertFalse(_FakeBLE().active())
+
+    def test_classic_esp32_hub_default_activates_ble_without_led_color(self):
+        # SimpleLED doesn't support rgb(), so the button helper's LED
+        # paint is a no-op on the classic hub — but the toggle still
+        # works and the persisted state still restores.
+        hub = ESP32DevkitHub()
+        self.assertIsNotNone(hub.bluetooth_toggle)
+        self.assertTrue(_FakeBLE().active())
 
 
 if __name__ == "__main__":

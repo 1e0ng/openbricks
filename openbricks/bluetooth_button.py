@@ -135,9 +135,15 @@ class BluetoothToggleButton:
 
     def _apply_led_for_current_state(self):
         """Paint the LED to match the current persisted BLE state, if an
-        LED was provided. No-op otherwise."""
+        RGB-capable LED was provided. Silently no-ops on plain on/off
+        LEDs (whose ``.rgb()`` raises ``NotImplementedError``) so the
+        hub can pass ``self.led`` unconditionally without caring which
+        variant it is."""
         if self._led is None:
             return
         from openbricks import bluetooth
         color = self._color_on if bluetooth.is_enabled() else self._color_off
-        self._led.rgb(*color)
+        try:
+            self._led.rgb(*color)
+        except NotImplementedError:
+            pass

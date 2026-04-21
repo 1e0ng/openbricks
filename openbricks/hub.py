@@ -7,9 +7,14 @@ Concrete hubs:
 
 * ``ESP32DevkitHub``    — ESP32 DevKitC-V4: single blue LED on GPIO 2,
   BOOT button on GPIO 0.
-* ``ESP32S3DevkitHub``  — ESP32-S3 DevKitC-1: BOOT button on GPIO 0. The
-  board's onboard LED is a WS2812 (not a plain digital LED), so no LED
-  is attached by default — wire an external one and pass ``led_pin``.
+* ``ESP32S3DevkitHub``  — ESP32-S3 DevKitC-1: onboard WS2812 RGB LED on
+  GPIO 48, BOOT button on GPIO 0.
+
+Both hubs auto-wire the BLE toggle button by default (``bluetooth=True``):
+constructing a hub restores the persisted BLE state, installs a long-
+press handler on the BOOT button, and — on the S3 — paints the WS2812
+blue (BLE on) or yellow (BLE off). Pass ``bluetooth=False`` to keep
+the button free for your own use.
 
 External I2C components like SSD1306 OLEDs are **not** part of the hub
 — they're wired to any I2C bus the user chooses, instantiated directly
@@ -123,11 +128,21 @@ class PushButton(Button):
 
 
 class ESP32DevkitHub(Hub):
-    """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BOOT button on GPIO 0."""
+    """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BOOT button on GPIO 0.
 
-    def __init__(self, led_pin=2, button_pin=0):
+    ``bluetooth`` default True wires the BOOT button to a long-press BLE
+    toggle and restores the persisted state at boot (see
+    ``openbricks.bluetooth_button`` / ``openbricks.bluetooth``). The
+    onboard LED is single-colour so no colour feedback, just the toggle.
+    Pass ``bluetooth=False`` to reserve the button for your own use.
+    """
+
+    def __init__(self, led_pin=2, button_pin=0, bluetooth=True):
         self.led = SimpleLED(led_pin)
         self.button = PushButton(button_pin, active_low=True)
+        self.bluetooth_toggle = None
+        if bluetooth:
+            _install_bluetooth_toggle(self)
 
 
 class ESP32S3DevkitHub(Hub):
@@ -140,6 +155,29 @@ class ESP32S3DevkitHub(Hub):
     values on write; default 0.2 is comfortable indoors.
     """
 
-    def __init__(self, led_pin=48, button_pin=0, brightness=0.2):
+    def __init__(self, led_pin=48, button_pin=0, brightness=0.2, bluetooth=True):
         self.led = NeoPixelLED(led_pin, brightness=brightness) if led_pin is not None else None
         self.button = PushButton(button_pin, active_low=True)
+        self.bluetooth_toggle = None
+        if bluetooth:
+            _install_bluetooth_toggle(self)
+
+
+# ---- BLE auto-wiring ----
+#
+# Called from the hub constructors when ``bluetooth=True`` (the default).
+# Restores the persisted BLE state (default on for a fresh board),
+# installs a long-press handler on the BOOT button that toggles it,
+# and — if the hub has an RGB-capable LED — paints the LED to match
+# the current state (blue = on, yellow = off).
+#
+# Kept out of the hub classes' namespace so the hub doesn't statically
+# depend on ``openbricks.bluetooth`` — the imports happen at the first
+# ``bluetooth=True`` construction only.
+
+def _install_bluetooth_toggle(hub):
+    from openbricks import bluetooth as _bt
+    from openbricks.bluetooth_button import BluetoothToggleButton
+    _bt.apply_persisted_state()
+    hub.bluetooth_toggle = BluetoothToggleButton(hub.button, led=hub.led)
+    hub.bluetooth_toggle.start()
