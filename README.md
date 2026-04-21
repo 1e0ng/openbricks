@@ -1,6 +1,6 @@
 # openbricks
 
-![coverage](https://img.shields.io/badge/coverage-86%25-green)
+[![coverage](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg)](https://codecov.io/gh/1e0ng/openbricks)
 
 > A Pybricks-style MicroPython firmware for **open hardware** — commodity MCUs, commodity motors, commodity sensors.
 
