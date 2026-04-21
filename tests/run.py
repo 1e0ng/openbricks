@@ -53,7 +53,6 @@ _TEST_MODULES = [
     "tests.test_observer",
     "tests.test_scheduler",
     "tests.test_jgb37_520",
-    "tests.test_config",
     "tests.test_drivebase",
     "tests.test_hub",
     "tests.test_ssd1306",

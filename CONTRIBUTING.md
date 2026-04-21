@@ -12,9 +12,8 @@ feedback and new drivers are both welcome.
 3. Subclass the interface and implement every method. Raising
    `NotImplementedError` on methods your hardware genuinely can't do is
    acceptable.
-4. Register the driver in `openbricks/config.py`'s `_DRIVER_REGISTRY`.
-5. Add a short example to `examples/`.
-6. If the chip needs calibration or has surprising quirks, add a section
+4. Add a short example to `examples/`.
+5. If the chip needs calibration or has surprising quirks, add a section
    to `docs/hardware.md`.
 
 ## Style
