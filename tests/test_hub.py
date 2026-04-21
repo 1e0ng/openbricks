@@ -135,6 +135,8 @@ class HubBluetoothAutoWireTests(unittest.TestCase):
     long-press watcher, and (on RGB-capable hubs) paint the LED."""
 
     def setUp(self):
+        from openbricks.hub import _reset_bluetooth_toggle_for_test
+        _reset_bluetooth_toggle_for_test()
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
         Timer.reset_for_test()
@@ -158,6 +160,15 @@ class HubBluetoothAutoWireTests(unittest.TestCase):
         hub = ESP32DevkitHub()
         self.assertIsNotNone(hub.bluetooth_toggle)
         self.assertTrue(_FakeBLE().active())
+
+    def test_second_hub_does_not_double_wire(self):
+        """If auto-boot already installed the toggle, a later user-
+        constructed hub shouldn't spawn a parallel watcher (which would
+        net no-op on each long-press)."""
+        _first = ESP32S3DevkitHub()
+        _second = ESP32S3DevkitHub()
+        self.assertIsNotNone(_first.bluetooth_toggle)
+        self.assertIsNone(_second.bluetooth_toggle)
 
 
 if __name__ == "__main__":

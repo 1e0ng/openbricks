@@ -175,9 +175,29 @@ class ESP32S3DevkitHub(Hub):
 # depend on ``openbricks.bluetooth`` — the imports happen at the first
 # ``bluetooth=True`` construction only.
 
+# Module-level flag: prevents a second ``bluetooth=True`` hub
+# construction from spawning a parallel watcher on the same button
+# (which would toggle twice per long-press and net no-op). First call
+# wins; subsequent calls are a no-op. ``openbricks.__init__`` auto-boots
+# an instance, so this normally fires there — a user who later does
+# ``hub = ESP32S3DevkitHub()`` just gets a plain hub with
+# ``hub.bluetooth_toggle is None``.
+_bluetooth_toggle_installed = False
+
+
 def _install_bluetooth_toggle(hub):
+    global _bluetooth_toggle_installed
+    if _bluetooth_toggle_installed:
+        return
     from openbricks import bluetooth as _bt
     from openbricks.bluetooth_button import BluetoothToggleButton
     _bt.apply_persisted_state()
     hub.bluetooth_toggle = BluetoothToggleButton(hub.button, led=hub.led)
     hub.bluetooth_toggle.start()
+    _bluetooth_toggle_installed = True
+
+
+def _reset_bluetooth_toggle_for_test():
+    """Test-only hook — drop the once-only latch between tests."""
+    global _bluetooth_toggle_installed
+    _bluetooth_toggle_installed = False
