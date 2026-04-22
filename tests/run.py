@@ -63,6 +63,7 @@ _TEST_MODULES = [
     "tests.test_tb6612",
     "tests.test_bluetooth",
     "tests.test_bluetooth_button",
+    "tests.test_ble_repl",
 ]
 
 

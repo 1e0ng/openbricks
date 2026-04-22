@@ -35,11 +35,25 @@ openbricks-dev list [--timeout 5.0] [--all]
 
 Runs a BLE scan and prints every named device found, sorted by RSSI (strongest first). `--all` includes unnamed devices too.
 
-### coming in PR 3 / PR 4
+### `run` — push a script and stream output
 
-- `run -n NAME script.py` — push a script to the hub and exec it transiently.
+```
+openbricks-dev run -n RobotA examples/hello.py
+```
+
+Connects to the named hub over BLE, pipes the script into the MicroPython REPL via paste mode, and streams stdout/stderr back to your terminal while it executes. Ctrl-C interrupts the remote program. Transient — nothing is written to the hub's flash; for that use `download` (PR 4).
+
+### `stop` — interrupt the running program
+
+```
+openbricks-dev stop -n RobotA
+```
+
+Sends a single Ctrl-C byte over the NUS REPL bridge, which MicroPython surfaces as `KeyboardInterrupt`. Useful when `openbricks-dev run` has already exited but the hub's still chewing on a long-running user program.
+
+### coming in PR 4
+
 - `download -n NAME script.py` — write a script to the hub's flash; runs at boot.
-- `stop -n NAME` — interrupt the running program.
 
 ## Tests
 

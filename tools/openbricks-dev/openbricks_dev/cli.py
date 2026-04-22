@@ -61,6 +61,46 @@ def _build_parser():
         help="Skip erase_flash (faster dev loop; leaves stale NVS keys).",
     )
 
+    # ---- run ----
+    p_run = sub.add_parser(
+        "run",
+        help="Push a Python script to a hub over BLE and stream output.",
+        description="Connect to the named hub over BLE, push SCRIPT to its "
+                    "REPL (via paste mode), and stream stdout/stderr back "
+                    "to this terminal until the script finishes. Ctrl-C "
+                    "interrupts the remote program.",
+    )
+    p_run.add_argument(
+        "-n", "--name", required=True,
+        help="Hub name baked in at flash time (``openbricks-dev flash --name``).",
+    )
+    p_run.add_argument(
+        "script", metavar="SCRIPT",
+        help="Path to the local Python script to run on the hub.",
+    )
+    p_run.add_argument(
+        "--scan-timeout", type=float, default=5.0,
+        help="How long to scan for the named hub before giving up. Default: 5.0 s.",
+    )
+
+    # ---- stop ----
+    p_stop = sub.add_parser(
+        "stop",
+        help="Send Ctrl-C to a hub running a program.",
+        description="Connect to the named hub over BLE and send a single "
+                    "Ctrl-C, which MicroPython surfaces as KeyboardInterrupt. "
+                    "Use when a long-running ``openbricks-dev run`` has "
+                    "already ended and you just want the hub to idle again.",
+    )
+    p_stop.add_argument(
+        "-n", "--name", required=True,
+        help="Hub name.",
+    )
+    p_stop.add_argument(
+        "--scan-timeout", type=float, default=5.0,
+        help="BLE scan timeout. Default: 5.0 s.",
+    )
+
     # ---- list ----
     p_list = sub.add_parser(
         "list",
@@ -95,6 +135,12 @@ def main(argv=None):
         if args.command == "list":
             from openbricks_dev import scan
             return scan.run(args)
+        if args.command == "run":
+            from openbricks_dev import run as run_mod
+            return run_mod.run(args)
+        if args.command == "stop":
+            from openbricks_dev import stop as stop_mod
+            return stop_mod.run(args)
     except KeyboardInterrupt:
         print("\naborted.", file=sys.stderr)
         return 130
