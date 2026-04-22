@@ -12,7 +12,7 @@ Concrete hubs:
 Both hubs expect a momentary user button wired between **GPIO 5** and
 GND (the pin is free on both DevKitC variants and safe — not a
 strapping pin, not used by anything else the hub touches). Override
-with ``button_pin=<N>`` on the hub constructor.
+with ``bluetooth_button_pin=<N>`` on the hub constructor.
 
 We deliberately avoid GPIO 0 (BOOT) because holding it during reset
 puts the ESP32 into download mode — sharing that pin with a
@@ -21,7 +21,7 @@ BOOT to only mean "enter the bootloader".
 
 Both hubs auto-wire the BLE toggle button by default (``bluetooth=True``):
 **constructing a hub** restores the persisted BLE state, installs a
-long-press handler on the ``button_pin``, and — on the S3 — paints
+long-press handler on the ``bluetooth_button_pin``, and — on the S3 — paints
 the WS2812 blue (BLE on) or yellow (BLE off). Put
 ``hub = ESP32S3DevkitHub()`` in your ``main.py`` to turn that on;
 omit the call (or pass ``bluetooth=False``) to keep the button free
@@ -139,43 +139,46 @@ class PushButton(Button):
 
 
 class ESP32DevkitHub(Hub):
-    """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, user button on GPIO 5.
+    """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BLE-toggle
+    button on GPIO 5.
 
-    ``bluetooth`` default True wires the user button to a long-press BLE
+    ``bluetooth`` default True wires the button to a long-press BLE
     toggle and restores the persisted state at boot (see
     ``openbricks.bluetooth_button`` / ``openbricks.bluetooth``). The
     onboard LED is single-colour so no colour feedback, just the toggle.
-    Pass ``bluetooth=False`` to reserve the button for your own use, or
-    ``button_pin=<N>`` to use a different GPIO. Wire the button between
-    the chosen GPIO and GND; an internal pull-up is enabled.
+    Pass ``bluetooth=False`` to skip the wiring entirely, or
+    ``bluetooth_button_pin=<N>`` to use a different GPIO. Wire the
+    button between the chosen GPIO and GND; an internal pull-up is
+    enabled.
     """
 
-    def __init__(self, led_pin=2, button_pin=5, bluetooth=True):
+    def __init__(self, led_pin=2, bluetooth_button_pin=5, bluetooth=True):
         self.led = SimpleLED(led_pin)
-        self.button = PushButton(button_pin, active_low=True)
+        self.button = PushButton(bluetooth_button_pin, active_low=True)
         self.bluetooth_toggle = None
         if bluetooth:
             _install_bluetooth_toggle(self)
 
 
 class ESP32S3DevkitHub(Hub):
-    """ESP32-S3 DevKitC-1 onboard hub: WS2812 RGB LED on GPIO 48, user
-    button on GPIO 5.
+    """ESP32-S3 DevKitC-1 onboard hub: WS2812 RGB LED on GPIO 48,
+    BLE-toggle button on GPIO 5.
 
     ``led_pin`` defaults to 48 (the DevKitC-1 onboard WS2812). Pass
     ``led_pin=None`` to disable the LED entirely, or any other GPIO for a
     WS2812 wired elsewhere. ``brightness`` (0.0 – 1.0) scales channel
     values on write; default 0.2 is comfortable indoors.
 
-    ``button_pin`` defaults to 5 — a safe, free pin on the DevKitC-1.
-    Wire a momentary switch between GPIO 5 and GND; the pin is
-    configured ``Pin.IN`` with ``PULL_UP`` so no external resistor is
-    needed. Override via ``button_pin=<N>`` for other wiring.
+    ``bluetooth_button_pin`` defaults to 5 — a safe, free pin on the
+    DevKitC-1. Wire a momentary switch between GPIO 5 and GND; the
+    pin is configured ``Pin.IN`` with ``PULL_UP`` so no external
+    resistor is needed. Override via ``bluetooth_button_pin=<N>``.
     """
 
-    def __init__(self, led_pin=48, button_pin=5, brightness=0.2, bluetooth=True):
+    def __init__(self, led_pin=48, bluetooth_button_pin=5, brightness=0.2,
+                 bluetooth=True):
         self.led = NeoPixelLED(led_pin, brightness=brightness) if led_pin is not None else None
-        self.button = PushButton(button_pin, active_low=True)
+        self.button = PushButton(bluetooth_button_pin, active_low=True)
         self.bluetooth_toggle = None
         if bluetooth:
             _install_bluetooth_toggle(self)

@@ -23,8 +23,8 @@ How to run:
     mpremote connect /dev/tty.usbserial-XXXX run examples/oled_hello.py
 
 Wire a momentary button between GPIO 5 and GND to reset the counter.
-(GPIO 5 is the hub's default ``button_pin``; override via
-``ESP32DevkitHub(button_pin=<N>)`` if you wired it elsewhere.)
+(GPIO 5 is the hub's default ``bluetooth_button_pin``; override via
+``ESP32DevkitHub(bluetooth_button_pin=<N>)`` if you wired it elsewhere.)
 """
 
 import time

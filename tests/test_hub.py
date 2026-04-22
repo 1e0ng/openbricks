@@ -82,7 +82,7 @@ class ESP32DevkitHubTests(unittest.TestCase):
         self.assertEqual(hub.button._pin.pin, 5)
 
     def test_pin_overrides(self):
-        hub = ESP32DevkitHub(led_pin=17, button_pin=9, bluetooth=False)
+        hub = ESP32DevkitHub(led_pin=17, bluetooth_button_pin=9, bluetooth=False)
         self.assertEqual(hub.led._pin.pin, 17)
         self.assertEqual(hub.button._pin.pin, 9)
 
