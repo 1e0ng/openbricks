@@ -54,21 +54,47 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install openbricks-dev (editable)
+      - name: Verify version files are in sync
+        # One canonical source: ``VERSION``. The two ``__init__.py``
+        # copies must match it, or ``scripts/bump-version.py`` wasn't
+        # run after a manual edit.
+        run: python scripts/check-version.py
+
+      - name: Install openbricks-dev (editable) + coverage
         working-directory: tools/openbricks-dev
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install coverage
 
-      - name: Run CLI test suite
+      - name: Run CLI test suite under coverage
         working-directory: tools/openbricks-dev
-        run: python -m unittest discover -s tests -t .
+        # Cover the ``openbricks_dev`` package only; the ``tests``
+        # themselves would inflate the number without measuring the
+        # thing we ship.
+        run: |
+          coverage run --source=openbricks_dev -m unittest discover -s tests -t .
+          coverage report
+          coverage xml -o coverage.xml
+
+      - name: Upload openbricks-dev coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: tools/openbricks-dev/coverage.xml
+          # Separate flag so the dashboard tracks host-CLI coverage
+          # independently from the C ``c-core`` flag below.
+          flags: openbricks-dev
+          fail_ci_if_error: false
 
       - name: Smoke-test the entry point
         run: |
           openbricks-dev --help
           openbricks-dev flash --help
           openbricks-dev list --help
+          openbricks-dev run --help
+          openbricks-dev download --help
+          openbricks-dev stop --help
 
   coverage:
     runs-on: ubuntu-latest
