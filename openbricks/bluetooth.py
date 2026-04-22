@@ -65,20 +65,34 @@ def set_enabled(enabled):
     Raises :class:`HubNameNotSetError` when turning BLE on with no hub
     name flashed. Turning BLE off is always allowed — a nameless hub
     can still be silenced.
+
+    When enabling, also starts the NUS REPL bridge (``openbricks.ble_repl``)
+    so ``openbricks-dev run`` / ``stop`` can push scripts over BLE. When
+    disabling, the bridge is torn down first so dupterm isn't left
+    pointing at an inactive stack.
     """
     import esp32
     import bluetooth
+    from openbricks import ble_repl
     if enabled:
         name = _require_hub_name()
     nvs = esp32.NVS(_NAMESPACE)
     nvs.set_i32(_KEY, 1 if enabled else 0)
     nvs.commit()
     ble = bluetooth.BLE()
+    if not enabled:
+        # Tear down the REPL bridge before we kill the radio so dupterm
+        # doesn't end up writing into a dead stack.
+        ble_repl.stop()
     if enabled:
         # gap_name must be set before active(True); config() raises if
         # the stack is already active.
         ble.config(gap_name=name)
     ble.active(bool(enabled))
+    if enabled:
+        # Start the REPL bridge *after* active(True) — gatts_register_services
+        # errors otherwise.
+        ble_repl.start()
 
 
 def toggle():
@@ -97,10 +111,15 @@ def apply_persisted_state():
     persisted state is enabled but no hub name was flashed.
     """
     import bluetooth
+    from openbricks import ble_repl
     enabled = is_enabled()
     if enabled:
         name = _require_hub_name()
     ble = bluetooth.BLE()
+    if not enabled:
+        ble_repl.stop()
     if enabled:
         ble.config(gap_name=name)
     ble.active(enabled)
+    if enabled:
+        ble_repl.start()

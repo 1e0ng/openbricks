@@ -51,6 +51,37 @@ class BuildParserTests(unittest.TestCase):
         self.assertEqual(args.baud, "921600")
         self.assertTrue(args.skip_erase)
 
+    # ---- run ----
+
+    def test_run_requires_name_and_script(self):
+        for missing in (["run", "script.py"],                         # no -n
+                        ["run", "-n", "A"]):                          # no script
+            with self.assertRaises(SystemExit):
+                with patch("sys.stderr", new_callable=io.StringIO):
+                    self._parse(missing)
+
+    def test_run_defaults(self):
+        args = self._parse(["run", "-n", "RobotA", "myscript.py"])
+        self.assertEqual(args.name, "RobotA")
+        self.assertEqual(args.script, "myscript.py")
+        self.assertEqual(args.scan_timeout, 5.0)
+
+    def test_run_accepts_scan_timeout(self):
+        args = self._parse(["run", "-n", "A", "s.py", "--scan-timeout", "2"])
+        self.assertEqual(args.scan_timeout, 2.0)
+
+    # ---- stop ----
+
+    def test_stop_requires_name(self):
+        with self.assertRaises(SystemExit):
+            with patch("sys.stderr", new_callable=io.StringIO):
+                self._parse(["stop"])
+
+    def test_stop_defaults(self):
+        args = self._parse(["stop", "-n", "RobotA"])
+        self.assertEqual(args.name, "RobotA")
+        self.assertEqual(args.scan_timeout, 5.0)
+
     # ---- list ----
 
     def test_list_defaults(self):
@@ -89,6 +120,18 @@ class MainDispatchTests(unittest.TestCase):
             rc = cli.main(["list", "--timeout", "1"])
         self.assertEqual(rc, 0)
         scan_run.assert_called_once()
+
+    def test_run_routes_to_run_module(self):
+        with patch("openbricks_dev.run.run", return_value=0) as run_run:
+            rc = cli.main(["run", "-n", "A", "script.py"])
+        self.assertEqual(rc, 0)
+        run_run.assert_called_once()
+
+    def test_stop_routes_to_stop_module(self):
+        with patch("openbricks_dev.stop.run", return_value=0) as stop_run:
+            rc = cli.main(["stop", "-n", "A"])
+        self.assertEqual(rc, 0)
+        stop_run.assert_called_once()
 
     def test_exception_from_subcommand_becomes_rc_1(self):
         def _boom(args):
