@@ -83,6 +83,38 @@ def _build_parser():
         help="How long to scan for the named hub before giving up. Default: 5.0 s.",
     )
 
+    # ---- download ----
+    p_download = sub.add_parser(
+        "download",
+        help="Persist a Python script to a hub so it runs at every boot.",
+        description="Upload SCRIPT to the hub's filesystem (default path "
+                    "``/main.py``). MicroPython runs it on every power-up. "
+                    "A tiny boot-safety preamble is prepended so BLE + REPL "
+                    "come up automatically — otherwise a crash in user code "
+                    "would leave the hub unreachable.",
+    )
+    p_download.add_argument(
+        "-n", "--name", required=True,
+        help="Hub name baked in at flash time.",
+    )
+    p_download.add_argument(
+        "script", metavar="SCRIPT",
+        help="Path to the local Python script to persist.",
+    )
+    p_download.add_argument(
+        "--path", default="/main.py",
+        help="Destination path on the hub's filesystem. Default: /main.py.",
+    )
+    p_download.add_argument(
+        "--no-reset", action="store_true",
+        help="Don't reboot the hub after writing. Default is to reset so "
+             "the new script runs immediately.",
+    )
+    p_download.add_argument(
+        "--scan-timeout", type=float, default=5.0,
+        help="BLE scan timeout. Default: 5.0 s.",
+    )
+
     # ---- stop ----
     p_stop = sub.add_parser(
         "stop",
@@ -138,6 +170,9 @@ def main(argv=None):
         if args.command == "run":
             from openbricks_dev import run as run_mod
             return run_mod.run(args)
+        if args.command == "download":
+            from openbricks_dev import download as download_mod
+            return download_mod.run(args)
         if args.command == "stop":
             from openbricks_dev import stop as stop_mod
             return stop_mod.run(args)
