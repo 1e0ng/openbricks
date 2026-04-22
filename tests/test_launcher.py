@@ -73,7 +73,6 @@ class PressClassificationTests(unittest.TestCase):
             self.btn,
             program_path="/nonexistent.py",
             poll_ms=50,
-            long_press_ms=1000,
         )
         # Patch ``_request_start`` so these tests are runtime-agnostic.
         # On MP, the real implementation calls ``micropython.schedule``
@@ -105,14 +104,11 @@ class PressClassificationTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertIs(calls[0], self.launcher)
 
-    def test_long_press_does_not_queue_start(self):
-        # Held past 1 s threshold → BLE watcher's territory.
+    def test_long_hold_still_fires_on_release(self):
+        # On the program pin we don't distinguish long vs short — any
+        # press-release cycle dispatches. The BLE-toggle button lives
+        # on a separate pin, so this one never needs to skip long holds.
         _press(self.btn, hold_ms=1500, tick_fn=self.launcher._tick)
-        self.assertIsNone(self.launcher._pending)
-
-    def test_borderline_press_below_threshold_is_short(self):
-        # Just under the 1000 ms threshold still counts as short.
-        _press(self.btn, hold_ms=900, tick_fn=self.launcher._tick)
         self.assertEqual(self.launcher._pending, "start")
 
     def test_release_without_press_is_noop(self):
@@ -121,7 +117,7 @@ class PressClassificationTests(unittest.TestCase):
             self.launcher._tick()
             advance_ms(50)
         self.assertIsNone(self.launcher._pending)
-        self.assertIsNone(self.launcher._press_start_ms)
+        self.assertFalse(self.launcher._was_pressed)
 
 
 class DrainAndExecTests(unittest.TestCase):
@@ -194,8 +190,7 @@ class StopRequestTests(unittest.TestCase):
     def setUp(self):
         self.btn = _make_button()
         self.launcher = launcher.Launcher(
-            self.btn, program_path="/ignored.py",
-            poll_ms=50, long_press_ms=1000)
+            self.btn, program_path="/ignored.py", poll_ms=50)
         # Pretend a program is already executing.
         self.launcher._running = True
 

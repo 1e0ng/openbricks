@@ -63,13 +63,15 @@ Sends a single Ctrl-C byte over the NUS REPL bridge, which MicroPython surfaces 
 openbricks-dev download -n RobotA examples/wander.py
 ```
 
-Writes the script to `/program.py` on the hub. **The code does not run automatically.** Place your robot, press the hub button, and the program starts. Press again to stop it mid-run — same UX as Pybricks Prime-hub `pybricksdev download`.
+Writes the script to `/program.py` on the hub. **The code does not run automatically.** Place your robot, press the **program button** (GPIO 4), and the program starts. Press again to stop it mid-run — same UX as Pybricks Prime-hub `pybricksdev download`.
 
 This works because the firmware ships a frozen `main.py` that:
 
 1. Brings BLE + REPL bridge up immediately (so `openbricks-dev run` / `download` / `stop` are always reachable, even when no program is running).
-2. Instantiates the board's Hub for the BLE long-press toggle.
-3. Watches the hub button via `openbricks.launcher.run()` — short-press runs `/program.py`, second short-press raises `KeyboardInterrupt` in the running program.
+2. Instantiates the board's Hub, which wires the **BLE-toggle button** (short-press on GPIO 5) with LED feedback.
+3. Watches the **program button** (GPIO 4) via `openbricks.launcher.run()` — a short-press runs `/program.py`, a second short-press raises `KeyboardInterrupt` in the running program.
+
+Two separate pins (4 for program, 5 for BLE toggle), each handled by short-press only — no duration-based dispatch.
 
 Pass `--path /alt.py` to stage at a different filename (if you've written your own `main.py` that reads from there).
 

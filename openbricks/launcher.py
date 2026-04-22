@@ -5,25 +5,27 @@ Button-gated user-program launcher.
 Pybricks-style workflow:
 
 * ``openbricks-dev download`` stages a script at ``/program.py`` but
-  does not run it — the user presses the hub button to launch.
-* ``openbricks-dev run`` stages the same script and then triggers the
-  launcher immediately. Output streams back to the client; the hub
-  button stops the program; when the program stops, the client exits.
+  does not run it — the user presses the program button to launch.
+* ``openbricks-dev run`` stages the same script and triggers the
+  launcher immediately. Output streams back to the client; pressing
+  the program button stops the program; when the program stops, the
+  terminal exits.
 
-Both paths go through the same ``Launcher`` singleton so button-stop
-works regardless of how the program was started. A persistent
-``machine.Timer`` polls the hub button and stays alive for the whole
-hub uptime; the watcher is installed on the first call to
-``_ensure_launcher()`` (from ``run`` in the frozen main.py, or from
-``run_program`` when the client triggers one).
+Each press is a full press-release cycle. The program button has its
+own GPIO (default ``4``), separate from the BLE-toggle button watched
+by :mod:`openbricks.bluetooth_button` (default ``5``). Two pins → no
+duration-based dispatch — every press on the program pin means
+start-or-stop, and every press on the BLE pin means toggle-BLE.
 
 Wiring:
 
-* Short press (held <``long_press_ms``): start if idle, stop if running.
-* Long press (held >=``long_press_ms``): owned by
-  ``openbricks.bluetooth_button.BluetoothToggleButton``. Both watchers
-  share the pin safely — the launcher only reacts to short presses,
-  the BLE watcher only reacts to long ones.
+* Press while idle → start ``/program.py``.
+* Press while running → raise ``KeyboardInterrupt`` via
+  ``micropython.schedule``, cleanly stopping the program.
+
+The watcher runs off a ``machine.Timer`` kept alive for the whole hub
+uptime (we never ``deinit`` it), so button-press-to-run survives
+``openbricks-dev run`` interrupting the main idle loop.
 
 Typical ``main.py`` (the firmware ships a frozen default; users can
 override by writing to ``/main.py`` in VFS):
@@ -37,32 +39,28 @@ import sys
 import time
 
 
-DEFAULT_BUTTON_PIN    = 5
-DEFAULT_POLL_MS       = 50
-DEFAULT_LONG_PRESS_MS = 1000  # aligned with bluetooth_button threshold
-DEFAULT_PROGRAM_PATH  = "/program.py"
+DEFAULT_BUTTON_PIN   = 4
+DEFAULT_POLL_MS      = 50
+DEFAULT_PROGRAM_PATH = "/program.py"
 
 
 class Launcher:
-    """Shared state for the button watcher.
+    """Shared state for the program-button watcher.
 
     Tests instantiate this directly and drive ``_tick`` with a fake
-    Pin; production code uses ``_ensure_launcher()`` below which
-    installs a singleton + Timer.
+    Pin; production code uses ``_ensure_launcher()`` below, which
+    installs a singleton + ``machine.Timer``.
     """
 
     def __init__(self, button, program_path=DEFAULT_PROGRAM_PATH,
-                 poll_ms=DEFAULT_POLL_MS,
-                 long_press_ms=DEFAULT_LONG_PRESS_MS):
+                 poll_ms=DEFAULT_POLL_MS):
         self._btn            = button      # anything with ``.value()``, 0 = pressed
         self._program_path   = program_path
         self._poll_ms        = poll_ms
-        self._long_press_ms  = long_press_ms
 
         self._running        = False
-        self._press_start_ms = None
-        self._already_fired_long = False
-        self._pending        = None        # None | "start" | "stop"
+        self._was_pressed    = False
+        self._pending        = None        # None | "start" | "stop"  (test fallback)
         # Timer stays alive for hub uptime — we never ``.deinit()`` it.
         # Keeping the reference here stops GC from collecting it.
         self._timer          = None
@@ -70,31 +68,20 @@ class Launcher:
     # ---- timer callback ----
 
     def _tick(self, _timer=None):
-        """Called on every ``poll_ms`` tick. Detects press/release edges
-        and classifies short vs long. Safe for IRQ context."""
+        """Called on every ``poll_ms`` tick. Edge-detects press→release
+        cycles and dispatches start/stop. Safe for IRQ context."""
         pressed = self._btn.value() == 0
-
         if pressed:
-            if self._press_start_ms is None:
-                self._press_start_ms = time.ticks_ms()
-                self._already_fired_long = False
-            elif not self._already_fired_long and \
-                    time.ticks_diff(time.ticks_ms(), self._press_start_ms) >= self._long_press_ms:
-                self._already_fired_long = True
+            self._was_pressed = True
             return
-
-        # Released.
-        if self._press_start_ms is None:
+        if not self._was_pressed:
             return
-        duration = time.ticks_diff(time.ticks_ms(), self._press_start_ms)
-        self._press_start_ms = None
-        if self._already_fired_long:
-            return
-        if duration < self._long_press_ms:
-            if self._running:
-                _request_interrupt(self)
-            else:
-                _request_start(self)
+        # Released after a press — fire once.
+        self._was_pressed = False
+        if self._running:
+            _request_interrupt(self)
+        else:
+            _request_start(self)
 
     def _drain_pending(self):
         """Consume a queued ``_pending`` fallback.
@@ -111,7 +98,7 @@ class Launcher:
                 _exec_program(self._program_path)
             finally:
                 self._running = False
-            print("openbricks: idle. Short-press button to run", self._program_path)
+            print("openbricks: idle. Press button to run", self._program_path)
         elif self._pending == "stop":
             self._pending = None
 
@@ -145,9 +132,7 @@ def _scheduled_start(launcher_instance):
     keeps firing, so routing start through ``micropython.schedule``
     makes button-press-to-restart work even with nothing actively
     draining. This is what lets the user press the button again after
-    ``run`` exits and have the robot start again (output just goes
-    nowhere visible since the client terminal is gone — that's fine,
-    same UX as Pybricks).
+    ``run`` exits and have the robot start again.
     """
     if launcher_instance._running:
         return  # already running; ignore (the raise path handles stop)
@@ -156,7 +141,7 @@ def _scheduled_start(launcher_instance):
         _exec_program(launcher_instance._program_path)
     finally:
         launcher_instance._running = False
-    print("openbricks: idle. Short-press button to run",
+    print("openbricks: idle. Press button to run",
           launcher_instance._program_path)
 
 
@@ -181,8 +166,8 @@ def _exec_program_raw(program_path):
     ``KeyboardInterrupt``; prints other exceptions and returns.
 
     Used by ``run_program`` where the client needs to see
-    ``KeyboardInterrupt`` propagate (so the disconnect signals "stopped"
-    back to the user's terminal).
+    ``KeyboardInterrupt`` propagate (so the disconnect signals
+    "stopped" back to the user's terminal).
     """
     with open(program_path) as f:
         code = f.read()
@@ -218,7 +203,6 @@ _singleton = None
 
 def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
                      poll_ms=DEFAULT_POLL_MS,
-                     long_press_ms=DEFAULT_LONG_PRESS_MS,
                      timer_id=-1):
     """Install the Launcher singleton + persistent Timer. Idempotent.
 
@@ -232,7 +216,7 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
         return _singleton
     from machine import Pin, Timer
     btn = Pin(button_pin, Pin.IN, Pin.PULL_UP)
-    _singleton = Launcher(btn, poll_ms=poll_ms, long_press_ms=long_press_ms)
+    _singleton = Launcher(btn, poll_ms=poll_ms)
     _singleton._timer = Timer(timer_id)
     _singleton._timer.init(
         period=poll_ms, mode=Timer.PERIODIC, callback=_singleton._tick)
@@ -242,21 +226,19 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
 # ---- entry points ----
 
 def run(program_path=DEFAULT_PROGRAM_PATH, button_pin=DEFAULT_BUTTON_PIN,
-        poll_ms=DEFAULT_POLL_MS, long_press_ms=DEFAULT_LONG_PRESS_MS,
-        timer_id=-1):
+        poll_ms=DEFAULT_POLL_MS, timer_id=-1):
     """Install the button watcher and block on the cooperative drain
     loop. Called from the frozen ``main.py``.
 
     Intentionally blocks forever. If ``openbricks-dev run`` later sends
     a Ctrl-C over the REPL to interrupt this loop, the Timer stays
     alive (we never ``deinit`` it) so subsequent ``run_program`` /
-    button-press stop continue to work.
+    button-press start continue to work.
     """
     launcher = _ensure_launcher(
-        button_pin=button_pin, poll_ms=poll_ms,
-        long_press_ms=long_press_ms, timer_id=timer_id)
+        button_pin=button_pin, poll_ms=poll_ms, timer_id=timer_id)
     launcher._program_path = program_path
-    print("openbricks: idle. Short-press button to run", program_path)
+    print("openbricks: idle. Press button to run", program_path)
     while True:
         launcher._drain_pending()
         time.sleep_ms(poll_ms)
@@ -265,10 +247,11 @@ def run(program_path=DEFAULT_PROGRAM_PATH, button_pin=DEFAULT_BUTTON_PIN,
 def run_program(program_path=DEFAULT_PROGRAM_PATH):
     """Client-triggered entry for ``openbricks-dev run``.
 
-    Sets the ``_running`` flag so a short button press routes through
+    Sets the ``_running`` flag so a button press routes through
     ``_request_interrupt``, then exec's the program in the main
-    thread. Propagates ``KeyboardInterrupt`` so the raw-REPL disconnect
-    signals "stopped" back to the client (which then exits).
+    thread. Propagates ``KeyboardInterrupt`` so the raw-REPL
+    disconnect signals "stopped" back to the client (which then
+    exits).
     """
     launcher = _ensure_launcher()
     launcher._running = True

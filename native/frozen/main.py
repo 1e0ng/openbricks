@@ -4,14 +4,20 @@ Default ``main.py`` frozen into the openbricks firmware image.
 
 Runs on every boot unless the user has written their own ``/main.py``
 into the VFS (which takes priority over the frozen copy). The default
-wires the Pybricks-style workflow: bring BLE up, instantiate the
-platform's hub for the BLE long-press toggle, and hand off to the
-button-gated launcher so user code from ``openbricks-dev download``
-only runs when the user actually presses the hub button.
+wires the Pybricks-style workflow:
+
+* BLE + NUS REPL up first so the openbricks-dev tool can always reach
+  the hub (via ``bluetooth.apply_persisted_state()``).
+* Platform hub constructed to wire the BLE-toggle **short-press**
+  button on GPIO 5 (flashes the LED blue/yellow for on/off feedback
+  on RGB-capable hubs).
+* The program-button watcher on GPIO 4 (short-press = run/stop) is
+  started via ``launcher.run()``, which also blocks here forever.
 
 If you want a different boot sequence — e.g. a calibration routine
 that runs unconditionally before the launcher, or BLE-off-by-default —
-write your own ``/main.py`` via ``mpremote cp`` or the REPL.
+write your own ``/main.py`` via ``openbricks-dev download --path /main.py``
+or ``mpremote cp``.
 """
 
 from openbricks import bluetooth
