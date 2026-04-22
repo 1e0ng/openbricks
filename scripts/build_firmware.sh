@@ -3,9 +3,13 @@
 #
 # Build the openbricks firmware image.
 #
+# One image is reused across every hub — per-hub identity (the BLE
+# advertising / addressing name) is set at **flash** time, not build
+# time. See ``scripts/flash_firmware.sh --name``.
+#
 # Usage:
-#   ./scripts/build_firmware.sh esp32       # default
-#   ./scripts/build_firmware.sh esp32s3     # ESP32-S3 (Xtensa LX7, native USB)
+#   ./scripts/build_firmware.sh esp32                    # default
+#   ./scripts/build_firmware.sh esp32s3                  # ESP32-S3
 #
 # Requirements:
 #   * ``native/micropython`` submodule initialised:
@@ -15,6 +19,7 @@
 set -euo pipefail
 
 PLATFORM="${1:-esp32}"
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NATIVE_DIR="${REPO_ROOT}/native"
 MICROPY_DIR="${NATIVE_DIR}/micropython"
@@ -74,6 +79,7 @@ case "${PLATFORM}" in
 
         echo
         echo "done — firmware at ${PORT_DIR}/build-${BOARD}/firmware.bin"
+        echo "       flash with: scripts/flash_firmware.sh --name NAME --port /dev/ttyUSB0"
         ;;
     *)
         echo "usage: $0 [esp32|esp32s3]"

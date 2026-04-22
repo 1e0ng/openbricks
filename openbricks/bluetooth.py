@@ -18,6 +18,12 @@ Then toggle programmatically (or from the hub's button — see
     bluetooth.toggle()                # flip current state, persist, apply
     bluetooth.set_enabled(False)      # explicit off
 
+Activating BLE requires a hub name (``openbricks.HUB_NAME``) — flash
+the image with ``scripts/flash_firmware.py --name NAME`` first. We
+refuse to advertise with no name rather than defaulting to a shared
+value, since two hubs with the same advertising name can't be
+individually addressed.
+
 ``esp32.NVS`` and ``bluetooth.BLE`` are imported lazily so desktop
 tests running under unix MicroPython don't need to have the firmware-
 only modules present — they install fakes in ``tests/_fakes_ble.py``.
@@ -25,6 +31,21 @@ only modules present — they install fakes in ``tests/_fakes_ble.py``.
 
 _NAMESPACE = "openbricks"
 _KEY       = "ble_enabled"
+
+
+class HubNameNotSetError(RuntimeError):
+    """Raised when the firmware was flashed without ``--name NAME``."""
+
+
+def _require_hub_name():
+    import openbricks
+    name = openbricks.HUB_NAME
+    if name is None:
+        raise HubNameNotSetError(
+            "hub name not set — reflash with "
+            "scripts/flash_firmware.py --name NAME --port /dev/ttyUSB0"
+        )
+    return name
 
 
 def is_enabled():
@@ -39,13 +60,25 @@ def is_enabled():
 
 
 def set_enabled(enabled):
-    """Persist ``enabled`` and apply it to the BLE stack immediately."""
+    """Persist ``enabled`` and apply it to the BLE stack immediately.
+
+    Raises :class:`HubNameNotSetError` when turning BLE on with no hub
+    name flashed. Turning BLE off is always allowed — a nameless hub
+    can still be silenced.
+    """
     import esp32
     import bluetooth
+    if enabled:
+        name = _require_hub_name()
     nvs = esp32.NVS(_NAMESPACE)
     nvs.set_i32(_KEY, 1 if enabled else 0)
     nvs.commit()
-    bluetooth.BLE().active(bool(enabled))
+    ble = bluetooth.BLE()
+    if enabled:
+        # gap_name must be set before active(True); config() raises if
+        # the stack is already active.
+        ble.config(gap_name=name)
+    ble.active(bool(enabled))
 
 
 def toggle():
@@ -60,7 +93,14 @@ def apply_persisted_state():
 
     Call this at boot (e.g. top of ``main.py``) so the BLE radio reflects
     whatever the user last chose before the reboot — or comes up enabled
-    on the very first boot.
+    on the very first boot. Raises :class:`HubNameNotSetError` when the
+    persisted state is enabled but no hub name was flashed.
     """
     import bluetooth
-    bluetooth.BLE().active(is_enabled())
+    enabled = is_enabled()
+    if enabled:
+        name = _require_hub_name()
+    ble = bluetooth.BLE()
+    if enabled:
+        ble.config(gap_name=name)
+    ble.active(enabled)
