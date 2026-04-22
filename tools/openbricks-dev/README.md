@@ -41,7 +41,9 @@ Runs a BLE scan and prints every named device found, sorted by RSSI (strongest f
 openbricks-dev run -n RobotA examples/hello.py
 ```
 
-Connects to the named hub over BLE, pipes the script into the MicroPython REPL via paste mode, and streams stdout/stderr back to your terminal while it executes. Ctrl-C interrupts the remote program. Transient — nothing is written to the hub's flash; for that use `download` (PR 4).
+Connects to the named hub over BLE, uploads the script through MicroPython's raw-paste protocol (same one `mpremote` uses), and streams stdout/stderr back to your terminal while it executes. Ctrl-C interrupts the remote program. Transient — nothing is written to the hub's flash; for that use `download` (PR 4).
+
+The script is not echoed back to the local terminal, and stderr (e.g. exception tracebacks) is surfaced separately after stdout completes.
 
 ### `stop` — interrupt the running program
 
