@@ -20,6 +20,11 @@ coverage:
           - c-core
         target: auto
         threshold: 1%
+      openbricks-py:
+        flags:
+          - openbricks-py
+        target: auto
+        threshold: 2%
       openbricks-dev:
         flags:
           - openbricks-dev
@@ -37,6 +42,9 @@ flags:
   c-core:
     paths:
       - native/user_c_modules/openbricks/
+  openbricks-py:
+    paths:
+      - openbricks/
   openbricks-dev:
     paths:
       - tools/openbricks-dev/openbricks_dev/
