@@ -58,18 +58,18 @@ Output tree: `native/micropython/ports/esp32/build-openbricks_<target>/`
 
 ## Flashing
 
-Use `scripts/flash_firmware.py`. It drives `esptool.py` to write the image and then writes the hub's BLE advertising name into NVS. The name is **per-hub**, set at flash time (not build time) — one firmware image is reused across every hub, and each hub gets its own identity here. ``--name`` is mandatory: two hubs that answer to the same name can't be individually addressed over BLE.
+Use `openbricks-dev flash`. It drives `esptool.py` to write the image and then writes the hub's BLE advertising name into NVS. The name is **per-hub**, set at flash time (not build time) — one firmware image is reused across every hub, and each hub gets its own identity here. `--name` is mandatory: two hubs that answer to the same name can't be individually addressed over BLE.
 
 ```
-pip install esptool mpremote     # one-time
+pip install -e tools/openbricks-dev     # one-time; pulls in bleak + esptool + mpremote
 
-scripts/flash_firmware.py \
+openbricks-dev flash \
     --name RobotA \
     --port /dev/tty.usbserial-XXXX \
     --firmware native/micropython/ports/esp32/build-openbricks_esp32s3/firmware.bin
 ```
 
-The script erases flash, writes `firmware.bin` at `0x0` (S3) / auto-detect (classic), waits for the device to boot, then pokes the name into `esp32.NVS("openbricks").hub_name` via `mpremote` and reads it back to verify. Cross-platform — works on macOS, Linux, Windows (use `COM5` etc. for `--port`).
+The command erases flash, writes `firmware.bin` at `0x0` (S3) / auto-detect (classic), waits for the device to boot, then pokes the name into `esp32.NVS("openbricks").hub_name` via `mpremote` and reads it back to verify. Cross-platform — works on macOS, Linux, Windows (use `COM5` etc. for `--port`).
 
 If you'd rather use `esptool.py` directly (e.g. mass-flashing with a fixture, no name needed yet), the raw commands:
 

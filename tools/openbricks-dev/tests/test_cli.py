@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: MIT
+"""Tests for the top-level argparse + dispatch in ``openbricks_dev.cli``."""
+
+import io
+import sys
+import unittest
+from unittest.mock import patch
+
+from openbricks_dev import cli
+
+
+class BuildParserTests(unittest.TestCase):
+    """Ensure required args are required and optional ones default correctly."""
+
+    def setUp(self):
+        self.parser = cli._build_parser()
+
+    def _parse(self, argv):
+        return self.parser.parse_args(argv)
+
+    # ---- flash ----
+
+    def test_flash_requires_name_port_firmware(self):
+        # Each of the three required args, missing in turn, should exit.
+        base = ["flash", "--name", "A", "--port", "P", "--firmware", "F"]
+        for missing in ("--name", "--port", "--firmware"):
+            idx = base.index(missing)
+            truncated = base[:idx] + base[idx + 2:]
+            with self.assertRaises(SystemExit):
+                # Suppress argparse's error text so the test output stays
+                # clean — we only care that it exits non-zero.
+                with patch("sys.stderr", new_callable=io.StringIO):
+                    self._parse(truncated)
+
+    def test_flash_defaults(self):
+        args = self._parse([
+            "flash", "--name", "RobotA", "--port", "/dev/ttyUSB0",
+            "--firmware", "firmware.bin",
+        ])
+        self.assertEqual(args.chip, "auto")
+        self.assertEqual(args.baud, "460800")
+        self.assertFalse(args.skip_erase)
+
+    def test_flash_overrides(self):
+        args = self._parse([
+            "flash", "--name", "RobotA", "--port", "COM5",
+            "--firmware", "fw.bin", "--chip", "esp32s3",
+            "--baud", "921600", "--skip-erase",
+        ])
+        self.assertEqual(args.chip, "esp32s3")
+        self.assertEqual(args.baud, "921600")
+        self.assertTrue(args.skip_erase)
+
+    # ---- list ----
+
+    def test_list_defaults(self):
+        args = self._parse(["list"])
+        self.assertEqual(args.timeout, 5.0)
+        self.assertFalse(args.all)
+
+    def test_list_accepts_timeout_and_all(self):
+        args = self._parse(["list", "--timeout", "2.5", "--all"])
+        self.assertEqual(args.timeout, 2.5)
+        self.assertTrue(args.all)
+
+    # ---- no subcommand ----
+
+    def test_missing_subcommand_exits(self):
+        with self.assertRaises(SystemExit):
+            with patch("sys.stderr", new_callable=io.StringIO):
+                self._parse([])
+
+
+class MainDispatchTests(unittest.TestCase):
+    """``cli.main`` should route to the right subcommand module."""
+
+    def test_flash_routes_to_flash_run(self):
+        with patch("openbricks_dev.flash.run", return_value=0) as flash_run:
+            rc = cli.main([
+                "flash", "--name", "A", "--port", "P", "--firmware", "F",
+            ])
+        self.assertEqual(rc, 0)
+        flash_run.assert_called_once()
+        args = flash_run.call_args[0][0]
+        self.assertEqual(args.name, "A")
+
+    def test_list_routes_to_scan_run(self):
+        with patch("openbricks_dev.scan.run", return_value=0) as scan_run:
+            rc = cli.main(["list", "--timeout", "1"])
+        self.assertEqual(rc, 0)
+        scan_run.assert_called_once()
+
+    def test_exception_from_subcommand_becomes_rc_1(self):
+        def _boom(args):
+            raise RuntimeError("boom")
+        with patch("openbricks_dev.flash.run", side_effect=_boom):
+            with patch("sys.stderr", new_callable=io.StringIO) as err:
+                rc = cli.main([
+                    "flash", "--name", "A", "--port", "P", "--firmware", "F",
+                ])
+        self.assertEqual(rc, 1)
+        self.assertIn("boom", err.getvalue())
+
+    def test_keyboard_interrupt_becomes_rc_130(self):
+        def _cancel(args):
+            raise KeyboardInterrupt()
+        with patch("openbricks_dev.scan.run", side_effect=_cancel):
+            with patch("sys.stderr", new_callable=io.StringIO):
+                rc = cli.main(["list"])
+        self.assertEqual(rc, 130)
+
+
+if __name__ == "__main__":
+    unittest.main()

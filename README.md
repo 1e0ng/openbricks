@@ -62,7 +62,7 @@ See `examples/full_robot.py` for a longer end-to-end demo.
 
 Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, 2-DOF coupled drivebase, and both quadrature encoders (software-IRQ and hardware-PCNT) all live as `user_c_modules` inside the firmware — the entire tick body is C, nothing on the hot path goes through a Python frame. Every bundled driver works end to end; the 136-test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
 
-**Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Grab `openbricks-esp32-firmware.bin` and flash with `esptool.py` — see `docs/build.md`.
+**Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Grab `openbricks-esp32-firmware.bin` and flash with `openbricks-dev flash` (see `tools/openbricks-dev/README.md`) or `esptool.py` directly — details in `docs/build.md`.
 
 Next on the roadmap: 1.0 polish + release (M5). The M4 hub abstraction (status LED, user button) and the SSD1306 OLED driver are both on `main`.
 
