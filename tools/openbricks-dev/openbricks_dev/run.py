@@ -1,39 +1,24 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev run -n NAME script.py`` — push a Python script to a hub
-over BLE and stream its output to the terminal while it executes.
+``openbricks-dev run -n NAME script.py`` — stage a script to the hub,
+launch it immediately, stream output back, exit when the program stops.
 
-Transport: MicroPython **raw-paste mode** (same protocol ``mpremote``
-uses over serial) on top of the NUS REPL bridge.
+Semantics mirror ``pybricks-dev run``:
 
-Why raw-paste over plain paste mode:
+* The script is written to ``/program.py`` on the hub (same file
+  ``openbricks-dev download`` stages to).
+* The hub's launcher execs it right away — no button press required to
+  start.
+* While running, pressing the hub button raises ``KeyboardInterrupt``
+  in the program (same path the launcher uses for download-then-press).
+* When the program stops (finished, raised, or interrupted by button),
+  the terminal exits.
 
-* Paste mode echoes every uploaded line back with a ``=== `` prefix,
-  polluting the user's transcript.
-* Raw-paste has window-based flow control so long scripts don't
-  overrun a slow BLE link.
-* stdout and stderr are framed by ``\\x04`` delimiters, so we can
-  stream stdout live and still surface a clean exception block.
-
-Flow (see ``micropython/ports/unix/modrepl.c`` for the device side):
-
-    host: Ctrl-C Ctrl-C     # interrupt whatever was running
-    host: Ctrl-A            # enter raw REPL
-    hub:  "raw REPL; CTRL-B to exit\\r\\n>"
-    host: Ctrl-E 'A' Ctrl-A # request raw-paste
-    hub:  "R\\x01" + <LE16 window-size>
-    host: <script bytes>    # respecting flow-control bytes:
-    hub:  Ctrl-A            #   (raw REPL flow control: \\x01 → window refilled)
-    host: Ctrl-D            # commit
-    hub:  Ctrl-D            # ack — script starts running
-    hub:  <stdout bytes...>
-    hub:  Ctrl-D            # end of stdout
-    hub:  <stderr bytes...>
-    hub:  Ctrl-D            # end of stderr
-    hub:  ">"               # back at raw REPL prompt
-
-Host-side Ctrl-C forwards a Ctrl-C byte to the hub and lets the
-traceback drain.
+Transport: NUS + raw-paste mode. The upload is a single Python script
+that does two things on the hub: write the staged file and call
+``openbricks.launcher.run_program`` to execute it. That keeps all the
+start/stop bookkeeping on the hub side where the Timer-driven button
+watcher lives.
 """
 
 import asyncio
@@ -58,18 +43,22 @@ _RAW_PASTE_REQUEST   = b"\x05A\x01"
 _RAW_PASTE_SUPPORTED = b"R\x01"
 _RAW_REPL_BANNER     = b"raw REPL; CTRL-B to exit\r\n>"
 
-# Flow-control bytes the hub emits during raw-paste upload.
-_FLOW_ACK   = b"\x01"   # window refilled by ``window_size`` bytes
-_FLOW_ABORT = b"\x04"   # hub bailed; abort the upload
+_FLOW_ACK   = b"\x01"
+_FLOW_ABORT = b"\x04"
+
+# Where the script lands; same target as ``openbricks-dev download`` so
+# the post-run state matches what a follow-up button press would rerun.
+_TARGET_PATH = "/program.py"
+
+
+# Soft upper bound — same as download, since the upload shape is the same.
+_MAX_SCRIPT_BYTES = 64 * 1024
 
 
 class _BufferedLink:
-    """Thin buffer over ``NUSLink`` exposing exact-byte reads.
-
-    ``NUSLink.read(timeout)`` returns whatever has arrived since last
-    call — one notification or several coalesced. The raw-paste
-    protocol needs to read specific byte counts and scan for
-    delimiters, so we interpose a small pushback buffer.
+    """Pushback buffer over ``NUSLink``. Same helper the download flow
+    uses — duplicated here instead of a cross-module import so neither
+    subcommand leaks internals of the other.
     """
 
     def __init__(self, link):
@@ -98,8 +87,6 @@ class _BufferedLink:
         return out
 
     async def drain(self, timeout=0.3):
-        """Best-effort consume whatever is buffered or arrives briefly.
-        Used after an interrupt to flush tracebacks / prompts."""
         try:
             chunk = await asyncio.wait_for(
                 self._link.read(timeout=timeout), timeout=timeout + 0.1)
@@ -111,11 +98,8 @@ class _BufferedLink:
 
 
 async def _enter_raw_repl(blink, link):
-    # Interrupt anything running. Two Ctrl-Cs because MP collapses very
-    # rapid ones; one can race with a still-initialising interpreter.
     await link.write(b"\r" + _CTRL_C + _CTRL_C)
     await blink.drain()
-    # Ctrl-A → raw REPL. Banner ends in "\r\n>" at raw-REPL-prompt level.
     await link.write(b"\r" + _CTRL_A)
     await blink.read_until(_RAW_REPL_BANNER)
 
@@ -125,12 +109,11 @@ async def _leave_raw_repl(link):
 
 
 async def _raw_paste_upload(blink, link, script_bytes):
-    """Stream ``script_bytes`` to the hub under raw-paste flow control."""
     await link.write(_RAW_PASTE_REQUEST)
     resp = await blink.read_exact(2)
     if resp != _RAW_PASTE_SUPPORTED:
         raise RunError(
-            "hub did not acknowledge raw-paste mode (got %r); is the "
+            "hub did not acknowledge raw-paste mode (got %r); "
             "firmware older than MicroPython 1.14?" % resp)
     win_bytes = await blink.read_exact(2)
     window_size = win_bytes[0] | (win_bytes[1] << 8)
@@ -139,51 +122,42 @@ async def _raw_paste_upload(blink, link, script_bytes):
     i = 0
     n = len(script_bytes)
     while i < n:
-        # Consume any flow-control bytes that landed since the last write,
-        # then block if the window is empty.
         while window_remaining == 0 or len(blink._buf) > 0:
             b = await blink.read_exact(1, timeout=30.0)
             if b == _FLOW_ACK:
                 window_remaining += window_size
             elif b == _FLOW_ABORT:
-                # Tell the hub we heard it, then bail.
                 await link.write(_CTRL_D)
                 raise RunError("hub aborted the upload")
             else:
-                # Any other byte here is a protocol violation; surface it.
                 raise RunError("unexpected byte %r during raw-paste upload" % b)
             if window_remaining > 0:
                 break
-
         step = min(window_remaining, n - i)
         await link.write(script_bytes[i:i + step])
         window_remaining -= step
         i += step
 
-    # End-of-data marker.
     await link.write(_CTRL_D)
-    # Consume any final window-ACKs then the mandatory Ctrl-D acknowledgement.
     while True:
         b = await blink.read_exact(1, timeout=10.0)
         if b == _CTRL_D:
             return
         if b == _FLOW_ACK:
-            continue  # late ACK; ignore
+            continue
         raise RunError("unexpected byte %r after raw-paste end" % b)
 
 
 async def _stream_output(blink, out):
-    """Pipe hub stdout → ``out`` until we hit the stdout-end Ctrl-D.
+    """Stream stdout live, then stderr (typically a traceback) if any.
 
-    The raw-REPL protocol frames stdout and stderr both with trailing
-    ``\\x04``. We stream stdout live (flush after each chunk) so long-
-    running prints are visible immediately. stderr (typically an
-    exception traceback) arrives after stdout ends; we echo it with a
-    blank-line separator when non-empty so the user can see it.
+    The hub frames stdout and stderr each with a trailing ``\\x04``.
+    Live stdout flushing lets users see prints as they happen; stderr
+    arrives after stdout ends and is surfaced with a leading blank
+    line so a traceback is visually distinct from normal output.
     """
     # --- stdout ---
     while True:
-        # Drain whatever's in the pushback buffer first.
         if blink._buf:
             chunk = bytes(blink._buf)
             blink._buf = bytearray()
@@ -195,7 +169,6 @@ async def _stream_output(blink, out):
         if idx >= 0:
             out.write(chunk[:idx].decode("utf-8", "replace"))
             out.flush()
-            # Push anything past \x04 back for the stderr pass.
             blink._buf = bytearray(chunk[idx + 1:])
             break
         out.write(chunk.decode("utf-8", "replace"))
@@ -206,20 +179,44 @@ async def _stream_output(blink, out):
     if err:
         text = err.decode("utf-8", "replace")
         if text.strip():
-            # Separator so the exception is visually distinct from any
-            # script output that preceded it.
             if not text.startswith("\n"):
                 out.write("\n")
             out.write(text)
             out.flush()
 
 
+def _compose_bootstrap(user_bytes):
+    """Build the raw-paste payload: write /program.py, then trigger the
+    hub-side launcher. Wrapping the launcher call in a try/except turns
+    a ``KeyboardInterrupt`` (from a button-press stop) into a clean
+    print instead of a raw traceback — the client is exiting anyway,
+    and we'd rather not scare the user with the message that comes
+    with an uncaught interrupt.
+    """
+    lines = [
+        "with open(%r, 'wb') as f:" % _TARGET_PATH,
+        "    f.write(%s)" % repr(user_bytes),
+        "from openbricks import launcher",
+        "try:",
+        "    launcher.run_program(%r)" % _TARGET_PATH,
+        "except KeyboardInterrupt:",
+        "    print('openbricks: stopped by button press.')",
+    ]
+    return ("\n".join(lines) + "\n").encode()
+
+
 async def _run_async(name, script_path, scan_timeout):
     try:
         with open(script_path, "rb") as f:
-            script_bytes = f.read()
+            user_bytes = f.read()
     except OSError as e:
         raise RunError("cannot read script %r: %s" % (script_path, e))
+    if len(user_bytes) > _MAX_SCRIPT_BYTES:
+        raise RunError(
+            "script is %d bytes, exceeding the %d-byte soft limit" % (
+                len(user_bytes), _MAX_SCRIPT_BYTES))
+
+    bootstrap = _compose_bootstrap(user_bytes)
 
     print("connecting to %r ..." % name, file=sys.stderr)
     try:
@@ -231,13 +228,13 @@ async def _run_async(name, script_path, scan_timeout):
         blink = _BufferedLink(link)
         await _enter_raw_repl(blink, link)
         try:
-            await _raw_paste_upload(blink, link, script_bytes)
+            await _raw_paste_upload(blink, link, bootstrap)
             out = sys.stdout
             try:
                 await _stream_output(blink, out)
             except asyncio.CancelledError:
-                # Host Ctrl-C: forward to the hub, then let the
-                # traceback drain through the normal stream path.
+                # Host-side Ctrl-C — forward and drain the interrupt
+                # traceback before disconnecting.
                 await link.write(_CTRL_C)
                 try:
                     await _stream_output(blink, out)
@@ -245,8 +242,6 @@ async def _run_async(name, script_path, scan_timeout):
                     pass
                 raise
         finally:
-            # Leave raw REPL so the hub ends up at a friendly ">>> " prompt
-            # for the next connection.
             try:
                 await _leave_raw_repl(link)
             except Exception:

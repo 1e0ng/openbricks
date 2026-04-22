@@ -189,5 +189,59 @@ class StopRequestTests(unittest.TestCase):
         self.assertIs(calls[0], self.launcher)
 
 
+class RunProgramTests(unittest.TestCase):
+    """``launcher.run_program`` is the entry point ``openbricks-dev run``
+    jumps into via raw REPL. Must set ``_running`` so button-stop works,
+    propagate ``KeyboardInterrupt``, and swallow other exceptions (the
+    user sees the traceback via the normal REPL error-framing path)."""
+
+    def setUp(self):
+        # The singleton is module-level; clear it so each test starts clean.
+        launcher._singleton = None
+        self.addCleanup(_cleanup_program)
+
+    def _fake_ensure(self):
+        """Patch _ensure_launcher to install a Launcher around a fake
+        Pin — the real helper would try to create a machine.Pin + Timer."""
+        btn = _make_button()
+        inst = launcher.Launcher(btn)
+        launcher._singleton = inst
+        return inst
+
+    def test_run_program_sets_running_flag_during_exec(self):
+        inst = self._fake_ensure()
+        # Program observes _running via the shared singleton.
+        marker = "/tmp/_openbricks_run_program_marker"
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        self.addCleanup(lambda: os.remove(marker) if _path_exists(marker) else None)
+        path = _write_program(
+            "from openbricks import launcher as _l\n"
+            "assert _l._singleton._running is True\n"
+            "open(%r, 'w').write('ok')\n" % marker
+        )
+        launcher.run_program(path)
+        self.assertTrue(_path_exists(marker))
+        # Running flag cleared on exit.
+        self.assertFalse(inst._running)
+
+    def test_run_program_propagates_keyboard_interrupt(self):
+        self._fake_ensure()
+        path = _write_program("raise KeyboardInterrupt\n")
+        with self.assertRaises(KeyboardInterrupt):
+            launcher.run_program(path)
+        # Running flag cleared even when exec raises.
+        self.assertFalse(launcher._singleton._running)
+
+    def test_run_program_swallows_other_exceptions(self):
+        self._fake_ensure()
+        path = _write_program("raise ValueError('boom')\n")
+        # Should not raise — the exception is printed via _exec_program_raw.
+        launcher.run_program(path)
+        self.assertFalse(launcher._singleton._running)
+
+
 if __name__ == "__main__":
     unittest.main()

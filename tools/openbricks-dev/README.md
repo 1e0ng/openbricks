@@ -35,15 +35,19 @@ openbricks-dev list [--timeout 5.0] [--all]
 
 Runs a BLE scan and prints every named device found, sorted by RSSI (strongest first). `--all` includes unnamed devices too.
 
-### `run` — push a script and stream output
+### `run` — stage and launch; button stops it; client exits on stop
 
 ```
 openbricks-dev run -n RobotA examples/hello.py
 ```
 
-Connects to the named hub over BLE, uploads the script through MicroPython's raw-paste protocol (same one `mpremote` uses), and streams stdout/stderr back to your terminal while it executes. Ctrl-C interrupts the remote program. Transient — nothing is written to the hub's flash; for that use `download` (PR 4).
+Stages the script to `/program.py` (same target as `download`) and triggers the hub's launcher to execute it immediately. Output streams back to your terminal in real time.
 
-The script is not echoed back to the local terminal, and stderr (e.g. exception tracebacks) is surfaced separately after stdout completes.
+- **Button stop.** Pressing the hub button while the program runs raises `KeyboardInterrupt` via the same launcher path `download`+button uses. The client sees the clean "stopped by button press" line and exits.
+- **Program completion.** When the program finishes (or raises), the client disconnects and exits — same as `pybricks-dev run`.
+- **Script persists.** Because `run` stages to `/program.py`, the hub can re-run the last program via a button press without another upload. `download` and `run` differ only in whether the client auto-launches after upload.
+
+Stderr (e.g. exception tracebacks) arrives after stdout and is surfaced with a blank-line separator. No paste-mode `===` echo — raw-paste mode is clean.
 
 ### `stop` — interrupt the running program
 
