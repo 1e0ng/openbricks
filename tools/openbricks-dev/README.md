@@ -53,25 +53,21 @@ openbricks-dev stop -n RobotA
 
 Sends a single Ctrl-C byte over the NUS REPL bridge, which MicroPython surfaces as `KeyboardInterrupt`. Useful when `openbricks-dev run` has already exited but the hub's still chewing on a long-running user program.
 
-### `download` — persist a script to run at every boot
+### `download` — stage a script; hub button launches it
 
 ```
 openbricks-dev download -n RobotA examples/wander.py
 ```
 
-Writes the script to `/main.py` on the hub's filesystem and reboots, so the new code runs on every power-up. Pass `--path /user.py` to target a different file, or `--no-reset` to skip the automatic reboot.
+Writes the script to `/program.py` on the hub. **The code does not run automatically.** Place your robot, press the hub button, and the program starts. Press again to stop it mid-run — same UX as Pybricks Prime-hub `pybricksdev download`.
 
-A tiny boot-safety preamble is prepended automatically:
+This works because the firmware ships a frozen `main.py` that:
 
-```python
-try:
-    from openbricks import bluetooth
-    bluetooth.apply_persisted_state()
-except Exception as _e:
-    print("openbricks: BLE auto-start failed:", _e)
-```
+1. Brings BLE + REPL bridge up immediately (so `openbricks-dev run` / `download` / `stop` are always reachable, even when no program is running).
+2. Instantiates the board's Hub for the BLE long-press toggle.
+3. Watches the hub button via `openbricks.launcher.run()` — short-press runs `/program.py`, second short-press raises `KeyboardInterrupt` in the running program.
 
-This ensures BLE + REPL bridge come up before your code runs — even if your script raises, you can `openbricks-dev stop` / `openbricks-dev download` a new version without touching USB.
+Pass `--path /alt.py` to stage at a different filename (if you've written your own `main.py` that reads from there).
 
 ## Tests
 

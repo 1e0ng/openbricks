@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 """Tests for ``openbricks_dev.download``.
 
-We exercise the payload composition + upload-program generation with
-plain function calls, and the full BLE flow through a scripted NUS
-link (same fake as test_run.py) so no hardware is required.
+``download`` stages a script at ``/program.py`` on the hub. The user
+launches it via the hub button; the client never triggers
+``machine.reset()``. These tests verify that the upload program has
+no reset call and that the staged path is the launcher's target
+(``/program.py``).
 """
 
 import argparse
@@ -21,72 +23,54 @@ from openbricks_dev._nus import NUSError
 def _args(
     name="RobotA",
     script="s.py",
-    path="/main.py",
-    no_reset=False,
+    path="/program.py",
     scan_timeout=5.0,
 ):
     return argparse.Namespace(
-        name=name, script=script, path=path,
-        no_reset=no_reset, scan_timeout=scan_timeout,
+        name=name, script=script, path=path, scan_timeout=scan_timeout,
     )
 
 
 class ComposeTests(unittest.TestCase):
-    """Payload + upload-program generation — pure functions, no BLE."""
+    """Pure-function tests for the upload-program generator."""
 
-    def test_preamble_prepended_to_user_script(self):
-        payload = dl._compose_payload(b"print('hi')\n")
-        self.assertIn(b"from openbricks import bluetooth", payload)
-        self.assertIn(b"apply_persisted_state()", payload)
-        # User script ends up AFTER the preamble so it only runs once
-        # BLE was already kicked off.
-        pre_idx = payload.index(b"apply_persisted_state()")
-        user_idx = payload.index(b"print('hi')")
-        self.assertLess(pre_idx, user_idx)
-
-    def test_preamble_is_exception_safe(self):
-        # A broken openbricks install shouldn't bring the whole boot
-        # sequence down — the preamble must be wrapped in try/except.
-        payload = dl._compose_payload(b"")
-        self.assertIn(b"try:", payload)
-        self.assertIn(b"except Exception", payload)
-
-    def test_upload_program_writes_to_given_path(self):
-        prog = dl._compose_upload_program("/user/prog.py", b"X", reset_after=False)
-        self.assertIn(b"'/user/prog.py'", prog)
+    def test_writes_payload_to_given_path(self):
+        prog = dl._compose_upload_program("/program.py", b"payload")
+        self.assertIn(b"'/program.py'", prog)
         self.assertIn(b"open(", prog)
         self.assertIn(b"'wb'", prog)
         self.assertIn(b"f.write(", prog)
 
-    def test_upload_program_prints_byte_count(self):
-        prog = dl._compose_upload_program("/main.py", b"XY", reset_after=False)
+    def test_custom_path_surfaces_in_program(self):
+        prog = dl._compose_upload_program("/user/alt.py", b"X")
+        self.assertIn(b"'/user/alt.py'", prog)
+
+    def test_prints_byte_count(self):
+        prog = dl._compose_upload_program("/program.py", b"AB")
         self.assertIn(b"print('downloaded', 2", prog)
 
-    def test_upload_program_with_reset_ends_with_machine_reset(self):
-        prog = dl._compose_upload_program("/main.py", b"X", reset_after=True)
-        self.assertIn(b"import machine", prog)
-        self.assertIn(b"machine.reset()", prog)
+    def test_does_not_issue_machine_reset(self):
+        """Auto-reset would run user code immediately — the launcher
+        workflow requires a manual button press to start, so the
+        upload program MUST NOT call machine.reset()."""
+        prog = dl._compose_upload_program("/program.py", b"X")
+        self.assertNotIn(b"machine.reset", prog)
+        self.assertNotIn(b"import machine", prog)
 
-    def test_upload_program_without_reset_omits_machine(self):
-        prog = dl._compose_upload_program("/main.py", b"X", reset_after=False)
-        self.assertNotIn(b"machine.reset()", prog)
-
-    def test_payload_round_trips_through_bytes_literal(self):
-        # Raw bytes with NULs / high bits / newlines must survive being
-        # baked into ``repr(...)`` and written to the hub verbatim.
+    def test_payload_bytes_round_trip(self):
+        # Raw bytes with NULs / high bits / quotes / newlines must
+        # survive ``repr()`` wrapping and come through verbatim.
         tricky = b"\x00\xff\r\n'\"\\x41"
-        prog = dl._compose_upload_program("/p", tricky, reset_after=False)
-        # The exact tricky bytes, wrapped in whatever quoting repr chose,
-        # should appear somewhere in the generated source.
+        prog = dl._compose_upload_program("/p", tricky)
         self.assertIn(repr(tricky).encode(), prog)
 
 
-# --- end-to-end with a scripted link ---
+# --- end-to-end through a scripted NUS link ---
 
-_BANNER = b"raw REPL; CTRL-B to exit\r\n>"
+_BANNER      = b"raw REPL; CTRL-B to exit\r\n>"
 _R_SUPPORTED = b"R\x01"
-_WINDOW_8K = b"\x00\x20"  # 0x2000 LE — big enough that the upload fits without needing mid-stream ACKs
-_CTRL_D = b"\x04"
+_WINDOW_8K   = b"\x00\x20"  # 0x2000 LE — fits the upload without mid-stream ACKs
+_CTRL_D      = b"\x04"
 
 
 class _ScriptedLink:
@@ -116,73 +100,68 @@ class _ScriptedLink:
 class DownloadFlowTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
-        self.tmp.write("print('hi')\n")
+        self.tmp.write("print('hello')\n")
         self.tmp.close()
         self.addCleanup(os.unlink, self.tmp.name)
 
     def _standard_responses(self, stdout_msg):
-        # After interrupt / drain / raw-REPL banner / raw-paste ack /
-        # end-of-paste ack / stdout+EOT / stderr+EOT.
         return [
-            b"",
-            _BANNER,
-            _R_SUPPORTED + _WINDOW_8K,
-            _CTRL_D,
-            stdout_msg + _CTRL_D,
-            _CTRL_D,
+            b"",                          # drain after Ctrl-C interrupt
+            _BANNER,                      # raw-REPL banner
+            _R_SUPPORTED + _WINDOW_8K,    # raw-paste ack + window
+            _CTRL_D,                      # end-of-paste ack
+            stdout_msg + _CTRL_D,         # stdout + EOT
+            _CTRL_D,                      # stderr + EOT
         ]
 
-    def test_no_reset_flow_writes_then_leaves_raw_repl(self):
+    def test_default_flow_stages_to_program_py_without_reset(self):
         fake = _ScriptedLink(self._standard_responses(
-            b"downloaded 73 bytes to '/main.py'\r\n"))
+            b"downloaded 15 bytes to '/program.py'\r\n"))
 
         async def _fake_connect(name, scan_timeout=5.0):
             return fake
 
         with patch.object(dl.NUSLink, "connect", side_effect=_fake_connect), \
              patch("sys.stdout", new_callable=io.StringIO) as out:
-            rc = dl.run(_args(script=self.tmp.name, no_reset=True))
+            rc = dl.run(_args(script=self.tmp.name))
 
         self.assertEqual(rc, 0)
-        self.assertIn("downloaded", out.getvalue())
         joined = b"".join(fake.writes)
-        # Raw REPL entered, raw-paste request issued, leave-raw sent.
-        self.assertIn(b"\x01", joined)       # Ctrl-A
-        self.assertIn(b"\x05A\x01", joined)  # raw-paste request
-        self.assertIn(b"\r\x02", joined)     # Ctrl-B (leave raw)
-        # Upload program contains the user's print.
-        self.assertIn(b"print('hi')", joined)
+        # No reset should be issued anywhere in the upload.
+        self.assertNotIn(b"machine.reset", joined)
+        self.assertNotIn(b"import machine", joined)
+        # Raw REPL fully entered and cleanly exited.
+        self.assertIn(b"\x01", joined)      # Ctrl-A (enter raw)
+        self.assertIn(b"\x05A\x01", joined) # raw-paste request
+        self.assertIn(b"\r\x02", joined)    # Ctrl-B (leave raw)
+        # The upload program writes to the default /program.py path.
+        self.assertIn(b"'/program.py'", joined)
+        # User script bytes got embedded in the upload literal.
+        self.assertIn(b"hello", joined)
         self.assertTrue(fake.closed)
+        # Confirmation printed to the user's terminal.
+        self.assertIn("downloaded", out.getvalue())
 
-    def test_reset_flow_tolerates_stream_timeout(self):
-        # With reset_after=True the hub disconnects mid-stream, so
-        # _stream_output's read eventually raises RunError (b"" → timeout).
-        # download.py should swallow that specific error path.
-        fake = _ScriptedLink([
-            b"",
-            _BANNER,
-            _R_SUPPORTED + _WINDOW_8K,
-            _CTRL_D,
-            # stdout starts but never terminates — simulates disconnect.
-            b"downloaded 10 bytes to '/main.py'\r\n",
-        ])
+    def test_custom_path_flag_targets_alt_location(self):
+        fake = _ScriptedLink(self._standard_responses(
+            b"downloaded 15 bytes to '/main.py'\r\n"))
 
         async def _fake_connect(name, scan_timeout=5.0):
             return fake
 
         with patch.object(dl.NUSLink, "connect", side_effect=_fake_connect), \
              patch("sys.stdout", new_callable=io.StringIO):
-            # Default (no --no-reset) → reset_after=True. Should return 0
-            # despite the mid-stream cut-off.
-            rc = dl.run(_args(script=self.tmp.name))
+            rc = dl.run(_args(script=self.tmp.name, path="/main.py"))
 
         self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertIn(b"'/main.py'", joined)
 
-    def test_missing_script_raises_download_error_without_touching_ble(self):
+    def test_missing_script_raises_without_touching_ble(self):
         with patch.object(dl.NUSLink, "connect") as connect:
             with self.assertRaises(dl.DownloadError) as ctx:
                 asyncio.run(dl._download_async(
-                    "RobotA", "/nonexistent.py", "/main.py", False, 5.0))
+                    "RobotA", "/nonexistent.py", "/program.py", 5.0))
         connect.assert_not_called()
         self.assertIn("cannot read script", str(ctx.exception))
 
@@ -195,7 +174,7 @@ class DownloadFlowTests(unittest.TestCase):
         with patch.object(dl.NUSLink, "connect") as connect:
             with self.assertRaises(dl.DownloadError) as ctx:
                 asyncio.run(dl._download_async(
-                    "RobotA", big.name, "/main.py", False, 5.0))
+                    "RobotA", big.name, "/program.py", 5.0))
         connect.assert_not_called()
         self.assertIn("soft limit", str(ctx.exception))
 
@@ -206,7 +185,7 @@ class DownloadFlowTests(unittest.TestCase):
         with patch.object(dl.NUSLink, "connect", side_effect=_raise):
             with self.assertRaises(dl.DownloadError):
                 asyncio.run(dl._download_async(
-                    "Ghost", self.tmp.name, "/main.py", False, 5.0))
+                    "Ghost", self.tmp.name, "/program.py", 5.0))
 
 
 if __name__ == "__main__":

@@ -83,17 +83,16 @@ class BuildParserTests(unittest.TestCase):
         args = self._parse(["download", "-n", "RobotA", "s.py"])
         self.assertEqual(args.name, "RobotA")
         self.assertEqual(args.script, "s.py")
-        self.assertEqual(args.path, "/main.py")
-        self.assertFalse(args.no_reset)
+        # Default target is /program.py — the path the firmware's
+        # frozen launcher reads on button press.
+        self.assertEqual(args.path, "/program.py")
         self.assertEqual(args.scan_timeout, 5.0)
 
-    def test_download_accepts_path_and_no_reset(self):
+    def test_download_accepts_path_override(self):
         args = self._parse([
-            "download", "-n", "A", "s.py",
-            "--path", "/user.py", "--no-reset",
+            "download", "-n", "A", "s.py", "--path", "/main.py",
         ])
-        self.assertEqual(args.path, "/user.py")
-        self.assertTrue(args.no_reset)
+        self.assertEqual(args.path, "/main.py")
 
     # ---- stop ----
 

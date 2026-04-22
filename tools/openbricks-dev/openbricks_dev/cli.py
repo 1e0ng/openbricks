@@ -86,12 +86,14 @@ def _build_parser():
     # ---- download ----
     p_download = sub.add_parser(
         "download",
-        help="Persist a Python script to a hub so it runs at every boot.",
+        help="Stage a Python script on a hub; the user launches it with the hub button.",
         description="Upload SCRIPT to the hub's filesystem (default path "
-                    "``/main.py``). MicroPython runs it on every power-up. "
-                    "A tiny boot-safety preamble is prepended so BLE + REPL "
-                    "come up automatically — otherwise a crash in user code "
-                    "would leave the hub unreachable.",
+                    "``/program.py``). The downloaded code does NOT run "
+                    "automatically — the hub's frozen main.py watches "
+                    "the hub button and exec's the staged script on each "
+                    "short press. Second short-press stops a running "
+                    "program. Same workflow as Pybricks Prime-hub "
+                    "``pybricksdev download``.",
     )
     p_download.add_argument(
         "-n", "--name", required=True,
@@ -99,16 +101,12 @@ def _build_parser():
     )
     p_download.add_argument(
         "script", metavar="SCRIPT",
-        help="Path to the local Python script to persist.",
+        help="Path to the local Python script to stage.",
     )
     p_download.add_argument(
-        "--path", default="/main.py",
-        help="Destination path on the hub's filesystem. Default: /main.py.",
-    )
-    p_download.add_argument(
-        "--no-reset", action="store_true",
-        help="Don't reboot the hub after writing. Default is to reset so "
-             "the new script runs immediately.",
+        "--path", default="/program.py",
+        help="Destination path on the hub's filesystem. Default: "
+             "/program.py (which the frozen launcher reads).",
     )
     p_download.add_argument(
         "--scan-timeout", type=float, default=5.0,
