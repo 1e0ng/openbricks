@@ -1,6 +1,7 @@
 # openbricks
 
-[![coverage](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg)](https://codecov.io/gh/1e0ng/openbricks)
+[![firmware coverage](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=c-core)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=c-core)
+[![openbricks-dev coverage](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-dev)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-dev)
 
 > A Pybricks-style MicroPython firmware for **open hardware** — commodity MCUs, commodity motors, commodity sensors.
 
