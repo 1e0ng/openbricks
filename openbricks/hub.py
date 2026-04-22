@@ -20,10 +20,12 @@ long-press application button confuses users who'd otherwise expect
 BOOT to only mean "enter the bootloader".
 
 Both hubs auto-wire the BLE toggle button by default (``bluetooth=True``):
-constructing a hub restores the persisted BLE state, installs a long-
-press handler on the button, and — on the S3 — paints the WS2812
-blue (BLE on) or yellow (BLE off). Pass ``bluetooth=False`` to keep
-the button free for your own use.
+**constructing a hub** restores the persisted BLE state, installs a
+long-press handler on the ``button_pin``, and — on the S3 — paints
+the WS2812 blue (BLE on) or yellow (BLE off). Put
+``hub = ESP32S3DevkitHub()`` in your ``main.py`` to turn that on;
+omit the call (or pass ``bluetooth=False``) to keep the button free
+for your own use.
 
 External I2C components like SSD1306 OLEDs are **not** part of the hub
 — they're wired to any I2C bus the user chooses, instantiated directly
@@ -191,29 +193,17 @@ class ESP32S3DevkitHub(Hub):
 # depend on ``openbricks.bluetooth`` — the imports happen at the first
 # ``bluetooth=True`` construction only.
 
-# Module-level flag: prevents a second ``bluetooth=True`` hub
-# construction from spawning a parallel watcher on the same button
-# (which would toggle twice per long-press and net no-op). First call
-# wins; subsequent calls are a no-op. ``openbricks.__init__`` auto-boots
-# an instance, so this normally fires there — a user who later does
-# ``hub = ESP32S3DevkitHub()`` just gets a plain hub with
-# ``hub.bluetooth_toggle is None``.
-_bluetooth_toggle_installed = False
-
-
 def _install_bluetooth_toggle(hub):
-    global _bluetooth_toggle_installed
-    if _bluetooth_toggle_installed:
-        return
+    """Called from the hub constructors when ``bluetooth=True``.
+
+    Restores the persisted BLE state, builds a long-press watcher on
+    the hub's button (recolouring the LED on each toggle if it's
+    RGB-capable), and stashes the watcher on ``hub.bluetooth_toggle``
+    so callers can ``stop()`` it later if they want the button for
+    something else.
+    """
     from openbricks import bluetooth as _bt
     from openbricks.bluetooth_button import BluetoothToggleButton
     _bt.apply_persisted_state()
     hub.bluetooth_toggle = BluetoothToggleButton(hub.button, led=hub.led)
     hub.bluetooth_toggle.start()
-    _bluetooth_toggle_installed = True
-
-
-def _reset_bluetooth_toggle_for_test():
-    """Test-only hook — drop the once-only latch between tests."""
-    global _bluetooth_toggle_installed
-    _bluetooth_toggle_installed = False
