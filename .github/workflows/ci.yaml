@@ -253,12 +253,15 @@ jobs:
           mkdir -p release-out
           BUILD_DIR=native/micropython/ports/esp32/build-openbricks_${TARGET}
 
-          # Tag name for versioned releases, or short SHA for rolling
-          # ``latest`` pre-releases on main.
+          # Tag name for versioned releases (e.g. ``v0.9.0``); literal
+          # ``latest`` for rolling pre-releases from ``main``. Keeping
+          # the main-branch name short and constant means the filename
+          # is stable across main pushes — users pointing at
+          # ``latest`` can rely on the same URL.
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
           else
-            VERSION="main-${GITHUB_SHA::7}"
+            VERSION="latest"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -314,9 +317,9 @@ jobs:
             Commit: ${{ github.sha }}
             ESP-IDF: v5.5.4
 
-            Images (filenames are version-stamped — these are the short tails):
-            - `openbricks-esp32-firmware-*.bin` — original ESP32 (Xtensa LX6)
-            - `openbricks-esp32s3-firmware-*.bin` — ESP32-S3 (Xtensa LX7, native USB)
+            Images:
+            - `openbricks-esp32-firmware-latest.bin` — original ESP32 (Xtensa LX6)
+            - `openbricks-esp32s3-firmware-latest.bin` — ESP32-S3 (Xtensa LX7, native USB)
 
             Flash with `openbricks-dev flash` or `esptool.py` — see `docs/build.md`.
           files: release-out/*
