@@ -42,6 +42,51 @@ jobs:
       - name: Run test suite under unix MicroPython
         run: ./native/micropython/ports/unix/build-standard/micropython tests/run.py
 
+  openbricks-py:
+    # Python-layer coverage of the firmware package (``openbricks/``).
+    # Only the modules that don't need the ``_openbricks_native`` C
+    # module are covered here — bluetooth, ble_repl, launcher,
+    # bluetooth_button, hub, __init__, interfaces. The rest (drivers,
+    # drivebase, scheduler) run against the real C code under MicroPython
+    # in the ``test`` + ``coverage`` jobs below, so they're covered
+    # there instead (as C lines, via gcov).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install coverage
+        run: |
+          python -m pip install --upgrade pip
+          pip install coverage
+
+      - name: Run CPython-compatible firmware tests under coverage
+        # Restrict coverage to the files the tests actually exercise
+        # so drivers/etc. don't show up as 0% Python-covered (they're
+        # C-covered — different surface).
+        run: |
+          python -m coverage run \
+            --include='openbricks/__init__.py,openbricks/interfaces.py,openbricks/bluetooth.py,openbricks/ble_repl.py,openbricks/bluetooth_button.py,openbricks/hub.py,openbricks/launcher.py' \
+            -m unittest \
+              tests.test_bluetooth \
+              tests.test_bluetooth_button \
+              tests.test_ble_repl \
+              tests.test_hub \
+              tests.test_launcher
+          python -m coverage report
+          python -m coverage xml -o coverage.xml
+
+      - name: Upload openbricks-py coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          flags: openbricks-py
+          fail_ci_if_error: false
+
   openbricks-dev:
     # Host-side CLI tests (tools/openbricks-dev). Pure CPython, no BLE,
     # no esptool — subprocess.run and BleakScanner are mocked so this

@@ -1,0 +1,50 @@
+# Codecov configuration — per-flag status checks.
+#
+# The default Codecov behaviour is to flag a project-wide drop in
+# aggregate coverage as a failure. That misfires here because the
+# openbricks-dev host CLI (Python, ~73% covered) and the C core
+# (gcov, ~98% covered) are different codebases with different
+# testability profiles — adding one would otherwise drag the
+# aggregate number down and flip the check red for no real regression.
+#
+# Instead we compute status per-flag, with a small threshold to
+# absorb rounding noise. A true regression in either surface still
+# fails CI; an asymmetric addition in the other doesn't.
+
+coverage:
+  status:
+    project:
+      default: false
+      c-core:
+        flags:
+          - c-core
+        target: auto
+        threshold: 1%
+      openbricks-py:
+        flags:
+          - openbricks-py
+        target: auto
+        threshold: 2%
+      openbricks-dev:
+        flags:
+          - openbricks-dev
+        target: auto
+        threshold: 2%
+    patch:
+      default:
+        # Patch coverage is the right gate — new code should be
+        # tested. Keep it at auto (target = base-branch patch level)
+        # so the threshold moves with the project.
+        target: auto
+        threshold: 1%
+
+flags:
+  c-core:
+    paths:
+      - native/user_c_modules/openbricks/
+  openbricks-py:
+    paths:
+      - openbricks/
+  openbricks-dev:
+    paths:
+      - tools/openbricks-dev/openbricks_dev/
