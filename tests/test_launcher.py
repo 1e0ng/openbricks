@@ -63,8 +63,9 @@ def _press(button, hold_ms, poll_ms=50, tick_fn=None):
 
 
 class PressClassificationTests(unittest.TestCase):
-    """Launcher._tick should mark short presses as ``_pending = 'start'``
-    and skip presses that cross the long-press threshold."""
+    """Launcher._tick should mark short presses via ``_request_start``
+    (flag-fallback on CPython, scheduled callback on MP) and skip
+    presses that cross the long-press threshold."""
 
     def setUp(self):
         self.btn = _make_button()
@@ -74,10 +75,35 @@ class PressClassificationTests(unittest.TestCase):
             poll_ms=50,
             long_press_ms=1000,
         )
+        # Patch ``_request_start`` so these tests are runtime-agnostic.
+        # On MP, the real implementation calls ``micropython.schedule``
+        # which would otherwise bypass the ``_pending`` flag these
+        # tests assert on.
+        self._original_request_start = launcher._request_start
+        launcher._request_start = lambda inst: setattr(inst, "_pending", "start")
+        self.addCleanup(setattr, launcher, "_request_start", self._original_request_start)
 
     def test_short_press_queues_start(self):
+        # On CPython (no ``micropython.schedule``), ``_request_start``
+        # falls back to setting the ``_pending`` flag the main loop
+        # drains. On MP it would schedule directly instead.
         _press(self.btn, hold_ms=200, tick_fn=self.launcher._tick)
         self.assertEqual(self.launcher._pending, "start")
+
+    def test_short_press_while_idle_invokes_request_start(self):
+        # Regardless of runtime, ``_request_start`` is the single
+        # dispatch point for a short press while idle. Swap it for a
+        # recorder to verify.
+        calls = []
+        original = launcher._request_start
+        launcher._request_start = lambda inst: calls.append(inst)
+        try:
+            _press(self.btn, hold_ms=200, tick_fn=self.launcher._tick)
+        finally:
+            launcher._request_start = original
+
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0], self.launcher)
 
     def test_long_press_does_not_queue_start(self):
         # Held past 1 s threshold → BLE watcher's territory.
@@ -187,6 +213,46 @@ class StopRequestTests(unittest.TestCase):
 
         self.assertEqual(len(calls), 1)
         self.assertIs(calls[0], self.launcher)
+
+
+class ScheduledStartTests(unittest.TestCase):
+    """``_scheduled_start`` is the callback MicroPython runs between
+    bytecodes after a short-press-while-idle. It execs the staged
+    program and leaves the launcher back in the idle state, so
+    pressing the button AGAIN starts it again — even when main.py's
+    idle loop isn't running (which is the post-``openbricks-dev run``
+    state)."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored")
+        self.addCleanup(_cleanup_program)
+
+    def test_scheduled_start_exec_s_the_program(self):
+        marker = "/tmp/_openbricks_scheduled_start_marker"
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        self.addCleanup(
+            lambda: os.remove(marker) if _path_exists(marker) else None)
+        self.launcher._program_path = _write_program(
+            "open(%r, 'w').write('ran')\n" % marker)
+        launcher._scheduled_start(self.launcher)
+        self.assertTrue(_path_exists(marker))
+        self.assertFalse(self.launcher._running)
+
+    def test_scheduled_start_is_noop_when_already_running(self):
+        # A second scheduled_start while the first is still mid-exec
+        # must not re-enter. Simulate by pre-setting _running and
+        # asserting the function bails before touching the program file.
+        self.launcher._program_path = "/bogus/no/such/file.py"
+        self.launcher._running = True
+        # Should not raise OSError on the nonexistent file — the early
+        # return fires first.
+        launcher._scheduled_start(self.launcher)
+        self.assertTrue(self.launcher._running)  # unchanged
 
 
 class RunProgramTests(unittest.TestCase):

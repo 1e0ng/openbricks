@@ -94,14 +94,15 @@ class Launcher:
             if self._running:
                 _request_interrupt(self)
             else:
-                self._pending = "start"
+                _request_start(self)
 
     def _drain_pending(self):
-        """Consume a queued 'start' from the button-gated loop.
+        """Consume a queued ``_pending`` fallback.
 
-        Called from ``run()``'s cooperative drain loop. ``run_program``
-        doesn't use this path — it sets ``_running`` directly and lets
-        the caller drive exec.
+        Only needed when ``_request_start`` / ``_request_interrupt``
+        couldn't reach ``micropython.schedule`` (CPython tests). Under
+        MicroPython, schedule runs the start/stop callbacks itself and
+        this method is a no-op.
         """
         if self._pending == "start" and not self._running:
             self._pending = None
@@ -133,6 +134,44 @@ def _request_interrupt(launcher_instance):
         micropython.schedule(_raise_interrupt, None)
     except (ImportError, AttributeError, RuntimeError):
         launcher_instance._pending = "stop"
+
+
+def _scheduled_start(launcher_instance):
+    """Run ``/program.py`` from the MicroPython scheduler queue.
+
+    Why schedule instead of setting a flag for the idle loop to drain:
+    after ``openbricks-dev run`` interrupts the frozen ``main.py``,
+    the idle loop is gone — we're sitting at the REPL. But the Timer
+    keeps firing, so routing start through ``micropython.schedule``
+    makes button-press-to-restart work even with nothing actively
+    draining. This is what lets the user press the button again after
+    ``run`` exits and have the robot start again (output just goes
+    nowhere visible since the client terminal is gone — that's fine,
+    same UX as Pybricks).
+    """
+    if launcher_instance._running:
+        return  # already running; ignore (the raise path handles stop)
+    launcher_instance._running = True
+    try:
+        _exec_program(launcher_instance._program_path)
+    finally:
+        launcher_instance._running = False
+    print("openbricks: idle. Short-press button to run",
+          launcher_instance._program_path)
+
+
+def _request_start(launcher_instance):
+    """Schedule a program start from the button-watcher Timer.
+
+    Module-level so tests can swap it out. Falls back to the
+    ``_pending`` flag if ``micropython.schedule`` isn't available
+    (CPython).
+    """
+    try:
+        import micropython
+        micropython.schedule(_scheduled_start, launcher_instance)
+    except (ImportError, AttributeError, RuntimeError):
+        launcher_instance._pending = "start"
 
 
 # ---- program exec helpers ----
