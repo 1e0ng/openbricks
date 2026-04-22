@@ -77,12 +77,12 @@ If you'd rather use `esptool.py` directly (e.g. mass-flashing with a fixture, no
 # Classic ESP32 — bootloader at 0x1000
 esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX erase_flash
 esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX --baud 460800 \
-    write_flash -z 0x1000 openbricks-esp32-firmware.bin
+    write_flash -z 0x1000 openbricks-esp32-firmware-v0.9.0.bin
 
 # ESP32-S3 — bootloader at 0x0
 esptool.py --chip esp32s3 --port /dev/tty.usbmodemXXXX erase_flash
 esptool.py --chip esp32s3 --port /dev/tty.usbmodemXXXX --baud 460800 \
-    write_flash -z 0x0 openbricks-esp32s3-firmware.bin
+    write_flash -z 0x0 openbricks-esp32s3-firmware-v0.9.0.bin
 ```
 
 A hub flashed this way boots fine but has no name; `openbricks.bluetooth.set_enabled(True)` will raise `HubNameNotSetError` until you write one via `mpremote`:
