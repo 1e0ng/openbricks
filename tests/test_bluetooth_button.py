@@ -28,6 +28,12 @@ class BluetoothToggleButtonTests(unittest.TestCase):
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
         Timer.reset_for_test()
+        # The long-press fires bluetooth.toggle(), which activates BLE
+        # when flipping "off → on" and therefore needs a flashed hub
+        # name. Plant one in NVS to mimic a properly-flashed device.
+        import openbricks
+        _FakeNVS(openbricks._HUB_NAME_NVS_NAMESPACE).set_blob(
+            openbricks._HUB_NAME_NVS_KEY, b"TestHub")
 
     # ---- short-press path ----
 
@@ -45,8 +51,9 @@ class BluetoothToggleButtonTests(unittest.TestCase):
         # Default state (never written) is on — a no-op toggle would flip
         # to off. Confirm we're still at the default.
         self.assertFalse(_FakeBLE().active())   # never activated
-        # NVS also hasn't been written.
-        self.assertFalse("openbricks" in _FakeNVS._STORE)
+        # NVS ble_enabled flag hasn't been written (hub_name is planted in
+        # setUp, so the namespace itself does exist).
+        self.assertFalse("ble_enabled" in _FakeNVS._STORE.get("openbricks", {}))
 
     # ---- long-press path ----
 
@@ -106,7 +113,7 @@ class BluetoothToggleButtonTests(unittest.TestCase):
         time.sleep_ms(2000)
 
         self.assertFalse(_FakeBLE().active())
-        self.assertFalse("openbricks" in _FakeNVS._STORE)
+        self.assertFalse("ble_enabled" in _FakeNVS._STORE.get("openbricks", {}))
 
     def test_double_start_is_idempotent(self):
         btn = _StubButton()
@@ -140,6 +147,12 @@ class BluetoothToggleButtonLEDTests(unittest.TestCase):
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
         Timer.reset_for_test()
+        # The long-press fires bluetooth.toggle(), which activates BLE
+        # when flipping "off → on" and therefore needs a flashed hub
+        # name. Plant one in NVS to mimic a properly-flashed device.
+        import openbricks
+        _FakeNVS(openbricks._HUB_NAME_NVS_NAMESPACE).set_blob(
+            openbricks._HUB_NAME_NVS_KEY, b"TestHub")
 
     def test_start_paints_blue_when_ble_enabled(self):
         btn = _StubButton()

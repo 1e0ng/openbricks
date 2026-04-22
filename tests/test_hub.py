@@ -138,6 +138,12 @@ class HubBluetoothAutoWireTests(unittest.TestCase):
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
         Timer.reset_for_test()
+        # A hub name is normally written at flash time (see
+        # scripts/flash_firmware.py). Plant one here so apply_persisted_state
+        # in the hub's BLE auto-wire doesn't raise HubNameNotSetError.
+        import openbricks
+        _FakeNVS(openbricks._HUB_NAME_NVS_NAMESPACE).set_blob(
+            openbricks._HUB_NAME_NVS_KEY, b"TestHub")
 
     def test_s3_hub_default_activates_ble_and_paints_led_blue(self):
         hub = ESP32S3DevkitHub()
