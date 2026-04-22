@@ -22,7 +22,9 @@ How to run:
     # Or run it once without persisting:
     mpremote connect /dev/tty.usbserial-XXXX run examples/oled_hello.py
 
-Press the BOOT button (GPIO 0) to reset the counter back to zero.
+Wire a momentary button between GPIO 5 and GND to reset the counter.
+(GPIO 5 is the hub's default ``button_pin``; override via
+``ESP32DevkitHub(button_pin=<N>)`` if you wired it elsewhere.)
 """
 
 import time
@@ -66,7 +68,7 @@ while True:
     display.text("hello, openbricks", 0, 0)
     display.text("uptime:", 0, 20)
     display.text("%d s" % seconds, 0, 32)
-    display.text("(BOOT to reset)", 0, 52)
+    display.text("(hold btn to zero)", 0, 52)
     display.show()
 
     time.sleep(1)
