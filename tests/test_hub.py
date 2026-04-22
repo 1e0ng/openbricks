@@ -74,17 +74,17 @@ class ESP32DevkitHubTests(unittest.TestCase):
         hub = ESP32DevkitHub(bluetooth=False)
         self.assertIsInstance(hub, Hub)
         self.assertIsInstance(hub.led, StatusLED)
-        self.assertIsInstance(hub.button, Button)
+        self.assertIsInstance(hub.bluetooth_button, Button)
 
     def test_default_pins(self):
         hub = ESP32DevkitHub(bluetooth=False)
         self.assertEqual(hub.led._pin.pin, 2)
-        self.assertEqual(hub.button._pin.pin, 5)
+        self.assertEqual(hub.bluetooth_button._pin.pin, 5)
 
     def test_pin_overrides(self):
         hub = ESP32DevkitHub(led_pin=17, bluetooth_button_pin=9, bluetooth=False)
         self.assertEqual(hub.led._pin.pin, 17)
-        self.assertEqual(hub.button._pin.pin, 9)
+        self.assertEqual(hub.bluetooth_button._pin.pin, 9)
 
 
 class NeoPixelLEDTests(unittest.TestCase):
@@ -111,11 +111,11 @@ class ESP32S3DevkitHubTests(unittest.TestCase):
     def test_onboard_led_is_neopixel(self):
         hub = ESP32S3DevkitHub(bluetooth=False)
         self.assertIsInstance(hub.led, NeoPixelLED)
-        self.assertIsInstance(hub.button, Button)
+        self.assertIsInstance(hub.bluetooth_button, Button)
 
     def test_button_default_pin(self):
         hub = ESP32S3DevkitHub(bluetooth=False)
-        self.assertEqual(hub.button._pin.pin, 5)
+        self.assertEqual(hub.bluetooth_button._pin.pin, 5)
 
     def test_led_default_pin_is_48(self):
         hub = ESP32S3DevkitHub(bluetooth=False)

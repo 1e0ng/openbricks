@@ -12,3 +12,7 @@ package(
     "openbricks",
     base_path="$(MPY_DIR)/../..",
 )
+
+# Default ``main.py`` — drives the button-gated launcher.
+# See native/boards/openbricks_esp32/manifest.py for the long note.
+freeze("$(MPY_DIR)/../../native/frozen")

@@ -64,6 +64,7 @@ _TEST_MODULES = [
     "tests.test_bluetooth",
     "tests.test_bluetooth_button",
     "tests.test_ble_repl",
+    "tests.test_launcher",
 ]
 
 

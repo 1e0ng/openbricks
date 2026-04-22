@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Tests for openbricks.bluetooth_button — long-press toggles BLE."""
+"""Tests for openbricks.bluetooth_button — short-press toggles BLE."""
 
 import tests._fakes        # noqa: F401
 import tests._fakes_ble    # noqa: F401  (fake esp32 + bluetooth modules)
@@ -23,110 +23,103 @@ class _StubButton:
         return self.pressed_value
 
 
+def _plant_hub_name():
+    # ``bluetooth.toggle()`` activates BLE when flipping "off → on" and
+    # that path needs a flashed hub name. Plant one in NVS so the
+    # toggle succeeds in tests.
+    import openbricks
+    _FakeNVS(openbricks._HUB_NAME_NVS_NAMESPACE).set_blob(
+        openbricks._HUB_NAME_NVS_KEY, b"TestHub")
+
+
 class BluetoothToggleButtonTests(unittest.TestCase):
     def setUp(self):
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
         Timer.reset_for_test()
-        # The long-press fires bluetooth.toggle(), which activates BLE
-        # when flipping "off → on" and therefore needs a flashed hub
-        # name. Plant one in NVS to mimic a properly-flashed device.
-        import openbricks
-        _FakeNVS(openbricks._HUB_NAME_NVS_NAMESPACE).set_blob(
-            openbricks._HUB_NAME_NVS_KEY, b"TestHub")
+        _plant_hub_name()
 
-    # ---- short-press path ----
-
-    def test_short_press_does_not_toggle(self):
+    def test_press_and_release_fires_toggle_once(self):
         btn = _StubButton()
-        helper = BluetoothToggleButton(btn, long_press_ms=2000, poll_ms=50)
+        helper = BluetoothToggleButton(btn, poll_ms=50)
         helper.start()
 
-        # Press for 500 ms then release — well under the 2000 ms threshold.
         btn.pressed_value = True
-        time.sleep_ms(500)
+        time.sleep_ms(200)         # any press duration
+        btn.pressed_value = False
+        time.sleep_ms(100)         # release edge registered
+
+        # Exactly one toggle: default True → False.
+        self.assertEqual(_FakeNVS._STORE["openbricks"]["ble_enabled"], 0)
+        self.assertFalse(_FakeBLE().active())
+
+    def test_holding_button_does_not_re_fire(self):
+        # While the button stays pressed, no toggle fires — we only
+        # act on the release edge.
+        btn = _StubButton()
+        helper = BluetoothToggleButton(btn, poll_ms=50)
+        helper.start()
+
+        btn.pressed_value = True
+        time.sleep_ms(5000)        # held for ages
+
+        # Nothing toggled yet.
+        self.assertFalse("ble_enabled" in _FakeNVS._STORE.get("openbricks", {}))
+        self.assertFalse(_FakeBLE().active())
+
+        # Release now fires exactly one toggle.
         btn.pressed_value = False
         time.sleep_ms(100)
-
-        # Default state (never written) is on — a no-op toggle would flip
-        # to off. Confirm we're still at the default.
-        self.assertFalse(_FakeBLE().active())   # never activated
-        # NVS ble_enabled flag hasn't been written (hub_name is planted in
-        # setUp, so the namespace itself does exist).
-        self.assertFalse("ble_enabled" in _FakeNVS._STORE.get("openbricks", {}))
-
-    # ---- long-press path ----
-
-    def test_long_press_fires_toggle_once(self):
-        btn = _StubButton()
-        helper = BluetoothToggleButton(btn, long_press_ms=1000, poll_ms=50)
-        helper.start()
-
-        btn.pressed_value = True
-        time.sleep_ms(1200)  # one threshold crossing plus a few extra ticks
-
-        # Toggle should have fired exactly once: default True -> False.
         self.assertEqual(_FakeNVS._STORE["openbricks"]["ble_enabled"], 0)
-        self.assertFalse(_FakeBLE().active())
 
-    def test_long_press_does_not_re_fire_while_held(self):
+    def test_release_and_second_press_fires_again(self):
         btn = _StubButton()
-        helper = BluetoothToggleButton(btn, long_press_ms=1000, poll_ms=50)
+        helper = BluetoothToggleButton(btn, poll_ms=50)
         helper.start()
 
+        # 1st press-release: True → False.
         btn.pressed_value = True
-        time.sleep_ms(5000)  # far past threshold, many polls
-
-        # Still only one toggle (→ False).
-        self.assertEqual(_FakeNVS._STORE["openbricks"]["ble_enabled"], 0)
-        self.assertFalse(_FakeBLE().active())
-
-    def test_release_and_second_long_press_fires_again(self):
-        btn = _StubButton()
-        helper = BluetoothToggleButton(btn, long_press_ms=1000, poll_ms=50)
-        helper.start()
-
-        # 1st long-press: True -> False.
-        btn.pressed_value = True
-        time.sleep_ms(1200)
-        btn.pressed_value = False
         time.sleep_ms(200)
+        btn.pressed_value = False
+        time.sleep_ms(100)
         self.assertFalse(_FakeBLE().active())
 
-        # 2nd long-press: False -> True.
+        # 2nd press-release: False → True.
         btn.pressed_value = True
-        time.sleep_ms(1200)
+        time.sleep_ms(200)
         btn.pressed_value = False
+        time.sleep_ms(100)
         self.assertTrue(_FakeBLE().active())
 
     # ---- lifecycle ----
 
     def test_stop_halts_polling(self):
         btn = _StubButton()
-        helper = BluetoothToggleButton(btn, long_press_ms=500, poll_ms=50)
+        helper = BluetoothToggleButton(btn, poll_ms=50)
         helper.start()
         helper.stop()
 
-        # After stop, holding the button past the threshold should NOT
-        # trigger a toggle.
         btn.pressed_value = True
-        time.sleep_ms(2000)
+        time.sleep_ms(500)
+        btn.pressed_value = False
+        time.sleep_ms(100)
 
+        # Nothing fired: the Timer is gone.
         self.assertFalse(_FakeBLE().active())
         self.assertFalse("ble_enabled" in _FakeNVS._STORE.get("openbricks", {}))
 
     def test_double_start_is_idempotent(self):
         btn = _StubButton()
-        helper = BluetoothToggleButton(btn, long_press_ms=500, poll_ms=50)
+        helper = BluetoothToggleButton(btn, poll_ms=50)
         helper.start()
         helper.start()   # second call should not stack a second Timer
 
-        # Hold long enough to fire once.
         btn.pressed_value = True
-        time.sleep_ms(700)
+        time.sleep_ms(200)
         btn.pressed_value = False
+        time.sleep_ms(100)
 
-        # Still one toggle, not two.
+        # Exactly one toggle, not two.
         self.assertEqual(_FakeNVS._STORE["openbricks"]["ble_enabled"], 0)
 
 
@@ -147,18 +140,13 @@ class BluetoothToggleButtonLEDTests(unittest.TestCase):
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
         Timer.reset_for_test()
-        # The long-press fires bluetooth.toggle(), which activates BLE
-        # when flipping "off → on" and therefore needs a flashed hub
-        # name. Plant one in NVS to mimic a properly-flashed device.
-        import openbricks
-        _FakeNVS(openbricks._HUB_NAME_NVS_NAMESPACE).set_blob(
-            openbricks._HUB_NAME_NVS_KEY, b"TestHub")
+        _plant_hub_name()
 
     def test_start_paints_blue_when_ble_enabled(self):
         btn = _StubButton()
         led = _RecordingLED()
         # Default state (never written) is enabled.
-        BluetoothToggleButton(btn, led=led, long_press_ms=1000, poll_ms=50).start()
+        BluetoothToggleButton(btn, led=led, poll_ms=50).start()
         self.assertEqual(led.last_rgb, (0, 0, 255))
 
     def test_start_paints_yellow_when_ble_disabled(self):
@@ -167,39 +155,41 @@ class BluetoothToggleButtonLEDTests(unittest.TestCase):
         # Pre-persist an "off" state.
         from openbricks import bluetooth
         bluetooth.set_enabled(False)
-        BluetoothToggleButton(btn, led=led, long_press_ms=1000, poll_ms=50).start()
+        BluetoothToggleButton(btn, led=led, poll_ms=50).start()
         self.assertEqual(led.last_rgb, (255, 200, 0))
 
     def test_toggle_recolors_the_led(self):
         btn = _StubButton()
         led = _RecordingLED()
-        helper = BluetoothToggleButton(btn, led=led, long_press_ms=500, poll_ms=50)
+        helper = BluetoothToggleButton(btn, led=led, poll_ms=50)
         helper.start()  # starts blue (on)
 
-        # Long-press → toggles to off → LED should flip to yellow.
+        # Press-release → toggles to off → LED should flip to yellow.
         btn.pressed_value = True
-        time.sleep_ms(700)
+        time.sleep_ms(200)
         btn.pressed_value = False
+        time.sleep_ms(100)
 
         self.assertEqual(led.last_rgb, (255, 200, 0))
 
-        # A second long-press flips back to on → blue.
-        time.sleep_ms(100)
+        # A second press-release flips back to on → blue.
         btn.pressed_value = True
-        time.sleep_ms(700)
+        time.sleep_ms(200)
         btn.pressed_value = False
+        time.sleep_ms(100)
 
         self.assertEqual(led.last_rgb, (0, 0, 255))
 
     def test_no_led_is_fine(self):
         """With led=None, no LED calls should be attempted; toggle still fires."""
         btn = _StubButton()
-        helper = BluetoothToggleButton(btn, led=None, long_press_ms=500, poll_ms=50)
+        helper = BluetoothToggleButton(btn, led=None, poll_ms=50)
         helper.start()
 
         btn.pressed_value = True
-        time.sleep_ms(700)
+        time.sleep_ms(200)
         btn.pressed_value = False
+        time.sleep_ms(100)
 
         self.assertFalse(_FakeBLE().active())
 
@@ -207,7 +197,7 @@ class BluetoothToggleButtonLEDTests(unittest.TestCase):
         btn = _StubButton()
         led = _RecordingLED()
         BluetoothToggleButton(
-            btn, led=led, long_press_ms=1000, poll_ms=50,
+            btn, led=led, poll_ms=50,
             color_on=(0, 255, 0), color_off=(255, 0, 0),
         ).start()
         # Default state = on → custom green.

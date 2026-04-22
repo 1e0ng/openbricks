@@ -9,20 +9,30 @@ Concrete hubs:
 * ``ESP32S3DevkitHub``  — ESP32-S3 DevKitC-1: onboard WS2812 RGB LED on
   GPIO 48.
 
-Both hubs expect a momentary user button wired between **GPIO 5** and
-GND (the pin is free on both DevKitC variants and safe — not a
-strapping pin, not used by anything else the hub touches). Override
-with ``bluetooth_button_pin=<N>`` on the hub constructor.
+Both hubs expect **two** momentary pushbuttons, each wired between a
+GPIO and GND:
 
-We deliberately avoid GPIO 0 (BOOT) because holding it during reset
-puts the ESP32 into download mode — sharing that pin with a
-long-press application button confuses users who'd otherwise expect
-BOOT to only mean "enter the bootloader".
+* ``bluetooth_button_pin`` (default **GPIO 5**) — short-press toggles
+  BLE on/off. Watched by
+  :class:`openbricks.bluetooth_button.BluetoothToggleButton` which
+  the hub auto-wires when ``bluetooth=True`` (the default).
+* The **program button** (default **GPIO 4**) — short-press starts
+  or stops ``/program.py``. Watched by
+  :mod:`openbricks.launcher` directly, which the frozen default
+  ``main.py`` starts via ``launcher.run()``.
+
+Two pins → no duration-based dispatch. Each button does one thing on
+every short press.
+
+We deliberately avoid GPIO 0 (BOOT) for either role: holding it
+during reset puts the ESP32 into the ROM bootloader, so sharing that
+pin with an application button would turn an accidental power-glitch
+into a flash-mode drop.
 
 Both hubs auto-wire the BLE toggle button by default (``bluetooth=True``):
 **constructing a hub** restores the persisted BLE state, installs a
-long-press handler on the ``bluetooth_button_pin``, and — on the S3 — paints
-the WS2812 blue (BLE on) or yellow (BLE off). Put
+short-press handler on the ``bluetooth_button_pin``, and — on the S3 —
+paints the WS2812 blue (BLE on) or yellow (BLE off). Put
 ``hub = ESP32S3DevkitHub()`` in your ``main.py`` to turn that on;
 omit the call (or pass ``bluetooth=False``) to keep the button free
 for your own use.
@@ -73,8 +83,8 @@ class Button:
 class Hub:
     """Board-level peripherals baked into a specific MCU devkit."""
 
-    led = None      # StatusLED
-    button = None   # Button
+    led              = None   # StatusLED
+    bluetooth_button = None   # Button — watched by BluetoothToggleButton
 
 
 class SimpleLED(StatusLED):
@@ -154,7 +164,7 @@ class ESP32DevkitHub(Hub):
 
     def __init__(self, led_pin=2, bluetooth_button_pin=5, bluetooth=True):
         self.led = SimpleLED(led_pin)
-        self.button = PushButton(bluetooth_button_pin, active_low=True)
+        self.bluetooth_button = PushButton(bluetooth_button_pin, active_low=True)
         self.bluetooth_toggle = None
         if bluetooth:
             _install_bluetooth_toggle(self)
@@ -178,7 +188,7 @@ class ESP32S3DevkitHub(Hub):
     def __init__(self, led_pin=48, bluetooth_button_pin=5, brightness=0.2,
                  bluetooth=True):
         self.led = NeoPixelLED(led_pin, brightness=brightness) if led_pin is not None else None
-        self.button = PushButton(bluetooth_button_pin, active_low=True)
+        self.bluetooth_button = PushButton(bluetooth_button_pin, active_low=True)
         self.bluetooth_toggle = None
         if bluetooth:
             _install_bluetooth_toggle(self)
@@ -208,5 +218,5 @@ def _install_bluetooth_toggle(hub):
     from openbricks import bluetooth as _bt
     from openbricks.bluetooth_button import BluetoothToggleButton
     _bt.apply_persisted_state()
-    hub.bluetooth_toggle = BluetoothToggleButton(hub.button, led=hub.led)
+    hub.bluetooth_toggle = BluetoothToggleButton(hub.bluetooth_button, led=hub.led)
     hub.bluetooth_toggle.start()
