@@ -52,8 +52,21 @@ def _read_hub_name():
 
 
 def __getattr__(name):
-    # PEP 562: resolved on each ``openbricks.HUB_NAME`` access. Both
-    # MicroPython and CPython honour this.
+    # PEP 562: resolved on each attribute miss. CPython still falls
+    # through to submodule auto-import when a parent package defines
+    # __getattr__, but MicroPython does not — so a bare
+    # ``from openbricks import bluetooth`` would fail here with
+    # AttributeError. Handle submodule names explicitly by importing
+    # them on demand; HUB_NAME stays freshly NVS-backed.
     if name == "HUB_NAME":
         return _read_hub_name()
-    raise AttributeError("module 'openbricks' has no attribute %r" % name)
+    import sys
+    fullname = "openbricks." + name
+    mod = sys.modules.get(fullname)
+    if mod is not None:
+        return mod
+    try:
+        __import__(fullname)
+    except ImportError:
+        raise AttributeError("module 'openbricks' has no attribute %r" % name)
+    return sys.modules[fullname]

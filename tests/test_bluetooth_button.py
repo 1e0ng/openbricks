@@ -53,7 +53,7 @@ class BluetoothToggleButtonTests(unittest.TestCase):
         self.assertFalse(_FakeBLE().active())   # never activated
         # NVS ble_enabled flag hasn't been written (hub_name is planted in
         # setUp, so the namespace itself does exist).
-        self.assertNotIn("ble_enabled", _FakeNVS._STORE.get("openbricks", {}))
+        self.assertFalse("ble_enabled" in _FakeNVS._STORE.get("openbricks", {}))
 
     # ---- long-press path ----
 
@@ -113,7 +113,7 @@ class BluetoothToggleButtonTests(unittest.TestCase):
         time.sleep_ms(2000)
 
         self.assertFalse(_FakeBLE().active())
-        self.assertNotIn("ble_enabled", _FakeNVS._STORE.get("openbricks", {}))
+        self.assertFalse("ble_enabled" in _FakeNVS._STORE.get("openbricks", {}))
 
     def test_double_start_is_idempotent(self):
         btn = _StubButton()
