@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openbricks-dev"
+version = "0.1.0"
+description = "Host-side CLI for flashing and running code on openbricks hubs."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "openbricks contributors" }]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Embedded Systems",
+]
+dependencies = [
+    # BLE scan + connect on macOS / Linux / Windows without vendor tools.
+    "bleak >= 0.22",
+    # Flashing ESP32 / ESP32-S3 images.
+    "esptool >= 4.7",
+    # Serial REPL bridge used by `flash` after a write.
+    "mpremote >= 1.23",
+]
+
+[project.scripts]
+openbricks-dev = "openbricks_dev.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["openbricks_dev*"]
