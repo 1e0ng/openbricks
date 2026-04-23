@@ -4,11 +4,19 @@ Host-side CLI for openbricks hubs — the same UX as `pybricks-dev`, built on co
 
 ## Install
 
+Once published to PyPI, users install with:
+
+```
+pip install openbricks-dev
+```
+
+For development against a repo checkout (editable install):
+
 ```
 pip install -e tools/openbricks-dev
 ```
 
-This pulls in `bleak` (cross-platform BLE), `esptool`, and `mpremote`.
+Either way pulls in `bleak` (cross-platform BLE), `esptool`, and `mpremote`.
 
 ## Commands
 

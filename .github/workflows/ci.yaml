@@ -339,3 +339,46 @@ jobs:
           generate_release_notes: true
           files: release-out/*
           fail_on_unmatched_files: true
+
+  publish-openbricks-dev:
+    # Publish the host CLI to PyPI on every ``v*`` tag push.
+    #
+    # First-time setup (one manual step on pypi.org):
+    #   1. Sign into PyPI as a project maintainer.
+    #   2. Go to https://pypi.org/manage/account/publishing/ and add a
+    #      "pending" trusted publisher with:
+    #         Owner:           1e0ng
+    #         Repository:      openbricks
+    #         Workflow name:   ci.yaml
+    #         Environment:     pypi
+    #      (The package name ``openbricks-dev`` doesn't exist on PyPI
+    #      yet — the pending-publisher flow is what bootstraps it.)
+    #   3. Push a ``v*`` tag; this job builds + uploads and PyPI
+    #      converts the pending publisher into an active one.
+    #
+    # After that, every subsequent tag push ships a new release.
+    # We use Trusted Publisher (OIDC) so no API token is stored in
+    # the repo.
+    needs: [openbricks-dev, firmware]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # required by PyPI trusted publisher (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build sdist + wheel
+        working-directory: tools/openbricks-dev
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: tools/openbricks-dev/dist/

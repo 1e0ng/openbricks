@@ -4,16 +4,45 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openbricks-dev"
-version = "0.9.0"
-description = "Host-side CLI for flashing and running code on openbricks hubs."
+# Version is baked by ``scripts/bump-version.py`` into
+# ``openbricks_dev/__init__.py::__version__``; the root ``VERSION``
+# file is the canonical source. ``dynamic`` tells setuptools to read
+# from the attribute, so this pyproject never needs editing for a
+# version bump.
+dynamic = ["version"]
+description = "Host-side CLI for the openbricks MicroPython firmware — flash, list, run, download, and stop code on an openbricks hub over BLE."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
 authors = [{ name = "openbricks contributors" }]
+keywords = [
+    "openbricks",
+    "micropython",
+    "robotics",
+    "esp32",
+    "ble",
+    "bluetooth",
+    "pybricks",
+    "lego",
+    "firmware",
+]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Embedded Systems",
+    "Topic :: Education",
 ]
 dependencies = [
     # BLE scan + connect on macOS / Linux / Windows without vendor tools.
@@ -24,11 +53,20 @@ dependencies = [
     "mpremote >= 1.23",
 ]
 
+[project.urls]
+Homepage      = "https://github.com/1e0ng/openbricks"
+Source        = "https://github.com/1e0ng/openbricks"
+Issues        = "https://github.com/1e0ng/openbricks/issues"
+Releases      = "https://github.com/1e0ng/openbricks/releases"
+
 [project.scripts]
 openbricks-dev = "openbricks_dev.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "coverage"]
+
+[tool.setuptools.dynamic]
+version = { attr = "openbricks_dev.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["openbricks_dev*"]
