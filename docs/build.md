@@ -61,7 +61,7 @@ Output tree: `native/micropython/ports/esp32/build-openbricks_<target>/`
 Use `openbricks-dev flash`. It drives `esptool.py` to write the image and then writes the hub's BLE advertising name into NVS. The name is **per-hub**, set at flash time (not build time) — one firmware image is reused across every hub, and each hub gets its own identity here. `--name` is mandatory: two hubs that answer to the same name can't be individually addressed over BLE.
 
 ```
-pip install -e tools/openbricks-dev     # one-time; pulls in bleak + esptool + mpremote
+pipx install openbricks-dev             # one-time; or `pip install openbricks-dev`
 
 openbricks-dev flash \
     --name RobotA \

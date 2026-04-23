@@ -4,7 +4,13 @@ Host-side CLI for openbricks hubs — the same UX as `pybricks-dev`, built on co
 
 ## Install
 
-Once published to PyPI, users install with:
+Recommended — with [`pipx`](https://pipx.pypa.io/) so the CLI lands in an isolated venv and avoids the "externally managed environment" error on modern macOS / Linux distros:
+
+```
+pipx install openbricks-dev
+```
+
+Plain `pip` works too:
 
 ```
 pip install openbricks-dev
@@ -13,10 +19,10 @@ pip install openbricks-dev
 For development against a repo checkout (editable install):
 
 ```
-pip install -e tools/openbricks-dev
+pipx install --editable tools/openbricks-dev    # or: pip install -e tools/openbricks-dev
 ```
 
-Either way pulls in `bleak` (cross-platform BLE), `esptool`, and `mpremote`.
+Any install path pulls in `bleak` (cross-platform BLE), `esptool`, and `mpremote`.
 
 ## Commands
 
