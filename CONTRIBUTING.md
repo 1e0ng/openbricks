@@ -35,6 +35,34 @@ Run tests on the desktop with CPython:
 
     python -m unittest discover -s tests
 
+## Releases
+
+Firmware and `openbricks-dev` (the host CLI) are versioned and tagged
+independently so one can't hold the other hostage.
+
+| Component        | Version file                        | Tag pattern           | Released                              |
+|------------------|-------------------------------------|-----------------------|---------------------------------------|
+| Firmware         | `VERSION`                           | `v0.9.3`              | GitHub release (firmware `.bin` files) |
+| `openbricks-dev` | `tools/openbricks-dev/VERSION`      | `openbricks-dev/v0.10.0` | PyPI (via OIDC trusted publisher)      |
+
+Cutting a release:
+
+    # Firmware only
+    scripts/bump-version.py --firmware 0.9.3
+    # commit, push, merge PR, then:
+    git tag v0.9.3 && git push origin v0.9.3
+
+    # openbricks-dev only
+    scripts/bump-version.py --openbricks-dev 0.10.0
+    # commit, push, merge PR, then:
+    git tag openbricks-dev/v0.10.0 && git push origin openbricks-dev/v0.10.0
+
+    # Both at once (rare — firmware changes usually ship alone)
+    scripts/bump-version.py --firmware 0.9.3 --openbricks-dev 0.10.0
+
+`scripts/check-version.py` runs in CI and fails the build if either
+`VERSION` file has drifted from its package's `__version__` literal.
+
 ## Licensing
 
 By contributing you agree your contributions will be released under the
