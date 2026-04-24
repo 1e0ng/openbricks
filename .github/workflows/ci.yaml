@@ -104,12 +104,6 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Verify version files are in sync
-        # One canonical source: ``VERSION``. The two ``__init__.py``
-        # copies must match it, or ``scripts/bump-version.py`` wasn't
-        # run after a manual edit.
-        run: python scripts/check-version.py
-
       - name: Install openbricks-dev (editable) + coverage
         working-directory: tools/openbricks-dev
         run: |

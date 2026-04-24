@@ -3,19 +3,13 @@
 """
 Bump the firmware and/or openbricks-dev version.
 
-The firmware (``openbricks/``) and the host CLI
-(``tools/openbricks-dev/``) move independently — firmware changes are
-big and slow, CLI changes are small and fast, so coupling their
-version numbers held one hostage to the other. Each has its own
-``VERSION`` file now:
-
-* Root ``VERSION``                        — firmware version.
-  Mirrored in ``openbricks/__init__.py::__version__``.
-  Released via ``git tag v<version>``.
-
-* ``tools/openbricks-dev/VERSION``        — openbricks-dev version.
-  Mirrored in ``openbricks_dev/__init__.py::__version__``.
-  Released via ``git tag openbricks-dev/v<version>``.
+Firmware and the host CLI are versioned independently — firmware
+changes are big and slow, CLI changes are small and fast, so coupling
+their version numbers held each hostage to the other. Each package's
+``__init__.py`` carries its own ``__version__`` literal, which is the
+single source of truth — ``pyproject.toml`` reads it back via
+``attr = "<pkg>.__version__"`` and the import-time constant is what
+users see at runtime.
 
 Usage:
 
@@ -23,8 +17,13 @@ Usage:
     scripts/bump-version.py --openbricks-dev 0.10.0
     scripts/bump-version.py --firmware 0.9.3 --openbricks-dev 0.10.0
 
-Either flag may be omitted; a version is only bumped when its flag is
-present.
+Either flag may be omitted; a version is only bumped when its flag
+is present.
+
+Tags use separate namespaces:
+
+  * firmware:       ``git tag v<version>``
+  * openbricks-dev: ``git tag openbricks-dev/v<version>``
 """
 
 import argparse
@@ -38,16 +37,14 @@ _INIT_LINE_RE = re.compile(r'^__version__\s*=\s*"[^"]*"$', re.M)
 
 
 _FIRMWARE = {
-    "label":     "firmware",
-    "version":   "VERSION",
-    "init":      "openbricks/__init__.py",
-    "tag_hint":  "git tag v{version}",
+    "label":    "firmware",
+    "init":     "openbricks/__init__.py",
+    "tag_hint": "git tag v{version}",
 }
 _CLI = {
-    "label":     "openbricks-dev",
-    "version":   "tools/openbricks-dev/VERSION",
-    "init":      "tools/openbricks-dev/openbricks_dev/__init__.py",
-    "tag_hint":  "git tag openbricks-dev/v{version}",
+    "label":    "openbricks-dev",
+    "init":     "tools/openbricks-dev/openbricks_dev/__init__.py",
+    "tag_hint": "git tag openbricks-dev/v{version}",
 }
 
 
@@ -67,7 +64,6 @@ def _bump(root, component, new_version):
         print("error: invalid version {!r} for {} (expected X.Y.Z)".format(
             new_version, component["label"]), file=sys.stderr)
         return 2
-    (root / component["version"]).write_text(new_version + "\n")
     _update_init(root / component["init"], new_version)
     print("bumped {} to {}".format(component["label"], new_version))
     print("  tag with: " + component["tag_hint"].format(version=new_version))
