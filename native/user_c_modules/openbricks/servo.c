@@ -129,7 +129,7 @@ static void servo_control_tick(void *ctx) {
     if (dt_s > 0.0) {
         openbricks_observer_update(&self->observer, measured_pos, dt_s);
     }
-    mp_float_t measured_dps = self->observer.vel_hat;
+    mp_float_t measured_dps = (mp_float_t)self->observer.core.vel_hat;
 
     mp_float_t error = self->target_dps - measured_dps;
     mp_float_t ff    = self->target_dps / RATED_DPS * POWER_CLAMP;

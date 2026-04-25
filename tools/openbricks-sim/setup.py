@@ -31,6 +31,8 @@ SHARED_DIR  = HERE / "native" / "_shared"
 _CORE_FILES = [
     "trajectory_core.c",
     "trajectory_core.h",
+    "observer_core.c",
+    "observer_core.h",
 ]
 
 
@@ -57,7 +59,11 @@ setup(
             "openbricks_sim._native",
             sources=[
                 "native/openbricks_sim_native.c",
+                # Shared cores compiled byte-identical with the
+                # firmware (see ``_sync_cores`` above). Any future
+                # ``*_core.c`` lands here.
                 "native/_shared/trajectory_core.c",
+                "native/_shared/observer_core.c",
             ],
             include_dirs=[
                 "native/_shared",

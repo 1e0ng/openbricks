@@ -18,6 +18,7 @@
 #include <Python.h>
 
 #include "trajectory_core.h"
+#include "observer_core.h"
 
 
 /* -------------------------------------------------------------------
@@ -99,6 +100,91 @@ static PyTypeObject TrajectoryType = {
 
 
 /* -------------------------------------------------------------------
+ * Observer (α-β position/velocity smoother)
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    PyObject_HEAD
+    ob_observer_t core;
+} ObserverObject;
+
+
+static int Observer_init(ObserverObject *self, PyObject *args, PyObject *kwargs) {
+    static char *kwlist[] = {"alpha", "beta", NULL};
+    double alpha = 0.5;
+    double beta  = 0.15;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|dd", kwlist,
+                                     &alpha, &beta)) {
+        return -1;
+    }
+    ob_observer_init(&self->core, (ob_float_t)alpha, (ob_float_t)beta);
+    return 0;
+}
+
+
+static PyObject *Observer_update(ObserverObject *self, PyObject *args) {
+    double pos, dt;
+    if (!PyArg_ParseTuple(args, "dd", &pos, &dt)) {
+        return NULL;
+    }
+    ob_observer_update(&self->core, (ob_float_t)pos, (ob_float_t)dt);
+    return Py_BuildValue("(dd)",
+                         (double)self->core.pos_hat,
+                         (double)self->core.vel_hat);
+}
+
+
+static PyObject *Observer_reset(ObserverObject *self, PyObject *args) {
+    double pos = 0.0;
+    if (!PyArg_ParseTuple(args, "|d", &pos)) {
+        return NULL;
+    }
+    ob_observer_reset(&self->core, (ob_float_t)pos);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *Observer_position(ObserverObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyFloat_FromDouble((double)self->core.pos_hat);
+}
+
+
+static PyObject *Observer_velocity(ObserverObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyFloat_FromDouble((double)self->core.vel_hat);
+}
+
+
+static PyMethodDef Observer_methods[] = {
+    {"update",   (PyCFunction)Observer_update,   METH_VARARGS,
+     "update(measured_pos, dt) -> (pos_hat, vel_hat). Step the observer one tick."},
+    {"reset",    (PyCFunction)Observer_reset,    METH_VARARGS,
+     "reset(pos=0.0). Re-anchor the position estimate; zero the velocity."},
+    {"position", (PyCFunction)Observer_position, METH_NOARGS,
+     "Estimated position."},
+    {"velocity", (PyCFunction)Observer_velocity, METH_NOARGS,
+     "Estimated velocity."},
+    {NULL, NULL, 0, NULL},
+};
+
+
+static PyTypeObject ObserverType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name      = "openbricks_sim._native.Observer",
+    .tp_basicsize = sizeof(ObserverObject),
+    .tp_itemsize  = 0,
+    .tp_flags     = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_doc       = PyDoc_STR(
+        "Two-state α-β position/velocity observer — same algorithm as "
+        "the firmware's ``_openbricks_native.Observer``. Construct with "
+        "alpha (default 0.5) and beta (default 0.15); call ``update`` "
+        "each tick with the latest measured position and the time step."),
+    .tp_new       = PyType_GenericNew,
+    .tp_init      = (initproc)Observer_init,
+    .tp_methods   = Observer_methods,
+};
+
+
+/* -------------------------------------------------------------------
  * Module init
  * ------------------------------------------------------------------- */
 
@@ -126,6 +212,17 @@ PyMODINIT_FUNC PyInit__native(void) {
     if (PyModule_AddObject(m, "TrapezoidalProfile",
                            (PyObject *)&TrajectoryType) < 0) {
         Py_DECREF(&TrajectoryType);
+        Py_DECREF(m);
+        return NULL;
+    }
+    if (PyType_Ready(&ObserverType) < 0) {
+        Py_DECREF(m);
+        return NULL;
+    }
+    Py_INCREF(&ObserverType);
+    if (PyModule_AddObject(m, "Observer",
+                           (PyObject *)&ObserverType) < 0) {
+        Py_DECREF(&ObserverType);
         Py_DECREF(m);
         return NULL;
     }
