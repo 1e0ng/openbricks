@@ -4,7 +4,11 @@ MuJoCo-backed simulator for openbricks firmware. The eventual goal: the user's `
 
 Backbone: [MuJoCo](https://github.com/google-deepmind/mujoco) (Apache-2.0, native Python, 1 kHz physics easy, native sensor primitives, stable wheel contacts). Picked over pybullet (wheel-contact chatter) and Webots (32 ms step floor incompatible with the 1 kHz firmware control loop).
 
-## Status — Phase A: chassis + world preview shipped
+## Status — Phase C in progress (sim runtime layer)
+
+* **Phase A** ✅ chassis + world preview, MuJoCo backbone wired up.
+* **Phase B** ✅ shared cores: trajectory, observer, motor_process, servo, drivebase. Sim hot-path math is byte-identical to the firmware (same `*_core.c` files compiled into both targets).
+* **Phase C** 🚧 runtime adapters that bind the cores to MuJoCo sensors / actuators. `openbricks_sim.runtime.SimMotor` + `SimDriveBase` now drive the default chassis end-to-end. Next: monkey-patch the `openbricks.drivers.*` registry so user code unchanged from real hardware can run inside the sim, plus an `openbricks-sim run main.py` entry point.
 
 ```
 pipx install openbricks-sim   # once on PyPI
@@ -53,8 +57,8 @@ Covers chassis MJCF shape, physics settling, motor → encoder round-trip, and c
 
 | Phase | Scope | Status |
 |---|---|---|
-| A | MuJoCo scaffold, default-chassis MJCF, `preview` command | ✅ this PR |
-| B | Port `_openbricks_native` (motor_process, observer, trajectory, servo, drivebase) C → CPython extension. Sim hot path ≡ firmware hot path | — |
-| C | Driver shims that monkey-patch `openbricks.drivers.*` at runtime; `openbricks-sim run main.py` | — |
+| A | MuJoCo scaffold, default-chassis MJCF, `preview` command | ✅ |
+| B | Port `_openbricks_native` (motor_process, observer, trajectory, servo, drivebase) C → CPython extension. Sim hot path ≡ firmware hot path | ✅ |
+| C | Sim runtime (`SimMotor` / `SimDriveBase`) bridging cores ↔ MuJoCo, driver-shim monkey-patch, `openbricks-sim run main.py` | 🚧 |
 | D | Camera sampling for the colour sensor, raycast for distance sensors, worlds library | — |
 | E | CI integration (headless rendering via EGL), examples, docs, PyPI publish as `openbricks-sim` | — |
