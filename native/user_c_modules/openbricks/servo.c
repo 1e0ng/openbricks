@@ -108,7 +108,7 @@ static void servo_control_tick(void *ctx) {
     // velocity setpoint before the P-control loop runs.
     if (self->traj_active) {
         mp_float_t elapsed_s = (mp_float_t)(openbricks_motor_process_now_ms() - self->traj_start_ms) / (mp_float_t)1000.0;
-        if (elapsed_s >= self->trajectory.t_total) {
+        if (elapsed_s >= self->trajectory.core.t_total) {
             self->target_dps = 0.0;
             self->traj_done  = true;
         } else {

@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: MIT
 //
-// Internal C API for the trapezoidal trajectory planner. Used by
-// servo.c to sample setpoints inside the 1 kHz control tick without
-// going through the Python object model.
-//
-// The full type definition is here (rather than hidden in the .c) so
-// ``servo_obj_t`` can embed a ``trajectory_obj_t`` directly and avoid
-// an allocation per trajectory.
+// MicroPython object wrapping ``ob_trajectory_t``. The algorithm
+// lives in ``trajectory_core.{c,h}`` so it can compile into both the
+// firmware ``_openbricks_native`` module and the host-side
+// ``openbricks_sim._native`` extension without drift.
 
 #pragma once
 
@@ -14,21 +11,18 @@
 
 #include "py/obj.h"
 
+#include "trajectory_core.h"
+
 typedef struct _trajectory_obj_t {
-    mp_obj_base_t base;
-    mp_float_t    start;
-    mp_float_t    distance;     // signed (target - start)
-    mp_float_t    cruise;       // magnitude
-    mp_float_t    accel;        // magnitude
-    mp_float_t    direction;    // +1 or -1
-    mp_float_t    t_ramp;       // seconds in accel (and decel) phase
-    mp_float_t    t_cruise;     // seconds at cruise speed (0 for triangular)
-    mp_float_t    t_total;      // seconds to completion
-    mp_float_t    d_ramp;       // degrees covered in one ramp phase
-    mp_float_t    v_peak;       // peak speed actually reached (magnitude)
-    bool          triangular;   // true if the profile never reaches cruise
+    mp_obj_base_t   base;
+    ob_trajectory_t core;
 } trajectory_obj_t;
 
+// Backward-compat wrappers around ``ob_trajectory_init`` /
+// ``ob_trajectory_sample`` that accept ``trajectory_obj_t*`` and
+// ``mp_float_t``. Used by ``servo.c`` and ``drivebase.c`` which embed a
+// ``trajectory_obj_t`` directly and didn't need to know about the
+// firmware-vs-sim split.
 void openbricks_trajectory_init(trajectory_obj_t *t,
                                  mp_float_t start,
                                  mp_float_t target,

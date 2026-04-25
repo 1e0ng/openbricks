@@ -11,6 +11,7 @@ add_library(usermod_openbricks INTERFACE)
 target_sources(usermod_openbricks INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/motor_process.c
     ${CMAKE_CURRENT_LIST_DIR}/trajectory.c
+    ${CMAKE_CURRENT_LIST_DIR}/trajectory_core.c
     ${CMAKE_CURRENT_LIST_DIR}/observer.c
     ${CMAKE_CURRENT_LIST_DIR}/servo.c
     ${CMAKE_CURRENT_LIST_DIR}/drivebase.c
