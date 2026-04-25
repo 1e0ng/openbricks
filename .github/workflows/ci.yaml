@@ -141,6 +141,49 @@ jobs:
           openbricks-dev download --help
           openbricks-dev stop --help
 
+  openbricks-sim:
+    # MuJoCo-backed simulator tests (tools/openbricks-sim). Pure
+    # CPython, MuJoCo is pure pip. Runs headless — no GPU needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install openbricks-sim (editable) + coverage
+        working-directory: tools/openbricks-sim
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install coverage
+
+      - name: Run sim test suite under coverage
+        working-directory: tools/openbricks-sim
+        run: |
+          coverage run --source=openbricks_sim -m unittest discover -s tests -t .
+          coverage report
+          coverage xml -o coverage.xml
+
+      - name: Upload openbricks-sim coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: tools/openbricks-sim/coverage.xml
+          flags: openbricks-sim
+          fail_ci_if_error: false
+
+      - name: Smoke-test the entry point
+        run: |
+          openbricks-sim --help
+          openbricks-sim preview --help
+          # Headless preview of each shipped world (no display on CI).
+          openbricks-sim preview --headless --duration 0.2 --world empty
+          openbricks-sim preview --headless --duration 0.2 --world wro-2026-elementary
+          openbricks-sim preview --headless --duration 0.2 --world wro-2026-junior
+          openbricks-sim preview --headless --duration 0.2 --world wro-2026-senior
+
   coverage:
     runs-on: ubuntu-latest
     # C coverage for the openbricks user_c_module, following the same

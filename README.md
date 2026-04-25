@@ -3,6 +3,7 @@
 [![firmware C](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=c-core)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=c-core)
 [![firmware Python](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-py)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-py)
 [![openbricks-dev](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-dev)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-dev)
+[![openbricks-sim](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-sim)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-sim)
 
 > A Pybricks-style MicroPython firmware for **open hardware** — commodity MCUs, commodity motors, commodity sensors.
 
