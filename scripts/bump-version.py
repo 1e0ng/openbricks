@@ -1,36 +1,51 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-Bump the project version.
+Bump the firmware and/or openbricks-dev version.
 
-One command, one edit, every ``__version__`` constant stays in sync:
+Firmware and the host CLI are versioned independently — firmware
+changes are big and slow, CLI changes are small and fast, so coupling
+their version numbers held each hostage to the other. Each package's
+``__init__.py`` carries its own ``__version__`` literal, which is the
+single source of truth — ``pyproject.toml`` reads it back via
+``attr = "<pkg>.__version__"`` and the import-time constant is what
+users see at runtime.
 
-    scripts/bump-version.py 1.0.0
+Usage:
 
-Writes the new value to ``VERSION`` (the canonical source) and
-regenerates the ``__version__ = "..."`` line in both packages'
-``__init__.py``:
+    scripts/bump-version.py --firmware 0.9.3
+    scripts/bump-version.py --openbricks-dev 0.10.0
+    scripts/bump-version.py --firmware 0.9.3 --openbricks-dev 0.10.0
 
-* ``openbricks/__init__.py``            — frozen into the firmware
-* ``openbricks_dev/__init__.py``        — exposed by the host CLI
+Either flag may be omitted; a version is only bumped when its flag
+is present.
 
-The ``VERSION`` file is what ``scripts/check-version.py`` compares
-against in CI, so drift between any of the three locations fails the
-build before a release can go out with a stale version string.
+Tags use separate namespaces:
+
+  * firmware:       ``git tag v<version>``
+  * openbricks-dev: ``git tag openbricks-dev/v<version>``
 """
 
+import argparse
 import re
 import sys
 from pathlib import Path
 
 
-_VERSION_RE     = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
-_INIT_LINE_RE   = re.compile(r'^__version__\s*=\s*"[^"]*"$', re.M)
+_VERSION_RE   = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
+_INIT_LINE_RE = re.compile(r'^__version__\s*=\s*"[^"]*"$', re.M)
 
-_INIT_FILES = (
-    "openbricks/__init__.py",
-    "tools/openbricks-dev/openbricks_dev/__init__.py",
-)
+
+_FIRMWARE = {
+    "label":    "firmware",
+    "init":     "openbricks/__init__.py",
+    "tag_hint": "git tag v{version}",
+}
+_CLI = {
+    "label":    "openbricks-dev",
+    "init":     "tools/openbricks-dev/openbricks_dev/__init__.py",
+    "tag_hint": "git tag openbricks-dev/v{version}",
+}
 
 
 def _update_init(path, new_version):
@@ -44,23 +59,38 @@ def _update_init(path, new_version):
         path.write_text(new_text)
 
 
-def main(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 1:
-        print("usage: scripts/bump-version.py X.Y.Z", file=sys.stderr)
-        return 2
-    new_version = argv[0]
+def _bump(root, component, new_version):
     if not _VERSION_RE.match(new_version):
-        print("error: invalid version {!r} (expected X.Y.Z)".format(new_version),
-              file=sys.stderr)
+        print("error: invalid version {!r} for {} (expected X.Y.Z)".format(
+            new_version, component["label"]), file=sys.stderr)
         return 2
+    _update_init(root / component["init"], new_version)
+    print("bumped {} to {}".format(component["label"], new_version))
+    print("  tag with: " + component["tag_hint"].format(version=new_version))
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="Bump firmware and/or openbricks-dev versions.")
+    ap.add_argument("--firmware", metavar="X.Y.Z",
+                    help="New firmware version (tag: v<version>).")
+    ap.add_argument("--openbricks-dev", metavar="X.Y.Z", dest="openbricks_dev",
+                    help="New openbricks-dev version (tag: openbricks-dev/v<version>).")
+    args = ap.parse_args(argv)
+
+    if not args.firmware and not args.openbricks_dev:
+        ap.error("pass --firmware and/or --openbricks-dev")
 
     root = Path(__file__).resolve().parent.parent
-    (root / "VERSION").write_text(new_version + "\n")
-    for rel in _INIT_FILES:
-        _update_init(root / rel, new_version)
-
-    print("bumped to {}".format(new_version))
+    if args.firmware:
+        rc = _bump(root, _FIRMWARE, args.firmware)
+        if rc:
+            return rc
+    if args.openbricks_dev:
+        rc = _bump(root, _CLI, args.openbricks_dev)
+        if rc:
+            return rc
     return 0
 
 

@@ -3,7 +3,12 @@ name: ci
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags:
+      # Firmware releases use the plain ``v*`` namespace; the CLI
+      # uses its own ``openbricks-dev/v*`` namespace so the two can
+      # be cut independently.
+      - "v*"
+      - "openbricks-dev/v*"
   pull_request:
     branches: [main]
 
@@ -98,12 +103,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Verify version files are in sync
-        # One canonical source: ``VERSION``. The two ``__init__.py``
-        # copies must match it, or ``scripts/bump-version.py`` wasn't
-        # run after a manual edit.
-        run: python scripts/check-version.py
 
       - name: Install openbricks-dev (editable) + coverage
         working-directory: tools/openbricks-dev
@@ -253,6 +252,9 @@ jobs:
           fail_ci_if_error: false
 
   firmware:
+    # Skip firmware builds for openbricks-dev-only tag pushes — those
+    # cut a host-CLI release that doesn't touch the image.
+    if: ${{ !startsWith(github.ref, 'refs/tags/openbricks-dev/') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -384,26 +386,17 @@ jobs:
           fail_on_unmatched_files: true
 
   publish-openbricks-dev:
-    # Publish the host CLI to PyPI on every ``v*`` tag push.
+    # Publish the host CLI to PyPI on every ``openbricks-dev/v*`` tag
+    # push. The CLI is versioned independently from the firmware
+    # (separate ``VERSION`` files, separate tag namespaces), so
+    # cutting a CLI release doesn't require a firmware release and
+    # vice versa.
     #
-    # First-time setup (one manual step on pypi.org):
-    #   1. Sign into PyPI as a project maintainer.
-    #   2. Go to https://pypi.org/manage/account/publishing/ and add a
-    #      "pending" trusted publisher with:
-    #         Owner:           1e0ng
-    #         Repository:      openbricks
-    #         Workflow name:   ci.yaml
-    #         Environment:     pypi
-    #      (The package name ``openbricks-dev`` doesn't exist on PyPI
-    #      yet — the pending-publisher flow is what bootstraps it.)
-    #   3. Push a ``v*`` tag; this job builds + uploads and PyPI
-    #      converts the pending publisher into an active one.
-    #
-    # After that, every subsequent tag push ships a new release.
-    # We use Trusted Publisher (OIDC) so no API token is stored in
-    # the repo.
-    needs: [openbricks-dev, firmware]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Trusted Publisher (OIDC) was set up on PyPI during the 0.9.2
+    # release — no API token is stored in the repo. See the project
+    # README / CONTRIBUTING for how to rotate if needed.
+    needs: [openbricks-dev]
+    if: startsWith(github.ref, 'refs/tags/openbricks-dev/v')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
