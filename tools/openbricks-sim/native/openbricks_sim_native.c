@@ -20,6 +20,7 @@
 #include "trajectory_core.h"
 #include "observer_core.h"
 #include "motor_process_core.h"
+#include "servo_core.h"
 
 
 /* -------------------------------------------------------------------
@@ -294,6 +295,154 @@ static PyTypeObject MotorProcessType = {
 
 
 /* -------------------------------------------------------------------
+ * Servo (control state machine + observer + trajectory composition)
+ *
+ * I/O is the caller's responsibility — sim binds its read-encoder /
+ * write-motor against MuJoCo joint sensors + actuators. The class
+ * here is pure state machine: ``tick(count, now_ms) -> power`` runs
+ * the same control law as the firmware's ``servo.c``.
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    PyObject_HEAD
+    ob_servo_t core;
+} ServoObject;
+
+
+static int Servo_init(ServoObject *self, PyObject *args, PyObject *kwargs) {
+    static char *kwlist[] = {"counts_per_rev", "kp", "invert", NULL};
+    int    counts_per_rev = 1320;
+    double kp             = OB_SERVO_DEFAULT_KP;
+    int    invert         = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|idp", kwlist,
+                                     &counts_per_rev, &kp, &invert)) {
+        return -1;
+    }
+    ob_servo_init(&self->core, counts_per_rev, (ob_float_t)kp, invert ? true : false);
+    return 0;
+}
+
+
+static PyObject *Servo_tick(ServoObject *self, PyObject *args) {
+    long count, now_ms;
+    if (!PyArg_ParseTuple(args, "ll", &count, &now_ms)) {
+        return NULL;
+    }
+    double power = (double)ob_servo_tick(&self->core, count, now_ms);
+    return PyFloat_FromDouble(power);
+}
+
+
+static PyObject *Servo_set_speed(ServoObject *self, PyObject *arg) {
+    double dps = PyFloat_AsDouble(arg);
+    if (dps == -1.0 && PyErr_Occurred()) {
+        return NULL;
+    }
+    ob_servo_set_speed(&self->core, (ob_float_t)dps);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *Servo_run_target(ServoObject *self, PyObject *args) {
+    long   count, now_ms;
+    double delta_deg, cruise_dps, accel;
+    if (!PyArg_ParseTuple(args, "llddd",
+                          &count, &now_ms,
+                          &delta_deg, &cruise_dps, &accel)) {
+        return NULL;
+    }
+    ob_servo_run_target(&self->core, count, now_ms,
+                        (ob_float_t)delta_deg,
+                        (ob_float_t)cruise_dps,
+                        (ob_float_t)accel);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *Servo_baseline(ServoObject *self, PyObject *args) {
+    long count, now_ms;
+    if (!PyArg_ParseTuple(args, "ll", &count, &now_ms)) {
+        return NULL;
+    }
+    ob_servo_baseline(&self->core, count, now_ms);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *Servo_is_done(ServoObject *self, PyObject *Py_UNUSED(ignored)) {
+    if (ob_servo_is_done(&self->core)) {
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+
+
+static PyObject *Servo_target_dps(ServoObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyFloat_FromDouble((double)self->core.target_dps);
+}
+
+
+static PyObject *Servo_observed_dps(ServoObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyFloat_FromDouble((double)self->core.observer.vel_hat);
+}
+
+
+static PyObject *Servo_observed_pos(ServoObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyFloat_FromDouble((double)self->core.observer.pos_hat);
+}
+
+
+static PyObject *Servo_count_to_angle(ServoObject *self, PyObject *arg) {
+    long count = PyLong_AsLong(arg);
+    if (count == -1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    return PyFloat_FromDouble((double)ob_servo_count_to_angle_deg(&self->core, count));
+}
+
+
+static PyMethodDef Servo_methods[] = {
+    {"tick",            (PyCFunction)Servo_tick,            METH_VARARGS,
+     "tick(count, now_ms) -> power. One control step; returns desired power in [-100, 100]."},
+    {"set_speed",       (PyCFunction)Servo_set_speed,       METH_O,
+     "Set a constant velocity target (deg/s); cancels any active trajectory."},
+    {"run_target",      (PyCFunction)Servo_run_target,      METH_VARARGS,
+     "run_target(count, now_ms, delta_deg, cruise_dps, accel). Kick off a trapezoidal move."},
+    {"baseline",        (PyCFunction)Servo_baseline,        METH_VARARGS,
+     "baseline(count, now_ms). Re-anchor observer + time baseline (call on attach)."},
+    {"is_done",         (PyCFunction)Servo_is_done,         METH_NOARGS,
+     "True if no trajectory active or the active one has completed."},
+    {"target_dps",      (PyCFunction)Servo_target_dps,      METH_NOARGS,
+     "Current velocity setpoint."},
+    {"observed_dps",    (PyCFunction)Servo_observed_dps,    METH_NOARGS,
+     "Observer's velocity estimate."},
+    {"observed_pos",    (PyCFunction)Servo_observed_pos,    METH_NOARGS,
+     "Observer's position estimate (degrees)."},
+    {"count_to_angle",  (PyCFunction)Servo_count_to_angle,  METH_O,
+     "Convert a raw encoder count to degrees using counts_per_rev."},
+    {NULL, NULL, 0, NULL},
+};
+
+
+static PyTypeObject ServoType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name      = "openbricks_sim._native.Servo",
+    .tp_basicsize = sizeof(ServoObject),
+    .tp_itemsize  = 0,
+    .tp_flags     = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_doc       = PyDoc_STR(
+        "Servo control state machine — same control law as the "
+        "firmware's ``_openbricks_native.Servo``. I/O is the caller's "
+        "responsibility (read encoder, call ``tick``, write the "
+        "returned power to your motor). The sim runner binds these "
+        "calls against MuJoCo joint sensors + actuators."),
+    .tp_new       = PyType_GenericNew,
+    .tp_init      = (initproc)Servo_init,
+    .tp_methods   = Servo_methods,
+};
+
+
+/* -------------------------------------------------------------------
  * Module init
  * ------------------------------------------------------------------- */
 
@@ -343,6 +492,16 @@ PyMODINIT_FUNC PyInit__native(void) {
     if (PyModule_AddObject(m, "MotorProcess",
                            (PyObject *)&MotorProcessType) < 0) {
         Py_DECREF(&MotorProcessType);
+        Py_DECREF(m);
+        return NULL;
+    }
+    if (PyType_Ready(&ServoType) < 0) {
+        Py_DECREF(m);
+        return NULL;
+    }
+    Py_INCREF(&ServoType);
+    if (PyModule_AddObject(m, "Servo", (PyObject *)&ServoType) < 0) {
+        Py_DECREF(&ServoType);
         Py_DECREF(m);
         return NULL;
     }

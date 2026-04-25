@@ -146,7 +146,7 @@ static void drivebase_control_tick(void *ctx) {
     // (heading, in wheel-degrees) comes from the IMU when ``use_gyro`` is
     // active — slip-immune, drift-corrected by fusion — or from the
     // encoder differential as the fallback.
-    mp_float_t sum_pos  = (self->left->observer.core.pos_hat + self->right->observer.core.pos_hat) / (mp_float_t)2.0;
+    mp_float_t sum_pos  = (self->left->core.observer.pos_hat + self->right->core.observer.pos_hat) / (mp_float_t)2.0;
     mp_float_t diff_pos;
     if (self->use_gyro && self->imu_heading_fn != MP_OBJ_NULL) {
         mp_float_t body = mp_obj_get_float(mp_call_function_0(self->imu_heading_fn));
@@ -163,7 +163,7 @@ static void drivebase_control_tick(void *ctx) {
         diff_pos = -delta * self->axle_track_mm * (mp_float_t)M_PI /
                    self->wheel_circumference_mm;
     } else {
-        diff_pos = (self->left->observer.core.pos_hat - self->right->observer.core.pos_hat) / (mp_float_t)2.0;
+        diff_pos = (self->left->core.observer.pos_hat - self->right->core.observer.pos_hat) / (mp_float_t)2.0;
     }
 
     mp_float_t sum_err  = fwd_target  - sum_pos;
@@ -175,8 +175,8 @@ static void drivebase_control_tick(void *ctx) {
     // diff_pos = (left - right)/2, so diff_cmd is the desired
     // (left_vel - right_vel)/2 = the rate at which left out-paces right.
     // Positive diff_cmd → left speeds up, right slows down.
-    self->left->target_dps  = fwd_cmd + diff_cmd;
-    self->right->target_dps = fwd_cmd - diff_cmd;
+    self->left->core.target_dps  = fwd_cmd + diff_cmd;
+    self->right->core.target_dps = fwd_cmd - diff_cmd;
 }
 
 // ---------------------------------------------------------------------
@@ -206,23 +206,23 @@ static void drivebase_register(drivebase_obj_t *self) {
     // QuadratureEncoder / PCNTEncoder / any future type).
     mp_int_t lc = mp_obj_get_int(mp_call_function_0(self->left->encoder_count));
     mp_int_t rc = mp_obj_get_int(mp_call_function_0(self->right->encoder_count));
-    mp_float_t lp = (mp_float_t)lc * (mp_float_t)360.0 / (mp_float_t)self->left->counts_per_rev;
-    mp_float_t rp = (mp_float_t)rc * (mp_float_t)360.0 / (mp_float_t)self->right->counts_per_rev;
-    openbricks_observer_reset(&self->left->observer,  lp);
-    openbricks_observer_reset(&self->right->observer, rp);
-    self->left->last_time_ms  = openbricks_motor_process_now_ms();
-    self->right->last_time_ms = openbricks_motor_process_now_ms();
+    mp_float_t lp = (mp_float_t)lc * (mp_float_t)360.0 / (mp_float_t)self->left->core.counts_per_rev;
+    mp_float_t rp = (mp_float_t)rc * (mp_float_t)360.0 / (mp_float_t)self->right->core.counts_per_rev;
+    ob_observer_reset(&self->left->core.observer,  lp);
+    ob_observer_reset(&self->right->core.observer, rp);
+    self->left->core.last_time_ms  = openbricks_motor_process_now_ms();
+    self->right->core.last_time_ms = openbricks_motor_process_now_ms();
 
     // Hand both servos into speed-mode by bumping their target to 0 and
     // ensuring they're active on motor_process. (Calling their Python
     // ``run_speed(0.0)`` would also do it, but we'd be re-entering MP
     // from a C callback scheduler which is avoidable.)
-    self->left->target_dps  = 0.0;
-    self->right->target_dps = 0.0;
-    self->left->traj_active  = false;
-    self->right->traj_active = false;
-    self->left->traj_done  = true;
-    self->right->traj_done = true;
+    self->left->core.target_dps  = 0.0;
+    self->right->core.target_dps = 0.0;
+    self->left->core.traj_active  = false;
+    self->right->core.traj_active = false;
+    self->left->core.traj_done  = true;
+    self->right->core.traj_done = true;
     // Servos' control_tick lives in servo.c; register it here only if
     // not already attached.
     extern void servo_control_tick(void *);   // forward decl mirror
@@ -277,8 +277,8 @@ static mp_obj_t db_straight(mp_obj_t self_in, mp_obj_t distance_in, mp_obj_t spe
     mp_float_t speed_dps    = fabs(speed_mm_s) / self->wheel_circumference_mm * (mp_float_t)360.0;
 
     // Build the fwd trajectory starting from current average position.
-    mp_float_t sum_pos  = (self->left->observer.core.pos_hat + self->right->observer.core.pos_hat) / (mp_float_t)2.0;
-    mp_float_t diff_pos = (self->left->observer.core.pos_hat - self->right->observer.core.pos_hat) / (mp_float_t)2.0;
+    mp_float_t sum_pos  = (self->left->core.observer.pos_hat + self->right->core.observer.pos_hat) / (mp_float_t)2.0;
+    mp_float_t diff_pos = (self->left->core.observer.pos_hat - self->right->core.observer.pos_hat) / (mp_float_t)2.0;
     openbricks_trajectory_init(&self->fwd, sum_pos, sum_pos + distance_deg,
                                 speed_dps, DEFAULT_ACCEL);
     self->fwd_start_ms = openbricks_motor_process_now_ms();
@@ -314,8 +314,8 @@ static mp_obj_t db_turn(mp_obj_t self_in, mp_obj_t angle_in, mp_obj_t rate_in) {
     mp_float_t rate_arc_mm_s = (mp_float_t)fabs((double)rate_dps) * ((mp_float_t)M_PI / (mp_float_t)180.0) * (self->axle_track_mm / (mp_float_t)2.0);
     mp_float_t rate_wheel_dps = rate_arc_mm_s / self->wheel_circumference_mm * (mp_float_t)360.0;
 
-    mp_float_t diff_pos = (self->left->observer.core.pos_hat - self->right->observer.core.pos_hat) / (mp_float_t)2.0;
-    mp_float_t sum_pos  = (self->left->observer.core.pos_hat + self->right->observer.core.pos_hat) / (mp_float_t)2.0;
+    mp_float_t diff_pos = (self->left->core.observer.pos_hat - self->right->core.observer.pos_hat) / (mp_float_t)2.0;
+    mp_float_t sum_pos  = (self->left->core.observer.pos_hat + self->right->core.observer.pos_hat) / (mp_float_t)2.0;
     openbricks_trajectory_init(&self->turn, diff_pos, diff_pos + signed_delta,
                                 rate_wheel_dps, DEFAULT_ACCEL);
     self->turn_start_ms = openbricks_motor_process_now_ms();
