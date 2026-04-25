@@ -39,6 +39,20 @@ class SimRobotConstructionTests(unittest.TestCase):
         self.assertIsNotNone(robot.right)
         self.assertIsNotNone(robot.drivebase)
 
+    def test_construct_with_wro_alias_loads_world(self):
+        # Exercises the load_world() branch (vs the standalone path).
+        robot = SimRobot(world="wro-2026-elementary",
+                          chassis_spec=ChassisSpec(pos_x=1.0, pos_y=-0.42))
+        # Same default chassis names should be wired up.
+        self.assertIsNotNone(robot.left)
+        self.assertIsNotNone(robot.right)
+        self.assertIsNotNone(robot.drivebase)
+
+    def test_construct_with_explicit_kp_sum_and_kp_diff(self):
+        # Just make sure these flow through without exception.
+        robot = SimRobot(kp_sum=3.0, kp_diff=6.0)
+        self.assertIsNotNone(robot.drivebase)
+
     def test_custom_chassis_spec_propagates_to_drivebase(self):
         # 80 mm wheels, 200 mm axle — verify those land in the
         # drivebase's geometry. The native DriveBase doesn't expose

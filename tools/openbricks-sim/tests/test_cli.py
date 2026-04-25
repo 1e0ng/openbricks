@@ -124,6 +124,41 @@ class RunSubcommandTests(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_run_with_viewer_calls_run_viewer_after_script(self):
+        # ``--viewer`` should cause cmd_run to launch the viewer once
+        # the user script returns. Patch ``SimRobot.run_viewer`` so
+        # we don't actually open a window in CI.
+        import tempfile, os
+        from openbricks_sim.robot import SimRobot
+        with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False) as f:
+            f.write("robot.run_for(0.01)\n")
+            path = f.name
+        try:
+            with patch.object(SimRobot, "run_viewer", autospec=True) as mock:
+                rc = cli.main(["run", path, "--world", "empty", "--viewer"])
+            self.assertEqual(rc, 0)
+            mock.assert_called_once()
+        finally:
+            os.unlink(path)
+
+    def test_run_with_viewer_holds_after_systemexit(self):
+        # User script calls sys.exit(); --viewer should still drop
+        # the user into the viewer rather than dying immediately.
+        import tempfile, os
+        from openbricks_sim.robot import SimRobot
+        with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False) as f:
+            f.write("import sys\nsys.exit(0)\n")
+            path = f.name
+        try:
+            with patch.object(SimRobot, "run_viewer", autospec=True) as mock:
+                rc = cli.main(["run", path, "--world", "empty", "--viewer"])
+            self.assertEqual(rc, 0)
+            mock.assert_called_once()
+        finally:
+            os.unlink(path)
+
 
 if __name__ == "__main__":
     unittest.main()
