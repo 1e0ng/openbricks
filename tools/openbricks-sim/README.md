@@ -8,7 +8,11 @@ Backbone: [MuJoCo](https://github.com/google-deepmind/mujoco) (Apache-2.0, nativ
 
 Pre-implementation. The following arrived ahead of the package itself because they're useful as standalone reference assets:
 
-- `worlds/wro_2026_elementary_robot_rockstars/` — MJCF + mat texture for the 2026 WRO Elementary "Robot Rockstars" challenge. Loadable directly in `python -m mujoco.viewer` today; will plug into the sim runner once it exists.
+- `worlds/wro_2026_elementary_robot_rockstars/` — 2026 WRO Elementary "Robot Rockstars" (max score 255)
+- `worlds/wro_2026_junior_heritage_heroes/` — 2026 WRO Junior "Heritage Heroes" (max score 230)
+- `worlds/wro_2026_senior_mosaic_masters/` — 2026 WRO Senior "Mosaic Masters" (max score 233)
+
+Each world is loadable directly in `python -m mujoco.viewer` today; all three will plug into the sim runner once it exists.
 
 ## Roadmap (5–7 months)
 
