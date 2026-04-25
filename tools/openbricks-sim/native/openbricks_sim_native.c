@@ -19,6 +19,7 @@
 
 #include "trajectory_core.h"
 #include "observer_core.h"
+#include "motor_process_core.h"
 
 
 /* -------------------------------------------------------------------
@@ -185,6 +186,114 @@ static PyTypeObject ObserverType = {
 
 
 /* -------------------------------------------------------------------
+ * MotorProcess (C-callback registry + tick clock)
+ *
+ * The sim runner uses this to drive the same servo / drivebase tick
+ * functions firmware does, except triggered from MuJoCo's step loop
+ * instead of a hardware Timer ISR. Python callback dispatch (the
+ * firmware's "slow path") isn't exposed here — sim user code runs
+ * directly inside the step loop, no need for a separate Python-
+ * callable list.
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    PyObject_HEAD
+    ob_motor_process_t core;
+} MotorProcessObject;
+
+
+static int MotorProcess_init(MotorProcessObject *self, PyObject *args, PyObject *kwargs) {
+    static char *kwlist[] = {"period_ms", NULL};
+    int period_ms = 1;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|i", kwlist, &period_ms)) {
+        return -1;
+    }
+    ob_motor_process_init(&self->core);
+    ob_motor_process_set_period_ms(&self->core, period_ms);
+    return 0;
+}
+
+
+static PyObject *MotorProcess_tick(MotorProcessObject *self, PyObject *Py_UNUSED(ignored)) {
+    /* Fire all registered C callbacks once + advance the tick clock.
+     *
+     * Python-side users who want their own callbacks fired as part
+     * of a tick simply call them themselves alongside this method —
+     * there's no equivalent of the firmware's Python-callable list
+     * here because the sim's "tick driver" is already pure Python
+     * (the MuJoCo step loop). */
+    ob_motor_process_fire_c(&self->core);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *MotorProcess_now_ms(MotorProcessObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyLong_FromLong((long)self->core.virtual_now_ms);
+}
+
+
+static PyObject *MotorProcess_period_ms(MotorProcessObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyLong_FromLong((long)self->core.period_ms);
+}
+
+
+static PyObject *MotorProcess_set_period_ms(MotorProcessObject *self, PyObject *arg) {
+    long period_ms = PyLong_AsLong(arg);
+    if (period_ms == -1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    ob_motor_process_set_period_ms(&self->core, (int)period_ms);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *MotorProcess_count_c(MotorProcessObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyLong_FromSize_t(ob_motor_process_count_c(&self->core));
+}
+
+
+static PyObject *MotorProcess_reset(MotorProcessObject *self, PyObject *Py_UNUSED(ignored)) {
+    ob_motor_process_reset(&self->core);
+    Py_RETURN_NONE;
+}
+
+
+static PyMethodDef MotorProcess_methods[] = {
+    {"tick",          (PyCFunction)MotorProcess_tick,          METH_NOARGS,
+     "Fire every registered C callback once and advance the tick clock by period_ms."},
+    {"now_ms",        (PyCFunction)MotorProcess_now_ms,        METH_NOARGS,
+     "Tick-driven monotonic clock in milliseconds."},
+    {"period_ms",     (PyCFunction)MotorProcess_period_ms,     METH_NOARGS,
+     "Current tick period in milliseconds."},
+    {"set_period_ms", (PyCFunction)MotorProcess_set_period_ms, METH_O,
+     "Set the tick period in milliseconds."},
+    {"count_c",       (PyCFunction)MotorProcess_count_c,       METH_NOARGS,
+     "Number of C callbacks currently registered."},
+    {"reset",         (PyCFunction)MotorProcess_reset,         METH_NOARGS,
+     "Clear callbacks + zero the clock + reset period to default 1 ms."},
+    {NULL, NULL, 0, NULL},
+};
+
+
+static PyTypeObject MotorProcessType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name      = "openbricks_sim._native.MotorProcess",
+    .tp_basicsize = sizeof(MotorProcessObject),
+    .tp_itemsize  = 0,
+    .tp_flags     = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_doc       = PyDoc_STR(
+        "Tick scheduler — same C-callback registry + virtual-clock "
+        "behaviour as the firmware's ``_openbricks_native.motor_process``. "
+        "Callable from the sim runner's MuJoCo step loop. The firmware's "
+        "Python-callable list isn't exposed here — sim ticks run inside "
+        "Python already, so callers call their own functions directly."),
+    .tp_new       = PyType_GenericNew,
+    .tp_init      = (initproc)MotorProcess_init,
+    .tp_methods   = MotorProcess_methods,
+};
+
+
+/* -------------------------------------------------------------------
  * Module init
  * ------------------------------------------------------------------- */
 
@@ -223,6 +332,17 @@ PyMODINIT_FUNC PyInit__native(void) {
     if (PyModule_AddObject(m, "Observer",
                            (PyObject *)&ObserverType) < 0) {
         Py_DECREF(&ObserverType);
+        Py_DECREF(m);
+        return NULL;
+    }
+    if (PyType_Ready(&MotorProcessType) < 0) {
+        Py_DECREF(m);
+        return NULL;
+    }
+    Py_INCREF(&MotorProcessType);
+    if (PyModule_AddObject(m, "MotorProcess",
+                           (PyObject *)&MotorProcessType) < 0) {
+        Py_DECREF(&MotorProcessType);
         Py_DECREF(m);
         return NULL;
     }

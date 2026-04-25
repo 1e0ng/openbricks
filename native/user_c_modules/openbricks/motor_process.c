@@ -2,18 +2,30 @@
 //
 // openbricks — motor_process.c
 //
-// The cooperative motor scheduler. A singleton owning a machine.Timer
-// that fires at the configured period (1 ms by default — 1 kHz, matching
-// pbio). Each tick fires two callback lists in order:
+// MicroPython binding shell for the cooperative motor scheduler.
+// Owns:
+//   - the Python-callback list (mp_obj_list_t of Python callables)
+//   - the ``machine.Timer`` lifecycle
 //
-//   1. Fast path: native C callbacks registered via motor_process.h.
-//      These are plain function-pointer calls, ~1 µs each. All
-//      openbricks-provided closed-loop drivers (servo.c, and later
-//      observer / trajectory / hub) live here.
-//   2. Slow path: Python callables registered via the public API below.
-//      Each call pays MicroPython dispatch overhead (~25 µs). Intended
-//      for user-extensible hooks (e.g. a sensor logger), not for the
-//      hot control loop.
+// Delegates to ``motor_process_core.{c,h}`` for:
+//   - the C-callback registry
+//   - the tick-driven monotonic clock
+//   - the firing loop for the C-callback list
+//
+// The split is what lets the same servo / drivebase tick functions
+// run unmodified in the host-side ``openbricks_sim._native``: the
+// sim runner instantiates its own ``ob_motor_process_t`` and calls
+// ``ob_motor_process_fire_c`` from the MuJoCo step loop, no
+// MicroPython or Timer involved.
+//
+// Tick dispatch order (firmware path, called from the Timer ISR):
+//
+//   1. Fast path: native C callbacks via the shared core (~1 µs each).
+//      All openbricks-provided closed-loop drivers (servo, drivebase,
+//      future hub instrumentation) live here.
+//   2. Slow path: Python callables registered via the public API.
+//      Each call pays MicroPython dispatch overhead (~25 µs). For
+//      user-extensible hooks (sensor loggers etc.), not the hot loop.
 //
 // Public Python API (module: _openbricks_native, attribute: motor_process):
 //
@@ -21,71 +33,90 @@
 //     motor_process.unregister(callback)    -> None
 //     motor_process.start()                 -> None
 //     motor_process.stop()                  -> None
-//     motor_process.tick()                  -> None      (synchronous one-shot)
+//     motor_process.tick()                  -> None       (synchronous one-shot)
 //     motor_process.is_running()            -> bool
 //     motor_process.configure(period_ms=N)  -> None
-//     motor_process.reset()                 -> None      (test helper)
-//
-// Internal C API: see motor_process.h. Sibling C modules use that to
-// subscribe their tick bodies without going through Python.
-//
-// The Python equivalent in tests/_fakes.py mirrors this behaviour exactly;
-// desktop tests exercise that fake, the firmware exercises this C module.
+//     motor_process.reset()                 -> None       (test helper)
+
+#include <stdbool.h>
 
 #include "py/runtime.h"
 #include "py/objlist.h"
 #include "py/mphal.h"
 
 #include "motor_process.h"
+#include "motor_process_core.h"
 
 #define DEFAULT_PERIOD_MS 1
-#define MAX_C_CALLBACKS   8   // raise if the fleet of native controllers grows
 
 // -----------------------------------------------------------------------
-// Singleton state
+// Singleton state — the Python-binding side. The C-side state (callback
+// table + virtual clock) lives in the shared core, in
+// ``shared_core_singleton`` below.
 
 struct _motor_process_obj_t {
     mp_obj_base_t base;
-    mp_int_t      period_ms;
-    // ``callbacks`` (mp_obj_list_t of Python callables) and ``timer``
-    // (machine.Timer instance or mp_const_none) are NOT stored here:
-    // because ``motor_process_singleton`` is a C-level static, any
-    // mp_obj_t stored in it is invisible to the GC. Under the
-    // coverage/debug build the GC collects the list out from under us,
-    // producing spurious "'float' object has no attribute 'clear'" crashes
-    // when we later try to use it. Putting them behind
-    // MP_REGISTER_ROOT_POINTER below means the GC traces them and the
-    // objects they point to survive collection.
 };
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t openbricks_mp_callbacks);
 MP_REGISTER_ROOT_POINTER(mp_obj_t openbricks_mp_timer);
 
-typedef struct {
-    openbricks_tick_fn_t fn;
-    void *ctx;
-} c_callback_slot_t;
-
 extern const mp_obj_type_t openbricks_motor_process_type;
 
 motor_process_obj_t motor_process_singleton = {
-    .base       = { &openbricks_motor_process_type },
-    .period_ms  = DEFAULT_PERIOD_MS,
+    .base = { &openbricks_motor_process_type },
 };
 
-static c_callback_slot_t c_callbacks[MAX_C_CALLBACKS];
-static size_t n_c_callbacks = 0;
+// The shared C-side state. Owned here so the public API
+// (``openbricks_motor_process_register_c``, etc.) can forward to it
+// without having to thread an instance pointer through every call site.
+static ob_motor_process_t shared_core_singleton;
+static bool               shared_core_initialised = false;
 
-// Tick-driven monotonic clock. Advances by ``period_ms`` each time
-// ``_on_tick`` fires — so time measurements in downstream C code
-// (servo / drivebase) track the tick cadence rather than real wall
-// time. This makes virtual-clock tests deterministic: each simulated
-// tick advances the clock by exactly one period, same as on firmware.
-static mp_int_t virtual_now_ms = 0;
+
+static ob_motor_process_t *core_get(void) {
+    if (!shared_core_initialised) {
+        ob_motor_process_init(&shared_core_singleton);
+        shared_core_initialised = true;
+    }
+    return &shared_core_singleton;
+}
+
+
+// -----------------------------------------------------------------------
+// Internal C API exported to siblings via motor_process.h. Forwards
+// straight to the shared core; preserved as a thin wrapper so
+// servo.c / drivebase.c didn't need a flag-day rename.
 
 mp_int_t openbricks_motor_process_now_ms(void) {
-    return virtual_now_ms;
+    return (mp_int_t)core_get()->virtual_now_ms;
 }
+
+
+// Forward declaration — mp_do_start is defined later in this file.
+static void mp_do_start(motor_process_obj_t *self);
+
+
+void openbricks_motor_process_register_c(openbricks_tick_fn_t fn, void *ctx) {
+    if (ob_motor_process_register_c(core_get(), fn, ctx) < 0) {
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("openbricks: too many C tick callbacks"));
+    }
+    // pbio-style: the scheduler runs any time there's work. Once started,
+    // it stays running for the life of the interpreter (no auto-stop).
+    mp_do_start(&motor_process_singleton);
+}
+
+
+void openbricks_motor_process_unregister_c(openbricks_tick_fn_t fn, void *ctx) {
+    ob_motor_process_unregister_c(core_get(), fn, ctx);
+}
+
+
+// -----------------------------------------------------------------------
+// Lazy init for the Python-side state. Same pattern as before — the
+// list / timer slots are MP root-pointer ``MP_OBJ_NULL`` until the
+// first access.
 
 static motor_process_obj_t *mp_get(void) {
     motor_process_obj_t *self = &motor_process_singleton;
@@ -93,63 +124,24 @@ static motor_process_obj_t *mp_get(void) {
         MP_STATE_PORT(openbricks_mp_callbacks) = mp_obj_new_list(0, NULL);
         MP_STATE_PORT(openbricks_mp_timer)     = mp_const_none;
     }
+    (void)core_get();   // make sure shared core is initialised too
     return self;
 }
 
-// -----------------------------------------------------------------------
-// Internal C API (see motor_process.h)
-
-// Forward declaration — mp_do_start is defined later in this file.
-static void mp_do_start(motor_process_obj_t *self);
-
-void openbricks_motor_process_register_c(openbricks_tick_fn_t fn, void *ctx) {
-    for (size_t i = 0; i < n_c_callbacks; i++) {
-        if (c_callbacks[i].fn == fn && c_callbacks[i].ctx == ctx) {
-            return;  // already registered
-        }
-    }
-    if (n_c_callbacks >= MAX_C_CALLBACKS) {
-        mp_raise_msg(&mp_type_RuntimeError,
-                     MP_ERROR_TEXT("openbricks: too many C tick callbacks"));
-    }
-    c_callbacks[n_c_callbacks].fn  = fn;
-    c_callbacks[n_c_callbacks].ctx = ctx;
-    n_c_callbacks++;
-    // pbio-style: the scheduler runs any time there's work. Once started,
-    // it stays running for the life of the interpreter (no auto-stop).
-    mp_do_start(mp_get());
-}
-
-void openbricks_motor_process_unregister_c(openbricks_tick_fn_t fn, void *ctx) {
-    for (size_t i = 0; i < n_c_callbacks; i++) {
-        if (c_callbacks[i].fn == fn && c_callbacks[i].ctx == ctx) {
-            for (size_t j = i; j + 1 < n_c_callbacks; j++) {
-                c_callbacks[j] = c_callbacks[j + 1];
-            }
-            n_c_callbacks--;
-            return;
-        }
-    }
-}
 
 // -----------------------------------------------------------------------
-// Tick dispatch. Registered as the machine.Timer callback (which receives
-// the Timer instance as its single argument). C callbacks fire first;
-// Python callbacks second via a stack snapshot so self-unregistration
-// mid-tick is safe.
+// Tick dispatch. Registered as the machine.Timer callback (which
+// receives the Timer instance as its single argument). C callbacks
+// (via the shared core's ``fire_c``) fire first; Python callbacks
+// second via a stack snapshot so self-unregistration mid-tick is safe.
 
 static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
     (void)timer_arg;
     motor_process_obj_t *self = mp_get();
+    (void)self;
 
-    // Advance the tick-driven clock before firing callbacks so subscribers
-    // see a consistent "now" for their deltas.
-    virtual_now_ms += self->period_ms;
-
-    // Fast path: native C callbacks. Tight loop, no MP allocation.
-    for (size_t i = 0; i < n_c_callbacks; i++) {
-        c_callbacks[i].fn(c_callbacks[i].ctx);
-    }
+    // Fast path — also advances the tick clock.
+    ob_motor_process_fire_c(core_get());
 
     // Slow path: Python callbacks.
     size_t n;
@@ -170,18 +162,20 @@ static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_on_tick_obj, mp_on_tick);
 
+
 // -----------------------------------------------------------------------
 // Timer lifecycle helpers. machine.Timer is accessed lazily via the
 // ``machine`` module so we don't hard-depend on its header.
 
 static void mp_do_start(motor_process_obj_t *self) {
+    (void)self;
     if (MP_STATE_PORT(openbricks_mp_timer) != mp_const_none) {
         return;
     }
     // Try to create a machine.Timer. On ports that don't ship a Timer
-    // (unix MP, for example), leave MP_STATE_PORT(openbricks_mp_timer) as mp_const_none — the
-    // scheduler is still usable via explicit ``tick()`` calls, which
-    // is how the test suite exercises it.
+    // (unix MP, for example), leave MP_STATE_PORT(openbricks_mp_timer)
+    // as mp_const_none — the scheduler is still usable via explicit
+    // ``tick()`` calls, which is how the test suite exercises it.
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t machine_mod = mp_import_name(MP_QSTR_machine, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
@@ -190,13 +184,14 @@ static void mp_do_start(motor_process_obj_t *self) {
         mp_obj_t timer       = mp_call_function_1(timer_cls, MP_OBJ_NEW_SMALL_INT(-1));
         mp_obj_t init_method = mp_load_attr(timer, MP_QSTR_init);
 
-        // mp_call_method_n_kw expects args = [func, self_or_NULL, positionals..., kw keys/vals].
-        // Our ``init_method`` is already bound to the timer instance, so we
-        // pass self = MP_OBJ_NULL and let MP skip the self-prepend.
+        // mp_call_method_n_kw expects args = [func, self_or_NULL,
+        // positionals..., kw keys/vals]. ``init_method`` is already
+        // bound to the timer instance, so we pass self = MP_OBJ_NULL
+        // and let MP skip the self-prepend.
         mp_obj_t args[] = {
             init_method,
             MP_OBJ_NULL,
-            MP_OBJ_NEW_QSTR(MP_QSTR_period),   MP_OBJ_NEW_SMALL_INT(self->period_ms),
+            MP_OBJ_NEW_QSTR(MP_QSTR_period),   MP_OBJ_NEW_SMALL_INT(core_get()->period_ms),
             MP_OBJ_NEW_QSTR(MP_QSTR_mode),     periodic,
             MP_OBJ_NEW_QSTR(MP_QSTR_callback), MP_OBJ_FROM_PTR(&mp_on_tick_obj),
         };
@@ -204,11 +199,13 @@ static void mp_do_start(motor_process_obj_t *self) {
         MP_STATE_PORT(openbricks_mp_timer) = timer;
         nlr_pop();
     }
-    // else: machine.Timer unavailable — swallow the exception and keep
-    // the singleton usable via tick().
+    // else: machine.Timer unavailable — swallow the exception and
+    // keep the singleton usable via ``tick()``.
 }
 
+
 static void mp_do_stop(motor_process_obj_t *self) {
+    (void)self;
     if (MP_STATE_PORT(openbricks_mp_timer) == mp_const_none) {
         return;
     }
@@ -216,6 +213,7 @@ static void mp_do_stop(motor_process_obj_t *self) {
     mp_call_function_0(deinit);
     MP_STATE_PORT(openbricks_mp_timer) = mp_const_none;
 }
+
 
 // -----------------------------------------------------------------------
 // Python-facing methods
@@ -290,7 +288,7 @@ static mp_obj_t mp_configure(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
                      MP_ARRAY_SIZE(allowed), allowed, parsed);
 
     motor_process_obj_t *self = mp_get();
-    self->period_ms = parsed[0].u_int;
+    ob_motor_process_set_period_ms(core_get(), parsed[0].u_int);
 
     if (MP_STATE_PORT(openbricks_mp_timer) != mp_const_none) {
         mp_do_stop(self);
@@ -302,7 +300,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(mp_configure_obj, 1, mp_configure);
 
 static mp_obj_t mp_period_ms(mp_obj_t self_in) {
     (void)self_in;
-    return MP_OBJ_NEW_SMALL_INT(mp_get()->period_ms);
+    return MP_OBJ_NEW_SMALL_INT(core_get()->period_ms);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_period_ms_obj, mp_period_ms);
 
@@ -327,9 +325,7 @@ static mp_obj_t mp_reset(mp_obj_t self_in) {
     mp_do_stop(self);
     mp_obj_t clear = mp_load_attr(MP_STATE_PORT(openbricks_mp_callbacks), MP_QSTR_clear);
     mp_call_function_0(clear);
-    self->period_ms   = DEFAULT_PERIOD_MS;
-    n_c_callbacks     = 0;
-    virtual_now_ms    = 0;
+    ob_motor_process_reset(core_get());
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_reset_obj, mp_reset);
