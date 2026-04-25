@@ -104,39 +104,46 @@ def cmd_preview(args):
 def cmd_run(args):
     """Execute ``args.script`` with a SimRobot pre-built in its globals.
 
-    The script can read / write the global ``robot`` (a
-    :class:`openbricks_sim.robot.SimRobot`) and step the sim via
-    ``robot.run_for`` / ``robot.run_until``. After the script returns
-    we either drop into the interactive viewer (if ``--viewer``) or
-    exit with the script's status.
+    By default the driver shim is installed, so a script that imports
+    ``openbricks.drivers.*`` + ``machine`` runs unchanged from the
+    firmware path. ``--no-shim`` skips the shim install — handy for
+    scripts that want to drive ``robot`` / ``drivebase`` directly with
+    the openbricks_sim API.
     """
     from openbricks_sim.robot import SimRobot
+    from openbricks_sim import shim
 
     spec  = ChassisSpec(pos_x=args.x, pos_y=args.y)
     robot = SimRobot(world=args.world, chassis_spec=spec)
 
+    if not args.no_shim:
+        shim.install(robot.runtime)
+
     init_globals = {
         "robot":   robot,
-        # Convenience aliases so scripts don't need to dig through
-        # the SimRobot attribute hierarchy for the common handles.
+        # Convenience aliases so openbricks_sim-style scripts (and
+        # ``--no-shim`` runs) can grab the common handles without
+        # digging through SimRobot.
         "drivebase": robot.drivebase,
         "left":      robot.left,
         "right":     robot.right,
     }
     try:
-        runpy.run_path(args.script, init_globals=init_globals,
-                       run_name="__main__")
-    except SystemExit as e:
+        try:
+            runpy.run_path(args.script, init_globals=init_globals,
+                           run_name="__main__")
+        except SystemExit as e:
+            if args.viewer:
+                # Even if the user script called sys.exit, hold the
+                # viewer so the user can inspect the final state.
+                robot.run_viewer()
+            return e.code if isinstance(e.code, int) else 0
         if args.viewer:
-            # Even if the user script called sys.exit, hold the viewer
-            # so the user can inspect the final state. Re-raise
-            # otherwise.
             robot.run_viewer()
-        return e.code if isinstance(e.code, int) else 0
-
-    if args.viewer:
-        robot.run_viewer()
-    return 0
+        return 0
+    finally:
+        if not args.no_shim:
+            shim.uninstall()
 
 
 def _build_parser():
@@ -194,6 +201,13 @@ def _build_parser():
                        help="Drop into the MuJoCo viewer after the "
                             "script returns so you can orbit the "
                             "final scene.")
+    p_run.add_argument("--no-shim", action="store_true",
+                       help="Skip installing the driver shim. The "
+                            "default behaviour ``install``s shims for "
+                            "``machine`` + ``openbricks._native`` and "
+                            "patches ``time.sleep_ms`` to advance the "
+                            "sim — disable when your script uses the "
+                            "openbricks_sim API directly.")
 
     return parser
 

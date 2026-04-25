@@ -142,6 +142,41 @@ class RunSubcommandTests(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_run_no_shim_skips_shim_install(self):
+        # With --no-shim, ``import machine`` should still fail in the
+        # user script (shim not installed).
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False) as f:
+            f.write(
+                "try:\n"
+                "    import machine\n"
+                "    raise SystemExit(1)\n"
+                "except ImportError:\n"
+                "    pass\n")
+            path = f.name
+        try:
+            rc = cli.main(["run", path, "--world", "empty", "--no-shim"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
+    def test_run_with_shim_makes_machine_importable(self):
+        # Default (no --no-shim) — ``import machine`` must succeed.
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False) as f:
+            f.write(
+                "import machine\n"
+                "p = machine.Pin(0)\n"
+                "p.value(1)\n")
+            path = f.name
+        try:
+            rc = cli.main(["run", path, "--world", "empty"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
     def test_run_with_viewer_holds_after_systemexit(self):
         # User script calls sys.exit(); --viewer should still drop
         # the user into the viewer rather than dying immediately.
