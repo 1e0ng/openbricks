@@ -30,6 +30,11 @@ coverage:
           - openbricks-dev
         target: auto
         threshold: 2%
+      openbricks-sim:
+        flags:
+          - openbricks-sim
+        target: auto
+        threshold: 2%
     patch:
       default:
         # Patch coverage is the right gate — new code should be
@@ -48,3 +53,6 @@ flags:
   openbricks-dev:
     paths:
       - tools/openbricks-dev/openbricks_dev/
+  openbricks-sim:
+    paths:
+      - tools/openbricks-sim/openbricks_sim/
