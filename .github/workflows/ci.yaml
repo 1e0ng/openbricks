@@ -238,7 +238,13 @@ jobs:
         # produced above 1:1.
         run: |
           mkdir -p coverage-out
-          for f in drivebase encoder motor_process observer pcnt_encoder servo trajectory; do
+          for f in drivebase drivebase_core \
+                   encoder \
+                   motor_process motor_process_core \
+                   observer observer_core \
+                   pcnt_encoder \
+                   servo servo_core \
+                   trajectory trajectory_core; do
             cp "native/micropython/ports/unix/${f}.c.gcov" "coverage-out/" || true
           done
           ls coverage-out/

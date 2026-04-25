@@ -14,6 +14,7 @@ SRC_USERMOD += $(USERMOD_DIR)/observer_core.c
 SRC_USERMOD += $(USERMOD_DIR)/servo.c
 SRC_USERMOD += $(USERMOD_DIR)/servo_core.c
 SRC_USERMOD += $(USERMOD_DIR)/drivebase.c
+SRC_USERMOD += $(USERMOD_DIR)/drivebase_core.c
 SRC_USERMOD += $(USERMOD_DIR)/pcnt_encoder.c
 SRC_USERMOD += $(USERMOD_DIR)/encoder.c
 SRC_USERMOD += $(USERMOD_DIR)/bno055.c

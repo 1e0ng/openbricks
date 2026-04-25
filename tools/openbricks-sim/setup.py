@@ -37,6 +37,8 @@ _CORE_FILES = [
     "motor_process_core.h",
     "servo_core.c",
     "servo_core.h",
+    "drivebase_core.c",
+    "drivebase_core.h",
 ]
 
 
@@ -70,6 +72,7 @@ setup(
                 "native/_shared/observer_core.c",
                 "native/_shared/motor_process_core.c",
                 "native/_shared/servo_core.c",
+                "native/_shared/drivebase_core.c",
             ],
             include_dirs=[
                 "native/_shared",
