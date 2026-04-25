@@ -8,7 +8,7 @@ Backbone: [MuJoCo](https://github.com/google-deepmind/mujoco) (Apache-2.0, nativ
 
 * **Phase A** ✅ chassis + world preview, MuJoCo backbone wired up.
 * **Phase B** ✅ shared cores: trajectory, observer, motor_process, servo, drivebase. Sim hot-path math is byte-identical to the firmware (same `*_core.c` files compiled into both targets).
-* **Phase C** 🚧 runtime adapters that bind the cores to MuJoCo sensors / actuators. `openbricks_sim.runtime.SimMotor` + `SimDriveBase` drive the default chassis end-to-end; `openbricks_sim.robot.SimRobot` bundles them with the world for one-line scripts; `openbricks-sim run main.py [--world ...]` executes a user script with `robot` / `drivebase` / `left` / `right` pre-bound. Next: a driver-shim layer (C3) that monkey-patches `openbricks.drivers.*` so firmware-targeting code runs unchanged.
+* **Phase C** 🚧 runtime adapters + driver shim. `openbricks_sim.runtime.SimMotor` + `SimDriveBase` drive the default chassis; `openbricks_sim.robot.SimRobot` bundles them with the world; `openbricks-sim run main.py` executes scripts with `robot` / `drivebase` / `left` / `right` pre-bound. **C3 (just shipped):** `openbricks_sim.shim` installs no-op `machine` + replacement `_openbricks_native` modules and patches `time.sleep_ms`, so a script that imports `openbricks.drivers.jgb37_520.JGB37Motor` and `openbricks.robotics.drivebase.DriveBase` runs unchanged inside the sim — see `examples/wander_hardware_style.py`. Next: `SimIMU` + `SimColorSensor` (C4).
 
 ```
 pipx install openbricks-sim   # once on PyPI
@@ -19,6 +19,9 @@ openbricks-sim preview --world wro-2026-elementary --x 1.0 --y -0.42
 
 # Or execute a script against the sim:
 openbricks-sim run examples/wander.py --world wro-2026-elementary --viewer
+
+# Or — with the driver shim — run unmodified firmware code:
+openbricks-sim run examples/wander_hardware_style.py --world wro-2026-elementary
 ```
 
 Opens a MuJoCo viewer window with a default differential-drive chassis spawned at the start area of the 2026 WRO Elementary mat. Physics steps at 1 kHz. Use the viewer's mouse controls to orbit, drive with arrow keys or programmatically from Phase C.
