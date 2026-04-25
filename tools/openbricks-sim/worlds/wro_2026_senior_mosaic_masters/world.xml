@@ -1,0 +1,198 @@
+<!--
+  WRO 2026 RoboMission Senior — "Mosaic Masters"
+  ================================================
+
+  Theme: a mosaic-tile-pattern construction site. The robot acts as
+  an apprentice mason — provides tools to colleagues, lays mosaic
+  tiles in a frame, delivers cement to colour-coded targets, and
+  protects the barriers around the work site.
+
+  Missions (from the official Game Rules PDF, 2026-01-15):
+
+    3.1  Provide the tools
+           Rectangular trowel → sponsor area. 15 full / 5 partial.
+           Cement bowl       → parking space. 15 full / 5 partial.
+           Masonry trowel    → start area.    15 full / 5 partial.
+    3.2  Put the mosaic in place
+           Up to 12 mosaic tiles in the mosaic frame, correctly
+             oriented + colour-matched + on-the-ground.
+             10 each correct (max 120). 5 each incorrect.
+    3.3  Deliver the cement
+           Up to 40 cement elements (10×each colour: yellow, blue,
+             green, white) placed in matching-colour cement target
+             areas. 1 each (max 40).
+    3.4  Bonus for barriers
+           4 barriers (2 red w/ blue balls, 2 black w/ red balls)
+             not damaged or moved. 7 each (max 28).
+
+  Max round score: 233.
+
+  Mat: 2362 × 1143 mm — official printed artwork as MuJoCo texture
+  (mat.png in this directory). Origin at mat centre. +X = long
+  axis, +Y = short, +Z = up. Metres.
+-->
+
+<mujoco model="wro_2026_senior_mosaic_masters">
+  <compiler angle="degree" coordinate="local"/>
+
+  <option timestep="0.001" iterations="20" solver="Newton"/>
+
+  <asset>
+    <texture name="mat_tex" type="2d" file="mat.png"/>
+    <material name="mat" texture="mat_tex" texrepeat="1 1"
+              specular="0" shininess="0" reflectance="0"/>
+    <material name="wall" rgba="0.90 0.90 0.90 1"/>
+
+    <material name="lego_red"     rgba="0.85 0.10 0.10 1"/>
+    <material name="lego_yellow"  rgba="0.95 0.80 0.10 1"/>
+    <material name="lego_green"   rgba="0.15 0.70 0.25 1"/>
+    <material name="lego_blue"    rgba="0.10 0.30 0.80 1"/>
+    <material name="lego_white"   rgba="0.95 0.95 0.95 1"/>
+    <material name="lego_black"   rgba="0.08 0.08 0.08 1"/>
+    <material name="lego_gray"    rgba="0.55 0.55 0.58 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos=" 0.6 0 1.6" dir="0 0 -1" diffuse="0.95 0.95 0.95"/>
+    <light pos="-0.6 0 1.6" dir="0 0 -1" diffuse="0.65 0.65 0.65"/>
+
+    <!-- ===== MAT (2.362 × 1.143 m, printed texture) ===== -->
+    <geom name="mat" type="plane" size="1.181 0.5715 0.01"
+          material="mat" friction="0.8 0.02 0.0001"/>
+
+    <geom name="wall_n" type="box" pos=" 0     0.579  0.02"
+          size="1.181 0.0075 0.02" material="wall"/>
+    <geom name="wall_s" type="box" pos=" 0    -0.579  0.02"
+          size="1.181 0.0075 0.02" material="wall"/>
+    <geom name="wall_e" type="box" pos=" 1.188 0      0.02"
+          size="0.0075 0.5715 0.02" material="wall"/>
+    <geom name="wall_w" type="box" pos="-1.188 0      0.02"
+          size="0.0075 0.5715 0.02" material="wall"/>
+
+    <!-- =========================================================
+         MISSION 3.4 — barriers (×4). Bonus 7 pts each, undamaged.
+         Position: in / around the mosaic frame in the city centre.
+         Two red barriers with blue tops, two black with red tops.
+         ========================================================= -->
+    <body name="barrier_red_a" pos="-0.20  0.18  0.025">
+      <freejoint/>
+      <geom type="box" size="0.014 0.014 0.025" mass="0.06" material="lego_red"/>
+      <geom type="sphere" size="0.012" pos="0 0 0.035"
+            mass="0.01" material="lego_blue"/>
+    </body>
+    <body name="barrier_red_b" pos=" 0.20  0.18  0.025">
+      <freejoint/>
+      <geom type="box" size="0.014 0.014 0.025" mass="0.06" material="lego_red"/>
+      <geom type="sphere" size="0.012" pos="0 0 0.035"
+            mass="0.01" material="lego_blue"/>
+    </body>
+    <body name="barrier_black_a" pos="-0.20 -0.18  0.025">
+      <freejoint/>
+      <geom type="box" size="0.014 0.014 0.025" mass="0.06" material="lego_black"/>
+      <geom type="sphere" size="0.012" pos="0 0 0.035"
+            mass="0.01" material="lego_red"/>
+    </body>
+    <body name="barrier_black_b" pos=" 0.20 -0.18  0.025">
+      <freejoint/>
+      <geom type="box" size="0.014 0.014 0.025" mass="0.06" material="lego_black"/>
+      <geom type="sphere" size="0.012" pos="0 0 0.035"
+            mass="0.01" material="lego_red"/>
+    </body>
+
+    <!-- =========================================================
+         MISSION 3.1 — 3 tools, each delivered to a specific area.
+         All start at the lower-end (start side) of the field.
+         ========================================================= -->
+
+    <!-- Rectangular trowel: long flat brick + handle stub.
+         Goes to the sponsor area. -->
+    <body name="rect_trowel" pos=" 0.80 -0.45  0.012">
+      <freejoint/>
+      <geom type="box" size="0.060 0.020 0.006" mass="0.05" material="lego_red"/>
+      <geom type="box" size="0.020 0.012 0.006" pos="-0.060 0 0.006"
+            mass="0.01" material="lego_gray"/>
+    </body>
+
+    <!-- Cement bowl: cylinder with a low rim. Goes to parking space. -->
+    <body name="cement_bowl" pos=" 0.95 -0.45  0.012">
+      <freejoint/>
+      <geom type="cylinder" size="0.022 0.012" mass="0.05" material="lego_white"/>
+    </body>
+
+    <!-- Masonry trowel: triangular tip + handle. Stays near start. -->
+    <body name="masonry_trowel" pos=" 1.05 -0.45  0.012">
+      <freejoint/>
+      <geom type="box" size="0.040 0.018 0.006" mass="0.04" material="lego_white"/>
+      <geom type="box" size="0.020 0.010 0.006" pos="-0.040 0 0.006"
+            mass="0.01" material="lego_gray"/>
+    </body>
+
+    <!-- =========================================================
+         MISSION 3.2 — mosaic tiles (24 total: 4 of each colour).
+         Start on the left side of the mat (mosaic-tile reservoir).
+         Robot picks them up and arranges them in the central mosaic
+         frame. Approximation: only one example tile per colour shown
+         here as a starting position seed; sim runner clones the rest
+         from a template each round.
+         ========================================================= -->
+    <body name="mosaic_tile_yellow_1" pos="-0.95 -0.30  0.005">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_yellow"/>
+    </body>
+    <body name="mosaic_tile_blue_1" pos="-0.95 -0.20  0.005">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_blue"/>
+    </body>
+    <body name="mosaic_tile_green_1" pos="-0.95 -0.10  0.005">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_green"/>
+    </body>
+    <body name="mosaic_tile_white_1" pos="-0.95  0.00  0.005">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_white"/>
+    </body>
+    <body name="mosaic_tile_yellow_2" pos="-0.95  0.10  0.005">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_yellow"/>
+    </body>
+    <body name="mosaic_tile_blue_2" pos="-0.95  0.20  0.005">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_blue"/>
+    </body>
+    <body name="mosaic_tile_green_2" pos="-0.95  0.30  0.005">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_green"/>
+    </body>
+    <body name="mosaic_tile_white_2" pos="-0.85 -0.30  0.005">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_white"/>
+    </body>
+
+    <!-- =========================================================
+         MISSION 3.3 — cement elements (40 total: 10 each of
+         yellow / blue / green / white). Delivered to matching-
+         colour cement target areas on the right side of the mat.
+         Approximation: 4 starter samples (one per colour); sim
+         runner clones the remainder from a template.
+         ========================================================= -->
+    <body name="cement_yellow_1" pos=" 0.05  0.40  0.010">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.010" mass="0.015" material="lego_yellow"/>
+    </body>
+    <body name="cement_blue_1" pos=" 0.20  0.40  0.010">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.010" mass="0.015" material="lego_blue"/>
+    </body>
+    <body name="cement_green_1" pos=" 0.05  0.30  0.010">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.010" mass="0.015" material="lego_green"/>
+    </body>
+    <body name="cement_white_1" pos=" 0.20  0.30  0.010">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.010" mass="0.015" material="lego_white"/>
+    </body>
+
+    <!-- Overhead camera for scene preview. -->
+    <camera name="overhead" pos="0 0 2.6" xyaxes="1 0 0 0 1 0"/>
+  </worldbody>
+</mujoco>

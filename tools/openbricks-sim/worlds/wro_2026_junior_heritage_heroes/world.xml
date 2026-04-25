@@ -1,0 +1,228 @@
+<!--
+  WRO 2026 RoboMission Junior — "Heritage Heroes"
+  =================================================
+
+  Theme: an old town's heritage. The robot helps tour visitors,
+  rebuilds towers, brings excavated artefacts to the museum, and
+  cleans the cobblestone area.
+
+  Missions (from the official Game Rules PDF, 2026-01-15):
+
+    3.1  Show the visitors around
+           4 visitors → corresponding-colour areas, upright.
+           10 pts each (40 max), 5 partial.
+    3.2  Rebuild the towers
+           2 yellow towers (top + base, two pieces each) → yellow
+             target areas with orange border.
+             25 pts (full + base full upright), 15 partial-base, max 50.
+           2 red towers (one piece each) → red target areas with
+             orange border, upright.
+             15 pts each (30 max), 10 partial.
+    3.3  Bring the artefacts in the museum
+           4 artefacts (red×?, yellow, green) → matching-colour
+             exhibition spots in the museum, upright.
+             15 pts each (60 max), 5 partial / wrong colour.
+    3.4  Clear the cobblestone of dirt
+           10 dirt particles must be moved out of the cobblestone
+           area. 2 pts each (20 max).
+    3.5  Bonus — don't damage / move:
+           Barrier ........ 10 each (×2 = 20 max)
+           Parrot ......... 10
+
+  Max round score: 230.
+
+  Mat: 2362 × 1143 mm — official printed artwork as MuJoCo texture
+  (mat.png in this directory). Origin at mat centre. +X = long
+  axis (towards start area), +Y = short axis, +Z = up. Metres.
+-->
+
+<mujoco model="wro_2026_junior_heritage_heroes">
+  <compiler angle="degree" coordinate="local"/>
+
+  <option timestep="0.001" iterations="20" solver="Newton"/>
+
+  <asset>
+    <texture name="mat_tex" type="2d" file="mat.png"/>
+    <material name="mat" texture="mat_tex" texrepeat="1 1"
+              specular="0" shininess="0" reflectance="0"/>
+    <material name="wall" rgba="0.90 0.90 0.90 1"/>
+
+    <!-- LEGO prop colours -->
+    <material name="lego_red"     rgba="0.85 0.10 0.10 1"/>
+    <material name="lego_yellow"  rgba="0.95 0.80 0.10 1"/>
+    <material name="lego_green"   rgba="0.15 0.70 0.25 1"/>
+    <material name="lego_blue"    rgba="0.10 0.30 0.80 1"/>
+    <material name="lego_white"   rgba="0.95 0.95 0.95 1"/>
+    <material name="lego_black"   rgba="0.08 0.08 0.08 1"/>
+    <material name="lego_brown"   rgba="0.50 0.30 0.15 1"/>
+    <material name="lego_gray"    rgba="0.55 0.55 0.58 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos=" 0.6 0 1.6" dir="0 0 -1" diffuse="0.95 0.95 0.95"/>
+    <light pos="-0.6 0 1.6" dir="0 0 -1" diffuse="0.65 0.65 0.65"/>
+
+    <!-- ===== MAT (2.362 × 1.143 m, printed texture) ===== -->
+    <geom name="mat" type="plane" size="1.181 0.5715 0.01"
+          material="mat" friction="0.8 0.02 0.0001"/>
+
+    <!-- Border walls. -->
+    <geom name="wall_n" type="box" pos=" 0     0.579  0.02"
+          size="1.181 0.0075 0.02" material="wall"/>
+    <geom name="wall_s" type="box" pos=" 0    -0.579  0.02"
+          size="1.181 0.0075 0.02" material="wall"/>
+    <geom name="wall_e" type="box" pos=" 1.188 0      0.02"
+          size="0.0075 0.5715 0.02" material="wall"/>
+    <geom name="wall_w" type="box" pos="-1.188 0      0.02"
+          size="0.0075 0.5715 0.02" material="wall"/>
+
+    <!-- =========================================================
+         MISSION 3.5 — bonus props (don't damage/move)
+         ========================================================= -->
+    <!-- Parrot: green LEGO bird sculpture, ~3×3 stud footprint.
+         Upper-mid of the field. -->
+    <body name="parrot" pos="-0.55  0.35  0.040">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.040" mass="0.05" material="lego_green"/>
+      <geom type="box" size="0.020 0.012 0.012" pos="0.014 0 0.020"
+            mass="0.01" material="lego_red"/>
+    </body>
+
+    <!-- Barriers (×2): wooden(brown)/red horizontal beams the robot
+         must route around. ~2×8 stud footprint, ~3 bricks tall. -->
+    <body name="barrier_a" pos="-0.30  0.10  0.020">
+      <freejoint/>
+      <geom type="box" size="0.060 0.014 0.020" mass="0.10" material="lego_brown"/>
+    </body>
+    <body name="barrier_b" pos=" 0.30 -0.05  0.020">
+      <freejoint/>
+      <geom type="box" size="0.060 0.014 0.020" mass="0.10" material="lego_brown"/>
+    </body>
+
+    <!-- =========================================================
+         MISSION 3.1 — 4 visitors, each delivered to its matching-
+         colour area. Visitors start at lower-end of the parking.
+         Body: small upright LEGO figure (~2×2 stud, 4 bricks tall).
+         ========================================================= -->
+    <body name="visitor_red" pos=" 0.65 -0.45  0.025">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.025" mass="0.04" material="lego_red"/>
+    </body>
+    <body name="visitor_blue" pos=" 0.75 -0.45  0.025">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.025" mass="0.04" material="lego_blue"/>
+    </body>
+    <body name="visitor_green" pos=" 0.85 -0.45  0.025">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.025" mass="0.04" material="lego_green"/>
+    </body>
+    <body name="visitor_yellow" pos=" 0.95 -0.45  0.025">
+      <freejoint/>
+      <geom type="box" size="0.012 0.012 0.025" mass="0.04" material="lego_yellow"/>
+    </body>
+
+    <!-- =========================================================
+         MISSION 3.2 — towers. 2 yellow (each = lower top + 2 pcs
+         base), 2 red (one piece each). Start at the upper half of
+         the field; targets on the lower half (with orange border).
+         ========================================================= -->
+    <!-- Yellow tower A: composite (top + base). One body for the
+         scoring "completely in" check on the whole tower. -->
+    <body name="yellow_tower_a" pos="-0.10  0.30  0.030">
+      <freejoint/>
+      <!-- base (lower) -->
+      <geom type="box" size="0.020 0.020 0.020"
+            mass="0.06" material="lego_yellow"/>
+      <!-- top -->
+      <geom type="box" size="0.014 0.014 0.014" pos="0 0 0.034"
+            mass="0.02" material="lego_yellow"/>
+    </body>
+    <body name="yellow_tower_b" pos=" 0.10  0.30  0.030">
+      <freejoint/>
+      <geom type="box" size="0.020 0.020 0.020"
+            mass="0.06" material="lego_yellow"/>
+      <geom type="box" size="0.014 0.014 0.014" pos="0 0 0.034"
+            mass="0.02" material="lego_yellow"/>
+    </body>
+    <!-- Red towers (single piece). -->
+    <body name="red_tower_a" pos=" 0.30  0.30  0.030">
+      <freejoint/>
+      <geom type="box" size="0.018 0.018 0.030" mass="0.07" material="lego_red"/>
+    </body>
+    <body name="red_tower_b" pos=" 0.50  0.30  0.030">
+      <freejoint/>
+      <geom type="box" size="0.018 0.018 0.030" mass="0.07" material="lego_red"/>
+    </body>
+
+    <!-- =========================================================
+         MISSION 3.3 — artefacts (4 colours) → matching exhibition
+         spots in the museum (top-right corner of the mat).
+         Artefacts start in the excavation site (centre of mat).
+         ========================================================= -->
+    <body name="artefact_red" pos=" 0.05 -0.05  0.020">
+      <freejoint/>
+      <geom type="cylinder" size="0.018 0.020" mass="0.05" material="lego_red"/>
+    </body>
+    <body name="artefact_yellow" pos=" 0.15 -0.05  0.020">
+      <freejoint/>
+      <geom type="cylinder" size="0.018 0.020" mass="0.05" material="lego_yellow"/>
+    </body>
+    <body name="artefact_green" pos=" 0.05 -0.18  0.020">
+      <freejoint/>
+      <geom type="cylinder" size="0.018 0.020" mass="0.05" material="lego_green"/>
+    </body>
+    <body name="artefact_blue" pos=" 0.15 -0.18  0.020">
+      <freejoint/>
+      <geom type="cylinder" size="0.018 0.020" mass="0.05" material="lego_blue"/>
+    </body>
+
+    <!-- =========================================================
+         MISSION 3.4 — 10 dirt particles in the cobblestone area
+         (right side). Each is a small flat disc; robot must move
+         each fully out of the cobblestone area.
+         ========================================================= -->
+    <body name="dirt_1" pos=" 0.85  0.10  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_2" pos=" 0.90  0.05  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_3" pos=" 0.95 -0.02  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_4" pos=" 0.98  0.08  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_5" pos=" 0.86 -0.05  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_6" pos=" 0.92 -0.15  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_7" pos=" 1.00  0.12  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_8" pos=" 0.83  0.18  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_9" pos=" 0.88  0.22  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+    <body name="dirt_10" pos=" 1.02 -0.10  0.005">
+      <freejoint/>
+      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
+    </body>
+
+    <!-- Overhead camera for scene preview. -->
+    <camera name="overhead" pos="0 0 2.6" xyaxes="1 0 0 0 1 0"/>
+  </worldbody>
+</mujoco>
