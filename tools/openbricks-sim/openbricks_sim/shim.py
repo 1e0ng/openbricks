@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Optional
 
 from openbricks_sim import _native as _sim_native
-from openbricks_sim.runtime import SimRuntime, SimMotor, SimDriveBase
+from openbricks_sim.runtime import SimRuntime, SimMotor, SimDriveBase, SimIMU
 
 
 # Module-level state — only one shim can be installed at a time, but
@@ -216,6 +216,32 @@ class ShimServo:
         self._adapter.coast()
 
 
+class ShimBNO055:
+    """Drop-in for ``_openbricks_native.BNO055`` — what
+    ``openbricks.drivers.bno055`` re-exports.
+
+    Constructor accepts whatever the firmware BNO055 takes
+    (typically an ``i2c=`` handle and an ``address=``); the shim
+    binds to the chassis IMU regardless. Methods proxy to a wrapped
+    :class:`SimIMU`.
+    """
+
+    def __init__(self, *args, **kwargs):
+        if _INSTALLED is None:
+            raise RuntimeError(
+                "shim not installed; call install(runtime) first")
+        self._imu = SimIMU(_INSTALLED.runtime)
+
+    def heading(self):
+        return self._imu.heading()
+
+    def angular_velocity(self):
+        return self._imu.angular_velocity()
+
+    def acceleration(self):
+        return self._imu.acceleration()
+
+
 class ShimDriveBase:
     """Drop-in for ``_openbricks_native.DriveBase``.
 
@@ -223,12 +249,14 @@ class ShimDriveBase:
     ``DriveBase(left=Servo, right=Servo, wheel_diameter_mm=,
                 axle_track_mm=, imu=None, kp_sum=, kp_diff=)``.
 
-    The IMU argument is held but only consulted when the Python
-    wrapper at ``openbricks/robotics/drivebase.py`` calls
-    ``use_gyro(True)`` — until ``SimIMU`` lands (Phase C4) this raises
-    ``NotImplementedError`` if an IMU was passed. With ``imu=None``
-    or no use_gyro call, behaviour matches the encoder-differential
-    path identically.
+    With ``use_gyro(True)`` the shim installs a per-tick callback
+    that reads the IMU heading, computes the body-degree delta from
+    the move-start offset, and pushes it into the native drivebase's
+    ``heading_override_wheel_deg`` slot — the same slip-immune
+    feedback path as firmware. The IMU just needs to expose a
+    ``heading()`` method (degrees, [-180, 180)); the shim BNO055
+    qualifies, and so does any user-supplied object with the same
+    shape.
     """
 
     def __init__(self, left=None, right=None,
@@ -247,12 +275,58 @@ class ShimDriveBase:
             axle_track_mm=float(axle_track_mm),
             kp_sum=kp_sum,
             kp_diff=kp_diff)
-        self._imu = imu
+        self._imu              = imu
+        self._use_gyro         = False
+        self._heading_offset   = 0.0
+        self._imu_tick_active  = False
+
+    # ----- IMU heading update tick ---------------------------------
+
+    def _imu_tick(self, now_ms):
+        body = float(self._imu.heading())
+        delta = body - self._heading_offset
+        # Wrap ±180 so a move that crosses the boundary doesn't see
+        # a spurious ±360 jump.
+        if delta >  180.0: delta -= 360.0
+        if delta < -180.0: delta += 360.0
+        self._db.set_heading_override(delta)
+
+    def _attach_imu_tick(self):
+        """Insert the IMU tick *before* the drivebase tick so the
+        override is fresh by the time the controller reads it."""
+        if self._imu_tick_active:
+            return
+        rt = self._db.runtime
+        rt.remove_tick(self._db._tick)
+        rt.remove_tick(self._db.left._tick)
+        rt.remove_tick(self._db.right._tick)
+        rt.add_tick(self._imu_tick)
+        rt.add_tick(self._db._tick)
+        rt.add_tick(self._db.left._tick)
+        rt.add_tick(self._db.right._tick)
+        # SimDriveBase + its motors all consider themselves attached
+        # after this dance — preserve that flag.
+        self._db._attached = True
+        self._db.left._attached  = True
+        self._db.right._attached = True
+        self._imu_tick_active = True
+
+    def _detach_imu_tick(self):
+        if not self._imu_tick_active:
+            return
+        self._db.runtime.remove_tick(self._imu_tick)
+        self._imu_tick_active = False
+
+    # ----- Move setup ----------------------------------------------
 
     def straight(self, distance_mm, speed_mm_s):
+        if self._use_gyro and self._imu is not None:
+            self._heading_offset = float(self._imu.heading())
         self._db.straight(float(distance_mm), float(speed_mm_s))
 
     def turn(self, angle_deg, rate_dps):
+        if self._use_gyro and self._imu is not None:
+            self._heading_offset = float(self._imu.heading())
         self._db.turn(float(angle_deg), float(rate_dps))
 
     def stop(self):
@@ -265,14 +339,15 @@ class ShimDriveBase:
         if enable and self._imu is None:
             raise RuntimeError(
                 "use_gyro requires imu= at construction")
+        # Toggling on captures the offset so "now" is heading 0.
         if enable:
-            # SimIMU integration lands in Phase C4. Until then, refuse
-            # cleanly so user code knows where it is.
-            raise NotImplementedError(
-                "shim DriveBase.use_gyro(True) requires the SimIMU "
-                "shim (Phase C4); use the encoder-differential path "
-                "for now")
-        self._db.set_use_gyro(False)
+            self._heading_offset = float(self._imu.heading())
+            self._db.set_use_gyro(True)
+            self._attach_imu_tick()
+        else:
+            self._db.set_use_gyro(False)
+            self._detach_imu_tick()
+        self._use_gyro = enable
 
 
 def _make_native_module():
@@ -290,7 +365,7 @@ def _make_native_module():
     # actually drive on the sim path. No-op stand-ins are enough.
     m.QuadratureEncoder  = _NoopHardware
     m.PCNTEncoder        = _NoopHardware
-    m.BNO055             = _NoopHardware
+    m.BNO055             = ShimBNO055
     # ``motor_process`` — the firmware exposes it as a singleton
     # object with .start / .stop / .tick / .is_running. The sim's
     # SimRuntime.step() is the equivalent; expose a stub that
