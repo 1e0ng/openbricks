@@ -105,8 +105,8 @@ static void drivebase_control_tick(void *ctx) {
     mp_float_t fwd_ff_vel = 0.0;
     if (self->fwd_active) {
         mp_float_t elapsed = (mp_float_t)(openbricks_motor_process_now_ms() - self->fwd_start_ms) / (mp_float_t)1000.0;
-        if (elapsed >= self->fwd.t_total) {
-            fwd_target = self->fwd.start + self->fwd.direction * (self->fwd.distance < 0 ? -self->fwd.distance : self->fwd.distance);
+        if (elapsed >= self->fwd.core.t_total) {
+            fwd_target = self->fwd.core.start + self->fwd.core.direction * (self->fwd.core.distance < 0 ? -self->fwd.core.distance : self->fwd.core.distance);
             fwd_ff_vel = 0.0;
             // Lock the trajectory end-point as the new hold target.
             self->fwd_hold   = fwd_target;
@@ -124,8 +124,8 @@ static void drivebase_control_tick(void *ctx) {
     mp_float_t turn_ff_vel = 0.0;
     if (self->turn_active) {
         mp_float_t elapsed = (mp_float_t)(openbricks_motor_process_now_ms() - self->turn_start_ms) / (mp_float_t)1000.0;
-        if (elapsed >= self->turn.t_total) {
-            turn_target = self->turn.start + self->turn.direction * (self->turn.distance < 0 ? -self->turn.distance : self->turn.distance);
+        if (elapsed >= self->turn.core.t_total) {
+            turn_target = self->turn.core.start + self->turn.core.direction * (self->turn.core.distance < 0 ? -self->turn.core.distance : self->turn.core.distance);
             turn_ff_vel = 0.0;
             self->turn_hold   = turn_target;
             self->turn_active = false;

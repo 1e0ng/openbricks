@@ -64,3 +64,16 @@ version = { attr = "openbricks_sim.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["openbricks_sim*"]
+
+# C extension: ``openbricks_sim._native``. Compiles the same
+# ``trajectory_core.c`` (and future ``observer_core.c`` etc.) that the
+# firmware freezes into its MicroPython ``_openbricks_native`` module,
+# so the sim's hot-path math and the hardware's hot-path math never
+# drift. Source paths are relative to this ``pyproject.toml``.
+[[tool.setuptools.ext-modules]]
+name    = "openbricks_sim._native"
+sources = [
+    "native/openbricks_sim_native.c",
+    "../../native/user_c_modules/openbricks/trajectory_core.c",
+]
+include-dirs = ["../../native/user_c_modules/openbricks"]
