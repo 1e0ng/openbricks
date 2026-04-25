@@ -2,13 +2,22 @@
 """
 Top-level CLI for ``openbricks-sim``.
 
-Phase A only ships ``preview``: load a world, splice in the default
-chassis, hand off to MuJoCo's bundled viewer so the user can walk
-around the scene in 3-D. ``run`` (execute a user script against the
-sim) and the driver-shim layer land in Phase C.
+Subcommands:
+
+  * ``preview`` — open a world + the default chassis in MuJoCo's
+    viewer so the user can orbit the scene with the mouse.
+  * ``run`` — execute a Python script with a pre-constructed
+    :class:`SimRobot` exposed in its globals (``robot``). The script
+    can drive ``robot.drivebase`` / ``robot.left`` / ``robot.right``
+    and step the sim via ``robot.run_for`` / ``robot.run_until``.
+
+The driver-shim monkey-patch (replacing ``openbricks.drivers.*`` so
+firmware-targeting code runs unchanged) lands in Phase C3 — for now,
+``run`` requires the script to import from ``openbricks_sim``.
 """
 
 import argparse
+import runpy
 import sys
 
 from openbricks_sim.chassis import ChassisSpec
@@ -92,6 +101,44 @@ def cmd_preview(args):
     return 0
 
 
+def cmd_run(args):
+    """Execute ``args.script`` with a SimRobot pre-built in its globals.
+
+    The script can read / write the global ``robot`` (a
+    :class:`openbricks_sim.robot.SimRobot`) and step the sim via
+    ``robot.run_for`` / ``robot.run_until``. After the script returns
+    we either drop into the interactive viewer (if ``--viewer``) or
+    exit with the script's status.
+    """
+    from openbricks_sim.robot import SimRobot
+
+    spec  = ChassisSpec(pos_x=args.x, pos_y=args.y)
+    robot = SimRobot(world=args.world, chassis_spec=spec)
+
+    init_globals = {
+        "robot":   robot,
+        # Convenience aliases so scripts don't need to dig through
+        # the SimRobot attribute hierarchy for the common handles.
+        "drivebase": robot.drivebase,
+        "left":      robot.left,
+        "right":     robot.right,
+    }
+    try:
+        runpy.run_path(args.script, init_globals=init_globals,
+                       run_name="__main__")
+    except SystemExit as e:
+        if args.viewer:
+            # Even if the user script called sys.exit, hold the viewer
+            # so the user can inspect the final state. Re-raise
+            # otherwise.
+            robot.run_viewer()
+        return e.code if isinstance(e.code, int) else 0
+
+    if args.viewer:
+        robot.run_viewer()
+    return 0
+
+
 def _build_parser():
     parser = argparse.ArgumentParser(
         prog="openbricks-sim",
@@ -125,6 +172,29 @@ def _build_parser():
                            help="Headless step duration in seconds. "
                                 "Default: 2.0.")
 
+    p_run = sub.add_parser(
+        "run",
+        help="Execute a user script against the sim.",
+        description="Loads the named world + the default chassis, "
+                    "constructs a ``SimRobot`` over them, and execs the "
+                    "script with ``robot`` (plus ``drivebase``, "
+                    "``left``, ``right`` aliases) in its globals. The "
+                    "script drives the sim by calling robot.run_for / "
+                    "run_until between actions.",
+    )
+    p_run.add_argument("script",
+                       help="Path to the Python script to execute.")
+    p_run.add_argument("--world", default="empty",
+                       help="World alias or path (same set as preview).")
+    p_run.add_argument("--x", type=float, default=0.0,
+                       help="Chassis spawn x (m).")
+    p_run.add_argument("--y", type=float, default=0.0,
+                       help="Chassis spawn y (m).")
+    p_run.add_argument("--viewer", action="store_true",
+                       help="Drop into the MuJoCo viewer after the "
+                            "script returns so you can orbit the "
+                            "final scene.")
+
     return parser
 
 
@@ -133,6 +203,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "preview":
         return cmd_preview(args)
+    if args.command == "run":
+        return cmd_run(args)
     parser.error("unknown command: %r" % args.command)
 
 
