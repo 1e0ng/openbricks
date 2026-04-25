@@ -8,7 +8,7 @@ Backbone: [MuJoCo](https://github.com/google-deepmind/mujoco) (Apache-2.0, nativ
 
 * **Phase A** ✅ chassis + world preview, MuJoCo backbone wired up.
 * **Phase B** ✅ shared cores: trajectory, observer, motor_process, servo, drivebase. Sim hot-path math is byte-identical to the firmware (same `*_core.c` files compiled into both targets).
-* **Phase C** 🚧 runtime adapters that bind the cores to MuJoCo sensors / actuators. `openbricks_sim.runtime.SimMotor` + `SimDriveBase` now drive the default chassis end-to-end. Next: monkey-patch the `openbricks.drivers.*` registry so user code unchanged from real hardware can run inside the sim, plus an `openbricks-sim run main.py` entry point.
+* **Phase C** 🚧 runtime adapters that bind the cores to MuJoCo sensors / actuators. `openbricks_sim.runtime.SimMotor` + `SimDriveBase` drive the default chassis end-to-end; `openbricks_sim.robot.SimRobot` bundles them with the world for one-line scripts; `openbricks-sim run main.py [--world ...]` executes a user script with `robot` / `drivebase` / `left` / `right` pre-bound. Next: a driver-shim layer (C3) that monkey-patches `openbricks.drivers.*` so firmware-targeting code runs unchanged.
 
 ```
 pipx install openbricks-sim   # once on PyPI
@@ -16,6 +16,9 @@ pipx install openbricks-sim   # once on PyPI
 pip install -e tools/openbricks-sim
 
 openbricks-sim preview --world wro-2026-elementary --x 1.0 --y -0.42
+
+# Or execute a script against the sim:
+openbricks-sim run examples/wander.py --world wro-2026-elementary --viewer
 ```
 
 Opens a MuJoCo viewer window with a default differential-drive chassis spawned at the start area of the 2026 WRO Elementary mat. Physics steps at 1 kHz. Use the viewer's mouse controls to orbit, drive with arrow keys or programmatically from Phase C.

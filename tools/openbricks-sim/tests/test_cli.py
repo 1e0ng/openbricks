@@ -67,5 +67,98 @@ class MainDispatchTests(unittest.TestCase):
         self.assertIn("headless preview", out.getvalue())
 
 
+class RunSubcommandTests(unittest.TestCase):
+    def setUp(self):
+        self.parser = cli._build_parser()
+
+    def test_parser_run_required_args(self):
+        args = self.parser.parse_args(["run", "/tmp/script.py"])
+        self.assertEqual(args.command, "run")
+        self.assertEqual(args.script, "/tmp/script.py")
+        self.assertEqual(args.world, "empty")
+        self.assertFalse(args.viewer)
+
+    def test_parser_run_overrides(self):
+        args = self.parser.parse_args([
+            "run", "main.py",
+            "--world", "wro-2026-junior",
+            "--x", "1.5", "--y", "-0.2",
+            "--viewer",
+        ])
+        self.assertEqual(args.script, "main.py")
+        self.assertEqual(args.world, "wro-2026-junior")
+        self.assertEqual(args.x, 1.5)
+        self.assertEqual(args.y, -0.2)
+        self.assertTrue(args.viewer)
+
+    def test_run_executes_user_script(self):
+        # Write a tiny script that drives a straight + asserts pose
+        # changed; if the SimRobot wiring is broken, the script
+        # raises and main() propagates the exception.
+        import tempfile, textwrap, os
+        with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False) as f:
+            f.write(textwrap.dedent("""
+                drivebase.straight(distance_mm=100.0, speed_mm_s=80.0)
+                robot.run_for(0.5)
+                x, y, yaw = robot.chassis_pose()
+                assert x > 10.0, "expected +X movement, got x=%r" % x
+            """))
+            path = f.name
+        try:
+            rc = cli.main(["run", path, "--world", "empty"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
+    def test_run_propagates_user_script_systemexit_zero(self):
+        # User code calling sys.exit(0) shouldn't make us crash.
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False) as f:
+            f.write("import sys\nsys.exit(0)\n")
+            path = f.name
+        try:
+            rc = cli.main(["run", path, "--world", "empty"])
+            self.assertEqual(rc, 0)
+        finally:
+            os.unlink(path)
+
+    def test_run_with_viewer_calls_run_viewer_after_script(self):
+        # ``--viewer`` should cause cmd_run to launch the viewer once
+        # the user script returns. Patch ``SimRobot.run_viewer`` so
+        # we don't actually open a window in CI.
+        import tempfile, os
+        from openbricks_sim.robot import SimRobot
+        with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False) as f:
+            f.write("robot.run_for(0.01)\n")
+            path = f.name
+        try:
+            with patch.object(SimRobot, "run_viewer", autospec=True) as mock:
+                rc = cli.main(["run", path, "--world", "empty", "--viewer"])
+            self.assertEqual(rc, 0)
+            mock.assert_called_once()
+        finally:
+            os.unlink(path)
+
+    def test_run_with_viewer_holds_after_systemexit(self):
+        # User script calls sys.exit(); --viewer should still drop
+        # the user into the viewer rather than dying immediately.
+        import tempfile, os
+        from openbricks_sim.robot import SimRobot
+        with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False) as f:
+            f.write("import sys\nsys.exit(0)\n")
+            path = f.name
+        try:
+            with patch.object(SimRobot, "run_viewer", autospec=True) as mock:
+                rc = cli.main(["run", path, "--world", "empty", "--viewer"])
+            self.assertEqual(rc, 0)
+            mock.assert_called_once()
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()
