@@ -18,6 +18,7 @@ target_sources(usermod_openbricks INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/servo.c
     ${CMAKE_CURRENT_LIST_DIR}/servo_core.c
     ${CMAKE_CURRENT_LIST_DIR}/drivebase.c
+    ${CMAKE_CURRENT_LIST_DIR}/drivebase_core.c
     ${CMAKE_CURRENT_LIST_DIR}/pcnt_encoder.c
     ${CMAKE_CURRENT_LIST_DIR}/encoder.c
     ${CMAKE_CURRENT_LIST_DIR}/bno055.c

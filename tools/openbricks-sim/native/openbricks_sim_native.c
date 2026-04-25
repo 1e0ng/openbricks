@@ -21,6 +21,7 @@
 #include "observer_core.h"
 #include "motor_process_core.h"
 #include "servo_core.h"
+#include "drivebase_core.h"
 
 
 /* -------------------------------------------------------------------
@@ -443,6 +444,200 @@ static PyTypeObject ServoType = {
 
 
 /* -------------------------------------------------------------------
+ * DriveBase (2-DOF coupled controller — fwd + turn trajectories,
+ * sum/diff PID with feedforward, mixed into per-servo target_dps).
+ *
+ * Construction takes two ``Servo`` instances by reference; the
+ * DriveBase keeps strong refs so they outlive it. The sim runner
+ * registers ``DriveBase.tick`` on its motor_process *before* the
+ * per-servo ticks so each tick fans out drivebase → servos.
+ * Heading override is a single-method push: when ``use_gyro`` is on,
+ * the sim runner reads the MuJoCo IMU body-yaw delta and stuffs the
+ * wheel-degree differential into the core via ``set_heading_override``.
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    PyObject_HEAD
+    ob_drivebase_t  core;
+    PyObject       *left_obj;   /* strong ref to Servo */
+    PyObject       *right_obj;  /* strong ref to Servo */
+} DriveBaseObject;
+
+
+static int DriveBase_init(DriveBaseObject *self, PyObject *args, PyObject *kwargs) {
+    static char *kwlist[] = {"left", "right",
+                             "wheel_diameter_mm", "axle_track_mm",
+                             "kp_sum", "kp_diff", NULL};
+    PyObject *left_obj  = NULL;
+    PyObject *right_obj = NULL;
+    double    wheel_d;
+    double    axle;
+    double    kp_sum  = OB_DRIVEBASE_DEFAULT_KP_SUM;
+    double    kp_diff = OB_DRIVEBASE_DEFAULT_KP_DIFF;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOdd|dd", kwlist,
+                                     &left_obj, &right_obj,
+                                     &wheel_d, &axle,
+                                     &kp_sum, &kp_diff)) {
+        return -1;
+    }
+    if (!PyObject_TypeCheck(left_obj,  &ServoType) ||
+        !PyObject_TypeCheck(right_obj, &ServoType)) {
+        PyErr_SetString(PyExc_TypeError,
+                        "left and right must be Servo instances");
+        return -1;
+    }
+
+    Py_INCREF(left_obj);
+    Py_INCREF(right_obj);
+    Py_XSETREF(self->left_obj,  left_obj);
+    Py_XSETREF(self->right_obj, right_obj);
+
+    ob_drivebase_init(&self->core,
+                      &((ServoObject *)left_obj)->core,
+                      &((ServoObject *)right_obj)->core,
+                      (ob_float_t)wheel_d,
+                      (ob_float_t)axle,
+                      (ob_float_t)kp_sum,
+                      (ob_float_t)kp_diff);
+    return 0;
+}
+
+
+static void DriveBase_dealloc(DriveBaseObject *self) {
+    Py_CLEAR(self->left_obj);
+    Py_CLEAR(self->right_obj);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+
+static PyObject *DriveBase_straight(DriveBaseObject *self, PyObject *args) {
+    long   now_ms;
+    double distance_mm, speed_mm_s;
+    if (!PyArg_ParseTuple(args, "ldd", &now_ms, &distance_mm, &speed_mm_s)) {
+        return NULL;
+    }
+    ob_drivebase_straight(&self->core, now_ms,
+                          (ob_float_t)distance_mm,
+                          (ob_float_t)speed_mm_s);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *DriveBase_turn(DriveBaseObject *self, PyObject *args) {
+    long   now_ms;
+    double angle_deg, rate_dps;
+    if (!PyArg_ParseTuple(args, "ldd", &now_ms, &angle_deg, &rate_dps)) {
+        return NULL;
+    }
+    ob_drivebase_turn(&self->core, now_ms,
+                      (ob_float_t)angle_deg,
+                      (ob_float_t)rate_dps);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *DriveBase_stop(DriveBaseObject *self, PyObject *Py_UNUSED(ignored)) {
+    ob_drivebase_stop(&self->core);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *DriveBase_tick(DriveBaseObject *self, PyObject *arg) {
+    long now_ms = PyLong_AsLong(arg);
+    if (now_ms == -1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    ob_drivebase_tick(&self->core, now_ms);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *DriveBase_is_done(DriveBaseObject *self, PyObject *Py_UNUSED(ignored)) {
+    if (ob_drivebase_is_done(&self->core)) {
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+
+
+static PyObject *DriveBase_set_use_gyro(DriveBaseObject *self, PyObject *arg) {
+    int enable = PyObject_IsTrue(arg);
+    if (enable < 0) {
+        return NULL;
+    }
+    self->core.use_gyro = enable ? true : false;
+    Py_RETURN_NONE;
+}
+
+
+/* set_heading_override(body_delta_deg) — converts via the core utility
+ * so the binding doesn't need the axle/wheel constants on the sim side. */
+static PyObject *DriveBase_set_heading_override(DriveBaseObject *self, PyObject *arg) {
+    double body_delta = PyFloat_AsDouble(arg);
+    if (body_delta == -1.0 && PyErr_Occurred()) {
+        return NULL;
+    }
+    self->core.heading_override_wheel_deg =
+        ob_drivebase_body_to_wheel_diff(&self->core, (ob_float_t)body_delta);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *DriveBase_target_left_dps(DriveBaseObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyFloat_FromDouble((double)self->core.left->target_dps);
+}
+
+
+static PyObject *DriveBase_target_right_dps(DriveBaseObject *self, PyObject *Py_UNUSED(ignored)) {
+    return PyFloat_FromDouble((double)self->core.right->target_dps);
+}
+
+
+static PyMethodDef DriveBase_methods[] = {
+    {"straight",             (PyCFunction)DriveBase_straight,             METH_VARARGS,
+     "straight(now_ms, distance_mm, speed_mm_s). Kick off a straight move."},
+    {"turn",                 (PyCFunction)DriveBase_turn,                 METH_VARARGS,
+     "turn(now_ms, angle_deg, rate_dps). Kick off a turn-in-place."},
+    {"stop",                 (PyCFunction)DriveBase_stop,                 METH_NOARGS,
+     "Cancel any active move."},
+    {"tick",                 (PyCFunction)DriveBase_tick,                 METH_O,
+     "tick(now_ms). One control step — samples profiles, computes errors, writes per-servo target_dps."},
+    {"is_done",              (PyCFunction)DriveBase_is_done,              METH_NOARGS,
+     "True iff no move is active."},
+    {"set_use_gyro",         (PyCFunction)DriveBase_set_use_gyro,         METH_O,
+     "Toggle slip-immune heading feedback. Caller is responsible for "
+     "calling ``set_heading_override`` before each tick when on."},
+    {"set_heading_override", (PyCFunction)DriveBase_set_heading_override, METH_O,
+     "Push the latest body-heading delta (degrees) — converted internally to wheel-degree differential."},
+    {"target_left_dps",      (PyCFunction)DriveBase_target_left_dps,      METH_NOARGS,
+     "Current per-tick velocity setpoint for the left servo."},
+    {"target_right_dps",     (PyCFunction)DriveBase_target_right_dps,     METH_NOARGS,
+     "Current per-tick velocity setpoint for the right servo."},
+    {NULL, NULL, 0, NULL},
+};
+
+
+static PyTypeObject DriveBaseType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name      = "openbricks_sim._native.DriveBase",
+    .tp_basicsize = sizeof(DriveBaseObject),
+    .tp_itemsize  = 0,
+    .tp_flags     = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_doc       = PyDoc_STR(
+        "Two-DOF coupled drivebase — same control law as the firmware's "
+        "``_openbricks_native.DriveBase``. Construct with two Servo "
+        "instances, wheel diameter (mm), axle track (mm), and optional "
+        "kp_sum / kp_diff overrides. Sim runner calls ``tick(now_ms)`` "
+        "in its motor_process step; per-servo ``target_dps`` is updated "
+        "by each tick."),
+    .tp_new       = PyType_GenericNew,
+    .tp_init      = (initproc)DriveBase_init,
+    .tp_dealloc   = (destructor)DriveBase_dealloc,
+    .tp_methods   = DriveBase_methods,
+};
+
+
+/* -------------------------------------------------------------------
  * Module init
  * ------------------------------------------------------------------- */
 
@@ -502,6 +697,16 @@ PyMODINIT_FUNC PyInit__native(void) {
     Py_INCREF(&ServoType);
     if (PyModule_AddObject(m, "Servo", (PyObject *)&ServoType) < 0) {
         Py_DECREF(&ServoType);
+        Py_DECREF(m);
+        return NULL;
+    }
+    if (PyType_Ready(&DriveBaseType) < 0) {
+        Py_DECREF(m);
+        return NULL;
+    }
+    Py_INCREF(&DriveBaseType);
+    if (PyModule_AddObject(m, "DriveBase", (PyObject *)&DriveBaseType) < 0) {
+        Py_DECREF(&DriveBaseType);
         Py_DECREF(m);
         return NULL;
     }
