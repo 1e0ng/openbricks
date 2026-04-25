@@ -1,21 +1,25 @@
 // SPDX-License-Identifier: MIT
 //
-// openbricks — servo.c
+// MicroPython binding shell for the native ``Servo`` type. The state
+// machine + control law live in ``servo_core.c`` so the firmware
+// build and the host-side ``openbricks_sim._native`` extension run
+// identical math.
 //
-// Native per-motor state machine. Subscribes its control tick to the
-// motor_process fast C path, so at 1 kHz the per-motor overhead is the
-// C math (~1 µs) plus a handful of cached Python method invocations on
-// the H-bridge pins and the encoder object (~20 µs total).
+// What stays here:
+//   - Hardware I/O (cached encoder.count(), in1.value(), in2.value(),
+//     pwm.duty()).
+//   - The brake / coast bridge driving — the L298N has a specific
+//     IN1=IN2=1, duty=max pattern for active brake; that's hardware-
+//     wiring, not algorithm.
+//   - mp_arg_parse + mp_obj_t constructor / accessor methods.
+//   - The motor_process subscription (``servo_attach`` /
+//     ``servo_detach``) — the firmware uses the MP scheduler
+//     singleton; the sim side will register against its own
+//     ``ob_motor_process_t``.
 //
-// The Python JGB37Motor wrapper in openbricks/drivers/jgb37_520.py is a
-// thin forwarding layer over this type. Public API matches the Python
-// equivalent pinned by tests/_fakes.py::_Servo.
-//
-// Control law for M1 is the same P-with-feedforward used in the previous
-// Python implementation. Observer + trajectory land in M2; the
-// structure here (a single ``_control_step`` tick body registered with
-// the scheduler) is identical to what pbio does in servo.c and is where
-// those land when ported.
+// Sibling C modules (drivebase.c) reach into ``self->core.observer``
+// / ``self->core.target_dps`` / ``self->core.traj_active`` directly
+// for zero-overhead reads in the 1 kHz tick.
 
 #include <stdbool.h>
 
@@ -25,9 +29,7 @@
 #include "motor_process.h"
 #include "servo.h"
 
-#define DUTY_MAX    1023               // 10-bit PWM (ESP32 default; matches L298N driver)
-#define POWER_CLAMP ((mp_float_t)100.0)
-#define RATED_DPS   ((mp_float_t)300.0) // feed-forward normaliser; tune per gearbox
+#define DUTY_MAX 1023               // 10-bit PWM (ESP32 default; matches L298N driver)
 #define DEFAULT_ACCEL ((mp_float_t)720.0)  // deg/s^2 if run_target omits accel
 
 extern const mp_obj_type_t openbricks_servo_type;
@@ -36,9 +38,6 @@ extern const mp_obj_type_t openbricks_servo_type;
 // Hardware primitives — called from the C tick body.
 
 static inline mp_int_t servo_read_count(servo_obj_t *self) {
-    // Call encoder.count() — cheap compared to mp_load_attr every tick,
-    // and lets encoders (like the PCNT-backed one) compute the total
-    // dynamically from hardware instead of shadowing it in an attribute.
     return mp_obj_get_int(mp_call_function_0(self->encoder_count));
 }
 
@@ -54,15 +53,12 @@ static inline void servo_write_duty(servo_obj_t *self, int duty) {
     mp_call_function_1(self->pwm_duty, MP_OBJ_NEW_SMALL_INT(duty));
 }
 
-// Drive the H-bridge to ``power`` in the range [-100, 100]. The servo's
-// ``invert`` flag swaps direction, for motors wired the opposite way.
+// Drive the H-bridge to ``power`` in the range [-100, 100]. The core
+// has already clamped the magnitude; we just translate sign +
+// magnitude into IN1/IN2/duty patterns. The ``invert`` flag from the
+// core swaps direction for motors wired the opposite way.
 static void servo_drive_power(servo_obj_t *self, mp_float_t power) {
-    if (power > POWER_CLAMP) {
-        power = POWER_CLAMP;
-    } else if (power < -POWER_CLAMP) {
-        power = -POWER_CLAMP;
-    }
-    mp_float_t effective = self->invert ? -power : power;
+    mp_float_t effective = self->core.invert ? -power : power;
 
     if (effective > 0.0) {
         servo_write_in1(self, 1);
@@ -98,43 +94,14 @@ static void servo_coast_bridge(servo_obj_t *self) {
 }
 
 // -----------------------------------------------------------------------
-// Control tick — the native hot path. Registered with motor_process's
-// C callback list; called at the configured tick rate (1 kHz default).
+// Control tick — the native hot path. The control math sits in
+// ``ob_servo_tick``; here we just read the encoder + write the bridge.
 
 static void servo_control_tick(void *ctx) {
     servo_obj_t *self = (servo_obj_t *)ctx;
-
-    // If we're tracking a trajectory, sample it to get the current
-    // velocity setpoint before the P-control loop runs.
-    if (self->traj_active) {
-        mp_float_t elapsed_s = (mp_float_t)(openbricks_motor_process_now_ms() - self->traj_start_ms) / (mp_float_t)1000.0;
-        if (elapsed_s >= self->trajectory.core.t_total) {
-            self->target_dps = 0.0;
-            self->traj_done  = true;
-        } else {
-            mp_float_t pos, vel;
-            openbricks_trajectory_sample(&self->trajectory, elapsed_s, &pos, &vel);
-            self->target_dps = vel;
-        }
-    }
-
-    // Read encoder as position (deg) and feed the observer.
-    mp_int_t count = servo_read_count(self);
-    mp_float_t measured_pos = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
-
-    mp_int_t now   = openbricks_motor_process_now_ms();
-    mp_float_t dt_s = (mp_float_t)(now - self->last_time_ms) / (mp_float_t)1000.0;
-    self->last_time_ms = now;
-
-    if (dt_s > 0.0) {
-        openbricks_observer_update(&self->observer, measured_pos, dt_s);
-    }
-    mp_float_t measured_dps = (mp_float_t)self->observer.core.vel_hat;
-
-    mp_float_t error = self->target_dps - measured_dps;
-    mp_float_t ff    = self->target_dps / RATED_DPS * POWER_CLAMP;
-    mp_float_t power = ff + self->kp * error;
-
+    long count = (long)servo_read_count(self);
+    long now   = (long)openbricks_motor_process_now_ms();
+    mp_float_t power = (mp_float_t)ob_servo_tick(&self->core, count, now);
     servo_drive_power(self, power);
 }
 
@@ -142,29 +109,25 @@ static void servo_control_tick(void *ctx) {
 // Attach / detach from motor_process
 
 static void servo_attach(servo_obj_t *self) {
-    if (self->active) {
+    if (self->core.active) {
         return;
     }
-    // Re-baseline the observer to the current shaft angle, with zero
-    // velocity — otherwise the first tick sees a huge residual because
-    // last-time-ms is stale from whenever the servo was idle.
-    mp_int_t count = servo_read_count(self);
-    mp_float_t pos = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
-    openbricks_observer_reset(&self->observer, pos);
-    self->last_time_ms = openbricks_motor_process_now_ms();
+    long count = (long)servo_read_count(self);
+    long now   = (long)openbricks_motor_process_now_ms();
+    ob_servo_baseline(&self->core, count, now);
     openbricks_motor_process_register_c(servo_control_tick, self);
-    self->active = true;
+    self->core.active = true;
 }
 
 static void servo_detach(servo_obj_t *self) {
-    if (!self->active) {
+    if (!self->core.active) {
         return;
     }
     openbricks_motor_process_unregister_c(servo_control_tick, self);
-    self->active      = false;
-    self->target_dps  = 0.0;
-    self->traj_active = false;
-    self->traj_done   = true;
+    self->core.active      = false;
+    self->core.target_dps  = 0.0;
+    self->core.traj_active = false;
+    self->core.traj_done   = true;
 }
 
 // -----------------------------------------------------------------------
@@ -172,9 +135,7 @@ static void servo_detach(servo_obj_t *self) {
 
 static mp_obj_t servo_run_speed(mp_obj_t self_in, mp_obj_t dps_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    self->target_dps  = mp_obj_get_float(dps_in);
-    self->traj_active = false;
-    self->traj_done   = true;
+    ob_servo_set_speed(&self->core, (ob_float_t)mp_obj_get_float(dps_in));
     servo_attach(self);
     return mp_const_none;
 }
@@ -187,17 +148,12 @@ static mp_obj_t servo_run_target(size_t n_args, const mp_obj_t *args) {
     mp_float_t cruise_dps = mp_obj_get_float(args[2]);
     mp_float_t accel      = (n_args > 3) ? mp_obj_get_float(args[3]) : DEFAULT_ACCEL;
 
-    // The trajectory operates on positions, not deltas — build it from
-    // the current shaft angle.
-    mp_int_t count = servo_read_count(self);
-    mp_float_t start = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
-    mp_float_t target = start + delta_deg;
-
-    openbricks_trajectory_init(&self->trajectory, start, target, cruise_dps, accel);
-    self->traj_start_ms = openbricks_motor_process_now_ms();
-    self->traj_active   = true;
-    self->traj_done     = false;
-    self->target_dps    = 0.0;   // first tick will sample the profile
+    long count = (long)servo_read_count(self);
+    long now   = (long)openbricks_motor_process_now_ms();
+    ob_servo_run_target(&self->core, count, now,
+                        (ob_float_t)delta_deg,
+                        (ob_float_t)cruise_dps,
+                        (ob_float_t)accel);
     servo_attach(self);
     return mp_const_none;
 }
@@ -205,26 +161,29 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(servo_run_target_obj, 3, 4, servo_run
 
 static mp_obj_t servo_is_done(mp_obj_t self_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return mp_obj_new_bool(self->traj_done);
+    return mp_obj_new_bool(ob_servo_is_done(&self->core));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_is_done_obj, servo_is_done);
 
 static mp_obj_t servo_target_dps(mp_obj_t self_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return mp_obj_new_float(self->target_dps);
+    return mp_obj_new_float((mp_float_t)self->core.target_dps);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_target_dps_obj, servo_target_dps);
 
 static mp_obj_t servo_is_active(mp_obj_t self_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    return mp_obj_new_bool(self->active);
+    return mp_obj_new_bool(self->core.active);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_is_active_obj, servo_is_active);
 
 static mp_obj_t servo_run(mp_obj_t self_in, mp_obj_t power_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
     servo_detach(self);
-    servo_drive_power(self, mp_obj_get_float(power_in));
+    mp_float_t power = mp_obj_get_float(power_in);
+    if (power >  100.0) power =  100.0;
+    if (power < -100.0) power = -100.0;
+    servo_drive_power(self, power);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(servo_run_obj, servo_run);
@@ -247,30 +206,29 @@ static MP_DEFINE_CONST_FUN_OBJ_1(servo_coast_obj, servo_coast);
 
 static mp_obj_t servo_angle(mp_obj_t self_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_int_t count = servo_read_count(self);
-    mp_float_t angle = (mp_float_t)count * 360.0 / (mp_float_t)self->counts_per_rev;
-    return mp_obj_new_float(angle);
+    long count = (long)servo_read_count(self);
+    return mp_obj_new_float((mp_float_t)ob_servo_count_to_angle_deg(&self->core, count));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_angle_obj, servo_angle);
 
 static mp_obj_t servo_reset_angle(size_t n_args, const mp_obj_t *args) {
     servo_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     mp_float_t angle = (n_args > 1) ? mp_obj_get_float(args[1]) : 0.0;
-    mp_int_t new_count = (mp_int_t)(angle * (mp_float_t)self->counts_per_rev / 360.0);
+    mp_int_t new_count = (mp_int_t)(angle * (mp_float_t)self->core.counts_per_rev / 360.0);
     // encoder.reset(new_count) — uniform across all encoder drivers,
     // including ones that back ``_count`` with a hardware peripheral.
     mp_call_function_1(self->encoder_reset, MP_OBJ_NEW_SMALL_INT(new_count));
-    // Re-baseline the observer and the time stamp, so the first tick
-    // after a reset_angle() doesn't see a huge phantom delta.
-    openbricks_observer_reset(&self->observer, angle);
-    self->last_time_ms = openbricks_motor_process_now_ms();
+    // Re-baseline the observer + time baseline so the first tick after
+    // a reset_angle doesn't see a huge phantom delta.
+    ob_servo_baseline(&self->core, (long)new_count,
+                      (long)openbricks_motor_process_now_ms());
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(servo_reset_angle_obj, 1, 2, servo_reset_angle);
 
-// run_angle is intentionally omitted from C — it's a blocking loop that's
-// easier to express in Python (sleep_ms / break on angle). The Python
-// wrapper provides it, calling run_speed + brake via this servo.
+// run_angle is intentionally omitted from C — it's a blocking loop
+// that's easier to express in Python (sleep_ms / break on angle).
+// The Python wrapper provides it, calling run_speed + brake.
 
 // -----------------------------------------------------------------------
 // Constructor
@@ -293,15 +251,10 @@ static mp_obj_t servo_make_new(const mp_obj_type_t *type,
                               MP_ARRAY_SIZE(allowed), allowed, parsed);
 
     servo_obj_t *self = mp_obj_malloc(servo_obj_t, type);
-    self->in1_pin        = parsed[ARG_in1].u_obj;
-    self->in2_pin        = parsed[ARG_in2].u_obj;
-    self->pwm            = parsed[ARG_pwm].u_obj;
-    self->encoder        = parsed[ARG_encoder].u_obj;
-    self->counts_per_rev = parsed[ARG_counts_per_rev].u_int;
-    self->invert         = parsed[ARG_invert].u_bool;
-    self->kp             = (parsed[ARG_kp].u_obj != MP_OBJ_NULL)
-                         ? mp_obj_get_float(parsed[ARG_kp].u_obj)
-                         : 0.3;
+    self->in1_pin = parsed[ARG_in1].u_obj;
+    self->in2_pin = parsed[ARG_in2].u_obj;
+    self->pwm     = parsed[ARG_pwm].u_obj;
+    self->encoder = parsed[ARG_encoder].u_obj;
 
     // Cache bound methods so the tick body does pure calls.
     self->in1_value     = mp_load_attr(self->in1_pin, MP_QSTR_value);
@@ -310,16 +263,14 @@ static mp_obj_t servo_make_new(const mp_obj_type_t *type,
     self->encoder_count = mp_load_attr(self->encoder, MP_QSTR_count);
     self->encoder_reset = mp_load_attr(self->encoder, MP_QSTR_reset);
 
-    self->target_dps   = 0.0;
-    self->active       = false;
-    self->traj_active  = false;
-    self->traj_done    = true;
-    self->traj_start_ms = 0;
-    self->last_time_ms = (mp_int_t)openbricks_motor_process_now_ms();
-
-    // Default observer tuning — caller can use a standalone Observer
-    // type later if they want different gains per motor.
-    openbricks_observer_init(&self->observer, 0.5, 0.15);
+    ob_float_t kp = (parsed[ARG_kp].u_obj != MP_OBJ_NULL)
+                    ? (ob_float_t)mp_obj_get_float(parsed[ARG_kp].u_obj)
+                    : (ob_float_t)OB_SERVO_DEFAULT_KP;
+    ob_servo_init(&self->core,
+                  (int)parsed[ARG_counts_per_rev].u_int,
+                  kp,
+                  parsed[ARG_invert].u_bool);
+    self->core.last_time_ms = (long)openbricks_motor_process_now_ms();
 
     return MP_OBJ_FROM_PTR(self);
 }

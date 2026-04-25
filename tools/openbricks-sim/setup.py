@@ -35,6 +35,8 @@ _CORE_FILES = [
     "observer_core.h",
     "motor_process_core.c",
     "motor_process_core.h",
+    "servo_core.c",
+    "servo_core.h",
 ]
 
 
@@ -67,6 +69,7 @@ setup(
                 "native/_shared/trajectory_core.c",
                 "native/_shared/observer_core.c",
                 "native/_shared/motor_process_core.c",
+                "native/_shared/servo_core.c",
             ],
             include_dirs=[
                 "native/_shared",
