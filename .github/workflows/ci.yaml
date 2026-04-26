@@ -47,6 +47,44 @@ jobs:
       - name: Run test suite under unix MicroPython
         run: ./native/micropython/ports/unix/build-standard/micropython tests/run.py
 
+  cpython-tests:
+    # Run every CPython-compatible firmware test under stock CPython 3.
+    #
+    # Why this exists alongside the ``test`` job (which runs the full
+    # suite under unix MicroPython): MP and CPython have small but
+    # real interpreter differences. ``builtins.print`` rebinds
+    # differently, ``sys.print_exception`` exists on MP but not
+    # CPython, ``time.sleep_ms`` is MP-only, etc. The firmware tests
+    # mostly paper over these via ``tests/_fakes.py``, but a test
+    # that accidentally relies on a CPython-only construct or an
+    # MP-only one only shows up if we exercise both interpreters.
+    #
+    # Excluded tests need the ``_openbricks_native`` C module
+    # (observer, trajectory, scheduler, servo / drivebase, encoder,
+    # mg370, bno055, pcnt_encoder). Those run under MP only via the
+    # ``test`` and ``coverage`` jobs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run CPython-compatible firmware tests under CPython
+        run: |
+          python -m unittest \
+            tests.test_bluetooth \
+            tests.test_bluetooth_button \
+            tests.test_ble_repl \
+            tests.test_hub \
+            tests.test_launcher \
+            tests.test_l298n \
+            tests.test_tcs34725 \
+            tests.test_st3215 \
+            tests.test_ssd1306 \
+            tests.test_tb6612
+
   openbricks-py:
     # Python-layer coverage of the firmware package (``openbricks/``).
     # Only the modules that don't need the ``_openbricks_native`` C
