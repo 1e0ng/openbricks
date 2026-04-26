@@ -54,7 +54,8 @@ from typing import Optional
 
 from openbricks_sim import _native as _sim_native
 from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
-                                     SimIMU, SimColorSensor)
+                                     SimIMU, SimColorSensor,
+                                     SimDistanceSensor)
 
 
 # Module-level state — only one shim can be installed at a time, but
@@ -256,6 +257,24 @@ class ShimTCS34725:
         scale = 65535 / 255
         return (int(c8 * scale), int(r8 * scale),
                 int(g8 * scale), int(b8 * scale))
+
+
+class ShimHCSR04:
+    """Drop-in for ``openbricks.drivers.hcsr04.HCSR04``.
+
+    Constructor accepts the firmware ``trig=, echo=, timeout_us=``
+    args; ignored — the shim binds straight to the chassis
+    :class:`SimDistanceSensor` regardless.
+    """
+
+    def __init__(self, *args, **kwargs):
+        if _INSTALLED is None:
+            raise RuntimeError(
+                "shim not installed; call install(runtime) first")
+        self._ds = SimDistanceSensor(_INSTALLED.runtime)
+
+    def distance_mm(self):
+        return self._ds.distance_mm()
 
 
 class ShimBNO055:
@@ -521,16 +540,21 @@ def _patch_pure_python_drivers(state: "_ShimState") -> None:
 
     Records the original attributes in ``state.prev_driver_attrs`` so
     ``uninstall`` can restore them exactly."""
-    # If the openbricks repo isn't on sys.path or doesn't exist,
-    # silently skip — the user might be running a script that doesn't
-    # touch openbricks driver classes.
-    try:
-        import openbricks.drivers.tcs34725 as _tcs_mod
-    except Exception:
-        return
-    state.prev_driver_attrs[("openbricks.drivers.tcs34725", "TCS34725")] = (
-        _tcs_mod, "TCS34725", _tcs_mod.TCS34725)
-    _tcs_mod.TCS34725 = ShimTCS34725
+    # Each entry: (module-import-name, attr-name, replacement). If
+    # the import fails (e.g. openbricks repo not on sys.path) skip
+    # silently — user script just doesn't use that driver.
+    targets = [
+        ("openbricks.drivers.tcs34725", "TCS34725", ShimTCS34725),
+        ("openbricks.drivers.hcsr04",   "HCSR04",   ShimHCSR04),
+    ]
+    for mod_name, attr, replacement in targets:
+        try:
+            mod = __import__(mod_name, fromlist=[attr])
+        except Exception:
+            continue
+        state.prev_driver_attrs[(mod_name, attr)] = (
+            mod, attr, getattr(mod, attr))
+        setattr(mod, attr, replacement)
 
 
 def uninstall() -> None:

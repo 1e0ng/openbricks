@@ -103,6 +103,16 @@ class ColorSensor:
         """Return ambient / clear-channel intensity in 0..100."""
         raise NotImplementedError
 
+
+# NOTE: ``DistanceSensor`` lives in ``openbricks.distance`` rather
+# than here, even though it's an interface. ``openbricks/__init__.py``
+# eagerly loads this module to re-export Motor/Servo/IMU/ColorSensor,
+# so every byte of bytecode here is paid by *every* import of
+# anything in the openbricks package — including the observer test
+# which runs against a tight MicroPython heap budget. Distance-sensor
+# users explicitly ``from openbricks.distance import DistanceSensor``
+# (or just import their concrete driver, which does).
+
 # Hub-layer interfaces (StatusLED, Button, Display, Hub) live in
 # ``openbricks.hub`` alongside their concrete implementations so that
 # tests which don't touch the hub don't pay the class-loading cost on
