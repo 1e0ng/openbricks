@@ -74,13 +74,14 @@ jobs:
         # C-covered — different surface).
         run: |
           python -m coverage run \
-            --include='openbricks/__init__.py,openbricks/interfaces.py,openbricks/bluetooth.py,openbricks/ble_repl.py,openbricks/bluetooth_button.py,openbricks/hub.py,openbricks/launcher.py' \
+            --include='openbricks/__init__.py,openbricks/interfaces.py,openbricks/bluetooth.py,openbricks/ble_repl.py,openbricks/bluetooth_button.py,openbricks/hub.py,openbricks/launcher.py,openbricks/log.py' \
             -m unittest \
               tests.test_bluetooth \
               tests.test_bluetooth_button \
               tests.test_ble_repl \
               tests.test_hub \
-              tests.test_launcher
+              tests.test_launcher \
+              tests.test_log
           python -m coverage report
           python -m coverage xml -o coverage.xml
 
