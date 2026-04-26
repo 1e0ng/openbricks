@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""Tests for ``openbricks_dev.download``.
+"""Tests for ``openbricks_dev.upload``.
 
-``download`` stages a script at ``/program.py`` on the hub. The user
+``upload`` stages a script at ``/program.py`` on the hub. The user
 launches it via the hub button; the client never triggers
 ``machine.reset()``. These tests verify that the upload program has
 no reset call and that the staged path is the launcher's target
@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openbricks_dev import download as dl
+from openbricks_dev import upload as ul
 from openbricks_dev._nus import NUSError
 
 
@@ -35,25 +35,25 @@ class ComposeTests(unittest.TestCase):
     """Pure-function tests for the upload-program generator."""
 
     def test_writes_payload_to_given_path(self):
-        prog = dl._compose_upload_program("/program.py", b"payload")
+        prog = ul._compose_upload_program("/program.py", b"payload")
         self.assertIn(b"'/program.py'", prog)
         self.assertIn(b"open(", prog)
         self.assertIn(b"'wb'", prog)
         self.assertIn(b"f.write(", prog)
 
     def test_custom_path_surfaces_in_program(self):
-        prog = dl._compose_upload_program("/user/alt.py", b"X")
+        prog = ul._compose_upload_program("/user/alt.py", b"X")
         self.assertIn(b"'/user/alt.py'", prog)
 
     def test_prints_byte_count(self):
-        prog = dl._compose_upload_program("/program.py", b"AB")
-        self.assertIn(b"print('downloaded', 2", prog)
+        prog = ul._compose_upload_program("/program.py", b"AB")
+        self.assertIn(b"print('uploaded', 2", prog)
 
     def test_does_not_issue_machine_reset(self):
         """Auto-reset would run user code immediately — the launcher
         workflow requires a manual button press to start, so the
         upload program MUST NOT call machine.reset()."""
-        prog = dl._compose_upload_program("/program.py", b"X")
+        prog = ul._compose_upload_program("/program.py", b"X")
         self.assertNotIn(b"machine.reset", prog)
         self.assertNotIn(b"import machine", prog)
 
@@ -61,7 +61,7 @@ class ComposeTests(unittest.TestCase):
         # Raw bytes with NULs / high bits / quotes / newlines must
         # survive ``repr()`` wrapping and come through verbatim.
         tricky = b"\x00\xff\r\n'\"\\x41"
-        prog = dl._compose_upload_program("/p", tricky)
+        prog = ul._compose_upload_program("/p", tricky)
         self.assertIn(repr(tricky).encode(), prog)
 
 
@@ -97,7 +97,7 @@ class _ScriptedLink:
         self.closed = True
 
 
-class DownloadFlowTests(unittest.TestCase):
+class UploadFlowTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
         self.tmp.write("print('hello')\n")
@@ -116,14 +116,14 @@ class DownloadFlowTests(unittest.TestCase):
 
     def test_default_flow_stages_to_program_py_without_reset(self):
         fake = _ScriptedLink(self._standard_responses(
-            b"downloaded 15 bytes to '/program.py'\r\n"))
+            b"uploaded 15 bytes to '/program.py'\r\n"))
 
         async def _fake_connect(name, scan_timeout=5.0):
             return fake
 
-        with patch.object(dl.NUSLink, "connect", side_effect=_fake_connect), \
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
              patch("sys.stdout", new_callable=io.StringIO) as out:
-            rc = dl.run(_args(script=self.tmp.name))
+            rc = ul.run(_args(script=self.tmp.name))
 
         self.assertEqual(rc, 0)
         joined = b"".join(fake.writes)
@@ -140,51 +140,51 @@ class DownloadFlowTests(unittest.TestCase):
         self.assertIn(b"hello", joined)
         self.assertTrue(fake.closed)
         # Confirmation printed to the user's terminal.
-        self.assertIn("downloaded", out.getvalue())
+        self.assertIn("uploaded", out.getvalue())
 
     def test_custom_path_flag_targets_alt_location(self):
         fake = _ScriptedLink(self._standard_responses(
-            b"downloaded 15 bytes to '/main.py'\r\n"))
+            b"uploaded 15 bytes to '/main.py'\r\n"))
 
         async def _fake_connect(name, scan_timeout=5.0):
             return fake
 
-        with patch.object(dl.NUSLink, "connect", side_effect=_fake_connect), \
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
              patch("sys.stdout", new_callable=io.StringIO):
-            rc = dl.run(_args(script=self.tmp.name, path="/main.py"))
+            rc = ul.run(_args(script=self.tmp.name, path="/main.py"))
 
         self.assertEqual(rc, 0)
         joined = b"".join(fake.writes)
         self.assertIn(b"'/main.py'", joined)
 
     def test_missing_script_raises_without_touching_ble(self):
-        with patch.object(dl.NUSLink, "connect") as connect:
-            with self.assertRaises(dl.DownloadError) as ctx:
-                asyncio.run(dl._download_async(
+        with patch.object(ul.NUSLink, "connect") as connect:
+            with self.assertRaises(ul.UploadError) as ctx:
+                asyncio.run(ul._upload_async(
                     "RobotA", "/nonexistent.py", "/program.py", 5.0))
         connect.assert_not_called()
         self.assertIn("cannot read script", str(ctx.exception))
 
     def test_oversized_script_raises(self):
         big = tempfile.NamedTemporaryFile(mode="wb", suffix=".py", delete=False)
-        big.write(b"x" * (dl._MAX_SCRIPT_BYTES + 1))
+        big.write(b"x" * (ul._MAX_SCRIPT_BYTES + 1))
         big.close()
         self.addCleanup(os.unlink, big.name)
 
-        with patch.object(dl.NUSLink, "connect") as connect:
-            with self.assertRaises(dl.DownloadError) as ctx:
-                asyncio.run(dl._download_async(
+        with patch.object(ul.NUSLink, "connect") as connect:
+            with self.assertRaises(ul.UploadError) as ctx:
+                asyncio.run(ul._upload_async(
                     "RobotA", big.name, "/program.py", 5.0))
         connect.assert_not_called()
         self.assertIn("soft limit", str(ctx.exception))
 
-    def test_connect_failure_propagates_as_download_error(self):
+    def test_connect_failure_propagates_as_upload_error(self):
         async def _raise(name, scan_timeout=5.0):
             raise NUSError("no hub named 'Ghost'")
 
-        with patch.object(dl.NUSLink, "connect", side_effect=_raise):
-            with self.assertRaises(dl.DownloadError):
-                asyncio.run(dl._download_async(
+        with patch.object(ul.NUSLink, "connect", side_effect=_raise):
+            with self.assertRaises(ul.UploadError):
+                asyncio.run(ul._upload_async(
                     "Ghost", self.tmp.name, "/program.py", 5.0))
 
 

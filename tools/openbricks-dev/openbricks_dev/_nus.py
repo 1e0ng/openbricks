@@ -11,7 +11,7 @@ Thin wrapper around ``bleak`` that:
   ``read(timeout)`` yields whatever stdout/stderr the hub has notified
   since the last read.
 
-Callers are the ``run`` and ``stop`` subcommands (and ``download`` in
+Callers are the ``run`` and ``stop`` subcommands (and ``upload`` in
 PR 4). Keeping this out of each subcommand module avoids bleak-setup
 boilerplate duplication and gives us one place to tweak retry/timeout
 policy.

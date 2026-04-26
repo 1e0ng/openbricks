@@ -10,7 +10,7 @@ name = "openbricks-dev"
 # from the attribute, so this pyproject never needs editing for a
 # version bump.
 dynamic = ["version"]
-description = "Host-side CLI for the openbricks MicroPython firmware — flash, list, run, download, and stop code on an openbricks hub over BLE."
+description = "Host-side CLI for the openbricks MicroPython firmware — flash, list, run, upload, and stop code on an openbricks hub over BLE."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"

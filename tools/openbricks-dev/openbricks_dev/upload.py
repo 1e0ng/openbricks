@@ -1,19 +1,24 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev download -n NAME script.py`` — stage a script on the
+``openbricks-dev upload -n NAME script.py`` — stage a script on the
 hub. The hub does **not** run it automatically; the user presses the
-hub button to launch (and presses again to stop). Same workflow as
-Pybricks Prime-hub ``pybricksdev download``.
+hub button to launch (and presses again to stop).
 
 Destination defaults to ``/program.py``. The firmware's frozen
 ``main.py`` watches the hub button and exec's that file on each short
-press, so a fresh download takes effect after the user places the
+press, so a fresh upload takes effect after the user places the
 robot and presses the button.
+
+(Pybricks calls this same operation ``download`` from the host's
+"download to the hub" perspective. We use ``upload`` because from
+the user's terminal the bytes are flowing *up* to the hub — the
+direction-of-data-travel naming is more intuitive for new users
+seeing this command for the first time.)
 
 Transport: NUS + raw-paste mode via the same helpers ``run`` uses.
 The upload runs a one-shot Python program on the hub that opens the
 target path and writes the bytes, then prints a confirmation. No
-``machine.reset()`` — the downloaded code does not execute until the
+``machine.reset()`` — the uploaded code does not execute until the
 user triggers it.
 
 For custom boot flows that replace the frozen ``main.py``, pass
@@ -29,7 +34,7 @@ from openbricks_dev._nus import NUSLink, NUSError
 from openbricks_dev import run as run_mod
 
 
-class DownloadError(Exception):
+class UploadError(Exception):
     pass
 
 
@@ -53,21 +58,21 @@ def _compose_upload_program(target_path, payload):
     lines = [
         "with open(%r, 'wb') as f:" % target_path,
         "    f.write(%s)" % repr(payload),
-        "print('downloaded', %d, 'bytes to', %r)" % (len(payload), target_path),
+        "print('uploaded', %d, 'bytes to', %r)" % (len(payload), target_path),
     ]
     return "\n".join(lines).encode() + b"\n"
 
 
-async def _download_async(name, script_path, target_path, scan_timeout):
+async def _upload_async(name, script_path, target_path, scan_timeout):
     try:
         with open(script_path, "rb") as f:
             user_bytes = f.read()
     except OSError as e:
-        raise DownloadError(
+        raise UploadError(
             "cannot read script %r: %s" % (script_path, e))
 
     if len(user_bytes) > _MAX_SCRIPT_BYTES:
-        raise DownloadError(
+        raise UploadError(
             "script is %d bytes, exceeding the %d-byte soft limit; "
             "split the code or bump _MAX_SCRIPT_BYTES" % (
                 len(user_bytes), _MAX_SCRIPT_BYTES))
@@ -78,7 +83,7 @@ async def _download_async(name, script_path, target_path, scan_timeout):
     try:
         link = await NUSLink.connect(name, scan_timeout=scan_timeout)
     except NUSError as e:
-        raise DownloadError(str(e))
+        raise UploadError(str(e))
 
     async with link:
         blink = run_mod._BufferedLink(link)
@@ -96,13 +101,13 @@ async def _download_async(name, script_path, target_path, scan_timeout):
 def run(args):
     """Subcommand entry. ``args`` is an argparse Namespace."""
     try:
-        asyncio.run(_download_async(
+        asyncio.run(_upload_async(
             args.name,
             args.script,
             args.path,
             args.scan_timeout,
         ))
-    except DownloadError:
+    except UploadError:
         raise
     except KeyboardInterrupt:
         print("\naborted.", file=sys.stderr)

@@ -55,11 +55,11 @@ Runs a BLE scan and prints every named device found, sorted by RSSI (strongest f
 openbricks-dev run -n RobotA examples/hello.py
 ```
 
-Stages the script to `/program.py` (same target as `download`) and triggers the hub's launcher to execute it immediately. Output streams back to your terminal in real time.
+Stages the script to `/program.py` (same target as `upload`) and triggers the hub's launcher to execute it immediately. Output streams back to your terminal in real time.
 
-- **Button stop.** Pressing the hub button while the program runs raises `KeyboardInterrupt` via the same launcher path `download`+button uses. The client sees the clean "stopped by button press" line and exits.
+- **Button stop.** Pressing the hub button while the program runs raises `KeyboardInterrupt` via the same launcher path `upload`+button uses. The client sees the clean "stopped by button press" line and exits.
 - **Program completion.** When the program finishes (or raises), the client disconnects and exits — same as `pybricks-dev run`.
-- **Script persists.** Because `run` stages to `/program.py`, the hub can re-run the last program via a button press without another upload. `download` and `run` differ only in whether the client auto-launches after upload.
+- **Script persists.** Because `run` stages to `/program.py`, the hub can re-run the last program via a button press without another upload. `upload` and `run` differ only in whether the client auto-launches after upload.
 
 Stderr (e.g. exception tracebacks) arrives after stdout and is surfaced with a blank-line separator. No paste-mode `===` echo — raw-paste mode is clean.
 
@@ -71,17 +71,19 @@ openbricks-dev stop -n RobotA
 
 Sends a single Ctrl-C byte over the NUS REPL bridge, which MicroPython surfaces as `KeyboardInterrupt`. Useful when `openbricks-dev run` has already exited but the hub's still chewing on a long-running user program.
 
-### `download` — stage a script; hub button launches it
+### `upload` — stage a script; hub button launches it
 
 ```
-openbricks-dev download -n RobotA examples/wander.py
+openbricks-dev upload -n RobotA examples/wander.py
 ```
 
-Writes the script to `/program.py` on the hub. **The code does not run automatically.** Place your robot, press the **program button** (GPIO 4), and the program starts. Press again to stop it mid-run — same UX as Pybricks Prime-hub `pybricksdev download`.
+Writes the script to `/program.py` on the hub. **The code does not run automatically.** Place your robot, press the **program button** (GPIO 4), and the program starts. Press again to stop it mid-run.
+
+(Pybricks calls this same operation `download` from the hub's "download to me" perspective. We name by direction-of-data-travel — bytes flow *up* to the hub, hence `upload`.)
 
 This works because the firmware ships a frozen `main.py` that:
 
-1. Brings BLE + REPL bridge up immediately (so `openbricks-dev run` / `download` / `stop` are always reachable, even when no program is running).
+1. Brings BLE + REPL bridge up immediately (so `openbricks-dev run` / `upload` / `stop` are always reachable, even when no program is running).
 2. Instantiates the board's Hub, which wires the **BLE-toggle button** (short-press on GPIO 5) with LED feedback.
 3. Watches the **program button** (GPIO 4) via `openbricks.launcher.run()` — a short-press runs `/program.py`, a second short-press raises `KeyboardInterrupt` in the running program.
 

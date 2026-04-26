@@ -2,7 +2,7 @@
 """Tests for ``openbricks_dev.run``.
 
 ``run`` stages the user's script at ``/program.py`` (same target as
-``download``) and triggers the hub-side launcher to exec it. Output
+``upload``) and triggers the hub-side launcher to exec it. Output
 streams back live. The hub-side button-press stop shows up here as a
 ``KeyboardInterrupt`` that the uploaded bootstrap catches and prints.
 
@@ -50,7 +50,7 @@ def _args(name="RobotA", script="s.py", scan_timeout=5.0):
         name=name, script=script, scan_timeout=scan_timeout)
 
 
-# Hub-side response shorthands (kept in sync with test_download).
+# Hub-side response shorthands (kept in sync with test_upload).
 _BANNER      = b"raw REPL; CTRL-B to exit\r\n>"
 _R_SUPPORTED = b"R\x01"
 _WINDOW_8K   = b"\x00\x20"  # 0x2000 LE window — upload fits without mid-stream ACKs
