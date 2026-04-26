@@ -259,12 +259,17 @@ class ShimTCS34725:
                 int(g8 * scale), int(b8 * scale))
 
 
-class ShimHCSR04:
-    """Drop-in for ``openbricks.drivers.hcsr04.HCSR04``.
+class _ShimDistanceSensorBase:
+    """Common shim for any distance-sensor driver.
 
-    Constructor accepts the firmware ``trig=, echo=, timeout_us=``
-    args; ignored — the shim binds straight to the chassis
-    :class:`SimDistanceSensor` regardless.
+    HC-SR04, VL53L0X, VL53L1X all implement
+    :class:`openbricks.distance.DistanceSensor` with the same
+    one-method shape (``distance_mm()``). Their firmware classes
+    differ in *constructor* (Pin pair vs I2C handle) but the
+    sim doesn't care — the underlying physics question
+    ("what's in front of the chassis?") is answered the same way
+    by :class:`SimDistanceSensor`. Each concrete shim subclass just
+    accepts whatever the firmware constructor takes.
     """
 
     def __init__(self, *args, **kwargs):
@@ -275,6 +280,18 @@ class ShimHCSR04:
 
     def distance_mm(self):
         return self._ds.distance_mm()
+
+
+class ShimHCSR04(_ShimDistanceSensorBase):
+    """Drop-in for ``openbricks.drivers.hcsr04.HCSR04``."""
+
+
+class ShimVL53L0X(_ShimDistanceSensorBase):
+    """Drop-in for ``openbricks.drivers.vl53l0x.VL53L0X``."""
+
+
+class ShimVL53L1X(_ShimDistanceSensorBase):
+    """Drop-in for ``openbricks.drivers.vl53l1x.VL53L1X``."""
 
 
 class ShimBNO055:
@@ -546,6 +563,8 @@ def _patch_pure_python_drivers(state: "_ShimState") -> None:
     targets = [
         ("openbricks.drivers.tcs34725", "TCS34725", ShimTCS34725),
         ("openbricks.drivers.hcsr04",   "HCSR04",   ShimHCSR04),
+        ("openbricks.drivers.vl53l0x",  "VL53L0X",  ShimVL53L0X),
+        ("openbricks.drivers.vl53l1x",  "VL53L1X",  ShimVL53L1X),
     ]
     for mod_name, attr, replacement in targets:
         try:

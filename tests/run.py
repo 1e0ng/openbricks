@@ -66,6 +66,8 @@ _TEST_MODULES = [
     "tests.test_ble_repl",
     "tests.test_launcher",
     "tests.test_hcsr04",
+    "tests.test_vl53l0x",
+    "tests.test_vl53l1x",
 ]
 
 
