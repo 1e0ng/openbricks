@@ -6,11 +6,11 @@ launch it immediately, stream output back, exit when the program stops.
 Semantics mirror ``pybricks-dev run``:
 
 * The script is written to ``/program.py`` on the hub (same file
-  ``openbricks-dev download`` stages to).
+  ``openbricks-dev upload`` stages to).
 * The hub's launcher execs it right away — no button press required to
   start.
 * While running, pressing the hub button raises ``KeyboardInterrupt``
-  in the program (same path the launcher uses for download-then-press).
+  in the program (same path the launcher uses for upload-then-press).
 * When the program stops (finished, raised, or interrupted by button),
   the terminal exits.
 
@@ -46,17 +46,17 @@ _RAW_REPL_BANNER     = b"raw REPL; CTRL-B to exit\r\n>"
 _FLOW_ACK   = b"\x01"
 _FLOW_ABORT = b"\x04"
 
-# Where the script lands; same target as ``openbricks-dev download`` so
+# Where the script lands; same target as ``openbricks-dev upload`` so
 # the post-run state matches what a follow-up button press would rerun.
 _TARGET_PATH = "/program.py"
 
 
-# Soft upper bound — same as download, since the upload shape is the same.
+# Soft upper bound — same as upload, since the upload shape is the same.
 _MAX_SCRIPT_BYTES = 64 * 1024
 
 
 class _BufferedLink:
-    """Pushback buffer over ``NUSLink``. Same helper the download flow
+    """Pushback buffer over ``NUSLink``. Same helper the upload flow
     uses — duplicated here instead of a cross-module import so neither
     subcommand leaks internals of the other.
     """

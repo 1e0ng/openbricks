@@ -6,7 +6,7 @@ Subcommands mirror the pybricks-dev workflow so the UX is familiar:
     openbricks-dev flash --name NAME --port PORT --firmware FW
     openbricks-dev list [--timeout SEC]
     openbricks-dev run      -n NAME SCRIPT  (PR 3)
-    openbricks-dev download -n NAME SCRIPT  (PR 4)
+    openbricks-dev upload   -n NAME SCRIPT  (PR 4)
     openbricks-dev stop     -n NAME         (PR 3)
 
 Each subcommand's real work lives in its own module so tests can import
@@ -83,32 +83,34 @@ def _build_parser():
         help="How long to scan for the named hub before giving up. Default: 5.0 s.",
     )
 
-    # ---- download ----
-    p_download = sub.add_parser(
-        "download",
+    # ---- upload ----
+    p_upload = sub.add_parser(
+        "upload",
         help="Stage a Python script on a hub; the user launches it with the hub button.",
         description="Upload SCRIPT to the hub's filesystem (default path "
-                    "``/program.py``). The downloaded code does NOT run "
+                    "``/program.py``). The uploaded code does NOT run "
                     "automatically — the hub's frozen main.py watches "
                     "the hub button and exec's the staged script on each "
                     "short press. Second short-press stops a running "
-                    "program. Same workflow as Pybricks Prime-hub "
-                    "``pybricksdev download``.",
+                    "program. (Pybricks calls this same operation "
+                    "``download`` from the hub's perspective; we name "
+                    "by direction-of-data-travel — bytes flow *up* to "
+                    "the hub.)",
     )
-    p_download.add_argument(
+    p_upload.add_argument(
         "-n", "--name", required=True,
         help="Hub name baked in at flash time.",
     )
-    p_download.add_argument(
+    p_upload.add_argument(
         "script", metavar="SCRIPT",
         help="Path to the local Python script to stage.",
     )
-    p_download.add_argument(
+    p_upload.add_argument(
         "--path", default="/program.py",
         help="Destination path on the hub's filesystem. Default: "
              "/program.py (which the frozen launcher reads).",
     )
-    p_download.add_argument(
+    p_upload.add_argument(
         "--scan-timeout", type=float, default=5.0,
         help="BLE scan timeout. Default: 5.0 s.",
     )
@@ -168,9 +170,9 @@ def main(argv=None):
         if args.command == "run":
             from openbricks_dev import run as run_mod
             return run_mod.run(args)
-        if args.command == "download":
-            from openbricks_dev import download as download_mod
-            return download_mod.run(args)
+        if args.command == "upload":
+            from openbricks_dev import upload as upload_mod
+            return upload_mod.run(args)
         if args.command == "stop":
             from openbricks_dev import stop as stop_mod
             return stop_mod.run(args)

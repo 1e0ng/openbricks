@@ -4,7 +4,7 @@ Button-gated user-program launcher.
 
 Pybricks-style workflow:
 
-* ``openbricks-dev download`` stages a script at ``/program.py`` but
+* ``openbricks-dev upload`` stages a script at ``/program.py`` but
   does not run it — the user presses the program button to launch.
 * ``openbricks-dev run`` stages the same script and triggers the
   launcher immediately. Output streams back to the client; pressing

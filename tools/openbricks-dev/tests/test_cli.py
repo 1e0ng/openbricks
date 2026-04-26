@@ -70,17 +70,17 @@ class BuildParserTests(unittest.TestCase):
         args = self._parse(["run", "-n", "A", "s.py", "--scan-timeout", "2"])
         self.assertEqual(args.scan_timeout, 2.0)
 
-    # ---- download ----
+    # ---- upload ----
 
-    def test_download_requires_name_and_script(self):
-        for missing in (["download", "s.py"],
-                        ["download", "-n", "A"]):
+    def test_upload_requires_name_and_script(self):
+        for missing in (["upload", "s.py"],
+                        ["upload", "-n", "A"]):
             with self.assertRaises(SystemExit):
                 with patch("sys.stderr", new_callable=io.StringIO):
                     self._parse(missing)
 
-    def test_download_defaults(self):
-        args = self._parse(["download", "-n", "RobotA", "s.py"])
+    def test_upload_defaults(self):
+        args = self._parse(["upload", "-n", "RobotA", "s.py"])
         self.assertEqual(args.name, "RobotA")
         self.assertEqual(args.script, "s.py")
         # Default target is /program.py — the path the firmware's
@@ -88,9 +88,9 @@ class BuildParserTests(unittest.TestCase):
         self.assertEqual(args.path, "/program.py")
         self.assertEqual(args.scan_timeout, 5.0)
 
-    def test_download_accepts_path_override(self):
+    def test_upload_accepts_path_override(self):
         args = self._parse([
-            "download", "-n", "A", "s.py", "--path", "/main.py",
+            "upload", "-n", "A", "s.py", "--path", "/main.py",
         ])
         self.assertEqual(args.path, "/main.py")
 
@@ -157,11 +157,11 @@ class MainDispatchTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         stop_run.assert_called_once()
 
-    def test_download_routes_to_download_module(self):
-        with patch("openbricks_dev.download.run", return_value=0) as dl_run:
-            rc = cli.main(["download", "-n", "A", "s.py"])
+    def test_upload_routes_to_upload_module(self):
+        with patch("openbricks_dev.upload.run", return_value=0) as ul_run:
+            rc = cli.main(["upload", "-n", "A", "s.py"])
         self.assertEqual(rc, 0)
-        dl_run.assert_called_once()
+        ul_run.assert_called_once()
 
     def test_exception_from_subcommand_becomes_rc_1(self):
         def _boom(args):

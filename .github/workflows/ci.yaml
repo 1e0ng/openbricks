@@ -137,7 +137,7 @@ jobs:
           openbricks-dev flash --help
           openbricks-dev list --help
           openbricks-dev run --help
-          openbricks-dev download --help
+          openbricks-dev upload --help
           openbricks-dev stop --help
 
   openbricks-sim:
