@@ -66,6 +66,7 @@ _TEST_MODULES = [
     "tests.test_ble_repl",
     "tests.test_launcher",
     "tests.test_log",
+    "tests.test_hcsr04",
 ]
 
 

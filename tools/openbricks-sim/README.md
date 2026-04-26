@@ -4,11 +4,12 @@ MuJoCo-backed simulator for openbricks firmware. The eventual goal: the user's `
 
 Backbone: [MuJoCo](https://github.com/google-deepmind/mujoco) (Apache-2.0, native Python, 1 kHz physics easy, native sensor primitives, stable wheel contacts). Picked over pybullet (wheel-contact chatter) and Webots (32 ms step floor incompatible with the 1 kHz firmware control loop).
 
-## Status — Phase C in progress (sim runtime layer)
+## Status — Phase D in progress (sensors + scenarios)
 
 * **Phase A** ✅ chassis + world preview, MuJoCo backbone wired up.
 * **Phase B** ✅ shared cores: trajectory, observer, motor_process, servo, drivebase. Sim hot-path math is byte-identical to the firmware (same `*_core.c` files compiled into both targets).
-* **Phase C** ✅ runtime adapters + driver shim. `SimMotor` + `SimDriveBase` + `SimIMU` + `SimColorSensor` cover the default chassis; `SimRobot` bundles them with the world; `openbricks-sim run main.py` executes scripts with `robot` / `drivebase` / `left` / `right` pre-bound. The driver shim (`openbricks_sim.shim`) installs no-op `machine` + replacement `_openbricks_native` modules, patches `time.sleep_ms`, and monkey-patches `openbricks.drivers.tcs34725.TCS34725` — so firmware-targeting code runs unchanged: `JGB37Motor` / `DriveBase` / `BNO055` / `TCS34725` imports all resolve. See `examples/wander_hardware_style.py`, `examples/wander_with_gyro.py`, `examples/color_drive.py`.
+* **Phase C** ✅ runtime adapters + driver shim. `SimMotor` + `SimDriveBase` + `SimIMU` + `SimColorSensor` cover the default chassis; `SimRobot` bundles them with the world; `openbricks-sim run main.py` executes scripts with `robot` / `drivebase` / `left` / `right` pre-bound. The driver shim installs no-op `machine` + replacement `_openbricks_native`, patches `time.sleep_ms`, and monkey-patches the pure-Python driver classes — `JGB37Motor` / `DriveBase` / `BNO055` / `TCS34725` imports all resolve.
+* **Phase D** 🚧 distance sensors + scenarios. **D1 (just shipped):** `SimDistanceSensor` raycasts forward from the chassis `chassis_dist` site; `ShimHCSR04` wraps it; `from openbricks.drivers.hcsr04 import HCSR04` works unchanged in the sim. See `examples/wall_avoid.py`. Next: VL53L0X variant, scenario reset / scoring helpers, more worlds.
 
 ```
 pipx install openbricks-sim   # once on PyPI
@@ -46,6 +47,7 @@ You can also pass a full path to any MJCF world.
 - `chassis_encvel_l`, `chassis_encvel_r` — wheel angular velocity
 - `chassis_accel`, `chassis_gyro` — IMU equivalents (shim → BNO055)
 - `chassis_cam_down` — downward camera for the TCS34725 colour sensor shim
+- `chassis_dist` site — forward-facing range-sensor origin (HC-SR04 / VL53L0X shim raycasts from here)
 
 Override via `openbricks_sim.chassis.ChassisSpec(...)` when constructing; defaults are tuned to a small educational robot.
 
@@ -66,5 +68,5 @@ Covers chassis MJCF shape, physics settling, motor → encoder round-trip, and c
 | A | MuJoCo scaffold, default-chassis MJCF, `preview` command | ✅ |
 | B | Port `_openbricks_native` (motor_process, observer, trajectory, servo, drivebase) C → CPython extension. Sim hot path ≡ firmware hot path | ✅ |
 | C | Sim runtime (`SimMotor` / `SimDriveBase` / `SimIMU` / `SimColorSensor`) bridging cores ↔ MuJoCo, driver-shim monkey-patch, `openbricks-sim run main.py` | ✅ |
-| D | Distance sensors (raycast HC-SR04 / VL53L0X), worlds library, scenario reset / scoring | — |
+| D | Distance sensors (raycast HC-SR04 / VL53L0X), worlds library, scenario reset / scoring | 🚧 |
 | E | CI integration (headless rendering via EGL), examples, docs, PyPI publish as `openbricks-sim` | — |

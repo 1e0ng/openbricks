@@ -40,7 +40,8 @@ import mujoco
 
 from openbricks_sim.chassis import ChassisSpec, standalone_mjcf
 from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
-                                     SimIMU, SimColorSensor)
+                                     SimIMU, SimColorSensor,
+                                     SimDistanceSensor)
 from openbricks_sim.world import load_world
 
 
@@ -147,6 +148,10 @@ class SimRobot:
 
         # Down-facing colour sensor — raycast against the floor.
         self.color_sensor = SimColorSensor(self.runtime)
+
+        # Forward-facing distance sensor (HC-SR04 / VL53L0X equivalent).
+        # Raycasts from the chassis_dist site along body +X.
+        self.distance_sensor = SimDistanceSensor(self.runtime)
 
     # ------------------------------------------------------------------
     # Time advancement helpers — thin wrappers over runtime.step() with
