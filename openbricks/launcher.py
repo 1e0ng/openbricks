@@ -165,23 +165,32 @@ def _exec_program_raw(program_path):
     """Load and run ``program_path`` in a fresh namespace. Propagates
     ``KeyboardInterrupt``; prints other exceptions and returns.
 
-    Used by ``run_program`` where the client needs to see
-    ``KeyboardInterrupt`` propagate (so the disconnect signals
-    "stopped" back to the user's terminal).
+    Wraps the run in a :func:`openbricks.log.session` so every
+    ``print()`` / exception traceback is *also* tee'd to a flash
+    file. The live console (USB-CDC / BLE-NUS) still sees everything;
+    the file is only a backup for inspecting an untethered run later
+    via ``openbricks-dev log``.
     """
     with open(program_path) as f:
         code = f.read()
-    try:
-        exec(code, {"__name__": "__main__"})
-    except KeyboardInterrupt:
-        raise
-    except Exception as e:
-        pe = getattr(sys, "print_exception", None)
-        if pe is not None:
-            pe(e)
-        else:
-            import traceback
-            traceback.print_exception(type(e), e, e.__traceback__)
+    from openbricks import log as _log
+    with _log.session() as sess:
+        try:
+            exec(code, {"__name__": "__main__"})
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            pe = getattr(sys, "print_exception", None)
+            if pe is not None:
+                pe(e)
+            else:
+                import traceback
+                traceback.print_exception(type(e), e, e.__traceback__)
+            # Tracebacks above go to the live console only — print()
+            # is the only stream we tee. Mirror a short summary into
+            # the log file so it shows up in ``openbricks-dev log``
+            # too.
+            sess.write_text("Exception: %r\n" % (e,))
 
 
 def _exec_program(program_path):

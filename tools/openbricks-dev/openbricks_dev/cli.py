@@ -150,6 +150,38 @@ def _build_parser():
              "when debugging a hub that came up without a flashed name.",
     )
 
+    # ---- log ----
+    p_log = sub.add_parser(
+        "log",
+        help="Pull a script-run log file off a hub.",
+        description="Every program executed via the launcher (button "
+                    "press OR ``openbricks-dev run``) gets its stdout / "
+                    "stderr tee'd to a flash file under "
+                    "``/openbricks_logs/``. Three rotating slots are "
+                    "kept (run_0..run_2). With no flags this prints "
+                    "the most recent run; ``--list`` shows the index; "
+                    "``--run N`` selects a specific slot. Useful for "
+                    "post-mortem on an untethered run where no live "
+                    "console was attached.",
+    )
+    p_log.add_argument(
+        "-n", "--name", required=True,
+        help="Hub name baked in at flash time.",
+    )
+    p_log.add_argument(
+        "--list", action="store_true",
+        help="List the available run indices + their on-flash size, "
+             "instead of dumping a run's contents.",
+    )
+    p_log.add_argument(
+        "--run", type=int, default=None,
+        help="Specific run index to dump. Defaults to the most recent.",
+    )
+    p_log.add_argument(
+        "--scan-timeout", type=float, default=5.0,
+        help="BLE scan timeout. Default: 5.0 s.",
+    )
+
     return parser
 
 
@@ -174,6 +206,9 @@ def main(argv=None):
         if args.command == "stop":
             from openbricks_dev import stop as stop_mod
             return stop_mod.run(args)
+        if args.command == "log":
+            from openbricks_dev import log as log_mod
+            return log_mod.run(args)
     except KeyboardInterrupt:
         print("\naborted.", file=sys.stderr)
         return 130
