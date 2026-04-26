@@ -97,7 +97,8 @@ class SimDistanceSensorTests(unittest.TestCase):
 # ---------------------------------------------------------------------
 # End-to-end: import openbricks.drivers.hcsr04.HCSR04 through the shim.
 
-class ShimHCSR04Tests(unittest.TestCase):
+class _ShimDistanceTestBase(unittest.TestCase):
+    """Common setUp/tearDown for shim-distance-driver tests."""
 
     def setUp(self):
         from openbricks_sim import shim
@@ -111,6 +112,9 @@ class ShimHCSR04Tests(unittest.TestCase):
         from openbricks_sim import shim
         shim.uninstall()
 
+
+class ShimHCSR04Tests(_ShimDistanceTestBase):
+
     def test_user_code_imports_real_hcsr04(self):
         from openbricks.drivers.hcsr04 import HCSR04
         from openbricks_sim.shim import ShimHCSR04
@@ -122,6 +126,37 @@ class ShimHCSR04Tests(unittest.TestCase):
         d = sensor.distance_mm()
         # On the empty world the forward ray sees nothing → -1.
         self.assertEqual(d, -1)
+
+
+class ShimVL53L0XTests(_ShimDistanceTestBase):
+
+    def test_user_code_imports_real_vl53l0x(self):
+        from openbricks.drivers.vl53l0x import VL53L0X
+        from openbricks_sim.shim import ShimVL53L0X
+        self.assertIs(VL53L0X, ShimVL53L0X)
+
+    def test_construct_with_firmware_args(self):
+        from openbricks.drivers.vl53l0x import VL53L0X
+        from machine import I2C
+        i2c = I2C(0, scl=22, sda=21, freq=400_000)
+        sensor = VL53L0X(i2c=i2c, address=0x29, timeout_ms=200)
+        # On the empty world the forward ray sees nothing → -1.
+        self.assertEqual(sensor.distance_mm(), -1)
+
+
+class ShimVL53L1XTests(_ShimDistanceTestBase):
+
+    def test_user_code_imports_real_vl53l1x(self):
+        from openbricks.drivers.vl53l1x import VL53L1X
+        from openbricks_sim.shim import ShimVL53L1X
+        self.assertIs(VL53L1X, ShimVL53L1X)
+
+    def test_construct_with_firmware_args(self):
+        from openbricks.drivers.vl53l1x import VL53L1X
+        from machine import I2C
+        i2c = I2C(0, scl=22, sda=21, freq=400_000)
+        sensor = VL53L1X(i2c=i2c, address=0x29, timeout_ms=200)
+        self.assertEqual(sensor.distance_mm(), -1)
 
 
 if __name__ == "__main__":
