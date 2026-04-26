@@ -8,7 +8,7 @@ Backbone: [MuJoCo](https://github.com/google-deepmind/mujoco) (Apache-2.0, nativ
 
 * **Phase A** ✅ chassis + world preview, MuJoCo backbone wired up.
 * **Phase B** ✅ shared cores: trajectory, observer, motor_process, servo, drivebase. Sim hot-path math is byte-identical to the firmware (same `*_core.c` files compiled into both targets).
-* **Phase C** 🚧 runtime adapters + driver shim. `openbricks_sim.runtime.SimMotor` + `SimDriveBase` drive the default chassis; `openbricks_sim.robot.SimRobot` bundles them with the world; `openbricks-sim run main.py` executes scripts with `robot` / `drivebase` / `left` / `right` pre-bound. **C3 (just shipped):** `openbricks_sim.shim` installs no-op `machine` + replacement `_openbricks_native` modules and patches `time.sleep_ms`, so a script that imports `openbricks.drivers.jgb37_520.JGB37Motor` and `openbricks.robotics.drivebase.DriveBase` runs unchanged inside the sim — see `examples/wander_hardware_style.py`. Next: `SimIMU` + `SimColorSensor` (C4).
+* **Phase C** 🚧 runtime adapters + driver shim. `SimMotor` + `SimDriveBase` + `SimIMU` drive the default chassis; `SimRobot` bundles them with the world; `openbricks-sim run main.py` executes scripts with `robot` / `drivebase` / `left` / `right` pre-bound. The driver shim (`openbricks_sim.shim`) installs no-op `machine` + replacement `_openbricks_native` modules and patches `time.sleep_ms`, so firmware-targeting code runs unchanged: `JGB37Motor` / `DriveBase` / `BNO055` imports all resolve. **C4 (just shipped):** `SimIMU` + slip-immune `DriveBase.use_gyro(True)` — see `examples/wander_with_gyro.py`. Next: `SimColorSensor` (camera-backed) for the TCS34725 path (C5).
 
 ```
 pipx install openbricks-sim   # once on PyPI

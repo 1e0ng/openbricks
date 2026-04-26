@@ -184,16 +184,24 @@ class ShimDriveBaseTests(_ShimTestBase):
         with self.assertRaises(RuntimeError):
             db.use_gyro(True)
 
-    def test_use_gyro_with_imu_raises_not_implemented(self):
-        from _openbricks_native import Servo, DriveBase
+    def test_use_gyro_with_imu_installs_imu_tick(self):
+        from _openbricks_native import Servo, DriveBase, BNO055
+        imu = BNO055(i2c=None, address=0x28)
         l = Servo(in1=12, in2=14, pwm=27, encoder=None)
         r = Servo(in1=13, in2=15, pwm=26, encoder=None)
         db = DriveBase(left=l, right=r,
                         wheel_diameter_mm=60.0, axle_track_mm=150.0,
-                        imu=object())   # any non-None object
-        # NotImplementedError until SimIMU lands in C4.
-        with self.assertRaises(NotImplementedError):
-            db.use_gyro(True)
+                        imu=imu)
+        # Toggling on captures the heading offset and installs the
+        # imu tick. Subsequent steps must not crash.
+        db.use_gyro(True)
+        for _ in range(10):
+            self.robot.runtime.step()
+        # And toggling off restores the encoder-differential path
+        # without leaving the imu tick behind.
+        db.use_gyro(False)
+        for _ in range(10):
+            self.robot.runtime.step()
 
     def test_use_gyro_false_is_always_allowed(self):
         from _openbricks_native import Servo, DriveBase

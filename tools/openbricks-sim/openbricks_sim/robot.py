@@ -39,7 +39,7 @@ from typing import Callable, Optional
 import mujoco
 
 from openbricks_sim.chassis import ChassisSpec, standalone_mjcf
-from openbricks_sim.runtime import SimRuntime, SimMotor, SimDriveBase
+from openbricks_sim.runtime import SimRuntime, SimMotor, SimDriveBase, SimIMU
 from openbricks_sim.world import load_world
 
 
@@ -137,6 +137,12 @@ class SimRobot:
             wheel_diameter_mm=wheel_d_mm,
             axle_track_mm=axle_mm,
             kp_sum=kp_sum, kp_diff=kp_diff)
+
+        # IMU bound to the chassis IMU site + accel / gyro sensors.
+        # Available even when the user's script doesn't ask for it —
+        # the SimIMU just exposes data; nothing happens unless someone
+        # calls heading() / angular_velocity() / acceleration().
+        self.imu = SimIMU(self.runtime)
 
     # ------------------------------------------------------------------
     # Time advancement helpers — thin wrappers over runtime.step() with

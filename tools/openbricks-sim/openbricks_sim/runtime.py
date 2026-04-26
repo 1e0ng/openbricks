@@ -157,10 +157,12 @@ class SimMotor:
         # now, so the first tick doesn't see a phantom delta.
         self.servo.baseline(self._read_count(), runtime.now_ms)
 
-        # Self-register on the runtime. The user can ``detach`` later
-        # for ``brake`` / ``coast`` — those bypass the closed loop.
+        # Don't auto-attach — same convention as the firmware
+        # ``servo.c``. The first ``run_speed`` / ``run_target`` /
+        # SimDriveBase attach call wakes the controller. Otherwise
+        # zero-target controllers fight passive wheel settling and
+        # destabilise the chassis.
         self._attached = False
-        self._attach()
 
     # -------- attach / detach lifecycle --------
 
@@ -251,6 +253,75 @@ class SimMotor:
 
     def is_done(self) -> bool:
         return bool(self.servo.is_done())
+
+
+class SimIMU:
+    """6-DOF IMU adapter, MuJoCo-side.
+
+    Wraps the chassis's ``accelerometer`` + ``gyro`` MuJoCo sensors
+    plus the body's ``xmat`` rotation matrix to produce the same
+    interface a real BNO055 driver exposes:
+
+      * ``heading()`` — yaw in degrees, wrapped to [-180, 180).
+        Pulled from the body's rotation matrix so it has zero
+        integration drift (the sim's "ground truth" yaw, not a
+        gyro-integrated estimate).
+      * ``angular_velocity()`` — (wx, wy, wz) in deg/s, body frame.
+      * ``acceleration()`` — (ax, ay, az) in m/s², body frame.
+
+    The drivebase ``use_gyro`` path on the firmware is slip-immune —
+    it doesn't matter how much the wheels spin, the heading comes
+    from the IMU. The sim's SimIMU gives the same property under
+    asymmetric friction / wheel-floor slip in MuJoCo.
+    """
+
+    def __init__(self,
+                 runtime: SimRuntime,
+                 body_name: str = "chassis",
+                 accel_sensor_name: str = "chassis_accel",
+                 gyro_sensor_name:  str = "chassis_gyro") -> None:
+        self.runtime = runtime
+        self._body_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if self._body_id < 0:
+            raise ValueError("no body named " + repr(body_name) +
+                             " in model")
+
+        self._accel_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_SENSOR, accel_sensor_name)
+        if self._accel_id < 0:
+            raise ValueError("no sensor named " + repr(accel_sensor_name) +
+                             " in model")
+        self._accel_addr = int(runtime.model.sensor_adr[self._accel_id])
+
+        self._gyro_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_SENSOR, gyro_sensor_name)
+        if self._gyro_id < 0:
+            raise ValueError("no sensor named " + repr(gyro_sensor_name) +
+                             " in model")
+        self._gyro_addr = int(runtime.model.sensor_adr[self._gyro_id])
+
+    def heading(self) -> float:
+        """Yaw angle (degrees) in [-180, 180), CCW positive."""
+        R = self.runtime.data.xmat[self._body_id].reshape(3, 3)
+        yaw_deg = math.degrees(math.atan2(float(R[1, 0]), float(R[0, 0])))
+        # Wrap to [-180, 180) to match the BNO055 driver shape.
+        return ((yaw_deg + 180.0) % 360.0) - 180.0
+
+    def angular_velocity(self):
+        """(wx, wy, wz) in deg/s, body frame."""
+        sd = self.runtime.data.sensordata
+        a = float(sd[self._gyro_addr])
+        b = float(sd[self._gyro_addr + 1])
+        c = float(sd[self._gyro_addr + 2])
+        return (math.degrees(a), math.degrees(b), math.degrees(c))
+
+    def acceleration(self):
+        """(ax, ay, az) in m/s², body frame."""
+        sd = self.runtime.data.sensordata
+        return (float(sd[self._accel_addr]),
+                float(sd[self._accel_addr + 1]),
+                float(sd[self._accel_addr + 2]))
 
 
 class SimDriveBase:
