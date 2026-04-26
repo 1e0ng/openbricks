@@ -39,7 +39,8 @@ from typing import Callable, Optional
 import mujoco
 
 from openbricks_sim.chassis import ChassisSpec, standalone_mjcf
-from openbricks_sim.runtime import SimRuntime, SimMotor, SimDriveBase, SimIMU
+from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
+                                     SimIMU, SimColorSensor)
 from openbricks_sim.world import load_world
 
 
@@ -143,6 +144,9 @@ class SimRobot:
         # the SimIMU just exposes data; nothing happens unless someone
         # calls heading() / angular_velocity() / acceleration().
         self.imu = SimIMU(self.runtime)
+
+        # Down-facing colour sensor — raycast against the floor.
+        self.color_sensor = SimColorSensor(self.runtime)
 
     # ------------------------------------------------------------------
     # Time advancement helpers — thin wrappers over runtime.step() with

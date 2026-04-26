@@ -53,7 +53,8 @@ from pathlib import Path
 from typing import Optional
 
 from openbricks_sim import _native as _sim_native
-from openbricks_sim.runtime import SimRuntime, SimMotor, SimDriveBase, SimIMU
+from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
+                                     SimIMU, SimColorSensor)
 
 
 # Module-level state — only one shim can be installed at a time, but
@@ -67,9 +68,10 @@ class _ShimState:
     attributes so ``uninstall()`` is exact."""
 
     def __init__(self):
-        self.prev_sys_modules: dict = {}
-        self.prev_time_attrs:  dict = {}
-        self.prev_sys_path:    list = []
+        self.prev_sys_modules:    dict = {}
+        self.prev_time_attrs:     dict = {}
+        self.prev_sys_path:       list = []
+        self.prev_driver_attrs:   dict = {}   # ("module.attr", prev_value)
         self.runtime: Optional[SimRuntime] = None
         self.motor_idx: int = 0
 
@@ -214,6 +216,46 @@ class ShimServo:
 
     def coast(self):
         self._adapter.coast()
+
+
+class ShimTCS34725:
+    """Drop-in for ``openbricks.drivers.tcs34725.TCS34725``.
+
+    Constructor accepts the firmware shape (``i2c=, address=,
+    integration_ms=, gain=``); arguments are kept for documentation
+    but ignored — the shim binds straight to the chassis
+    :class:`SimColorSensor` regardless.
+
+    ``rgb()`` and ``ambient()`` proxy directly. ``raw()`` returns a
+    synthetic 4-tuple ``(c, r, g, b)`` in the 16-bit range that the
+    real driver would produce, so user code that calls ``raw()``
+    sees realistic-looking values.
+    """
+
+    def __init__(self, *args, **kwargs):
+        if _INSTALLED is None:
+            raise RuntimeError(
+                "shim not installed; call install(runtime) first")
+        self._cs = SimColorSensor(_INSTALLED.runtime)
+
+    def rgb(self):
+        return self._cs.rgb()
+
+    def ambient(self):
+        return self._cs.ambient()
+
+    def raw(self):
+        # Synthesise a (clear, R, G, B) 16-bit reading from the
+        # raycast result. The real TCS34725 has independent C / R /
+        # G / B ADCs; the sim reduces RGB to a clear-channel via
+        # luminance and scales each channel to 0..65535. Plenty
+        # accurate enough for tests that check "is the sensor over a
+        # red zone yet".
+        r8, g8, b8 = self._cs.rgb()
+        c8 = self._cs.ambient() * 255 // 100
+        scale = 65535 / 255
+        return (int(c8 * scale), int(r8 * scale),
+                int(g8 * scale), int(b8 * scale))
 
 
 class ShimBNO055:
@@ -466,6 +508,30 @@ def install(runtime: SimRuntime) -> None:
 
     _INSTALLED = state
 
+    # 4. Patch driver classes that don't go through ``_native``.
+    # The TCS34725 talks I2C directly — replace the class so user
+    # ``from openbricks.drivers.tcs34725 import TCS34725`` resolves
+    # to the sim version. Must happen *after* sys.path is rigged so
+    # the import succeeds.
+    _patch_pure_python_drivers(state)
+
+
+def _patch_pure_python_drivers(state: "_ShimState") -> None:
+    """Replace pure-Python driver classes with sim-aware versions.
+
+    Records the original attributes in ``state.prev_driver_attrs`` so
+    ``uninstall`` can restore them exactly."""
+    # If the openbricks repo isn't on sys.path or doesn't exist,
+    # silently skip — the user might be running a script that doesn't
+    # touch openbricks driver classes.
+    try:
+        import openbricks.drivers.tcs34725 as _tcs_mod
+    except Exception:
+        return
+    state.prev_driver_attrs[("openbricks.drivers.tcs34725", "TCS34725")] = (
+        _tcs_mod, "TCS34725", _tcs_mod.TCS34725)
+    _tcs_mod.TCS34725 = ShimTCS34725
+
 
 def uninstall() -> None:
     """Roll back every change ``install()`` made. Idempotent."""
@@ -494,6 +560,10 @@ def uninstall() -> None:
 
     # 3. sys.path
     sys.path[:] = state.prev_sys_path
+
+    # 4. Driver classes patched in step 4 of install.
+    for _key, (mod, attr, prev) in state.prev_driver_attrs.items():
+        setattr(mod, attr, prev)
 
     _INSTALLED = None
 

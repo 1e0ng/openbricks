@@ -8,7 +8,7 @@ Backbone: [MuJoCo](https://github.com/google-deepmind/mujoco) (Apache-2.0, nativ
 
 * **Phase A** ✅ chassis + world preview, MuJoCo backbone wired up.
 * **Phase B** ✅ shared cores: trajectory, observer, motor_process, servo, drivebase. Sim hot-path math is byte-identical to the firmware (same `*_core.c` files compiled into both targets).
-* **Phase C** 🚧 runtime adapters + driver shim. `SimMotor` + `SimDriveBase` + `SimIMU` drive the default chassis; `SimRobot` bundles them with the world; `openbricks-sim run main.py` executes scripts with `robot` / `drivebase` / `left` / `right` pre-bound. The driver shim (`openbricks_sim.shim`) installs no-op `machine` + replacement `_openbricks_native` modules and patches `time.sleep_ms`, so firmware-targeting code runs unchanged: `JGB37Motor` / `DriveBase` / `BNO055` imports all resolve. **C4 (just shipped):** `SimIMU` + slip-immune `DriveBase.use_gyro(True)` — see `examples/wander_with_gyro.py`. Next: `SimColorSensor` (camera-backed) for the TCS34725 path (C5).
+* **Phase C** ✅ runtime adapters + driver shim. `SimMotor` + `SimDriveBase` + `SimIMU` + `SimColorSensor` cover the default chassis; `SimRobot` bundles them with the world; `openbricks-sim run main.py` executes scripts with `robot` / `drivebase` / `left` / `right` pre-bound. The driver shim (`openbricks_sim.shim`) installs no-op `machine` + replacement `_openbricks_native` modules, patches `time.sleep_ms`, and monkey-patches `openbricks.drivers.tcs34725.TCS34725` — so firmware-targeting code runs unchanged: `JGB37Motor` / `DriveBase` / `BNO055` / `TCS34725` imports all resolve. See `examples/wander_hardware_style.py`, `examples/wander_with_gyro.py`, `examples/color_drive.py`.
 
 ```
 pipx install openbricks-sim   # once on PyPI
@@ -65,6 +65,6 @@ Covers chassis MJCF shape, physics settling, motor → encoder round-trip, and c
 |---|---|---|
 | A | MuJoCo scaffold, default-chassis MJCF, `preview` command | ✅ |
 | B | Port `_openbricks_native` (motor_process, observer, trajectory, servo, drivebase) C → CPython extension. Sim hot path ≡ firmware hot path | ✅ |
-| C | Sim runtime (`SimMotor` / `SimDriveBase`) bridging cores ↔ MuJoCo, driver-shim monkey-patch, `openbricks-sim run main.py` | 🚧 |
-| D | Camera sampling for the colour sensor, raycast for distance sensors, worlds library | — |
+| C | Sim runtime (`SimMotor` / `SimDriveBase` / `SimIMU` / `SimColorSensor`) bridging cores ↔ MuJoCo, driver-shim monkey-patch, `openbricks-sim run main.py` | ✅ |
+| D | Distance sensors (raycast HC-SR04 / VL53L0X), worlds library, scenario reset / scoring | — |
 | E | CI integration (headless rendering via EGL), examples, docs, PyPI publish as `openbricks-sim` | — |

@@ -324,6 +324,103 @@ class SimIMU:
                 float(sd[self._accel_addr + 2]))
 
 
+class SimColorSensor:
+    """Down-facing colour sensor, MuJoCo-side.
+
+    Casts a ray from the camera position straight down (world -Z) and
+    returns the colour of whatever geom it hits. The look direction
+    is hard-coded to world -Z rather than the camera's actual local
+    -Z so a slightly-pitched chassis (e.g. ~6.7° wheel-settle) still
+    samples the floor directly under the sensor — the cosine error
+    against camera-frame Z is < 1% at that tilt, which is well below
+    the colour-sensor's quantisation in any case. Real TCS34725
+    sensors integrate over a small FOV; this is a single-point
+    approximation.
+
+    Returned colour comes from the geom's material ``rgba`` (or the
+    geom's own ``rgba`` if it has no material). Textured materials
+    fall back to the texture-modulating rgba — the WRO mat texture
+    image is NOT sampled (that needs offscreen rendering, not yet
+    available on macOS in this codebase).
+
+    Methods match :class:`openbricks.interfaces.ColorSensor`:
+
+      * ``rgb()`` returns ``(r, g, b)`` ints in 0..255.
+      * ``ambient()`` returns a 0..100 luminance score (BT.601).
+    """
+
+    def __init__(self,
+                 runtime: SimRuntime,
+                 camera_name: str = "chassis_cam_down",
+                 chassis_body_name: str = "chassis") -> None:
+        self.runtime = runtime
+        self._cam_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
+        if self._cam_id < 0:
+            raise ValueError("no camera named " + repr(camera_name) +
+                             " in model")
+        # Exclude the chassis itself from raycasts so we don't
+        # self-hit the chassis body geom.
+        self._chassis_body_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_BODY, chassis_body_name)
+        if self._chassis_body_id < 0:
+            raise ValueError("no body named " + repr(chassis_body_name) +
+                             " in model")
+
+    # ------------- raycast -------------
+
+    def _hit_rgba(self):
+        """Return the rgba (4 floats, 0..1) of the geom under the
+        camera, or None if the ray missed."""
+        # Lazy-import numpy at call-site; mujoco depends on it so it's
+        # always available, but keeping the runtime module's top-level
+        # imports minimal helps cold-start time.
+        import numpy as np
+
+        # Force a forward pass so cam_xpos reflects the latest qpos.
+        # (mj_step does this; explicit forward is for cases where the
+        # caller queries before stepping.)
+        mujoco.mj_forward(self.runtime.model, self.runtime.data)
+
+        pnt = np.array(self.runtime.data.cam_xpos[self._cam_id],
+                        dtype=np.float64)
+        # World -Z. See class docstring for why we use world axis
+        # rather than the camera's local -Z.
+        vec = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+        geom_id = np.zeros(1, dtype=np.int32)
+        dist = mujoco.mj_ray(self.runtime.model, self.runtime.data,
+                              pnt, vec,
+                              None,                    # geomgroup
+                              1,                       # flg_static (include static)
+                              self._chassis_body_id,   # bodyexclude
+                              geom_id)
+        if geom_id[0] < 0 or dist < 0:
+            return None
+        # Look up the material rgba; fall back to the geom's own
+        # rgba when the geom has no material.
+        m = self.runtime.model
+        mat_id = int(m.geom_matid[geom_id[0]])
+        if mat_id >= 0:
+            return tuple(float(c) for c in m.mat_rgba[mat_id])
+        return tuple(float(c) for c in m.geom_rgba[geom_id[0]])
+
+    def rgb(self):
+        rgba = self._hit_rgba()
+        if rgba is None:
+            return (0, 0, 0)
+        return (
+            min(255, max(0, int(rgba[0] * 255.0))),
+            min(255, max(0, int(rgba[1] * 255.0))),
+            min(255, max(0, int(rgba[2] * 255.0))),
+        )
+
+    def ambient(self):
+        r, g, b = self.rgb()
+        # BT.601 luma, scaled 0..100.
+        lum = 0.299 * r + 0.587 * g + 0.114 * b
+        return int(min(100, max(0, lum * 100.0 / 255.0)))
+
+
 class SimDriveBase:
     """2-DOF coupled drivebase, MuJoCo-side.
 
