@@ -278,9 +278,12 @@ jobs:
           fail_ci_if_error: false
 
   firmware:
-    # Skip firmware builds for openbricks/v* tag pushes — those cut
-    # a host-tooling release that doesn't touch the firmware image.
-    if: ${{ !startsWith(github.ref, 'refs/tags/openbricks/') }}
+    # Skip firmware builds for host-tooling tags — those cut a CLI /
+    # sim release and don't touch the firmware image. Both
+    # ``openbricks/v*`` (the unified package) and ``openbricks-dev/v*``
+    # (the legacy deprecation namespace) qualify.
+    if: ${{ !startsWith(github.ref, 'refs/tags/openbricks/') &&
+            !startsWith(github.ref, 'refs/tags/openbricks-dev/') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
