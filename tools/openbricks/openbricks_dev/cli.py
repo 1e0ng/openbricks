@@ -1,16 +1,21 @@
 # SPDX-License-Identifier: MIT
-"""Argument parsing + subcommand dispatch for ``openbricks-dev``.
+"""Argument parsing + subcommand dispatch for ``openbricks``.
 
-Subcommands mirror the pybricks-dev workflow so the UX is familiar:
+Subcommands mirror the pybricksdev workflow so the UX is familiar,
+plus a ``sim`` passthrough that forwards to the MuJoCo-backed
+simulator when the ``[sim]`` extra is installed:
 
-    openbricks-dev flash --name NAME --port PORT --firmware FW
-    openbricks-dev list [--timeout SEC]
-    openbricks-dev run      -n NAME SCRIPT  (PR 3)
-    openbricks-dev upload   -n NAME SCRIPT  (PR 4)
-    openbricks-dev stop     -n NAME         (PR 3)
+    openbricks flash --name NAME --port PORT --firmware FW
+    openbricks list [--timeout SEC]
+    openbricks run    -n NAME SCRIPT
+    openbricks upload -n NAME SCRIPT
+    openbricks stop   -n NAME
+    openbricks log    -n NAME [--list | --run N]
+    openbricks sim …  (requires ``pip install openbricks[sim]``)
 
-Each subcommand's real work lives in its own module so tests can import
-and call it directly without going through argparse.
+Python module name stays ``openbricks_dev`` to avoid colliding
+with the firmware-side ``openbricks`` package on the hub, which is
+also imported on the host by the sim's driver shim.
 """
 
 import argparse
@@ -19,9 +24,10 @@ import sys
 
 def _build_parser():
     parser = argparse.ArgumentParser(
-        prog="openbricks-dev",
+        prog="openbricks",
         description="Host-side CLI for flashing and running code on "
-                    "openbricks hubs.",
+                    "openbricks hubs, plus a MuJoCo-backed simulator "
+                    "(``openbricks sim …``).",
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
@@ -184,11 +190,55 @@ def _build_parser():
         help="BLE scan timeout. Default: 5.0 s.",
     )
 
+    # ---- sim (passthrough to openbricks_sim.cli) ----
+    #
+    # Argparse-wise this is a stub: the real grammar lives in
+    # ``openbricks_sim.cli``. ``main()`` short-circuits before
+    # ``parse_args`` runs when ``argv[0] == "sim"`` — see
+    # ``_dispatch_sim``. Registered here only so it shows up in
+    # ``openbricks --help``.
+    sub.add_parser(
+        "sim",
+        help="Run a sim subcommand (preview, run; "
+             "requires ``pip install openbricks[sim]``).",
+        description="Forwards all remaining arguments to the "
+                    "MuJoCo-backed simulator's CLI. Use ``openbricks "
+                    "sim --help`` to see the sim's own subcommand list.",
+        add_help=False,   # let openbricks_sim handle --help itself
+    )
+
     return parser
+
+
+def _dispatch_sim(remaining_argv):
+    """``openbricks sim <args>`` → ``openbricks_sim.cli.main(args)``.
+
+    We bypass argparse for this so the sim CLI's grammar lives in one
+    place. If ``openbricks_sim`` isn't importable (the user installed
+    ``openbricks`` without the ``[sim]`` extra), print a hint instead
+    of an ImportError traceback.
+    """
+    try:
+        from openbricks_sim.cli import main as sim_main
+    except ImportError:
+        print(
+            "error: ``openbricks sim`` requires the simulator extra.\n"
+            "       install it with:  pip install openbricks[sim]",
+            file=sys.stderr)
+        return 1
+    return sim_main(remaining_argv)
 
 
 def main(argv=None):
     """Entry point. ``argv`` defaults to ``sys.argv[1:]`` for tests."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # ``openbricks sim …`` short-circuits argparse and forwards the
+    # remaining argv to openbricks_sim's CLI. See ``_dispatch_sim``.
+    if argv and argv[0] == "sim":
+        return _dispatch_sim(argv[1:])
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 

@@ -1,9 +1,11 @@
 # openbricks
 
-[![firmware C](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=c-core)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=c-core)
-[![firmware Python](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-py)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-py)
-[![openbricks-dev](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-dev)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-dev)
-[![openbricks-sim](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-sim)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-sim)
+| Surface | Coverage |
+|---|---|
+| firmware C (`native/user_c_modules`) | [![c-core](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=c-core)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=c-core) |
+| firmware Python (`openbricks/`) | [![openbricks-py](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-py)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-py) |
+| host CLI (`openbricks_dev`) | [![openbricks-dev](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-dev)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-dev) |
+| host sim (`openbricks_sim`) | [![openbricks-sim](https://codecov.io/gh/1e0ng/openbricks/branch/main/graph/badge.svg?flag=openbricks-sim)](https://app.codecov.io/gh/1e0ng/openbricks?flags[0]=openbricks-sim) |
 
 > A Pybricks-style MicroPython firmware for **open hardware** — commodity MCUs, commodity motors, commodity sensors.
 
@@ -69,18 +71,18 @@ See `examples/full_robot.py` for a longer end-to-end demo.
 Pybricks is the gold-standard MicroPython firmware for educational robotics — we modelled openbricks's API and three-layer architecture on it directly. Where openbricks differs:
 
 - **Open hardware.** Pybricks runs on LEGO hubs with LEGO motors and LEGO sensors. openbricks runs on commodity ESP32 / ESP32-S3 boards driving any motor (L298N / TB6612 / JGB37-520 / MG370 / ST-3215), any IMU (BNO055), any I2C colour sensor (TCS34725), any I2C OLED (SSD1306). New driver = one Python file under `openbricks/drivers/`.
-- **Hardware-accurate simulator (`openbricks-sim`).** A MuJoCo-backed sim with the *same C control cores* as the firmware — `*_core.c` files compile into both targets, so the sim's hot-path math is byte-identical to the hub's. Write your `main.py` once, test it in MuJoCo against a WRO mat, then flash. Pybricks has no comparable sim — closest equivalent is the LEGO virtual brick, which simulates the API but not the physics.
-- **Driver shim — same script, both targets.** `openbricks-sim run main.py` installs a shim that replaces `machine`, `openbricks._native`, and the I2C driver classes (`TCS34725` etc.) with sim-aware versions. Code that imports `from openbricks.drivers.jgb37_520 import JGB37Motor` runs unchanged in MuJoCo. No "if simulator else hardware" branches in user code.
+- **Hardware-accurate simulator (`openbricks sim`).** A MuJoCo-backed sim with the *same C control cores* as the firmware — `*_core.c` files compile into both targets, so the sim's hot-path math is byte-identical to the hub's. Write your `main.py` once, test it in MuJoCo against a WRO mat, then flash. Pybricks has no comparable sim — closest equivalent is the LEGO virtual brick, which simulates the API but not the physics.
+- **Driver shim — same script, both targets.** `openbricks sim run main.py` installs a shim that replaces `machine`, `openbricks._native`, and the I2C driver classes (`TCS34725` etc.) with sim-aware versions. Code that imports `from openbricks.drivers.jgb37_520 import JGB37Motor` runs unchanged in MuJoCo. No "if simulator else hardware" branches in user code.
 - **Slip-immune drivebase.** `DriveBase.use_gyro(True)` routes heading feedback through the IMU instead of the encoder differential — a robot that wheel-slips on a slippery patch keeps its course. The firmware C drivebase + sim adapter both honour it.
-- **`openbricks-dev log` for untethered runs.** Every program execution has its `print` output tee'd to `/openbricks_logs/run_N.log` on the hub (3 rotating slots, 64 KB each). When you run a program battery-only with no laptop attached, you can plug in afterwards and read what happened: `openbricks-dev log -n RobotA`. Pybricks-dev has no equivalent — once the program ends, untethered output is gone.
+- **`openbricks log` for untethered runs.** Every program execution has its `print` output tee'd to `/openbricks_logs/run_N.log` on the hub (3 rotating slots, 64 KB each). When you run a program battery-only with no laptop attached, you can plug in afterwards and read what happened: `openbricks log -n RobotA`. Pybricks-dev has no equivalent — once the program ends, untethered output is gone.
 - **C cores you can read.** The firmware's 1 kHz hot path lives in `native/user_c_modules/openbricks/*_core.c` — pbio-style trapezoidal trajectory, α-β observer, 2-DOF coupled drivebase, 1 kHz scheduler. About 1500 lines of straight C math; auditable. Pybricks's pbio is also open source — same shape.
-- **Flashable firmware on every push to main.** [Rolling `latest` pre-release](../../releases/tag/latest) is rebuilt by CI per push; versioned `v*` tags get their own releases. `openbricks-dev flash` writes the image and the hub's BLE name in one step.
+- **Flashable firmware on every push to main.** [Rolling `latest` pre-release](../../releases/tag/latest) is rebuilt by CI per push; versioned `v*` tags get their own releases. `openbricks flash` writes the image and the hub's BLE name in one step.
 
 ## Status
 
 Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, 2-DOF coupled drivebase, and both quadrature encoders (software-IRQ and hardware-PCNT) all live as `user_c_modules` inside the firmware — the entire tick body is C, nothing on the hot path goes through a Python frame. Every bundled driver works end to end; the 136-test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
 
-**Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Download the `openbricks-<target>-firmware-<version>.bin` for your board and flash with `openbricks-dev flash` (see `tools/openbricks-dev/README.md`) or `esptool.py` directly — details in `docs/build.md`.
+**Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Download the `openbricks-<target>-firmware-<version>.bin` for your board and flash with `openbricks flash` (see `tools/openbricks/README.md`) or `esptool.py` directly — details in `docs/build.md`.
 
 Next on the roadmap: 1.0 polish + release (M5). The M4 hub abstraction (status LED, user button) and the SSD1306 OLED driver are both on `main`.
 

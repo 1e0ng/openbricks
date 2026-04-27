@@ -36,4 +36,4 @@ coverage.xml
 # Local robot configs (users often keep calibration in here)
 robot.local.json
 *.so
-tools/openbricks-sim/native/_shared/
+tools/openbricks/native/_shared/
