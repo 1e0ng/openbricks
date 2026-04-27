@@ -1,29 +1,35 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-Bump the firmware and/or openbricks-dev version.
+Bump the firmware and/or host-tooling version.
 
-Firmware and the host CLI are versioned independently — firmware
-changes are big and slow, CLI changes are small and fast, so coupling
-their version numbers held each hostage to the other. Each package's
-``__init__.py`` carries its own ``__version__`` literal, which is the
-single source of truth — ``pyproject.toml`` reads it back via
-``attr = "<pkg>.__version__"`` and the import-time constant is what
-users see at runtime.
+Firmware and the host tooling (the unified ``openbricks`` package
+that ships both the CLI and the MuJoCo sim) are versioned
+independently — firmware changes are big and slow, host changes
+are small and fast, so coupling their version numbers held each
+hostage to the other. Each package's ``__init__.py`` carries its
+own ``__version__`` literal, which is the single source of truth —
+``pyproject.toml`` reads it back via ``attr = "<pkg>.__version__"``
+and the import-time constant is what users see at runtime.
 
 Usage:
 
     scripts/bump-version.py --firmware 0.9.3
-    scripts/bump-version.py --openbricks-dev 0.10.0
-    scripts/bump-version.py --firmware 0.9.3 --openbricks-dev 0.10.0
+    scripts/bump-version.py --openbricks 0.10.0
+    scripts/bump-version.py --firmware 0.9.3 --openbricks 0.10.0
 
 Either flag may be omitted; a version is only bumped when its flag
 is present.
 
 Tags use separate namespaces:
 
-  * firmware:       ``git tag v<version>``
-  * openbricks-dev: ``git tag openbricks-dev/v<version>``
+  * firmware:   ``git tag v<version>``
+  * openbricks: ``git tag openbricks/v<version>``
+
+The ``openbricks`` package was previously published as
+``openbricks-dev`` (host CLI) and ``openbricks-sim`` (sim) before the
+unification PR. Old tags ``openbricks-dev/v*`` are frozen — the new
+namespace is ``openbricks/v*``.
 """
 
 import argparse
@@ -41,10 +47,10 @@ _FIRMWARE = {
     "init":     "openbricks/__init__.py",
     "tag_hint": "git tag v{version}",
 }
-_CLI = {
-    "label":    "openbricks-dev",
-    "init":     "tools/openbricks-dev/openbricks_dev/__init__.py",
-    "tag_hint": "git tag openbricks-dev/v{version}",
+_HOST = {
+    "label":    "openbricks",
+    "init":     "tools/openbricks/openbricks_dev/__init__.py",
+    "tag_hint": "git tag openbricks/v{version}",
 }
 
 
@@ -72,23 +78,24 @@ def _bump(root, component, new_version):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Bump firmware and/or openbricks-dev versions.")
+        description="Bump firmware and/or openbricks (host) versions.")
     ap.add_argument("--firmware", metavar="X.Y.Z",
                     help="New firmware version (tag: v<version>).")
-    ap.add_argument("--openbricks-dev", metavar="X.Y.Z", dest="openbricks_dev",
-                    help="New openbricks-dev version (tag: openbricks-dev/v<version>).")
+    ap.add_argument("--openbricks", metavar="X.Y.Z",
+                    help="New openbricks (host) version "
+                         "(tag: openbricks/v<version>).")
     args = ap.parse_args(argv)
 
-    if not args.firmware and not args.openbricks_dev:
-        ap.error("pass --firmware and/or --openbricks-dev")
+    if not args.firmware and not args.openbricks:
+        ap.error("pass --firmware and/or --openbricks")
 
     root = Path(__file__).resolve().parent.parent
     if args.firmware:
         rc = _bump(root, _FIRMWARE, args.firmware)
         if rc:
             return rc
-    if args.openbricks_dev:
-        rc = _bump(root, _CLI, args.openbricks_dev)
+    if args.openbricks:
+        rc = _bump(root, _HOST, args.openbricks)
         if rc:
             return rc
     return 0
