@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.1 — sdist build fix (no functional changes)
+
+Fixes a build failure that prevented 0.10.0 from publishing:
+`python -m build` runs `setup.py` inside an isolated environment
+that can't reach `../../native/user_c_modules/openbricks/`. The
+sdist now bundles the synced cores via `MANIFEST.in`, and
+`_sync_cores()` falls through cleanly when the upstream isn't
+available (sdist build context). Regression test in
+`tests/test_sdist_build.py` builds a fresh sdist and asserts every
+shared core is inside.
+
+If you saw a 0.10.0 install fail, install 0.10.1 instead — it's the
+same code, just shippable.
+
 ## 0.10.0 — unification
 
 The host CLI (`openbricks-dev`) and the MuJoCo simulator

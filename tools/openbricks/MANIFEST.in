@@ -1,0 +1,22 @@
+# Files that need to land in the sdist tarball but aren't covered by
+# ``setuptools.packages.find`` (which only catches ``*.py`` inside
+# the package directories).
+
+# The CPython extension's C source (sibling to the package).
+include native/openbricks_sim_native.c
+
+# Shared cores synced from the firmware's user_c_modules. Without
+# these in the sdist, ``setup.py``'s isolated build environment
+# can't find them (the firmware tree is two levels up, outside the
+# sdist root). ``_sync_cores()`` populates this directory before
+# the sdist is built; including it here lets the wheel-build step
+# (which runs from the unpacked sdist) compile cleanly.
+recursive-include native/_shared *.c *.h
+
+# WRO worlds + small examples — useful for users who want to load a
+# world without a repo checkout.
+recursive-include worlds *.xml *.png README.md
+recursive-include examples *.py
+
+# CHANGELOG so the migration guide ships with the wheel.
+include CHANGELOG.md

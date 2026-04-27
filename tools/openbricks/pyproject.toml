@@ -68,7 +68,7 @@ sim = [
     "mujoco >= 3.2",
     "numpy >= 1.24",
 ]
-dev = ["pytest", "coverage"]
+dev = ["pytest", "coverage", "build"]
 
 [project.urls]
 Homepage = "https://github.com/1e0ng/openbricks"
