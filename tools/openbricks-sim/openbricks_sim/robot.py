@@ -260,6 +260,48 @@ class SimRobot:
         mujoco.mj_forward(self.model, self.data)
 
     # ------------------------------------------------------------------
+    # Mission-scoring helpers — predicates over the chassis pose for
+    # quickly answering "did the robot end up in the right place?"
+    # without the user re-deriving Euclidean / box-intersection math.
+
+    def chassis_in_box(self,
+                       x_min_mm: float, y_min_mm: float,
+                       x_max_mm: float, y_max_mm: float) -> bool:
+        """True iff the chassis centre is inside the axis-aligned box
+        ``[x_min_mm, x_max_mm] × [y_min_mm, y_max_mm]`` (world frame).
+        """
+        x, y, _ = self.chassis_pose()
+        return x_min_mm <= x <= x_max_mm and y_min_mm <= y <= y_max_mm
+
+    def chassis_in_circle(self,
+                          cx_mm: float, cy_mm: float,
+                          radius_mm: float) -> bool:
+        """True iff the chassis centre is within ``radius_mm`` of
+        ``(cx_mm, cy_mm)`` (world frame)."""
+        x, y, _ = self.chassis_pose()
+        dx = x - cx_mm
+        dy = y - cy_mm
+        return (dx * dx + dy * dy) <= (radius_mm * radius_mm)
+
+    def distance_to(self, cx_mm: float, cy_mm: float) -> float:
+        """Euclidean distance from chassis centre to ``(cx_mm, cy_mm)``,
+        in millimetres."""
+        x, y, _ = self.chassis_pose()
+        dx = x - cx_mm
+        dy = y - cy_mm
+        return math.sqrt(dx * dx + dy * dy)
+
+    def heading_aligned_with(self,
+                             target_yaw_deg: float,
+                             tolerance_deg: float = 10.0) -> bool:
+        """True iff the chassis heading is within ``tolerance_deg`` of
+        ``target_yaw_deg``. Handles wrap-around (e.g. -179° vs +179°
+        is a 2° difference)."""
+        _, _, yaw = self.chassis_pose()
+        delta = (yaw - target_yaw_deg + 540.0) % 360.0 - 180.0
+        return abs(delta) <= tolerance_deg
+
+    # ------------------------------------------------------------------
     # Position introspection (mostly for tests + interactive scripts).
 
     def chassis_pose(self):
