@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openbricks-dev"
+# Static version on this stub — it's the final release of the
+# ``openbricks-dev`` PyPI name. Future versions live under
+# ``openbricks`` (or ``openbricks[sim]`` for the simulator).
+version = "0.9.3"
+description = "DEPRECATED — replaced by ``openbricks``. Run ``pip install 'openbricks[sim]'`` to migrate; ``openbricks-dev <cmd>`` becomes ``openbricks <cmd>`` and ``openbricks-sim <cmd>`` becomes ``openbricks sim <cmd>``. See https://github.com/1e0ng/openbricks/blob/main/tools/openbricks/CHANGELOG.md."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "openbricks contributors" }]
+keywords = [
+    "openbricks",
+    "deprecated",
+]
+classifiers = [
+    "Development Status :: 7 - Inactive",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Embedded Systems",
+]
+# No real dependencies — the stub doesn't connect to BLE or anything
+# else. We just print and exit. Removing bleak / esptool / mpremote
+# from the dep list keeps a fresh ``pip install openbricks-dev`` fast
+# (and surfaces the deprecation message *before* dragging in 50 MB of
+# stuff the user is about to uninstall anyway).
+dependencies = []
+
+[project.urls]
+Homepage     = "https://github.com/1e0ng/openbricks"
+Source       = "https://github.com/1e0ng/openbricks"
+Issues       = "https://github.com/1e0ng/openbricks/issues"
+Replacement  = "https://pypi.org/project/openbricks/"
+
+[project.scripts]
+# When the user runs ``openbricks-dev <anything>`` after installing
+# this final 0.9.3, they hit the deprecation message and a non-zero
+# exit. The previous 0.9.2 release's binary still runs on installs
+# that haven't upgraded — they keep working until the user reinstalls.
+openbricks-dev = "openbricks_dev_legacy.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["openbricks_dev_legacy*"]
