@@ -325,6 +325,13 @@ class _FakeMachineModule:
     UART = UART
     Timer = Timer
 
+    # ``time_pulse_us`` stand-in for the HC-SR04 driver. By default
+    # returns -1 ("no echo"); tests rebind via
+    # ``machine.time_pulse_us = lambda p, l, t: <value>`` directly.
+    @staticmethod
+    def time_pulse_us(pin, level, timeout_us):
+        return -1
+
 
 sys.modules["machine"] = _FakeMachineModule
 

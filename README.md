@@ -30,6 +30,9 @@ Each platform ships as a separate firmware image.
 | MG370 GMR | DC gear motor with 500-PPR GMR quadrature encoder (closed loop via native `PCNTEncoder` — ESP32 PCNT hardware counter) | `drivers.mg370` |
 | BNO055 | 9-DOF IMU with onboard sensor fusion | `drivers.bno055` |
 | TCS34725 | RGB + clear color sensor | `drivers.tcs34725` |
+| HC-SR04 | Ultrasonic distance sensor (echo-pulse timing, 20–4000 mm) | `drivers.hcsr04` |
+| VL53L0X | Laser ToF distance sensor (I2C, 30–2000 mm) | `drivers.vl53l0x` |
+| VL53L1X | Laser ToF distance sensor (I2C, longer range, up to 4000 mm; VL53L4CD pin-compatible) | `drivers.vl53l1x` |
 | ST-3215-C018 | Serial bus servo (FeeTech/SCServo protocol) | `drivers.st3215` |
 | SSD1306 | 128×64 / 128×32 monochrome OLED display over I2C | `drivers.ssd1306` |
 

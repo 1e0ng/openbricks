@@ -38,7 +38,14 @@ class TestObserver(unittest.TestCase):
         """Exit criterion: the observer must meaningfully smooth the
         velocity estimate. Feed noisy position samples from a truly
         constant-velocity source; the observer's velocity variance
-        should be at least 5x less than raw finite-difference."""
+        should be at least 5x less than raw finite-difference.
+
+        Uses Welford's online algorithm so we don't allocate two
+        5000-element float lists — the previous list-based form ran
+        right up against the MicroPython unix-port heap on Linux CI
+        and tipped over whenever a co-located test added a few
+        hundred bytes to the global module footprint. Online variance
+        is ~constant memory and gives exactly the same answer."""
         random.seed(1)
         o = Observer()
         o.reset(0.0)
@@ -47,27 +54,31 @@ class TestObserver(unittest.TestCase):
         true_vel = 100.0
         noise_amp = 0.5   # +/- 0.25 deg of encoder quantization noise
 
-        raw_vels = []
-        obs_vels = []
+        # Welford accumulators for raw and observed velocity samples
+        # past the initial transient (i >= warmup_ticks).
+        warmup_ticks = 1000
+        n_raw = 0;  mean_raw = 0.0; m2_raw = 0.0
+        n_obs = 0;  mean_obs = 0.0; m2_obs = 0.0
+
         prev = 0.0
         for i in range(5000):
             true_pos = true_vel * (i + 1) * dt
             noisy = true_pos + (random.random() - 0.5) * noise_amp
-            raw_vels.append((noisy - prev) / dt)
+            raw_vel = (noisy - prev) / dt
             prev = noisy
-            _p, v = o.update(noisy, dt)
-            obs_vels.append(v)
+            _p, obs_vel = o.update(noisy, dt)
+            if i >= warmup_ticks:
+                n_raw += 1
+                d = raw_vel - mean_raw
+                mean_raw += d / n_raw
+                m2_raw   += d * (raw_vel - mean_raw)
+                n_obs += 1
+                d = obs_vel - mean_obs
+                mean_obs += d / n_obs
+                m2_obs   += d * (obs_vel - mean_obs)
 
-        # Skip initial transient so we measure steady-state variance.
-        raw_tail = raw_vels[1000:]
-        obs_tail = obs_vels[1000:]
-
-        def variance(xs):
-            m = sum(xs) / len(xs)
-            return sum((x - m) ** 2 for x in xs) / len(xs)
-
-        var_raw = variance(raw_tail)
-        var_obs = variance(obs_tail)
+        var_raw = m2_raw / n_raw
+        var_obs = m2_obs / n_obs
         self.assertGreater(var_raw / var_obs, 5.0)
 
     def test_update_converges_on_step_input(self):

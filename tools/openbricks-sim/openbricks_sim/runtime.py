@@ -421,6 +421,58 @@ class SimColorSensor:
         return int(min(100, max(0, lum * 100.0 / 255.0)))
 
 
+class SimDistanceSensor:
+    """Forward-facing range sensor, MuJoCo-side.
+
+    Casts a ray from the chassis ``chassis_dist`` site along body +X
+    and returns the hit distance in millimetres. Excludes the
+    chassis body so a self-hit on the front geom doesn't dominate
+    every reading.
+
+    Mirrors :class:`openbricks.distance.DistanceSensor`:
+    ``distance_mm()`` returns mm; ``-1`` if no hit within
+    ``max_range_mm``."""
+
+    def __init__(self,
+                 runtime: SimRuntime,
+                 site_name: str = "chassis_dist",
+                 chassis_body_name: str = "chassis",
+                 max_range_mm: float = 4000.0) -> None:
+        self.runtime = runtime
+        self._site_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
+        if self._site_id < 0:
+            raise ValueError("no site named " + repr(site_name) +
+                             " in model")
+        self._chassis_body_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_BODY, chassis_body_name)
+        if self._chassis_body_id < 0:
+            raise ValueError("no body named " + repr(chassis_body_name) +
+                             " in model")
+        self._max_range_m = float(max_range_mm) / 1000.0
+
+    def distance_mm(self):
+        import numpy as np
+        mujoco.mj_forward(self.runtime.model, self.runtime.data)
+        # Site origin in world frame.
+        pnt = np.array(self.runtime.data.site_xpos[self._site_id],
+                        dtype=np.float64)
+        # Site rotation matrix's column 0 = body +X in world frame.
+        R = np.array(self.runtime.data.site_xmat[self._site_id],
+                      dtype=np.float64).reshape(3, 3)
+        vec = R[:, 0]
+        geom_id = np.zeros(1, dtype=np.int32)
+        dist = mujoco.mj_ray(self.runtime.model, self.runtime.data,
+                              pnt, vec,
+                              None,                    # geomgroup
+                              1,                       # flg_static
+                              self._chassis_body_id,   # bodyexclude
+                              geom_id)
+        if geom_id[0] < 0 or dist < 0 or dist > self._max_range_m:
+            return -1
+        return int(dist * 1000.0)
+
+
 class SimDriveBase:
     """2-DOF coupled drivebase, MuJoCo-side.
 
