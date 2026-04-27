@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.2 — sdist-only publish (PyPI manylinux requirement)
+
+The 0.10.1 publish failed at the upload step:
+
+    400 Bad Request: Binary wheel
+    'openbricks-0.10.1-cp311-cp311-linux_x86_64.whl' has an
+    unsupported platform tag 'linux_x86_64'.
+
+PyPI requires Linux wheels to be tagged ``manylinux*``, built inside
+the ``quay.io/pypa/manylinux2014`` Docker image (or via
+``cibuildwheel``). The CI's ``python -m build`` on a stock Ubuntu
+runner produces ``linux_x86_64`` wheels, which PyPI rejects.
+
+Quick fix: publish ``--sdist`` only. Users ``pip install openbricks``
+get the source distribution and compile the native extension on
+first install (slower, but gcc + python headers are typical on
+Linux/macOS dev machines). Multi-platform manylinux wheels are a
+follow-up.
+
+No functional changes vs. 0.10.0 / 0.10.1 — same code, just shippable.
+
 ## 0.10.1 — sdist build fix (no functional changes)
 
 Fixes a build failure that prevented 0.10.0 from publishing:

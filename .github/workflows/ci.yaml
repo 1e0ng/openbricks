@@ -444,13 +444,20 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build sdist + wheel
+      - name: Build sdist
         working-directory: tools/openbricks
+        # ``--sdist`` only: the wheel produced by ``python -m build``
+        # on a stock Ubuntu runner is tagged ``linux_x86_64``, which
+        # PyPI rejects. Linux wheels need ``manylinux*`` tags built
+        # via ``cibuildwheel`` — that's a follow-up. For now, ship
+        # the sdist alone; users compile the native extension from
+        # source on first install. Sdist contains everything needed
+        # (verified by ``tests/test_sdist_build.py``).
         run: |
           python -m pip install --upgrade pip build
-          python -m build
+          python -m build --sdist
 
-      - name: Publish to PyPI
+      - name: Publish sdist to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: tools/openbricks/dist/
