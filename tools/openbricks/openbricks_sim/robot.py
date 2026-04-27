@@ -53,6 +53,10 @@ _BUILTIN_WORLDS = {
     "wro-2026-elementary": "worlds/wro_2026_elementary_robot_rockstars/world.xml",
     "wro-2026-junior":     "worlds/wro_2026_junior_heritage_heroes/world.xml",
     "wro-2026-senior":     "worlds/wro_2026_senior_mosaic_masters/world.xml",
+    # Small practice scenes for learning / iteration. See
+    # ``worlds/<name>/README.md`` for the layout + suggested missions.
+    "practice-zones":      "worlds/practice_zones/world.xml",
+    "practice-walls":      "worlds/practice_walls/world.xml",
 }
 
 

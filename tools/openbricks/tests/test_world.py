@@ -19,6 +19,8 @@ _BUILTIN_WORLDS = [
     "wro_2026_elementary_robot_rockstars",
     "wro_2026_junior_heritage_heroes",
     "wro_2026_senior_mosaic_masters",
+    "practice_zones",
+    "practice_walls",
 ]
 
 

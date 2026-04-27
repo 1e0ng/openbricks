@@ -1,0 +1,50 @@
+<!--
+  practice-walls — small obstacle-avoidance learning world.
+
+  A 2 × 2 m grey floor with three perpendicular walls forming a
+  partial corridor, plus an open exit on +X. Walls are 30 mm thick,
+  150 mm tall — visible to the chassis distance sensor (raycast),
+  occluding for the colour sensor (raycast also).
+
+    * back wall:   x = -0.5,  y in [-0.6, 0.6]   (closes off -X)
+    * left wall:   y =  0.7,  x in [-0.5, 0.5]
+    * right wall:  y = -0.7,  x in [-0.5, 0.5]
+
+  The chassis spawns at origin facing +X (the open exit). A naive
+  forward-drive script will eventually clear the corridor and exit
+  on +X; a wall-avoidance script using the distance sensor can
+  navigate around the back wall first.
+
+  Origin at floor centre. +X = open exit direction. All dimensions
+  in metres.
+-->
+
+<mujoco model="practice_walls">
+  <compiler angle="degree" coordinate="local"/>
+  <option timestep="0.001" iterations="20" solver="Newton" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.5 0.5 0.5" specular="0 0 0"/>
+  </visual>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1"/>
+
+    <!-- Light grey floor — 2 × 2 m. -->
+    <geom name="floor" type="plane" size="1.0 1.0 0.05"
+          rgba="0.85 0.85 0.85 1" friction="0.9 0.02 0.0001"/>
+
+    <!-- Three obstacle walls. 30 mm thick, 150 mm tall, brown.
+         Tall enough to be seen by the chassis_dist sensor at any
+         realistic chassis-tilt angle. -->
+    <geom name="wall_back" type="box"
+          pos="-0.50 0.00 0.075" size="0.015 0.60 0.075"
+          rgba="0.55 0.35 0.20 1"/>
+    <geom name="wall_left" type="box"
+          pos="0.00 0.70 0.075" size="0.50 0.015 0.075"
+          rgba="0.55 0.35 0.20 1"/>
+    <geom name="wall_right" type="box"
+          pos="0.00 -0.70 0.075" size="0.50 0.015 0.075"
+          rgba="0.55 0.35 0.20 1"/>
+  </worldbody>
+</mujoco>
