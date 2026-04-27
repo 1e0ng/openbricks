@@ -1,0 +1,49 @@
+<!--
+  practice-zones — small learning world.
+
+  A 1.5 × 1.5 m white floor with three coloured rectangular zones
+  arranged in a triangle around the spawn point. Each zone is a
+  thin slab geom raised 1 mm off the floor so the colour sensor's
+  downward raycast hits its solid rgba (the sensor works at the
+  geom-material level, not at the texture-pixel level).
+
+    * red zone:    +X 400 mm, ahead of the chassis
+    * green zone:  +X 250 mm, +Y 300 mm
+    * blue zone:   +X 250 mm, -Y 300 mm
+
+  Useful for "drive to the X zone" missions and tuning the colour
+  sensor's threshold. Pair with ``robot.chassis_in_box(...)`` for
+  scoring.
+
+  Origin at floor centre. +X forward of the spawned chassis.
+  All dimensions in metres.
+-->
+
+<mujoco model="practice_zones">
+  <compiler angle="degree" coordinate="local"/>
+  <option timestep="0.001" iterations="20" solver="Newton" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.5 0.5 0.5" specular="0 0 0"/>
+  </visual>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1"/>
+
+    <!-- White floor — 1.5 × 1.5 m. -->
+    <geom name="floor" type="plane" size="0.75 0.75 0.05"
+          rgba="1 1 1 1" friction="0.9 0.02 0.0001"/>
+
+    <!-- Coloured target zones. Thin (1 mm) slabs raised 1 mm so the
+         downward raycast hits the slab, not the floor below. -->
+    <geom name="zone_red" type="box"
+          pos="0.40 0 0.001" size="0.075 0.075 0.001"
+          rgba="0.9 0.1 0.1 1"/>
+    <geom name="zone_green" type="box"
+          pos="0.25 0.30 0.001" size="0.075 0.075 0.001"
+          rgba="0.1 0.7 0.1 1"/>
+    <geom name="zone_blue" type="box"
+          pos="0.25 -0.30 0.001" size="0.075 0.075 0.001"
+          rgba="0.1 0.3 0.9 1"/>
+  </worldbody>
+</mujoco>
