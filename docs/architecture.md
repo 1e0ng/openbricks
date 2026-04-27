@@ -76,20 +76,55 @@ are direct where they can be.
    test (one wheel at 0.9× commanded speed) keeps heading error
    under 5% of forward distance — the pure-Kp M1 fallback fails it.
 
-## What's next
+## Host tooling
 
-M1 / M2 / M3 (scheduler, observer, trajectory, 2-DOF drivebase, all in C)
-are landed. The remaining roadmap:
+Everything above describes what runs on the hub. There's a parallel
+host-side surface — a single PyPI package called `openbricks` that
+ships:
 
-- **M4** — `hub` abstraction (status LED, user button) plus an SSD1306
-  OLED driver (wired via I2C, used alongside the hub rather than through
-  it). Already landed on `main`; ESP32 + ESP32-S3 firmware images ship as
-  separate binaries from the same codebase, so the dual-platform build
-  seam is already validated.
-- **M5** — 1.0 polish + release with per-platform firmware images
-  published through GitHub Releases (already wired up in
-  `.github/workflows/ci.yaml` for the main branch).
+- A console CLI: `openbricks flash | list | run | upload | stop |
+  log` for hub interaction over BLE / USB. See
+  `tools/openbricks/openbricks_dev/`.
+- A MuJoCo-backed simulator: `openbricks sim {preview, run}` opens a
+  physics sim with the same C control cores as the firmware
+  (`*_core.c` files compile into both targets, so the sim's hot-path
+  math is byte-identical). Lives under `tools/openbricks/openbricks_sim/`.
+  Optional via `pip install openbricks[sim]`.
+- A driver shim that lets `from openbricks.drivers.jgb37_520 import
+  JGB37Motor` (and BNO055 / TCS34725 / HC-SR04 / VL53L0X / VL53L1X)
+  run unchanged in MuJoCo — `openbricks sim run main.py` installs
+  no-op `machine` fakes and replaces the I2C driver classes with
+  sim-aware versions.
+- Per-run log capture on the hub: every program execution tee'd to
+  `/openbricks_logs/run_N.log` (3 rotating slots, 64 KB each).
+  `openbricks log -n NAME` reads them back over BLE — useful for
+  untethered runs where no live console was attached.
 
-Upgrading the α-β observer to a pbio-style model-based observer (with
-voltage/current coupling and a motor model) is later work — a precision
-lift we pick up once we can measure real hardware performance.
+The Python module names on the host are deliberately split
+(`openbricks_dev` for the CLI, `openbricks_sim` for the sim) so they
+don't shadow the firmware-side `openbricks` package, which is
+sometimes imported on the host by the sim's driver shim.
+
+## Status
+
+All foundational milestones are landed. Roadmap items completed:
+
+- **M1** — always-on 1 kHz scheduler in C (`motor_process.c`).
+- **M2** — observer + trajectory + servo state machine, all in C.
+- **M3** — 2-DOF coupled drivebase in C, with optional gyro-feedback
+  (`use_gyro(True)`) for slip-immune heading via an attached IMU.
+- **M4** — `hub` abstraction (status LED, user button) + SSD1306 OLED.
+  ESP32 + ESP32-S3 firmware images both build from the same codebase.
+- **M5** — per-platform firmware images auto-published on every
+  push to `main` (rolling `latest`) and on `v*` tags (versioned).
+
+Sim phases (host-side): A (chassis + worlds) → B (shared C cores) →
+C (runtime + driver shim) → D (sensors + scenario reset / scoring)
+all landed. Phase E (Linux EGL headless rendering for pixel-accurate
+colour-sensor texture sampling, broader worlds library, more example
+walkthroughs) is open.
+
+Upgrading the α-β observer to a pbio-style model-based observer
+(voltage/current coupling + motor model) is on the longer-term list —
+a precision lift we pick up once we have real hardware to measure
+against.
