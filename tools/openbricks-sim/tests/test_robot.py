@@ -187,6 +187,59 @@ class SimRobotSetPoseTests(unittest.TestCase):
         self.assertEqual(robot.runtime.now_ms, 0)
 
 
+class SimRobotMissionScoringTests(unittest.TestCase):
+    """Predicates over the chassis pose for mission-scoring scripts."""
+
+    def test_chassis_in_box_contains_origin(self):
+        robot = SimRobot()
+        # Empty world chassis spawns at (0, 0). Box around the origin.
+        self.assertTrue(robot.chassis_in_box(-50.0, -50.0, 50.0, 50.0))
+
+    def test_chassis_in_box_excludes_distant_box(self):
+        robot = SimRobot()
+        self.assertFalse(robot.chassis_in_box(500.0, 500.0, 600.0, 600.0))
+
+    def test_chassis_in_circle_contains_close_centre(self):
+        robot = SimRobot()
+        self.assertTrue(robot.chassis_in_circle(0.0, 0.0, 100.0))
+
+    def test_chassis_in_circle_excludes_far_centre(self):
+        robot = SimRobot()
+        self.assertFalse(robot.chassis_in_circle(500.0, 500.0, 100.0))
+
+    def test_chassis_in_circle_boundary_inclusive(self):
+        robot = SimRobot()
+        # Chassis at origin, point at (50, 0), radius 50 → exactly on
+        # the edge. ``<=`` membership is inclusive.
+        self.assertTrue(robot.chassis_in_circle(50.0, 0.0, 50.0))
+
+    def test_distance_to_origin_is_zero(self):
+        robot = SimRobot()
+        self.assertAlmostEqual(robot.distance_to(0.0, 0.0), 0.0, delta=2.0)
+
+    def test_distance_to_300_300_is_pythagorean(self):
+        # Spawn at origin, distance to (300, 400) should be ~500.
+        robot = SimRobot()
+        self.assertAlmostEqual(robot.distance_to(300.0, 400.0), 500.0,
+                                delta=5.0)
+
+    def test_heading_aligned_at_zero(self):
+        robot = SimRobot()
+        # Settled chassis is heading ~0°.
+        self.assertTrue(robot.heading_aligned_with(0.0, tolerance_deg=5.0))
+
+    def test_heading_not_aligned_with_perpendicular(self):
+        robot = SimRobot()
+        self.assertFalse(robot.heading_aligned_with(90.0, tolerance_deg=10.0))
+
+    def test_heading_aligned_handles_wraparound(self):
+        # set_pose to yaw=179°, check alignment with -179° (delta = 2°).
+        robot = SimRobot()
+        robot.set_pose(x_mm=0.0, y_mm=0.0, yaw_deg=179.0)
+        robot.run_for(0.2)
+        self.assertTrue(robot.heading_aligned_with(-179.0, tolerance_deg=5.0))
+
+
 class SimRobotRunViewerTests(unittest.TestCase):
     """Smoke test for the viewer entry — only exercises the import +
     error-when-no-mujoco-viewer path. Actually opening a window in CI
