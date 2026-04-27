@@ -118,6 +118,75 @@ class SimRobotPoseTests(unittest.TestCase):
                             "straight move")
 
 
+class SimRobotResetTests(unittest.TestCase):
+    """``reset()`` lets a script iterate on a mission without
+    restarting the sim process."""
+
+    def test_reset_returns_chassis_to_origin(self):
+        robot = SimRobot()
+        # Drive the chassis somewhere.
+        robot.left.run_speed(180.0)
+        robot.right.run_speed(180.0)
+        robot.run_for(1.0)
+        x_mid, _, _ = robot.chassis_pose()
+        self.assertGreater(abs(x_mid), 50.0, "should have moved")
+        # Reset.
+        robot.reset()
+        x_after, y_after, yaw_after = robot.chassis_pose()
+        self.assertAlmostEqual(x_after, 0.0, delta=5.0)
+        self.assertAlmostEqual(y_after, 0.0, delta=5.0)
+        self.assertAlmostEqual(yaw_after, 0.0, delta=2.0)
+
+    def test_reset_zeroes_now_ms(self):
+        robot = SimRobot()
+        robot.run_for(0.5)
+        self.assertEqual(robot.runtime.now_ms, 500)
+        robot.reset()
+        self.assertEqual(robot.runtime.now_ms, 0)
+
+    def test_reset_clears_active_drivebase_move(self):
+        robot = SimRobot()
+        robot.drivebase.straight(distance_mm=200.0, speed_mm_s=80.0)
+        self.assertFalse(robot.drivebase.is_done())
+        robot.reset()
+        self.assertTrue(robot.drivebase.is_done())
+
+    def test_reset_allows_drive_again(self):
+        # After reset the controllers must be fresh — driving forward
+        # again should produce +X translation just like the first
+        # time. Catches "left a stale tick callback registered" bugs.
+        robot = SimRobot()
+        robot.left.run_speed(180.0)
+        robot.right.run_speed(180.0)
+        robot.run_for(0.5)
+        robot.reset()
+        x0, _, _ = robot.chassis_pose()
+        robot.left.run_speed(180.0)
+        robot.right.run_speed(180.0)
+        robot.run_for(0.5)
+        x1, _, _ = robot.chassis_pose()
+        self.assertGreater(x1 - x0, 30.0)
+
+
+class SimRobotSetPoseTests(unittest.TestCase):
+
+    def test_set_pose_teleports_chassis(self):
+        robot = SimRobot()
+        robot.set_pose(x_mm=200.0, y_mm=-100.0, yaw_deg=45.0)
+        # Settle the chassis on its wheels at the new spot.
+        robot.run_for(0.2)
+        x, y, yaw = robot.chassis_pose()
+        self.assertAlmostEqual(x, 200.0, delta=15.0)
+        self.assertAlmostEqual(y, -100.0, delta=15.0)
+        self.assertAlmostEqual(yaw, 45.0, delta=5.0)
+
+    def test_set_pose_resets_clock(self):
+        robot = SimRobot()
+        robot.run_for(0.5)
+        robot.set_pose(x_mm=100.0, y_mm=0.0)
+        self.assertEqual(robot.runtime.now_ms, 0)
+
+
 class SimRobotRunViewerTests(unittest.TestCase):
     """Smoke test for the viewer entry — only exercises the import +
     error-when-no-mujoco-viewer path. Actually opening a window in CI

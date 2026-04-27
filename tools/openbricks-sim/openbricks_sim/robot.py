@@ -186,6 +186,80 @@ class SimRobot:
         return False
 
     # ------------------------------------------------------------------
+    # Scenario reset — useful for iterating on a mission script
+    # without restarting the sim process. A typical pattern:
+    #
+    #     robot = SimRobot(world="wro-2026-elementary")
+    #     for attempt in range(10):
+    #         robot.reset()
+    #         run_my_mission(robot)
+    #         score = evaluate(robot.chassis_pose())
+    #         print(f"attempt {attempt}: score={score}")
+
+    def reset(self) -> None:
+        """Reset the sim to a fresh state.
+
+        Stops the drivebase + motors, restores all qpos / qvel to
+        the model's keyframe-zero state (back to spawn), zeroes the
+        runtime clock, and re-baselines the encoder observers so the
+        next tick doesn't see a phantom delta. Sensor adapters
+        (IMU / colour / distance) are stateless wrappers around the
+        current MuJoCo data, so they need no explicit reset.
+        """
+        # 1. Cancel any active drivebase move and detach motors so
+        #    they stop writing actuator ctrl. ``stop`` puts both
+        #    motors into brake mode; we additionally clear the
+        #    runtime tick list so a stale closure can't fire after
+        #    a reset.
+        self.drivebase.stop()
+        self.left.brake()
+        self.right.brake()
+
+        # 2. Restore physics to the spawn pose. ``mj_resetData`` zeros
+        #    qpos/qvel/qacc/sensordata/etc. and reapplies the model's
+        #    initial qpos (which is what ``ChassisSpec.pos_x/pos_y``
+        #    set at construction). One ``mj_forward`` so the kinematic
+        #    derived state (xpos/xmat/cam_xpos) reflects the new qpos
+        #    before any sensor calls land.
+        mujoco.mj_resetData(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)
+
+        # 3. Reset the virtual clock and re-baseline observers.
+        self.runtime.now_ms = 0
+        self.left.servo.baseline(self.left._read_count(), 0)
+        self.right.servo.baseline(self.right._read_count(), 0)
+
+    def set_pose(self, x_mm: float, y_mm: float,
+                 yaw_deg: float = 0.0) -> None:
+        """Teleport the chassis to ``(x_mm, y_mm)`` with heading
+        ``yaw_deg``. Calls :meth:`reset` first, then writes the
+        chassis free-joint qpos.
+
+        Useful for parking the robot at a specific test location
+        without rebuilding the model.
+        """
+        self.reset()
+        cid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT,
+                                 "chassis_free")
+        if cid < 0:
+            raise SimRobotError("model has no joint named 'chassis_free'")
+        # qpos for a free-joint is [x, y, z, qw, qx, qy, qz] (7 entries).
+        qadr = self.model.jnt_qposadr[cid]
+        # Preserve current Z so the chassis sits on its wheels.
+        z = float(self.data.qpos[qadr + 2])
+        yaw_rad = math.radians(float(yaw_deg))
+        qw = math.cos(yaw_rad / 2.0)
+        qz = math.sin(yaw_rad / 2.0)
+        self.data.qpos[qadr + 0] = float(x_mm) / 1000.0
+        self.data.qpos[qadr + 1] = float(y_mm) / 1000.0
+        self.data.qpos[qadr + 2] = z
+        self.data.qpos[qadr + 3] = qw
+        self.data.qpos[qadr + 4] = 0.0
+        self.data.qpos[qadr + 5] = 0.0
+        self.data.qpos[qadr + 6] = qz
+        mujoco.mj_forward(self.model, self.data)
+
+    # ------------------------------------------------------------------
     # Position introspection (mostly for tests + interactive scripts).
 
     def chassis_pose(self):
