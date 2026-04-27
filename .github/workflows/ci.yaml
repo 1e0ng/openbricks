@@ -6,9 +6,12 @@ on:
     tags:
       # Firmware releases use the plain ``v*`` namespace; the host
       # tooling uses its own ``openbricks/v*`` namespace so the two
-      # can be cut independently.
+      # can be cut independently. ``openbricks-dev/v*`` is kept for
+      # one final 0.9.3 deprecation publish — see the
+      # ``publish-openbricks-dev-deprecation`` job.
       - "v*"
       - "openbricks/v*"
+      - "openbricks-dev/v*"
   pull_request:
     branches: [main]
 
@@ -438,3 +441,36 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: tools/openbricks/dist/
+
+  publish-openbricks-dev-deprecation:
+    # One-shot final release of the legacy ``openbricks-dev`` PyPI
+    # project. Triggered by ``openbricks-dev/v0.9.3`` (or any future
+    # ``openbricks-dev/v*`` tag, though there shouldn't be one).
+    # The wheel ships the deprecation stub at
+    # ``tools/openbricks-dev/`` — its single console-script binary
+    # prints a migration message pointing users at ``openbricks``.
+    #
+    # Trusted Publisher was set up on PyPI for the ``openbricks-dev``
+    # project during the original 0.9.2 release; no API token in repo.
+    if: startsWith(github.ref, 'refs/tags/openbricks-dev/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build sdist + wheel (deprecation stub)
+        working-directory: tools/openbricks-dev
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Publish openbricks-dev (final, deprecation) to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: tools/openbricks-dev/dist/
