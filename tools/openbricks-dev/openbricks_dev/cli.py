@@ -184,11 +184,56 @@ def _build_parser():
         help="BLE scan timeout. Default: 5.0 s.",
     )
 
+    # ---- sim (passthrough to openbricks-sim) ----
+    #
+    # Argparse-wise this is a stub: the real grammar lives in
+    # ``openbricks_sim.cli``. ``main()`` short-circuits before
+    # ``parse_args`` runs when ``argv[0] == "sim"`` — see
+    # ``_dispatch_sim``. We register the subcommand here only so it
+    # shows up in ``openbricks --help``.
+    sub.add_parser(
+        "sim",
+        help="Run an openbricks-sim subcommand "
+             "(passthrough; requires the ``openbricks-sim`` package).",
+        description="Forwards all remaining arguments to "
+                    "``openbricks_sim.cli`` — equivalent to running "
+                    "``openbricks-sim`` directly. Use ``openbricks "
+                    "sim --help`` to see the sim's own subcommand list.",
+        add_help=False,   # let openbricks-sim handle --help itself
+    )
+
     return parser
+
+
+def _dispatch_sim(remaining_argv):
+    """``openbricks sim <args>`` → call ``openbricks_sim.cli.main`` with
+    the remaining argv. We bypass argparse for this one because the
+    sim CLI has its own argument grammar — re-declaring it here would
+    bind the two together. If ``openbricks_sim`` isn't installed we
+    print a hint instead of an ImportError traceback.
+    """
+    try:
+        from openbricks_sim.cli import main as sim_main
+    except ImportError:
+        print(
+            "error: 'openbricks sim' requires the openbricks-sim "
+            "package.\n"
+            "       install it with: pip install openbricks-sim",
+            file=sys.stderr)
+        return 1
+    return sim_main(remaining_argv)
 
 
 def main(argv=None):
     """Entry point. ``argv`` defaults to ``sys.argv[1:]`` for tests."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # ``openbricks sim …`` short-circuits argparse and forwards the
+    # remaining argv to openbricks-sim's CLI. See ``_dispatch_sim``.
+    if argv and argv[0] == "sim":
+        return _dispatch_sim(argv[1:])
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 

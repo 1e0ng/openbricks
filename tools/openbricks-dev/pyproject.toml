@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openbricks-dev"
+name = "openbricks"
 # Version is baked by ``scripts/bump-version.py`` into
 # ``openbricks_dev/__init__.py::__version__``; the root ``VERSION``
 # file is the canonical source. ``dynamic`` tells setuptools to read
@@ -60,7 +60,14 @@ Issues        = "https://github.com/1e0ng/openbricks/issues"
 Releases      = "https://github.com/1e0ng/openbricks/releases"
 
 [project.scripts]
-openbricks-dev = "openbricks_dev.cli:main"
+# Primary command. ``openbricks`` was historically published as
+# ``openbricks-dev``; the rename matches the simpler ``git`` /
+# ``docker`` UX. The Python module name stays ``openbricks_dev``
+# because the firmware-side ``openbricks`` Python package (drivers,
+# robotics, etc., flashed into the hub image) is also imported on
+# the host by ``openbricks-sim``'s shim — naming the host CLI's
+# module ``openbricks`` would shadow it.
+openbricks = "openbricks_dev.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "coverage"]

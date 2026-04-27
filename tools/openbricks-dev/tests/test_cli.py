@@ -183,5 +183,71 @@ class MainDispatchTests(unittest.TestCase):
         self.assertEqual(rc, 130)
 
 
+class SimPassthroughTests(unittest.TestCase):
+    """``openbricks sim …`` short-circuits argparse and forwards the
+    remaining argv to ``openbricks_sim.cli.main``."""
+
+    def test_sim_dispatch_calls_sim_cli(self):
+        # Inject a fake openbricks_sim module that records its argv.
+        import sys, types
+        fake = types.ModuleType("openbricks_sim")
+        fake_cli = types.ModuleType("openbricks_sim.cli")
+        recorded = {}
+        def _fake_main(argv=None):
+            recorded["argv"] = argv
+            return 0
+        fake_cli.main = _fake_main
+        fake.cli = fake_cli
+        prev_pkg = sys.modules.get("openbricks_sim")
+        prev_cli = sys.modules.get("openbricks_sim.cli")
+        sys.modules["openbricks_sim"] = fake
+        sys.modules["openbricks_sim.cli"] = fake_cli
+        try:
+            rc = cli.main(["sim", "preview", "--world", "empty"])
+        finally:
+            if prev_pkg is None:
+                sys.modules.pop("openbricks_sim", None)
+            else:
+                sys.modules["openbricks_sim"] = prev_pkg
+            if prev_cli is None:
+                sys.modules.pop("openbricks_sim.cli", None)
+            else:
+                sys.modules["openbricks_sim.cli"] = prev_cli
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(recorded["argv"],
+                         ["preview", "--world", "empty"])
+
+    def test_sim_dispatch_without_openbricks_sim_prints_hint(self):
+        # Make ``import openbricks_sim.cli`` fail.
+        import sys
+        prev_pkg = sys.modules.get("openbricks_sim")
+        prev_cli = sys.modules.get("openbricks_sim.cli")
+        # Sentinel that raises ImportError on import attempts.
+        sys.modules["openbricks_sim"] = None
+        sys.modules.pop("openbricks_sim.cli", None)
+        try:
+            with patch("sys.stderr", new_callable=io.StringIO) as err:
+                rc = cli.main(["sim", "run", "foo.py"])
+            self.assertEqual(rc, 1)
+            self.assertIn("openbricks-sim", err.getvalue())
+            self.assertIn("pip install", err.getvalue())
+        finally:
+            if prev_pkg is None:
+                sys.modules.pop("openbricks_sim", None)
+            else:
+                sys.modules["openbricks_sim"] = prev_pkg
+            if prev_cli is not None:
+                sys.modules["openbricks_sim.cli"] = prev_cli
+
+    def test_sim_appears_in_top_level_help(self):
+        # `--help` should list the sim subcommand alongside the
+        # native ones.
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            with self.assertRaises(SystemExit):
+                cli.main(["--help"])
+        self.assertIn("sim", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

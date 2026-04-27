@@ -172,12 +172,18 @@ jobs:
 
       - name: Smoke-test the entry point
         run: |
-          openbricks-dev --help
-          openbricks-dev flash --help
-          openbricks-dev list --help
-          openbricks-dev run --help
-          openbricks-dev upload --help
-          openbricks-dev stop --help
+          openbricks --help
+          openbricks flash --help
+          openbricks list --help
+          openbricks run --help
+          openbricks upload --help
+          openbricks stop --help
+          openbricks log --help
+          # ``openbricks sim …`` short-circuits to openbricks_sim.cli.
+          # The sim package isn't installed in this CI job, so the
+          # passthrough should print a "pip install openbricks-sim"
+          # hint and exit non-zero — that's the documented behaviour.
+          openbricks sim --help || true
 
   openbricks-sim:
     # MuJoCo-backed simulator tests (tools/openbricks-sim). Pure
