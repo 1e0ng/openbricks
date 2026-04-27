@@ -52,7 +52,7 @@ flags:
       - openbricks/
   openbricks-dev:
     paths:
-      - tools/openbricks-dev/openbricks_dev/
+      - tools/openbricks/openbricks_dev/
   openbricks-sim:
     paths:
-      - tools/openbricks-sim/openbricks_sim/
+      - tools/openbricks/openbricks_sim/

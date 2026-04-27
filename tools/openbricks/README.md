@@ -1,35 +1,37 @@
-# openbricks-dev
+# openbricks (host CLI + sim)
 
-Host-side CLI for openbricks hubs — the same UX as `pybricks-dev`, built on commodity Python tooling (`bleak`, `esptool`, `mpremote`). One tool for flashing, scanning, and (coming) running code over BLE.
+Host-side tooling for openbricks hubs — same UX as `pybricksdev`, built on commodity Python tooling (`bleak`, `esptool`, `mpremote`). One package, one console script: `openbricks flash / list / run / upload / stop / log`. The MuJoCo-backed simulator is built in too — `openbricks sim …` opens the sim's CLI when the `[sim]` extra is installed.
 
 ## Install
 
 Recommended — with [`pipx`](https://pipx.pypa.io/) so the CLI lands in an isolated venv and avoids the "externally managed environment" error on modern macOS / Linux distros:
 
 ```
-pipx install openbricks-dev
+pipx install openbricks            # CLI only (lightweight; bleak / esptool / mpremote)
+pipx install 'openbricks[sim]'     # CLI + MuJoCo physics simulator
 ```
 
 Plain `pip` works too:
 
 ```
-pip install openbricks-dev
+pip install openbricks
+pip install 'openbricks[sim]'
 ```
 
 For development against a repo checkout (editable install):
 
 ```
-pipx install --editable tools/openbricks-dev    # or: pip install -e tools/openbricks-dev
+pip install -e 'tools/openbricks[sim]'
 ```
 
-Any install path pulls in `bleak` (cross-platform BLE), `esptool`, and `mpremote`.
+`[sim]` adds `mujoco` (~50 MB, native OpenGL) and `numpy` — most users (flash + run + log) don't need it. Without `[sim]`, `openbricks sim …` prints a helpful "pip install openbricks[sim]" hint instead of crashing.
 
 ## Commands
 
 ### `flash` — program a hub
 
 ```
-openbricks-dev flash \
+openbricks flash \
     --name RobotA \
     --port /dev/tty.usbserial-XXXX \
     --firmware native/micropython/ports/esp32/build-openbricks_esp32s3/firmware.bin
@@ -44,7 +46,7 @@ Useful flags: `--chip esp32s3`, `--baud 921600`, `--skip-erase` (faster dev loop
 ### `list` — scan for hubs
 
 ```
-openbricks-dev list [--timeout 5.0] [--all]
+openbricks list [--timeout 5.0] [--all]
 ```
 
 Runs a BLE scan and prints every named device found, sorted by RSSI (strongest first). `--all` includes unnamed devices too.
@@ -52,7 +54,7 @@ Runs a BLE scan and prints every named device found, sorted by RSSI (strongest f
 ### `run` — stage and launch; button stops it; client exits on stop
 
 ```
-openbricks-dev run -n RobotA examples/hello.py
+openbricks run -n RobotA examples/hello.py
 ```
 
 Stages the script to `/program.py` (same target as `upload`) and triggers the hub's launcher to execute it immediately. Output streams back to your terminal in real time.
@@ -66,15 +68,15 @@ Stderr (e.g. exception tracebacks) arrives after stdout and is surfaced with a b
 ### `stop` — interrupt the running program
 
 ```
-openbricks-dev stop -n RobotA
+openbricks stop -n RobotA
 ```
 
-Sends a single Ctrl-C byte over the NUS REPL bridge, which MicroPython surfaces as `KeyboardInterrupt`. Useful when `openbricks-dev run` has already exited but the hub's still chewing on a long-running user program.
+Sends a single Ctrl-C byte over the NUS REPL bridge, which MicroPython surfaces as `KeyboardInterrupt`. Useful when `openbricks run` has already exited but the hub's still chewing on a long-running user program.
 
 ### `upload` — stage a script; hub button launches it
 
 ```
-openbricks-dev upload -n RobotA examples/wander.py
+openbricks upload -n RobotA examples/wander.py
 ```
 
 Writes the script to `/program.py` on the hub. **The code does not run automatically.** Place your robot, press the **program button** (GPIO 4), and the program starts. Press again to stop it mid-run.
@@ -83,7 +85,7 @@ Writes the script to `/program.py` on the hub. **The code does not run automatic
 
 This works because the firmware ships a frozen `main.py` that:
 
-1. Brings BLE + REPL bridge up immediately (so `openbricks-dev run` / `upload` / `stop` are always reachable, even when no program is running).
+1. Brings BLE + REPL bridge up immediately (so `openbricks run` / `upload` / `stop` are always reachable, even when no program is running).
 2. Instantiates the board's Hub, which wires the **BLE-toggle button** (short-press on GPIO 5) with LED feedback.
 3. Watches the **program button** (GPIO 4) via `openbricks.launcher.run()` — a short-press runs `/program.py`, a second short-press raises `KeyboardInterrupt` in the running program.
 
