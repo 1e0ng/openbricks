@@ -337,6 +337,14 @@ jobs:
           else
             VERSION="latest"
           fi
+          # Sanitize: tag namespaces may contain ``/`` (e.g.
+          # ``openbricks-dev/v0.9.3``), which would otherwise make
+          # ``cp`` try to write through a non-existent subdir. The
+          # firmware-skip rule already prevents this job from running
+          # on host-tooling tags, but we belt-and-brace here so a
+          # future tag namespace with a slash never silently breaks
+          # the artifact path.
+          VERSION="${VERSION//\//-}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
           # Version-stamp every filename so an extracted .bin still
