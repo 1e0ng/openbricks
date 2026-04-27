@@ -148,11 +148,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install openbricks (editable, with [sim]) + coverage
+      - name: Install openbricks (editable, with [sim,dev]) + coverage
         working-directory: tools/openbricks
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[sim]"
+          # ``[dev]`` brings in ``build`` which the sdist regression
+          # test exercises; ``[sim]`` brings in MuJoCo + numpy.
+          pip install -e ".[sim,dev]"
           pip install coverage
 
       - name: Run host test suite under coverage

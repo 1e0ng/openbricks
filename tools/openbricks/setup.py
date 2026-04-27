@@ -7,12 +7,26 @@ live at ``native/user_c_modules/openbricks/*_core.c``, two levels up),
 and setuptools refuses both absolute paths *and* relative paths that
 reach upward out of the package root. The fix is a tiny pre-build
 hook that copies the shared cores into a local ``native/_shared/``
-directory so setuptools only ever sees in-tree sources. The copy is
-reproducible and cached — it's re-done on every build but the bytes
-are identical to the upstream.
+directory so setuptools only ever sees in-tree sources.
 
 Everything else (metadata, dependencies, scripts) still lives in
 ``pyproject.toml``; setuptools merges the two.
+
+Build contexts
+--------------
+
+In a **repo checkout** (editable install, local ``python -m build``,
+CI), the firmware sources at ``../../native/user_c_modules/openbricks``
+exist and we copy them into ``native/_shared/`` fresh on every build.
+That keeps the truth in one place: the firmware's user_c_modules.
+
+In an **sdist build** (PyPI publish, isolated build environment), the
+upstream firmware sources are NOT in the source tree — only what
+made it into the sdist tarball is. ``MANIFEST.in`` ensures the
+already-synced ``native/_shared/*.{c,h}`` files are bundled, so the
+``_sync_cores()`` step is a no-op (the files already exist locally
+and there's nothing upstream to copy from). The fallback path here
+detects that case and proceeds without raising.
 """
 
 from pathlib import Path
@@ -43,17 +57,37 @@ _CORE_FILES = [
 
 
 def _sync_cores():
-    """Copy the shared core sources into ``native/_shared/`` so
-    setuptools can compile them as in-tree files. Idempotent."""
+    """Refresh the shared core sources into ``native/_shared/``.
+
+    Two valid build modes:
+
+      * Repo checkout — the firmware sources at ``CORE_SRC`` exist;
+        copy from there. This is the path used during development
+        and CI test runs.
+      * sdist build — ``CORE_SRC`` doesn't exist (only sdist contents
+        are reachable); ``native/_shared/`` was pre-bundled by the
+        sdist via MANIFEST.in. Verify the files are present and
+        leave them alone.
+
+    Anything else (no ``CORE_SRC`` *and* no pre-bundled ``_shared/``)
+    is a broken checkout and we raise.
+    """
     SHARED_DIR.mkdir(parents=True, exist_ok=True)
+    src_available = CORE_SRC.is_dir()
+
     for fname in _CORE_FILES:
         src = CORE_SRC / fname
         dst = SHARED_DIR / fname
-        if not src.is_file():
+        if src_available and src.is_file():
+            shutil.copyfile(src, dst)
+            continue
+        # No upstream — this is the sdist path. The file must already
+        # be present locally (bundled via MANIFEST.in).
+        if not dst.is_file():
             raise RuntimeError(
-                "missing shared core source: " + str(src) +
-                " — is the repo checkout complete?")
-        shutil.copyfile(src, dst)
+                "missing shared core source: cannot copy from " +
+                str(src) + " (upstream unavailable) and " +
+                str(dst) + " is not bundled either — broken checkout?")
 
 
 _sync_cores()
