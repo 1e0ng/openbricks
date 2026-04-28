@@ -1,0 +1,13 @@
+0 WRO 2026 Senior — Cement bowl (mission 3.1)
+0 Per the rules-PDF page 4 photo: hollow square white "bowl"
+0 with grey plate at the bottom-centre. Approximation: white
+0 brick walls + grey plate base, ~5x5 stud footprint.
+0
+0 ===== Grey plate base =====
+1 7 0 0 0 1 0 0 0 1 0 0 0 1 3032.dat
+0
+0 ===== White brick walls (forming a box around the centre) =====
+1 15 -30 -8 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 15  30 -8 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 15 0 -8 -50 1 0 0 0 1 0 0 0 1 3001.dat
+1 15 0 -8  50 1 0 0 0 1 0 0 0 1 3001.dat

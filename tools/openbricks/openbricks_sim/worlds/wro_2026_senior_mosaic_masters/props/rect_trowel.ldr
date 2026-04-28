@@ -1,0 +1,11 @@
+0 WRO 2026 Senior — Rectangular trowel (mission 3.1)
+0 Per the rules-PDF page 4 photo: red brick handle on a flat white
+0 plate base; trowel shape with handle sticking up.
+0
+0 ===== White plate base (4x6) =====
+1 15 0 0 0 1 0 0 0 1 0 0 0 1 3032.dat
+0
+0 ===== Red brick "handle" =====
+1 4 -10 -8 0 1 0 0 0 1 0 0 0 1 3001.dat
+1 4  10 -8 0 1 0 0 0 1 0 0 0 1 3001.dat
+1 4 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat

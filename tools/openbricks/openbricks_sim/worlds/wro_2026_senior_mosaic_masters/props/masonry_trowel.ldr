@@ -1,0 +1,14 @@
+0 WRO 2026 Senior — Masonry trowel (mission 3.1)
+0 Per the rules-PDF page 4 photo: white tiered base with a red
+0 brick "handle" sticking up. ~6x4 stud footprint.
+0
+0 ===== White plate base (4x8) =====
+1 15 0 0 0 1 0 0 0 1 0 0 0 1 3035.dat
+0
+0 ===== White brick body =====
+1 15 -10 -8 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  10 -8 -40 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Red brick handle (vertical) =====
+1 4 0 -32 -40 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -56 -40 1 0 0 0 1 0 0 0 1 3003.dat

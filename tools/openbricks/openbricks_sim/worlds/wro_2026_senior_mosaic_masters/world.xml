@@ -70,127 +70,97 @@
           size="0.0075 0.5715 0.02" material="wall"/>
 
     <!-- =========================================================
-         MISSION 3.4 — barriers (×4). Bonus 7 pts each, undamaged.
-         Position: in / around the mosaic frame in the city centre.
-         Two red barriers with blue tops, two black with red tops.
-         ========================================================= -->
-    <body name="barrier_red_a" pos="-0.20  0.18  0.025">
-      <freejoint/>
-      <geom type="box" size="0.014 0.014 0.025" mass="0.06" material="lego_red"/>
-      <geom type="sphere" size="0.012" pos="0 0 0.035"
-            mass="0.01" material="lego_blue"/>
-    </body>
-    <body name="barrier_red_b" pos=" 0.20  0.18  0.025">
-      <freejoint/>
-      <geom type="box" size="0.014 0.014 0.025" mass="0.06" material="lego_red"/>
-      <geom type="sphere" size="0.012" pos="0 0 0.035"
-            mass="0.01" material="lego_blue"/>
-    </body>
-    <body name="barrier_black_a" pos="-0.20 -0.18  0.025">
-      <freejoint/>
-      <geom type="box" size="0.014 0.014 0.025" mass="0.06" material="lego_black"/>
-      <geom type="sphere" size="0.012" pos="0 0 0.035"
-            mass="0.01" material="lego_red"/>
-    </body>
-    <body name="barrier_black_b" pos=" 0.20 -0.18  0.025">
-      <freejoint/>
-      <geom type="box" size="0.014 0.014 0.025" mass="0.06" material="lego_black"/>
-      <geom type="sphere" size="0.012" pos="0 0 0.035"
-            mass="0.01" material="lego_red"/>
-    </body>
-
-    <!-- =========================================================
-         MISSION 3.1 — 3 tools, each delivered to a specific area.
-         All start at the lower-end (start side) of the field.
+         F2.7: All Senior props as LDraw assemblies. Shared geometry
+         .ldr files (senior_barrier, mosaic_tile, cement_element)
+         use the lego_prop ``color`` attribute to drive colour at
+         load time, so a single file does duty for all instances
+         differing only in colour. The F3.S randomization spec
+         (separate PR) randomises cement-element positions within
+         their matching-colour cement target areas, and the mosaic
+         pattern via paper-under-frame.
          ========================================================= -->
 
-    <!-- Rectangular trowel: long flat brick + handle stub.
-         Goes to the sponsor area. -->
-    <body name="rect_trowel" pos=" 0.80 -0.45  0.012">
-      <freejoint/>
-      <geom type="box" size="0.060 0.020 0.006" mass="0.05" material="lego_red"/>
-      <geom type="box" size="0.020 0.012 0.006" pos="-0.060 0 0.006"
-            mass="0.01" material="lego_gray"/>
-    </body>
+    <!-- Mission 3.4: 4 barriers (bonus, don't damage). -->
+    <lego_prop name="barrier_red_a"   ldr="props/senior_barrier.ldr" pos="-0.20 0.18 0.0"  mass="0.070" color="red"/>
+    <lego_prop name="barrier_red_b"   ldr="props/senior_barrier.ldr" pos="0.20 0.18 0.0"   mass="0.070" color="red"/>
+    <lego_prop name="barrier_black_a" ldr="props/senior_barrier.ldr" pos="-0.20 -0.18 0.0" mass="0.070" color="black"/>
+    <lego_prop name="barrier_black_b" ldr="props/senior_barrier.ldr" pos="0.20 -0.18 0.0"  mass="0.070" color="black"/>
 
-    <!-- Cement bowl: cylinder with a low rim. Goes to parking space. -->
-    <body name="cement_bowl" pos=" 0.95 -0.45  0.012">
-      <freejoint/>
-      <geom type="cylinder" size="0.022 0.012" mass="0.05" material="lego_white"/>
-    </body>
+    <!-- Mission 3.1: 3 tools. -->
+    <lego_prop name="rect_trowel"    ldr="props/rect_trowel.ldr"    pos="0.80 -0.45 0.0" mass="0.060"/>
+    <lego_prop name="cement_bowl"    ldr="props/cement_bowl.ldr"    pos="0.95 -0.45 0.0" mass="0.050"/>
+    <lego_prop name="masonry_trowel" ldr="props/masonry_trowel.ldr" pos="1.05 -0.45 0.0" mass="0.050"/>
 
-    <!-- Masonry trowel: triangular tip + handle. Stays near start. -->
-    <body name="masonry_trowel" pos=" 1.05 -0.45  0.012">
-      <freejoint/>
-      <geom type="box" size="0.040 0.018 0.006" mass="0.04" material="lego_white"/>
-      <geom type="box" size="0.020 0.010 0.006" pos="-0.040 0 0.006"
-            mass="0.01" material="lego_gray"/>
-    </body>
+    <!-- Mission 3.2: 24 mosaic tiles (6 of each: yellow/blue/green/white).
+         All from one mosaic_tile.ldr; positions arranged on the
+         left-end mat reservoir in a 4x6 grid. -->
+    <lego_prop name="mosaic_tile_yellow_1" ldr="props/mosaic_tile.ldr" pos="-1.05 -0.30 0.0" mass="0.010" color="yellow"/>
+    <lego_prop name="mosaic_tile_yellow_2" ldr="props/mosaic_tile.ldr" pos="-1.05 -0.18 0.0" mass="0.010" color="yellow"/>
+    <lego_prop name="mosaic_tile_yellow_3" ldr="props/mosaic_tile.ldr" pos="-1.05 -0.06 0.0" mass="0.010" color="yellow"/>
+    <lego_prop name="mosaic_tile_yellow_4" ldr="props/mosaic_tile.ldr" pos="-1.05 0.06 0.0"  mass="0.010" color="yellow"/>
+    <lego_prop name="mosaic_tile_yellow_5" ldr="props/mosaic_tile.ldr" pos="-1.05 0.18 0.0"  mass="0.010" color="yellow"/>
+    <lego_prop name="mosaic_tile_yellow_6" ldr="props/mosaic_tile.ldr" pos="-1.05 0.30 0.0"  mass="0.010" color="yellow"/>
+    <lego_prop name="mosaic_tile_blue_1"   ldr="props/mosaic_tile.ldr" pos="-0.95 -0.30 0.0" mass="0.010" color="blue"/>
+    <lego_prop name="mosaic_tile_blue_2"   ldr="props/mosaic_tile.ldr" pos="-0.95 -0.18 0.0" mass="0.010" color="blue"/>
+    <lego_prop name="mosaic_tile_blue_3"   ldr="props/mosaic_tile.ldr" pos="-0.95 -0.06 0.0" mass="0.010" color="blue"/>
+    <lego_prop name="mosaic_tile_blue_4"   ldr="props/mosaic_tile.ldr" pos="-0.95 0.06 0.0"  mass="0.010" color="blue"/>
+    <lego_prop name="mosaic_tile_blue_5"   ldr="props/mosaic_tile.ldr" pos="-0.95 0.18 0.0"  mass="0.010" color="blue"/>
+    <lego_prop name="mosaic_tile_blue_6"   ldr="props/mosaic_tile.ldr" pos="-0.95 0.30 0.0"  mass="0.010" color="blue"/>
+    <lego_prop name="mosaic_tile_green_1"  ldr="props/mosaic_tile.ldr" pos="-0.85 -0.30 0.0" mass="0.010" color="green"/>
+    <lego_prop name="mosaic_tile_green_2"  ldr="props/mosaic_tile.ldr" pos="-0.85 -0.18 0.0" mass="0.010" color="green"/>
+    <lego_prop name="mosaic_tile_green_3"  ldr="props/mosaic_tile.ldr" pos="-0.85 -0.06 0.0" mass="0.010" color="green"/>
+    <lego_prop name="mosaic_tile_green_4"  ldr="props/mosaic_tile.ldr" pos="-0.85 0.06 0.0"  mass="0.010" color="green"/>
+    <lego_prop name="mosaic_tile_green_5"  ldr="props/mosaic_tile.ldr" pos="-0.85 0.18 0.0"  mass="0.010" color="green"/>
+    <lego_prop name="mosaic_tile_green_6"  ldr="props/mosaic_tile.ldr" pos="-0.85 0.30 0.0"  mass="0.010" color="green"/>
+    <lego_prop name="mosaic_tile_white_1"  ldr="props/mosaic_tile.ldr" pos="-0.75 -0.30 0.0" mass="0.010" color="white"/>
+    <lego_prop name="mosaic_tile_white_2"  ldr="props/mosaic_tile.ldr" pos="-0.75 -0.18 0.0" mass="0.010" color="white"/>
+    <lego_prop name="mosaic_tile_white_3"  ldr="props/mosaic_tile.ldr" pos="-0.75 -0.06 0.0" mass="0.010" color="white"/>
+    <lego_prop name="mosaic_tile_white_4"  ldr="props/mosaic_tile.ldr" pos="-0.75 0.06 0.0"  mass="0.010" color="white"/>
+    <lego_prop name="mosaic_tile_white_5"  ldr="props/mosaic_tile.ldr" pos="-0.75 0.18 0.0"  mass="0.010" color="white"/>
+    <lego_prop name="mosaic_tile_white_6"  ldr="props/mosaic_tile.ldr" pos="-0.75 0.30 0.0"  mass="0.010" color="white"/>
 
-    <!-- =========================================================
-         MISSION 3.2 — mosaic tiles (24 total: 4 of each colour).
-         Start on the left side of the mat (mosaic-tile reservoir).
-         Robot picks them up and arranges them in the central mosaic
-         frame. Approximation: only one example tile per colour shown
-         here as a starting position seed; sim runner clones the rest
-         from a template each round.
-         ========================================================= -->
-    <body name="mosaic_tile_yellow_1" pos="-0.95 -0.30  0.005">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_yellow"/>
-    </body>
-    <body name="mosaic_tile_blue_1" pos="-0.95 -0.20  0.005">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_blue"/>
-    </body>
-    <body name="mosaic_tile_green_1" pos="-0.95 -0.10  0.005">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_green"/>
-    </body>
-    <body name="mosaic_tile_white_1" pos="-0.95  0.00  0.005">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_white"/>
-    </body>
-    <body name="mosaic_tile_yellow_2" pos="-0.95  0.10  0.005">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_yellow"/>
-    </body>
-    <body name="mosaic_tile_blue_2" pos="-0.95  0.20  0.005">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_blue"/>
-    </body>
-    <body name="mosaic_tile_green_2" pos="-0.95  0.30  0.005">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_green"/>
-    </body>
-    <body name="mosaic_tile_white_2" pos="-0.85 -0.30  0.005">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.005" mass="0.02" material="lego_white"/>
-    </body>
-
-    <!-- =========================================================
-         MISSION 3.3 — cement elements (40 total: 10 each of
-         yellow / blue / green / white). Delivered to matching-
-         colour cement target areas on the right side of the mat.
-         Approximation: 4 starter samples (one per colour); sim
-         runner clones the remainder from a template.
-         ========================================================= -->
-    <body name="cement_yellow_1" pos=" 0.05  0.40  0.010">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.010" mass="0.015" material="lego_yellow"/>
-    </body>
-    <body name="cement_blue_1" pos=" 0.20  0.40  0.010">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.010" mass="0.015" material="lego_blue"/>
-    </body>
-    <body name="cement_green_1" pos=" 0.05  0.30  0.010">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.010" mass="0.015" material="lego_green"/>
-    </body>
-    <body name="cement_white_1" pos=" 0.20  0.30  0.010">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.010" mass="0.015" material="lego_white"/>
-    </body>
+    <!-- Mission 3.3: 40 cement elements (10 of each: yellow/blue/green/white).
+         Arranged in a 5x8 grid on the cement storage area (right side). -->
+    <lego_prop name="cement_yellow_1"  ldr="props/cement_element.ldr" pos="0.85 -0.45 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_2"  ldr="props/cement_element.ldr" pos="0.90 -0.45 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_3"  ldr="props/cement_element.ldr" pos="0.95 -0.45 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_4"  ldr="props/cement_element.ldr" pos="1.00 -0.45 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_5"  ldr="props/cement_element.ldr" pos="1.05 -0.45 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_6"  ldr="props/cement_element.ldr" pos="0.85 -0.40 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_7"  ldr="props/cement_element.ldr" pos="0.90 -0.40 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_8"  ldr="props/cement_element.ldr" pos="0.95 -0.40 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_9"  ldr="props/cement_element.ldr" pos="1.00 -0.40 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_yellow_10" ldr="props/cement_element.ldr" pos="1.05 -0.40 0.0" mass="0.005" color="yellow"/>
+    <lego_prop name="cement_blue_1"    ldr="props/cement_element.ldr" pos="0.85 -0.30 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_2"    ldr="props/cement_element.ldr" pos="0.90 -0.30 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_3"    ldr="props/cement_element.ldr" pos="0.95 -0.30 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_4"    ldr="props/cement_element.ldr" pos="1.00 -0.30 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_5"    ldr="props/cement_element.ldr" pos="1.05 -0.30 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_6"    ldr="props/cement_element.ldr" pos="0.85 -0.25 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_7"    ldr="props/cement_element.ldr" pos="0.90 -0.25 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_8"    ldr="props/cement_element.ldr" pos="0.95 -0.25 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_9"    ldr="props/cement_element.ldr" pos="1.00 -0.25 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_blue_10"   ldr="props/cement_element.ldr" pos="1.05 -0.25 0.0" mass="0.005" color="blue"/>
+    <lego_prop name="cement_green_1"   ldr="props/cement_element.ldr" pos="0.85 -0.15 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_2"   ldr="props/cement_element.ldr" pos="0.90 -0.15 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_3"   ldr="props/cement_element.ldr" pos="0.95 -0.15 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_4"   ldr="props/cement_element.ldr" pos="1.00 -0.15 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_5"   ldr="props/cement_element.ldr" pos="1.05 -0.15 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_6"   ldr="props/cement_element.ldr" pos="0.85 -0.10 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_7"   ldr="props/cement_element.ldr" pos="0.90 -0.10 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_8"   ldr="props/cement_element.ldr" pos="0.95 -0.10 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_9"   ldr="props/cement_element.ldr" pos="1.00 -0.10 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_green_10"  ldr="props/cement_element.ldr" pos="1.05 -0.10 0.0" mass="0.005" color="green"/>
+    <lego_prop name="cement_white_1"   ldr="props/cement_element.ldr" pos="0.85 0.00 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_2"   ldr="props/cement_element.ldr" pos="0.90 0.00 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_3"   ldr="props/cement_element.ldr" pos="0.95 0.00 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_4"   ldr="props/cement_element.ldr" pos="1.00 0.00 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_5"   ldr="props/cement_element.ldr" pos="1.05 0.00 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_6"   ldr="props/cement_element.ldr" pos="0.85 0.05 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_7"   ldr="props/cement_element.ldr" pos="0.90 0.05 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_8"   ldr="props/cement_element.ldr" pos="0.95 0.05 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_9"   ldr="props/cement_element.ldr" pos="1.00 0.05 0.0"  mass="0.005" color="white"/>
+    <lego_prop name="cement_white_10"  ldr="props/cement_element.ldr" pos="1.05 0.05 0.0"  mass="0.005" color="white"/>
 
     <!-- Overhead camera for scene preview. -->
     <camera name="overhead" pos="0 0 2.6" xyaxes="1 0 0 0 1 0"/>
