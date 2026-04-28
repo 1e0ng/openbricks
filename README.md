@@ -80,11 +80,11 @@ Pybricks is the gold-standard MicroPython firmware for educational robotics — 
 
 ## Status
 
-Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, 2-DOF coupled drivebase, and both quadrature encoders (software-IRQ and hardware-PCNT) all live as `user_c_modules` inside the firmware — the entire tick body is C, nothing on the hot path goes through a Python frame. Every bundled driver works end to end; the 136-test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
+**openbricks 1.0.** All foundational milestones (M0–M5) shipped. Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, 2-DOF coupled drivebase, and both quadrature encoders (software-IRQ and hardware-PCNT) all live as `user_c_modules` inside the firmware — the entire tick body is C, nothing on the hot path goes through a Python frame. The hub abstraction (status LED, user button) and SSD1306 OLED driver round out the on-hub user surface; ESP32 + ESP32-S3 firmware images both build from the same codebase. Every bundled driver works end to end; the test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
 
 **Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Download the `openbricks-<target>-firmware-<version>.bin` for your board and flash with `openbricks flash` (see `tools/openbricks/README.md`) or `esptool.py` directly — details in `docs/build.md`.
 
-Next on the roadmap: 1.0 polish + release (M5). The M4 hub abstraction (status LED, user button) and the SSD1306 OLED driver are both on `main`.
+The host-side simulator (`openbricks sim`) shares the same C control cores with the firmware via `*_core.c` files compiled into both targets, so sim runs are byte-identical to hardware on the hot path. Pixel-accurate colour-sensor texture sampling on the WRO mat is on `main` (Phase E1) — driving across a printed map reads the actual printed colours, not the material's flat tint. Future work: model-based observer (precision lift, picked up once we have hardware to measure against) and full MuJoCo offscreen rendering (only relevant when scenes grow shadows / lighting / overlays beyond a flat printed mat).
 
 ## License
 
