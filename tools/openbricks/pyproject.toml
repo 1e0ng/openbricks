@@ -98,3 +98,45 @@ include = ["openbricks_dev*", "openbricks_sim*"]
 # shared ``native/user_c_modules/openbricks/*_core.c`` files), but
 # a setup.py that resolves them to absolute paths sidesteps the
 # issue.
+
+# ---------------------------------------------------------------------
+# cibuildwheel — produces the manylinux / macOS / Windows binary
+# wheels that PyPI accepts. Without these, ``pip install openbricks``
+# falls back to the sdist and recompiles ``openbricks_sim._native``
+# on the user's machine (slow, requires a C toolchain). With them,
+# install is a download + extract.
+#
+# Build matrix:
+#   * CPython 3.9-3.13 (matches the trove classifiers above).
+#   * Linux x86_64 manylinux_2_28 (CentOS 8 / glibc 2.28 baseline —
+#     covers Ubuntu 18.04+, Debian 10+, RHEL 8+).
+#   * macOS arm64 + x86_64 (universal2 wheel built on macos-latest).
+#   * Windows AMD64.
+#
+# Skipped (reason in parens):
+#   * PyPy (no asks; setuptools Extension would need extra config).
+#   * 32-bit (no asks; saves CI time).
+#   * musllinux (Alpine — straightforward to add later if asked).
+#   * linux aarch64 (would need QEMU emulation; ~10× slower; revisit
+#     when we have a Pi user).
+# ---------------------------------------------------------------------
+[tool.cibuildwheel]
+build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+skip = [
+    "pp*",
+    "*-musllinux*",
+    "*-manylinux_i686",
+    "*-win32",
+]
+# After each wheel builds, install it into a clean venv and import
+# the C extension. Catches a broken wheel at build time instead of
+# after publish.
+test-command = 'python -c "from openbricks_sim import _native; assert hasattr(_native, \"TrapezoidalProfile\"); print(_native.__file__)"'
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+
+[tool.cibuildwheel.macos]
+# Universal2 wheels (x86_64 + arm64 fat binaries) so one wheel
+# covers both Intel and Apple Silicon Macs.
+archs = ["universal2"]
