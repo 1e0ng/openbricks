@@ -142,6 +142,9 @@ _PART_REGISTRY = {
     "3894.dat": _PartSpec(   # 1x6 brick with cross-axle hole — same envelope
         w_ldu=1 * LDU_PER_STUD, d_ldu=6 * LDU_PER_STUD, h_ldu=LDU_PER_BRICK_H,
         stud_grid=_grid_studs(1, 6)),
+    "3703.dat": _PartSpec(   # Technic 1x16 brick with holes (45819)
+        w_ldu=1 * LDU_PER_STUD, d_ldu=16 * LDU_PER_STUD, h_ldu=LDU_PER_BRICK_H,
+        stud_grid=_grid_studs(1, 16)),
     "3022.dat": _PartSpec(   # 2x2 plate
         w_ldu=2 * LDU_PER_STUD, d_ldu=2 * LDU_PER_STUD, h_ldu=LDU_PER_PLATE_H,
         stud_grid=_grid_studs(2, 2)),
@@ -256,19 +259,29 @@ def _emit_geom(name_prefix: str,
 def emit_placement(placement: Placement,
                    *,
                    indent: str = "    ",
-                   per_part_mass_kg: float = 0.001) -> str:
+                   per_part_mass_kg: float = 0.001,
+                   color_override: int = None) -> str:
     """Convert one LDraw placement into MJCF geom lines (brick body
     + visual stud cylinders).
 
     The brick-body geom carries the placement's mass; stud cylinders
     are visual-only (zero mass) so the whole prop's CoM matches the
     bricks' centroids and the stud count doesn't artificially raise
-    the moment of inertia."""
+    the moment of inertia.
+
+    If ``color_override`` is given, it replaces the LDraw colour code
+    on the placement (and on its studs). Useful for shared
+    ``.ldr`` files where the geometry is identical across instances
+    but the colour differs (e.g. Junior visitors and artefacts share
+    the same body shape per colour)."""
     spec = _PART_REGISTRY.get(placement.part)
     if spec is None:
         raise KeyError("no LDraw part spec for {!r} — add to "
                        "_PART_REGISTRY".format(placement.part))
-    material = COLOR_NAME_BY_LDRAW_CODE.get(placement.ldraw_color)
+    effective_color = (color_override
+                       if color_override is not None
+                       else placement.ldraw_color)
+    material = COLOR_NAME_BY_LDRAW_CODE.get(effective_color)
     if material is None:
         # 0 (LDraw black) maps cleanly; everything else falls back
         # to white as a safe default. Add the colour code to the
@@ -323,13 +336,19 @@ def emit_prop_body(name: str,
                    *,
                    freejoint: bool = True,
                    total_mass_kg: float = 0.05,
-                   indent: str = "    ") -> str:
+                   indent: str = "    ",
+                   color_override: int = None) -> str:
     """Convert an LDraw model into a complete MJCF ``<body>`` block.
 
     ``pos_world_m`` is the body's origin in the world frame; the
     LDraw model's frame origin lands there. ``total_mass_kg`` is
     distributed evenly across the brick bodies (visual-only studs
-    carry zero mass)."""
+    carry zero mass).
+
+    ``color_override`` (optional LDraw colour code) overrides every
+    placement's colour. Lets a single ``.ldr`` describe a prop's
+    geometry once and have multiple ``<lego_prop>`` instances colour
+    it differently (Junior visitors and artefacts use this)."""
     placements = parse_ldr(ldr_text)
     if not placements:
         raise ValueError("LDraw text contains no part instances")
@@ -346,6 +365,7 @@ def emit_prop_body(name: str,
         lines.append("{}<freejoint/>".format(inner))
     for placement in placements:
         lines.append(emit_placement(
-            placement, indent=inner, per_part_mass_kg=per_brick_mass))
+            placement, indent=inner, per_part_mass_kg=per_brick_mass,
+            color_override=color_override))
     lines.append("{}</body>".format(indent))
     return "\n".join(lines)

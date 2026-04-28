@@ -1,0 +1,17 @@
+0 WRO 2026 Junior — Visitor (shared geometry across 4 colours)
+0 Per the rules, 4 visitors of different colours (red, blue, green,
+0 black). All same shape; lego_prop's color="..." attribute drives
+0 the colour at world-load time, so this file uses placeholder LDraw
+0 colour 1 (overridden anyway). Source: rules-PDF page 4 photo —
+0 small chunky figure, ~2x2 stud × 4 brick tall.
+0
+0 Stud-grid positions visually estimated. ~5 placements.
+0
+0 ===== 2x2 plate base =====
+1 1 0 0 0 1 0 0 0 1 0 0 0 1 3022.dat
+0
+0 ===== 2x2 brick body, stacked =====
+1 1 0 -8 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 1 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 1 0 -56 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 1 0 -80 0 1 0 0 0 1 0 0 0 1 3003.dat

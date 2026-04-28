@@ -1,0 +1,17 @@
+0 WRO 2026 Junior — Barrier (×2: one red, one white)
+0 Per the rules, 2 barriers on the right end of the field. Source:
+0 rules-PDF page 6 photo — long horizontal beam, ~12 cm long.
+0 lego_prop's color="..." selects red vs white at load time.
+0
+0 Stud-grid positions visually estimated. ~5 placements per barrier.
+0
+0 ===== Long base (1x16 technic brick lengthwise) =====
+1 1 0 0 0 0 0 1 0 1 0 -1 0 0 3703.dat
+0
+0 ===== Top spine (multiple 1x6 bricks) =====
+1 1 -40 -24 0 0 0 1 0 1 0 -1 0 0 3009.dat
+1 1  40 -24 0 0 0 1 0 1 0 -1 0 0 3009.dat
+0
+0 ===== Black end caps =====
+1 0 -80 -8 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 0  80 -8 0 1 0 0 0 1 0 0 0 1 3003.dat

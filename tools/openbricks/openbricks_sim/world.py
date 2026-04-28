@@ -48,8 +48,21 @@ _LEGO_PROP_RE = re.compile(
     r'<lego_prop\s+name="(?P<name>[^"]+)"\s+'
     r'ldr="(?P<ldr>[^"]+)"\s+'
     r'pos="(?P<pos>[^"]+)"\s+'
-    r'mass="(?P<mass>[^"]+)"\s*/>',
+    r'mass="(?P<mass>[^"]+)"'
+    r'(?:\s+color="(?P<color>[^"]+)")?'   # optional LDraw colour override
+    r'\s*/>',
     re.DOTALL)
+
+
+# LDraw colour-code aliases the ``<lego_prop color="...">`` attribute
+# accepts. Numeric strings ("0", "1", "14") are parsed as literal
+# LDraw colour codes; keyword strings (``"red"``, ``"blue"``) map to
+# the canonical LDraw codes via this table. Mirrors the keys in
+# ``lego_mjcf.COLOR_NAME_BY_LDRAW_CODE`` so both sides stay in sync.
+_COLOR_KEYWORD_TO_LDRAW = {
+    "black":  0, "blue":   1, "green":  2, "red":    4,
+    "yellow": 14, "white": 15, "gray":  7,
+}
 
 
 def _expand_lego_props(world_xml: str, world_dir: Path) -> str:
@@ -79,9 +92,23 @@ def _expand_lego_props(world_xml: str, world_dir: Path) -> str:
             raise WorldLoadError(
                 "lego_prop {!r} pos must be 3 floats; got {!r}"
                 .format(m.group("name"), m.group("pos")))
+        color_attr = m.group("color")
+        color_override = None
+        if color_attr is not None:
+            if color_attr.isdigit():
+                color_override = int(color_attr)
+            elif color_attr in _COLOR_KEYWORD_TO_LDRAW:
+                color_override = _COLOR_KEYWORD_TO_LDRAW[color_attr]
+            else:
+                raise WorldLoadError(
+                    "lego_prop {!r} color={!r} unrecognised — use a "
+                    "numeric LDraw code or one of {}".format(
+                        m.group("name"), color_attr,
+                        sorted(_COLOR_KEYWORD_TO_LDRAW.keys())))
         return lego_mjcf.emit_prop_body(
             m.group("name"), pos, ldr_text,
-            total_mass_kg=float(m.group("mass")))
+            total_mass_kg=float(m.group("mass")),
+            color_override=color_override)
     return _LEGO_PROP_RE.sub(_expand, world_xml)
 
 

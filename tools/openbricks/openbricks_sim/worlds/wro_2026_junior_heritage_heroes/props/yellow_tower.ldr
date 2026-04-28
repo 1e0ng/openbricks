@@ -1,0 +1,22 @@
+0 WRO 2026 Junior — Yellow tower (top + base)
+0 Per the rules, 2 yellow tower tops + 2 yellow tower bases
+0 (each tower = base + top, scored together for 25 pts max).
+0 Source: rules-PDF page 4 photo — yellow body with white roof,
+0 small black "window" detail. ~3x3 stud × 5 brick tall total.
+0
+0 Stud-grid positions visually estimated. ~10 placements.
+0 Colours: 14 = yellow, 15 = white, 0 = black.
+0
+0 ===== Yellow base layers =====
+1 14 0 0 0 1 0 0 0 1 0 0 0 1 3032.dat
+1 14 0  -8 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 14 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+0 Black "window" detail
+1 0 0 -32 -20 1 0 0 0 1 0 0 0 1 3022.dat
+0
+0 ===== Top section (separate "tower top" piece visually) =====
+1 14 0 -56 0 1 0 0 0 1 0 0 0 1 3003.dat
+0
+0 ===== White roof =====
+1 15 0 -80 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 15 0 -88 0 1 0 0 0 1 0 0 0 1 3022.dat

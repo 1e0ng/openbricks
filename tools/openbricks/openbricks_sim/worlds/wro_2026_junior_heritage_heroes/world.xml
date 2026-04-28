@@ -77,150 +77,61 @@
           size="0.0075 0.5715 0.02" material="wall"/>
 
     <!-- =========================================================
-         MISSION 3.5 — bonus props (don't damage/move)
+         F2.6: All Junior props as LDraw assemblies, expanded by
+         world.py's lego_prop placeholder. Shared geometry .ldr
+         files (visitor.ldr, artefact.ldr, barrier.ldr) use the
+         lego_prop ``color`` attribute to override the LDraw
+         colour at load time, so a single file does duty for all
+         instances differing only in colour. The fixed-position
+         layout below matches what 0.10.x had; the F3.J
+         randomization spec (a follow-up PR) permutes 4 of the 5
+         artefacts across 4 black target squares per round, and
+         randomises the 10 dirt-particle positions on the
+         cobblestone area.
          ========================================================= -->
-    <!-- Parrot: green LEGO bird sculpture, ~3×3 stud footprint.
-         Upper-mid of the field. -->
-    <body name="parrot" pos="-0.55  0.35  0.040">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.040" mass="0.05" material="lego_green"/>
-      <geom type="box" size="0.020 0.012 0.012" pos="0.014 0 0.020"
-            mass="0.01" material="lego_red"/>
-    </body>
 
-    <!-- Barriers (×2): wooden(brown)/red horizontal beams the robot
-         must route around. ~2×8 stud footprint, ~3 bricks tall. -->
-    <body name="barrier_a" pos="-0.30  0.10  0.020">
-      <freejoint/>
-      <geom type="box" size="0.060 0.014 0.020" mass="0.10" material="lego_brown"/>
-    </body>
-    <body name="barrier_b" pos=" 0.30 -0.05  0.020">
-      <freejoint/>
-      <geom type="box" size="0.060 0.014 0.020" mass="0.10" material="lego_brown"/>
-    </body>
+    <!-- Mission 3.5 bonus: parrot + 2 barriers (don't damage). -->
+    <lego_prop name="parrot"    ldr="props/parrot.ldr"  pos="-0.55 0.35 0.0" mass="0.050"/>
+    <lego_prop name="barrier_a" ldr="props/barrier.ldr" pos="-0.30 0.10 0.0" mass="0.100" color="red"/>
+    <lego_prop name="barrier_b" ldr="props/barrier.ldr" pos="0.30 -0.05 0.0" mass="0.100" color="white"/>
 
-    <!-- =========================================================
-         MISSION 3.1 — 4 visitors, each delivered to its matching-
-         colour area. Visitors start at lower-end of the parking.
-         Body: small upright LEGO figure (~2×2 stud, 4 bricks tall).
-         ========================================================= -->
-    <body name="visitor_red" pos=" 0.65 -0.45  0.025">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.025" mass="0.04" material="lego_red"/>
-    </body>
-    <body name="visitor_blue" pos=" 0.75 -0.45  0.025">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.025" mass="0.04" material="lego_blue"/>
-    </body>
-    <body name="visitor_green" pos=" 0.85 -0.45  0.025">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.025" mass="0.04" material="lego_green"/>
-    </body>
-    <body name="visitor_yellow" pos=" 0.95 -0.45  0.025">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.025" mass="0.04" material="lego_yellow"/>
-    </body>
+    <!-- Mission 3.1: 4 visitors (red / blue / green / black). -->
+    <lego_prop name="visitor_red"   ldr="props/visitor.ldr" pos="0.65 -0.45 0.0" mass="0.040" color="red"/>
+    <lego_prop name="visitor_blue"  ldr="props/visitor.ldr" pos="0.75 -0.45 0.0" mass="0.040" color="blue"/>
+    <lego_prop name="visitor_green" ldr="props/visitor.ldr" pos="0.85 -0.45 0.0" mass="0.040" color="green"/>
+    <lego_prop name="visitor_black" ldr="props/visitor.ldr" pos="0.95 -0.45 0.0" mass="0.040" color="black"/>
 
-    <!-- =========================================================
-         MISSION 3.2 — towers. 2 yellow (each = lower top + 2 pcs
-         base), 2 red (one piece each). Start at the upper half of
-         the field; targets on the lower half (with orange border).
-         ========================================================= -->
-    <!-- Yellow tower A: composite (top + base). One body for the
-         scoring "completely in" check on the whole tower. -->
-    <body name="yellow_tower_a" pos="-0.10  0.30  0.030">
-      <freejoint/>
-      <!-- base (lower) -->
-      <geom type="box" size="0.020 0.020 0.020"
-            mass="0.06" material="lego_yellow"/>
-      <!-- top -->
-      <geom type="box" size="0.014 0.014 0.014" pos="0 0 0.034"
-            mass="0.02" material="lego_yellow"/>
-    </body>
-    <body name="yellow_tower_b" pos=" 0.10  0.30  0.030">
-      <freejoint/>
-      <geom type="box" size="0.020 0.020 0.020"
-            mass="0.06" material="lego_yellow"/>
-      <geom type="box" size="0.014 0.014 0.014" pos="0 0 0.034"
-            mass="0.02" material="lego_yellow"/>
-    </body>
-    <!-- Red towers (single piece). -->
-    <body name="red_tower_a" pos=" 0.30  0.30  0.030">
-      <freejoint/>
-      <geom type="box" size="0.018 0.018 0.030" mass="0.07" material="lego_red"/>
-    </body>
-    <body name="red_tower_b" pos=" 0.50  0.30  0.030">
-      <freejoint/>
-      <geom type="box" size="0.018 0.018 0.030" mass="0.07" material="lego_red"/>
-    </body>
+    <!-- Mission 3.2: 2 yellow towers + 2 red towers. -->
+    <lego_prop name="yellow_tower_a" ldr="props/yellow_tower.ldr" pos="-0.10 0.30 0.0" mass="0.080"/>
+    <lego_prop name="yellow_tower_b" ldr="props/yellow_tower.ldr" pos="0.10 0.30 0.0"  mass="0.080"/>
+    <lego_prop name="red_tower_a"    ldr="props/red_tower.ldr"    pos="0.30 0.30 0.0"  mass="0.070"/>
+    <lego_prop name="red_tower_b"    ldr="props/red_tower.ldr"    pos="0.50 0.30 0.0"  mass="0.070"/>
 
-    <!-- =========================================================
-         MISSION 3.3 — artefacts (4 colours) → matching exhibition
-         spots in the museum (top-right corner of the mat).
-         Artefacts start in the excavation site (centre of mat).
-         ========================================================= -->
-    <body name="artefact_red" pos=" 0.05 -0.05  0.020">
-      <freejoint/>
-      <geom type="cylinder" size="0.018 0.020" mass="0.05" material="lego_red"/>
-    </body>
-    <body name="artefact_yellow" pos=" 0.15 -0.05  0.020">
-      <freejoint/>
-      <geom type="cylinder" size="0.018 0.020" mass="0.05" material="lego_yellow"/>
-    </body>
-    <body name="artefact_green" pos=" 0.05 -0.18  0.020">
-      <freejoint/>
-      <geom type="cylinder" size="0.018 0.020" mass="0.05" material="lego_green"/>
-    </body>
-    <body name="artefact_blue" pos=" 0.15 -0.18  0.020">
-      <freejoint/>
-      <geom type="cylinder" size="0.018 0.020" mass="0.05" material="lego_blue"/>
-    </body>
+    <!-- Mission 3.3: 4 of 5 artefacts on the field per round.
+         Per the rules, 5 colours exist (blue/red/green/black/yellow)
+         but only 4 are placed; the 5th is the round's "unused".
+         F3.J randomization (follow-up) selects which 4 each round.
+         For now we seed all 5 — randomization deletes the chosen
+         "unused" body's geoms each round by placing it off-mat. -->
+    <lego_prop name="artefact_red"    ldr="props/artefact.ldr" pos="0.05 -0.05 0.0" mass="0.050" color="red"/>
+    <lego_prop name="artefact_yellow" ldr="props/artefact.ldr" pos="0.15 -0.05 0.0" mass="0.050" color="yellow"/>
+    <lego_prop name="artefact_green"  ldr="props/artefact.ldr" pos="0.05 -0.18 0.0" mass="0.050" color="green"/>
+    <lego_prop name="artefact_blue"   ldr="props/artefact.ldr" pos="0.15 -0.18 0.0" mass="0.050" color="blue"/>
+    <lego_prop name="artefact_black"  ldr="props/artefact.ldr" pos="0.10 -0.30 0.0" mass="0.050" color="black"/>
 
-    <!-- =========================================================
-         MISSION 3.4 — 10 dirt particles in the cobblestone area
-         (right side). Each is a small flat disc; robot must move
-         each fully out of the cobblestone area.
-         ========================================================= -->
-    <body name="dirt_1" pos=" 0.85  0.10  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_2" pos=" 0.90  0.05  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_3" pos=" 0.95 -0.02  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_4" pos=" 0.98  0.08  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_5" pos=" 0.86 -0.05  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_6" pos=" 0.92 -0.15  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_7" pos=" 1.00  0.12  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_8" pos=" 0.83  0.18  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_9" pos=" 0.88  0.22  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
-    <body name="dirt_10" pos=" 1.02 -0.10  0.005">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.005" mass="0.005" material="lego_brown"/>
-    </body>
+    <!-- Mission 3.4: 10 dirt particles. Same .ldr (a single 1x2
+         tile) instantiated 10 times. F3.J randomization permutes
+         their positions on the cobblestone area each round. -->
+    <lego_prop name="dirt_1"  ldr="props/dirt.ldr" pos="0.85 0.10 0.0"  mass="0.003" color="black"/>
+    <lego_prop name="dirt_2"  ldr="props/dirt.ldr" pos="0.90 0.05 0.0"  mass="0.003" color="black"/>
+    <lego_prop name="dirt_3"  ldr="props/dirt.ldr" pos="0.95 -0.02 0.0" mass="0.003" color="black"/>
+    <lego_prop name="dirt_4"  ldr="props/dirt.ldr" pos="0.98 0.08 0.0"  mass="0.003" color="black"/>
+    <lego_prop name="dirt_5"  ldr="props/dirt.ldr" pos="0.86 -0.05 0.0" mass="0.003" color="black"/>
+    <lego_prop name="dirt_6"  ldr="props/dirt.ldr" pos="0.92 -0.15 0.0" mass="0.003" color="black"/>
+    <lego_prop name="dirt_7"  ldr="props/dirt.ldr" pos="1.00 0.12 0.0"  mass="0.003" color="black"/>
+    <lego_prop name="dirt_8"  ldr="props/dirt.ldr" pos="0.83 0.18 0.0"  mass="0.003" color="black"/>
+    <lego_prop name="dirt_9"  ldr="props/dirt.ldr" pos="0.88 0.22 0.0"  mass="0.003" color="black"/>
+    <lego_prop name="dirt_10" ldr="props/dirt.ldr" pos="1.02 -0.10 0.0" mass="0.003" color="black"/>
 
     <!-- Overhead camera for scene preview. -->
     <camera name="overhead" pos="0 0 2.6" xyaxes="1 0 0 0 1 0"/>
