@@ -3,6 +3,86 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.10 — Phase F3: per-round randomization (Elementary)
+
+Per the WRO General Rules glossary ("Robot Round" definition):
+"Before the round starts with the first team but after all robots
+are placed on the robot parking, randomizations to game fields (if
+any) are done." That's the part of the challenge that forces
+robots to perceive the field rather than rely on hardcoded
+positions. 0.10.10 brings the same to openbricks-sim:
+
+```
+openbricks sim preview --world wro-2026-elementary --seed 42
+openbricks sim run     --world wro-2026-elementary --seed 7  main.py
+```
+
+Each integer seed produces a deterministic permutation; same seed
+twice gives the same layout. Without `--seed`, randomization is
+non-deterministic per run.
+
+The Elementary spec (the only one wired in 0.10.10): the four
+notes `black`, `white`, `yellow`, `blue` are permuted across four
+fixed light-green start squares at the upper end of the mat. Per
+the Game Rules PDF p7: "Four of the notes (black, white, yellow,
+blue) are randomly placed on the four light-green squares at the
+upper end of the game field. The positions of the green and red
+note are not random." So 4! = 24 distinct layouts; the red and
+green notes stay at fixed positions.
+
+The four slot coordinates were extracted from the actual mat
+artwork (the high-res `mat.png` shipped in 0.10.8), not estimated.
+`scripts/extract-wro-slot-coords.py` finds connected components
+of pixels matching a target colour in a strip of the mat and
+prints centroids in mat-local world coordinates. Re-run when
+WRO updates the mat artwork. For the Elementary mat with target
+RGB (144, 208, 112) and tolerance 32, the script identifies four
+clusters of identical size (35,532 px each, ≈32×32 mm) at:
+
+```
+world (+0.0499, +0.4881) m   <- slot_1
+world (+0.1818, +0.4881) m   <- slot_2
+world (+0.5775, +0.4881) m   <- slot_3
+world (+0.7094, +0.4881) m   <- slot_4
+```
+
+Implementation surface in `openbricks_sim.randomization`:
+
+```python
+from openbricks_sim import randomization
+layout = randomization.randomize(model, data,
+                                 world="wro-2026-elementary",
+                                 seed=N)
+# {"note_black": "slot_2", "note_white": "slot_4", ...}
+```
+
+For each note it:
+- locates the body's freejoint and writes `(x, y)` directly into
+  `data.qpos` at the joint's qpos address;
+- preserves the body's resting Z from `model.body_pos` (the value
+  authored in the world XML), so the mixed-shape notes
+  (sphere/box/cylinder of differing heights) all sit on the mat
+  correctly after randomization;
+- zeroes the freejoint's `qvel` so the body doesn't carry any
+  pre-randomization motion;
+- calls `mj_forward` once at the end to refresh `xpos` /
+  `cam_xpos` / sensor reads.
+
+Test pins in `test_randomization.py` (7 tests):
+- determinism (same seed → same layout);
+- 4! = 24 distinct layouts achievable (200 seeds, 24 unique
+  results);
+- every randomized note lands at one of the 4 spec slots;
+- no two notes ever share a slot;
+- the fixed `note_red` / `note_green` don't move;
+- per-note Z is preserved through randomization;
+- unknown world raises `KeyError` (Junior + Senior today; spec
+  KeyError is how the CLI knows to skip the print).
+
+Junior and Senior randomization specs land in follow-up PRs once
+their Game Rules PDFs are read into specs. The mechanism is
+ready; the `_SPECS` dict just needs another entry.
+
 ## 0.10.9 — fix: drop mjpython, use blocking `mujoco.viewer.launch`
 
 User-reported on 0.10.8: `openbricks sim preview --world
