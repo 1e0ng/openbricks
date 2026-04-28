@@ -1,0 +1,27 @@
+0 WRO 2026 Elementary RoboMission — Congas prop
+0 Name: congas.ldr
+0
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, congas build pages.
+0 Per the rules-PDF page-4 photo: pair of red drum cylinders on
+0 a yellow stand. We approximate the cylinders with stacked
+0 2x2 round bricks (3941 — round 2x2 with axle hole, in 45819).
+0
+0 Stud-grid positions visually estimated.
+0 Colours: 4 = red, 14 = yellow.
+0
+0 ===== Yellow base plate (4x6) =====
+1 14 0 0 0 1 0 0 0 1 0 0 0 1 3032.dat
+0
+0 ===== Layer 1: 4× yellow 2x2 bricks forming the base/stand =====
+1 14 -20 -8 -40 1 0 0 0 1 0 0 0 1 3003.dat
+1 14  20 -8 -40 1 0 0 0 1 0 0 0 1 3003.dat
+1 14 -20 -8  40 1 0 0 0 1 0 0 0 1 3003.dat
+1 14  20 -8  40 1 0 0 0 1 0 0 0 1 3003.dat
+0
+0 ===== Layer 2-4: red 2x2 bricks stacking up as the conga drums =====
+1 4 0 -32 -20 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -32  20 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -56 -20 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -56  20 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -80 -20 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -80  20 1 0 0 0 1 0 0 0 1 3003.dat
