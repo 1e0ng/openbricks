@@ -26,6 +26,8 @@ pip install -e 'tools/openbricks[sim]'
 
 `[sim]` adds `mujoco` (~50 MB, native OpenGL) and `numpy` — most users (flash + run + log) don't need it. Without `[sim]`, `openbricks sim …` prints a helpful "pip install openbricks[sim]" hint instead of crashing.
 
+> **Note (0.10.x):** the package currently ships sdist-only. `pip install openbricks` compiles the bundled native extension (`openbricks_sim._native`) on first install, so a C compiler + Python headers are required (`gcc` / `clang` on Linux/macOS, MSVC on Windows). Manylinux wheels via cibuildwheel are a follow-up — when those land, fresh installs will be faster and toolchain-free.
+
 ## Commands
 
 ### `flash` — program a hub

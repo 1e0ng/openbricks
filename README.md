@@ -42,9 +42,22 @@ New drivers just need to implement one of the abstract interfaces in `openbricks
 
 ## Quick start
 
-Once the firmware is flashed, `openbricks` is already importable at the REPL. Wire it up in Python, Pybricks-style:
+### Install the host tooling
+
+```
+pipx install 'openbricks[sim]'   # CLI + MuJoCo simulator
+# or, lighter:
+pipx install openbricks          # CLI only (flash / run / log)
+```
+
+(`pip install` works too; `pipx` is recommended on modern macOS / Linux to avoid the "externally managed environment" error.) The package is on PyPI: <https://pypi.org/project/openbricks/>.
+
+### Drive a robot
+
+Once the firmware is flashed, write a `main.py` and push it to the hub:
 
 ```python
+# main.py
 from machine import I2C, Pin
 from openbricks.drivers.l298n import L298NMotor
 from openbricks.drivers.bno055 import BNO055
@@ -64,7 +77,14 @@ print(color.rgb())         # (r, g, b) 0-255
 print(imu.heading())       # degrees
 ```
 
-See `examples/full_robot.py` for a longer end-to-end demo.
+Then run it:
+
+```
+openbricks run -n RobotA main.py             # on a real hub over BLE
+openbricks sim run main.py --world empty     # in MuJoCo, no hardware needed
+```
+
+The same script runs on both targets — the sim's driver shim replaces `machine` and the `openbricks._native` module with sim-aware versions, so `JGB37Motor` / `BNO055` / `TCS34725` calls hit MuJoCo bodies instead of GPIO. See `tools/openbricks/examples/` for more samples and `tools/openbricks/CHANGELOG.md` for the migration story if you're coming from the legacy `openbricks-dev` / `openbricks-sim` packages.
 
 ## Why openbricks (vs Pybricks)
 
