@@ -4,10 +4,22 @@
 // See ``drivebase_core.h`` for the design notes; this file is just
 // the math, with no MicroPython / Python.h symbols.
 
+// Windows / MSVC hides M_PI behind this feature macro. Must come
+// before <math.h>. No-op on POSIX compilers (gcc / clang) where
+// M_PI is exposed unconditionally.
+#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdbool.h>
 
 #include "drivebase_core.h"
+
+// Belt-and-suspenders: even with ``_USE_MATH_DEFINES`` set, some
+// embedded toolchains (older newlib variants, occasional MinGW
+// configurations) still don't expose ``M_PI``. Define it inline if
+// the system header didn't.
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 
 void ob_drivebase_init(ob_drivebase_t *db,
