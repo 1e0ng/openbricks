@@ -17,10 +17,57 @@ firmware-targeting code runs unchanged) lands in Phase C3 — for now,
 """
 
 import argparse
+import os
 import runpy
 import sys
+from pathlib import Path
 
 from openbricks_sim.chassis import ChassisSpec
+
+
+def _relaunch_under_mjpython_if_needed():
+    """Re-exec the current invocation under mjpython on macOS.
+
+    MuJoCo's interactive viewer (``mujoco.viewer.launch_passive`` and
+    friends) needs to control the main thread for OpenGL on macOS,
+    which Python's REPL doesn't give it — hence MuJoCo ships
+    ``mjpython``, a small wrapper that does. Without this redirect,
+    ``openbricks sim preview --world wro-2026-elementary`` on macOS
+    blows up with ``RuntimeError: launch_passive requires that the
+    Python script be run under mjpython on macOS`` and a stack trace
+    that's no help to a robotics user.
+
+    The helper only fires when we're (a) on macOS, (b) not already
+    under mjpython, and (c) calling a subcommand that opens the GUI
+    viewer. When that's true, we ``execv`` mjpython with the same
+    arguments — the relaunched process picks up where this one would
+    have, model load + viewer call all happen there. The current
+    process is replaced; this function does not return.
+
+    No-op on Linux / Windows (where Python's main thread already
+    suits MuJoCo). No-op when ``mjpython`` isn't alongside the
+    running Python (unusual; would only happen if someone installed
+    mujoco from a stripped wheel) — in that case the upstream
+    RuntimeError still fires and the user gets MuJoCo's own message.
+    """
+    if sys.platform != "darwin":
+        return
+    if Path(sys.executable).name == "mjpython":
+        return
+    mjpython = Path(sys.executable).parent / "mjpython"
+    if not mjpython.is_file():
+        return
+    # Reconstruct the sim-CLI argv. When invoked as ``openbricks sim
+    # preview ...``, ``sys.argv`` is ``[".../openbricks", "sim",
+    # "preview", ...]``; when invoked as ``python -m openbricks_sim
+    # preview ...`` it's ``[".../site-packages/openbricks_sim/
+    # __main__.py", "preview", ...]``. In both cases everything after
+    # the leading wrapper is what we want to forward to mjpython.
+    argv = list(sys.argv[1:])
+    if argv and argv[0] == "sim":
+        argv = argv[1:]
+    os.execv(str(mjpython),
+             [str(mjpython), "-m", "openbricks_sim", *argv])
 
 
 _BUILTIN_WORLDS = {
@@ -59,6 +106,12 @@ def _resolve_world(arg: str):
 
 
 def cmd_preview(args):
+    # Re-exec under mjpython if needed before any model load — saves
+    # the duplicate work that a "load → relaunch → reload" path would
+    # cost. Only fires for the GUI viewer; ``--headless`` skips this.
+    if not args.headless:
+        _relaunch_under_mjpython_if_needed()
+
     from openbricks_sim import chassis as chassis_mod
     from openbricks_sim.world import load_world
 
@@ -116,6 +169,14 @@ def cmd_run(args):
     scripts that want to drive ``robot`` / ``drivebase`` directly with
     the openbricks_sim API.
     """
+    # Re-exec under mjpython before model load if the user asked for
+    # the viewer (the alternative would be: build the SimRobot, run
+    # the script, then ``robot.run_viewer()`` blows up at the end —
+    # wasting all the work the script did). ``--no-viewer`` runs are
+    # plain Python, no relaunch needed.
+    if args.viewer:
+        _relaunch_under_mjpython_if_needed()
+
     from openbricks_sim.robot import SimRobot
     from openbricks_sim import shim
 
