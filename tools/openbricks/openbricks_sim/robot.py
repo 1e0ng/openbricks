@@ -68,10 +68,12 @@ def _resolve_world(world):
         rel = _BUILTIN_WORLDS[world]
         if rel is None:
             return None
-        # Aliases are repo-relative; the openbricks-sim package lives
-        # at ``tools/openbricks-sim/openbricks_sim/`` and the worlds
-        # are siblings of the package directory.
-        pkg_root = Path(__file__).resolve().parent.parent
+        # Aliases are package-relative — the worlds directory ships
+        # inside ``openbricks_sim/`` so the wheel bundles them, and
+        # ``Path(__file__).parent`` resolves to the installed package
+        # root regardless of how the user installed (pip, pipx,
+        # editable, sdist-compile).
+        pkg_root = Path(__file__).resolve().parent
         candidate = pkg_root / rel
         if candidate.is_file():
             return str(candidate)

@@ -3,6 +3,48 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.6 — fix: bundle world XMLs into the wheel
+
+Every wheel published 0.10.3 → 0.10.5 shipped without the WRO and
+practice-world MJCFs. End users hit
+`WorldLoadError: world file not found: wro-2026-elementary` even
+though `openbricks sim --help` listed the alias.
+
+Root cause: the `worlds/` directory lived at
+`tools/openbricks/worlds/` — outside the `openbricks_sim` Python
+package — so `[tool.setuptools.packages.find]` (which only catches
+`*.py` files inside the package) didn't pick it up. `MANIFEST.in`'s
+`recursive-include worlds *.xml` seeded the *sdist* but not the
+wheel. CI's smoke-tests passed because they ran from an editable
+install (`pip install -e ".[sim,dev]"`), where the worlds exist
+next to the package on the developer's disk.
+
+The fix:
+
+  * `worlds/` moved inside the package: now at
+    `tools/openbricks/openbricks_sim/worlds/` (10 files: 5 worlds
+    × `world.xml` + per-world `README.md` + the 3 WRO `mat.png`
+    textures).
+  * `[tool.setuptools.package-data]` added to `pyproject.toml` so
+    the XMLs / PNGs / MDs ride along into the wheel.
+  * `_resolve_world()` in both `cli.py` and `robot.py` now uses
+    `Path(__file__).parent` (the installed package root) instead
+    of `parent.parent` (the now-non-existent sibling sit).
+  * `MANIFEST.in` no longer needs the `recursive-include worlds`
+    line — package-data covers both sdist and wheel.
+
+Regression test in `tests/test_wheel_bundles_worlds.py` builds a
+fresh wheel and asserts `world.xml` for every alias plus `mat.png`
+for the textured WRO worlds. Same gating shape as
+`test_sdist_build.py`.
+
+If you installed 0.10.3, 0.10.4, or 0.10.5, `pip install --upgrade
+openbricks[sim]` to 0.10.6 — the alias resolution will start
+working without any code changes on your end. (Also: 0.10.5 is the
+last release with this bug; we'd recommend `pip install
+'openbricks[sim]==0.10.6'` to avoid resolver pickup of the broken
+versions.)
+
 ## 0.10.5 — sim: practice-zones and practice-walls learning worlds
 
 Two small worlds for users iterating on sim code without wrestling

@@ -43,11 +43,13 @@ def _resolve_world(arg: str):
         rel = _BUILTIN_WORLDS[arg]
         if rel is None:
             return None
-        # Aliases are repo-relative. ``openbricks-sim`` is installed
-        # as a package but the worlds live outside the package for
-        # now — look for them next to ``tools/openbricks-sim``.
+        # Aliases are package-relative — the worlds directory ships
+        # inside ``openbricks_sim/`` so the wheel bundles them, and
+        # ``Path(__file__).parent`` resolves to the installed package
+        # root regardless of how the user installed (pip, pipx,
+        # editable, sdist-compile).
         from pathlib import Path
-        pkg_dir = Path(__file__).resolve().parent.parent
+        pkg_dir = Path(__file__).resolve().parent
         candidate = pkg_dir / rel
         if candidate.is_file():
             return str(candidate)
