@@ -3,6 +3,40 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.4 — sim Phase E1: pixel-accurate colour-sensor texture sampling
+
+`SimColorSensor` now samples the actual texture pixel at the chassis
+position when driving over a textured plane (the WRO-mat use case),
+instead of returning the material's flat tint. The 0.10.x sensor
+saw a single colour everywhere on a printed mat; 0.10.4 reads the
+real printed pattern.
+
+Implementation is CPU-side: the sensor reads `model.tex_data`
+directly, computes UV from the geom-local hit point, and indexes
+the texel. No GL context, no offscreen rendering, no platform
+divergence — works on macOS / Linux / Windows identically. The
+phase was originally scoped as "Linux EGL headless rendering," but
+EGL is only required for scenes with shadows / lighting / overlays;
+for a flat printed mat the texel itself IS the answer.
+
+Surface-colour resolution in `SimColorSensor` now dispatches on
+what the ray hit:
+
+  * Textured plane geom — sample the texture at the (u, v) of the
+    world hit point (the WRO mat path).
+  * Untextured material — material's `rgba` (the previous behaviour
+    on solid-colour floors, kept unchanged).
+  * No material — geom's own `rgba`.
+
+Six new tests in `test_color_sensor.py::TexturedPlaneSamplingTests`
+pin the four-quadrant checker mapping and `texrepeat` re-tiling.
+All 246 existing host tests untouched.
+
+Future work — full MuJoCo offscreen rendering with `MUJOCO_GL=egl`
+on Linux — only becomes relevant when sim scenes grow more complex
+than a printed mat (3D coloured obstacles casting shadows on the
+sensor's view, translucent overlays). Not yet prioritised.
+
 ## 0.10.3 — manylinux + macOS + Windows binary wheels
 
 `pip install openbricks` now downloads a prebuilt binary wheel
