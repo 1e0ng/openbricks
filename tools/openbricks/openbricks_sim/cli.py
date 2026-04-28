@@ -25,6 +25,33 @@ from pathlib import Path
 from openbricks_sim.chassis import ChassisSpec
 
 
+# When we ``execv`` mjpython, the relaunched process needs to know
+# it's already been redirected so it doesn't loop. mjpython sets
+# ``sys.executable`` to its inner ``python3`` (not to itself), so a
+# naive ``Path(sys.executable).name == "mjpython"`` check fails and
+# we'd re-exec into mjpython forever — observed in 0.10.7 as a
+# repeating "Task policy set failed: 4 ((os/kern) invalid argument)"
+# at ~4 Hz on the user's terminal until they Ctrl+C. The env-var
+# marker survives execv (the child process inherits ``os.environ``)
+# and is what we actually trust. The ``sys.executable`` check
+# remains as a secondary signal for the case where someone directly
+# runs ``mjpython -m openbricks_sim ...`` without our helper firing.
+_MJPYTHON_RELAUNCH_MARKER = "OPENBRICKS_MJPYTHON_RELAUNCHED"
+
+
+def _running_under_mjpython() -> bool:
+    """Best-effort detection of whether we're already inside mjpython.
+
+    Either we set ``OPENBRICKS_MJPYTHON_RELAUNCHED`` on a previous
+    self-relaunch, or ``sys.executable`` actually names ``mjpython``
+    (rare — most mjpython releases set it to the inner ``python3``,
+    but a future / older release could differ). Either signal is
+    enough to skip another relaunch."""
+    if os.environ.get(_MJPYTHON_RELAUNCH_MARKER):
+        return True
+    return Path(sys.executable).name == "mjpython"
+
+
 def _relaunch_under_mjpython_if_needed():
     """Re-exec the current invocation under mjpython on macOS.
 
@@ -39,10 +66,11 @@ def _relaunch_under_mjpython_if_needed():
 
     The helper only fires when we're (a) on macOS, (b) not already
     under mjpython, and (c) calling a subcommand that opens the GUI
-    viewer. When that's true, we ``execv`` mjpython with the same
-    arguments — the relaunched process picks up where this one would
-    have, model load + viewer call all happen there. The current
-    process is replaced; this function does not return.
+    viewer. When that's true, we set the relaunch-marker env var
+    and ``execv`` mjpython with the same arguments — the relaunched
+    process picks up where this one would have, model load + viewer
+    call all happen there. The current process is replaced; this
+    function does not return.
 
     No-op on Linux / Windows (where Python's main thread already
     suits MuJoCo). No-op when ``mjpython`` isn't alongside the
@@ -52,7 +80,7 @@ def _relaunch_under_mjpython_if_needed():
     """
     if sys.platform != "darwin":
         return
-    if Path(sys.executable).name == "mjpython":
+    if _running_under_mjpython():
         return
     mjpython = Path(sys.executable).parent / "mjpython"
     if not mjpython.is_file():
@@ -66,6 +94,9 @@ def _relaunch_under_mjpython_if_needed():
     argv = list(sys.argv[1:])
     if argv and argv[0] == "sim":
         argv = argv[1:]
+    # Marker survives execv via inherited environment; the relaunched
+    # process sees it and short-circuits this helper.
+    os.environ[_MJPYTHON_RELAUNCH_MARKER] = "1"
     os.execv(str(mjpython),
              [str(mjpython), "-m", "openbricks_sim", *argv])
 

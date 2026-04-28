@@ -3,6 +3,42 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.9 — fix: prevent mjpython auto-relaunch from looping infinitely
+
+The 0.10.7 mjpython auto-relaunch helper used
+`Path(sys.executable).name == "mjpython"` to detect "already
+relaunched, skip the helper." That assumption is wrong: most
+mjpython releases set `sys.executable` to the *inner* `python3`
+(the binary mjpython exec'd into), not to mjpython itself. Result:
+the relaunched process saw `sys.executable=".../python3"`, decided
+it wasn't under mjpython, and re-exec'd into mjpython — over and
+over, ~4 times/second, with the user's terminal scrolling
+"Task policy set failed: 4 ((os/kern) invalid argument)" until
+they Ctrl+C.
+
+Fix: set `OPENBRICKS_MJPYTHON_RELAUNCHED=1` in `os.environ`
+*before* `os.execv`. The env survives the exec, the relaunched
+process sees the marker, and the helper short-circuits. The old
+`sys.executable` check is kept as a secondary signal for the
+case where someone runs `mjpython -m openbricks_sim ...` manually
+without our helper firing.
+
+Test pin: `RelaunchUnderMjpythonTests::test_noop_when_relaunch_marker_set`
+mocks the post-relaunch state (`sys.executable` names `python3`,
+not `mjpython`) and asserts the helper does NOT re-execv.
+`test_relaunches_with_sim_subcommand_stripped` was extended to
+assert the env marker is set BEFORE the execv call.
+
+Note: this fix only matters when mjpython itself works. On Python
+3.14 + recent macOS releases mjpython has a separate hang in
+`_mjpython_init` (Task policy set failed at QoS init) that needs
+mjpython itself to ship a fix or users to drop to Python 3.13:
+
+    pipx uninstall openbricks
+    pipx install --python python3.13 'openbricks[sim]'
+
+That's an mjpython issue, not ours.
+
 ## 0.10.8 — Phase F1: high-fidelity WRO 2026 mat textures (150 dpi)
 
 The three WRO 2026 mats (Elementary, Junior, Senior) were shipped

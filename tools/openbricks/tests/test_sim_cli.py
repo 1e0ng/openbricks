@@ -2,6 +2,7 @@
 """Tests for the openbricks-sim CLI argparse + dispatch."""
 
 import io
+import os
 import unittest
 from unittest.mock import patch
 
@@ -85,11 +86,37 @@ class RelaunchUnderMjpythonTests(unittest.TestCase):
             cli._relaunch_under_mjpython_if_needed()
             mock_execv.assert_not_called()
 
-    def test_noop_when_already_under_mjpython(self):
+    def test_noop_when_already_under_mjpython_via_executable_name(self):
+        # Defensive path: some mjpython releases (or future ones) set
+        # ``sys.executable`` to themselves rather than the inner python3.
+        # Honour that signal too.
         with patch("openbricks_sim.cli.sys") as mock_sys, \
-             patch("openbricks_sim.cli.os.execv") as mock_execv:
+             patch("openbricks_sim.cli.os.execv") as mock_execv, \
+             patch.dict("openbricks_sim.cli.os.environ", {}, clear=True):
             mock_sys.platform = "darwin"
             mock_sys.executable = "/path/to/venv/bin/mjpython"
+            cli._relaunch_under_mjpython_if_needed()
+            mock_execv.assert_not_called()
+
+    def test_noop_when_relaunch_marker_set(self):
+        # Primary path: we set ``OPENBRICKS_MJPYTHON_RELAUNCHED=1``
+        # before ``os.execv``, the env survives the exec, and the
+        # relaunched process detects the marker so it doesn't relaunch
+        # again. This is the test that pins the 0.10.7 → 0.10.9
+        # regression: without the marker, the relaunched process saw
+        # ``sys.executable=".../python3"`` (mjpython's inner Python),
+        # decided we weren't under mjpython, and re-exec'd into
+        # mjpython forever — about 4 relaunches/second until Ctrl+C.
+        with patch("openbricks_sim.cli.sys") as mock_sys, \
+             patch("openbricks_sim.cli.os.execv") as mock_execv, \
+             patch.dict("openbricks_sim.cli.os.environ",
+                        {"OPENBRICKS_MJPYTHON_RELAUNCHED": "1"},
+                        clear=True):
+            mock_sys.platform = "darwin"
+            # Note: sys.executable names ``python3``, not ``mjpython``
+            # — exactly the post-relaunch scenario where the executable
+            # check alone would FAIL. Only the env-var marker saves us.
+            mock_sys.executable = "/path/to/venv/bin/python3"
             cli._relaunch_under_mjpython_if_needed()
             mock_execv.assert_not_called()
 
@@ -119,15 +146,22 @@ class RelaunchUnderMjpythonTests(unittest.TestCase):
         # only ``["preview", "--world", "X"]`` (the leading "sim"
         # is the openbricks-CLI dispatch keyword, not part of the
         # sim CLI's own argv).
+        #
+        # Plus: the relaunch must set ``OPENBRICKS_MJPYTHON_RELAUNCHED=1``
+        # in the env BEFORE calling execv, so the relaunched process
+        # short-circuits the helper instead of looping.
         from pathlib import Path
         recorded = {}
 
         def fake_execv(path, argv):
             recorded["path"] = path
             recorded["argv"] = argv
+            recorded["env_marker"] = os.environ.get(
+                "OPENBRICKS_MJPYTHON_RELAUNCHED")
 
         with patch("openbricks_sim.cli.sys") as mock_sys, \
              patch("openbricks_sim.cli.os.execv", side_effect=fake_execv), \
+             patch.dict("openbricks_sim.cli.os.environ", {}, clear=True), \
              patch("openbricks_sim.cli.Path") as mock_path_cls:
             mock_sys.platform = "darwin"
             mock_sys.executable = "/venv/bin/python"
@@ -167,6 +201,11 @@ class RelaunchUnderMjpythonTests(unittest.TestCase):
              "preview", "--world", "wro-2026-elementary"],
             "expected the leading ``sim`` to be stripped before "
             "re-executing under mjpython")
+        self.assertEqual(
+            recorded["env_marker"], "1",
+            "OPENBRICKS_MJPYTHON_RELAUNCHED must be set BEFORE execv "
+            "so the relaunched process sees it and short-circuits — "
+            "without it the relaunch loops at ~4 Hz on macOS")
 
 
 class RunSubcommandTests(unittest.TestCase):
