@@ -3,6 +3,51 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.9 — fix: drop mjpython, use blocking `mujoco.viewer.launch`
+
+User-reported on 0.10.8: `openbricks sim preview --world
+wro-2026-elementary` on macOS 26.4.1 (Tahoe) with mujoco 3.8 hangs
+in mjpython's `_mjpython_init` with the kernel spamming "Task
+policy set failed: 4 ((os/kern) invalid argument)" at ~4 Hz. The
+hang reproduces even when invoking `mjpython -m openbricks_sim
+preview ...` directly, with no openbricks helper involved.
+
+Root cause: macOS recently tightened `task_policy_set()`
+permissions for QoS class promotion, and the version of mjpython
+bundled with mujoco 3.8 hasn't caught up. mjpython's GLFW
+main-thread handoff never completes, so the viewer thread sits
+on `threading.wait()` forever.
+
+The fix sidesteps mjpython entirely. MuJoCo also exposes
+`mujoco.viewer.launch(model, data)` — the blocking variant —
+which runs MuJoCo's own time loop on the calling thread instead
+of returning control to Python. The blocking variant doesn't need
+the main-thread handoff that `launch_passive` requires on macOS,
+so it works on this user's macOS 26 with plain Python (no
+mjpython wrapper). User confirmed `mujoco.viewer.launch(model,
+data)` opens a window cleanly on their box.
+
+The 0.10.7 mjpython auto-relaunch helper, the 0.10.7 viewer
+manual-stepping loop in `cmd_preview`, and the corresponding
+manual-stepping loop in `SimRobot.run_viewer` are all removed.
+`cmd_preview` now just calls `mujoco.viewer.launch(model, data)`.
+`SimRobot.run_viewer` does the same. The `until` callback param
+on `run_viewer` is kept for backwards-compat in the signature
+but is now ignored — blocking `launch` doesn't return control
+until the user closes the window, so a Python-side predicate
+couldn't end it early. Scripts that need predicate-driven
+termination should use `run_for` / `run_until` instead.
+
+Tests removed: the four `RelaunchUnderMjpythonTests` from
+`test_sim_cli.py` are gone (they covered the now-deleted helper).
+Tests on `cmd_preview --headless` and on `run --viewer` still
+gate the surrounding behaviour; the actual GUI-launch is
+manually exercised on macOS / Linux / Windows.
+
+Net code change is a simplification: ~70 lines deleted, ~5 added.
+The 0.10.7 + 0.10.9 (closed PR #94) work was in the wrong
+direction; this is the right fix.
+
 ## 0.10.8 — Phase F1: high-fidelity WRO 2026 mat textures (150 dpi)
 
 The three WRO 2026 mats (Elementary, Junior, Senior) were shipped
