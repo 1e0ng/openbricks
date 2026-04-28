@@ -329,24 +329,31 @@ class SimRobot:
     # so user scripts can opt into it without importing mujoco.viewer.
 
     def run_viewer(self, until: Optional[Callable[[], bool]] = None) -> None:
-        """Open MuJoCo's bundled viewer and step real-time until the
-        user closes the window or ``until()`` (if given) fires.
+        """Open MuJoCo's bundled viewer on the current model + data.
+
+        Uses ``mujoco.viewer.launch`` (blocking) — the variant that
+        owns the main thread for OpenGL on macOS, so no ``mjpython``
+        is needed. The viewer runs MuJoCo's own time loop until the
+        user closes the window. The pre-0.10.9 version drove the
+        runtime's ``step()`` from a Python loop using ``launch_passive``
+        + a manual sync; that path required ``mjpython`` on macOS,
+        which currently hangs at GLFW init on macOS 26 + recent
+        ``mujoco`` releases. The blocking variant sidesteps both.
+
+        ``until`` is accepted for backwards compatibility but is no
+        longer wired in (the blocking viewer does not return control
+        to Python until the window closes, so a Python-side predicate
+        couldn't end it early). User scripts that need predicate-
+        driven termination should use ``run_for`` / ``run_until``
+        which step the sim from Python.
 
         Convenience for example scripts; tests use ``run_for`` /
         ``run_until`` instead."""
+        del until  # see docstring — see issue
         try:
             import mujoco.viewer
         except ImportError as e:
             raise SimRobotError(
                 "mujoco.viewer not available — install a newer mujoco "
                 "wheel or use run_for / run_until instead") from e
-        with mujoco.viewer.launch_passive(self.model, self.data) as viewer:
-            t0 = time.time()
-            while viewer.is_running():
-                if until is not None and until():
-                    break
-                self.runtime.step()
-                lag = self.data.time - (time.time() - t0)
-                viewer.sync()
-                if lag > 0.0:
-                    time.sleep(lag)
+        mujoco.viewer.launch(self.model, self.data)
