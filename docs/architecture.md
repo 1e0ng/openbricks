@@ -120,9 +120,21 @@ All foundational milestones are landed. Roadmap items completed:
 
 Sim phases (host-side): A (chassis + worlds) → B (shared C cores) →
 C (runtime + driver shim) → D (sensors + scenario reset / scoring)
-all landed. Phase E (Linux EGL headless rendering for pixel-accurate
-colour-sensor texture sampling, broader worlds library, more example
-walkthroughs) is open.
+all landed. Phase E1 — pixel-accurate colour-sensor texture
+sampling — landed via CPU-side sampling: the sensor reads
+``model.tex_data`` directly, computes UV from the geom-local hit
+point, and indexes the texel. No offscreen GL context, no platform
+divergence, works on macOS / Linux / Windows. Originally scoped as
+"Linux EGL headless rendering" but the EGL machinery is only needed
+for scenes with shadows / lighting / overlays over the textured
+plane — the WRO use case is a flat printed mat where the texture IS
+the answer.
+
+Remaining in Phase E: broader worlds library, more example
+walkthroughs. EGL offscreen rendering would unlock simulation of
+scenes more complex than a printed mat (e.g. coloured 3D obstacles
+that cast shadows onto the colour sensor's view); not yet
+prioritised.
 
 Upgrading the α-β observer to a pbio-style model-based observer
 (voltage/current coupling + motor model) is on the longer-term list —
