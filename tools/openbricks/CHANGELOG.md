@@ -3,6 +3,39 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.5 — sim: practice-zones and practice-walls learning worlds
+
+Two small worlds for users iterating on sim code without wrestling
+with a full WRO mat:
+
+  * **practice-zones** — 1.5 × 1.5 m white floor with red / green /
+    blue 150 × 150 mm slabs in a triangle around the chassis spawn.
+    Pair with the colour sensor and `robot.chassis_in_box(...)` for
+    "drive to the X zone" missions. The Phase E1 surface dispatch
+    routes the colour-sensor raycast on the slabs' solid `rgba` to
+    the material-rgba path, so reads are deterministic.
+  * **practice-walls** — 2 × 2 m grey floor with three perpendicular
+    walls forming a corridor open on +X. Pair with the distance
+    sensor (HC-SR04 / VL53L0X / VL53L1X) for obstacle-avoidance
+    practice.
+
+Both registered in the CLI + `SimRobot` world-alias maps as
+`practice-zones` and `practice-walls`. Each ships with a `README.md`
+documenting layout + suggested missions.
+
+```
+openbricks sim preview --world practice-zones
+openbricks sim run --world practice-walls my_avoidance.py
+```
+
+CI smoke-tests both worlds headlessly on every push, alongside the
+existing three WRO worlds.
+
+The 0.10.4 release was prepared but not tagged; this version
+collapses Phase E1 + practice-worlds into a single PyPI release.
+The 0.10.4 changelog entry below describes the colour-sensor
+texture-sampling work that 0.10.5 also includes.
+
 ## 0.10.4 — sim Phase E1: pixel-accurate colour-sensor texture sampling
 
 `SimColorSensor` now samples the actual texture pixel at the chassis
