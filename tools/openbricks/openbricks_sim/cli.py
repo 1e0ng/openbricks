@@ -58,6 +58,27 @@ def _resolve_world(arg: str):
     return arg
 
 
+def _maybe_randomize(model, data, args):
+    """Apply per-round randomization if the world has a spec.
+
+    Skips silently for worlds without a spec (e.g. ``empty``,
+    ``practice-*``, raw paths) — randomization is opt-in per
+    world. Prints the chosen layout to stderr so the user knows
+    what was permuted, mirroring the way a WRO judge announces
+    each round's randomization at the table."""
+    from openbricks_sim import randomization
+    try:
+        layout = randomization.randomize(
+            model, data, world=args.world, seed=args.seed)
+    except KeyError:
+        return  # no spec — skip silently
+    seed_str = "default" if args.seed is None else str(args.seed)
+    print("[randomize] {} (seed={}):".format(args.world, seed_str),
+          file=sys.stderr)
+    for body, slot_label in sorted(layout.items()):
+        print("  {} -> {}".format(body, slot_label), file=sys.stderr)
+
+
 def cmd_preview(args):
     from openbricks_sim import chassis as chassis_mod
     from openbricks_sim.world import load_world
@@ -73,6 +94,8 @@ def cmd_preview(args):
         data = mujoco.MjData(model)
     else:
         model, data, _ = load_world(world_path, chassis_spec=spec)
+
+    _maybe_randomize(model, data, args)
 
     if args.headless:
         import mujoco
@@ -113,6 +136,7 @@ def cmd_run(args):
 
     spec  = ChassisSpec(pos_x=args.x, pos_y=args.y)
     robot = SimRobot(world=args.world, chassis_spec=spec)
+    _maybe_randomize(robot.model, robot.data, args)
 
     if not args.no_shim:
         shim.install(robot.runtime)
@@ -176,6 +200,13 @@ def _build_parser():
     p_preview.add_argument("--duration", type=float, default=2.0,
                            help="Headless step duration in seconds. "
                                 "Default: 2.0.")
+    p_preview.add_argument("--seed", type=int, default=None,
+                           help="Randomization seed for per-round prop "
+                                "permutation. Set to a different integer "
+                                "each round to mimic the WRO judge's "
+                                "pre-round randomization; same seed "
+                                "produces same layout. Has no effect on "
+                                "worlds without a randomization spec.")
 
     p_run = sub.add_parser(
         "run",
@@ -206,6 +237,9 @@ def _build_parser():
                             "patches ``time.sleep_ms`` to advance the "
                             "sim — disable when your script uses the "
                             "openbricks_sim API directly.")
+    p_run.add_argument("--seed", type=int, default=None,
+                       help="Randomization seed (same semantics as "
+                            "``preview --seed``).")
 
     return parser
 
