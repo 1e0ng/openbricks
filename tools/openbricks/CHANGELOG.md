@@ -3,6 +3,43 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.7 — fix: auto-relaunch under mjpython on macOS for the GUI viewer
+
+`openbricks sim preview --world wro-2026-elementary` on macOS
+crashed with a Python stack trace ending in:
+
+    RuntimeError: `launch_passive` requires that the Python script
+    be run under `mjpython` on macOS
+
+MuJoCo's interactive viewer needs to control the main thread for
+OpenGL on macOS — Python's REPL doesn't give it that, hence the
+`mjpython` wrapper that ships alongside `mujoco`. Without an opt-in,
+every macOS user hit the crash.
+
+The fix is a small re-exec helper. When the sim CLI on macOS is
+asked to open the GUI viewer (`preview` without `--headless`, or
+`run --viewer`), it locates the venv's bundled `mjpython` and
+`os.execv`s into it before any model loading happens. Inside
+mjpython, the viewer call works. No-op on Linux / Windows / when
+already under mjpython / when mjpython isn't in the venv.
+
+Workarounds that worked previously:
+
+```
+openbricks sim preview --world wro-2026-elementary --headless --duration 5
+~/.local/pipx/venvs/openbricks/bin/mjpython -m openbricks_sim preview --world wro-2026-elementary
+```
+
+…still work, of course. After 0.10.7, the bare invocation also
+works on macOS.
+
+Tests in `test_sim_cli.py::RelaunchUnderMjpythonTests` pin: no-op on
+Linux, no-op when already under mjpython, no-op when mjpython is
+missing from the venv (let upstream raise), and re-exec strips the
+leading `sim` keyword from `sys.argv` before forwarding (the CLI
+sees `sim preview ...` because `openbricks` dispatched it; the sim's
+own argv parser sees `preview ...`).
+
 ## 0.10.6 — fix: bundle world XMLs into the wheel
 
 Every wheel published 0.10.3 → 0.10.5 shipped without the WRO and
