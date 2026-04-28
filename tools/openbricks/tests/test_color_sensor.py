@@ -44,6 +44,53 @@ def _make_runtime(r=0.5, g=0.5, b=0.5):
     return SimRuntime(model, data)
 
 
+# A model with a textured plane — uses MuJoCo's builtin checker
+# texture so the test doesn't depend on PIL or a tmp PNG file. The
+# 4×4 checker has 2-pixel blocks, so the colour mapping in world
+# coordinates (after MuJoCo's UV convention with v-flip) is:
+#
+#         +Y
+#          |
+#    red   |  blue       (image rows 0..1)
+#   -------+-------  +X
+#    blue  |  red        (image rows 2..3)
+#          |
+#         -Y
+#
+# So the chassis at world (-0.25, +0.25) reads red, at (+0.25, +0.25)
+# reads blue, etc. Plane is 1 m × 1 m centred on origin, texrepeat=1,1.
+_TEXTURED_TEMPLATE = """\
+<mujoco model="color_sensor_textured_test">
+  <option timestep="0.001" gravity="0 0 -9.81"/>
+  <asset>
+    <texture name="t" type="2d" builtin="checker"
+             rgb1="1 0 0" rgb2="0 0 1" width="4" height="4"/>
+    <material name="m" texture="t" texrepeat="{rx} {ry}"
+              texuniform="false"/>
+  </asset>
+  <worldbody>
+    <body name="chassis" pos="{cx} {cy} 0.05">
+      <freejoint name="chassis_free"/>
+      <inertial pos="0 0 0" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
+      <geom name="chassis_body" type="box" size="0.02 0.02 0.01"
+            rgba="0.10 0.50 0.90 1.0"/>
+      <site name="chassis_imu" pos="0 0 0" size="0.005"/>
+      <camera name="chassis_cam_down" pos="0 0 0"
+              xyaxes="0 -1 0 1 0 0" fovy="20"/>
+    </body>
+    <geom name="floor" type="plane" size="0.5 0.5 0.1" material="m"/>
+  </worldbody>
+</mujoco>
+"""
+
+
+def _make_textured_runtime(cx=0.0, cy=0.0, rx=1, ry=1):
+    xml = _TEXTURED_TEMPLATE.format(cx=cx, cy=cy, rx=rx, ry=ry)
+    model = mujoco.MjModel.from_xml_string(xml)
+    data  = mujoco.MjData(model)
+    return SimRuntime(model, data)
+
+
 class SimColorSensorTests(unittest.TestCase):
 
     def test_construct_rejects_unknown_camera(self):
@@ -89,6 +136,71 @@ class SimColorSensorTests(unittest.TestCase):
         rt = _make_runtime(r=0.0, g=0.0, b=0.0)
         cs = SimColorSensor(rt)
         self.assertEqual(cs.ambient(), 0)
+
+
+class TexturedPlaneSamplingTests(unittest.TestCase):
+    """The 0.10.x ``SimColorSensor`` returned the material's flat
+    rgba even on textured planes — i.e. driving across the WRO mat
+    saw a single tint, never a printed pattern. Phase E1 fixes this
+    with CPU-side texture sampling.
+
+    These tests pin the behaviour: with a known checker texture
+    mapped 1:1 onto the floor, driving the chassis to each of the
+    four 25 cm-offset corners must read the corresponding texel."""
+
+    def test_top_left_quadrant_is_red(self):
+        # World (-0.25, +0.25) → image (col=1, row=1) → red block.
+        rt = _make_textured_runtime(cx=-0.25, cy=+0.25)
+        cs = SimColorSensor(rt)
+        r, g, b = cs.rgb()
+        self.assertEqual((r, g, b), (255, 0, 0),
+                         "expected red at (-0.25, +0.25); got %r"
+                         % ((r, g, b),))
+
+    def test_top_right_quadrant_is_blue(self):
+        # World (+0.25, +0.25) → image (col=3, row=1) → blue block.
+        rt = _make_textured_runtime(cx=+0.25, cy=+0.25)
+        cs = SimColorSensor(rt)
+        self.assertEqual(cs.rgb(), (0, 0, 255))
+
+    def test_bottom_right_quadrant_is_red(self):
+        # World (+0.25, -0.25) → image (col=3, row=3) → red block.
+        rt = _make_textured_runtime(cx=+0.25, cy=-0.25)
+        cs = SimColorSensor(rt)
+        self.assertEqual(cs.rgb(), (255, 0, 0))
+
+    def test_bottom_left_quadrant_is_blue(self):
+        # World (-0.25, -0.25) → image (col=1, row=3) → blue block.
+        rt = _make_textured_runtime(cx=-0.25, cy=-0.25)
+        cs = SimColorSensor(rt)
+        self.assertEqual(cs.rgb(), (0, 0, 255))
+
+    def test_texrepeat_changes_the_sampled_texel(self):
+        # Sanity: at world (+0.30, 0), texrepeat=1 lands on row=2 col=3
+        # (red, the lower-right block of the bottom checker row) while
+        # texrepeat=2 wraps to row=0 col=2 (blue). If our UV pipeline
+        # ignored texrepeat (or hardcoded it to 1), both queries would
+        # return red. So a difference in colour between the two is
+        # the contract this test pins.
+        cx, cy = +0.30, 0.0
+        rt1 = _make_textured_runtime(cx=cx, cy=cy, rx=1, ry=1)
+        rt2 = _make_textured_runtime(cx=cx, cy=cy, rx=2, ry=2)
+        c1 = SimColorSensor(rt1).rgb()
+        c2 = SimColorSensor(rt2).rgb()
+        self.assertEqual(c1, (255, 0, 0))
+        self.assertEqual(c2, (0, 0, 255))
+        self.assertNotEqual(c1, c2,
+                            "texrepeat had no effect on the sampled "
+                            "texel — UV wrap probably not applied")
+
+    def test_untextured_material_still_falls_through_to_rgba(self):
+        # The ``_make_runtime`` helper builds a plane with rgba and
+        # no texture — texture sampling must skip and the material
+        # rgba must be the answer. This pins the regression-safety
+        # of the 0.10.x existing-tests: solid-colour floors still work.
+        rt = _make_runtime(r=0.0, g=1.0, b=0.0)
+        cs = SimColorSensor(rt)
+        self.assertEqual(cs.rgb(), (0, 255, 0))
 
 
 # ---------------------------------------------------------------------

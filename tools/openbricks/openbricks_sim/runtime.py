@@ -337,17 +337,40 @@ class SimColorSensor:
     sensors integrate over a small FOV; this is a single-point
     approximation.
 
-    Returned colour comes from the geom's material ``rgba`` (or the
-    geom's own ``rgba`` if it has no material). Textured materials
-    fall back to the texture-modulating rgba — the WRO mat texture
-    image is NOT sampled (that needs offscreen rendering, not yet
-    available on macOS in this codebase).
+    Surface-colour resolution dispatches on what the ray hit:
+
+      * **Textured plane geom** — sample the texture at the (u, v)
+        coordinate corresponding to the world hit point. This is the
+        path the WRO mat takes: ``mat.png`` is loaded by MuJoCo as
+        an RGB texture, the printed colour at any (x, y) on the mat
+        is what the real TCS34725 would see.
+      * **Untextured material** — the material's ``rgba`` (a single
+        flat colour). What the previous implementation returned for
+        every surface.
+      * **No material** — the geom's own ``rgba``.
+
+    Texture sampling is CPU-side: read ``model.tex_data`` directly,
+    compute UV from the geom-local hit coordinate, index the texel.
+    No GL context, no offscreen rendering — works on macOS / Linux /
+    Windows identically. The trade-off is that we don't simulate
+    lighting, shadows, or geom layering: a flat printed mat is
+    rendered byte-accurately, but a translucent overlay above it
+    would not be composited. For the WRO mats — the actual driver of
+    this work — that's exactly the right model.
 
     Methods match :class:`openbricks.interfaces.ColorSensor`:
 
       * ``rgb()`` returns ``(r, g, b)`` ints in 0..255.
       * ``ambient()`` returns a 0..100 luminance score (BT.601).
     """
+
+    # MuJoCo texture-role indices into ``mat_texid[mat_id, role]``.
+    # Both RGB and RGBA roles are colour textures; we accept either.
+    # Numeric values come from the ``mjtTextureRole`` enum (mjTEXROLE_*)
+    # in mjmodel.h — hard-coded here because the Python bindings
+    # don't expose the enum as named constants on every release.
+    _TEXROLE_RGB  = 1
+    _TEXROLE_RGBA = 8
 
     def __init__(self,
                  runtime: SimRuntime,
@@ -396,13 +419,120 @@ class SimColorSensor:
                               geom_id)
         if geom_id[0] < 0 or dist < 0:
             return None
-        # Look up the material rgba; fall back to the geom's own
-        # rgba when the geom has no material.
+        gid = int(geom_id[0])
         m = self.runtime.model
-        mat_id = int(m.geom_matid[geom_id[0]])
+
+        # Surface dispatch: textured plane → sample texel; material →
+        # material rgba; bare geom → geom rgba. Not a fallback chain —
+        # the previous level of the dispatch is the actual answer for
+        # the surface kind that didn't match.
+        mat_id = int(m.geom_matid[gid])
         if mat_id >= 0:
+            sampled = self._sample_textured_geom(
+                gid, mat_id, pnt + dist * vec)
+            if sampled is not None:
+                return sampled
             return tuple(float(c) for c in m.mat_rgba[mat_id])
-        return tuple(float(c) for c in m.geom_rgba[geom_id[0]])
+        return tuple(float(c) for c in m.geom_rgba[gid])
+
+    # ------------- texture sampling -------------
+
+    def _sample_textured_geom(self, geom_id, mat_id, world_hit):
+        """Sample the colour-texture pixel under ``world_hit`` for the
+        given (geom, material). Returns rgba in [0,1], or ``None`` if:
+
+          * the material has no RGB / RGBA-role texture, or
+          * the geom is not a plane (the only shape we currently
+            UV-map; the WRO mat use case is exactly a plane).
+
+        Plane UV mapping (matches MuJoCo's renderer): the surface
+        is the geom's local XY plane, of size (2*sx, 2*sy) where
+        ``size`` is the geom's half-extent. Local x maps to U,
+        local y to V (inverted: image-space row 0 is +Y in
+        MuJoCo's convention, so v_image = 1 - v_local). Material
+        ``texrepeat`` tiles the texture across the geom; we
+        wrap with ``mod 1.0``.
+        """
+        import numpy as np
+        m = self.runtime.model
+
+        # Texture role lookup. Try RGB first (the common case for
+        # ``<texture type="2d" file="..."/>`` / built-in checker),
+        # then RGBA. Anything else (occlusion, normal map, etc.)
+        # isn't a colour-texture and we skip it.
+        tex_id = int(m.mat_texid[mat_id, self._TEXROLE_RGB])
+        if tex_id < 0:
+            tex_id = int(m.mat_texid[mat_id, self._TEXROLE_RGBA])
+        if tex_id < 0:
+            return None
+
+        # Plane-only UV. Other geom types (box, sphere, mesh) need
+        # different unwrapping; punt for now — the WRO mat is a
+        # plane and that's the use case driving this.
+        # ``mjtGeom.mjGEOM_PLANE`` = 0 in MuJoCo's enum.
+        if int(m.geom_type[geom_id]) != int(mujoco.mjtGeom.mjGEOM_PLANE):
+            return None
+
+        # World → geom-local. ``geom_xmat`` is row-major flattened.
+        data = self.runtime.data
+        origin = np.asarray(data.geom_xpos[geom_id], dtype=np.float64)
+        rot    = np.asarray(data.geom_xmat[geom_id], dtype=np.float64
+                            ).reshape(3, 3)
+        local  = rot.T @ (np.asarray(world_hit, dtype=np.float64) - origin)
+        sx, sy = float(m.geom_size[geom_id, 0]), float(m.geom_size[geom_id, 1])
+
+        # Plane size = 0 (infinite plane in MuJoCo) — fall back to no
+        # sampling. Real WRO mats use finite size, so this just
+        # protects against pathological models.
+        if sx <= 0.0 or sy <= 0.0:
+            return None
+
+        u_norm = (float(local[0]) + sx) / (2.0 * sx)
+        v_norm = (float(local[1]) + sy) / (2.0 * sy)
+        # Clamp before the wrap: a hit at lx > sx (extrapolation,
+        # shouldn't happen but cheap to guard) would otherwise wrap
+        # around rather than reading the edge texel.
+        u_norm = max(0.0, min(1.0, u_norm))
+        v_norm = max(0.0, min(1.0, v_norm))
+
+        rx = float(m.mat_texrepeat[mat_id, 0])
+        ry = float(m.mat_texrepeat[mat_id, 1])
+        u = (u_norm * rx) % 1.0 if rx != 0.0 else 0.0
+        # Image-space row 0 is +Y in MuJoCo's plane orientation, so
+        # invert v before tiling.
+        v = ((1.0 - v_norm) * ry) % 1.0 if ry != 0.0 else 0.0
+
+        return self._read_texel(tex_id, u, v)
+
+    def _read_texel(self, tex_id, u, v):
+        """Look up the pixel at ``(u, v) ∈ [0,1]²`` in texture
+        ``tex_id``. Returns ``(r, g, b, a)`` floats in [0, 1].
+        Nearest-neighbour sampling — MuJoCo's renderer interpolates
+        bilinearly, but for a 2 mm camera spot on a high-resolution
+        printed mat the difference is below the colour quantisation."""
+        import numpy as np
+        m = self.runtime.model
+
+        w     = int(m.tex_width[tex_id])
+        h     = int(m.tex_height[tex_id])
+        nchan = int(m.tex_nchannel[tex_id])
+        adr   = int(m.tex_adr[tex_id])
+
+        ix = min(w - 1, max(0, int(u * w)))
+        iy = min(h - 1, max(0, int(v * h)))
+        off = adr + (iy * w + ix) * nchan
+        px = m.tex_data[off:off + nchan]
+
+        if nchan == 4:
+            return (px[0] / 255.0, px[1] / 255.0,
+                    px[2] / 255.0, px[3] / 255.0)
+        # nchan == 3 (RGB) or anything else (treat as luminance for
+        # safety; MuJoCo's grayscale textures are nchan=1).
+        if nchan == 3:
+            return (px[0] / 255.0, px[1] / 255.0, px[2] / 255.0, 1.0)
+        # nchan == 1 — replicate luminance into RGB.
+        lum = px[0] / 255.0
+        return (lum, lum, lum, 1.0)
 
     def rgb(self):
         rgba = self._hit_rgba()
