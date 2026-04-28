@@ -1,0 +1,15 @@
+0 WRO 2026 Elementary RoboMission — Red note
+0 Per the rules, each note has the same base but a distinct upper
+0 silhouette. The robot's down-facing colour sensor + the chassis-
+0 height profile distinguish them. Red note: tall thin column.
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, note builds.
+0 Stud-grid positions visually estimated. Colour: 4 = red.
+0
+0 ===== 2x2 plate base (3022 — common across all 6 notes) =====
+1 4 0 0 0 1 0 0 0 1 0 0 0 1 3022.dat
+0
+0 ===== Stack of 2x2 red bricks — vertical column =====
+1 4 0 -8  0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -56 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -80 0 1 0 0 0 1 0 0 0 1 3003.dat

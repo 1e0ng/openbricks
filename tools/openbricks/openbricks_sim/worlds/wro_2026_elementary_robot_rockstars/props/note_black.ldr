@@ -1,0 +1,11 @@
+0 WRO 2026 Elementary RoboMission — Black note (tall 1x2 column)
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, note builds.
+0 Stud-grid positions visually estimated. Colour: 0 = black.
+0
+1 0 0 0 0 1 0 0 0 1 0 0 0 1 3022.dat
+0 Tall thin column made of 1x2 plates — distinctive silhouette
+1 0 0 -8  0 1 0 0 0 1 0 0 0 1 3069b.dat
+1 0 0 -16 0 1 0 0 0 1 0 0 0 1 3069b.dat
+1 0 0 -24 0 1 0 0 0 1 0 0 0 1 3069b.dat
+1 0 0 -32 0 1 0 0 0 1 0 0 0 1 3069b.dat
+1 0 0 -40 0 1 0 0 0 1 0 0 0 1 3069b.dat
