@@ -3,6 +3,30 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.3 — manylinux + macOS + Windows binary wheels
+
+`pip install openbricks` now downloads a prebuilt binary wheel
+instead of recompiling `openbricks_sim._native` on every machine.
+The 0.10.2 sdist-only fallback stays in place for platforms outside
+the matrix below.
+
+Wheel matrix:
+
+| Platform | Tag | Built on |
+|---|---|---|
+| Linux x86_64 | `manylinux_2_28_x86_64` | `ubuntu-latest` via cibuildwheel |
+| macOS Intel + Apple Silicon | `macosx_*_universal2` | `macos-latest` |
+| Windows AMD64 | `win_amd64` | `windows-latest` |
+
+Each platform ships wheels for CPython 3.9 / 3.10 / 3.11 / 3.12 / 3.13.
+Skipped (no asks; revisit when requested): musllinux (Alpine),
+linux aarch64, linux i686, win32, PyPy.
+
+CI gate: the `build-openbricks-wheels` job runs on every push / PR,
+so wheel-build breakage is caught at review time rather than at
+release time. Same pattern as the existing `build-openbricks-sdist`
+regression check (`tests/test_sdist_build.py`).
+
 ## 0.10.2 — sdist-only publish (PyPI manylinux requirement)
 
 The 0.10.1 publish failed at the upload step:
