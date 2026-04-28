@@ -19,6 +19,19 @@ permissions:
   contents: write        # release job needs to create/update releases
   pull-requests: write
 
+# Opt every JS-based action (``actions/checkout``, ``actions/setup-
+# python``, ``codecov/codecov-action``, ``pypa/gh-action-pypi-
+# publish``, etc.) into the Node.js 24 runtime. GitHub Actions
+# deprecated Node.js 20 on 2025-09-19 and will force Node 24 by
+# default on 2026-06-02 (and remove Node 20 entirely on 2026-09-16).
+# Setting this env var workflow-wide opts us in early so we surface
+# any Node-24 incompatibility now, while we still have the option of
+# pinning ``ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true`` to roll
+# back. See:
+# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   test:
     runs-on: ubuntu-latest
