@@ -13,9 +13,15 @@ include native/openbricks_sim_native.c
 # (which runs from the unpacked sdist) compile cleanly.
 recursive-include native/_shared *.c *.h
 
-# WRO worlds + small examples — useful for users who want to load a
-# world without a repo checkout.
-recursive-include worlds *.xml *.png README.md
+# Worlds now live INSIDE the ``openbricks_sim`` package (see
+# ``[tool.setuptools.package-data]`` in pyproject.toml), so they
+# ride along into both sdist and wheel automatically. This used to
+# be a top-level ``recursive-include worlds`` — moved 2026-04-28
+# because that pattern only seeded the sdist, not the wheel,
+# which left ``WorldLoadError`` for end users on 0.10.3-0.10.5.
+
+# Small examples — useful for users who want to read sample code
+# without a repo checkout.
 recursive-include examples *.py
 
 # CHANGELOG so the migration guide ships with the wheel.

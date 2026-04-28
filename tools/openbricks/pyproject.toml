@@ -91,6 +91,20 @@ version = { attr = "openbricks_dev.__version__" }
 [tool.setuptools.packages.find]
 include = ["openbricks_dev*", "openbricks_sim*"]
 
+# Non-Python data inside the sim package — the WRO + practice
+# worlds. ``setuptools.packages.find`` only catches ``*.py``
+# files; without this stanza the world XMLs (and their PNG mat
+# textures + READMEs) wouldn't ship in the wheel and end users
+# would hit ``WorldLoadError: world file not found:
+# wro-2026-elementary`` even though the alias map knows about it.
+# This bug shipped in 0.10.3-0.10.5; the fix lands in 0.10.6.
+[tool.setuptools.package-data]
+openbricks_sim = [
+    "worlds/*/world.xml",
+    "worlds/*/mat.png",
+    "worlds/*/README.md",
+]
+
 # The ``openbricks_sim._native`` CPython extension is declared in
 # ``setup.py`` alongside this pyproject — see that shim's docstring
 # for why. Summary: setuptools' declarative ext-modules can't

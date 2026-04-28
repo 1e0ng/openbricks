@@ -11,9 +11,13 @@ from openbricks_sim.chassis import ChassisSpec
 from openbricks_sim.world import WorldLoadError, load_world
 
 
-# Shipped worlds live one level up from the openbricks-sim package.
-_PKG_DIR  = Path(__file__).resolve().parent.parent
-_WORLDS   = _PKG_DIR / "worlds"
+# Shipped worlds live INSIDE the ``openbricks_sim`` package as of
+# 0.10.6 (so they land in the wheel via package-data — see
+# pyproject.toml). Locate them via the package, not the test file:
+# importlib.resources keeps the test correct under both editable
+# installs and built wheels.
+import openbricks_sim
+_WORLDS = Path(openbricks_sim.__file__).resolve().parent / "worlds"
 
 _BUILTIN_WORLDS = [
     "wro_2026_elementary_robot_rockstars",
