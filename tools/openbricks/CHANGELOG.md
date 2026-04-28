@@ -3,6 +3,33 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.8 — Phase F1: high-fidelity WRO 2026 mat textures (150 dpi)
+
+The three WRO 2026 mats (Elementary, Junior, Senior) were shipped
+as 2048×991 PNGs — about 22 dpi for a 2362×1143 mm mat. That left
+zone boundaries soft and made the Phase E1 colour-sensor
+texture-sampling pipeline read averaged colours instead of crisp
+printed pixels.
+
+0.10.8 replaces them with 13949×6750 PNGs rasterized at 150 dpi
+(0.169 mm/pixel — ~7× finer than the TCS34725's physical sampling
+spot, so the chassis colour sensor reads actual printed pixels).
+Source is the official "Game Mat Printing File" PDF that WRO
+publishes — vector PDF, 2362×1143 mm at 1:1, rendered with
+`pdftoppm -r 150`.
+
+Wheel size goes from ~3 MB to ~17 MB because the three mats add
+8.6 + 4.1 + 5.1 = ~18 MB of PNG. That's the cost of pixel-level
+fidelity. If you don't need the WRO worlds at all and want a
+slim install, the future direction is on-demand asset download
+via `openbricks sim assets fetch <world>` — not in this release;
+defer until someone asks.
+
+The mats are not committed as the source PDFs (license + size).
+`scripts/regen-wro-mat-textures.sh` re-fetches the PDFs from
+`wro-association.org` and re-rasterizes — run it whenever WRO
+publishes a mat-fix mid-season, or when adjusting DPI.
+
 ## 0.10.7 — fix: auto-relaunch under mjpython on macOS for the GUI viewer
 
 `openbricks sim preview --world wro-2026-elementary` on macOS

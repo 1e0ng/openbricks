@@ -7,7 +7,7 @@ A MuJoCo MJCF world for the [2026 WRO RoboMission Elementary](https://wro-associ
 | | |
 |---|---|
 | `world.xml` | MJCF scene description |
-| `mat.png` | Printed mat texture, ~2048 px wide (resampled from the official 9 MB printing PDF) |
+| `mat.png` | Printed mat texture, 13949×6750 px (150 dpi rasterization of the official Game Mat Printing File PDF). Regenerable via `scripts/regen-wro-mat-textures.sh`. |
 
 ## Mat — what's where
 
