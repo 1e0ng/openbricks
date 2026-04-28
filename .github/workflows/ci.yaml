@@ -202,6 +202,8 @@ jobs:
           openbricks sim preview --headless --duration 0.2 --world wro-2026-elementary
           openbricks sim preview --headless --duration 0.2 --world wro-2026-junior
           openbricks sim preview --headless --duration 0.2 --world wro-2026-senior
+          openbricks sim preview --headless --duration 0.2 --world practice-zones
+          openbricks sim preview --headless --duration 0.2 --world practice-walls
 
   coverage:
     runs-on: ubuntu-latest
