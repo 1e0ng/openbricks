@@ -104,11 +104,18 @@
          pattern via paper-under-frame.
          ========================================================= -->
 
-    <!-- Mission 3.4: 4 barriers (bonus, don't damage). -->
-    <lego_prop name="barrier_red_a"   ldr="props/senior_barrier.ldr" pos="-0.20 0.18 0.0"  mass="0.070" color="red"/>
-    <lego_prop name="barrier_red_b"   ldr="props/senior_barrier.ldr" pos="0.20 0.18 0.0"   mass="0.070" color="red"/>
-    <lego_prop name="barrier_black_a" ldr="props/senior_barrier.ldr" pos="-0.20 -0.18 0.0" mass="0.070" color="black"/>
-    <lego_prop name="barrier_black_b" ldr="props/senior_barrier.ldr" pos="0.20 -0.18 0.0"  mass="0.070" color="black"/>
+    <!-- Mission 3.4: 4 barriers (bonus, don't damage). The rules-PDF
+         photo shows 2 colour variants — red bodies with blue balls
+         and black bodies with red balls. F2.7 used a single
+         ``senior_barrier.ldr`` with the lego_prop ``color`` override
+         which forced ALL bricks to the same colour and lost the
+         ball/body contrast. F4.2 splits into two .ldr files with
+         per-brick LDraw colour codes; the ``color`` override is
+         dropped so the per-brick colours pass through. -->
+    <lego_prop name="barrier_red_a"   ldr="props/senior_barrier_red_blue.ldr"  pos="-0.20 0.18 0.0"  mass="0.070"/>
+    <lego_prop name="barrier_red_b"   ldr="props/senior_barrier_red_blue.ldr"  pos="0.20 0.18 0.0"   mass="0.070"/>
+    <lego_prop name="barrier_black_a" ldr="props/senior_barrier_black_red.ldr" pos="-0.20 -0.18 0.0" mass="0.070"/>
+    <lego_prop name="barrier_black_b" ldr="props/senior_barrier_black_red.ldr" pos="0.20 -0.18 0.0"  mass="0.070"/>
 
     <!-- Mission 3.1: 3 tools. -->
     <lego_prop name="rect_trowel"    ldr="props/rect_trowel.ldr"    pos="0.80 -0.45 0.0" mass="0.060"/>

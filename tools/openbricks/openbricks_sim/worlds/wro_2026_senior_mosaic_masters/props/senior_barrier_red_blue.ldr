@@ -1,0 +1,22 @@
+0 WRO 2026 Senior — Barrier (red body + blue ball, ×2)
+0 Per the rules-PDF page 6 photo: 2 of the 4 barriers around the
+0 mosaic area are red-bodied with a blue ball on top. The
+0 sister file ``senior_barrier_black_red.ldr`` covers the other 2.
+0 Authored with per-brick LDraw colour codes — LDraw 4 = red,
+0 LDraw 1 = blue — so the lego_prop tag does NOT pass a ``color``
+0 attribute (which would override every brick uniformly and lose
+0 the dual-colour scheme).
+0
+0 ===== Body base plate (red) =====
+1 4 0 0 0 1 0 0 0 1 0 0 0 1 3022.dat
+0
+0 ===== Body column (red) =====
+1 4 0 -8 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -56 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -80 0 1 0 0 0 1 0 0 0 1 3003.dat
+0
+0 ===== "Ball" on top (blue) — approximated as a 2x2 brick. The
+0 WRO set's actual round 2x2 isn't in our part registry yet; a
+0 stacked 2x2 is close enough for sim collision. =====
+1 1 0 -104 0 1 0 0 0 1 0 0 0 1 3003.dat
