@@ -43,6 +43,17 @@
               specular="0" shininess="0" reflectance="0"/>
     <material name="wall" rgba="0.90 0.90 0.90 1"/>
 
+    <!-- Mosaic frame: 3D-printed black-PLA template (4×4 tile grid
+         with raised 6 mm border). Source: WRO's
+         WRO-2026-RoboMission-Senior-3D-Printing.zip → "Template
+         without logo.stl" (2208 triangles — the with-logo variant
+         is 4× heavier and only adds branding decor that the sim
+         doesn't need). STL units are mm; ``scale`` converts to
+         metres. The STL's local origin is at one corner; the geom's
+         ``pos`` recentres the bbox centroid on the mat origin. -->
+    <mesh name="mosaic_frame" file="mosaic_frame.stl"
+          scale="0.001 0.001 0.001"/>
+
     <material name="lego_red"     rgba="0.85 0.10 0.10 1"/>
     <material name="lego_yellow"  rgba="0.95 0.80 0.10 1"/>
     <material name="lego_green"   rgba="0.15 0.70 0.25 1"/>
@@ -68,6 +79,19 @@
           size="0.0075 0.5715 0.02" material="wall"/>
     <geom name="wall_w" type="box" pos="-1.188 0      0.02"
           size="0.0075 0.5715 0.02" material="wall"/>
+
+    <!-- =========================================================
+         Mission 3.2 — mosaic frame. 3D-printed scenery from the
+         official Senior 3D-Printing zip; the robot lays tiles into
+         the 4×4 grid. Static (no body / no joint) so it sits welded
+         to the mat. STL bbox: x ∈ [-33, 183] mm, y ∈ [-133, 33] mm,
+         z ∈ [0, 6] mm — centroid at (75, -50, 3) mm. The geom's pos
+         lands the STL's local origin so the centroid sits at the
+         mat origin (0, 0): pos.x = -0.075, pos.y = +0.050, pos.z = 0
+         (frame bottom on mat surface).
+         ========================================================= -->
+    <geom name="mosaic_frame" type="mesh" mesh="mosaic_frame"
+          pos="-0.075 0.050 0" material="lego_black"/>
 
     <!-- =========================================================
          F2.7: All Senior props as LDraw assemblies. Shared geometry
