@@ -3,6 +3,55 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.12 — Junior + Senior randomization tightened to mat-truth
+
+Closes the two TODOs left after 0.10.10's per-round randomization
+introduction (PR #105). Both are user-visible behaviour changes
+for `openbricks sim --world wro-2026-junior` and
+`--world wro-2026-senior`.
+
+### Junior — slot coordinates now extracted from the mat
+
+The four "black squares at the lower end of the field" used as
+randomization slots had estimated coordinates (`y=-0.45`, round
+x). PR #109 replaces them with positions extracted from the
+high-res Junior mat artwork via `scripts/extract-wro-slot-coords.py`
+(same flow used for Elementary in 0.10.10):
+
+```
+world (-0.1052, -0.5055) m   <- slot_1
+world (+0.0267, -0.5055) m   <- slot_2
+world (+0.1586, -0.5055) m   <- slot_3
+world (+0.2904, -0.5055) m   <- slot_4
+```
+
+~0.13 m spacing — the same pattern as Elementary's note-start
+squares.
+
+### Senior — randomization now covers all 4 cement colours
+
+0.10.10 wired Senior randomization for the yellow cement group
+only (10 elements). 0.10.12 expands to all 4 colours
+(yellow + blue + green + white = 40 elements). The rules require
+each colour permutes within its own storage area independently,
+so internally the spec moved from a single `_RandomizationSpec`
+per world to a tuple of specs (one per colour group), driven by
+one shared seeded RNG so `seed=N` still pins the entire
+40-element layout.
+
+`_SPECS` type changed from `Dict[str, _RandomizationSpec]` to
+`Dict[str, Tuple[_RandomizationSpec, ...]]`. The public
+`randomize(...)` signature is unchanged; the return dict simply
+grows from 10 → 40 entries for Senior.
+
+### Compatibility
+
+No public API changes. Junior layouts produced by
+`randomize(seed=N)` differ from 0.10.11 because the slot
+coordinates moved; Senior layouts differ because three new
+colour groups were added. Tests pinning specific (x, y) values
+will need updating — the layout dict structure is the same.
+
 ## 0.10.11 — fix unusable wheels + WRO 2026 prop library complete
 
 **Critical fix.** Wheels 0.10.7 → 0.10.10 on PyPI shipped with
