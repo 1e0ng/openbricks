@@ -3,6 +3,61 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.11 — fix unusable wheels + WRO 2026 prop library complete
+
+**Critical fix.** Wheels 0.10.7 → 0.10.10 on PyPI shipped with
+**zero** `props/*.ldr` files in the package data. Every WRO world
+on `pip install openbricks` raised:
+
+```
+WorldLoadError: lego_prop 'clef' references missing .ldr file
+'.../openbricks_sim/worlds/wro_2026_elementary_robot_rockstars/props/clef.ldr'
+```
+
+…regardless of which `--world` you asked for, because every WRO
+world references at least one `<lego_prop ldr="props/*.ldr"/>`
+placeholder. Same shape of bug as the missing-worlds bug fixed
+in 0.10.6; the F2 phase (PR #98 onwards) introduced `.ldr` files
+without a matching `package-data` entry and the regression
+slipped past until packaging-test coverage caught it during the
+F4.1 wheel-build verification.
+
+Fix: extend `[tool.setuptools.package-data]` to include
+`worlds/*/props/*.ldr` and `worlds/*/*.stl`, with two new
+regression tests in `test_wheel_bundles_worlds` to pin both.
+**Anyone on 0.10.7 → 0.10.10 should upgrade to 0.10.11.**
+
+### What's new (was previously stuck on PyPI)
+
+The complete WRO 2026 RoboMission prop library now actually
+loads. Every prop in all three age-group worlds is built from
+LDraw assemblies (one `<lego_prop>` per visible LEGO model in the
+official Building Instructions PDFs):
+
+* **Elementary "Robot Rockstars"** — clef, two cables, three
+  instruments + microphone, six notes, amplifier + two speakers
+  (PRs #98 → #102).
+* **Junior "Heritage Heroes"** — visitors, artefacts, towers,
+  dirt, barrier, parrot (PR #103).
+* **Senior "Mosaic Masters"** — 72 prop instances total: 3 tools,
+  24 mosaic tiles (6 × 4 colours), 40 cement elements
+  (10 × 4 colours), 4 barriers (2 colour schemes), plus the
+  3D-printed mosaic frame mesh from WRO's own STL (PRs #104,
+  #106, #107).
+
+`scripts/extract-wro-slot-coords.py` produces randomization slot
+coordinates for Junior + Senior the same way Elementary's were
+extracted in 0.10.10 (pixel-inspection of the high-res mat).
+F3.J wires Junior randomization (5 artefacts × 4 slots,
+choose-N-of-M); F3.S wires Senior (10 cement positions per colour
+within their respective target areas).
+
+### Compatibility
+
+No API changes. Worlds that worked on 0.10.6 still work; worlds
+that *would* have worked on 0.10.7 → 0.10.10 if the wheel weren't
+broken now actually do.
+
 ## 0.10.10 — Phase F3: per-round randomization (Elementary)
 
 Per the WRO General Rules glossary ("Robot Round" definition):
