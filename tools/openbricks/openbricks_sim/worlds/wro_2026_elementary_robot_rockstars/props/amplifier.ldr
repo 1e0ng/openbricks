@@ -1,0 +1,50 @@
+0 WRO 2026 Elementary RoboMission — Amplifier prop
+0 Name: amplifier.ldr
+0
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, amplifier build pages
+0 (around steps 80-100, before the cables). Per the rules-PDF
+0 page-6 photo: black/dark box with red knob detail on the front,
+0 a "speaker grille" appearance (visible technic-brick holes).
+0 Static decoration — bonus points for not damaging it (rule 3.4).
+0
+0 Stud-grid positions visually estimated. Approximation: ~4×5 stud
+0 footprint, ~10 bricks tall, predominantly black with white sides.
+0 Colours: 0 = black, 4 = red, 15 = white.
+0
+0 ===== Black plate base =====
+1 0 0 0 0 1 0 0 0 1 0 0 0 1 3035.dat
+0
+0 ===== Layer 1 (y=-8): black bricks forming the lower body =====
+1 0 -20 -8 -60 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -8 -60 1 0 0 0 1 0 0 0 1 3001.dat
+1 0 -20 -8 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -8 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 0 -20 -8  20 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -8  20 1 0 0 0 1 0 0 0 1 3001.dat
+1 0 -20 -8  60 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -8  60 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Layer 2 (y=-32): white sides, red knob in middle =====
+1 15 -30 -32 -60 1 0 0 0 1 0 0 0 1 3009.dat
+1 15  30 -32 -60 1 0 0 0 1 0 0 0 1 3009.dat
+1 4 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 15 -30 -32 60 1 0 0 0 1 0 0 0 1 3009.dat
+1 15  30 -32 60 1 0 0 0 1 0 0 0 1 3009.dat
+0
+0 ===== Layer 3 (y=-56): black middle =====
+1 0 -20 -56 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -56 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0 -20 -56  40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -56  40 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Layer 4 (y=-80): black top =====
+1 0 -20 -80 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -80 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0 -20 -80  40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -80  40 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Layer 5 (y=-104): black tile cap =====
+1 0 -20 -104 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -104 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0 -20 -104  40 1 0 0 0 1 0 0 0 1 3001.dat
+1 0  20 -104  40 1 0 0 0 1 0 0 0 1 3001.dat
