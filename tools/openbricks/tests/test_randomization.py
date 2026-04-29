@@ -157,8 +157,126 @@ class ElementaryRandomizationTests(unittest.TestCase):
     def test_unknown_world_raises_keyerror(self):
         m, d, _ = _make_elementary()
         with self.assertRaises(KeyError):
+            # Use a world name that has no spec — junior + senior
+            # gained specs in F3.J / F3.S, so they no longer raise.
             randomization.randomize(
-                m, d, world="wro-2026-junior", seed=1)
+                m, d, world="wro-2026-imaginary", seed=1)
+
+
+_JUNIOR_PATH = (Path(__file__).resolve().parent.parent
+                / "openbricks_sim" / "worlds"
+                / "wro_2026_junior_heritage_heroes" / "world.xml")
+
+
+def _make_junior():
+    model, data, merged = load_world(
+        str(_JUNIOR_PATH), chassis_spec=ChassisSpec())
+    mujoco.mj_forward(model, data)
+    return model, data, merged
+
+
+class JuniorRandomizationTests(unittest.TestCase):
+    """Pin the Junior 'select 4 of 5 artefacts' randomization. Per
+    rules-PDF p7: the 4 selected artefacts go to the 4 black squares
+    at the lower end of the field; 1 is unused per round."""
+
+    def test_four_selected_one_unused(self):
+        m, d, _ = _make_junior()
+        layout = randomization.randomize(
+            m, d, world="wro-2026-junior", seed=42)
+        # 5 artefacts total in the spec.
+        self.assertEqual(len(layout), 5)
+        # Exactly 4 go to slots, 1 is "unused".
+        unused_count = sum(1 for v in layout.values() if v == "unused")
+        slot_count = sum(1 for v in layout.values() if v.startswith("slot_"))
+        self.assertEqual(unused_count, 1)
+        self.assertEqual(slot_count, 4)
+
+    def test_unused_artefact_goes_off_mat(self):
+        # Unused artefact gets stashed at z = -1 m so it doesn't
+        # appear in the chassis camera frustum or interact with
+        # other props.
+        m, d, _ = _make_junior()
+        layout = randomization.randomize(
+            m, d, world="wro-2026-junior", seed=99)
+        for body_name, slot in layout.items():
+            if slot != "unused":
+                continue
+            body_id = mujoco.mj_name2id(
+                m, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            z = float(d.xpos[body_id, 2])
+            self.assertLess(z, -0.5,
+                            "unused artefact %s should be stashed "
+                            "off-mat (z<-0.5); got z=%f"
+                            % (body_name, z))
+
+    def test_deterministic(self):
+        m1, d1, _ = _make_junior()
+        m2, d2, _ = _make_junior()
+        layout1 = randomization.randomize(
+            m1, d1, world="wro-2026-junior", seed=7)
+        layout2 = randomization.randomize(
+            m2, d2, world="wro-2026-junior", seed=7)
+        self.assertEqual(layout1, layout2)
+
+    def test_each_seed_can_yield_any_unused(self):
+        # Across enough seeds, each of the 5 artefacts should land
+        # in the "unused" slot at least once. If the RNG only ever
+        # marked the same colour as unused, this test fails.
+        seen_unused = set()
+        for seed in range(500):
+            m, d, _ = _make_junior()
+            layout = randomization.randomize(
+                m, d, world="wro-2026-junior", seed=seed)
+            for body, slot in layout.items():
+                if slot == "unused":
+                    seen_unused.add(body)
+        self.assertEqual(
+            len(seen_unused), 5,
+            "expected all 5 artefacts to be selected as 'unused' "
+            "at least once across 500 seeds; got: %s" % seen_unused)
+
+
+_SENIOR_PATH = (Path(__file__).resolve().parent.parent
+                / "openbricks_sim" / "worlds"
+                / "wro_2026_senior_mosaic_masters" / "world.xml")
+
+
+def _make_senior():
+    model, data, merged = load_world(
+        str(_SENIOR_PATH), chassis_spec=ChassisSpec())
+    mujoco.mj_forward(model, data)
+    return model, data, merged
+
+
+class SeniorRandomizationTests(unittest.TestCase):
+    """Pin the Senior cement-element randomization. Per rules-PDF
+    p7: cement elements are randomly placed within their matching-
+    coloured cement storage area each round. The current spec
+    permutes the 10 yellow elements; blue / green / white land in
+    follow-up tightening."""
+
+    def test_yellow_cement_permuted(self):
+        m, d, _ = _make_senior()
+        layout = randomization.randomize(
+            m, d, world="wro-2026-senior", seed=2026)
+        # All 10 yellow cement elements should be in the layout
+        # at slot positions (no "unused" since elements == slots).
+        self.assertEqual(len(layout), 10)
+        for body_name, slot in layout.items():
+            self.assertTrue(body_name.startswith("cement_yellow_"))
+            self.assertTrue(slot.startswith("cement_yellow_slot_"),
+                            "expected slot label cement_yellow_slot_*; "
+                            "got %r" % slot)
+
+    def test_deterministic(self):
+        m1, d1, _ = _make_senior()
+        m2, d2, _ = _make_senior()
+        layout1 = randomization.randomize(
+            m1, d1, world="wro-2026-senior", seed=11)
+        layout2 = randomization.randomize(
+            m2, d2, world="wro-2026-senior", seed=11)
+        self.assertEqual(layout1, layout2)
 
 
 if __name__ == "__main__":

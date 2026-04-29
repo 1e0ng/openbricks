@@ -62,10 +62,19 @@ class _RandomizationSpec:
 
     ``elements`` is the ordered list of randomizable bodies (each must
     be a body in the world XML with a freejoint). ``slots`` is the
-    list of slot positions; ``len(slots)`` must equal
-    ``len(elements)``. Randomization is a permutation: each round,
-    we shuffle ``elements`` and place each one at the corresponding
-    ``slot`` (no two elements ever share a slot).
+    list of slot positions.
+
+    Two randomization shapes are supported:
+
+      * **Permutation** (``len(slots) == len(elements)``): each
+        round, shuffle ``elements`` and place each at the
+        corresponding slot. No two elements share a slot.
+      * **Selection** (``len(slots) < len(elements)``): each round,
+        randomly pick ``len(slots)`` elements and place them at the
+        slots; the remaining elements get ``off_mat_pos`` (well
+        below the mat, out of the chassis camera's frustum). Junior
+        artefacts use this — 4 of 5 placed per round, the 5th
+        unused.
 
     Fixed-position elements aren't listed here — they stay where
     the world.xml put them and are explicitly NOT randomized per
@@ -73,6 +82,10 @@ class _RandomizationSpec:
     """
     elements: Sequence[str]
     slots: Sequence[_Slot]
+    # Where to stash unselected elements (see "Selection" above).
+    # Default is ~1 m below the mat surface — safely out of any
+    # camera frame and won't interact with the chassis.
+    off_mat_pos: Tuple[float, float, float] = (0.0, 0.0, -1.0)
 
 
 # ---------------------------------------------------------------------
@@ -109,10 +122,65 @@ _ELEMENTARY = _RandomizationSpec(
 )
 
 
+# Junior "Heritage Heroes" — per Game Rules p7 ("Summary
+# randomization"): "Four of the artefacts are randomly placed on
+# the four black squares at the lower end of the game field. Per
+# round one artefact is not used."
+#
+# 5 artefacts × choose 4 × permute across 4 slots = 5 × 4! = 120
+# distinct layouts.
+#
+# TODO: slot coordinates are estimates from the rules-PDF page-7
+# image (4 black squares at the lower end). Run
+# ``scripts/extract-wro-slot-coords.py`` against the high-res
+# Junior mat with the artefact-target square colour to refine.
+_JUNIOR = _RandomizationSpec(
+    elements=("artefact_red", "artefact_blue", "artefact_green",
+              "artefact_yellow", "artefact_black"),
+    slots=(
+        _Slot(x=0.20, y=-0.45, label="slot_1"),
+        _Slot(x=0.30, y=-0.45, label="slot_2"),
+        _Slot(x=0.40, y=-0.45, label="slot_3"),
+        _Slot(x=0.50, y=-0.45, label="slot_4"),
+    ),
+    # 5 elements, 4 slots → "select 4" semantics. 1 artefact lands
+    # off-mat each round.
+)
+
+
+# Senior "Mosaic Masters" — per Game Rules p7: "All cement
+# elements are randomly placed within the matching-coloured
+# cement storage area."
+#
+# Each colour group (yellow / blue / green / white) has 10 cement
+# elements; they get permuted within their colour's storage area
+# each round. 4 separate permutation specs would be cleaner;
+# we model it as 4 specs and pick one ``randomize()`` call per
+# colour. For now, the single _SENIOR spec permutes the YELLOW
+# group as proof-of-concept; blue / green / white land in
+# follow-up tightening.
+#
+# TODO: refine to a multi-group spec where one ``randomize()``
+# call permutes all 4 colour groups. The mosaic-pattern paper-
+# under-frame randomization is also out of scope for this spec
+# (it's a paper sheet not a LEGO body).
+_SENIOR = _RandomizationSpec(
+    elements=("cement_yellow_1", "cement_yellow_2", "cement_yellow_3",
+              "cement_yellow_4", "cement_yellow_5", "cement_yellow_6",
+              "cement_yellow_7", "cement_yellow_8", "cement_yellow_9",
+              "cement_yellow_10"),
+    slots=tuple(
+        _Slot(x=0.85 + 0.05 * (i % 5), y=-0.45 + 0.05 * (i // 5),
+              label="cement_yellow_slot_{}".format(i + 1))
+        for i in range(10)
+    ),
+)
+
+
 _SPECS: Dict[str, _RandomizationSpec] = {
     "wro-2026-elementary": _ELEMENTARY,
-    # Junior and Senior land in follow-up PRs once their Game Rules
-    # PDFs are read into specs.
+    "wro-2026-junior":     _JUNIOR,
+    "wro-2026-senior":     _SENIOR,
 }
 
 
@@ -143,21 +211,34 @@ def randomize(model, data, world: str,
             "no randomization spec for world {!r} (have: {})"
             .format(world, sorted(_SPECS.keys())))
     spec = _SPECS[world]
-    if len(spec.elements) != len(spec.slots):
-        # Spec invariant; dev-time sanity check that survives into
-        # runtime so a future PR mismatch surfaces immediately.
+    if len(spec.elements) < len(spec.slots):
+        # ``elements`` < ``slots`` would leave some slots empty,
+        # which the WRO rules don't currently call for — flag.
         raise RuntimeError(
-            "{!r} spec has {} elements but {} slots — must match"
+            "{!r} spec has {} elements but {} slots — need at least "
+            "as many elements as slots"
             .format(world, len(spec.elements), len(spec.slots)))
 
     rng = random.Random(seed)
     perm = list(spec.elements)
     rng.shuffle(perm)
 
+    selected = perm[:len(spec.slots)]
+    unselected = perm[len(spec.slots):]
+
     layout: Dict[str, str] = {}
-    for element_name, slot in zip(perm, spec.slots):
+    # Place selected elements at slots.
+    for element_name, slot in zip(selected, spec.slots):
         _place_freejoint_body(model, data, element_name, slot.x, slot.y)
         layout[element_name] = slot.label
+    # Stash unselected elements off-mat so they don't interfere with
+    # the chassis or the camera. Z is forced to off_mat_pos.z.
+    for element_name in unselected:
+        _place_freejoint_body(
+            model, data, element_name,
+            spec.off_mat_pos[0], spec.off_mat_pos[1],
+            z_override=spec.off_mat_pos[2])
+        layout[element_name] = "unused"
 
     # Refresh derived quantities (xpos / cam_xpos / sensordata) so any
     # downstream code that reads positions sees the new placements
@@ -167,9 +248,14 @@ def randomize(model, data, world: str,
 
 
 def _place_freejoint_body(model, data, body_name: str,
-                          x: float, y: float) -> None:
+                          x: float, y: float,
+                          *, z_override: float = None) -> None:
     """Move a body that's attached via a freejoint to ``(x, y)``,
     preserving its world-XML resting height and identity orientation.
+
+    ``z_override`` (optional) bypasses the body_pos Z and uses the
+    given value instead. Used to stash "unselected" elements
+    off-mat in select-N-of-M randomization.
 
     The Z preservation matters: each randomizable note in the
     Elementary world has a different shape (sphere / box / cylinder
@@ -194,11 +280,14 @@ def _place_freejoint_body(model, data, body_name: str,
         raise ValueError(
             "body " + repr(body_name) + "'s first joint is not a "
             "freejoint — randomization can only relocate freejointed bodies")
-    # Resting Z from the world.xml ``<body pos="...">`` attribute,
-    # which MuJoCo stores in ``body_pos``. Use it directly so the
-    # post-randomization body sits on the mat the same way the
-    # author intended.
-    z = float(model.body_pos[body_id, 2])
+    # Resting Z: the ``z_override`` if given, else the world.xml
+    # ``<body pos="...">`` attribute (which MuJoCo stores in
+    # ``body_pos``). Override is used to stash unselected elements
+    # in select-N-of-M randomization off-mat.
+    if z_override is not None:
+        z = float(z_override)
+    else:
+        z = float(model.body_pos[body_id, 2])
     qpos_addr = int(model.jnt_qposadr[joint_id])
     # Freejoint qpos layout: [x, y, z, qw, qx, qy, qz].
     data.qpos[qpos_addr]     = x
