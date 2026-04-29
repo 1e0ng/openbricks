@@ -302,6 +302,40 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
                             "drivebase.straight should have moved the "
                             "chassis +X (got x=%.1f mm)" % x_mm)
 
+    @unittest.expectedFailure
+    def test_jgb37_drivebase_straight_lands_near_target(self):
+        # Tighter version of ``test_jgb37_drivebase_straight``: pin
+        # what users *expect* — straight(50) leaves the chassis near
+        # x=50, not just somewhere positive. As of this commit the
+        # chassis significantly overshoots the target because the
+        # native drivebase's ``is_done()`` fires when the planned
+        # trajectory distance is reached, not when the chassis has
+        # actually settled at the target. ``db.stop()`` then cuts
+        # power without active braking, so the chassis coasts past.
+        # Real hardware masks this with motor-internal friction;
+        # the sim doesn't, so a 50 mm requested move can land at
+        # 100-300 mm depending on speed.
+        #
+        # Marked ``expectedFailure`` so the test runs (catches a
+        # future fix that flips it green) without breaking the
+        # current suite. Fix landing-place: deceleration phase that
+        # brings velocity to ~0 at target, and/or active braking
+        # in ``ob_drivebase_stop``.
+        from openbricks.drivers.jgb37_520 import JGB37Motor
+        from openbricks.robotics.drivebase import DriveBase
+        m_left  = JGB37Motor(in1=12, in2=14, pwm=27,
+                              encoder_a=18, encoder_b=19)
+        m_right = JGB37Motor(in1=13, in2=15, pwm=26,
+                              encoder_a=20, encoder_b=21)
+        db = DriveBase(m_left, m_right,
+                        wheel_diameter_mm=60, axle_track_mm=150)
+        db.settings(straight_speed=180)
+        db.straight(50)
+        x_mm, _, _ = self.robot.chassis_pose()
+        # Within ±20% of the requested 50 mm.
+        self.assertGreaterEqual(x_mm, 40.0)
+        self.assertLessEqual(x_mm, 60.0)
+
 
 if __name__ == "__main__":
     unittest.main()
