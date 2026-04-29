@@ -130,6 +130,31 @@ for scenes with shadows / lighting / overlays over the textured
 plane — the WRO use case is a flat printed mat where the texture IS
 the answer.
 
+Phase F (WRO 2026 RoboMission, 0.10.8 → 0.10.12) is feature-complete:
+
+- **F1** — high-fidelity mat textures rasterised at 150 dpi
+  (~14000×6750 px) from the official "Game Mat Printing File"
+  PDFs. Drives Phase E1's sensor sampling against the real
+  printed artwork. ``scripts/regen-wro-mat-textures.sh``
+  re-fetches and re-rasterises when WRO updates the source PDFs.
+- **F2** — every visible LEGO prop in all three age categories
+  (Elementary, Junior, Senior) modelled as LDraw assemblies. Per-
+  prop ``.ldr`` files are the source of truth; ``world.py``
+  expands ``<lego_prop ldr=".../*.ldr"/>`` placeholders into MJCF
+  bodies at load time via ``openbricks_sim.lego_mjcf``. 13 LDraw
+  part types in the registry today; new parts plug in by adding
+  one ``_PartSpec`` entry. Senior also wires the WRO-published
+  3D-printed "mosaic frame" STL as a static MuJoCo ``<mesh>``.
+- **F3** — per-round randomization (WRO General Rules glossary
+  "Robot Round" definition). Same seed → same layout. Specs are
+  per-world tuples of ``_RandomizationSpec`` driven by one
+  shared seeded RNG, so a Senior round shuffles all four cement
+  colour groups deterministically from a single ``seed=N``.
+- **F4 + F5** — closed the F2 deferreds (mosaic frame mesh, dual-
+  colour Senior barriers) and lifted Junior + Senior randomization
+  slot coordinates from estimates to mat-extracted positions
+  (same pixel-inspection flow Elementary used in 0.10.10).
+
 Remaining in Phase E: broader worlds library, more example
 walkthroughs. EGL offscreen rendering would unlock simulation of
 scenes more complex than a printed mat (e.g. coloured 3D obstacles

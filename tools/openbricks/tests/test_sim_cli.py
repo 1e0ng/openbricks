@@ -195,5 +195,30 @@ class RunSubcommandTests(unittest.TestCase):
             os.unlink(path)
 
 
+class ShippedExamplesTests(unittest.TestCase):
+    """Smoke-test the ``examples/`` scripts that demonstrate the
+    sim. They're user-facing tutorials; if one starts crashing,
+    a docs-link will point new users at broken code."""
+
+    def test_wro_elementary_walkthrough_runs(self):
+        # The walkthrough teleport-free version: queries the model
+        # for randomized note positions, prints a route plan. Run
+        # against the real Elementary world + a fixed seed, and
+        # assert the CLI exits 0.
+        import os
+        from pathlib import Path
+        example = (Path(__file__).resolve().parent.parent
+                   / "examples" / "wro_elementary_walkthrough.py")
+        self.assertTrue(example.is_file(),
+                        "shipped example missing: %s" % example)
+        rc = cli.main([
+            "run", str(example),
+            "--world", "wro-2026-elementary",
+            "--seed", "42",
+            "--no-shim",
+        ])
+        self.assertEqual(rc, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
