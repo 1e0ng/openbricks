@@ -1,0 +1,7 @@
+0 WRO 2026 Senior — Mosaic tile (×24, 6 each: yellow/blue/green/white)
+0 Per the rules-PDF page 5 photo: small chunky cube ~2x2 stud,
+0 single colour. lego_prop's color="..." selects the colour at
+0 load time. Single .ldr instantiated 24 times.
+0
+1 14 0 0 0 1 0 0 0 1 0 0 0 1 3022.dat
+1 14 0 -8 0 1 0 0 0 1 0 0 0 1 3003.dat
