@@ -175,6 +175,44 @@ class ShimDriveBaseTests(_ShimTestBase):
             deadline += 10
         self.assertTrue(db.is_done())
 
+    def test_construction_resizes_chassis_wheels_to_match_dims(self):
+        # The user's robot.py is the same script the firmware runs;
+        # ``DriveBase(wheel_diameter_mm=80, axle_track_mm=200)`` is
+        # the single source of truth for chassis dims. Pin: at
+        # ShimDriveBase construction time, the sim model's wheel geom
+        # gets resized to the user's wheel_diameter_mm and the wheel
+        # bodies are repositioned for axle_track_mm. Without this,
+        # encoders rotate a default-size wheel while the user's
+        # odometry math thinks they're rotating a different-size wheel.
+        import mujoco
+        from _openbricks_native import Servo, DriveBase
+
+        m = self.robot.model
+        wl_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "chassis_wheel_l")
+        wr_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "chassis_wheel_r")
+        # Find each wheel body's cylinder geom (one per body).
+        def _wheel_geom(bid):
+            for gid in range(m.ngeom):
+                if int(m.geom_bodyid[gid]) == bid:
+                    return gid
+            raise AssertionError("no geom found for body %d" % bid)
+        wl_gid = _wheel_geom(wl_id)
+        wr_gid = _wheel_geom(wr_id)
+
+        # Construct DriveBase with non-default dims.
+        l = Servo(in1=12, in2=14, pwm=27, encoder=None)
+        r = Servo(in1=13, in2=15, pwm=26, encoder=None)
+        DriveBase(left=l, right=r,
+                  wheel_diameter_mm=80.0,    # default is 60 mm
+                  axle_track_mm=200.0)       # default is 150 mm
+
+        # Wheel cylinder radius in metres = 80 / 2000 = 0.040.
+        self.assertAlmostEqual(float(m.geom_size[wl_gid, 0]), 0.040, delta=1e-6)
+        self.assertAlmostEqual(float(m.geom_size[wr_gid, 0]), 0.040, delta=1e-6)
+        # Axle Y on each side = ±200 / 2000 = ±0.100 m.
+        self.assertAlmostEqual(float(m.body_pos[wl_id, 1]), +0.100, delta=1e-6)
+        self.assertAlmostEqual(float(m.body_pos[wr_id, 1]), -0.100, delta=1e-6)
+
     def test_use_gyro_without_imu_raises(self):
         from _openbricks_native import Servo, DriveBase
         l = Servo(in1=12, in2=14, pwm=27, encoder=None)

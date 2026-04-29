@@ -194,6 +194,92 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
     return body + actuators + sensors
 
 
+def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
+                                  wheel_diameter_mm: float,
+                                  axle_track_mm: float) -> None:
+    """Resize the chassis wheels + reposition the axles on a compiled
+    MuJoCo model so they match the dimensions a user passed to their
+    ``DriveBase(wheel_diameter_mm=..., axle_track_mm=...)`` call.
+
+    Why this exists
+    ---------------
+
+    The user's ``robot.py`` is the same script the firmware runs. On
+    firmware, the ``DriveBase`` constructor's ``wheel_diameter_mm`` /
+    ``axle_track_mm`` are the truth (no other config). On sim, those
+    args ALSO need to be the truth — otherwise the sim's wheel
+    encoders rotate a default-size wheel while the user's odometry
+    math thinks they're rotating a different-size wheel, and reported
+    distance and physical motion diverge.
+
+    Pre-this-helper the sim built the chassis from default
+    :class:`ChassisSpec` values (60 mm wheels, 150 mm axle) before
+    the user script ran, so ``DriveBase(wheel_diameter_mm=80, ...)``
+    in the script silently broke odometry. This helper closes the
+    loop by mutating wheel geom sizes + body positions IN PLACE on
+    the compiled model — no recompile, no SimRobot rebuild.
+
+    Trade-offs
+    ----------
+
+    * Wheel ``mass`` / ``inertia`` are NOT recomputed — they were
+      derived from default radius at compile time and stay there.
+      Slightly inaccurate dynamics for non-default wheels (lower
+      moment-of-inertia than a real wheel of that size). Fine for
+      the typical "wheel diameter ±20 mm of default" range; openly
+      a lossy approximation otherwise. Recomputing inertia would
+      need a model recompile.
+    * Body length / width / mass stay at the spec defaults — the
+      ``DriveBase`` constructor doesn't expose those parameters
+      anyway, so the user has no opinion to pass through.
+    * Caster offset stays at default. The chassis pose-on-wheels
+      depends on wheel radius; we adjust the wheel-body Z so the
+      chassis still sits with 5 mm clearance.
+    """
+    import mujoco
+    wheel_radius   = wheel_diameter_mm / 2000.0   # mm → m, diameter → radius
+    half_axle      = axle_track_mm / 2000.0       # mm → m, full → half
+
+    spec = ChassisSpec()  # for body half-extents, wheel half-width
+    bz   = spec.body_height / 2
+    ground_clearance = 0.005
+    # Wheel body Z so the wheel bottom sits ground_clearance above z=0
+    # in the chassis frame (same formula chassis_mjcf uses).
+    wz_offset = -bz - (wheel_radius - bz - ground_clearance)
+
+    for side, sign in (("l", +1), ("r", -1)):
+        wheel_body = "{}_wheel_{}".format(name, side)
+        bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, wheel_body)
+        if bid < 0:
+            raise ValueError(
+                "model has no body named %r — chassis dims can only "
+                "be applied to the default openbricks-sim chassis"
+                % wheel_body)
+        # Body Y position: half-axle on each side (left = +Y, right = -Y).
+        model.body_pos[bid, 1] = sign * half_axle
+        model.body_pos[bid, 2] = wz_offset
+        # Find the wheel cylinder geom under this body and resize it.
+        # geom_size for cylinder: [radius, half-length, _].
+        for gid in range(model.ngeom):
+            if int(model.geom_bodyid[gid]) == bid:
+                model.geom_size[gid, 0] = wheel_radius
+                # geom_size[1] is half-length — keep at spec default
+                # (wheel width is independent of diameter).
+                break
+    # The chassis body itself sits at chassis_z = wheel_radius + clearance
+    # in the world frame; update it so the chassis doesn't fall through
+    # the floor or float when the wheel size changes.
+    chassis_bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+    if chassis_bid >= 0:
+        model.body_pos[chassis_bid, 2] = wheel_radius + ground_clearance
+
+    # Refresh derived fields (e.g. cached spatial transforms) on the
+    # compiled model. ``mj_setConst`` recomputes constants like
+    # body_invweight0 from the new positions; without it the next
+    # ``mj_step`` would use stale derivations.
+    mujoco.mj_setConst(model, mujoco.MjData(model))
+
+
 def standalone_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
     """Wrap :func:`chassis_mjcf` with a bare ``<mujoco>`` envelope and a
     ground plane so the chassis can be previewed in isolation without
