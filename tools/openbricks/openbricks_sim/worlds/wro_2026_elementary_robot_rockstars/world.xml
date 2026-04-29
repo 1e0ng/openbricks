@@ -168,30 +168,19 @@
          with pillar/sphere/flat-brick/tall-brick/half-cyl/rod so a
          downward camera sensor can tell them apart.
          ========================================================= -->
-    <body name="note_red" pos=" 0.50  0.40  0.018">
-      <freejoint/>
-      <geom type="box" size="0.014 0.014 0.018" mass="0.02" material="lego_red"/>
-    </body>
-    <body name="note_blue" pos=" 0.65  0.40  0.012">
-      <freejoint/>
-      <geom type="cylinder" size="0.014 0.012" mass="0.02" material="lego_blue"/>
-    </body>
-    <body name="note_green" pos=" 0.80  0.40  0.024">
-      <freejoint/>
-      <geom type="box" size="0.010 0.010 0.024" mass="0.02" material="lego_green"/>
-    </body>
-    <body name="note_yellow" pos=" 0.95  0.40  0.010">
-      <freejoint/>
-      <geom type="box" size="0.022 0.010 0.010" mass="0.02" material="lego_yellow"/>
-    </body>
-    <body name="note_white" pos=" 0.50  0.25  0.015">
-      <freejoint/>
-      <geom type="sphere" size="0.015" mass="0.02" material="lego_white"/>
-    </body>
-    <body name="note_black" pos=" 0.80  0.25  0.020">
-      <freejoint/>
-      <geom type="cylinder" size="0.010 0.020" mass="0.02" material="lego_black"/>
-    </body>
+    <!-- F2.4: 6 notes as LDraw assemblies. Each note has a 2x2
+         plate base (common across all 6 — required by the rules)
+         and a distinct upper silhouette so the chassis colour
+         sensor + the per-note shape can disambiguate. Same
+         positions as the 0.10.x placeholders; the F3 randomization
+         in randomization.py permutes the 4 random notes (black /
+         white / yellow / blue) across slot_1..slot_4 each round. -->
+    <lego_prop name="note_red"    ldr="props/note_red.ldr"    pos="0.50 0.40 0.0" mass="0.020"/>
+    <lego_prop name="note_blue"   ldr="props/note_blue.ldr"   pos="0.65 0.40 0.0" mass="0.020"/>
+    <lego_prop name="note_green"  ldr="props/note_green.ldr"  pos="0.80 0.40 0.0" mass="0.020"/>
+    <lego_prop name="note_yellow" ldr="props/note_yellow.ldr" pos="0.95 0.40 0.0" mass="0.020"/>
+    <lego_prop name="note_white"  ldr="props/note_white.ldr"  pos="0.50 0.25 0.0" mass="0.020"/>
+    <lego_prop name="note_black"  ldr="props/note_black.ldr"  pos="0.80 0.25 0.0" mass="0.020"/>
 
     <!-- =========================================================
          OVERHEAD CAMERA for previewing the whole scene in MuJoCo's

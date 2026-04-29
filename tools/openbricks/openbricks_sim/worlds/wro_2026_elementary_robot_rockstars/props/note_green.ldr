@@ -1,0 +1,13 @@
+0 WRO 2026 Elementary RoboMission — Green note (stepped pyramid)
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, note builds.
+0 Stud-grid positions visually estimated. Colour: 2 = green.
+0
+0 ===== 2x2 plate base =====
+1 2 0 0 0 1 0 0 0 1 0 0 0 1 3022.dat
+0
+0 ===== Stack with offset rotation for "stepped" look =====
+1 2 0 -8  0 1 0 0 0 1 0 0 0 1 3003.dat
+1 2 0 -32 0 0 0 1 0 1 0 -1 0 0 3003.dat
+1 2 0 -56 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 2 0 -80 0 0 0 1 0 1 0 -1 0 0 3003.dat
+1 2 0 -104 0 1 0 0 0 1 0 0 0 1 3003.dat
