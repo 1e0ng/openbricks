@@ -121,6 +121,28 @@ class LegoPropExpansionTests(unittest.TestCase):
             world = '<worldbody><geom type="plane" size="1 1 0.1"/></worldbody>'
             self.assertEqual(_expand_lego_props(world, Path(tmp)), world)
 
+    def test_senior_world_has_mosaic_frame_mesh(self):
+        # The Senior "Mosaic Masters" world uses the WRO-published
+        # 3D-printed mosaic frame as a MuJoCo ``<mesh>`` (the only
+        # non-LDraw geometry in the prop set). Pin that:
+        #   * exactly one mesh is declared in <asset>
+        #   * a static geom named ``mosaic_frame`` references it
+        #   * the geom is welded to the worldbody (body 0)
+        path = (_WORLDS / "wro_2026_senior_mosaic_masters" / "world.xml")
+        m, _, _ = load_world(str(path), chassis_spec=ChassisSpec())
+        self.assertEqual(
+            m.nmesh, 1,
+            "Senior world should declare exactly 1 mesh (the mosaic "
+            "frame); got %d" % m.nmesh)
+        gid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "mosaic_frame")
+        self.assertGreaterEqual(
+            gid, 0, "mosaic_frame geom missing from Senior world")
+        # Static scenery → parent body is the worldbody (id 0).
+        self.assertEqual(
+            int(m.geom_bodyid[gid]), 0,
+            "mosaic_frame should be welded to the worldbody (static "
+            "scenery), not parented to a movable body")
+
     def test_elementary_world_clef_has_many_geoms(self):
         # Integration test: the shipped Elementary world's clef is a
         # ``<lego_prop>`` placeholder that, when expanded, becomes a

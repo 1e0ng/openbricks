@@ -103,6 +103,18 @@ openbricks_sim = [
     "worlds/*/world.xml",
     "worlds/*/mat.png",
     "worlds/*/README.md",
+    # LDraw prop sources read at world-load time by ``world.py``'s
+    # ``<lego_prop>`` expansion. F2 introduced these and they were
+    # NOT in the original packaging — wheels 0.10.7-0.10.10 shipped
+    # without them and silently broke every WRO world on
+    # ``pip install``. Same shape of bug as the missing-worlds bug
+    # in 0.10.3-0.10.5 (PR #84), now caught by
+    # ``test_wheel_bundles_worlds.test_wheel_contains_ldr_props``.
+    "worlds/*/props/*.ldr",
+    # 3D-printed scenery meshes (currently just the Senior mosaic
+    # frame). MuJoCo loads them via ``<mesh file="..."/>`` at
+    # ``mj_makeData`` time, same lifecycle as ``mat.png``.
+    "worlds/*/*.stl",
 ]
 
 # The ``openbricks_sim._native`` CPython extension is declared in
