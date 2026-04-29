@@ -121,6 +121,39 @@ class LegoPropExpansionTests(unittest.TestCase):
             world = '<worldbody><geom type="plane" size="1 1 0.1"/></worldbody>'
             self.assertEqual(_expand_lego_props(world, Path(tmp)), world)
 
+    def test_senior_barriers_have_dual_color_scheme(self):
+        # F4.2 split the single ``senior_barrier.ldr`` (which used
+        # the lego_prop ``color`` override and so forced every brick
+        # — body + ball — to one colour) into two files with
+        # per-brick LDraw colours, restoring the rules-PDF photo's
+        # red-body+blue-ball / black-body+red-ball contrast. Pin
+        # that the loaded model actually has multiple distinct
+        # materials per barrier body — if a future refactor goes
+        # back to a single colour override, this test catches it.
+        path = (_WORLDS / "wro_2026_senior_mosaic_masters" / "world.xml")
+        m, _, _ = load_world(str(path), chassis_spec=ChassisSpec())
+
+        def _materials_under(body_name):
+            bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            self.assertGreaterEqual(bid, 0, "%s body missing" % body_name)
+            mats = set()
+            for gi in range(m.ngeom):
+                if int(m.geom_bodyid[gi]) == bid:
+                    mid = int(m.geom_matid[gi])
+                    if mid >= 0:
+                        mats.add(mid)
+            return mats
+
+        for barrier in ("barrier_red_a", "barrier_red_b",
+                        "barrier_black_a", "barrier_black_b"):
+            mats = _materials_under(barrier)
+            self.assertGreaterEqual(
+                len(mats), 2,
+                "%s should reference >=2 materials (body + ball "
+                "colours); got %d — did the dual-colour scheme "
+                "regress to a single ``color`` override?" % (
+                    barrier, len(mats)))
+
     def test_senior_world_has_mosaic_frame_mesh(self):
         # The Senior "Mosaic Masters" world uses the WRO-published
         # 3D-printed mosaic frame as a MuJoCo ``<mesh>`` (the only
