@@ -290,10 +290,13 @@ class SeniorRandomizationTests(unittest.TestCase):
         m, d, _ = _make_senior()
         layout = randomization.randomize(
             m, d, world="wro-2026-senior", seed=2026)
+        # 40 cement bodies + 12 mosaic-pattern cells (paper-under-frame).
+        cement_layout = {k: v for k, v in layout.items()
+                         if k.startswith("cement_")}
         self.assertEqual(
-            len(layout), 40,
+            len(cement_layout), 40,
             "Senior layout should cover 40 cement elements (10 each "
-            "× 4 colours); got %d" % len(layout))
+            "× 4 colours); got %d" % len(cement_layout))
         for color in ("yellow", "blue", "green", "white"):
             for i in range(1, 11):
                 body = "cement_%s_%d" % (color, i)
@@ -339,6 +342,60 @@ class SeniorRandomizationTests(unittest.TestCase):
         layout2 = randomization.randomize(
             m2, d2, world="wro-2026-senior", seed=11)
         self.assertEqual(layout1, layout2)
+
+
+class SeniorMosaicPatternTests(unittest.TestCase):
+    """Pin the paper-under-frame mosaic-pattern randomization. 12
+    cells, 3 of each colour (yellow/blue/green/white) per round.
+    Information-only — not a LEGO body."""
+
+    def test_balanced_colors(self):
+        # The pattern must be balanced: exactly 3 cells of each
+        # of the 4 colours. WRO uses a balanced pattern so the
+        # robot needs all 12 (3 × 4) tiles, not a lopsided count.
+        from collections import Counter
+        pat = randomization.senior_mosaic_pattern(seed=42)
+        counts = Counter(pat.values())
+        self.assertEqual(set(counts), {"yellow", "blue", "green", "white"})
+        self.assertTrue(all(c == 3 for c in counts.values()),
+                        "expected 3 of each colour; got %s" % dict(counts))
+
+    def test_twelve_cells(self):
+        pat = randomization.senior_mosaic_pattern(seed=7)
+        self.assertEqual(len(pat), 12)
+        self.assertEqual(set(pat),
+                         {"mosaic_cell_%d" % (i + 1) for i in range(12)})
+
+    def test_deterministic_for_fixed_seed(self):
+        a = randomization.senior_mosaic_pattern(seed=314)
+        b = randomization.senior_mosaic_pattern(seed=314)
+        self.assertEqual(a, b)
+
+    def test_distinct_seeds_yield_distinct_patterns(self):
+        # 369,600 patterns are possible; even a small seed range
+        # should produce many distinct ones.
+        seen = set()
+        for s in range(50):
+            pat = randomization.senior_mosaic_pattern(seed=s)
+            seen.add(tuple(pat.items()))
+        self.assertGreater(len(seen), 40,
+                           "expected >40 distinct patterns across 50 "
+                           "seeds; got %d" % len(seen))
+
+    def test_randomize_includes_pattern_for_senior(self):
+        # ``randomize()`` for the Senior world must fold the
+        # mosaic pattern into the returned layout, so callers
+        # (e.g. the CLI log) see it alongside body shuffles.
+        m, d, _ = _make_senior()
+        layout = randomization.randomize(
+            m, d, world="wro-2026-senior", seed=2026)
+        # 40 cement bodies + 12 mosaic cells = 52 entries.
+        self.assertEqual(len(layout), 52)
+        cells = {k: v for k, v in layout.items()
+                 if k.startswith("mosaic_cell_")}
+        self.assertEqual(len(cells), 12)
+        for color in cells.values():
+            self.assertIn(color, ("yellow", "blue", "green", "white"))
 
 
 if __name__ == "__main__":

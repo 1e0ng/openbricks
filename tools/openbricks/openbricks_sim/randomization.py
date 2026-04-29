@@ -214,6 +214,56 @@ _SPECS: Dict[str, Tuple[_RandomizationSpec, ...]] = {
 
 
 # ---------------------------------------------------------------------
+# Senior mosaic-frame pattern
+#
+# The Senior rules also randomize the mosaic *pattern* — the
+# 12-cell layout the robot must reproduce inside the mosaic frame.
+# The pattern is communicated to teams via a paper sheet placed
+# under the frame; the robot reads it (typically with a colour
+# sensor through the frame's open cells) to know which colour
+# tile to place where. This isn't a movable LEGO body, so it
+# doesn't go through ``_RandomizationSpec`` / ``randomize()``'s
+# freejoint mover — it's pure information.
+#
+# Constraint: 12 cells, 3 each of yellow/blue/green/white (the
+# typical balanced pattern WRO uses). 12! / (3!⁴) = 369,600
+# distinct patterns. Same seeded RNG ``randomize()`` uses, so
+# ``seed=N`` pins both body positions and the pattern.
+
+_MOSAIC_CELL_COUNT  = 12
+_MOSAIC_COLOR_COUNT = 4
+assert _MOSAIC_CELL_COUNT % _MOSAIC_COLOR_COUNT == 0, \
+    "balanced pattern needs cells divisible by colour count"
+_MOSAIC_PER_COLOR   = _MOSAIC_CELL_COUNT // _MOSAIC_COLOR_COUNT
+_MOSAIC_COLORS      = ("yellow", "blue", "green", "white")
+
+
+def senior_mosaic_pattern(seed: Optional[int] = None) -> Dict[str, str]:
+    """Return a deterministic Senior mosaic-frame pattern as a
+    ``{cell_label: color}`` map.
+
+    12 cells, 3 each of yellow/blue/green/white, permuted by the
+    seeded RNG. Cell labels are ``mosaic_cell_1`` through
+    ``mosaic_cell_12``, ordered row-major across the 4×3 frame
+    grid. Same ``seed`` always returns the same pattern; a fresh
+    RNG (``seed=None``) returns a non-deterministic one.
+
+    This is a standalone helper — ``randomize()`` calls it for
+    Senior worlds and folds the entries into the layout dict so
+    the CLI's ``[randomize]`` log shows the pattern alongside
+    the per-body shuffles.
+    """
+    return _mosaic_pattern_from_rng(random.Random(seed))
+
+
+def _mosaic_pattern_from_rng(rng) -> Dict[str, str]:
+    deck = list(_MOSAIC_COLORS) * _MOSAIC_PER_COLOR
+    rng.shuffle(deck)
+    return {"mosaic_cell_{}".format(i + 1): deck[i]
+            for i in range(_MOSAIC_CELL_COUNT)}
+
+
+# ---------------------------------------------------------------------
 # Apply
 
 def randomize(model, data, world: str,
@@ -272,6 +322,15 @@ def randomize(model, data, world: str,
                 spec.off_mat_pos[0], spec.off_mat_pos[1],
                 z_override=spec.off_mat_pos[2])
             layout[element_name] = "unused"
+
+    # Senior also has a mosaic-pattern randomization (paper-under-
+    # frame, not a LEGO body — see ``senior_mosaic_pattern``). Fold
+    # it into the layout so callers / the CLI log see the pattern
+    # alongside the body shuffles. Same RNG → same seed → same
+    # pattern.
+    if world == "wro-2026-senior":
+        for cell_label, color in _mosaic_pattern_from_rng(rng).items():
+            layout[cell_label] = color
 
     # Refresh derived quantities (xpos / cam_xpos / sensordata) so any
     # downstream code that reads positions sees the new placements
