@@ -1,0 +1,27 @@
+0 WRO 2026 Junior — Parrot (×1, mission 3.5 bonus, 10 pts)
+0 Per the rules-PDF page 7 photo: a green LEGO parrot sculpture
+0 with red beak and yellow chest accents. Stylized — perched
+0 vertically on the field. ~2x2 stud × 7 brick tall.
+0
+0 Stud-grid positions visually estimated. ~10 placements.
+0 Colours: 0 = black, 2 = green, 4 = red, 14 = yellow.
+0
+0 ===== Yellow feet base =====
+1 14 0 0 0 1 0 0 0 1 0 0 0 1 3022.dat
+0
+0 ===== Green body (vertical column) =====
+1 2 0  -8 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 2 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 2 0 -56 0 1 0 0 0 1 0 0 0 1 3003.dat
+0
+0 ===== Yellow chest accent =====
+1 14 0 -32 -20 1 0 0 0 1 0 0 0 1 3069b.dat
+0
+0 ===== Green head =====
+1 2 0 -80 0 1 0 0 0 1 0 0 0 1 3003.dat
+0
+0 ===== Red beak =====
+1 4 0 -80 -20 1 0 0 0 1 0 0 0 1 3069b.dat
+0
+0 ===== Black eyes (small accent) =====
+1 0 0 -80 20 1 0 0 0 1 0 0 0 1 3069b.dat

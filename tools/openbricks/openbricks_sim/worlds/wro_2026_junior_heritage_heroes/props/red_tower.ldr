@@ -1,0 +1,23 @@
+0 WRO 2026 Junior — Red tower
+0 Per the rules, 2 red towers (single piece each, 15 pts each in
+0 mission 3.2). Source: rules-PDF page 5 photo — red body with
+0 white "ledge" / window frames detail, ~3x3 stud × 6 brick tall.
+0
+0 Stud-grid positions visually estimated. ~9 placements.
+0 Colours: 4 = red, 15 = white.
+0
+0 ===== Red plate base =====
+1 4 0 0 0 1 0 0 0 1 0 0 0 1 3032.dat
+0
+0 ===== Red body =====
+1 4 0  -8 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -56 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 4 0 -80 0 1 0 0 0 1 0 0 0 1 3003.dat
+0
+0 ===== White accent ring (looks like a "ledge" / window frame) =====
+1 15 0 -56 -20 1 0 0 0 1 0 0 0 1 3022.dat
+0
+0 ===== White roof =====
+1 15 0 -104 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 15 0 -112 0 1 0 0 0 1 0 0 0 1 3022.dat

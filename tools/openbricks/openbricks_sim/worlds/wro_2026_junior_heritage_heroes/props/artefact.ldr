@@ -1,0 +1,18 @@
+0 WRO 2026 Junior — Artefact (shared geometry across 5 colours)
+0 Per the rules, 5 artefacts (1× each: blue/red/green/black/yellow);
+0 only 4 placed on the field per round (1 random unused). Same
+0 shape; lego_prop's color="..." attribute selects the colour at
+0 load time. Source: rules-PDF page 5 photo — chunky cube-like
+0 LEGO assembly, ~3x3 stud footprint, ~3 brick tall.
+0
+0 Stud-grid positions visually estimated. ~5 placements.
+0
+0 ===== 2x2 plate base =====
+1 1 0 0 0 1 0 0 0 1 0 0 0 1 3022.dat
+0
+0 ===== 2x2 brick body =====
+1 1 0  -8 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 1 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+0
+0 ===== Top plate cap (artefact "lid") =====
+1 1 0 -56 0 1 0 0 0 1 0 0 0 1 3022.dat
