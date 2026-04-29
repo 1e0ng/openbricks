@@ -1,0 +1,32 @@
+0 WRO 2026 Elementary RoboMission — Guitar prop
+0 Name: guitar.ldr
+0
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, steps 113-130 (guitar
+0 build). Per the rules-PDF page-4 photo: red body with yellow
+0 neck accent, shape resembling a stylized guitar.
+0
+0 Stud-grid positions visually estimated.
+0 Colours: 4 = red, 14 = yellow, 15 = white.
+0
+0 ===== White plate base =====
+1 15 0 0 0 1 0 0 0 1 0 0 0 1 3032.dat
+0
+0 ===== Layer 1 (y=-8): red bricks forming the body lower =====
+1 4 -10 -8 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 4  10 -8 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 4 -10 -8  20 1 0 0 0 1 0 0 0 1 3001.dat
+1 4  10 -8  20 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Layer 2 (y=-32): wider red body =====
+1 4 -10 -32 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 4  10 -32 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 4 -10 -32  20 1 0 0 0 1 0 0 0 1 3001.dat
+1 4  10 -32  20 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Layer 3 (y=-56): narrowing — guitar neck base =====
+1 4 0 -56 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 4 0 -56  20 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Yellow neck (extending upward) =====
+1 14 0 -80 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 14 0 -104 0 1 0 0 0 1 0 0 0 1 3009.dat

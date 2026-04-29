@@ -1,0 +1,24 @@
+0 WRO 2026 Elementary RoboMission — Microphone prop
+0 Name: microphone.ldr
+0
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, microphone build pages.
+0 Per the rules-PDF page-4 photo: yellow stand with a black sphere /
+0 round head at top. We approximate the sphere with stacked 2x2
+0 black bricks at the top of the stand.
+0
+0 Stud-grid positions visually estimated.
+0 Colours: 0 = black, 14 = yellow.
+0
+0 ===== Yellow base plate (small 2x2 plate footprint via 4x6 plate) =====
+1 14 0 0 0 1 0 0 0 1 0 0 0 1 3032.dat
+0
+0 ===== Yellow stand (vertical column of 2x2 bricks) =====
+1 14 0  -8 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 14 0 -32 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 14 0 -56 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 14 0 -80 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 14 0 -104 0 1 0 0 0 1 0 0 0 1 3003.dat
+0
+0 ===== Black "head" at the top (2x2 bricks approximating a sphere) =====
+1 0 0 -128 0 1 0 0 0 1 0 0 0 1 3003.dat
+1 0 0 -152 0 1 0 0 0 1 0 0 0 1 3003.dat

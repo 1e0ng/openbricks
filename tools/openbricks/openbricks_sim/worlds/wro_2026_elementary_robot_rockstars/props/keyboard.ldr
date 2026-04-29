@@ -1,0 +1,28 @@
+0 WRO 2026 Elementary RoboMission — Keyboard prop
+0 Name: keyboard.ldr
+0
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, keyboard build pages
+0 (after the guitar). Per the rules-PDF page-4 photo: flat wide
+0 keyboard with yellow base + white keys + red top accents.
+0
+0 Stud-grid positions visually estimated.
+0 Colours: 4 = red, 14 = yellow, 15 = white.
+0
+0 ===== Yellow base plate (4x8) =====
+1 14 0 0 0 1 0 0 0 1 0 0 0 1 3035.dat
+0
+0 ===== Layer 1 (y=-8): yellow bricks forming the keyboard body =====
+1 14 -10 -8 -40 1 0 0 0 1 0 0 0 1 3009.dat
+1 14  10 -8 -40 1 0 0 0 1 0 0 0 1 3009.dat
+1 14 -10 -8  40 1 0 0 0 1 0 0 0 1 3009.dat
+1 14  10 -8  40 1 0 0 0 1 0 0 0 1 3009.dat
+0
+0 ===== Layer 2 (y=-32): white keys on top =====
+1 15 -20 -32 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  20 -32 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15 -20 -32  40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  20 -32  40 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Layer 3 (y=-56): red accent on top =====
+1 4 0 -56 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 4 0 -56  40 1 0 0 0 1 0 0 0 1 3001.dat
