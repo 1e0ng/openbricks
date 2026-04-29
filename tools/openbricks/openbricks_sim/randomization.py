@@ -19,8 +19,12 @@ return value is the chosen layout — body name → slot label — for
 logging and test pins.
 
 Randomization specs are per-world and pulled from each category's
-Game Rules PDF. The Elementary spec is the only one wired today;
-Junior and Senior come once their rules are read into specs.
+Game Rules PDF. A world maps to a *tuple of specs*: most worlds
+have one spec (one shuffle group), but Senior has four — one per
+cement-element colour group, since the rules permute within each
+colour's storage area independently. ``randomize()`` runs each
+spec in sequence with a single seeded RNG so determinism is
+preserved across the multi-group case.
 """
 
 from __future__ import annotations
@@ -130,18 +134,29 @@ _ELEMENTARY = _RandomizationSpec(
 # 5 artefacts × choose 4 × permute across 4 slots = 5 × 4! = 120
 # distinct layouts.
 #
-# TODO: slot coordinates are estimates from the rules-PDF page-7
-# image (4 black squares at the lower end). Run
-# ``scripts/extract-wro-slot-coords.py`` against the high-res
-# Junior mat with the artefact-target square colour to refine.
+# Slot coordinates extracted from the high-res Junior mat (the
+# 13949×6750 px artwork shipped in 0.10.8) via
+# ``scripts/extract-wro-slot-coords.py``. Run with target-rgb
+# 0/0/0 (the squares are black against the mat's painted
+# background), --tol 30, --lower-strip 0.20, and
+# --min-cluster-px 5000. The script reports 4 identical-size
+# clusters (~35,700 px ≈ 32×32 mm each) at:
+#
+#     world (-0.1052, -0.5055) m   <- slot_1
+#     world (+0.0267, -0.5055) m   <- slot_2
+#     world (+0.1586, -0.5055) m   <- slot_3
+#     world (+0.2904, -0.5055) m   <- slot_4
+#
+# Spacing ~0.13 m between adjacent slots — the same pattern as
+# Elementary's 4 light-green note-start squares.
 _JUNIOR = _RandomizationSpec(
     elements=("artefact_red", "artefact_blue", "artefact_green",
               "artefact_yellow", "artefact_black"),
     slots=(
-        _Slot(x=0.20, y=-0.45, label="slot_1"),
-        _Slot(x=0.30, y=-0.45, label="slot_2"),
-        _Slot(x=0.40, y=-0.45, label="slot_3"),
-        _Slot(x=0.50, y=-0.45, label="slot_4"),
+        _Slot(x=-0.1052, y=-0.5055, label="slot_1"),
+        _Slot(x=+0.0267, y=-0.5055, label="slot_2"),
+        _Slot(x=+0.1586, y=-0.5055, label="slot_3"),
+        _Slot(x=+0.2904, y=-0.5055, label="slot_4"),
     ),
     # 5 elements, 4 slots → "select 4" semantics. 1 artefact lands
     # off-mat each round.
@@ -154,33 +169,47 @@ _JUNIOR = _RandomizationSpec(
 #
 # Each colour group (yellow / blue / green / white) has 10 cement
 # elements; they get permuted within their colour's storage area
-# each round. 4 separate permutation specs would be cleaner;
-# we model it as 4 specs and pick one ``randomize()`` call per
-# colour. For now, the single _SENIOR spec permutes the YELLOW
-# group as proof-of-concept; blue / green / white land in
-# follow-up tightening.
+# each round. Modelled as 4 separate ``_RandomizationSpec`` per
+# colour, all keyed under ``"wro-2026-senior"`` in ``_SPECS``;
+# ``randomize()`` runs each spec in sequence with one shared RNG
+# so a fixed seed still yields a fixed 40-element layout.
 #
-# TODO: refine to a multi-group spec where one ``randomize()``
-# call permutes all 4 colour groups. The mosaic-pattern paper-
-# under-frame randomization is also out of scope for this spec
-# (it's a paper sheet not a LEGO body).
-_SENIOR = _RandomizationSpec(
-    elements=("cement_yellow_1", "cement_yellow_2", "cement_yellow_3",
-              "cement_yellow_4", "cement_yellow_5", "cement_yellow_6",
-              "cement_yellow_7", "cement_yellow_8", "cement_yellow_9",
-              "cement_yellow_10"),
-    slots=tuple(
-        _Slot(x=0.85 + 0.05 * (i % 5), y=-0.45 + 0.05 * (i // 5),
-              label="cement_yellow_slot_{}".format(i + 1))
-        for i in range(10)
-    ),
-)
+# Slot positions match the world.xml's hardcoded 5×2 grid per
+# colour group (storage areas don't appear as colour-coded zones
+# on the printed mat, so we keep the existing grid as the
+# reference). Per-colour Y bands:
+#   yellow  y ∈ {-0.45, -0.40}
+#   blue    y ∈ {-0.30, -0.25}
+#   green   y ∈ {-0.15, -0.10}
+#   white   y ∈ { 0.00, +0.05}
+# X bands are identical: {0.85, 0.90, 0.95, 1.00, 1.05}.
+def _senior_color_spec(color, y_bottom):
+    """Build a 10-element / 10-slot spec for one cement colour."""
+    elements = tuple("cement_{}_{}".format(color, i + 1)
+                     for i in range(10))
+    slots = tuple(
+        _Slot(x=0.85 + 0.05 * (i % 5),
+              y=y_bottom + 0.05 * (i // 5),
+              label="cement_{}_slot_{}".format(color, i + 1))
+        for i in range(10))
+    return _RandomizationSpec(elements=elements, slots=slots)
 
 
-_SPECS: Dict[str, _RandomizationSpec] = {
-    "wro-2026-elementary": _ELEMENTARY,
-    "wro-2026-junior":     _JUNIOR,
-    "wro-2026-senior":     _SENIOR,
+_SENIOR_YELLOW = _senior_color_spec("yellow", -0.45)
+_SENIOR_BLUE   = _senior_color_spec("blue",   -0.30)
+_SENIOR_GREEN  = _senior_color_spec("green",  -0.15)
+_SENIOR_WHITE  = _senior_color_spec("white",   0.00)
+
+
+# A world maps to a tuple of specs; ``randomize()`` runs each in
+# sequence with a single seeded RNG. Most worlds have one spec
+# (one shuffle group); Senior has four (one per cement colour
+# since each colour permutes within its own storage area).
+_SPECS: Dict[str, Tuple[_RandomizationSpec, ...]] = {
+    "wro-2026-elementary": (_ELEMENTARY,),
+    "wro-2026-junior":     (_JUNIOR,),
+    "wro-2026-senior":     (_SENIOR_YELLOW, _SENIOR_BLUE,
+                            _SENIOR_GREEN,  _SENIOR_WHITE),
 }
 
 
@@ -210,35 +239,39 @@ def randomize(model, data, world: str,
         raise KeyError(
             "no randomization spec for world {!r} (have: {})"
             .format(world, sorted(_SPECS.keys())))
-    spec = _SPECS[world]
-    if len(spec.elements) < len(spec.slots):
-        # ``elements`` < ``slots`` would leave some slots empty,
-        # which the WRO rules don't currently call for — flag.
-        raise RuntimeError(
-            "{!r} spec has {} elements but {} slots — need at least "
-            "as many elements as slots"
-            .format(world, len(spec.elements), len(spec.slots)))
-
+    specs = _SPECS[world]
     rng = random.Random(seed)
-    perm = list(spec.elements)
-    rng.shuffle(perm)
-
-    selected = perm[:len(spec.slots)]
-    unselected = perm[len(spec.slots):]
-
     layout: Dict[str, str] = {}
-    # Place selected elements at slots.
-    for element_name, slot in zip(selected, spec.slots):
-        _place_freejoint_body(model, data, element_name, slot.x, slot.y)
-        layout[element_name] = slot.label
-    # Stash unselected elements off-mat so they don't interfere with
-    # the chassis or the camera. Z is forced to off_mat_pos.z.
-    for element_name in unselected:
-        _place_freejoint_body(
-            model, data, element_name,
-            spec.off_mat_pos[0], spec.off_mat_pos[1],
-            z_override=spec.off_mat_pos[2])
-        layout[element_name] = "unused"
+
+    # Each spec is one independent shuffle group (e.g. one cement
+    # colour for Senior, or the single Elementary note group). They
+    # share one RNG so ``seed=N`` still pins the entire multi-group
+    # outcome.
+    for spec in specs:
+        if len(spec.elements) < len(spec.slots):
+            # ``elements`` < ``slots`` would leave some slots empty,
+            # which the WRO rules don't currently call for — flag.
+            raise RuntimeError(
+                "{!r} spec has {} elements but {} slots — need at "
+                "least as many elements as slots"
+                .format(world, len(spec.elements), len(spec.slots)))
+        perm = list(spec.elements)
+        rng.shuffle(perm)
+        selected = perm[:len(spec.slots)]
+        unselected = perm[len(spec.slots):]
+        # Place selected elements at slots.
+        for element_name, slot in zip(selected, spec.slots):
+            _place_freejoint_body(model, data, element_name,
+                                  slot.x, slot.y)
+            layout[element_name] = slot.label
+        # Stash unselected elements off-mat so they don't interfere
+        # with the chassis or the camera. Z is forced to off_mat_pos.z.
+        for element_name in unselected:
+            _place_freejoint_body(
+                model, data, element_name,
+                spec.off_mat_pos[0], spec.off_mat_pos[1],
+                z_override=spec.off_mat_pos[2])
+            layout[element_name] = "unused"
 
     # Refresh derived quantities (xpos / cam_xpos / sensordata) so any
     # downstream code that reads positions sees the new placements

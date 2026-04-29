@@ -192,6 +192,32 @@ class JuniorRandomizationTests(unittest.TestCase):
         self.assertEqual(unused_count, 1)
         self.assertEqual(slot_count, 4)
 
+    def test_each_artefact_lands_on_a_mat_extracted_slot(self):
+        # F5 replaced the estimated y=-0.45 slots with the 4 black-
+        # square positions extracted from the high-res Junior mat
+        # (y=-0.5055; x ∈ {-0.1052, +0.0267, +0.1586, +0.2904}).
+        # Pin that the 4 selected artefacts each land at one of
+        # those exact (x, y) — within tolerance for mj_forward
+        # numerical noise.
+        m, d, _ = _make_junior()
+        layout = randomization.randomize(
+            m, d, world="wro-2026-junior", seed=314)
+        spec_xys = {(-0.1052, -0.5055), (+0.0267, -0.5055),
+                    (+0.1586, -0.5055), (+0.2904, -0.5055)}
+        for body_name, slot in layout.items():
+            if slot == "unused":
+                continue
+            body_id = mujoco.mj_name2id(
+                m, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            x = float(d.xpos[body_id, 0])
+            y = float(d.xpos[body_id, 1])
+            matched = any(abs(x - sx) < 1e-3 and abs(y - sy) < 1e-3
+                          for sx, sy in spec_xys)
+            self.assertTrue(
+                matched,
+                "%s landed at (%.4f, %.4f) which isn't one of the "
+                "mat-extracted Junior slots" % (body_name, x, y))
+
     def test_unused_artefact_goes_off_mat(self):
         # Unused artefact gets stashed at z = -1 m so it doesn't
         # appear in the chassis camera frustum or interact with
@@ -256,18 +282,54 @@ class SeniorRandomizationTests(unittest.TestCase):
     permutes the 10 yellow elements; blue / green / white land in
     follow-up tightening."""
 
-    def test_yellow_cement_permuted(self):
+    def test_all_four_color_groups_permuted(self):
+        # F5 expanded the Senior spec from yellow-only (10 elements)
+        # to all 4 cement colours (40 elements). Pin: every cement
+        # element appears in the layout, and each one lands at a
+        # slot whose label has its own colour.
         m, d, _ = _make_senior()
         layout = randomization.randomize(
             m, d, world="wro-2026-senior", seed=2026)
-        # All 10 yellow cement elements should be in the layout
-        # at slot positions (no "unused" since elements == slots).
-        self.assertEqual(len(layout), 10)
-        for body_name, slot in layout.items():
-            self.assertTrue(body_name.startswith("cement_yellow_"))
-            self.assertTrue(slot.startswith("cement_yellow_slot_"),
-                            "expected slot label cement_yellow_slot_*; "
-                            "got %r" % slot)
+        self.assertEqual(
+            len(layout), 40,
+            "Senior layout should cover 40 cement elements (10 each "
+            "× 4 colours); got %d" % len(layout))
+        for color in ("yellow", "blue", "green", "white"):
+            for i in range(1, 11):
+                body = "cement_%s_%d" % (color, i)
+                self.assertIn(body, layout, "%s missing from layout" % body)
+                slot = layout[body]
+                self.assertTrue(
+                    slot.startswith("cement_%s_slot_" % color),
+                    "%s landed at slot %r — should be in the %s "
+                    "group's slots, not another colour's" % (body, slot, color))
+
+    def test_each_color_permutes_independently(self):
+        # The 4 colour groups must shuffle within their own slots,
+        # never across colours. After a randomize(), every yellow
+        # element must occupy one of the 10 yellow slots, every
+        # blue element one of the 10 blue slots, etc.
+        m, d, _ = _make_senior()
+        randomization.randomize(
+            m, d, world="wro-2026-senior", seed=314)
+        # Expected slot positions per colour (matches the spec
+        # generator: x ∈ {0.85..1.05}, y per colour).
+        y_band = {"yellow": -0.45, "blue": -0.30,
+                  "green":  -0.15, "white":  0.00}
+        for color, y0 in y_band.items():
+            expected_xys = {(round(0.85 + 0.05 * (i % 5), 3),
+                             round(y0 + 0.05 * (i // 5), 3))
+                            for i in range(10)}
+            for i in range(1, 11):
+                body = "cement_%s_%d" % (color, i)
+                bid = mujoco.mj_name2id(
+                    m, mujoco.mjtObj.mjOBJ_BODY, body)
+                xy = (round(float(d.xpos[bid, 0]), 3),
+                      round(float(d.xpos[bid, 1]), 3))
+                self.assertIn(
+                    xy, expected_xys,
+                    "%s landed at %s — not one of the %s group's "
+                    "expected slot positions" % (body, xy, color))
 
     def test_deterministic(self):
         m1, d1, _ = _make_senior()
