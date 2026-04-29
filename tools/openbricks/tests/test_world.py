@@ -2,13 +2,14 @@
 """Tests for world loading + chassis injection."""
 
 import os
+import tempfile
 import unittest
 from pathlib import Path
 
 import mujoco
 
 from openbricks_sim.chassis import ChassisSpec
-from openbricks_sim.world import WorldLoadError, load_world
+from openbricks_sim.world import WorldLoadError, load_world, _expand_lego_props
 
 
 # Shipped worlds live INSIDE the ``openbricks_sim`` package as of
@@ -78,6 +79,65 @@ class LoadWorldTests(unittest.TestCase):
         self.assertGreater(abs(x1 - x0), 0.02,
                            "motor ctrl should move the chassis (x went "
                            "from %.3f to %.3f)" % (x0, x1))
+
+
+class LegoPropExpansionTests(unittest.TestCase):
+    """The ``<lego_prop name="..." ldr="..." pos="..." mass="..."/>``
+    placeholder is the syntax world.xml uses to embed an LDraw-built
+    prop without inlining hundreds of generated MJCF lines.
+    ``_expand_lego_props`` reads the .ldr at load time and substitutes
+    a full ``<body>`` block. These tests pin that pipeline."""
+
+    def test_placeholder_replaced_with_body_geoms(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "props").mkdir()
+            (tmp / "props" / "tiny.ldr").write_text(
+                "0 Tiny test prop\n"
+                "1 1 0 0 0 1 0 0 0 1 0 0 0 1 3003.dat\n")
+            world = ('<lego_prop name="tinyp" ldr="props/tiny.ldr" '
+                     'pos="0.0 0.0 0.0" mass="0.005"/>')
+            expanded = _expand_lego_props(world, tmp)
+            self.assertIn('<body name="tinyp"', expanded)
+            self.assertIn('<freejoint/>', expanded)
+            self.assertIn('material="lego_blue"', expanded)
+            # 1 brick body + 4 stud cylinders (2x2 brick)
+            self.assertEqual(expanded.count('<geom type="box"'), 1)
+            self.assertEqual(expanded.count('<geom type="cylinder"'), 4)
+
+    def test_missing_ldr_raises_loadly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            world = ('<lego_prop name="x" ldr="props/no_such.ldr" '
+                     'pos="0 0 0" mass="0.01"/>')
+            with self.assertRaises(WorldLoadError) as cm:
+                _expand_lego_props(world, tmp)
+            self.assertIn("missing .ldr", str(cm.exception))
+
+    def test_world_with_no_lego_prop_passes_through(self):
+        # Non-prop XML must round-trip unchanged so we don't break
+        # the existing world.xml structure.
+        with tempfile.TemporaryDirectory() as tmp:
+            world = '<worldbody><geom type="plane" size="1 1 0.1"/></worldbody>'
+            self.assertEqual(_expand_lego_props(world, Path(tmp)), world)
+
+    def test_elementary_world_clef_has_many_geoms(self):
+        # Integration test: the shipped Elementary world's clef is a
+        # ``<lego_prop>`` placeholder that, when expanded, becomes a
+        # body with 31 brick boxes + 230+ stud cylinders. Pre-F2.1
+        # the clef was a single-box approximation — pin the new
+        # multi-geom shape so a regression to single-box is caught.
+        path = (_WORLDS / "wro_2026_elementary_robot_rockstars" / "world.xml")
+        m, _, _ = load_world(str(path), chassis_spec=ChassisSpec())
+        clef_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "clef")
+        self.assertGreaterEqual(clef_id, 0, "clef body missing from model")
+        clef_geom_count = sum(
+            1 for i in range(m.ngeom) if int(m.geom_bodyid[i]) == clef_id)
+        self.assertGreater(
+            clef_geom_count, 100,
+            "clef should have >100 geoms (~31 bricks + ~230 studs); "
+            "got %d — has the lego_prop expansion regressed to a "
+            "single-box approximation?" % clef_geom_count)
 
 
 if __name__ == "__main__":

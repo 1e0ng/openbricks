@@ -1,0 +1,97 @@
+0 WRO 2026 Elementary RoboMission — Clef prop
+0 Name: clef.ldr
+0 Author: openbricks (visual interpretation of the BI PDF)
+0 !LICENSE Redistributable under CCAL version 2.0 : see CAreadme.txt
+0
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, steps 1-14 (clef build).
+0 BI part counts (verified from each step's inset image):
+0   Step 1:  4× 1x6 brick (3009)         — base layer on white 4x6 plate
+0   Step 2:  2× 2x4 brick (3001)
+0   Step 3:  2× 2x4 brick (3001)
+0   Step 4:  1× 2x4 brick (3001)
+0   Step 5:  4× 1x6 brick (3009)         — second wide layer
+0   Step 6:  3× 2x3 brick (3002)
+0   Step 7:  2× 2x3 brick (3002)
+0   Step 8:  1× 2x3 brick (3002)
+0   Step 9:  2× 2x3 brick (3002)
+0   Step 10: 2× 2x4 brick (3001)
+0   Step 11: 2× 2x4 brick (3001)
+0   Step 12: 2× 2x4 brick (3001)
+0   Step 13: 2× 2x4 brick (3001)
+0   Step 14: 1× 2x4 brick (3001)
+0 Total: 30 blue bricks + 1 white 4x6 plate = 31 parts.
+0
+0 Stud-grid positions are visually estimated from the isometric BI
+0 renders (which lack explicit grid coordinates). The silhouette
+0 matches the BI's final view (step 15) and the rules-PDF page-6 photo
+0 to ~1-stud accuracy. For stud-exact fidelity someone would need to
+0 build this in BrickLink Studio with snap-to-grid and export the
+0 .ldr — when that lands we replace this file.
+0
+0 Coordinate frame: LDraw +X right, +Y down, +Z forward.
+0 Plate footprint centred on origin, 80 LDU × 120 LDU (4 × 6 studs).
+0 Layer 1 brick bottom at y=-8 (top of plate). Each brick adds 24 LDU
+0 of height ⇒ y decreases (LDraw +Y is down) by 24 per layer.
+0
+0 Colours: 1 = blue, 15 = white.
+0
+0 // ===== Base plate =====
+1 15 0 0 0 1 0 0 0 1 0 0 0 1 3032.dat
+0
+0 // ===== Layer 1 (y=-8): 4× 1x6, side by side filling plate =====
+1 1 -30 -8 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 1 -10 -8 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 1  10 -8 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 1  30 -8 0 1 0 0 0 1 0 0 0 1 3009.dat
+0
+0 // ===== Layer 2 (y=-32): 2× 2x4 brick — loop bottom =====
+1 1 -20 -32 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 1  20 -32 -20 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 // ===== Layer 3 (y=-56): 2× 2x4 brick — continues =====
+1 1 -20 -56  20 1 0 0 0 1 0 0 0 1 3001.dat
+1 1  20 -56  20 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 // ===== Layer 4 (y=-80): 1× 2x4 brick — tapering =====
+1 1   0 -80 -20 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 // ===== Layer 5 (y=-104): 4× 1x6 — second wide layer (loop) =====
+1 1 -30 -104 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 1 -10 -104 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 1  10 -104 0 1 0 0 0 1 0 0 0 1 3009.dat
+1 1  30 -104 0 1 0 0 0 1 0 0 0 1 3009.dat
+0
+0 // ===== Layer 6 (y=-128): 3× 2x3 brick =====
+1 1 -20 -128 -10 1 0 0 0 1 0 0 0 1 3002.dat
+1 1  20 -128 -10 1 0 0 0 1 0 0 0 1 3002.dat
+1 1   0 -128  20 1 0 0 0 1 0 0 0 1 3002.dat
+0
+0 // ===== Layer 7 (y=-152): 2× 2x3 brick =====
+1 1 -20 -152  10 1 0 0 0 1 0 0 0 1 3002.dat
+1 1  20 -152  10 1 0 0 0 1 0 0 0 1 3002.dat
+0
+0 // ===== Layer 8 (y=-176): 1× 2x3 brick — narrowing =====
+1 1   0 -176 -10 1 0 0 0 1 0 0 0 1 3002.dat
+0
+0 // ===== Layer 9 (y=-200): 2× 2x3 brick =====
+1 1 -10 -200  10 1 0 0 0 1 0 0 0 1 3002.dat
+1 1  10 -200 -20 1 0 0 0 1 0 0 0 1 3002.dat
+0
+0 // ===== Layer 10 (y=-224): 2× 2x4 brick =====
+1 1 -20 -224 -10 1 0 0 0 1 0 0 0 1 3001.dat
+1 1  20 -224  10 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 // ===== Layer 11 (y=-248): 2× 2x4 brick =====
+1 1 -20 -248  10 1 0 0 0 1 0 0 0 1 3001.dat
+1 1  20 -248 -10 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 // ===== Layer 12 (y=-272): 2× 2x4 brick =====
+1 1   0 -272 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 1   0 -272  20 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 // ===== Layer 13 (y=-296): 2× 2x4 brick =====
+1 1 -10 -296   0 1 0 0 0 1 0 0 0 1 3001.dat
+1 1  10 -296   0 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 // ===== Layer 14 (y=-320): 1× 2x4 brick — top hook =====
+1 1   0 -320   0 1 0 0 0 1 0 0 0 1 3001.dat

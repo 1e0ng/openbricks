@@ -101,12 +101,11 @@
          to the mat for the demo.
          ========================================================= -->
 
-    <!-- Clef: blue, slender tower. ~3×3 stud footprint, ~9 bricks
-         tall. Built from the cover page of the build instructions. -->
-    <body name="clef" pos="-0.08  0.12  0.050">
-      <freejoint/>
-      <geom type="box" size="0.012 0.012 0.048" mass="0.06" material="lego_blue"/>
-    </body>
+    <!-- Clef: F2.1 LDraw-built blue brick tower on a 4x6 white plate
+         base. The ``<lego_prop>`` placeholder is expanded by
+         ``world.py`` at load time using ``props/clef.ldr`` (BI steps
+         1-14, 30 blue bricks + 1 plate, ≈48 g). -->
+    <lego_prop name="clef" ldr="props/clef.ldr" pos="-0.08 0.12 0.0" mass="0.048"/>
 
     <!-- Amplifier: tall black/blue stack, ~4×5 stud footprint,
          ~10 bricks tall. Upper-left of stage. -->

@@ -127,18 +127,30 @@ _PART_REGISTRY = {
     "3001.dat": _PartSpec(   # 2x4 brick
         w_ldu=2 * LDU_PER_STUD, d_ldu=4 * LDU_PER_STUD, h_ldu=LDU_PER_BRICK_H,
         stud_grid=_grid_studs(2, 4)),
+    "3002.dat": _PartSpec(   # 2x3 brick (in 45819 expansion)
+        w_ldu=2 * LDU_PER_STUD, d_ldu=3 * LDU_PER_STUD, h_ldu=LDU_PER_BRICK_H,
+        stud_grid=_grid_studs(2, 3)),
     "3003.dat": _PartSpec(   # 2x2 brick
         w_ldu=2 * LDU_PER_STUD, d_ldu=2 * LDU_PER_STUD, h_ldu=LDU_PER_BRICK_H,
         stud_grid=_grid_studs(2, 2)),
     "3009.dat": _PartSpec(   # 1x6 brick
         w_ldu=1 * LDU_PER_STUD, d_ldu=6 * LDU_PER_STUD, h_ldu=LDU_PER_BRICK_H,
         stud_grid=_grid_studs(1, 6)),
+    "3010.dat": _PartSpec(   # 1x4 brick
+        w_ldu=1 * LDU_PER_STUD, d_ldu=4 * LDU_PER_STUD, h_ldu=LDU_PER_BRICK_H,
+        stud_grid=_grid_studs(1, 4)),
     "3894.dat": _PartSpec(   # 1x6 brick with cross-axle hole — same envelope
         w_ldu=1 * LDU_PER_STUD, d_ldu=6 * LDU_PER_STUD, h_ldu=LDU_PER_BRICK_H,
         stud_grid=_grid_studs(1, 6)),
     "3022.dat": _PartSpec(   # 2x2 plate
         w_ldu=2 * LDU_PER_STUD, d_ldu=2 * LDU_PER_STUD, h_ldu=LDU_PER_PLATE_H,
         stud_grid=_grid_studs(2, 2)),
+    "3032.dat": _PartSpec(   # 4x6 plate (in 45819)
+        w_ldu=4 * LDU_PER_STUD, d_ldu=6 * LDU_PER_STUD, h_ldu=LDU_PER_PLATE_H,
+        stud_grid=_grid_studs(4, 6)),
+    "3035.dat": _PartSpec(   # 4x8 plate (in 45819)
+        w_ldu=4 * LDU_PER_STUD, d_ldu=8 * LDU_PER_STUD, h_ldu=LDU_PER_PLATE_H,
+        stud_grid=_grid_studs(4, 8)),
     "3069b.dat": _PartSpec(  # 1x2 tile — smooth, no studs
         w_ldu=1 * LDU_PER_STUD, d_ldu=2 * LDU_PER_STUD, h_ldu=LDU_PER_PLATE_H,
         stud_grid=()),
