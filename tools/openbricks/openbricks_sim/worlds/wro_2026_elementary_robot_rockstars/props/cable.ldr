@@ -1,0 +1,57 @@
+0 WRO 2026 Elementary RoboMission — Cable prop (×2 in the world)
+0 Name: cable.ldr
+0
+0 Source: WRO-2026-RM-Elementary-BI-All.pdf, steps 101-112 (cables build).
+0 Per-step part counts (counts × 2 for the pair built in parallel):
+0   Step 101: 4× 2x4 yellow brick                  → 2 per cable
+0   Step 102: 2× 2x4 white brick                   → 1 per cable
+0   Step 103: 2× 1x6 black technic brick (3894)    → 1 per cable
+0   Step 104: 4× 1x6 white brick                   → 2 per cable
+0   Step 105: 2× 2x2 black brick                   → 1 per cable
+0   Step 106: 4× 2x2 white brick                   → 2 per cable
+0   Step 107: 2× 2x4 yellow brick                  → 1 per cable
+0   Step 108: 4× 2x4 yellow brick                  → 2 per cable
+0   Step 109: 4× 1x6 white brick                   → 2 per cable
+0   Step 110: 2× 1x2 brick with pin + 2× 2x4 white → 1+1 per cable
+0   Step 111: 2× 1x2 brick with pin + 2× 2x4 white → 1+1 per cable
+0 Total: ~14 bricks per cable; world.xml instantiates 2 of these.
+0
+0 Stud-grid positions visually estimated. Silhouette: yellow base
+0 plate, white body with 1x6 black technic brick running through
+0 the middle as the visible "cable" element, accent bricks at the ends.
+0
+0 Colours: 1 = blue, 4 = red, 14 = yellow, 15 = white, 0 = black.
+0
+0 ===== Yellow plate base (4x8) =====
+1 14 0 0 0 1 0 0 0 1 0 0 0 1 3035.dat
+0
+0 ===== Layer 1 (y=-8): yellow + white bricks forming the base =====
+1 14 -20 -8 -60 1 0 0 0 1 0 0 0 1 3001.dat
+1 14  20 -8 -60 1 0 0 0 1 0 0 0 1 3001.dat
+1 14 -20 -8  60 1 0 0 0 1 0 0 0 1 3001.dat
+1 14  20 -8  60 1 0 0 0 1 0 0 0 1 3001.dat
+1 15 -20 -8 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  20 -8 -20 1 0 0 0 1 0 0 0 1 3001.dat
+1 15 -20 -8  20 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  20 -8  20 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Layer 2 (y=-32): white + black technic brick (the cable wire) =====
+1 15 -20 -32 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  20 -32 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15 -20 -32  40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  20 -32  40 1 0 0 0 1 0 0 0 1 3001.dat
+0 The 1x6 black technic brick running along the cable — the visual
+0 "wire" element. Centred in the assembly.
+1 0 0 -32 0 0 0 1 0 1 0 -1 0 0 3894.dat
+0
+0 ===== Layer 3 (y=-56): white top =====
+1 15 -20 -56 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  20 -56 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15 -20 -56  40 1 0 0 0 1 0 0 0 1 3001.dat
+1 15  20 -56  40 1 0 0 0 1 0 0 0 1 3001.dat
+0
+0 ===== Layer 4 (y=-80): yellow brick caps at the ends =====
+1 14 -20 -80 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 14  20 -80 -40 1 0 0 0 1 0 0 0 1 3001.dat
+1 14 -20 -80  40 1 0 0 0 1 0 0 0 1 3001.dat
+1 14  20 -80  40 1 0 0 0 1 0 0 0 1 3001.dat

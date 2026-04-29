@@ -131,14 +131,12 @@
          grey target areas printed on the mat between the amplifier
          and each speaker).
          ========================================================= -->
-    <body name="cable_upper" pos="-0.82  0.30  0.014">
-      <freejoint/>
-      <geom type="box" size="0.060 0.010 0.014" mass="0.04" material="lego_gray"/>
-    </body>
-    <body name="cable_lower" pos="-0.82 -0.30  0.014">
-      <freejoint/>
-      <geom type="box" size="0.060 0.010 0.014" mass="0.04" material="lego_gray"/>
-    </body>
+    <!-- F2.2: each cable is ~22 LEGO bricks (yellow plate base + white
+         body + 1x6 black technic-brick "cable wire" running through the
+         middle + yellow caps), generated from props/cable.ldr at load
+         time. Two instances at the upper / lower target zones. -->
+    <lego_prop name="cable_upper" ldr="props/cable.ldr" pos="-0.82 0.30 0.0" mass="0.040"/>
+    <lego_prop name="cable_lower" ldr="props/cable.ldr" pos="-0.82 -0.30 0.0" mass="0.040"/>
 
     <!-- =========================================================
          MISSION 3.2 — instruments start in the backstage-start
