@@ -347,6 +347,16 @@ class ShimDriveBase:
             raise TypeError(
                 "shim DriveBase requires shim Servo instances "
                 "(got %s, %s)" % (type(left).__name__, type(right).__name__))
+        # The user's robot.py is the same script the firmware runs; its
+        # ``wheel_diameter_mm`` / ``axle_track_mm`` are the single source
+        # of truth for chassis dims. Apply them to the sim model in
+        # place so wheel encoders rotate a wheel of the right size — see
+        # ``chassis.apply_drivebase_dims_to_model`` for the trade-offs.
+        from openbricks_sim.chassis import apply_drivebase_dims_to_model
+        apply_drivebase_dims_to_model(
+            _INSTALLED.runtime.model,
+            wheel_diameter_mm=float(wheel_diameter_mm),
+            axle_track_mm=float(axle_track_mm))
         self._db = SimDriveBase(
             _INSTALLED.runtime, left._adapter, right._adapter,
             wheel_diameter_mm=float(wheel_diameter_mm),
