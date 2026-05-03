@@ -14,10 +14,21 @@ CONFIG_ESP_WIFI_ENABLED=n
 # Route the IDF console (boot logs + MicroPython REPL) over the
 # ESP32-S3's built-in USB Serial/JTAG controller (GPIO 19/20),
 # which is what most S3 dev boards' single USB-C connector uses.
-# Without this, the IDF default console is UART0 — boot logs and
-# the REPL go to the chip's UART0 pins, which aren't connected
-# to the USB-C cable on most boards. Symptom: ``mpremote
-# connect /dev/cu.usbmodem...`` times out because there's
-# nothing on the USB side.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# v1.0.2 had USB-Serial-JTAG console wired up but the device was
+# still silent after ``entry 0x403c88a8`` — Enter on the REPL got
+# no echo, BOOT button got no response. Bump bootloader + default
+# log levels from WARN/ERROR up to INFO so we can see exactly
+# where the boot is hanging: the IDF stage-2 bootloader's
+# partition + app-loading messages, and IDF system-init logs.
+#
+# Overrides sdkconfig.base, which keeps these at WARN/ERROR for
+# binary-size reasons. Cost: ~2 KB of strings + slightly slower
+# boot. Worth it during bring-up; tighten back once the boot is
+# reliable.
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=
+CONFIG_BOOTLOADER_LOG_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL_ERROR=
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
