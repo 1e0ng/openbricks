@@ -4,7 +4,7 @@
 
 Two-step flow:
 
-  1. ``esptool.py ... write_flash`` writes the combined firmware image.
+  1. ``esptool ... write-flash`` writes the combined firmware image.
   2. ``mpremote ... exec`` pokes the BLE advertising name into NVS under
      namespace ``openbricks``, key ``hub_name`` (where ``openbricks``
      reads it via ``openbricks._read_hub_name``).
@@ -39,6 +39,23 @@ def _require_tool(name):
         _die("%s not found on PATH — install with: pip install esptool mpremote"
              % name)
     return path
+
+
+def _esptool_paths_and_commands():
+    """Return ``(binary_path, write_cmd, erase_cmd)`` for the esptool
+    install on PATH.
+
+    Prefer the v5 binary name (``esptool``) and v5 kebab-case
+    commands (``write-flash`` / ``erase-flash``) when both are
+    available — output is clean of "DEPRECATED" warnings. Fall
+    back to the v4 names when v5 isn't installed (typical on
+    Python 3.9, since esptool 5+ requires Python ≥ 3.10).
+    """
+    if shutil.which("esptool") is not None:
+        return shutil.which("esptool"), "write-flash", "erase-flash"
+    if shutil.which("esptool.py") is not None:
+        return shutil.which("esptool.py"), "write_flash", "erase_flash"
+    _die("esptool not found on PATH — install with: pip install esptool mpremote")
 
 
 def _run(cmd, check=True):
@@ -122,17 +139,24 @@ def run(args):
     """Subcommand entry. ``args`` is an argparse ``Namespace``."""
     _validate_name(args.name)
 
-    esptool  = _require_tool("esptool.py")
+    # esptool v5 renamed the binary (``esptool.py`` → ``esptool``) and
+    # switched commands to kebab-case (``write_flash`` → ``write-flash``,
+    # ``erase_flash`` → ``erase-flash``). The legacy forms still work in
+    # v5 but emit deprecation warnings on every flash. We can't pin v5
+    # as a floor (it requires Python >= 3.10 and openbricks supports
+    # >= 3.9), so detect which is on PATH at runtime and pick command
+    # spelling accordingly.
+    esptool, write_cmd, erase_cmd = _esptool_paths_and_commands()
     mpremote = _require_tool("mpremote")
 
     print("=== openbricks flash: name=%r port=%s ===" % (args.name, args.port))
 
     if not args.skip_erase:
-        _run([esptool, "--chip", args.chip, "--port", args.port, "erase_flash"])
+        _run([esptool, "--chip", args.chip, "--port", args.port, erase_cmd])
 
     _run([
         esptool, "--chip", args.chip, "--port", args.port,
-        "--baud", args.baud, "write_flash", "0x0", args.firmware,
+        "--baud", args.baud, write_cmd, "0x0", args.firmware,
     ])
 
     # esptool leaves the device reset; give USB-CDC ports time to

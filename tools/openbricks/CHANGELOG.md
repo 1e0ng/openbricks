@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.13 — `openbricks flash` uses esptool v5 commands when available
+
+`openbricks flash` invoked `esptool.py write_flash` and `erase_flash`
+— the esptool v4 forms. esptool v5 (out for ~12 months) renamed
+the binary to `esptool` and the commands to kebab-case
+(`write-flash`, `erase-flash`); the legacy forms still work but
+print deprecation warnings on every flash:
+
+```
+Warning: DEPRECATED: 'esptool.py' is deprecated. Please use 'esptool' instead.
+Warning: Deprecated: Command 'write_flash' is deprecated. Use 'write-flash' instead.
+```
+
+`flash.py` now runtime-detects which esptool form is on PATH and
+picks command spelling accordingly: `esptool` + kebab-case if v5
+is installed, falling back to `esptool.py` + underscore on v4.
+Output is clean of deprecation warnings on v5 installs.
+
+Why not bump the dependency floor? esptool 5+ requires Python ≥ 3.10
+and openbricks supports ≥ 3.9; pinning v5 would break wheel builds
+for Python 3.9 users. Runtime detection lets both paths coexist.
+
 ## 0.10.12 — Junior + Senior randomization tightened to mat-truth
 
 Closes the two TODOs left after 0.10.10's per-round randomization
