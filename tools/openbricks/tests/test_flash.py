@@ -93,10 +93,10 @@ class RunHappyPathTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         # Three subprocess.call invocations: erase, write, reset.
         self.assertEqual(len(call_history), 3)
-        # First: erase_flash.
-        self.assertIn("erase_flash", call_history[0])
-        # Second: write_flash at 0x0 with the firmware path.
-        self.assertIn("write_flash", call_history[1])
+        # First: erase-flash (esptool v5 kebab-case form).
+        self.assertIn("erase-flash", call_history[0])
+        # Second: write-flash at 0x0 with the firmware path.
+        self.assertIn("write-flash", call_history[1])
         self.assertIn("0x0", call_history[1])
         self.assertIn("firmware.bin", call_history[1])
         # Third: mpremote reset at the end.
@@ -114,7 +114,7 @@ class RunHappyPathTests(unittest.TestCase):
              patch("subprocess.run", side_effect=lambda *a, **k: next(run_responses)):
             flash.run(_args(skip_erase=True))
         self.assertEqual(len(call_history), 2)
-        self.assertNotIn("erase_flash", call_history[0])
+        self.assertNotIn("erase-flash", call_history[0])
 
     def test_readback_mismatch_raises(self):
         run_responses = iter([
@@ -130,7 +130,7 @@ class RunHappyPathTests(unittest.TestCase):
         self.assertIn("verification failed", str(ctx.exception))
 
     def test_write_flash_failure_raises(self):
-        # erase_flash succeeds (rc=0); write_flash fails (rc=3).
+        # erase-flash succeeds (rc=0); write-flash fails (rc=3).
         returncodes = iter([0, 3])
         with patch("subprocess.call",
                    side_effect=lambda cmd: next(returncodes)), \
@@ -145,7 +145,7 @@ class ToolMissingTests(unittest.TestCase):
         with patch("shutil.which", return_value=None):
             with self.assertRaises(flash.FlashError) as ctx:
                 flash.run(_args())
-        self.assertIn("esptool.py not found", str(ctx.exception))
+        self.assertIn("esptool not found", str(ctx.exception))
 
 
 class NameWriteSnippetTests(unittest.TestCase):

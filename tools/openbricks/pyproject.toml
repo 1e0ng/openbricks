@@ -54,8 +54,11 @@ classifiers = [
 dependencies = [
     # BLE scan + connect on macOS / Linux / Windows without vendor tools.
     "bleak >= 0.22",
-    # Flashing ESP32 / ESP32-S3 images.
-    "esptool >= 4.7",
+    # Flashing ESP32 / ESP32-S3 images. v5+ ships the ``esptool``
+    # binary (the legacy ``esptool.py`` form prints deprecation
+    # warnings on every invocation) and the kebab-case command names
+    # (``write-flash`` etc.) we use in ``openbricks_dev.flash``.
+    "esptool >= 5.0",
     # Serial REPL bridge used by ``flash`` after a write.
     "mpremote >= 1.23",
 ]

@@ -4,7 +4,7 @@
 
 Two-step flow:
 
-  1. ``esptool.py ... write_flash`` writes the combined firmware image.
+  1. ``esptool ... write-flash`` writes the combined firmware image.
   2. ``mpremote ... exec`` pokes the BLE advertising name into NVS under
      namespace ``openbricks``, key ``hub_name`` (where ``openbricks``
      reads it via ``openbricks._read_hub_name``).
@@ -122,17 +122,23 @@ def run(args):
     """Subcommand entry. ``args`` is an argparse ``Namespace``."""
     _validate_name(args.name)
 
-    esptool  = _require_tool("esptool.py")
+    # esptool v5 renamed the binary (``esptool.py`` → ``esptool``) and
+    # switched commands to kebab-case (``write_flash`` → ``write-flash``,
+    # ``erase_flash`` → ``erase-flash``); the legacy forms still work in
+    # v5 but emit deprecation warnings on every flash. Use the v5 forms
+    # to keep ``openbricks flash`` output clean. Min ``esptool >= 5.0``
+    # is pinned in pyproject.toml so the new binary is always present.
+    esptool  = _require_tool("esptool")
     mpremote = _require_tool("mpremote")
 
     print("=== openbricks flash: name=%r port=%s ===" % (args.name, args.port))
 
     if not args.skip_erase:
-        _run([esptool, "--chip", args.chip, "--port", args.port, "erase_flash"])
+        _run([esptool, "--chip", args.chip, "--port", args.port, "erase-flash"])
 
     _run([
         esptool, "--chip", args.chip, "--port", args.port,
-        "--baud", args.baud, "write_flash", "0x0", args.firmware,
+        "--baud", args.baud, "write-flash", "0x0", args.firmware,
     ])
 
     # esptool leaves the device reset; give USB-CDC ports time to

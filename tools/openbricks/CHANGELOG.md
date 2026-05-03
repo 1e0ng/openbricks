@@ -3,6 +3,30 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.13 — `openbricks flash` uses esptool v5 commands
+
+`openbricks flash` invoked `esptool.py write_flash` and `erase_flash`
+— the esptool v4 forms. esptool v5 (out for ~12 months) renamed
+the binary to `esptool` and the commands to kebab-case
+(`write-flash`, `erase-flash`); the legacy forms still work but
+print deprecation warnings on every flash:
+
+```
+Warning: DEPRECATED: 'esptool.py' is deprecated. Please use 'esptool' instead.
+Warning: Deprecated: Command 'write_flash' is deprecated. Use 'write-flash' instead.
+```
+
+Switched to the v5 forms. `esptool >= 5.0` is now the dependency
+floor (was `>= 4.7`).
+
+If you're still on esptool 4.x, upgrade with:
+
+```
+pip install --upgrade 'esptool >= 5.0'
+```
+
+…or `pipx upgrade openbricks` (which pulls the new pin in).
+
 ## 0.10.12 — Junior + Senior randomization tightened to mat-truth
 
 Closes the two TODOs left after 0.10.10's per-round randomization
