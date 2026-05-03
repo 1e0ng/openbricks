@@ -10,3 +10,14 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 # 2.4 GHz RF contention with BLE (which stays on for the mpremote-over-
 # BLE code-transfer workflow) and shrinks the firmware image.
 CONFIG_ESP_WIFI_ENABLED=n
+
+# Route the IDF console (boot logs + MicroPython REPL) over the
+# ESP32-S3's built-in USB Serial/JTAG controller (GPIO 19/20),
+# which is what most S3 dev boards' single USB-C connector uses.
+# Without this, the IDF default console is UART0 — boot logs and
+# the REPL go to the chip's UART0 pins, which aren't connected
+# to the USB-C cable on most boards. Symptom: ``mpremote
+# connect /dev/cu.usbmodem...`` times out because there's
+# nothing on the USB side.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
