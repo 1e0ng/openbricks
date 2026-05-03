@@ -52,6 +52,19 @@ pipx install openbricks          # CLI only (flash / run / log)
 
 (`pip install` works too; `pipx` is recommended on modern macOS / Linux to avoid the "externally managed environment" error.) The package is on PyPI: <https://pypi.org/project/openbricks/>.
 
+### Flash the firmware
+
+Grab a prebuilt firmware image from [Releases](../../releases) — pick `openbricks-esp32-firmware-<version>.bin` or the `-esp32s3-` variant for your board — then flash and name the hub in one step:
+
+```
+openbricks flash \
+    --name RobotA \
+    --port /dev/cu.usbserial-0001 \
+    --firmware openbricks-esp32-firmware-latest.bin
+```
+
+`--name` is the BLE advertising identifier you'll use later with `openbricks run -n …`; pick a unique one per hub. The `--port` value depends on your OS (`/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS, `COM5` on Windows). Add `--chip esp32s3` if auto-detection misses. Skip this step entirely if you only want to run code in the simulator.
+
 ### Drive a robot
 
 Once the firmware is flashed, write a `main.py` and push it to the hub:
