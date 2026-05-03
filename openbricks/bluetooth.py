@@ -107,14 +107,27 @@ def apply_persisted_state():
 
     Call this at boot (e.g. top of ``main.py``) so the BLE radio reflects
     whatever the user last chose before the reboot — or comes up enabled
-    on the very first boot. Raises :class:`HubNameNotSetError` when the
-    persisted state is enabled but no hub name was flashed.
+    on the very first boot.
+
+    Tolerant of a missing hub name: if the persisted state says BLE-on
+    but no hub name is flashed (typical on a freshly-flashed chip
+    before the first ``openbricks flash --name ...`` run), prints a
+    one-line warning and skips activation. Better than raising
+    ``HubNameNotSetError`` from ``main.py``, which (per the
+    1.0.4 silent-boot bug) could lose its traceback to USB-Serial-JTAG
+    timing and brick the boot.
     """
     import bluetooth
     from openbricks import ble_repl
     enabled = is_enabled()
     if enabled:
-        name = _require_hub_name()
+        try:
+            name = _require_hub_name()
+        except HubNameNotSetError:
+            print("openbricks: BLE persisted-on but no hub name in NVS; "
+                  "skipping BLE activation. Reflash with "
+                  "``openbricks flash --name NAME ...`` to enable.")
+            return
     ble = bluetooth.BLE()
     if not enabled:
         ble_repl.stop()

@@ -127,10 +127,20 @@ class HubNameRequiredTests(unittest.TestCase):
         self.assertFalse(_FakeBLE().active())
         self.assertFalse(bluetooth.is_enabled())
 
-    def test_apply_persisted_state_raises_when_default_on_without_name(self):
-        """Fresh device (no NVS keys) defaults to BLE-on, which needs a name."""
-        with self.assertRaises(bluetooth.HubNameNotSetError):
-            bluetooth.apply_persisted_state()
+    def test_apply_persisted_state_skips_when_default_on_without_name(self):
+        """Fresh device (no NVS keys) defaults to BLE-on, which needs a
+        name. Pre-1.0.5 this raised ``HubNameNotSetError`` — but on a
+        freshly-flashed chip the exception escaped from ``main.py`` and
+        the traceback was lost to USB-Serial-JTAG timing, leaving the
+        device looking silent. 1.0.5 traded the raise for a printed
+        warning + skip; ``apply_persisted_state`` now never raises on
+        the no-name path so ``main.py`` keeps running and the REPL
+        comes up. Pin: BLE stays inactive (no name → no advertising)
+        and the call returns cleanly."""
+        bluetooth.apply_persisted_state()
+        self.assertFalse(_FakeBLE().active(),
+                         "BLE should stay off when no hub name set, "
+                         "even with persisted-on flag")
 
     def test_apply_persisted_state_ok_when_off_without_name(self):
         # Persist "off" via raw NVS write so we don't go through the
