@@ -38,6 +38,18 @@ class ParserTests(unittest.TestCase):
             with patch("sys.stderr", new_callable=io.StringIO):
                 self.parser.parse_args([])
 
+    def test_version_flag_prints_and_exits(self):
+        # ``openbricks-sim --version`` exits 0 and writes the version
+        # to stdout. Pinned because new users expect this and it's a
+        # cheap "is the install live" sanity check.
+        from openbricks_dev import __version__
+        out = io.StringIO()
+        with self.assertRaises(SystemExit) as ctx:
+            with patch("sys.stdout", new=out):
+                self.parser.parse_args(["--version"])
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn(__version__, out.getvalue())
+
 
 class ResolveWorldTests(unittest.TestCase):
     def test_empty_alias_returns_none(self):
