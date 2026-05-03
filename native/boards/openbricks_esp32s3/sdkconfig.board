@@ -1,34 +1,16 @@
 # SPDX-License-Identifier: MIT
 # openbricks-specific ESP-IDF sdkconfig overrides for ESP32-S3.
 #
-# QIO flash mode + 80 MHz matches MicroPython's ESP32_GENERIC_S3 baseline,
-# which is what every S3 devkit we care about supports.
+# v1.0.4: minimum-divergence config. Stock MicroPython
+# ``ESP32_GENERIC_S3-SPIRAM_OCT`` boots fine on the AP_3v3 chip we
+# tested with; everything we'd previously layered on (WiFi disable,
+# USB-Serial-JTAG console override, INFO log levels) was a
+# bring-up hypothesis that turned out not to fix the silent-boot
+# issue and may have been the cause. Strip back to just the
+# flash-mode pin (QIO/80 MHz) — match upstream — and let IDF
+# pick its defaults for everything else.
+#
+# The frozen ``main.py`` (loads BLE on every boot) is the next
+# suspect; that's a Python-side change covered in the same PR.
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
-
-# WiFi is disabled — we don't use WLAN today; turning it off removes
-# 2.4 GHz RF contention with BLE (which stays on for the mpremote-over-
-# BLE code-transfer workflow) and shrinks the firmware image.
-CONFIG_ESP_WIFI_ENABLED=n
-
-# Route the IDF console (boot logs + MicroPython REPL) over the
-# ESP32-S3's built-in USB Serial/JTAG controller (GPIO 19/20),
-# which is what most S3 dev boards' single USB-C connector uses.
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
-
-# v1.0.2 had USB-Serial-JTAG console wired up but the device was
-# still silent after ``entry 0x403c88a8`` — Enter on the REPL got
-# no echo, BOOT button got no response. Bump bootloader + default
-# log levels from WARN/ERROR up to INFO so we can see exactly
-# where the boot is hanging: the IDF stage-2 bootloader's
-# partition + app-loading messages, and IDF system-init logs.
-#
-# Overrides sdkconfig.base, which keeps these at WARN/ERROR for
-# binary-size reasons. Cost: ~2 KB of strings + slightly slower
-# boot. Worth it during bring-up; tighten back once the boot is
-# reliable.
-CONFIG_BOOTLOADER_LOG_LEVEL_WARN=
-CONFIG_BOOTLOADER_LOG_LEVEL_INFO=y
-CONFIG_LOG_DEFAULT_LEVEL_ERROR=
-CONFIG_LOG_DEFAULT_LEVEL_INFO=y
