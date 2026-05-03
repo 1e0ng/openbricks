@@ -21,6 +21,8 @@ also imported on the host by the sim's driver shim.
 import argparse
 import sys
 
+from openbricks_dev import __version__
+
 
 def _build_parser():
     parser = argparse.ArgumentParser(
@@ -28,6 +30,11 @@ def _build_parser():
         description="Host-side CLI for flashing and running code on "
                     "openbricks hubs, plus a MuJoCo-backed simulator "
                     "(``openbricks sim …``).",
+    )
+    parser.add_argument(
+        "--version", action="version",
+        version="openbricks {}".format(__version__),
+        help="Print the openbricks package version and exit.",
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True

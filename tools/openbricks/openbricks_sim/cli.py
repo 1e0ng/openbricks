@@ -173,6 +173,15 @@ def _build_parser():
         prog="openbricks-sim",
         description="MuJoCo-backed simulator for openbricks firmware.",
     )
+    # Same version as the parent ``openbricks`` CLI — both ship from
+    # the same package (``openbricks_dev.__version__`` is the canonical
+    # source).
+    from openbricks_dev import __version__
+    parser.add_argument(
+        "--version", action="version",
+        version="openbricks-sim {}".format(__version__),
+        help="Print the openbricks package version and exit.",
+    )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
 

@@ -20,6 +20,18 @@ class BuildParserTests(unittest.TestCase):
 
     # ---- flash ----
 
+    def test_version_flag_prints_and_exits(self):
+        # ``openbricks --version`` exits 0 and writes the version to
+        # stdout. Cheap "is the install live + which version" check
+        # users expect from any CLI tool.
+        from openbricks_dev import __version__
+        out = io.StringIO()
+        with self.assertRaises(SystemExit) as ctx:
+            with patch("sys.stdout", new=out):
+                self._parse(["--version"])
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn(__version__, out.getvalue())
+
     def test_flash_requires_name_port_firmware(self):
         # Each of the three required args, missing in turn, should exit.
         base = ["flash", "--name", "A", "--port", "P", "--firmware", "F"]
