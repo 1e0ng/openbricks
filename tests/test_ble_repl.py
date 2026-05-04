@@ -134,6 +134,24 @@ class StreamBridgeTests(unittest.TestCase):
         self.rx_handle = self.bridge._rx_handle
         self.tx_handle = self.bridge._tx_handle
 
+    def test_bridge_subclasses_io_iobase(self):
+        # ``os.dupterm()``'s C-side check at ``mp_get_stream_raise``
+        # requires the OBJECT'S TYPE to have the stream-protocol slot
+        # (the ``mp_stream_p_t`` of function pointers). Python classes
+        # inherit this slot from their first base; pure-Python classes
+        # without a stream-aware ancestor fail the check with
+        # ``OSError: stream operation not supported`` — even if all
+        # the right methods (``read``/``readinto``/``write``/``ioctl``)
+        # are defined as Python methods. ``io.IOBase`` has the slot
+        # pre-installed with a Python-method-dispatching adapter.
+        # 1.0.7 added the methods but didn't fix inheritance; 1.0.8
+        # makes ``_Bridge`` extend ``io.IOBase``.
+        import io
+        self.assertIsInstance(self.bridge, io.IOBase,
+                              "_Bridge must inherit from io.IOBase so "
+                              "MicroPython attaches the stream-protocol "
+                              "slot to the type")
+
     def test_read_returns_buffered_bytes(self):
         # ``read(sz)`` complements ``readinto`` for the dupterm stream
         # protocol — modern MicroPython requires both. Pre-1.0.7 we
