@@ -163,10 +163,15 @@ class _Bridge(_IOBASE):
 
     def read(self, sz=None):
         """Read up to ``sz`` bytes from the BLE rx buffer (or all if
-        ``sz`` is None). Returns ``b''`` when nothing is buffered."""
+        ``sz`` is None). Returns ``None`` when nothing is buffered —
+        critical for the dupterm protocol: returning ``b''`` would be
+        interpreted as EOF and trigger
+        ``mp_os_deactivate(idx, "dupterm: EOF received, deactivating")``,
+        permanently disabling our stream so Ctrl-C from the host
+        never reaches the REPL."""
         rx = self._rx_buffer
         if not rx:
-            return b""
+            return None
         if sz is None or sz >= len(rx):
             result = bytes(rx)
             self._rx_buffer = bytearray()

@@ -156,10 +156,15 @@ class StreamBridgeTests(unittest.TestCase):
         # ``read(sz)`` complements ``readinto`` for the dupterm stream
         # protocol — modern MicroPython requires both. Pre-1.0.7 we
         # only had readinto, which made os.dupterm raise OSError.
+        # When the buffer is empty, ``read`` MUST return ``None`` (not
+        # ``b""``): MicroPython's dupterm treats a 0-byte read as EOF
+        # and permanently deactivates the stream
+        # (``mp_os_deactivate(... "dupterm: EOF received...")``),
+        # which silently breaks Ctrl-C delivery from BLE.
         _FakeBLE._simulate_central_write(1, self.rx_handle, b"abcdef")
         self.assertEqual(self.bridge.read(3), b"abc")
         self.assertEqual(self.bridge.read(), b"def")
-        self.assertEqual(self.bridge.read(), b"")
+        self.assertIsNone(self.bridge.read())
 
     def test_ioctl_reports_readable_when_buffered(self):
         # ``os.dupterm`` polls the stream via ``ioctl(MP_STREAM_POLL=3,
