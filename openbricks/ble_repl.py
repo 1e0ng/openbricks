@@ -79,6 +79,17 @@ def _install_dupterm(stream):
         os.dupterm(stream)
 
 
+def _dupterm_notify():
+    """Poke dupterm so it drains pending bridge input into the REPL.
+    Indirected (vs. an inline ``os.dupterm_notify`` call) for the same
+    reason as ``_install_dupterm``: ``os`` is frozen on MicroPython
+    and rejects ``setattr``, so tests need a regular Python helper to
+    monkey-patch."""
+    import os
+    if hasattr(os, "dupterm_notify"):
+        os.dupterm_notify(None)
+
+
 class _Bridge(_IOBASE):
     """Holds the live BLE state, plus a stream interface for ``dupterm``.
 
@@ -135,15 +146,7 @@ class _Bridge(_IOBASE):
                 # ESP32 API for "stream has new data"; the upstream
                 # ``ble_uart_repl.py`` example does the same thing
                 # under the same comment.
-                try:
-                    import os
-                    os.dupterm_notify(None)
-                except (AttributeError, ImportError):
-                    # Older MP builds don't ship dupterm_notify; on
-                    # those the REPL polls dupterm-streams on its
-                    # own schedule, so missing the poke just adds
-                    # latency rather than breaking input.
-                    pass
+                _dupterm_notify()
         elif event == _IRQ_MTU_EXCHANGED:
             _conn_handle, mtu = data
             self._mtu_payload = mtu - 3

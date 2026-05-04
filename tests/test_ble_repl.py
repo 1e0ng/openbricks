@@ -188,22 +188,22 @@ class StreamBridgeTests(unittest.TestCase):
         # The upstream ``examples/bluetooth/ble_uart_repl.py`` does
         # the same poke in its rx callback. Pin: when the central
         # writes to the rx characteristic, our IRQ handler calls
-        # ``os.dupterm_notify``.
-        import os
+        # the ``_dupterm_notify`` helper.
+        #
+        # Patch the helper rather than ``os.dupterm_notify`` directly
+        # because MicroPython's ``os`` module is frozen and rejects
+        # ``setattr`` — same reason ``_install_dupterm`` exists.
         notify_calls = []
-        orig = getattr(os, "dupterm_notify", None)
-        os.dupterm_notify = lambda arg: notify_calls.append(arg)
+        orig = ble_repl._dupterm_notify
+        ble_repl._dupterm_notify = lambda: notify_calls.append(None)
         try:
             _FakeBLE._simulate_central_write(1, self.rx_handle, b"x")
         finally:
-            if orig is None:
-                del os.dupterm_notify
-            else:
-                os.dupterm_notify = orig
+            ble_repl._dupterm_notify = orig
         self.assertEqual(len(notify_calls), 1,
-                         "rx IRQ must call os.dupterm_notify(None) "
-                         "exactly once per write — without it, BLE "
-                         "input never reaches the REPL")
+                         "rx IRQ must call _dupterm_notify exactly "
+                         "once per write — without it, BLE input "
+                         "never reaches the REPL")
 
     def test_central_write_fills_rx_buffer(self):
         _FakeBLE._simulate_central_write(1, self.rx_handle, b"hello")
