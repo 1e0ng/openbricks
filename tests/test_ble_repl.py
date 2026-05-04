@@ -176,6 +176,35 @@ class StreamBridgeTests(unittest.TestCase):
         # Other ops return 0 (we don't support them).
         self.assertEqual(self.bridge.ioctl(99, None), 0)
 
+    def test_rx_irq_calls_dupterm_notify(self):
+        # ``os.dupterm`` runs the REPL on its own schedule; without an
+        # explicit ``dupterm_notify`` poke from the BLE rx-IRQ handler,
+        # bytes sit in ``_rx_buffer`` until the REPL eventually polls
+        # — but a Ctrl-C the host sent gets stuck in the buffer for
+        # too long, breaking ``openbricks run -n NAME`` (it sends
+        # Ctrl-C to interrupt user code, then expects the raw-REPL
+        # banner; with the poke missing, it times out).
+        #
+        # The upstream ``examples/bluetooth/ble_uart_repl.py`` does
+        # the same poke in its rx callback. Pin: when the central
+        # writes to the rx characteristic, our IRQ handler calls
+        # the ``_dupterm_notify`` helper.
+        #
+        # Patch the helper rather than ``os.dupterm_notify`` directly
+        # because MicroPython's ``os`` module is frozen and rejects
+        # ``setattr`` — same reason ``_install_dupterm`` exists.
+        notify_calls = []
+        orig = ble_repl._dupterm_notify
+        ble_repl._dupterm_notify = lambda: notify_calls.append(None)
+        try:
+            _FakeBLE._simulate_central_write(1, self.rx_handle, b"x")
+        finally:
+            ble_repl._dupterm_notify = orig
+        self.assertEqual(len(notify_calls), 1,
+                         "rx IRQ must call _dupterm_notify exactly "
+                         "once per write — without it, BLE input "
+                         "never reaches the REPL")
+
     def test_central_write_fills_rx_buffer(self):
         _FakeBLE._simulate_central_write(1, self.rx_handle, b"hello")
         buf = bytearray(32)
