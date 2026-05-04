@@ -32,6 +32,43 @@ def _plant_hub_name():
         openbricks._HUB_NAME_NVS_KEY, b"TestHub")
 
 
+class TimerIdDefaultTests(unittest.TestCase):
+    """Pin the default ``timer_id`` to a hardware-valid value on
+    esp32-s3 (0..3). The previous default ``-1`` (virtual timer)
+    works on older MicroPython but raises ``ValueError: invalid
+    Timer number`` on the v1.27+ MP we vendor — main.py bricked
+    at boot in 1.0.8 because of this."""
+
+    def setUp(self):
+        _FakeNVS._reset_for_test()
+        _FakeBLE._reset_for_test()
+        Timer.reset_for_test()
+        _plant_hub_name()
+
+    def test_default_timer_id_is_hardware_valid(self):
+        # Construct a BluetoothToggleButton with default timer_id and
+        # read the stored value. ``inspect.signature`` isn't available
+        # on the MicroPython unix port that runs the firmware test
+        # job, so use call-site capture instead.
+        from openbricks.bluetooth_button import BluetoothToggleButton
+        helper = BluetoothToggleButton(_StubButton())
+        # ESP32-S3 hardware timers are 0..3; -1 (virtual) raises
+        # ``ValueError: invalid Timer number`` on the MP we vendor.
+        self.assertGreaterEqual(helper._timer_id, 0)
+        self.assertLessEqual(helper._timer_id, 3)
+
+    def test_default_timer_id_doesnt_collide_with_launcher(self):
+        # The launcher takes timer 0 (per its default in launcher.run);
+        # bluetooth_button must pick a different ID so the two timers
+        # don't conflict at runtime when both are wired.
+        from openbricks.bluetooth_button import BluetoothToggleButton
+        helper = BluetoothToggleButton(_StubButton())
+        # Match-up to launcher's default 0 — must be different.
+        self.assertNotEqual(helper._timer_id, 0,
+                            "bluetooth_button must use a Timer ID "
+                            "different from the launcher's (0)")
+
+
 class BluetoothToggleButtonTests(unittest.TestCase):
     def setUp(self):
         _FakeNVS._reset_for_test()

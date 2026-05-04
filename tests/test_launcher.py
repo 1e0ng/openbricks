@@ -250,6 +250,42 @@ class ScheduledStartTests(unittest.TestCase):
         self.assertTrue(self.launcher._running)  # unchanged
 
 
+class TimerIdDefaultTests(unittest.TestCase):
+    """Pin the timer_id defaults to a hardware-valid number on the
+    esp32-s3 we ship for. Older MicroPython supported ``Timer(-1)``
+    as a virtual software timer; the v1.27+ MP we vendor raises
+    ``ValueError: invalid Timer number`` for anything outside 0..3.
+    Pre-1.0.9 the defaults were -1 and main.py bricked at boot."""
+
+    def test_run_default_timer_id_is_hardware_valid(self):
+        # Patch _ensure_launcher to capture the timer_id arg and not
+        # actually construct a Timer (which requires the firmware
+        # machine module). MicroPython's ``inspect`` is missing
+        # ``signature`` so we read defaults via call-site capture.
+        captured = {}
+        def _stub(button_pin, poll_ms, timer_id):
+            captured["timer_id"] = timer_id
+            class _Inst:
+                def _drain_pending(self):
+                    raise KeyboardInterrupt()  # exit the run loop
+            inst = _Inst()
+            inst._program_path = None
+            return inst
+        orig = launcher._ensure_launcher
+        launcher._ensure_launcher = _stub
+        try:
+            try:
+                launcher.run()
+            except KeyboardInterrupt:
+                pass
+        finally:
+            launcher._ensure_launcher = orig
+        # ESP32-S3 hardware timers are 0..3; -1 (virtual) raises
+        # ``ValueError: invalid Timer number`` on the MP we vendor.
+        self.assertGreaterEqual(captured["timer_id"], 0)
+        self.assertLessEqual(captured["timer_id"], 3)
+
+
 class RunProgramTests(unittest.TestCase):
     """``launcher.run_program`` is the entry point ``openbricks-dev run``
     jumps into via raw REPL. Must set ``_running`` so button-stop works,

@@ -212,7 +212,7 @@ _singleton = None
 
 def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
                      poll_ms=DEFAULT_POLL_MS,
-                     timer_id=-1):
+                     timer_id=0):
     """Install the Launcher singleton + persistent Timer. Idempotent.
 
     First call wins on pin/poll parameters; later calls just return
@@ -235,11 +235,16 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
 # ---- entry points ----
 
 def run(program_path=DEFAULT_PROGRAM_PATH, button_pin=DEFAULT_BUTTON_PIN,
-        poll_ms=DEFAULT_POLL_MS, timer_id=-1):
+        poll_ms=DEFAULT_POLL_MS, timer_id=0):
     """Install the button watcher and block on the cooperative drain
     loop. Called from the frozen ``main.py``.
 
-    Intentionally blocks forever. If ``openbricks-dev run`` later sends
+    ``timer_id=0`` is the first ESP32-S3 hardware timer. The previous
+    default ``-1`` (virtual timer) was supported by older MicroPython
+    builds but raises ``ValueError: invalid Timer number`` on the
+    v1.27+ MP we vendor — esp32-s3 only exposes hardware timers 0..3.
+
+    Intentionally blocks forever. If ``openbricks run`` later sends
     a Ctrl-C over the REPL to interrupt this loop, the Timer stays
     alive (we never ``deinit`` it) so subsequent ``run_program`` /
     button-press start continue to work.
