@@ -112,6 +112,17 @@ class _FakeBLE:
     # Notify history so tests can assert what was sent over BLE.
     _notify_log = []  # list[(conn_handle, value_handle, bytes)]
 
+    # gatts_set_buffer settings: handle → (size, append).
+    _gatts_buffer_settings = {}
+
+    # gap_disconnect call log.
+    _disconnect_log = []
+
+    # Track which conn_handles have fired CENTRAL_CONNECT so test
+    # helpers can simulate writes from "already-connected" centrals
+    # without re-firing connect each time.
+    _connected_centrals = set()
+
     def __new__(cls):
         if cls._INSTANCE is None:
             cls._INSTANCE = super().__new__(cls)
@@ -185,11 +196,20 @@ class _FakeBLE:
     def gatts_notify(self, conn_handle, value_handle, data):
         _FakeBLE._notify_log.append((conn_handle, value_handle, bytes(data)))
 
-    # ---- GAP advertising ----
+    def gatts_set_buffer(self, value_handle, size, append=False):
+        # Real MP just sets internal RX buffer geometry. Fake records
+        # so a regression test can pin "we asked for append mode".
+        _FakeBLE._gatts_buffer_settings[value_handle] = (size, append)
+
+    # ---- GAP ----
 
     def gap_advertise(self, interval_us, adv_data=None):
         _FakeBLE._adv_interval_us = interval_us
         _FakeBLE._adv_payload = None if adv_data is None else bytes(adv_data)
+
+    def gap_disconnect(self, conn_handle):
+        # Just record that we asked. Real MP terminates the BLE link.
+        _FakeBLE._disconnect_log.append(conn_handle)
 
     # ---- test helpers ----
 
@@ -207,6 +227,9 @@ class _FakeBLE:
         cls._adv_interval_us = None
         cls._adv_payload = None
         cls._notify_log = []
+        cls._gatts_buffer_settings = {}
+        cls._disconnect_log = []
+        cls._connected_centrals = set()
 
     # ---- helpers for ble_repl IRQ simulation ----
 
@@ -218,10 +241,25 @@ class _FakeBLE:
 
     @classmethod
     def _simulate_central_write(cls, conn_handle, value_handle, data):
-        """Write ``data`` to the given char (as a BLE central would), then
-        fire the GATTS_WRITE IRQ so the bridge picks it up."""
+        """Write ``data`` to the given char (as a BLE central would),
+        then fire the GATTS_WRITE IRQ so the bridge picks it up.
+
+        Auto-fires a CENTRAL_CONNECT IRQ first if this conn_handle
+        hasn't been seen — the post-1.2.0 bridge tracks connections
+        in a set and ignores writes from unknown peers, so tests
+        that skipped the connect step would otherwise see no buffer
+        updates.
+        """
+        if conn_handle not in cls._connected_centrals:
+            cls._fire_irq(1, (conn_handle, 0, b"\x00" * 6))  # _IRQ_CENTRAL_CONNECT
+            cls._connected_centrals.add(conn_handle)
         cls._char_values[value_handle] = bytes(data)
         cls._fire_irq(3, (conn_handle, value_handle))  # _IRQ_GATTS_WRITE = 3
+
+    @classmethod
+    def _simulate_central_disconnect(cls, conn_handle):
+        cls._connected_centrals.discard(conn_handle)
+        cls._fire_irq(2, (conn_handle, 0, b"\x00" * 6))  # _IRQ_CENTRAL_DISCONNECT
 
 
 class _FakeBluetoothModule:

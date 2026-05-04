@@ -2,321 +2,326 @@
 """
 Nordic UART Service bridge for the MicroPython REPL over BLE.
 
-Registers the de-facto Bluetooth-LE serial UART service (Nordic UART,
-aka NUS) and plumbs its two characteristics through ``os.dupterm`` so
-whatever the REPL reads/writes also flows over BLE. This is what makes
-``openbricks-dev run`` / ``stop`` work — the client tool speaks the same
-cooked REPL a serial-attached user would see.
+Vendored from upstream MicroPython's
+``examples/bluetooth/ble_uart_peripheral.py`` (the ``BLEUART``
+class) and ``ble_uart_repl.py`` (the ``BLEUARTStream`` dupterm
+adapter). Both files are MIT-licensed under MicroPython's project
+LICENSE. The one structural change is the advertising payload —
+upstream advertises only the device name + appearance; we add the
+NUS 128-bit service UUID so clients filtering by service can find
+us. Everything else (connection-set tracking, append-mode rx
+buffer, scheduled-flush write batching, ``io.IOBase`` inheritance)
+is the upstream pattern, unmodified.
 
-Wiring:
+Why vendored: writing this from scratch using only the docs (the
+1.0.0-1.1.1 history) produced a long parade of "invisible until
+hardware" bugs — each fix required a hardware reflash + paste
+diagnostic round. Starting from upstream's working example would
+have caught all of them at once.
 
-* Advertising payload carries the NUS 128-bit service UUID and the
-  baked-in GAP name (``openbricks.HUB_NAME``), so clients filtering by
-  service can discover us and pick the right hub by name.
-* ``_UART_RX_CHAR`` (client → hub, WRITE) — bytes written here land in
-  the REPL's input buffer, as if typed on a keyboard.
-* ``_UART_TX_CHAR`` (hub → client, NOTIFY) — whatever the REPL prints
-  is chunked to the negotiated MTU and notified out.
-* ``start()`` is called from ``openbricks.bluetooth`` right after the
-  stack goes active; ``stop()`` tears down on deactivate.
+Public surface (what ``openbricks.bluetooth.apply_persisted_state``
+calls):
 
-Only one IRQ handler can be registered per ``bluetooth.BLE()`` instance.
-This module currently owns that handler — if another feature needs to
-co-exist (e.g. a GATT service for streaming telemetry), we'll need a
-small dispatcher. Not blocking today.
+* ``start()`` — bring up the NUS bridge. Idempotent.
+* ``stop()``  — tear down. Idempotent.
+* ``is_running()`` — query.
 """
+
+import struct
 
 try:
     import bluetooth
     import io
+    import os
     from micropython import const
     _IOBASE = io.IOBase
 except ImportError:
-    # Desktop tests install fakes via ``tests._fakes_ble``; the module
-    # level imports still need to succeed at import time. ``const`` is
-    # a MicroPython optimisation — on CPython, a pass-through works.
-    # ``io.IOBase`` exists on CPython too; use it as-is so subclassing
-    # behaves the same on host tests.
+    # Desktop tests install fakes via ``tests._fakes_ble``; the
+    # module-level imports still need to succeed at import time on
+    # CPython. ``const`` is a MicroPython optimisation — pass-through
+    # works on CPython.
     import io
+    import os
     _IOBASE = io.IOBase
     const = lambda x: x  # noqa: E731
 
+try:
+    import micropython
+    _SCHEDULE = micropython.schedule
+except ImportError:
+    # Desktop tests have no scheduler; flush synchronously.
+    def _SCHEDULE(fn, arg):
+        fn(arg)
+
+
+# ---- BLE constants ----------------------------------------------------
 
 _IRQ_CENTRAL_CONNECT    = const(1)
 _IRQ_CENTRAL_DISCONNECT = const(2)
 _IRQ_GATTS_WRITE        = const(3)
-_IRQ_MTU_EXCHANGED      = const(21)
 
-_ADV_TYPE_FLAGS         = const(0x01)
-_ADV_TYPE_UUID128_COMPLETE = const(0x07)
-_ADV_TYPE_NAME_COMPLETE = const(0x09)
+_FLAG_WRITE  = const(0x0008)
+_FLAG_NOTIFY = const(0x0010)
 
-_ADV_FLAG_LE_GENERAL_DISC = const(0x06)  # LE general discoverable + BR/EDR not supported
+_MP_STREAM_POLL    = const(3)
+_MP_STREAM_POLL_RD = const(0x0001)
 
-# Requested MTU. The peer may negotiate lower. Larger MTU = fewer
-# notifications per REPL print, which matters when the user program
-# prints long tracebacks.
-_REQ_MTU = const(247)
 
-# Standard Nordic UART Service UUIDs. These are what every commodity
-# BLE UART tool — Nordic's nRF Connect, Adafruit's BluefruitLE,
-# mpremote's experimental BLE transport, bleak examples — expects.
+# ---- NUS service UUIDs (the de-facto BLE serial ones) ----------------
+
+# Stored as strings so tests can compare without instantiating
+# ``bluetooth.UUID`` (which on the test fakes wraps the string).
 _UART_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 _UART_TX_UUID      = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"  # hub → client
 _UART_RX_UUID      = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"  # client → hub
 
 
-_state = {"bridge": None}  # module singleton; None ⇔ not running
+# ---- Advertising payload helper --------------------------------------
+#
+# Vendored from ``examples/bluetooth/ble_advertising.py``,
+# specialised to our exact needs (flags + name + 128-bit UUID).
 
-
-def _install_dupterm(stream):
-    """Route REPL I/O through ``stream``. Firmware calls ``os.dupterm``;
-    tests monkey-patch this function to observe installations without
-    touching the ``os`` module (which on MicroPython is a frozen type
-    and rejects ``setattr``)."""
-    import os
-    if hasattr(os, "dupterm"):
-        os.dupterm(stream)
-
-
-def _dupterm_notify():
-    """Poke dupterm so it drains pending bridge input into the REPL.
-    Indirected (vs. an inline ``os.dupterm_notify`` call) for the same
-    reason as ``_install_dupterm``: ``os`` is frozen on MicroPython
-    and rejects ``setattr``, so tests need a regular Python helper to
-    monkey-patch."""
-    import os
-    if hasattr(os, "dupterm_notify"):
-        os.dupterm_notify(None)
-
-
-class _Bridge(_IOBASE):
-    """Holds the live BLE state, plus a stream interface for ``dupterm``.
-
-    Subclasses ``io.IOBase`` so MicroPython attaches the C-level
-    stream-protocol slot to the type. ``os.dupterm()``'s C-side check
-    (``mp_get_stream_raise(... READ | WRITE | IOCTL)``) requires the
-    type to *have* the protocol slot — pure Python classes without an
-    ``IOBase`` ancestor fail the check with ``OSError: stream
-    operation not supported`` even when the right Python methods are
-    present. v1.0.7 added ``read``/``ioctl`` to the methods but didn't
-    fix the inheritance; v1.0.8 does.
-    """
-
-    def __init__(self, ble):
-        self._ble = ble
-        self._tx_handle = None
-        self._rx_handle = None
-        self._rx_buffer = bytearray()
-        self._conn_handle = None
-        # ATT default payload is MTU - 3. We start conservative and let
-        # _IRQ_MTU_EXCHANGED bump us up.
-        self._mtu_payload = 20
-
-    # ---- lifecycle ----
-
-    def register_services(self):
-        tx = (bluetooth.UUID(_UART_TX_UUID), bluetooth.FLAG_NOTIFY)
-        rx = (bluetooth.UUID(_UART_RX_UUID),
-              bluetooth.FLAG_WRITE | bluetooth.FLAG_WRITE_NO_RESPONSE)
-        service = (bluetooth.UUID(_UART_SERVICE_UUID), (tx, rx))
-        ((self._tx_handle, self._rx_handle),) = \
-            self._ble.gatts_register_services((service,))
-
-    # ---- IRQ ----
-
-    def on_irq(self, event, data):
-        if event == _IRQ_CENTRAL_CONNECT:
-            conn_handle, _addr_type, _addr = data
-            self._conn_handle = conn_handle
-        elif event == _IRQ_CENTRAL_DISCONNECT:
-            self._conn_handle = None
-            # Keep accepting new connections so a second ``openbricks-dev
-            # run`` can dial back in without a hub reboot.
-            _advertise(self._ble)
-        elif event == _IRQ_GATTS_WRITE:
-            conn_handle, value_handle = data
-            if value_handle == self._rx_handle:
-                self._rx_buffer += self._ble.gatts_read(self._rx_handle)
-                # Wake the dupterm machinery so it drains our rx
-                # buffer into the REPL's stdin. Without this poke, a
-                # Ctrl-C sent over BLE sits in ``_rx_buffer`` forever
-                # and the REPL never breaks out of whatever it's
-                # running. ``dupterm_notify`` is the documented
-                # ESP32 API for "stream has new data"; the upstream
-                # ``ble_uart_repl.py`` example does the same thing
-                # under the same comment.
-                _dupterm_notify()
-        elif event == _IRQ_MTU_EXCHANGED:
-            _conn_handle, mtu = data
-            self._mtu_payload = mtu - 3
-
-    # ---- dupterm stream protocol ----
-    #
-    # ``os.dupterm()`` in modern MicroPython requires the stream object
-    # to expose all four of ``read`` / ``readinto`` / ``write`` /
-    # ``ioctl``. The C-side check is at ``mp_get_stream_raise(...,
-    # MP_STREAM_OP_READ | MP_STREAM_OP_WRITE | MP_STREAM_OP_IOCTL)`` —
-    # missing any one of them raises ``OSError: stream operation not
-    # supported``. Pre-1.0.7 we only had readinto+write, which used to
-    # be enough on older MP but breaks on the v1.27+ MP we vendor.
-
-    def read(self, sz=None):
-        """Read up to ``sz`` bytes from the BLE rx buffer (or all if
-        ``sz`` is None). Returns ``b''`` when nothing is buffered."""
-        rx = self._rx_buffer
-        if not rx:
-            return b""
-        if sz is None or sz >= len(rx):
-            result = bytes(rx)
-            self._rx_buffer = bytearray()
-        else:
-            result = bytes(rx[:sz])
-            self._rx_buffer = bytearray(rx[sz:])
-        return result
-
-    def readinto(self, buf):
-        """Called by the REPL when it needs stdin. Returns ``None`` when
-        no bytes are buffered (polls again later), else the byte count.
-
-        MicroPython's bytearray doesn't support slice deletion, so we
-        rebuild the tail into a fresh bytearray rather than ``del rx[:n]``.
-        """
-        rx = self._rx_buffer
-        if not rx:
-            return None
-        n = min(len(buf), len(rx))
-        buf[:n] = rx[:n]
-        self._rx_buffer = bytearray(rx[n:])
-        return n
-
-    def ioctl(self, op, arg):
-        """Stream-protocol ioctl. The REPL polls this to ask "is there
-        data to read?" — return ``MP_STREAM_POLL_RD`` (0x01) when
-        ``self._rx_buffer`` is non-empty, else 0. Other ops are
-        ignored (return 0)."""
-        # MP_STREAM_POLL = 3, MP_STREAM_POLL_RD = 0x01.
-        # Hard-coded so we don't import a constant module on every poll.
-        if op == 3:
-            if self._rx_buffer:
-                return 0x01
-        return 0
-
-    def write(self, buf):
-        """Called by the REPL to emit stdout/stderr. Fan out over one or
-        more BLE notifications depending on the MTU. Returns bytes sent;
-        callers (including dupterm) rely on this being a truthy int."""
-        if self._conn_handle is None:
-            return 0
-        mv = memoryview(buf)
-        total = len(mv)
-        sent = 0
-        step = max(1, self._mtu_payload)
-        while sent < total:
-            chunk = bytes(mv[sent:sent + step])
-            try:
-                self._ble.gatts_notify(self._conn_handle, self._tx_handle, chunk)
-            except OSError:
-                # Peer went away mid-print. Don't propagate; the next
-                # _IRQ_CENTRAL_DISCONNECT will clean up.
-                break
-            sent += len(chunk)
-        return sent
-
-    def close(self):
-        # dupterm calls close() when it's unhooked. Nothing to free here.
-        pass
-
-
-def _advertise(ble, name=None):
-    """Start advertising with the NUS service UUID and the GAP name.
-
-    The name comes from ``openbricks.HUB_NAME`` — set by
-    ``openbricks-dev flash`` into NVS and read fresh on each call so an
-    in-field rename surfaces at the next disconnect/reconnect.
-    """
-    if name is None:
-        import openbricks
-        name = openbricks.HUB_NAME
-    if name is None:
-        # ``bluetooth.set_enabled`` guards against this, but belt-and-
-        # braces for direct _advertise callers.
-        raise RuntimeError("hub name unset; flash with openbricks-dev flash --name NAME")
-    name_bytes = name.encode()[:29]
-    payload = bytes([
-        # Flags: LE general discoverable, classic BR/EDR unsupported.
-        2, _ADV_TYPE_FLAGS, _ADV_FLAG_LE_GENERAL_DISC,
-        # Complete local name.
-        len(name_bytes) + 1, _ADV_TYPE_NAME_COMPLETE,
-    ]) + name_bytes
-    # 128-bit service UUID, little-endian byte order per the spec.
-    svc = _uuid_bytes_le(_UART_SERVICE_UUID)
-    payload += bytes([len(svc) + 1, _ADV_TYPE_UUID128_COMPLETE]) + svc
-    # 100 ms interval — fast enough for "I just flashed, where's the
-    # hub" discovery, low enough not to batter radio power budget.
-    ble.gap_advertise(100_000, payload)
+_ADV_TYPE_FLAGS            = const(0x01)
+_ADV_TYPE_NAME             = const(0x09)
+_ADV_TYPE_UUID128_COMPLETE = const(0x07)
+_ADV_MAX_PAYLOAD           = const(31)
 
 
 def _uuid_bytes_le(uuid_str):
-    """Pack a dashed UUID string into 16 bytes, little-endian.
-
-    Bluetooth service UUIDs on the wire are little-endian. ``int(..., 16)``
-    gives big-endian so we reverse.
-    """
+    """Convert a 128-bit UUID string to little-endian bytes (the wire
+    format BLE advertising expects)."""
     hex_ = uuid_str.replace("-", "")
     b = bytes.fromhex(hex_)
     return bytes(reversed(b))
 
 
-def start():
-    """Bring up the NUS bridge. Call after ``bluetooth.BLE().active(True)``.
+def _advertising_payload(name, service_uuid_str):
+    """Build a BLE advertising payload: flags + name + 128-bit
+    service UUID. Raises if it overflows 31 bytes (the BLE-LE
+    advertising max)."""
+    payload = bytearray()
+    def _append(adv_type, value):
+        payload.extend(struct.pack("BB", len(value) + 1, adv_type) + value)
+    # 0x06 = LE general discoverable + BR/EDR not supported.
+    _append(_ADV_TYPE_FLAGS, struct.pack("B", 0x06))
+    if name:
+        name_bytes = name.encode() if isinstance(name, str) else name
+        _append(_ADV_TYPE_NAME, name_bytes[:29])  # leave room for headers
+    _append(_ADV_TYPE_UUID128_COMPLETE, _uuid_bytes_le(service_uuid_str))
+    if len(payload) > _ADV_MAX_PAYLOAD:
+        raise ValueError("advertising payload too large (%d bytes)" % len(payload))
+    return bytes(payload)
 
-    Idempotent: calling twice is a no-op, matching the ``set_enabled(True);
-    set_enabled(True)`` pattern that main.py users might write.
+
+# ---- _BLEUART: NUS service registration + connection tracking --------
+#
+# Mirror-image of upstream's ``BLEUART`` class. The handler-callback
+# pattern (``self._handler``) lets ``_BLEUARTStream`` (below) get
+# notified on rx without us having to call into dupterm from the
+# IRQ handler — the stream wraps ``_on_rx`` and that's where the
+# ``os.dupterm_notify`` poke lives.
+
+class _BLEUART:
+    def __init__(self, ble, name, rxbuf=100):
+        self._ble = ble
+        self._ble.irq(self._irq)
+        ((self._tx_handle, self._rx_handle),) = self._ble.gatts_register_services(
+            ((bluetooth.UUID(_UART_SERVICE_UUID), (
+                (bluetooth.UUID(_UART_TX_UUID), _FLAG_NOTIFY),
+                (bluetooth.UUID(_UART_RX_UUID), _FLAG_WRITE),
+            )),)
+        )
+        # Append-mode rx buffer: back-to-back writes from the central
+        # accumulate instead of overwriting. Without this, a quick
+        # "Ctrl-C Ctrl-A" from openbricks-dev run loses one of the two.
+        self._ble.gatts_set_buffer(self._rx_handle, rxbuf, True)
+        self._connections = set()
+        self._rx_buffer = bytearray()
+        self._handler = None
+        self._payload = _advertising_payload(name=name, service_uuid_str=_UART_SERVICE_UUID)
+        self._advertise()
+
+    def irq(self, handler):
+        """Set the rx-arrived handler. Called from ``_BLEUARTStream``
+        to install the ``os.dupterm_notify`` poke."""
+        self._handler = handler
+
+    def _irq(self, event, data):
+        if event == _IRQ_CENTRAL_CONNECT:
+            conn_handle, _, _ = data
+            self._connections.add(conn_handle)
+        elif event == _IRQ_CENTRAL_DISCONNECT:
+            conn_handle, _, _ = data
+            if conn_handle in self._connections:
+                self._connections.remove(conn_handle)
+            # Keep accepting new connections.
+            self._advertise()
+        elif event == _IRQ_GATTS_WRITE:
+            conn_handle, value_handle = data
+            if conn_handle in self._connections and value_handle == self._rx_handle:
+                self._rx_buffer += self._ble.gatts_read(self._rx_handle)
+                if self._handler:
+                    self._handler()
+
+    def any(self):
+        return len(self._rx_buffer)
+
+    def read(self, sz=None):
+        if not sz:
+            sz = len(self._rx_buffer)
+        result = bytes(self._rx_buffer[0:sz])
+        self._rx_buffer = self._rx_buffer[sz:]
+        return result
+
+    def write(self, data):
+        for conn_handle in self._connections:
+            try:
+                self._ble.gatts_notify(conn_handle, self._tx_handle, data)
+            except OSError:
+                # Peer went away mid-notify; ignore — disconnect IRQ
+                # will tidy up.
+                pass
+
+    def close(self):
+        for conn_handle in list(self._connections):
+            try:
+                self._ble.gap_disconnect(conn_handle)
+            except OSError:
+                pass
+        self._connections.clear()
+        self._stop_advertising()
+
+    def _advertise(self, interval_us=100_000):
+        self._ble.gap_advertise(interval_us, adv_data=self._payload)
+
+    def _stop_advertising(self):
+        # ``gap_advertise(None)`` stops advertising in MicroPython.
+        try:
+            self._ble.gap_advertise(None)
+        except (TypeError, OSError):
+            pass
+
+
+# ---- _BLEUARTStream: dupterm-compatible stream wrapper ---------------
+#
+# Vendored from upstream's ``BLEUARTStream``. ``io.IOBase`` is what
+# gives the type the C-level stream-protocol slot — without that
+# inheritance, ``os.dupterm()`` raises ``stream operation not
+# supported``.
+#
+# Write-side batching: ``write()`` queues bytes into ``_tx_buf`` and
+# schedules a ``_flush`` callback via ``micropython.schedule``. The
+# flush sends up to 100 bytes per pass and re-schedules if more
+# remain. This keeps gatts_notify off the IRQ-handler hot path AND
+# avoids one notify per byte (which BLE link-layer rate limits would
+# choke on).
+
+class _BLEUARTStream(_IOBASE):
+    def __init__(self, uart):
+        self._uart = uart
+        self._tx_buf = bytearray()
+        self._scheduled = False
+        self._uart.irq(self._on_rx)
+
+    def _on_rx(self):
+        # Wake dupterm so it drains uart's rx buffer into stdin
+        # immediately. Without this, a Ctrl-C arriving over BLE sits
+        # in the buffer until the REPL happens to poll — which can
+        # be never, if user code is busy-looping.
+        if hasattr(os, "dupterm_notify"):
+            os.dupterm_notify(None)
+
+    def read(self, sz=None):
+        return self._uart.read(sz)
+
+    def readinto(self, buf):
+        avail = self._uart.read(len(buf))
+        if not avail:
+            return None
+        for i in range(len(avail)):
+            buf[i] = avail[i]
+        return len(avail)
+
+    def ioctl(self, op, arg):
+        if op == _MP_STREAM_POLL:
+            if self._uart.any():
+                return _MP_STREAM_POLL_RD
+        return 0
+
+    def _flush(self, _arg):
+        self._scheduled = False
+        if not self._tx_buf:
+            return
+        data = bytes(self._tx_buf[0:100])
+        self._tx_buf = self._tx_buf[100:]
+        self._uart.write(data)
+        if self._tx_buf and not self._scheduled:
+            _SCHEDULE(self._flush, None)
+            self._scheduled = True
+
+    def write(self, buf):
+        self._tx_buf += buf
+        if not self._scheduled:
+            _SCHEDULE(self._flush, None)
+            self._scheduled = True
+
+
+# ---- Public API ------------------------------------------------------
+
+# Singleton bridge state. ``_state["bridge"]`` is the active
+# ``_BLEUART`` (kept under that key for backwards-compat with tests
+# that introspected the bridge before 1.2.0). ``_state["stream"]``
+# is the ``_BLEUARTStream`` installed in dupterm.
+_state = {"bridge": None, "stream": None}
+
+
+def is_running():
+    return _state["bridge"] is not None
+
+
+def start():
+    """Bring up the NUS bridge. Idempotent — second call is a no-op
+    if already running.
+
+    Caller must have ``ble.active(True)`` before calling. Hub name
+    comes from ``openbricks.HUB_NAME`` (NVS-backed); we refuse to
+    advertise without one.
     """
     if _state["bridge"] is not None:
         return
+    import openbricks
+    name = openbricks.HUB_NAME
+    if name is None:
+        raise RuntimeError(
+            "hub name unset; flash with `openbricks flash --name NAME ...`"
+        )
     ble = bluetooth.BLE()
-    # BLE must already be active; asking gatts_register_services on an
-    # inactive stack errors with OSError on ESP32.
     if not ble.active():
         raise RuntimeError(
             "BLE is not active; call openbricks.bluetooth.set_enabled(True) "
             "before ble_repl.start()"
         )
-    bridge = _Bridge(ble)
-    bridge.register_services()
-    ble.irq(bridge.on_irq)
-    try:
-        ble.config(mtu=_REQ_MTU)
-    except (OSError, ValueError):
-        # Older MP builds may reject mtu in config(). Not fatal — 20-byte
-        # chunks still work, just slower for big prints.
-        pass
-    _install_dupterm(bridge)
-    _advertise(ble)
-    _state["bridge"] = bridge
+    uart = _BLEUART(ble, name=name)
+    stream = _BLEUARTStream(uart)
+    _install_dupterm(stream)
+    _state["bridge"] = uart
+    _state["stream"] = stream
 
 
 def stop():
-    """Tear the bridge back down. Safe to call when not running."""
-    bridge = _state["bridge"]
-    if bridge is None:
+    """Tear down the NUS bridge. Idempotent."""
+    if _state["bridge"] is None:
         return
     _install_dupterm(None)
-    ble = bluetooth.BLE()
-    try:
-        ble.gap_advertise(None)
-    except OSError:
-        pass
-    # Clear the IRQ handler so a fresh start() can install its own
-    # without racing on stale closure state.
-    try:
-        ble.irq(None)
-    except (OSError, TypeError):
-        pass
+    _state["bridge"].close()
     _state["bridge"] = None
+    _state["stream"] = None
 
 
-def is_running():
-    return _state["bridge"] is not None
+def _install_dupterm(stream):
+    """Install/clear the dupterm stream. Indirection point so tests
+    can monkey-patch this helper instead of touching ``os.dupterm``
+    directly (``os`` is a frozen module on MicroPython and rejects
+    ``setattr``)."""
+    if hasattr(os, "dupterm"):
+        os.dupterm(stream)
