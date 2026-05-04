@@ -53,6 +53,64 @@ except ImportError:
     def _SCHEDULE(fn, arg):
         fn(arg)
 
+try:
+    import time as _TIME
+    _TICKS = _TIME.ticks_ms
+except (ImportError, AttributeError):
+    import time as _TIME
+    def _TICKS():
+        return int(_TIME.monotonic() * 1000)
+
+
+# ---- In-memory event log (1.2.1) -------------------------------------
+#
+# 1.2.0 worked in unit tests but produced 0 notify packets on hardware
+# (host BLE-connected with MTU 256, 30 s wait, nothing came back).
+# Three possible causes: CENTRAL_CONNECT IRQ not firing, GATTS_WRITE
+# IRQ not firing, gatts_notify silently dropping. They look identical
+# from the host. Logging IRQs + write attempts to memory (NOT through
+# print/dupterm — that recurses through this module's own write path)
+# tells us which one. Inspect via:
+#
+#   mpremote connect /dev/cu.usbmodem... exec \
+#       'from openbricks import ble_repl; ble_repl.dump_log()'
+#
+# Cheap enough at 500 entries × ~40 bytes ≈ 20 KB to keep enabled.
+
+_LOG = []
+_LOG_MAX = 500
+
+
+def _log(tag, *args):
+    """Append a timestamped event to the in-memory log. No-op once
+    the log is full — we'd rather lose late events than have logging
+    raise from a hot path."""
+    if len(_LOG) < _LOG_MAX:
+        try:
+            _LOG.append((_TICKS(), tag, args))
+        except MemoryError:
+            pass
+
+
+def dump_log():
+    """Print the in-memory BLE event log over USB-Serial-JTAG.
+
+    Why a helper rather than ``print(_LOG)``: ``print`` routes through
+    dupterm which routes through this module's stream, so a long log
+    print adds entries to itself while running. Iterating + printing
+    item by item is bounded; the bytes added during the print sit in
+    _tx_buf until later and don't grow the log.
+    """
+    n = len(_LOG)
+    print("ble_repl event log (%d / %d):" % (n, _LOG_MAX))
+    for entry in _LOG:
+        t, tag, args = entry
+        print("  %d %s %s" % (t, tag, args))
+
+
+def clear_log():
+    _LOG[:] = []
+
 
 # ---- BLE constants ----------------------------------------------------
 
@@ -139,6 +197,7 @@ class _BLEUART:
         self._rx_buffer = bytearray()
         self._handler = None
         self._payload = _advertising_payload(name=name, service_uuid_str=_UART_SERVICE_UUID)
+        _log("init", self._tx_handle, self._rx_handle, name)
         self._advertise()
 
     def irq(self, handler):
@@ -147,21 +206,32 @@ class _BLEUART:
         self._handler = handler
 
     def _irq(self, event, data):
+        # Log EVERY event — including ones we don't expect — so we can
+        # tell "CONNECT never fired" from "CONNECT fired but with weird
+        # data" from "some other event we silently dropped".
+        _log("irq", event)
         if event == _IRQ_CENTRAL_CONNECT:
             conn_handle, _, _ = data
             self._connections.add(conn_handle)
+            _log("CONNECT", conn_handle, len(self._connections))
         elif event == _IRQ_CENTRAL_DISCONNECT:
             conn_handle, _, _ = data
             if conn_handle in self._connections:
                 self._connections.remove(conn_handle)
+            _log("DISCONNECT", conn_handle, len(self._connections))
             # Keep accepting new connections.
             self._advertise()
         elif event == _IRQ_GATTS_WRITE:
             conn_handle, value_handle = data
-            if conn_handle in self._connections and value_handle == self._rx_handle:
-                self._rx_buffer += self._ble.gatts_read(self._rx_handle)
+            in_set = conn_handle in self._connections
+            if in_set and value_handle == self._rx_handle:
+                buf = self._ble.gatts_read(self._rx_handle)
+                self._rx_buffer += buf
+                _log("GATTS_WRITE_OK", conn_handle, len(buf), bytes(buf[:8]))
                 if self._handler:
                     self._handler()
+            else:
+                _log("GATTS_WRITE_DROP", conn_handle, value_handle, in_set, self._rx_handle)
 
     def any(self):
         return len(self._rx_buffer)
@@ -174,13 +244,17 @@ class _BLEUART:
         return result
 
     def write(self, data):
+        if not self._connections:
+            _log("write_no_conn", len(data))
+            return
         for conn_handle in self._connections:
             try:
                 self._ble.gatts_notify(conn_handle, self._tx_handle, data)
-            except OSError:
+                _log("notify_ok", conn_handle, len(data))
+            except OSError as e:
                 # Peer went away mid-notify; ignore — disconnect IRQ
                 # will tidy up.
-                pass
+                _log("notify_err", conn_handle, len(data), str(e))
 
     def close(self):
         for conn_handle in list(self._connections):
@@ -193,6 +267,7 @@ class _BLEUART:
 
     def _advertise(self, interval_us=100_000):
         self._ble.gap_advertise(interval_us, adv_data=self._payload)
+        _log("advertise", interval_us, len(self._payload))
 
     def _stop_advertising(self):
         # ``gap_advertise(None)`` stops advertising in MicroPython.
