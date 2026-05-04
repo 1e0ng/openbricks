@@ -131,25 +131,39 @@ class ESP32S3DevkitHubTests(unittest.TestCase):
 
 
 class HubBluetoothAutoWireTests(unittest.TestCase):
-    """Default ``bluetooth=True`` should restore persisted state, start the
-    long-press watcher, and (on RGB-capable hubs) paint the LED."""
+    """Default ``bluetooth=True`` should wire the long-press watcher
+    and (on RGB-capable hubs) paint the LED to match the persisted
+    BLE state. The hub does NOT activate BLE itself — that's
+    ``main.py``'s job (since 1.0.10; double-activation in 1.0.0-1.0.9
+    silently broke advertising)."""
 
     def setUp(self):
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
         Timer.reset_for_test()
         # A hub name is normally written at flash time (see
-        # scripts/flash_firmware.py). Plant one here so apply_persisted_state
-        # in the hub's BLE auto-wire doesn't raise HubNameNotSetError.
+        # scripts/flash_firmware.py). Plant one for completeness,
+        # though hub init no longer touches NVS for BLE since 1.0.10.
         import openbricks
         _FakeNVS(openbricks._HUB_NAME_NVS_NAMESPACE).set_blob(
             openbricks._HUB_NAME_NVS_KEY, b"TestHub")
 
-    def test_s3_hub_default_activates_ble_and_paints_led_blue(self):
+    def test_s3_hub_wires_toggle_and_paints_led_per_persisted_state(self):
         hub = ESP32S3DevkitHub()
         self.assertIsNotNone(hub.bluetooth_toggle)
-        self.assertTrue(_FakeBLE().active())             # default-on restored
+        # LED painted blue because persisted state defaults to "enabled"
+        # (no NVS key written yet) — read from NVS, not from active BLE.
         self.assertEqual(hub.led._np[0], (0, 0, 51))     # (0,0,255) scaled by 0.2
+
+    def test_s3_hub_does_not_activate_ble_at_construction(self):
+        # Pre-1.0.10 the hub called apply_persisted_state which
+        # activated BLE. The same activation in main.py + the hub's
+        # second call torn down advertising. main.py owns BLE
+        # lifecycle now; the hub stays out.
+        ESP32S3DevkitHub()
+        self.assertFalse(_FakeBLE().active(),
+                         "hub construction must not activate BLE — "
+                         "main.py's apply_persisted_state owns that")
 
     def test_s3_hub_bluetooth_false_opts_out(self):
         hub = ESP32S3DevkitHub(bluetooth=False)
@@ -157,13 +171,16 @@ class HubBluetoothAutoWireTests(unittest.TestCase):
         # BLE stack was never touched; no timer installed.
         self.assertFalse(_FakeBLE().active())
 
-    def test_classic_esp32_hub_default_activates_ble_without_led_color(self):
+    def test_classic_esp32_hub_wires_toggle_without_led_color(self):
         # SimpleLED doesn't support rgb(), so the button helper's LED
         # paint is a no-op on the classic hub — but the toggle still
-        # works and the persisted state still restores.
+        # works.
         hub = ESP32DevkitHub()
         self.assertIsNotNone(hub.bluetooth_toggle)
-        self.assertTrue(_FakeBLE().active())
+
+    def test_classic_esp32_hub_does_not_activate_ble_at_construction(self):
+        ESP32DevkitHub()
+        self.assertFalse(_FakeBLE().active())
 
 
 if __name__ == "__main__":
