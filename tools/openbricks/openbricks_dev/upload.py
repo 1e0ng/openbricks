@@ -90,7 +90,7 @@ async def _upload_async(name, script_path, target_path, scan_timeout):
         await run_mod._enter_raw_repl(blink, link)
         try:
             await run_mod._raw_paste_upload(blink, link, upload_program)
-            await run_mod._stream_output(blink, sys.stdout)
+            await run_mod._stream_output(blink, link, sys.stdout)
         finally:
             try:
                 await run_mod._leave_raw_repl(link)

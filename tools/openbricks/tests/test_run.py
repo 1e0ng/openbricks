@@ -111,7 +111,7 @@ class RunFlowTests(unittest.TestCase):
         fake = _ScriptedLink(self._standard_responses(
             b"hello from hub\r\n"))
 
-        async def _fake_connect(name, scan_timeout=5.0):
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
@@ -141,7 +141,7 @@ class RunFlowTests(unittest.TestCase):
         fake = _ScriptedLink(self._standard_responses(
             b"partial output\r\nopenbricks: stopped by button press.\r\n"))
 
-        async def _fake_connect(name, scan_timeout=5.0):
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
@@ -158,7 +158,7 @@ class RunFlowTests(unittest.TestCase):
             b"Traceback (most recent call last):\r\n  ...\r\nValueError: boom\r\n",
         ))
 
-        async def _fake_connect(name, scan_timeout=5.0):
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
@@ -183,7 +183,7 @@ class RawPasteErrorTests(unittest.TestCase):
         tmp.close()
         self.addCleanup(os.unlink, tmp.name)
 
-        async def _fake_connect(name, scan_timeout=5.0):
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect):
@@ -219,7 +219,7 @@ class ErrorPathTests(unittest.TestCase):
         tmp.close()
         self.addCleanup(os.unlink, tmp.name)
 
-        async def _raise(name, scan_timeout=5.0):
+        async def _raise(name, scan_timeout=5.0, debug=False):
             raise NUSError("no hub named 'RobotA' found")
 
         with patch.object(run_mod.NUSLink, "connect", side_effect=_raise):
