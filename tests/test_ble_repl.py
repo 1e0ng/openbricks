@@ -134,6 +134,30 @@ class StreamBridgeTests(unittest.TestCase):
         self.rx_handle = self.bridge._rx_handle
         self.tx_handle = self.bridge._tx_handle
 
+    def test_read_returns_buffered_bytes(self):
+        # ``read(sz)`` complements ``readinto`` for the dupterm stream
+        # protocol — modern MicroPython requires both. Pre-1.0.7 we
+        # only had readinto, which made os.dupterm raise OSError.
+        _FakeBLE._simulate_central_write(1, self.rx_handle, b"abcdef")
+        self.assertEqual(self.bridge.read(3), b"abc")
+        self.assertEqual(self.bridge.read(), b"def")
+        self.assertEqual(self.bridge.read(), b"")
+
+    def test_ioctl_reports_readable_when_buffered(self):
+        # ``os.dupterm`` polls the stream via ``ioctl(MP_STREAM_POLL=3,
+        # ...)`` and expects ``MP_STREAM_POLL_RD = 0x01`` when there's
+        # data to read. Without this, the REPL never sees BLE input.
+        _MP_STREAM_POLL = 3
+        _MP_STREAM_POLL_RD = 0x01
+        # Empty buffer → no readable bit set.
+        self.assertEqual(self.bridge.ioctl(_MP_STREAM_POLL, None), 0)
+        # Buffer has data → readable.
+        _FakeBLE._simulate_central_write(1, self.rx_handle, b"x")
+        self.assertEqual(self.bridge.ioctl(_MP_STREAM_POLL, None),
+                         _MP_STREAM_POLL_RD)
+        # Other ops return 0 (we don't support them).
+        self.assertEqual(self.bridge.ioctl(99, None), 0)
+
     def test_central_write_fills_rx_buffer(self):
         _FakeBLE._simulate_central_write(1, self.rx_handle, b"hello")
         buf = bytearray(32)

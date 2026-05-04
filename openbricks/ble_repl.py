@@ -116,6 +116,28 @@ class _Bridge:
             self._mtu_payload = mtu - 3
 
     # ---- dupterm stream protocol ----
+    #
+    # ``os.dupterm()`` in modern MicroPython requires the stream object
+    # to expose all four of ``read`` / ``readinto`` / ``write`` /
+    # ``ioctl``. The C-side check is at ``mp_get_stream_raise(...,
+    # MP_STREAM_OP_READ | MP_STREAM_OP_WRITE | MP_STREAM_OP_IOCTL)`` —
+    # missing any one of them raises ``OSError: stream operation not
+    # supported``. Pre-1.0.7 we only had readinto+write, which used to
+    # be enough on older MP but breaks on the v1.27+ MP we vendor.
+
+    def read(self, sz=None):
+        """Read up to ``sz`` bytes from the BLE rx buffer (or all if
+        ``sz`` is None). Returns ``b''`` when nothing is buffered."""
+        rx = self._rx_buffer
+        if not rx:
+            return b""
+        if sz is None or sz >= len(rx):
+            result = bytes(rx)
+            self._rx_buffer = bytearray()
+        else:
+            result = bytes(rx[:sz])
+            self._rx_buffer = bytearray(rx[sz:])
+        return result
 
     def readinto(self, buf):
         """Called by the REPL when it needs stdin. Returns ``None`` when
@@ -131,6 +153,18 @@ class _Bridge:
         buf[:n] = rx[:n]
         self._rx_buffer = bytearray(rx[n:])
         return n
+
+    def ioctl(self, op, arg):
+        """Stream-protocol ioctl. The REPL polls this to ask "is there
+        data to read?" — return ``MP_STREAM_POLL_RD`` (0x01) when
+        ``self._rx_buffer`` is non-empty, else 0. Other ops are
+        ignored (return 0)."""
+        # MP_STREAM_POLL = 3, MP_STREAM_POLL_RD = 0x01.
+        # Hard-coded so we don't import a constant module on every poll.
+        if op == 3:
+            if self._rx_buffer:
+                return 0x01
+        return 0
 
     def write(self, buf):
         """Called by the REPL to emit stdout/stderr. Fan out over one or
