@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: MIT
-"""Tests for openbricks.ble_repl — NUS bridge + dupterm plumbing."""
+"""Tests for openbricks.ble_repl — vendored upstream BLEUART + dupterm.
+
+The bridge is now a near-verbatim port of upstream MicroPython's
+``examples/bluetooth/ble_uart_peripheral.py`` + ``ble_uart_repl.py``;
+tests focus on the public surface and the openbricks-specific bits
+(advertising payload, NVS hub-name, idempotent start/stop)."""
 
 import tests._fakes       # noqa: F401
 import tests._fakes_ble   # noqa: F401  (installs fake esp32 + bluetooth + os.dupterm)
 
-import os as _real_os
 import unittest
 
 from tests._fakes_ble import (
@@ -34,8 +38,6 @@ class StartStopTests(unittest.TestCase):
         _FakeBLE._reset_for_test()
         _FakeNVS._reset_for_test()
         _FakeOsDupterm._reset_for_test()
-        # ble_repl is a singleton — clear any lingering bridge from a
-        # previous test.
         if ble_repl.is_running():
             ble_repl.stop()
         _set_hub_name("TestHub")
@@ -45,36 +47,52 @@ class StartStopTests(unittest.TestCase):
         ble_repl.start()
 
         self.assertTrue(ble_repl.is_running())
-        # Exactly one service registered, with two characteristics (TX, RX).
+        # One service registered, two characteristics (TX, RX).
         self.assertEqual(len(_FakeBLE._service_registrations), 1)
         svc_uuid, chars = _FakeBLE._service_registrations[0]
         self.assertEqual(svc_uuid.value, ble_repl._UART_SERVICE_UUID)
         self.assertEqual(len(chars), 2)
         self.assertEqual(chars[0][0].value, ble_repl._UART_TX_UUID)
         self.assertEqual(chars[1][0].value, ble_repl._UART_RX_UUID)
-        # Flags: TX is NOTIFY, RX is WRITE | WRITE_NO_RESPONSE.
+        # TX = NOTIFY, RX = WRITE (matching upstream BLEUART exactly).
         self.assertEqual(chars[0][1], _FakeBluetoothModule.FLAG_NOTIFY)
-        self.assertEqual(
-            chars[1][1],
-            _FakeBluetoothModule.FLAG_WRITE | _FakeBluetoothModule.FLAG_WRITE_NO_RESPONSE,
-        )
-        # dupterm has the bridge stream.
+        self.assertEqual(chars[1][1], _FakeBluetoothModule.FLAG_WRITE)
+        # dupterm has the stream installed.
         self.assertIsNotNone(_FakeOsDupterm.installed_stream)
         # Advertising started, interval 100 ms, payload includes the name.
         self.assertEqual(_FakeBLE._adv_interval_us, 100_000)
         self.assertIn(b"TestHub", _FakeBLE._adv_payload)
 
+    def test_start_calls_gatts_set_buffer_with_append_mode(self):
+        # Append mode is critical: without it, back-to-back writes
+        # from the central overwrite each other in the GATTS layer
+        # (e.g. Ctrl-C followed by Ctrl-A loses one of the two).
+        # Pre-1.2.0 we never called gatts_set_buffer at all.
+        _activate_ble()
+        ble_repl.start()
+        rx_handle = ble_repl._state["bridge"]._rx_handle
+        size, append = _FakeBLE._gatts_buffer_settings[rx_handle]
+        self.assertTrue(append,
+                        "rx buffer must be in append mode so back-to-back "
+                        "writes accumulate instead of overwriting")
+        self.assertGreater(size, 0)
+
+    def test_start_when_no_hub_name_raises(self):
+        _FakeNVS._reset_for_test()  # clear name
+        _activate_ble()
+        with self.assertRaises(RuntimeError):
+            ble_repl.start()
+
     def test_start_when_ble_inactive_raises(self):
-        # BLE stays inactive on purpose.
         with self.assertRaises(RuntimeError):
             ble_repl.start()
 
     def test_start_is_idempotent(self):
         _activate_ble()
         ble_repl.start()
-        first_bridge = ble_repl._state["bridge"]
+        first = ble_repl._state["bridge"]
         ble_repl.start()
-        self.assertIs(ble_repl._state["bridge"], first_bridge)
+        self.assertIs(ble_repl._state["bridge"], first)
 
     def test_stop_clears_dupterm_and_stops_advertising(self):
         _activate_ble()
@@ -83,19 +101,17 @@ class StartStopTests(unittest.TestCase):
 
         self.assertFalse(ble_repl.is_running())
         self.assertIsNone(_FakeOsDupterm.installed_stream)
-        # gap_advertise(None) clears the payload.
         self.assertIsNone(_FakeBLE._adv_payload)
 
     def test_stop_when_not_running_is_safe(self):
-        # Should not raise when there's no bridge to tear down.
         ble_repl.stop()
         self.assertFalse(ble_repl.is_running())
 
 
 class AdvertPayloadTests(unittest.TestCase):
-    """Payload must carry the NUS 128-bit service UUID and the GAP name
-    so ``openbricks-dev list`` (service-UUID filter) and
-    ``openbricks-dev run -n NAME`` (name filter) both work."""
+    """Payload must carry the NUS 128-bit service UUID and the GAP
+    name so ``openbricks list`` (UUID filter) and ``openbricks run
+    -n NAME`` (name filter) both work."""
 
     def setUp(self):
         _FakeBLE._reset_for_test()
@@ -108,7 +124,6 @@ class AdvertPayloadTests(unittest.TestCase):
         _set_hub_name("H")
         _activate_ble()
         ble_repl.start()
-
         uuid_le = ble_repl._uuid_bytes_le(ble_repl._UART_SERVICE_UUID)
         self.assertEqual(len(uuid_le), 16)
         self.assertIn(uuid_le, _FakeBLE._adv_payload)
@@ -120,7 +135,11 @@ class AdvertPayloadTests(unittest.TestCase):
         self.assertIn(b"RobotA", _FakeBLE._adv_payload)
 
 
-class StreamBridgeTests(unittest.TestCase):
+class UartRxTxTests(unittest.TestCase):
+    """The vendored ``_BLEUART`` rx/tx pipe — appends incoming writes
+    to its buffer (gated on the conn_handle being in
+    ``_connections``), notifies all connected centrals on write."""
+
     def setUp(self):
         _FakeBLE._reset_for_test()
         _FakeNVS._reset_for_test()
@@ -130,150 +149,110 @@ class StreamBridgeTests(unittest.TestCase):
         _set_hub_name("TestHub")
         _activate_ble()
         ble_repl.start()
-        self.bridge = ble_repl._state["bridge"]
-        self.rx_handle = self.bridge._rx_handle
-        self.tx_handle = self.bridge._tx_handle
-
-    def test_bridge_subclasses_io_iobase(self):
-        # ``os.dupterm()``'s C-side check at ``mp_get_stream_raise``
-        # requires the OBJECT'S TYPE to have the stream-protocol slot
-        # (the ``mp_stream_p_t`` of function pointers). Python classes
-        # inherit this slot from their first base; pure-Python classes
-        # without a stream-aware ancestor fail the check with
-        # ``OSError: stream operation not supported`` — even if all
-        # the right methods (``read``/``readinto``/``write``/``ioctl``)
-        # are defined as Python methods. ``io.IOBase`` has the slot
-        # pre-installed with a Python-method-dispatching adapter.
-        # 1.0.7 added the methods but didn't fix inheritance; 1.0.8
-        # makes ``_Bridge`` extend ``io.IOBase``.
-        import io
-        self.assertIsInstance(self.bridge, io.IOBase,
-                              "_Bridge must inherit from io.IOBase so "
-                              "MicroPython attaches the stream-protocol "
-                              "slot to the type")
-
-    def test_read_returns_buffered_bytes(self):
-        # ``read(sz)`` complements ``readinto`` for the dupterm stream
-        # protocol — modern MicroPython requires both. Pre-1.0.7 we
-        # only had readinto, which made os.dupterm raise OSError.
-        _FakeBLE._simulate_central_write(1, self.rx_handle, b"abcdef")
-        self.assertEqual(self.bridge.read(3), b"abc")
-        self.assertEqual(self.bridge.read(), b"def")
-        self.assertEqual(self.bridge.read(), b"")
-
-    def test_ioctl_reports_readable_when_buffered(self):
-        # ``os.dupterm`` polls the stream via ``ioctl(MP_STREAM_POLL=3,
-        # ...)`` and expects ``MP_STREAM_POLL_RD = 0x01`` when there's
-        # data to read. Without this, the REPL never sees BLE input.
-        _MP_STREAM_POLL = 3
-        _MP_STREAM_POLL_RD = 0x01
-        # Empty buffer → no readable bit set.
-        self.assertEqual(self.bridge.ioctl(_MP_STREAM_POLL, None), 0)
-        # Buffer has data → readable.
-        _FakeBLE._simulate_central_write(1, self.rx_handle, b"x")
-        self.assertEqual(self.bridge.ioctl(_MP_STREAM_POLL, None),
-                         _MP_STREAM_POLL_RD)
-        # Other ops return 0 (we don't support them).
-        self.assertEqual(self.bridge.ioctl(99, None), 0)
-
-    def test_rx_irq_calls_dupterm_notify(self):
-        # ``os.dupterm`` runs the REPL on its own schedule; without an
-        # explicit ``dupterm_notify`` poke from the BLE rx-IRQ handler,
-        # bytes sit in ``_rx_buffer`` until the REPL eventually polls
-        # — but a Ctrl-C the host sent gets stuck in the buffer for
-        # too long, breaking ``openbricks run -n NAME`` (it sends
-        # Ctrl-C to interrupt user code, then expects the raw-REPL
-        # banner; with the poke missing, it times out).
-        #
-        # The upstream ``examples/bluetooth/ble_uart_repl.py`` does
-        # the same poke in its rx callback. Pin: when the central
-        # writes to the rx characteristic, our IRQ handler calls
-        # the ``_dupterm_notify`` helper.
-        #
-        # Patch the helper rather than ``os.dupterm_notify`` directly
-        # because MicroPython's ``os`` module is frozen and rejects
-        # ``setattr`` — same reason ``_install_dupterm`` exists.
-        notify_calls = []
-        orig = ble_repl._dupterm_notify
-        ble_repl._dupterm_notify = lambda: notify_calls.append(None)
-        try:
-            _FakeBLE._simulate_central_write(1, self.rx_handle, b"x")
-        finally:
-            ble_repl._dupterm_notify = orig
-        self.assertEqual(len(notify_calls), 1,
-                         "rx IRQ must call _dupterm_notify exactly "
-                         "once per write — without it, BLE input "
-                         "never reaches the REPL")
+        self.uart = ble_repl._state["bridge"]
+        self.rx_handle = self.uart._rx_handle
+        self.tx_handle = self.uart._tx_handle
 
     def test_central_write_fills_rx_buffer(self):
         _FakeBLE._simulate_central_write(1, self.rx_handle, b"hello")
-        buf = bytearray(32)
-        n = self.bridge.readinto(buf)
-        self.assertEqual(n, 5)
-        self.assertEqual(bytes(buf[:n]), b"hello")
+        self.assertEqual(self.uart.read(), b"hello")
 
-    def test_readinto_returns_none_when_empty(self):
-        buf = bytearray(32)
-        self.assertIsNone(self.bridge.readinto(buf))
+    def test_unknown_conn_writes_are_ignored(self):
+        # The bridge tracks connections in a set — a write from a
+        # conn_handle that never fired CONNECT shouldn't reach the
+        # rx buffer. ``_simulate_central_write`` auto-fires CONNECT
+        # for new conns, so to test "unknown conn", we have to
+        # bypass it and fire GATTS_WRITE directly.
+        _FakeBLE._char_values[self.rx_handle] = b"sneak"
+        _FakeBLE._fire_irq(3, (999, self.rx_handle))   # unknown conn=999
+        self.assertEqual(self.uart.read(), b"")
 
-    def test_multiple_writes_coalesce(self):
+    def test_multiple_writes_accumulate(self):
         _FakeBLE._simulate_central_write(1, self.rx_handle, b"foo")
         _FakeBLE._simulate_central_write(1, self.rx_handle, b"bar")
-        buf = bytearray(32)
-        n = self.bridge.readinto(buf)
-        self.assertEqual(bytes(buf[:n]), b"foobar")
+        self.assertEqual(self.uart.read(), b"foobar")
 
-    def test_write_emits_gatts_notify_when_connected(self):
-        # Simulate the central-connect IRQ so the bridge has a conn_handle.
-        _FakeBLE._fire_irq(1, (42, 0, b"\x00" * 6))  # _IRQ_CENTRAL_CONNECT
-        self.bridge.write(b"hi")
+    def test_uart_write_notifies_all_connected(self):
+        # Two centrals connected → write goes to both via gatts_notify.
+        _FakeBLE._fire_irq(1, (42, 0, b"\x00" * 6))
+        _FakeBLE._fire_irq(1, (43, 0, b"\x00" * 6))
+        self.uart.write(b"hi")
+        recipients = sorted(c for (c, _h, _d) in _FakeBLE._notify_log)
+        self.assertEqual(recipients, [42, 43])
 
-        self.assertTrue(_FakeBLE._notify_log)
-        conn, handle, data = _FakeBLE._notify_log[-1]
-        self.assertEqual(conn, 42)
-        self.assertEqual(handle, self.tx_handle)
-        self.assertEqual(data, b"hi")
-
-    def test_write_without_connection_is_noop(self):
-        # No central ever connected.
-        n = self.bridge.write(b"ignored")
-        self.assertEqual(n, 0)
+    def test_uart_write_without_connection_is_silent(self):
+        self.uart.write(b"ignored")
         self.assertEqual(_FakeBLE._notify_log, [])
 
-    def test_large_write_chunks_to_mtu(self):
-        _FakeBLE._fire_irq(1, (42, 0, b"\x00" * 6))  # connect
-        # Start with the default 20-byte payload cap.
-        payload = b"A" * 55
-        self.bridge.write(payload)
-
-        # Expect ceil(55 / 20) = 3 notifications, first two 20 bytes, last 15.
-        sizes = [len(chunk) for (_c, _h, chunk) in _FakeBLE._notify_log]
-        self.assertEqual(sizes, [20, 20, 15])
-        # Concatenation round-trips.
-        joined = b"".join(chunk for (_c, _h, chunk) in _FakeBLE._notify_log)
-        self.assertEqual(joined, payload)
-
-    def test_mtu_irq_enlarges_chunk_size(self):
-        _FakeBLE._fire_irq(1, (42, 0, b"\x00" * 6))  # connect
-        _FakeBLE._fire_irq(21, (42, 100))            # _IRQ_MTU_EXCHANGED mtu=100
-        # Now payload cap is 100 - 3 = 97 bytes.
-        payload = b"B" * 97
-        _FakeBLE._notify_log.clear()
-        self.bridge.write(payload)
-        self.assertEqual(len(_FakeBLE._notify_log), 1)
-
     def test_disconnect_resumes_advertising(self):
-        _FakeBLE._fire_irq(1, (42, 0, b"\x00" * 6))  # connect
-        # Wipe the advertising payload to simulate the "connected →
-        # advertising paused" state.
+        _FakeBLE._fire_irq(1, (42, 0, b"\x00" * 6))
         _FakeBLE._adv_payload = None
         _FakeBLE._fire_irq(2, (42, 0, b"\x00" * 6))  # _IRQ_CENTRAL_DISCONNECT
         self.assertIsNotNone(_FakeBLE._adv_payload)
 
 
+class StreamProtocolTests(unittest.TestCase):
+    """The dupterm-facing ``_BLEUARTStream`` — io.IOBase subclass with
+    the four methods MicroPython's stream protocol checks for."""
+
+    def setUp(self):
+        _FakeBLE._reset_for_test()
+        _FakeNVS._reset_for_test()
+        _FakeOsDupterm._reset_for_test()
+        if ble_repl.is_running():
+            ble_repl.stop()
+        _set_hub_name("TestHub")
+        _activate_ble()
+        ble_repl.start()
+        self.uart   = ble_repl._state["bridge"]
+        self.stream = ble_repl._state["stream"]
+        self.rx_handle = self.uart._rx_handle
+
+    def test_stream_subclasses_io_iobase(self):
+        # io.IOBase inheritance is what gives the type the C-level
+        # stream-protocol slot. Without it, os.dupterm raises
+        # ``OSError: stream operation not supported``.
+        import io
+        self.assertIsInstance(self.stream, io.IOBase)
+
+    def test_readinto_returns_none_on_empty(self):
+        # Returning ``b""`` here would be interpreted as EOF by
+        # MicroPython's dupterm and permanently deactivate the
+        # stream. Upstream returns None.
+        buf = bytearray(8)
+        self.assertIsNone(self.stream.readinto(buf))
+
+    def test_readinto_drains_buffer(self):
+        _FakeBLE._simulate_central_write(1, self.rx_handle, b"abcdef")
+        buf = bytearray(3)
+        n = self.stream.readinto(buf)
+        self.assertEqual(n, 3)
+        self.assertEqual(bytes(buf), b"abc")
+        # Remaining bytes still readable.
+        buf2 = bytearray(8)
+        n2 = self.stream.readinto(buf2)
+        self.assertEqual(n2, 3)
+        self.assertEqual(bytes(buf2[:n2]), b"def")
+
+    def test_ioctl_reports_readable_when_buffered(self):
+        # MP_STREAM_POLL = 3, MP_STREAM_POLL_RD = 0x01.
+        self.assertEqual(self.stream.ioctl(3, None), 0)
+        _FakeBLE._simulate_central_write(1, self.rx_handle, b"x")
+        self.assertEqual(self.stream.ioctl(3, None), 0x01)
+
+    def test_rx_handler_is_wired(self):
+        # _BLEUARTStream.__init__ registers _on_rx with the uart, so
+        # an rx event triggers os.dupterm_notify (when available).
+        # Bound methods don't compare via ``is`` (each access creates
+        # a fresh wrapper); compare the underlying function.
+        self.assertIsNotNone(self.uart._handler)
+        self.assertEqual(self.uart._handler.__func__,
+                         self.stream._on_rx.__func__)
+
+
 class BluetoothIntegrationTests(unittest.TestCase):
-    """``openbricks.bluetooth.set_enabled(True)`` should start the REPL
-    bridge; ``set_enabled(False)`` should stop it."""
+    """``openbricks.bluetooth.set_enabled(True)`` should start the
+    REPL bridge; ``set_enabled(False)`` should stop it."""
 
     def setUp(self):
         _FakeBLE._reset_for_test()
