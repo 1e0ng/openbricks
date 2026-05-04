@@ -32,6 +32,36 @@ def _plant_hub_name():
         openbricks._HUB_NAME_NVS_KEY, b"TestHub")
 
 
+class TimerIdDefaultTests(unittest.TestCase):
+    """Pin the default ``timer_id`` to a hardware-valid value on
+    esp32-s3 (0..3). The previous default ``-1`` (virtual timer)
+    works on older MicroPython but raises ``ValueError: invalid
+    Timer number`` on the v1.27+ MP we vendor — main.py bricked
+    at boot in 1.0.8 because of this."""
+
+    def test_default_timer_id_is_hardware_valid(self):
+        import inspect
+        from openbricks.bluetooth_button import BluetoothToggleButton
+        sig = inspect.signature(BluetoothToggleButton.__init__)
+        default = sig.parameters["timer_id"].default
+        self.assertGreaterEqual(default, 0)
+        self.assertLessEqual(default, 3)
+
+    def test_default_timer_id_doesnt_collide_with_launcher(self):
+        # The launcher takes timer 0 (per its default in launcher.run);
+        # bluetooth_button must pick a different ID so the two timers
+        # don't conflict at runtime when both are wired.
+        import inspect
+        from openbricks import launcher
+        from openbricks.bluetooth_button import BluetoothToggleButton
+        launcher_default = inspect.signature(launcher.run).parameters["timer_id"].default
+        bbutton_default = inspect.signature(
+            BluetoothToggleButton.__init__).parameters["timer_id"].default
+        self.assertNotEqual(launcher_default, bbutton_default,
+                            "launcher and bluetooth_button must use "
+                            "distinct hardware Timer IDs")
+
+
 class BluetoothToggleButtonTests(unittest.TestCase):
     def setUp(self):
         _FakeNVS._reset_for_test()

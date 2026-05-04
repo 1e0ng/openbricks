@@ -250,6 +250,31 @@ class ScheduledStartTests(unittest.TestCase):
         self.assertTrue(self.launcher._running)  # unchanged
 
 
+class TimerIdDefaultTests(unittest.TestCase):
+    """Pin the timer_id defaults to a hardware-valid number on the
+    esp32-s3 we ship for. Older MicroPython supported ``Timer(-1)``
+    as a virtual software timer; the v1.27+ MP we vendor raises
+    ``ValueError: invalid Timer number`` for anything outside 0..3.
+    Pre-1.0.9 the defaults were -1 and main.py bricked at boot."""
+
+    def test_run_default_timer_id_is_hardware_valid(self):
+        # Inspect the function signature so we don't have to actually
+        # construct a Timer (which requires the firmware machine module).
+        # ``run`` should default to a small non-negative integer.
+        import inspect
+        sig = inspect.signature(launcher.run)
+        default = sig.parameters["timer_id"].default
+        self.assertGreaterEqual(default, 0)
+        self.assertLessEqual(default, 3)
+
+    def test_ensure_launcher_default_timer_id_is_hardware_valid(self):
+        import inspect
+        sig = inspect.signature(launcher._ensure_launcher)
+        default = sig.parameters["timer_id"].default
+        self.assertGreaterEqual(default, 0)
+        self.assertLessEqual(default, 3)
+
+
 class RunProgramTests(unittest.TestCase):
     """``launcher.run_program`` is the entry point ``openbricks-dev run``
     jumps into via raw REPL. Must set ``_running`` so button-stop works,

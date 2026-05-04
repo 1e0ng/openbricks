@@ -43,7 +43,7 @@ DEFAULT_COLOR_OFF = (255, 200, 0)     # yellow
 
 class BluetoothToggleButton:
     def __init__(self, button, led=None,
-                 poll_ms=DEFAULT_POLL_MS, timer_id=-1,
+                 poll_ms=DEFAULT_POLL_MS, timer_id=1,
                  color_on=DEFAULT_COLOR_ON,
                  color_off=DEFAULT_COLOR_OFF):
         """
@@ -60,9 +60,12 @@ class BluetoothToggleButton:
                 skip LED feedback.
             poll_ms: polling period. Default 50 ms (20 Hz) — well under
                 human reaction time, negligible CPU.
-            timer_id: ``machine.Timer`` ID. Default -1 uses the virtual
-                software timer; use 0..3 for ESP32 hardware timers if
-                you need to reserve -1 for something else.
+            timer_id: ``machine.Timer`` hardware ID (0..3 on
+                ESP32-S3). Default 1 stays out of the way of the
+                ``launcher`` (which takes timer 0). The previous
+                default ``-1`` (virtual timer) was supported by older
+                MicroPython but raises ``ValueError: invalid Timer
+                number`` on the v1.27+ MP we vendor.
             color_on, color_off: ``(r, g, b)`` tuples the LED is set to
                 when BLE is enabled / disabled. Defaults: blue / yellow.
         """
