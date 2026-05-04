@@ -127,6 +127,23 @@ class _Bridge(_IOBASE):
             conn_handle, value_handle = data
             if value_handle == self._rx_handle:
                 self._rx_buffer += self._ble.gatts_read(self._rx_handle)
+                # Wake the dupterm machinery so it drains our rx
+                # buffer into the REPL's stdin. Without this poke, a
+                # Ctrl-C sent over BLE sits in ``_rx_buffer`` forever
+                # and the REPL never breaks out of whatever it's
+                # running. ``dupterm_notify`` is the documented
+                # ESP32 API for "stream has new data"; the upstream
+                # ``ble_uart_repl.py`` example does the same thing
+                # under the same comment.
+                try:
+                    import os
+                    os.dupterm_notify(None)
+                except (AttributeError, ImportError):
+                    # Older MP builds don't ship dupterm_notify; on
+                    # those the REPL polls dupterm-streams on its
+                    # own schedule, so missing the poke just adds
+                    # latency rather than breaking input.
+                    pass
         elif event == _IRQ_MTU_EXCHANGED:
             _conn_handle, mtu = data
             self._mtu_payload = mtu - 3
