@@ -209,14 +209,26 @@ class ESP32S3DevkitHub(Hub):
 def _install_bluetooth_toggle(hub):
     """Called from the hub constructors when ``bluetooth=True``.
 
-    Restores the persisted BLE state, builds a long-press watcher on
-    the hub's button (recolouring the LED on each toggle if it's
-    RGB-capable), and stashes the watcher on ``hub.bluetooth_toggle``
-    so callers can ``stop()`` it later if they want the button for
-    something else.
+    Builds a long-press watcher on the hub's button (recolouring the
+    LED on each toggle if it's RGB-capable) and stashes the watcher
+    on ``hub.bluetooth_toggle`` so callers can ``stop()`` it later
+    if they want the button for something else.
+
+    Until 1.0.10 this also called ``bluetooth.apply_persisted_state()``
+    to restore the persisted BLE-on/off state. That was wrong: the
+    frozen ``main.py`` calls ``apply_persisted_state()`` *first*,
+    bringing BLE up + advertising. A second call from here re-runs
+    ``ble.active(True)`` — which under MicroPython's NimBLE port
+    unconditionally tears down and re-inits the stack
+    (``mp_bluetooth_init`` calls ``mp_bluetooth_deinit`` even when
+    already active, stopping advertising and clearing registered
+    services). The follow-up ``ble_repl.start()`` then early-returns
+    because ``_state["bridge"]`` is still set from the first call,
+    so services + advertising are never re-installed. End result:
+    BLE active but invisible to scanners.
+
+    main.py owns BLE lifecycle. The hub's role is the toggle button.
     """
-    from openbricks import bluetooth as _bt
     from openbricks.bluetooth_button import BluetoothToggleButton
-    _bt.apply_persisted_state()
     hub.bluetooth_toggle = BluetoothToggleButton(hub.bluetooth_button, led=hub.led)
     hub.bluetooth_toggle.start()
