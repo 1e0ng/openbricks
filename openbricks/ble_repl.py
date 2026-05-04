@@ -28,11 +28,17 @@ small dispatcher. Not blocking today.
 
 try:
     import bluetooth
+    import io
     from micropython import const
+    _IOBASE = io.IOBase
 except ImportError:
     # Desktop tests install fakes via ``tests._fakes_ble``; the module
     # level imports still need to succeed at import time. ``const`` is
     # a MicroPython optimisation — on CPython, a pass-through works.
+    # ``io.IOBase`` exists on CPython too; use it as-is so subclassing
+    # behaves the same on host tests.
+    import io
+    _IOBASE = io.IOBase
     const = lambda x: x  # noqa: E731
 
 
@@ -73,8 +79,18 @@ def _install_dupterm(stream):
         os.dupterm(stream)
 
 
-class _Bridge:
-    """Holds the live BLE state, plus a stream interface for ``dupterm``."""
+class _Bridge(_IOBASE):
+    """Holds the live BLE state, plus a stream interface for ``dupterm``.
+
+    Subclasses ``io.IOBase`` so MicroPython attaches the C-level
+    stream-protocol slot to the type. ``os.dupterm()``'s C-side check
+    (``mp_get_stream_raise(... READ | WRITE | IOCTL)``) requires the
+    type to *have* the protocol slot — pure Python classes without an
+    ``IOBase`` ancestor fail the check with ``OSError: stream
+    operation not supported`` even when the right Python methods are
+    present. v1.0.7 added ``read``/``ioctl`` to the methods but didn't
+    fix the inheritance; v1.0.8 does.
+    """
 
     def __init__(self, ble):
         self._ble = ble
