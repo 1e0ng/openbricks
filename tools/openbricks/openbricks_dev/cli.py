@@ -95,6 +95,13 @@ def _build_parser():
         "--scan-timeout", type=float, default=5.0,
         help="How long to scan for the named hub before giving up. Default: 5.0 s.",
     )
+    p_run.add_argument(
+        "--debug", action="store_true",
+        help="Print every BLE notify packet (timestamp + hex + ascii) "
+             "to stderr as it arrives. Use to diagnose 'timed out reading "
+             "from hub' errors — tells you whether the hub is sending "
+             "anything at all.",
+    )
 
     # ---- upload ----
     p_upload = sub.add_parser(

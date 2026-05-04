@@ -18,6 +18,8 @@ policy.
 """
 
 import asyncio
+import sys
+import time
 
 
 # Hub-side advertises these — keep in sync with ``openbricks/ble_repl.py``.
@@ -28,6 +30,20 @@ UART_RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # client → hub (wr
 
 class NUSError(Exception):
     """Raised on BLE discovery / connect / I/O problems."""
+
+
+def _print_packet(data, connected_at):
+    """Print one received notify packet to stderr in --debug mode.
+
+    Format: ``[+0.123s] rx 12 bytes: 01 02 ... | "ascii"`` — relative
+    timestamp from connect, length, hex, and an ascii column with
+    non-printables shown as ``.``.
+    """
+    t = time.monotonic() - connected_at if connected_at else 0.0
+    hex_ = " ".join("%02x" % b for b in data)
+    ascii_ = "".join(chr(b) if 32 <= b < 127 else "." for b in data)
+    print("[+%.3fs] rx %d bytes: %s | %r" % (t, len(data), hex_, ascii_),
+          file=sys.stderr)
 
 
 async def _find_by_name(name, timeout):
@@ -64,14 +80,27 @@ class NUSLink:
     callback cycle are coalesced.
     """
 
-    def __init__(self, client):
+    def __init__(self, client, debug=False):
         self._client = client
         self._rx = bytearray()
         self._rx_event = asyncio.Event()
+        # Diagnostic counters surfaced in timeout errors and --debug
+        # output. ``connect()`` overwrites _connected_at; ``_on_notify``
+        # bumps the rest. Used by ``stats()``.
+        self._debug = debug
+        self._connected_at = None
+        self._notify_count = 0
+        self._byte_count   = 0
+        self._last_byte_at = None
 
     @classmethod
-    async def connect(cls, name, scan_timeout=5.0):
-        """Scan + connect + subscribe. Raises :class:`NUSError` on any failure."""
+    async def connect(cls, name, scan_timeout=5.0, debug=False):
+        """Scan + connect + subscribe. Raises :class:`NUSError` on any failure.
+
+        ``debug=True`` makes the link print every notify packet's
+        timestamp + hex + ascii to stderr — useful when you need to
+        see whether the hub is sending anything at all (vs. silently
+        dropping our writes)."""
         try:
             from bleak import BleakClient
         except ImportError as e:
@@ -84,9 +113,15 @@ class NUSLink:
         except Exception as e:
             raise NUSError("failed to connect to %r: %s" % (name, e)) from e
 
-        link = cls(client)
+        link = cls(client, debug=debug)
+        link._connected_at = time.monotonic()
 
         def _on_notify(_char, data):
+            link._notify_count += 1
+            link._byte_count   += len(data)
+            link._last_byte_at  = time.monotonic()
+            if link._debug:
+                _print_packet(data, link._connected_at)
             link._rx += data
             link._rx_event.set()
 
@@ -102,7 +137,27 @@ class NUSLink:
                 "failed to subscribe to TX characteristic (is this an "
                 "openbricks hub with BLE REPL enabled?): %s" % e) from e
 
+        if debug:
+            mtu = getattr(client, "mtu_size", None)
+            print("[debug] connected, mtu=%s" % mtu, file=sys.stderr)
         return link
+
+    def stats(self):
+        """Return a dict of diagnostic counters for timeout error
+        formatting. Safe to call after disconnect."""
+        now = time.monotonic()
+        last_ago = None if self._last_byte_at is None else now - self._last_byte_at
+        try:
+            connected = self._client.is_connected
+        except Exception:
+            connected = "unknown"
+        return {
+            "connected":     connected,
+            "notify_count":  self._notify_count,
+            "byte_count":    self._byte_count,
+            "last_byte_ago": last_ago,
+            "uptime":        None if self._connected_at is None else now - self._connected_at,
+        }
 
     async def __aenter__(self):
         # ``connect`` is already an async classmethod; we don't need to
