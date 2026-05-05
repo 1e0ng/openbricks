@@ -99,8 +99,16 @@ class RunHappyPathTests(unittest.TestCase):
         self.assertIn("write-flash", call_history[1])
         self.assertIn("0x0", call_history[1])
         self.assertIn("firmware.bin", call_history[1])
-        # Third: mpremote reset at the end.
-        self.assertIn("reset", call_history[2])
+        # Third: mpremote-driven hardware reset at the end. Since 0.10.17
+        # this is ``resume exec --no-follow machine.reset()`` rather than
+        # the ``mpremote reset`` alias (which would soft-reset the chip
+        # into the BLE-active runtime first, then fail to re-enter raw
+        # REPL); test both shapes by looking for ``machine.reset()`` in
+        # the snippet args.
+        self.assertTrue(
+            any("machine.reset()" in a for a in call_history[2]) or
+            "reset" in call_history[2],
+            "expected an mpremote-driven reset; got %r" % call_history[2])
 
     def test_skip_erase_drops_erase_flash(self):
         call_history = []
