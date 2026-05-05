@@ -56,7 +56,15 @@ class StartStopTests(unittest.TestCase):
         self.assertEqual(chars[1][0].value, ble_repl._UART_RX_UUID)
         # TX = NOTIFY, RX = WRITE (matching upstream BLEUART exactly).
         self.assertEqual(chars[0][1], _FakeBluetoothModule.FLAG_NOTIFY)
-        self.assertEqual(chars[1][1], _FakeBluetoothModule.FLAG_WRITE)
+        # RX must declare BOTH WRITE and WRITE_NO_RESPONSE — bleak
+        # uses write-no-response for the streaming-REPL hot path
+        # (response=False), and CoreBluetooth silently drops it
+        # against a characteristic that only advertises WRITE.
+        rx_flags = chars[1][1]
+        self.assertTrue(rx_flags & _FakeBluetoothModule.FLAG_WRITE,
+                        "RX must include FLAG_WRITE")
+        self.assertTrue(rx_flags & _FakeBluetoothModule.FLAG_WRITE_NO_RESPONSE,
+                        "RX must include FLAG_WRITE_NO_RESPONSE")
         # dupterm has the stream installed.
         self.assertIsNotNone(_FakeOsDupterm.installed_stream)
         # Advertising started, interval 100 ms, payload includes the name.
