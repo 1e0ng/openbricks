@@ -181,7 +181,7 @@ def _advertising_payload(name, service_uuid_str):
 # ``os.dupterm_notify`` poke lives.
 
 class _BLEUART:
-    def __init__(self, ble, name, rxbuf=100):
+    def __init__(self, ble, name, rxbuf=512):
         self._ble = ble
         self._ble.irq(self._irq)
         ((self._tx_handle, self._rx_handle),) = self._ble.gatts_register_services(
@@ -203,6 +203,15 @@ class _BLEUART:
         # Append-mode rx buffer: back-to-back writes from the central
         # accumulate instead of overwriting. Without this, a quick
         # "Ctrl-C Ctrl-A" from openbricks-dev run loses one of the two.
+        #
+        # rxbuf=512 (was 100 in upstream BLEUART): MicroPython's
+        # raw-paste protocol uses a 128-byte window and after the
+        # initial header the host sends UP TO 256 bytes upfront
+        # (window_remaining = window_size + the first \x01 ACK that
+        # arrived bundled with the header). 100 bytes silently drops
+        # everything past the first ~third of the bootstrap, the chip
+        # never sees a complete script and never sends another ACK.
+        # 512 = 2 windows + headroom for ACKs / control bytes.
         self._ble.gatts_set_buffer(self._rx_handle, rxbuf, True)
         self._connections = set()
         self._rx_buffer = bytearray()
