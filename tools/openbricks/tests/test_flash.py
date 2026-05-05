@@ -156,7 +156,8 @@ class NameWriteSnippetTests(unittest.TestCase):
         captured = {}
 
         def _fake_run(cmd, capture_output=True, text=True):
-            # cmd is ``[mpremote, connect, PORT, exec, <snippet>]``.
+            # cmd ends in ``... exec <snippet>``; the chain in front
+            # is mpremote-version-dependent (``connect PORT [resume]``).
             captured["snippet"] = cmd[-1]
             return MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr="")
 

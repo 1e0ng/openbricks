@@ -72,8 +72,18 @@ def _mpremote_exec(mpremote, port, snippet):
 
     Returns ``(returncode, stdout, stderr)``. ``_run`` isn't used here
     because we need to capture stdout for readback verification.
+
+    The ``resume`` argument is critical: without it, each
+    ``mpremote exec`` invocation does a soft reset before entering
+    raw REPL. Once the hub name has been written to NVS, the
+    soft-reset re-runs frozen ``main.py`` which now activates BLE
+    and blocks in ``launcher.run()`` — and the *next* mpremote
+    invocation can't enter raw REPL, failing the readback step
+    with "could not enter raw repl". ``resume`` flips
+    ``_auto_soft_reset`` to ``False`` so the chip's REPL state
+    persists across our flash-flow steps.
     """
-    cmd = [mpremote, "connect", port, "exec", snippet]
+    cmd = [mpremote, "connect", port, "resume", "exec", snippet]
     print(">>> " + " ".join(cmd), flush=True)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     return proc.returncode, proc.stdout, proc.stderr
