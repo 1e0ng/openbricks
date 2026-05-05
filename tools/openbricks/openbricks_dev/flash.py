@@ -85,14 +85,31 @@ def _wait_for_repl(mpremote, port, timeout_s=20):
     After flashing, the device reboots and the serial link takes a second
     or two to come back; mpremote has no built-in retry. Idle-poll every
     500 ms.
+
+    On timeout, surface mpremote's last rc / stdout / stderr so the
+    user can see *why* it's failing — a bare "timed out" message is
+    indistinguishable between "chip is stuck in user code that never
+    yields to the REPL", "chip is in download mode after a flash
+    failure", and "USB-Serial-JTAG never re-enumerated".
     """
     deadline = time.time() + timeout_s
+    last_rc, last_out, last_err = -1, "", ""
     while time.time() < deadline:
-        rc, out, _err = _mpremote_exec(mpremote, port, "print('ok')")
-        if rc == 0 and "ok" in out:
+        last_rc, last_out, last_err = _mpremote_exec(mpremote, port, "print('ok')")
+        if last_rc == 0 and "ok" in last_out:
             return
         time.sleep(0.5)
-    _die("timed out waiting for device REPL on %s" % port)
+    _die(
+        "timed out waiting for device REPL on %s after %.0fs\n"
+        "  last mpremote rc:     %d\n"
+        "  last mpremote stdout: %r\n"
+        "  last mpremote stderr: %r\n"
+        "hint: if stderr mentions 'could not enter raw repl', the chip's\n"
+        "      main.py is stuck in user code — power-cycle and try again,\n"
+        "      or hold the BOOT button while pressing reset to enter the\n"
+        "      ROM bootloader (then re-run with --skip-erase)."
+        % (port, timeout_s, last_rc, last_out.strip(), last_err.strip())
+    )
 
 
 def _write_hub_name(mpremote, port, name):
