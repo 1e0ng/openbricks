@@ -198,8 +198,23 @@ def run(args):
         _die("verification failed: wrote %r, read back %r" % (args.name, readback))
     print("verified: hub name is %r" % readback)
 
-    # Soft-reboot so any user code sees the new name immediately.
-    _run([mpremote, "connect", args.port, "reset"], check=False)
+    # Trigger a hardware reset so the freshly-flashed chip boots into
+    # the BLE-active runtime state (now that hub_name is in NVS).
+    #
+    # Why ``resume exec --no-follow machine.reset()`` rather than the
+    # ``mpremote ... reset`` alias: the alias expands to
+    # ``exec --no-follow "machine.reset()"`` with the default
+    # ``enter_raw_repl(soft_reset=True)``. That soft reset itself
+    # boots the chip into the new state, blocking in
+    # ``launcher.run()`` before mpremote can reach the raw REPL to
+    # actually send ``machine.reset()`` — surfacing as
+    # ``TransportError: could not enter raw repl``. ``resume`` flips
+    # ``_auto_soft_reset`` off so we go straight from friendly REPL
+    # into raw REPL once, send the snippet, and disconnect; the
+    # snippet's own ``machine.reset()`` is what reboots the chip.
+    _run([mpremote, "connect", args.port, "resume",
+          "exec", "--no-follow",
+          "import machine; machine.reset()"], check=False)
 
     print("done — hub %r flashed on %s." % (args.name, args.port))
     return 0
