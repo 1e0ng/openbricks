@@ -74,6 +74,34 @@ def _format_timeout(link, step, partial_buf):
                 else "%.2fs" % s["uptime"])
     partial  = bytes(partial_buf)
     partial_repr = repr(partial[:80]) + (" ..." if len(partial) > 80 else "")
+
+    # Pick a hint based on what the counters actually say. Three
+    # broad cases at timeout: the hub never sent anything (BLE path
+    # broken / unsubscribed), the hub started talking but went
+    # quiet (script blocking on hardware), or it's still actively
+    # sending but not the bytes we wanted.
+    if s["notify_count"] == 0:
+        hint = (
+            "hint: notify_count=0 — the hub never sent anything. "
+            "Its BLE notify path is broken or no central is registered. "
+            "Re-run with --debug to log every notify packet as it arrives."
+        )
+    elif s["last_byte_ago"] is not None and s["last_byte_ago"] >= 5.0:
+        hint = (
+            "hint: hub WAS sending (%d packets, %d bytes), then went "
+            "quiet for %.1fs. Most often: your script is blocked on "
+            "hardware (sensor never responds, motor never reaches "
+            "target). Re-run with --debug to see the last bytes; try "
+            "a hello-world script first to confirm the BLE path is fine."
+            % (s["notify_count"], s["byte_count"], s["last_byte_ago"])
+        )
+    else:
+        hint = (
+            "hint: hub is sending bytes but not what we expected at "
+            "this step. Re-run with --debug to see exactly what it's "
+            "sending and where the protocol diverged."
+        )
+
     return (
         "timed out reading from hub\n"
         "  step:               %s\n"
@@ -82,11 +110,9 @@ def _format_timeout(link, step, partial_buf):
         "  notify packets rx:  %d\n"
         "  bytes received:     %d (last byte: %s)\n"
         "  partial buffer:     %s\n"
-        "hint: notify_count=0 means the hub never sent anything — its "
-        "BLE notify path is broken or no central is registered. "
-        "Re-run with --debug to log every notify packet as it arrives."
+        "%s"
     ) % (step, s["connected"], uptime, s["notify_count"],
-         s["byte_count"], last_ago, partial_repr)
+         s["byte_count"], last_ago, partial_repr, hint)
 
 
 class _BufferedLink:
