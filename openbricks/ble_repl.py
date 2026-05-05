@@ -118,8 +118,9 @@ _IRQ_CENTRAL_CONNECT    = const(1)
 _IRQ_CENTRAL_DISCONNECT = const(2)
 _IRQ_GATTS_WRITE        = const(3)
 
-_FLAG_WRITE  = const(0x0008)
-_FLAG_NOTIFY = const(0x0010)
+_FLAG_WRITE             = const(0x0008)
+_FLAG_NOTIFY            = const(0x0010)
+_FLAG_WRITE_NO_RESPONSE = const(0x0004)
 
 _MP_STREAM_POLL    = const(3)
 _MP_STREAM_POLL_RD = const(0x0001)
@@ -186,7 +187,17 @@ class _BLEUART:
         ((self._tx_handle, self._rx_handle),) = self._ble.gatts_register_services(
             ((bluetooth.UUID(_UART_SERVICE_UUID), (
                 (bluetooth.UUID(_UART_TX_UUID), _FLAG_NOTIFY),
-                (bluetooth.UUID(_UART_RX_UUID), _FLAG_WRITE),
+                # RX needs BOTH flags. The host-side openbricks-dev
+                # uses ``write_gatt_char(..., response=False)`` for
+                # the streaming-REPL hot path; bleak / CoreBluetooth
+                # silently drop that write if WRITE_NO_RESPONSE isn't
+                # advertised on the characteristic. WRITE alone leaves
+                # the chip reading 0 GATTS_WRITE IRQs even after a
+                # successful BLE connect — which is exactly what 1.2.x
+                # produced on hardware (see _LOG entries: CONNECT +
+                # MTU exchange, then no irq(3,) entries).
+                (bluetooth.UUID(_UART_RX_UUID),
+                 _FLAG_WRITE | _FLAG_WRITE_NO_RESPONSE),
             )),)
         )
         # Append-mode rx buffer: back-to-back writes from the central
