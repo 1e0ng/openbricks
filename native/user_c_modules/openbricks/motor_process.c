@@ -176,12 +176,20 @@ static void mp_do_start(motor_process_obj_t *self) {
     // (unix MP, for example), leave MP_STATE_PORT(openbricks_mp_timer)
     // as mp_const_none — the scheduler is still usable via explicit
     // ``tick()`` calls, which is how the test suite exercises it.
+    //
+    // Timer ID 2: ESP32-S3 only supports hardware timers 0..3 — virtual
+    // Timer(-1) raises ValueError there. Timer 0 is taken by
+    // ``openbricks.launcher`` (button watcher) and Timer 1 by
+    // ``openbricks.bluetooth_button`` (BLE-toggle). Use Timer 2 for the
+    // motor_process scheduler so all three coexist on a stock-build hub.
+    // (Other ports — esp32 classic, unix MP — accept this ID too;
+    // hardware-timer 2 exists on every port we ship.)
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t machine_mod = mp_import_name(MP_QSTR_machine, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
         mp_obj_t timer_cls   = mp_load_attr(machine_mod, MP_QSTR_Timer);
         mp_obj_t periodic    = mp_load_attr(timer_cls, MP_QSTR_PERIODIC);
-        mp_obj_t timer       = mp_call_function_1(timer_cls, MP_OBJ_NEW_SMALL_INT(-1));
+        mp_obj_t timer       = mp_call_function_1(timer_cls, MP_OBJ_NEW_SMALL_INT(2));
         mp_obj_t init_method = mp_load_attr(timer, MP_QSTR_init);
 
         // mp_call_method_n_kw expects args = [func, self_or_NULL,
