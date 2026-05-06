@@ -177,6 +177,51 @@ class DrainAndExecTests(unittest.TestCase):
         self.assertFalse(launch._running)
 
 
+class RunProgramResetsMotorProcessTests(unittest.TestCase):
+    """``run_program`` is the entry point for both BLE-triggered runs
+    (``openbricks-dev run``) and button-press launches. Each call must
+    wipe the native scheduler's callback list so the new program
+    doesn't inherit dead servo / drivebase tick subscriptions from the
+    previous run.
+
+    Discovered 2026-05-06: a stale callback list left
+    ``DriveBase.straight()`` blocked forever in
+    ``while not is_done()`` — the new drivebase's ``register_c`` call
+    silently failed (list contaminated with garbage from the
+    previous run) and the trajectory tick never fired."""
+
+    def setUp(self):
+        self._original = launcher._reset_motor_process
+        self._call_count = 0
+
+        def _spy():
+            self._call_count += 1
+
+        launcher._reset_motor_process = _spy
+
+    def tearDown(self):
+        launcher._reset_motor_process = self._original
+
+    def test_run_program_resets_motor_process_before_exec(self):
+        # Tiny program that just touches a marker file; we don't care
+        # what it does, only that _reset_motor_process fired before it.
+        marker = "/tmp/_openbricks_run_program_marker"
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        self.addCleanup(lambda: os.remove(marker) if _path_exists(marker) else None)
+        path = _write_program("open(%r, 'w').write('ran')\n" % marker)
+        self.addCleanup(_cleanup_program)
+
+        launcher.run_program(path)
+
+        self.assertEqual(self._call_count, 1,
+                         "run_program must call _reset_motor_process exactly once")
+        self.assertTrue(_path_exists(marker),
+                        "program should still execute after the reset")
+
+
 class StopRequestTests(unittest.TestCase):
     """Short press while ``_running`` is True requests mid-run stop.
 
