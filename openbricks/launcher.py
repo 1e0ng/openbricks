@@ -266,10 +266,32 @@ def run_program(program_path=DEFAULT_PROGRAM_PATH):
     thread. Propagates ``KeyboardInterrupt`` so the raw-REPL
     disconnect signals "stopped" back to the client (which then
     exits).
+
+    Wipes ``motor_process`` state before exec'ing the user script.
+    ``openbricks run`` interrupts whatever was running before
+    (typically a long-lived main.py) but the C-side motor_process
+    callback list isn't tied to Python GC — without this reset, the
+    new program inherits dead servo/drivebase tick-callback pointers
+    from the previous program and ``register_c`` either silently
+    rejects new subscriptions (list full) or schedules them alongside
+    garbage, leaving ``DriveBase.straight()`` blocked forever in the
+    ``while not is_done()`` loop.
     """
+    _reset_motor_process()
     launcher = _ensure_launcher()
     launcher._running = True
     try:
         _exec_program_raw(program_path)
     finally:
         launcher._running = False
+
+
+def _reset_motor_process():
+    """Best-effort wipe of the native scheduler's callback list.
+    Imported lazily so unix MP / CPython tests without the C module
+    don't fail on launcher import."""
+    try:
+        from _openbricks_native import motor_process
+    except ImportError:
+        return
+    motor_process.reset()
