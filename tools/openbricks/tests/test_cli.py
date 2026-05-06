@@ -65,12 +65,14 @@ class BuildParserTests(unittest.TestCase):
 
     # ---- run ----
 
-    def test_run_requires_name_and_script(self):
-        for missing in (["run", "script.py"],                         # no -n
-                        ["run", "-n", "A"]):                          # no script
-            with self.assertRaises(SystemExit):
-                with patch("sys.stderr", new_callable=io.StringIO):
-                    self._parse(missing)
+    def test_run_requires_name(self):
+        # ``-n NAME`` is still required at the argparse layer.
+        # SCRIPT is optional now (mutually exclusive with -c). The
+        # "must pass one of script/-c" check happens at runtime;
+        # see test_neither_script_nor_command_raises in test_run.py.
+        with self.assertRaises(SystemExit):
+            with patch("sys.stderr", new_callable=io.StringIO):
+                self._parse(["run", "script.py"])  # no -n
 
     def test_run_defaults(self):
         args = self._parse(["run", "-n", "RobotA", "myscript.py"])

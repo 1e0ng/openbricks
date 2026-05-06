@@ -275,12 +275,24 @@ def _compose_bootstrap(user_bytes):
     return ("\n".join(lines) + "\n").encode()
 
 
-async def _run_async(name, script_path, scan_timeout, debug=False):
-    try:
-        with open(script_path, "rb") as f:
-            user_bytes = f.read()
-    except OSError as e:
-        raise RunError("cannot read script %r: %s" % (script_path, e))
+async def _run_async(name, script_path, scan_timeout, debug=False, command=None):
+    if command is not None and script_path is not None:
+        raise RunError("specify either SCRIPT or -c CODE, not both")
+    if command is None and script_path is None:
+        raise RunError("missing program: pass a SCRIPT path or -c CODE")
+
+    if command is not None:
+        # Inline code path. ``-c "print('x')"`` mirrors ``python -c``;
+        # we wrap the same launcher.run_program flow as the file path
+        # so cleanup (motor_process reset, KeyboardInterrupt handling)
+        # is identical.
+        user_bytes = command.encode("utf-8")
+    else:
+        try:
+            with open(script_path, "rb") as f:
+                user_bytes = f.read()
+        except OSError as e:
+            raise RunError("cannot read script %r: %s" % (script_path, e))
     if len(user_bytes) > _MAX_SCRIPT_BYTES:
         raise RunError(
             "script is %d bytes, exceeding the %d-byte soft limit" % (
@@ -322,8 +334,10 @@ async def _run_async(name, script_path, scan_timeout, debug=False):
 def run(args):
     """Subcommand entry. ``args`` is an argparse Namespace."""
     debug = getattr(args, "debug", False)
+    command = getattr(args, "inline_code", None)
     try:
-        asyncio.run(_run_async(args.name, args.script, args.scan_timeout, debug=debug))
+        asyncio.run(_run_async(args.name, args.script, args.scan_timeout,
+                               debug=debug, command=command))
     except RunError:
         raise
     except KeyboardInterrupt:

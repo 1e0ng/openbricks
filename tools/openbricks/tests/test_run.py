@@ -45,9 +45,10 @@ class _ScriptedLink:
         self.closed = True
 
 
-def _args(name="RobotA", script="s.py", scan_timeout=5.0):
+def _args(name="RobotA", script="s.py", scan_timeout=5.0, inline_code=None):
     return argparse.Namespace(
-        name=name, script=script, scan_timeout=scan_timeout)
+        name=name, script=script, scan_timeout=scan_timeout,
+        inline_code=inline_code)
 
 
 # Hub-side response shorthands (kept in sync with test_upload).
@@ -212,6 +213,54 @@ class ErrorPathTests(unittest.TestCase):
                 asyncio.run(run_mod._run_async("RobotA", big.name, 5.0))
         connect.assert_not_called()
         self.assertIn("soft limit", str(ctx.exception))
+
+    def test_command_and_script_mutually_exclusive(self):
+        with patch.object(run_mod.NUSLink, "connect") as connect:
+            with self.assertRaises(run_mod.RunError) as ctx:
+                asyncio.run(
+                    run_mod._run_async("RobotA", "/path/to/script.py", 5.0,
+                                       command="print('hi')"))
+        connect.assert_not_called()
+        self.assertIn("either", str(ctx.exception).lower())
+
+    def test_neither_script_nor_command_raises(self):
+        with patch.object(run_mod.NUSLink, "connect") as connect:
+            with self.assertRaises(run_mod.RunError) as ctx:
+                asyncio.run(
+                    run_mod._run_async("RobotA", None, 5.0, command=None))
+        connect.assert_not_called()
+        self.assertIn("missing program", str(ctx.exception).lower())
+
+
+class InlineCommandTests(unittest.TestCase):
+    """``-c CODE`` runs the same flow as a SCRIPT path, but uses the
+    inline string instead of a file's contents."""
+
+    def test_command_bytes_reach_the_bootstrap(self):
+        responses = [
+            b"",
+            _BANNER,
+            _R_SUPPORTED + _WINDOW_8K,
+            _CTRL_D,
+            b"hello\r\n" + _CTRL_D,
+            _CTRL_D,
+        ]
+        fake = _ScriptedLink(responses)
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO):
+            rc = run_mod.run(_args(script=None, inline_code="print('hello')"))
+
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        # The inline ``CODE`` lands inside the ``f.write(...)`` repr in
+        # the bootstrap — verify the bytes are present.
+        self.assertIn(b"print('hello')", joined)
+        self.assertIn(b"launcher.run_program", joined)
+
 
     def test_connect_failure_propagates_as_run_error(self):
         tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
