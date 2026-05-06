@@ -88,8 +88,17 @@ def _build_parser():
         help="Hub name baked in at flash time (``openbricks-dev flash --name``).",
     )
     p_run.add_argument(
-        "script", metavar="SCRIPT",
-        help="Path to the local Python script to run on the hub.",
+        "script", metavar="SCRIPT", nargs="?",
+        help="Path to the local Python script to run on the hub. "
+             "Mutually exclusive with -c.",
+    )
+    p_run.add_argument(
+        "-c", "--command", metavar="CODE",
+        help="Inline Python code to run on the hub (analogous to "
+             "``python -c CODE``). Useful for quick diagnostics — "
+             "e.g. ``openbricks run -n ls -c 'import openbricks; "
+             "print(openbricks.__version__)'``. Mutually exclusive "
+             "with the SCRIPT positional.",
     )
     p_run.add_argument(
         "--scan-timeout", type=float, default=5.0,
