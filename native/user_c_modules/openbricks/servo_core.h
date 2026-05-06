@@ -43,6 +43,13 @@
 // values; the chassis MJCF declares the range).
 #define OB_SERVO_POWER_CLAMP 100.0
 
+// SAFETY CAP applied at servo_drive_power (covers open-loop run() AND
+// closed-loop tick output). 2026-05-06 hardware bring-up: the user's
+// robot has shown brownouts and runaway behavior at higher powers; we
+// keep this cap in place until the bench is verified safe. Raise /
+// remove afterwards.
+#define OB_SERVO_SAFETY_POWER_CAP 10.0
+
 
 typedef struct {
     // Config (set at construction, never mutated by the tick body).
