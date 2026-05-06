@@ -117,13 +117,15 @@ class TestJGB37Motor(unittest.TestCase):
     def test_scheduler_drives_bridge_at_1khz(self):
         """At the default 1 ms period, one sleep_ms(1) yields one tick of
         control. With target=300, measured=0, feedforward+P saturates at
-        +100% -> full-forward H-bridge."""
+        +100% — capped to +10% by the firmware-1.2.8 hardware bring-up
+        safety cap (servo.c OB_SERVO_SAFETY_POWER_CAP). 10% × 1023 ≈
+        102."""
         m = _make_motor()
         m.run_speed(300)
         time.sleep_ms(1)
         self.assertEqual(m._in1.value(), 1)
         self.assertEqual(m._in2.value(), 0)
-        self.assertEqual(m._pwm.duty(), 1023)
+        self.assertEqual(m._pwm.duty(), 102)
         m.brake()
 
     def test_run_angle_reaches_target_when_encoder_is_fed(self):
