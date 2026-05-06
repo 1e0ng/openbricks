@@ -57,7 +57,24 @@ static inline void servo_write_duty(servo_obj_t *self, int duty) {
 // has already clamped the magnitude; we just translate sign +
 // magnitude into IN1/IN2/duty patterns. The ``invert`` flag from the
 // core swaps direction for motors wired the opposite way.
+//
+// SAFETY CAP (2026-05-06 hardware bring-up): the user's robot is
+// undergoing bench debugging; high-power drive has already shown
+// brownouts and runaway behavior. Cap any commanded power at ±10%
+// regardless of source (open-loop ``motor.run`` OR closed-loop tick
+// output) until the hardware platform is fully verified. Both call
+// sites of this function — ``servo_run`` and ``servo_control_tick``
+// — funnel through here, so this is the single chokepoint.
+//
+// Once the bench is happy, raise / remove this cap. The constant
+// lives in servo_core.h so docs / tests can reference it.
 static void servo_drive_power(servo_obj_t *self, mp_float_t power) {
+    if (power >  (mp_float_t)OB_SERVO_SAFETY_POWER_CAP) {
+        power =  (mp_float_t)OB_SERVO_SAFETY_POWER_CAP;
+    }
+    if (power < -(mp_float_t)OB_SERVO_SAFETY_POWER_CAP) {
+        power = -(mp_float_t)OB_SERVO_SAFETY_POWER_CAP;
+    }
     mp_float_t effective = self->core.invert ? -power : power;
 
     if (effective > 0.0) {

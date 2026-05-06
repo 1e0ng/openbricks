@@ -55,11 +55,15 @@ class TestMG370Motor(unittest.TestCase):
     # --- open-loop behaviour (same story as JGB37 via the shared Servo) ---
 
     def test_run_passes_through_to_h_bridge(self):
+        # Power 8 stays under the 10%-firmware safety cap currently
+        # active during hardware bring-up (servo.c
+        # OB_SERVO_SAFETY_POWER_CAP), so the duty math is the
+        # uncapped form: 8% × 1023 ≈ 81.
         m = _make_motor()
-        m.run(50)
+        m.run(8)
         self.assertEqual(m._in1.value(), 1)
         self.assertEqual(m._in2.value(), 0)
-        self.assertEqual(m._pwm.duty(), 511)
+        self.assertEqual(m._pwm.duty(), 81)
 
     def test_run_reverse(self):
         m = _make_motor()
