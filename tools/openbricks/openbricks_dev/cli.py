@@ -93,7 +93,12 @@ def _build_parser():
              "Mutually exclusive with -c.",
     )
     p_run.add_argument(
-        "-c", "--command", metavar="CODE",
+        "-c", "--code", metavar="CODE",
+        dest="inline_code",
+        # Long form is ``--code`` rather than ``--command`` because the
+        # subparsers reserve ``args.command`` for the subcommand name
+        # ("flash", "run", "list", ...). The short ``-c`` stays for
+        # familiarity with ``python -c``.
         help="Inline Python code to run on the hub (analogous to "
              "``python -c CODE``). Useful for quick diagnostics — "
              "e.g. ``openbricks run -n ls -c 'import openbricks; "

@@ -334,7 +334,7 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
 def run(args):
     """Subcommand entry. ``args`` is an argparse Namespace."""
     debug = getattr(args, "debug", False)
-    command = getattr(args, "command", None)
+    command = getattr(args, "inline_code", None)
     try:
         asyncio.run(_run_async(args.name, args.script, args.scan_timeout,
                                debug=debug, command=command))

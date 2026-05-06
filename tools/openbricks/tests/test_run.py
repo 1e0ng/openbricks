@@ -45,10 +45,10 @@ class _ScriptedLink:
         self.closed = True
 
 
-def _args(name="RobotA", script="s.py", scan_timeout=5.0, command=None):
+def _args(name="RobotA", script="s.py", scan_timeout=5.0, inline_code=None):
     return argparse.Namespace(
         name=name, script=script, scan_timeout=scan_timeout,
-        command=command)
+        inline_code=inline_code)
 
 
 # Hub-side response shorthands (kept in sync with test_upload).
@@ -252,7 +252,7 @@ class InlineCommandTests(unittest.TestCase):
 
         with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
              patch("sys.stdout", new_callable=io.StringIO):
-            rc = run_mod.run(_args(script=None, command="print('hello')"))
+            rc = run_mod.run(_args(script=None, inline_code="print('hello')"))
 
         self.assertEqual(rc, 0)
         joined = b"".join(fake.writes)
