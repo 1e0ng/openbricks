@@ -176,21 +176,25 @@ class PCNTEncoderInt64AccumulatorTests(unittest.TestCase):
     def test_accumulator_survives_past_int32_max(self):
         enc = PCNTEncoder(pin_a=1, pin_b=2)
         # int32 max is 2_147_483_647. We accumulate well past that by
-        # walking the hardware counter in 30k-edge increments (under
-        # the half-range threshold so the wrap heuristic correctly
-        # adds them all up).
+        # walking the hardware counter forward in 30k-edge steps. Each
+        # step is under the half-range threshold so the wrap heuristic
+        # in pcnt_update_count correctly adds them up. The synthetic
+        # hardware counter wraps from +32767 down to -32767+1 to mimic
+        # the real PCNT — note PCNT range is max-min = 65534 (not
+        # 65535) since both endpoints are inclusive.
         target = 5_000_000_000   # > 2x int32 max
         step   = 30_000
-        position = 0
-        while position < target:
-            position += step
-            # Map ``position`` into a synthetic [-32767, 32767] hardware
-            # counter value, walking through wraps. Equivalent to:
-            # how the real PCNT would look if it were running.
-            hw = ((position + 32767) % 65535) - 32767
+        PCNT_RANGE = 65534       # = 32767 - (-32767)
+        hw = 0
+        expected = 0
+        while expected < target:
+            hw += step
+            if hw > 32767:
+                hw -= PCNT_RANGE   # mimic hardware wrap to negative side
+            expected += step
             _set_hw(0, hw)
             enc.count()
-        self.assertGreaterEqual(enc.count(), target)
+        self.assertEqual(enc.count(), expected)
 
     def test_count_returns_full_int64_value_to_python(self):
         # Even on a 32-bit MicroPython port, ``count()`` must return a
