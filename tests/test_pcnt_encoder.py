@@ -122,6 +122,84 @@ class PCNTEncoderResetTests(unittest.TestCase):
         enc.reset(1000)
         self.assertEqual(enc.count(), 1000)
 
+    def test_reset_accepts_int64_value(self):
+        # 1.4.0: ``reset()`` widened to int64 so a value previously
+        # returned by ``count()`` (which can exceed int32 after a long
+        # run) round-trips back through reset() without OverflowError.
+        enc = PCNTEncoder(pin_a=1, pin_b=2)
+        big = 5_000_000_000   # > int32 max (2.15e9)
+        enc.reset(big)
+        self.assertEqual(enc.count(), big)
+
+
+class PCNTEncoderThresholdIRQTests(unittest.TestCase):
+    """1.4.0 fix: configure threshold0/threshold1 at ±16384 and arm
+    an IRQ that drains the hardware counter back to 0 each crossing.
+    Without this, the heuristic wrap detection in ``pcnt_update_count``
+    needed ``count()`` to be polled faster than RANGE/(2 × edge_rate),
+    which broke for open-loop ``run()`` + ``time.sleep`` patterns at
+    high-PPR encoders."""
+
+    def setUp(self):
+        _FakePCNT._reset_for_test()
+
+    def test_thresholds_configured_at_quarter_range(self):
+        PCNTEncoder(pin_a=1, pin_b=2)
+        ch = _ch0()
+        self.assertEqual(ch.threshold0, -16384)
+        self.assertEqual(ch.threshold1, +16384)
+
+    def test_irq_is_armed_with_threshold_triggers(self):
+        PCNTEncoder(pin_a=1, pin_b=2)
+        ch = _ch0()
+        self.assertIsNotNone(ch.irq_handler,
+                             "PCNTEncoder must register an IRQ handler "
+                             "so the hardware counter is drained at the "
+                             "thresholds and never approaches the ±32767 "
+                             "wrap limits")
+        # Trigger mask must include both thresholds (PCNT.IRQ_THRESHOLD0
+        # | PCNT.IRQ_THRESHOLD1 = 2 | 4 = 6 in the fake).
+        self.assertEqual(ch.irq_trigger,
+                         _FakePCNT.IRQ_THRESHOLD0 | _FakePCNT.IRQ_THRESHOLD1)
+
+
+class PCNTEncoderInt64AccumulatorTests(unittest.TestCase):
+    """1.4.0 fix: ``accum`` widened from int32 to int64 so high-PPR
+    encoders running at full speed don't overflow the accumulator
+    after ~6 hours. Verified by feeding the fake hardware counter
+    multiple wraps' worth of edges and reading back the accumulated
+    total — must be far past int32 max."""
+
+    def setUp(self):
+        _FakePCNT._reset_for_test()
+
+    def test_accumulator_survives_past_int32_max(self):
+        enc = PCNTEncoder(pin_a=1, pin_b=2)
+        # int32 max is 2_147_483_647. We accumulate well past that by
+        # walking the hardware counter in 30k-edge increments (under
+        # the half-range threshold so the wrap heuristic correctly
+        # adds them all up).
+        target = 5_000_000_000   # > 2x int32 max
+        step   = 30_000
+        position = 0
+        while position < target:
+            position += step
+            # Map ``position`` into a synthetic [-32767, 32767] hardware
+            # counter value, walking through wraps. Equivalent to:
+            # how the real PCNT would look if it were running.
+            hw = ((position + 32767) % 65535) - 32767
+            _set_hw(0, hw)
+            enc.count()
+        self.assertGreaterEqual(enc.count(), target)
+
+    def test_count_returns_full_int64_value_to_python(self):
+        # Even on a 32-bit MicroPython port, ``count()`` must return a
+        # Python int that holds the full 64-bit accumulator without
+        # truncation.
+        enc = PCNTEncoder(pin_a=1, pin_b=2)
+        enc.reset(9_223_372_036_854_775_000)   # near int64 max
+        self.assertEqual(enc.count(), 9_223_372_036_854_775_000)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,7 @@
 
 #include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "py/runtime.h"
 #include "py/mphal.h"
@@ -83,10 +84,10 @@ static void drivebase_register(drivebase_obj_t *self) {
     // PCNTEncoder / any future encoder type.
     servo_obj_t *left_servo  = MP_OBJ_TO_PTR(self->left_obj);
     servo_obj_t *right_servo = MP_OBJ_TO_PTR(self->right_obj);
-    mp_int_t lc = mp_obj_get_int(mp_call_function_0(left_servo->encoder_count));
-    mp_int_t rc = mp_obj_get_int(mp_call_function_0(right_servo->encoder_count));
-    ob_float_t lp = ob_servo_count_to_angle_deg(self->core.left,  (long)lc);
-    ob_float_t rp = ob_servo_count_to_angle_deg(self->core.right, (long)rc);
+    int64_t lc = (int64_t)mp_obj_get_ll(mp_call_function_0(left_servo->encoder_count));
+    int64_t rc = (int64_t)mp_obj_get_ll(mp_call_function_0(right_servo->encoder_count));
+    ob_float_t lp = ob_servo_count_to_angle_deg(self->core.left,  lc);
+    ob_float_t rp = ob_servo_count_to_angle_deg(self->core.right, rc);
     ob_observer_reset(&self->core.left->observer,  lp);
     ob_observer_reset(&self->core.right->observer, rp);
     long now = (long)openbricks_motor_process_now_ms();

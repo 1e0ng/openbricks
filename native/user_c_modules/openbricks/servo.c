@@ -22,6 +22,7 @@
 // for zero-overhead reads in the 1 kHz tick.
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "py/runtime.h"
 #include "py/mphal.h"
@@ -37,8 +38,14 @@ extern const mp_obj_type_t openbricks_servo_type;
 // -----------------------------------------------------------------------
 // Hardware primitives — called from the C tick body.
 
-static inline mp_int_t servo_read_count(servo_obj_t *self) {
-    return mp_obj_get_int(mp_call_function_0(self->encoder_count));
+static inline int64_t servo_read_count(servo_obj_t *self) {
+    // ``mp_obj_get_ll`` accepts both small Python ints and big-int /
+    // mpz objects without raising — the encoder's accumulator is
+    // 64-bit, and after ~6 hours of full-speed running it'll exceed
+    // mp_int_t (= int32) on 32-bit MicroPython ports. Using
+    // ``mp_obj_get_int`` here would crash the closed-loop tick at
+    // the int32 boundary.
+    return (int64_t)mp_obj_get_ll(mp_call_function_0(self->encoder_count));
 }
 
 static inline void servo_write_in1(servo_obj_t *self, int value) {
@@ -116,7 +123,7 @@ static void servo_coast_bridge(servo_obj_t *self) {
 
 static void servo_control_tick(void *ctx) {
     servo_obj_t *self = (servo_obj_t *)ctx;
-    long count = (long)servo_read_count(self);
+    int64_t count = servo_read_count(self);
     long now   = (long)openbricks_motor_process_now_ms();
     mp_float_t power = (mp_float_t)ob_servo_tick(&self->core, count, now);
     servo_drive_power(self, power);
@@ -129,7 +136,7 @@ static void servo_attach(servo_obj_t *self) {
     if (self->core.active) {
         return;
     }
-    long count = (long)servo_read_count(self);
+    int64_t count = servo_read_count(self);
     long now   = (long)openbricks_motor_process_now_ms();
     ob_servo_baseline(&self->core, count, now);
     openbricks_motor_process_register_c(servo_control_tick, self);
@@ -165,7 +172,7 @@ static mp_obj_t servo_run_target(size_t n_args, const mp_obj_t *args) {
     mp_float_t cruise_dps = mp_obj_get_float(args[2]);
     mp_float_t accel      = (n_args > 3) ? mp_obj_get_float(args[3]) : DEFAULT_ACCEL;
 
-    long count = (long)servo_read_count(self);
+    int64_t count = servo_read_count(self);
     long now   = (long)openbricks_motor_process_now_ms();
     ob_servo_run_target(&self->core, count, now,
                         (ob_float_t)delta_deg,
@@ -223,7 +230,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(servo_coast_obj, servo_coast);
 
 static mp_obj_t servo_angle(mp_obj_t self_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    long count = (long)servo_read_count(self);
+    int64_t count = servo_read_count(self);
     return mp_obj_new_float((mp_float_t)ob_servo_count_to_angle_deg(&self->core, count));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_angle_obj, servo_angle);

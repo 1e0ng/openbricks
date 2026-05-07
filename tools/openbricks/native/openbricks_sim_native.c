@@ -325,11 +325,12 @@ static int Servo_init(ServoObject *self, PyObject *args, PyObject *kwargs) {
 
 
 static PyObject *Servo_tick(ServoObject *self, PyObject *args) {
-    long count, now_ms;
-    if (!PyArg_ParseTuple(args, "ll", &count, &now_ms)) {
+    long long count;
+    long      now_ms;
+    if (!PyArg_ParseTuple(args, "Ll", &count, &now_ms)) {
         return NULL;
     }
-    double power = (double)ob_servo_tick(&self->core, count, now_ms);
+    double power = (double)ob_servo_tick(&self->core, (int64_t)count, now_ms);
     return PyFloat_FromDouble(power);
 }
 
@@ -345,14 +346,15 @@ static PyObject *Servo_set_speed(ServoObject *self, PyObject *arg) {
 
 
 static PyObject *Servo_run_target(ServoObject *self, PyObject *args) {
-    long   count, now_ms;
-    double delta_deg, cruise_dps, accel;
-    if (!PyArg_ParseTuple(args, "llddd",
+    long long count;
+    long      now_ms;
+    double    delta_deg, cruise_dps, accel;
+    if (!PyArg_ParseTuple(args, "Llddd",
                           &count, &now_ms,
                           &delta_deg, &cruise_dps, &accel)) {
         return NULL;
     }
-    ob_servo_run_target(&self->core, count, now_ms,
+    ob_servo_run_target(&self->core, (int64_t)count, now_ms,
                         (ob_float_t)delta_deg,
                         (ob_float_t)cruise_dps,
                         (ob_float_t)accel);
@@ -361,11 +363,12 @@ static PyObject *Servo_run_target(ServoObject *self, PyObject *args) {
 
 
 static PyObject *Servo_baseline(ServoObject *self, PyObject *args) {
-    long count, now_ms;
-    if (!PyArg_ParseTuple(args, "ll", &count, &now_ms)) {
+    long long count;
+    long      now_ms;
+    if (!PyArg_ParseTuple(args, "Ll", &count, &now_ms)) {
         return NULL;
     }
-    ob_servo_baseline(&self->core, count, now_ms);
+    ob_servo_baseline(&self->core, (int64_t)count, now_ms);
     Py_RETURN_NONE;
 }
 
@@ -394,11 +397,11 @@ static PyObject *Servo_observed_pos(ServoObject *self, PyObject *Py_UNUSED(ignor
 
 
 static PyObject *Servo_count_to_angle(ServoObject *self, PyObject *arg) {
-    long count = PyLong_AsLong(arg);
+    long long count = PyLong_AsLongLong(arg);
     if (count == -1 && PyErr_Occurred()) {
         return NULL;
     }
-    return PyFloat_FromDouble((double)ob_servo_count_to_angle_deg(&self->core, count));
+    return PyFloat_FromDouble((double)ob_servo_count_to_angle_deg(&self->core, (int64_t)count));
 }
 
 

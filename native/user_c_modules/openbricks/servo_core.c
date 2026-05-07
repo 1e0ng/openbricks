@@ -51,7 +51,7 @@ void ob_servo_init(ob_servo_t *s,
 }
 
 
-ob_float_t ob_servo_count_to_angle_deg(const ob_servo_t *s, long count) {
+ob_float_t ob_servo_count_to_angle_deg(const ob_servo_t *s, int64_t count) {
     if (s->counts_per_rev <= 0) {
         return 0.0;
     }
@@ -59,7 +59,7 @@ ob_float_t ob_servo_count_to_angle_deg(const ob_servo_t *s, long count) {
 }
 
 
-void ob_servo_baseline(ob_servo_t *s, long count, long now_ms) {
+void ob_servo_baseline(ob_servo_t *s, int64_t count, long now_ms) {
     ob_float_t pos = ob_servo_count_to_angle_deg(s, count);
     ob_observer_reset(&s->observer, pos);
     s->last_time_ms = now_ms;
@@ -73,7 +73,7 @@ void ob_servo_set_speed(ob_servo_t *s, ob_float_t dps) {
 }
 
 
-void ob_servo_run_target(ob_servo_t *s, long count, long now_ms,
+void ob_servo_run_target(ob_servo_t *s, int64_t count, long now_ms,
                          ob_float_t delta_deg,
                          ob_float_t cruise_dps,
                          ob_float_t accel) {
@@ -88,7 +88,7 @@ void ob_servo_run_target(ob_servo_t *s, long count, long now_ms,
 }
 
 
-ob_float_t ob_servo_tick(ob_servo_t *s, long count, long now_ms) {
+ob_float_t ob_servo_tick(ob_servo_t *s, int64_t count, long now_ms) {
     // 1. If a trajectory is active, sample it for the velocity
     //    setpoint.
     if (s->traj_active) {
