@@ -31,6 +31,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "trajectory_core.h"
 #include "observer_core.h"
@@ -103,7 +104,12 @@ void ob_servo_init(ob_servo_t *s,
 // Re-baseline the observer to the angle implied by ``count`` and
 // the time baseline to ``now_ms``. Called whenever the servo first
 // attaches to the scheduler, or after a ``reset_angle``.
-void ob_servo_baseline(ob_servo_t *s, long count, long now_ms);
+//
+// ``count`` is int64_t so a long-running encoder accumulator
+// (which can exceed int32 after ~6 hours of full-speed running on
+// a high-PPR encoder like the MG370 GMR) doesn't truncate as it
+// flows through the control path.
+void ob_servo_baseline(ob_servo_t *s, int64_t count, long now_ms);
 
 
 // Set a constant velocity target. Cancels any active trajectory.
@@ -113,7 +119,7 @@ void ob_servo_set_speed(ob_servo_t *s, ob_float_t dps);
 // Kick off a trapezoidal trajectory: ``delta_deg`` away from the
 // current shaft angle (computed from ``count``). The trajectory
 // timeline starts at ``now_ms``.
-void ob_servo_run_target(ob_servo_t *s, long count, long now_ms,
+void ob_servo_run_target(ob_servo_t *s, int64_t count, long now_ms,
                          ob_float_t delta_deg,
                          ob_float_t cruise_dps,
                          ob_float_t accel);
@@ -123,11 +129,11 @@ void ob_servo_run_target(ob_servo_t *s, long count, long now_ms,
 // [-OB_SERVO_POWER_CLAMP, +OB_SERVO_POWER_CLAMP]. Mutates the
 // observer + trajectory state but doesn't touch any hardware —
 // the binding is responsible for writing ``out`` to its bridge.
-ob_float_t ob_servo_tick(ob_servo_t *s, long count, long now_ms);
+ob_float_t ob_servo_tick(ob_servo_t *s, int64_t count, long now_ms);
 
 
 // Convert a raw encoder count to a shaft angle in degrees.
-ob_float_t ob_servo_count_to_angle_deg(const ob_servo_t *s, long count);
+ob_float_t ob_servo_count_to_angle_deg(const ob_servo_t *s, int64_t count);
 
 
 // "Done" flag for the embedded trajectory. ``run_speed`` resets it

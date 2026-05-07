@@ -44,7 +44,8 @@ class _FakePCNT:
 
     def __init__(self, unit, channel=0, pin=None, rising=None, falling=None,
                  mode_pin=None, mode_low=None, mode_high=None,
-                 min=None, max=None, filter=None, **kwargs):
+                 min=None, max=None, threshold0=None, threshold1=None,
+                 filter=None, **kwargs):
         self.unit = unit
         self.channel = channel
         self.pin = pin
@@ -55,7 +56,13 @@ class _FakePCNT:
         self.mode_high = mode_high
         self.min = min
         self.max = max
+        self.threshold0 = threshold0
+        self.threshold1 = threshold1
         self.filter = filter
+        # Track IRQ registration so tests can assert ``PCNTEncoder``
+        # armed the threshold-IRQ handler. Filled by ``irq(...)``.
+        self.irq_handler = None
+        self.irq_trigger = None
         _FakePCNT._UNITS.setdefault(unit, {"value": 0, "started": False})
         _FakePCNT._INSTANCES.append(self)
 
@@ -72,6 +79,8 @@ class _FakePCNT:
         _FakePCNT._UNITS[self.unit]["started"] = False
 
     def irq(self, trigger=None, handler=None):
+        self.irq_handler = handler
+        self.irq_trigger = trigger
         return None
 
     def deinit(self):
