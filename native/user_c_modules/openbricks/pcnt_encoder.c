@@ -139,8 +139,33 @@ static void pcnt_reset_count(pcnt_encoder_obj_t *self, int64_t value) {
 // hardware counter back to 0. ``mp_irq`` runs this in scheduled
 // context (not a hard ISR), so calling back into Python — which
 // pcnt.value() does internally — is safe.
+//
+// CRITICAL: clear ``irq.flags()`` BEFORE calling ``pcnt.value()`` to
+// drain the counter. Looking at upstream ``esp32_pcnt_value()``:
+//
+//   while (true) {
+//       pcnt_get_counter_value(...);
+//       if (self->irq && self->irq->flags && handler != none) {
+//           // The handler must call irq.flags() to clear flags,
+//           // otherwise this will be an infinite loop.
+//           mp_call_function_1(handler, parent);
+//           continue;
+//       }
+//       break;
+//   }
+//
+// — so each ``pcnt.value()`` call synchronously re-invokes our
+// handler until flags are cleared. Without the clear, the first
+// ``pcnt_read_raw`` inside our handler causes infinite recursion
+// (handler → value() → handler → value() → ...). Clearing flags
+// up front is the documented contract for PCNT IRQ handlers.
 static mp_obj_t _pcnt_encoder_irq_dispatch(mp_obj_t irq_in) {
     mp_irq_obj_t *irq = MP_OBJ_TO_PTR(irq_in);
+    if (irq->methods != NULL && irq->methods->info != NULL) {
+        // Atomically read-and-clear ``self->irq->flags`` so the
+        // synchronous-flush loop in pcnt.value() exits.
+        (void)irq->methods->info(irq_in, MP_IRQ_INFO_FLAGS);
+    }
     mp_obj_t parent_pcnt = irq->parent;
     for (int i = 0; i < MAX_PCNT_UNITS; i++) {
         pcnt_encoder_obj_t *enc = _encoders_by_unit[i];

@@ -101,7 +101,8 @@ jobs:
             tests.test_st3215 \
             tests.test_ssd1306 \
             tests.test_tb6612 \
-            tests.test_motor_process_timer_id
+            tests.test_motor_process_timer_id \
+            tests.test_pcnt_encoder_irq_contract
 
   openbricks-py:
     # Python-layer coverage of the firmware package (``openbricks/``).
