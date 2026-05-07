@@ -50,22 +50,35 @@
 #include "shared/runtime/mpirq.h"
 
 
-// PCNT hardware counter is 16-bit signed (±32767 usable). We keep the
-// hard limits at ±32767 but install threshold IRQs at ±16384 — the IRQ
-// drains the counter back to 0 long before it could approach the full
-// limits, so the legacy wrap heuristic in pcnt_update_count is now
-// just belt-and-suspenders.
-#define PCNT_MIN              (-32767)
-#define PCNT_MAX              (+32767)
-#define PCNT_THRESHOLD_LOW    (-16384)
-#define PCNT_THRESHOLD_HIGH   (+16384)
-#define PCNT_RANGE            (PCNT_MAX - PCNT_MIN)   // = 65534
+// PCNT hardware counter is 16-bit signed (±32767). We use the min/max
+// auto-reset feature: when the hardware counter hits ±PCNT_LIMIT, the
+// peripheral itself resets it to 0 AND fires an IRQ. The IRQ handler
+// adds the known limit value (±PCNT_LIMIT) to ``accum`` and returns —
+// crucially WITHOUT reading the counter via pcnt.value(), because
+// upstream's value() runs a synchronous-flush loop that dispatches
+// us, which would re-enter value() if any other event arrived during
+// the handler — infinite recursion.
+//
+// PCNT_LIMIT well below ±32767 leaves headroom for stray edges between
+// the hardware reset and our handler running.
+#define PCNT_LIMIT  (16384)
+#define PCNT_MIN    (-PCNT_LIMIT)
+#define PCNT_MAX    (+PCNT_LIMIT)
+#define PCNT_RANGE  (PCNT_MAX - PCNT_MIN)   // = 32768 (full counter span between auto-resets)
 
 // Generous upper bound — ESP32 classic has 8, S2/S3 have 4. Encoders
 // register themselves here so the single-handler IRQ dispatcher can
 // look up which encoder a given IRQ belongs to via the parent PCNT
 // pointer comparison below.
 #define MAX_PCNT_UNITS 8
+
+// PCNT event-status bit masks, read from ``esp32.PCNT.IRQ_MIN`` /
+// ``IRQ_MAX`` at first construction (so we don't have to depend on
+// ESP-IDF headers from this user_c_module). Used by the IRQ
+// dispatcher to tell which limit was hit from the flags returned by
+// ``info(MP_IRQ_INFO_FLAGS)``.
+static mp_int_t _pcnt_evt_l_lim = -1;
+static mp_int_t _pcnt_evt_h_lim = -1;
 
 extern const mp_obj_type_t openbricks_pcnt_encoder_type;
 
@@ -97,15 +110,13 @@ static void pcnt_write_raw_zero(pcnt_encoder_obj_t *self) {
     mp_call_function_1(self->value_fn, MP_OBJ_NEW_SMALL_INT(0));
 }
 
-// Drain whatever's currently in the hardware counter into accum, then
-// reset the counter to 0. Called from the threshold IRQ; also called
-// from count() to fold in any sub-threshold edges since the last IRQ.
-static void pcnt_drain_to_accum(pcnt_encoder_obj_t *self) {
-    mp_int_t raw = pcnt_read_raw(self);
-    self->accum += (int64_t)raw;
-    pcnt_write_raw_zero(self);
-    self->last_raw = 0;
-}
+// (Earlier versions had a ``pcnt_drain_to_accum`` helper that read the
+// counter and reset it to 0 in the IRQ handler. That recursed through
+// ``pcnt.value()``'s flush loop and locked up the chip on the first
+// threshold crossing. The 1.4.2 redesign moves all counter access out
+// of the IRQ handler — the handler just adds the known limit value to
+// the accumulator. The hardware itself resets the counter via min/max
+// auto-reset.)
 
 // Fold any hardware delta since the last read into ``accum``. With the
 // threshold IRQ in place, the raw value is bounded to roughly
@@ -135,42 +146,61 @@ static void pcnt_reset_count(pcnt_encoder_obj_t *self, int64_t value) {
 // --- IRQ dispatcher ---------------------------------------------------
 
 // Single C handler registered with each PCNT unit's ``irq()`` slot.
-// Finds the encoder via parent-PCNT pointer match, drains the
-// hardware counter back to 0. ``mp_irq`` runs this in scheduled
-// context (not a hard ISR), so calling back into Python — which
-// pcnt.value() does internally — is safe.
+// Runs in mp_irq scheduled context — not a hard ISR — so we *can*
+// call back into Python; we just must not, because of the
+// reentrancy trap below.
 //
-// CRITICAL: clear ``irq.flags()`` BEFORE calling ``pcnt.value()`` to
-// drain the counter. Looking at upstream ``esp32_pcnt_value()``:
+// REENTRANCY TRAP: ``esp32_pcnt_value()`` runs a while-true flush
+// loop that dispatches the IRQ handler whenever ``self->irq->flags``
+// is non-zero. Hardware can set those flags asynchronously at any
+// time (a real edge crossing the limit). So if our handler reads or
+// writes the counter via pcnt.value(), the flush loop in that
+// recursive value() call will dispatch us again as soon as the
+// hardware fires another IRQ — even if we cleared the previous
+// flags. With a fast-spinning encoder, this locks the chip in an
+// unbounded handler→value()→handler chain (1.4.0 / 1.4.1 hung the
+// chip on the first threshold crossing during a hand-spin).
 //
-//   while (true) {
-//       pcnt_get_counter_value(...);
-//       if (self->irq && self->irq->flags && handler != none) {
-//           // The handler must call irq.flags() to clear flags,
-//           // otherwise this will be an infinite loop.
-//           mp_call_function_1(handler, parent);
-//           continue;
-//       }
-//       break;
-//   }
+// The 1.4.2 design avoids the trap entirely:
 //
-// — so each ``pcnt.value()`` call synchronously re-invokes our
-// handler until flags are cleared. Without the clear, the first
-// ``pcnt_read_raw`` inside our handler causes infinite recursion
-// (handler → value() → handler → value() → ...). Clearing flags
-// up front is the documented contract for PCNT IRQ handlers.
+//   * Configure PCNT with min = -PCNT_LIMIT and max = +PCNT_LIMIT.
+//     The hardware peripheral itself resets the counter to 0 when
+//     it hits either limit — no software write needed.
+//   * Subscribe to IRQ_MIN | IRQ_MAX. When the IRQ fires, the
+//     ``info(MP_IRQ_INFO_FLAGS)`` call returns which limit fired
+//     (and atomically clears flags so the flush loop exits).
+//   * Add the known limit value (±PCNT_LIMIT) to ``accum``. Done.
+//
+// No counter read, no counter write inside the handler. Reentrancy
+// can't happen because there's no nested pcnt.value() call.
 static mp_obj_t _pcnt_encoder_irq_dispatch(mp_obj_t irq_in) {
     mp_irq_obj_t *irq = MP_OBJ_TO_PTR(irq_in);
+
+    // Read AND clear the flags atomically. The returned bitmask tells
+    // us which limit was hit (IRQ_MIN -> low limit, IRQ_MAX -> high).
+    mp_uint_t flags = 0;
     if (irq->methods != NULL && irq->methods->info != NULL) {
-        // Atomically read-and-clear ``self->irq->flags`` so the
-        // synchronous-flush loop in pcnt.value() exits.
-        (void)irq->methods->info(irq_in, MP_IRQ_INFO_FLAGS);
+        flags = irq->methods->info(irq_in, MP_IRQ_INFO_FLAGS);
     }
+
     mp_obj_t parent_pcnt = irq->parent;
     for (int i = 0; i < MAX_PCNT_UNITS; i++) {
         pcnt_encoder_obj_t *enc = _encoders_by_unit[i];
         if (enc != NULL && enc->pcnt == parent_pcnt) {
-            pcnt_drain_to_accum(enc);
+            // Hardware auto-reset already returned the counter to 0
+            // when it crossed the limit. We just account for the
+            // limit-many edges that got "consumed" by the reset.
+            if (_pcnt_evt_h_lim != -1 && (flags & (mp_uint_t)_pcnt_evt_h_lim)) {
+                enc->accum += (int64_t)PCNT_LIMIT;
+            }
+            if (_pcnt_evt_l_lim != -1 && (flags & (mp_uint_t)_pcnt_evt_l_lim)) {
+                enc->accum -= (int64_t)PCNT_LIMIT;
+            }
+            // Counter is at (or near) 0 now; reset the wrap-detection
+            // baseline so the next pcnt_update_count call computes a
+            // small delta from 0 rather than a full-range delta from
+            // the pre-reset value.
+            enc->last_raw = 0;
             return mp_const_none;
         }
     }
@@ -232,8 +262,11 @@ static mp_obj_t pcnt_encoder_make_new(const mp_obj_type_t *type,
     mp_obj_t REVERSE   = mp_load_attr(PCNT_cls, MP_QSTR_REVERSE);
 
     // Channel 0 kwargs: channel, pin, rising, falling, mode_pin,
-    // mode_low, mode_high, min, max, threshold0, threshold1, filter
-    // — 12 kwargs.
+    // mode_low, mode_high, min, max, filter — 10 kwargs. We deliberately
+    // DON'T set threshold0/threshold1; the IRQ uses min/max instead so
+    // the hardware can auto-reset the counter without our software
+    // having to call pcnt.value() (which would recurse through the
+    // synchronous-flush loop).
     mp_obj_t ch0_args[] = {
         MP_OBJ_NEW_SMALL_INT(unit),                                          // positional: unit
         MP_OBJ_NEW_QSTR(MP_QSTR_channel),    MP_OBJ_NEW_SMALL_INT(0),
@@ -245,11 +278,9 @@ static mp_obj_t pcnt_encoder_make_new(const mp_obj_type_t *type,
         MP_OBJ_NEW_QSTR(MP_QSTR_mode_high),  REVERSE,
         MP_OBJ_NEW_QSTR(MP_QSTR_min),        MP_OBJ_NEW_SMALL_INT(PCNT_MIN),
         MP_OBJ_NEW_QSTR(MP_QSTR_max),        MP_OBJ_NEW_SMALL_INT(PCNT_MAX),
-        MP_OBJ_NEW_QSTR(MP_QSTR_threshold0), MP_OBJ_NEW_SMALL_INT(PCNT_THRESHOLD_LOW),
-        MP_OBJ_NEW_QSTR(MP_QSTR_threshold1), MP_OBJ_NEW_SMALL_INT(PCNT_THRESHOLD_HIGH),
         MP_OBJ_NEW_QSTR(MP_QSTR_filter),     MP_OBJ_NEW_SMALL_INT(filter),
     };
-    mp_obj_t pcnt_ch0 = mp_call_function_n_kw(PCNT_cls, 1, 12, ch0_args);
+    mp_obj_t pcnt_ch0 = mp_call_function_n_kw(PCNT_cls, 1, 10, ch0_args);
 
     // Channel 1 — direction-flipped modes so both contribute to one running total.
     mp_obj_t ch1_args[] = {
@@ -278,15 +309,20 @@ static mp_obj_t pcnt_encoder_make_new(const mp_obj_type_t *type,
     // a window where an early IRQ could fire and not find the encoder.
     _encoders_by_unit[unit] = self;
 
-    // Arm the threshold IRQ. PCNT.IRQ_THRESHOLD0 | PCNT.IRQ_THRESHOLD1.
-    // mpremote / unix MP fakes don't expose the IRQ_THRESHOLD constants
-    // — wrap in nlr to keep the constructor working in tests where
-    // the fake just no-ops irq().
+    // Arm the limit IRQ. PCNT.IRQ_MIN | PCNT.IRQ_MAX. Cache the
+    // event-status bit values into static globals so the IRQ
+    // dispatcher can decode which limit fired without re-importing
+    // the esp32 module from the handler.
+    //
+    // Wrapped in nlr to keep the constructor working in tests where
+    // the fake esp32 module no-ops these attrs.
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        mp_obj_t T0 = mp_load_attr(PCNT_cls, MP_QSTR_IRQ_THRESHOLD0);
-        mp_obj_t T1 = mp_load_attr(PCNT_cls, MP_QSTR_IRQ_THRESHOLD1);
-        mp_int_t trigger = mp_obj_get_int(T0) | mp_obj_get_int(T1);
+        mp_obj_t MIN_obj = mp_load_attr(PCNT_cls, MP_QSTR_IRQ_MIN);
+        mp_obj_t MAX_obj = mp_load_attr(PCNT_cls, MP_QSTR_IRQ_MAX);
+        _pcnt_evt_l_lim = mp_obj_get_int(MIN_obj);
+        _pcnt_evt_h_lim = mp_obj_get_int(MAX_obj);
+        mp_int_t trigger = _pcnt_evt_l_lim | _pcnt_evt_h_lim;
         mp_obj_t irq_fn  = mp_load_attr(pcnt_ch0, MP_QSTR_irq);
         mp_obj_t irq_args[] = {
             irq_fn,

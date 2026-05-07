@@ -1,37 +1,30 @@
 # SPDX-License-Identifier: MIT
 """
-Regression guard for the firmware 1.4.0 IRQ-handler-must-clear-flags
-contract.
+Regression guards for the PCNTEncoder IRQ-handler reentrancy traps.
 
-Looking at upstream ``ports/esp32/esp32_pcnt.c::esp32_pcnt_value()``:
+History:
 
-    while (true) {
-        pcnt_get_counter_value(...);
-        if (self->irq && self->irq->flags && handler != none) {
-            // The handler must call irq.flags() to clear
-            // self->irq->base.flags, otherwise this will be an
-            // infinite loop.
-            mp_call_function_1(handler, ...);
-            continue;
-        }
-        break;
-    }
+* 1.4.0 added a threshold IRQ that called ``pcnt.value()`` to drain
+  the counter. ``pcnt.value()`` runs a synchronous-flush loop that
+  re-invokes the handler whenever ``irq.flags`` is set — so even
+  with flags cleared up front, a hardware IRQ arriving during the
+  handler's drain step reentered us. Hung the chip on the first
+  threshold crossing.
 
-— ``pcnt.value()`` synchronously re-invokes the IRQ handler until
-the flags are cleared. Our handler calls ``pcnt.value()`` to drain
-the counter, so without an up-front flag-clear the first
-``pcnt_read_raw`` inside the handler recurses infinitely (handler
-→ value() → handler → value() → ...) and locks up the chip.
+* 1.4.1 cleared ``irq.flags()`` at the top of the handler. Still
+  hung — clear-then-drain doesn't help if hardware fires during
+  the drain.
 
-Hardware confirmed: a few wheel rotations in
-``prob_pcnt_by_hand.py`` were enough to trip the threshold IRQ; the
-chip went silent (BLE alive but no further script output) until the
-30-second openbricks-run read timeout. Fix is to call
-``irq.methods->info(irq, MP_IRQ_INFO_FLAGS)`` before draining.
+* 1.4.2 redesigned: configure min/max for hardware auto-reset,
+  add the known limit value (±PCNT_LIMIT) to ``accum`` from the
+  handler. The handler no longer touches ``pcnt.value()`` at all,
+  so reentrancy can't happen.
 
-This file is a static guard on the C source — if anyone refactors
-the handler and forgets the flag-clear, the test fails before the
-firmware reaches hardware.
+These tests guard the 1.4.2 contract: the handler must NOT call
+the helper that touches pcnt.value() (``pcnt_drain_to_accum``,
+which we removed), AND must still atomically clear flags via
+``info(MP_IRQ_INFO_FLAGS)`` so the flush loop in the OUTER
+``pcnt.value()`` (which is what dispatched us) breaks out.
 """
 
 import os
@@ -70,26 +63,49 @@ class IRQDispatcherContractTests(unittest.TestCase):
             "re-invokes the handler until flags are cleared)."
         )
 
-    def test_flags_clear_happens_before_pcnt_drain(self):
-        """The clear has to happen BEFORE ``pcnt_drain_to_accum`` is
-        called, because the drain itself goes through ``pcnt.value()``
-        — which is what triggers the flush loop. A late clear would
-        still recurse on the first drain."""
+    def test_dispatcher_does_not_call_pcnt_value(self):
+        """The 1.4.2 redesign: the handler must NOT call back into
+        ``pcnt.value()`` (which is what re-dispatches us via the
+        upstream synchronous-flush loop). Verify by checking the
+        dispatcher body contains no reference to ``pcnt_read_raw``,
+        ``pcnt_write_raw_zero``, or ``pcnt_drain_to_accum`` — the
+        helpers from 1.4.0/1.4.1 that all funneled through
+        pcnt.value()."""
+        m = re.search(
+            r"_pcnt_encoder_irq_dispatch\([^)]*\)\s*\{(?P<body>.*?)\n\}",
+            self.src, re.DOTALL,
+        )
+        self.assertIsNotNone(m)
+        body = m.group("body")
+        for forbidden in ("pcnt_read_raw", "pcnt_write_raw_zero",
+                          "pcnt_drain_to_accum"):
+            self.assertNotIn(
+                forbidden, body,
+                "dispatcher must not call ``%s`` — that helper goes "
+                "through pcnt.value(), which the upstream PCNT runs in "
+                "a synchronous-flush loop that re-invokes our handler. "
+                "Hardware-confirmed reentrancy hang in 1.4.0/1.4.1."
+                % forbidden
+            )
+
+    def test_dispatcher_uses_min_max_event_decoding(self):
+        """The 1.4.2 dispatcher accounts for hardware auto-reset by
+        adding the known limit value to ``accum`` based on which
+        IRQ_MIN / IRQ_MAX event fired. Verify the source references
+        the event-decoding statics."""
         m = re.search(
             r"_pcnt_encoder_irq_dispatch\([^)]*\)\s*\{(?P<body>.*?)\n\}",
             self.src, re.DOTALL,
         )
         body = m.group("body")
-        flags_idx = body.find("MP_IRQ_INFO_FLAGS")
-        drain_idx = body.find("pcnt_drain_to_accum")
-        self.assertGreater(flags_idx, -1)
-        self.assertGreater(drain_idx, -1)
-        self.assertLess(
-            flags_idx, drain_idx,
-            "flags must be cleared (info(..., MP_IRQ_INFO_FLAGS)) BEFORE "
-            "pcnt_drain_to_accum runs; otherwise the drain's pcnt.value() "
-            "call sees flags still set and recurses into us."
-        )
+        self.assertIn("_pcnt_evt_h_lim", body,
+                      "dispatcher must check the IRQ_MAX flag bit so "
+                      "it can add +PCNT_LIMIT to accum on high-limit "
+                      "auto-reset")
+        self.assertIn("_pcnt_evt_l_lim", body,
+                      "dispatcher must check the IRQ_MIN flag bit so "
+                      "it can subtract PCNT_LIMIT from accum on "
+                      "low-limit auto-reset")
 
 
 if __name__ == "__main__":

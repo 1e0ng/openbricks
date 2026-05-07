@@ -132,35 +132,47 @@ class PCNTEncoderResetTests(unittest.TestCase):
         self.assertEqual(enc.count(), big)
 
 
-class PCNTEncoderThresholdIRQTests(unittest.TestCase):
-    """1.4.0 fix: configure threshold0/threshold1 at ±16384 and arm
-    an IRQ that drains the hardware counter back to 0 each crossing.
-    Without this, the heuristic wrap detection in ``pcnt_update_count``
-    needed ``count()`` to be polled faster than RANGE/(2 × edge_rate),
-    which broke for open-loop ``run()`` + ``time.sleep`` patterns at
-    high-PPR encoders."""
+class PCNTEncoderLimitIRQTests(unittest.TestCase):
+    """1.4.2 redesign: configure min/max at ±16384 (not threshold0/1)
+    so the hardware peripheral itself auto-resets the counter to 0 on
+    each crossing AND fires an IRQ. The handler then accounts for the
+    known limit value in ``accum`` WITHOUT calling ``pcnt.value()`` —
+    avoiding the synchronous-flush-loop reentrancy that hung the chip
+    in 1.4.0 and 1.4.1."""
 
     def setUp(self):
         _FakePCNT._reset_for_test()
 
-    def test_thresholds_configured_at_quarter_range(self):
+    def test_min_max_configured_at_limit(self):
         PCNTEncoder(pin_a=1, pin_b=2)
         ch = _ch0()
-        self.assertEqual(ch.threshold0, -16384)
-        self.assertEqual(ch.threshold1, +16384)
+        self.assertEqual(ch.min, -16384)
+        self.assertEqual(ch.max, +16384)
 
-    def test_irq_is_armed_with_threshold_triggers(self):
+    def test_threshold0_threshold1_not_used(self):
+        # 1.4.0/1.4.1 used threshold0/threshold1 + ``pcnt.value()`` in
+        # the handler — that was the buggy design. 1.4.2 uses min/max
+        # auto-reset instead, so threshold0/threshold1 must be left
+        # unset on the PCNT.
+        PCNTEncoder(pin_a=1, pin_b=2)
+        ch = _ch0()
+        self.assertIsNone(ch.threshold0,
+                          "1.4.2 redesign uses min/max auto-reset "
+                          "instead of thresholds — threshold0 should "
+                          "be left at the PCNT default")
+        self.assertIsNone(ch.threshold1)
+
+    def test_irq_is_armed_with_min_max_triggers(self):
         PCNTEncoder(pin_a=1, pin_b=2)
         ch = _ch0()
         self.assertIsNotNone(ch.irq_handler,
                              "PCNTEncoder must register an IRQ handler "
-                             "so the hardware counter is drained at the "
-                             "thresholds and never approaches the ±32767 "
-                             "wrap limits")
-        # Trigger mask must include both thresholds (PCNT.IRQ_THRESHOLD0
-        # | PCNT.IRQ_THRESHOLD1 = 2 | 4 = 6 in the fake).
+                             "so the auto-reset edges are added to the "
+                             "software accumulator")
+        # Trigger mask must include both limit events (PCNT.IRQ_MIN |
+        # PCNT.IRQ_MAX = 8 | 16 = 24 in the fake).
         self.assertEqual(ch.irq_trigger,
-                         _FakePCNT.IRQ_THRESHOLD0 | _FakePCNT.IRQ_THRESHOLD1)
+                         _FakePCNT.IRQ_MIN | _FakePCNT.IRQ_MAX)
 
 
 class PCNTEncoderInt64AccumulatorTests(unittest.TestCase):
