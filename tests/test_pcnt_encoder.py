@@ -90,19 +90,22 @@ class PCNTEncoderCountTests(unittest.TestCase):
         self.assertEqual(enc.count(), -20)
 
     def test_count_handles_positive_wrap(self):
-        # 32000 -> -32000 is actually +1534 through the +32767 -> -32767 wrap.
+        # 1.4.2: hardware is configured with min=-16384 / max=+16384,
+        # so the counter range is 32768 and the wrap heuristic in
+        # pcnt_update_count corrects deltas larger than RANGE/2=16384.
+        # 16000 -> -16000 is actually +768 through the +16384/-16384 wrap.
         enc = PCNTEncoder(pin_a=1, pin_b=2)
-        _set_hw(0, 32000)
-        self.assertEqual(enc.count(), 32000)
-        _set_hw(0, -32000)
-        self.assertEqual(enc.count(), 32000 + 1534)
+        _set_hw(0, 16000)
+        self.assertEqual(enc.count(), 16000)
+        _set_hw(0, -16000)
+        self.assertEqual(enc.count(), 16000 + 768)
 
     def test_count_handles_negative_wrap(self):
         enc = PCNTEncoder(pin_a=1, pin_b=2)
-        _set_hw(0, -32000)
-        self.assertEqual(enc.count(), -32000)
-        _set_hw(0, 32000)
-        self.assertEqual(enc.count(), -32000 - 1534)
+        _set_hw(0, -16000)
+        self.assertEqual(enc.count(), -16000)
+        _set_hw(0, 16000)
+        self.assertEqual(enc.count(), -16000 - 768)
 
 
 class PCNTEncoderResetTests(unittest.TestCase):
@@ -188,20 +191,21 @@ class PCNTEncoderInt64AccumulatorTests(unittest.TestCase):
     def test_accumulator_survives_past_int32_max(self):
         enc = PCNTEncoder(pin_a=1, pin_b=2)
         # int32 max is 2_147_483_647. We accumulate well past that by
-        # walking the hardware counter forward in 30k-edge steps. Each
-        # step is under the half-range threshold so the wrap heuristic
-        # in pcnt_update_count correctly adds them up. The synthetic
-        # hardware counter wraps from +32767 down to -32767+1 to mimic
-        # the real PCNT — note PCNT range is max-min = 65534 (not
-        # 65535) since both endpoints are inclusive.
+        # walking the hardware counter forward in steps under the
+        # wrap-heuristic half-range threshold. 1.4.2 configures the
+        # hardware at min=-16384 / max=+16384, so PCNT_RANGE=32768 and
+        # the heuristic only corrects deltas larger than RANGE/2=16384.
+        # Each step is 8000 edges (well under 16384) and we mimic the
+        # configured hardware wrap from +16384 down to -16384.
         target = 5_000_000_000   # > 2x int32 max
-        step   = 30_000
-        PCNT_RANGE = 65534       # = 32767 - (-32767)
+        step   = 15_000          # < RANGE/2 = 16384 so heuristic resolves
+        PCNT_LIMIT = 16384
+        PCNT_RANGE = 2 * PCNT_LIMIT   # = 32768
         hw = 0
         expected = 0
         while expected < target:
             hw += step
-            if hw > 32767:
+            if hw > PCNT_LIMIT:
                 hw -= PCNT_RANGE   # mimic hardware wrap to negative side
             expected += step
             _set_hw(0, hw)
