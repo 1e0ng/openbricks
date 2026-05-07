@@ -44,11 +44,18 @@
 #define OB_SERVO_POWER_CLAMP 100.0
 
 // SAFETY CAP applied at servo_drive_power (covers open-loop run() AND
-// closed-loop tick output). 2026-05-06 hardware bring-up: the user's
-// robot has shown brownouts and runaway behavior at higher powers; we
-// keep this cap in place until the bench is verified safe. Raise /
-// remove afterwards.
-#define OB_SERVO_SAFETY_POWER_CAP 10.0
+// closed-loop tick output). The user's robot is in active hardware
+// bring-up; we keep this cap deliberately low until the platform is
+// verified end-to-end. Raise / remove afterwards.
+//
+// 2026-05-06 — initial value 10% during the TB6612 / VCC / wiring
+//              shakedown. Both motors confirmed live; bench safe.
+// 2026-05-07 — bumped to 30% so closed-loop kinematics can actually
+//              hit their commanded speeds (target_dps=60 was getting
+//              clamped to 15-18 dps actual at 10% duty, leaving
+//              ``run_angle`` and ``DriveBase.straight`` short of
+//              their target distances every time).
+#define OB_SERVO_SAFETY_POWER_CAP 30.0
 
 
 typedef struct {
