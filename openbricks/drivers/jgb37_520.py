@@ -35,17 +35,25 @@ class JGB37Motor(Motor):
         encoder_a, encoder_b,
         counts_per_output_rev=1320,
         invert=False,
+        encoder_invert=False,
         kp=_DEFAULT_KP,
     ):
+        # See ``MG370Motor`` for ``encoder_invert`` semantics: it flips
+        # ONLY the encoder reading (mirror-mounted motor pairs where
+        # the encoder counts down on motor-forward), unlike ``invert``
+        # which flips both motor command and encoder together (motors
+        # wired backwards end-to-end).
+        from openbricks.drivers.mg370 import _InvertedEncoder
         self._in1 = Pin(in1, Pin.OUT, value=0)
         self._in2 = Pin(in2, Pin.OUT, value=0)
         self._pwm = PWM(Pin(pwm), freq=_PWM_FREQ_HZ, duty=0)
         self._enc = QuadratureEncoder(pin_a=encoder_a, pin_b=encoder_b)
+        encoder_for_servo = _InvertedEncoder(self._enc) if encoder_invert else self._enc
         self._servo = Servo(
             in1=self._in1,
             in2=self._in2,
             pwm=self._pwm,
-            encoder=self._enc,
+            encoder=encoder_for_servo,
             counts_per_rev=counts_per_output_rev,
             invert=invert,
             kp=kp,

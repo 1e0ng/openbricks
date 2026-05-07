@@ -32,6 +32,33 @@ _DEFAULT_KP = 0.3
 _DEFAULT_CPR = 68028
 
 
+class _InvertedEncoder:
+    """Wraps an encoder so its ``count()`` returns negated counts.
+
+    Used by ``MG370Motor(encoder_invert=True)`` for the case where the
+    encoder physically counts in the opposite direction of the motor's
+    "forward" — common with mirror-mounted motor pairs (one side of a
+    differential drivebase) where motor leads happen to be wired such
+    that ``run(+N)`` already drives the wheel forward, but the encoder
+    naturally counts down because the motor shaft spins the other way
+    relative to the other side.
+
+    Different from ``invert=True``: that flag flips both motor command
+    AND encoder reading together (for motors wired backward end-to-end).
+    ``encoder_invert`` is the right flag when only the encoder direction
+    is "wrong" relative to motor direction.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def count(self):
+        return -self._inner.count()
+
+    def reset(self, value=0):
+        self._inner.reset(-int(value))
+
+
 class MG370Motor(Motor):
     def __init__(
         self,
@@ -41,6 +68,7 @@ class MG370Motor(Motor):
         pcnt_filter=1023,
         counts_per_output_rev=_DEFAULT_CPR,
         invert=False,
+        encoder_invert=False,
         kp=_DEFAULT_KP,
     ):
         self._in1 = Pin(in1, Pin.OUT, value=0)
@@ -50,11 +78,12 @@ class MG370Motor(Motor):
             pin_a=encoder_a, pin_b=encoder_b,
             unit=pcnt_unit, filter=pcnt_filter,
         )
+        encoder_for_servo = _InvertedEncoder(self._enc) if encoder_invert else self._enc
         self._servo = Servo(
             in1=self._in1,
             in2=self._in2,
             pwm=self._pwm,
-            encoder=self._enc,
+            encoder=encoder_for_servo,
             counts_per_rev=counts_per_output_rev,
             invert=invert,
             kp=kp,
