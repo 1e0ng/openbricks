@@ -90,6 +90,28 @@ class TestMG370Motor(unittest.TestCase):
         self.assertEqual(m._in1.value(), 0)
         self.assertEqual(m._in2.value(), 1)
 
+    # --- encoder_invert: flips ONLY encoder reading (mirror mounting) ---
+
+    def test_encoder_invert_keeps_motor_direction(self):
+        """``encoder_invert=True`` does NOT touch motor commands —
+        ``run(+N)`` still drives IN1=1, IN2=0 (forward) regardless."""
+        m = _make_motor(encoder_invert=True)
+        m.run(8)   # 8 stays under the 10% firmware safety cap
+        self.assertEqual(m._in1.value(), 1)
+        self.assertEqual(m._in2.value(), 0)
+
+    def test_encoder_invert_negates_angle_relative_to_default(self):
+        """Two motors with the same raw PCNT count: the
+        ``encoder_invert=True`` one reports the negation of the other."""
+        a = _make_motor(pcnt_unit=0, counts_per_output_rev=1320)
+        b = _make_motor(pcnt_unit=2, counts_per_output_rev=1320,
+                        encoder_invert=True)
+        _FakePCNT._UNITS[0]["value"] = 1320
+        _FakePCNT._UNITS[2]["value"] = 1320
+        # One full rev at CPR=1320 → 360°.
+        self.assertAlmostEqual(a.angle(),  360.0, places=1)
+        self.assertAlmostEqual(b.angle(), -360.0, places=1)
+
     # --- default CPR reflects MG370 GMR 1:34 ---
 
     def test_default_counts_per_rev_matches_gmr_1to34(self):
