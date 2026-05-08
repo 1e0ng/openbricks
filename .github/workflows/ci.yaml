@@ -21,7 +21,7 @@ permissions:
 
 # Belt-and-suspenders: the JS actions used below are pinned to
 # Node-24-native major versions (``actions/checkout@v5``,
-# ``actions/setup-python@v6``, ``codecov/codecov-action@v5``), so
+# ``actions/setup-python@v6``, ``codecov/codecov-action@v6``), so
 # the deprecation warning that prompted ``FORCE_JAVASCRIPT_ACTIONS_
 # TO_NODE24=true`` no longer fires. We keep the env var anyway as
 # free insurance for any future action we add that hasn't been
@@ -143,7 +143,7 @@ jobs:
           python -m coverage xml -o coverage.xml
 
       - name: Upload openbricks-py coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
@@ -185,7 +185,7 @@ jobs:
           coverage xml -o coverage.xml
 
       - name: Upload host coverage to Codecov (CLI flag)
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: tools/openbricks/coverage.xml
@@ -193,7 +193,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload host coverage to Codecov (sim flag)
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: tools/openbricks/coverage.xml
@@ -288,7 +288,7 @@ jobs:
           ls coverage-out/
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: coverage-out
