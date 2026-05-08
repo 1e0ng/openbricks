@@ -62,13 +62,15 @@
 #include "shared/runtime/mpirq.h"
 
 // Diagnostic levels:
-//   0 — silent.
-//   1 — IRQ + constructor traces only (low frequency, fires per
-//       limit crossing — useful for verifying the IRQ pipeline).
+//   0 — silent (default for shipped firmware).
+//   1 — IRQ + constructor traces (low frequency, fires per limit
+//       crossing). Used for v1.4.5 hardware verification — confirmed
+//       single-bit flags (0x10 / 0x20) and clean accum updates after
+//       the info()-arg fix.
 //   2 — verbose: also trace every count()/read_raw/update call.
 //       Floods the UART at scheduler-tick rates; only enable for
 //       short reproducer scripts.
-#define OPENBRICKS_PCNT_TRACE 1
+#define OPENBRICKS_PCNT_TRACE 0
 #if OPENBRICKS_PCNT_TRACE >= 1
 #define PCNT_TRACE(fmt, ...)  mp_printf(&mp_plat_print, "[pcnt] " fmt "\n", ##__VA_ARGS__)
 #else
