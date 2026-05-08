@@ -183,12 +183,15 @@ class TestST3215Wheel(unittest.TestCase):
         # +32767 → -32767+1, so the real motion is +5536 counts).
         m = ST3215Wheel(servo_id=8)
 
+        # MicroPython doesn't allow attribute access on closures, so the
+        # queue lives in an enclosing list (mutated via .pop()).
+        queue = [30000, (-30000) & 0xFFFF]
+
         def fake_read(servo_id, register, nbytes):
             assert servo_id == 8 and register == _REG_PRESENT_POS and nbytes == 2
-            v = fake_read.queue.pop(0)
+            v = queue.pop(0)
             v &= 0xFFFF
             return bytes([v & 0xFF, (v >> 8) & 0xFF])
-        fake_read.queue = [30000, -30000 & 0xFFFF]
         m._bus.read = fake_read
 
         first  = m.angle()
@@ -202,13 +205,13 @@ class TestST3215Wheel(unittest.TestCase):
     def test_reset_angle_zeroes_the_reading(self):
         m = ST3215Wheel(servo_id=9)
 
+        # Same closure-list pattern as the wrap test.
+        queue = [12345, 12345, 12345]
+
         def fake_read(servo_id, register, nbytes):
-            v = fake_read.queue[fake_read.idx]
-            fake_read.idx = min(fake_read.idx + 1, len(fake_read.queue) - 1)
+            v = queue[0] if len(queue) == 1 else queue.pop(0)
             v &= 0xFFFF
             return bytes([v & 0xFF, (v >> 8) & 0xFF])
-        fake_read.queue = [12345, 12345, 12345]
-        fake_read.idx   = 0
         m._bus.read = fake_read
 
         before = m.angle()
