@@ -168,9 +168,11 @@ static int64_t pcnt_update_count(pcnt_encoder_obj_t *self) {
     }
     self->accum += (int64_t)delta;
     self->last_raw = raw;
-    PCNT_TRACE("update prev=%d raw=%d delta=%d wrap=%d accum=%lld irqs=%u",
+    PCNT_TRACE("update prev=%d raw=%d delta=%d wrap=%d accum_hi=%d accum_lo=%d irqs=%u",
                (int)prev_last_raw, (int)raw, (int)delta, wrap_corr,
-               (long long)self->accum, (unsigned)_diag_irq_count);
+               (int)(self->accum >> 32),
+               (int)(self->accum & 0xFFFFFFFF),
+               (unsigned)_diag_irq_count);
     return self->accum;
 }
 
@@ -211,44 +213,47 @@ static void pcnt_reset_count(pcnt_encoder_obj_t *self, int64_t value) {
 //
 // No counter read, no counter write inside the handler. Reentrancy
 // can't happen because there's no nested pcnt.value() call.
-static mp_obj_t _pcnt_encoder_irq_dispatch(mp_obj_t irq_in) {
+static mp_obj_t _pcnt_encoder_irq_dispatch(mp_obj_t pcnt_in) {
     _diag_irq_count++;
     uint32_t my_n = _diag_irq_count;
     PCNT_TRACE("irq#%u enter", (unsigned)my_n);
 
-    mp_irq_obj_t *irq = MP_OBJ_TO_PTR(irq_in);
+    // CRITICAL: upstream's pcnt_value() flush loop calls the handler with
+    // ``self->irq->base.parent`` as the argument — that's the PCNT object,
+    // NOT the irq object. (1.4.0/1.4.1/1.4.2 all assumed it was the irq
+    // and read garbage memory, so info() never cleared flags and the
+    // chip hung in the flush loop.) Get the real irq object by calling
+    // ``pcnt.irq()`` (no args returns the existing object).
+    mp_obj_t irq_attr = mp_load_attr(pcnt_in, MP_QSTR_irq);
+    mp_obj_t irq_obj  = mp_call_function_0(irq_attr);
+    mp_irq_obj_t *irq = MP_OBJ_TO_PTR(irq_obj);
 
-    // Read AND clear the flags atomically. The returned bitmask tells
-    // us which limit was hit (IRQ_MIN -> low limit, IRQ_MAX -> high).
+    // Read AND clear the flags atomically.
     mp_uint_t flags = 0;
     if (irq->methods != NULL && irq->methods->info != NULL) {
-        flags = irq->methods->info(irq_in, MP_IRQ_INFO_FLAGS);
+        flags = irq->methods->info(irq_obj, MP_IRQ_INFO_FLAGS);
     }
     PCNT_TRACE("irq#%u flags=0x%x evt_l=0x%x evt_h=0x%x",
                (unsigned)my_n, (unsigned)flags,
                (unsigned)_pcnt_evt_l_lim, (unsigned)_pcnt_evt_h_lim);
 
-    mp_obj_t parent_pcnt = irq->parent;
     for (int i = 0; i < MAX_PCNT_UNITS; i++) {
         pcnt_encoder_obj_t *enc = _encoders_by_unit[i];
-        if (enc != NULL && enc->pcnt == parent_pcnt) {
-            // Hardware auto-reset already returned the counter to 0
-            // when it crossed the limit. We just account for the
-            // limit-many edges that got "consumed" by the reset.
+        if (enc != NULL && enc->pcnt == pcnt_in) {
             if (_pcnt_evt_h_lim != -1 && (flags & (mp_uint_t)_pcnt_evt_h_lim)) {
                 enc->accum += (int64_t)PCNT_LIMIT;
-                PCNT_TRACE("irq#%u +H accum=%lld",
-                           (unsigned)my_n, (long long)enc->accum);
+                PCNT_TRACE("irq#%u +H accum_hi=%d accum_lo=%d",
+                           (unsigned)my_n,
+                           (int)(enc->accum >> 32),
+                           (int)(enc->accum & 0xFFFFFFFF));
             }
             if (_pcnt_evt_l_lim != -1 && (flags & (mp_uint_t)_pcnt_evt_l_lim)) {
                 enc->accum -= (int64_t)PCNT_LIMIT;
-                PCNT_TRACE("irq#%u -L accum=%lld",
-                           (unsigned)my_n, (long long)enc->accum);
+                PCNT_TRACE("irq#%u -L accum_hi=%d accum_lo=%d",
+                           (unsigned)my_n,
+                           (int)(enc->accum >> 32),
+                           (int)(enc->accum & 0xFFFFFFFF));
             }
-            // Counter is at (or near) 0 now; reset the wrap-detection
-            // baseline so the next pcnt_update_count call computes a
-            // small delta from 0 rather than a full-range delta from
-            // the pre-reset value.
             enc->last_raw = 0;
             PCNT_TRACE("irq#%u exit unit=%d", (unsigned)my_n, i);
             return mp_const_none;
@@ -408,8 +413,9 @@ static mp_obj_t pcnt_encoder_count(mp_obj_t self_in) {
     PCNT_TRACE("count#%u enter (irqs-so-far=%u)",
                (unsigned)_diag_count_calls, (unsigned)_diag_irq_count);
     int64_t v = pcnt_update_count(self);
-    PCNT_TRACE("count#%u exit accum=%lld",
-               (unsigned)_diag_count_calls, (long long)v);
+    PCNT_TRACE("count#%u exit accum_hi=%d accum_lo=%d",
+               (unsigned)_diag_count_calls,
+               (int)(v >> 32), (int)(v & 0xFFFFFFFF));
     // ``mp_obj_new_int_from_ll`` returns a multi-precision int when the
     // value exceeds mp_int_t range, so 32-bit MicroPython ports don't
     // silently truncate the 64-bit accumulator on read.
