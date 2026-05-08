@@ -218,20 +218,29 @@ static mp_obj_t _pcnt_encoder_irq_dispatch(mp_obj_t pcnt_in) {
     uint32_t my_n = _diag_irq_count;
     PCNT_TRACE("irq#%u enter", (unsigned)my_n);
 
-    // CRITICAL: upstream's pcnt_value() flush loop calls the handler with
-    // ``self->irq->base.parent`` as the argument — that's the PCNT object,
-    // NOT the irq object. (1.4.0/1.4.1/1.4.2 all assumed it was the irq
-    // and read garbage memory, so info() never cleared flags and the
-    // chip hung in the flush loop.) Get the real irq object by calling
-    // ``pcnt.irq()`` (no args returns the existing object).
+    // CRITICAL convention: ``mp_irq_methods_t.info`` is always called
+    // with the PARENT object as ``self_in``, not the irq object —
+    // see shared/runtime/mpirq.c:125 (mp_irq_flags) and the esp32
+    // pcnt info impl which casts to esp32_pcnt_obj_t (line 388).
+    //
+    // Our handler receives the PCNT object directly (upstream's flush
+    // loop and mp_irq_handler both pass ``self->irq->base.parent``).
+    // So we get the irq object from the PCNT to access methods/flags
+    // bookkeeping, but call ``info()`` with the PCNT.
+    //
+    // 1.4.0/1.4.1/1.4.2 cast the PCNT-as-handler-arg to mp_irq_obj_t*
+    // (read garbage method pointer, info() did nothing).
+    // 1.4.4 fixed that but passed the IRQ object to info() — also
+    // wrong: esp32_pcnt_irq_info treats self_in as the PCNT, so
+    // ``self->irq->flags`` read garbage and returned wild values
+    // like 0x63205d74 with multiple bits set.
     mp_obj_t irq_attr = mp_load_attr(pcnt_in, MP_QSTR_irq);
     mp_obj_t irq_obj  = mp_call_function_0(irq_attr);
     mp_irq_obj_t *irq = MP_OBJ_TO_PTR(irq_obj);
 
-    // Read AND clear the flags atomically.
     mp_uint_t flags = 0;
     if (irq->methods != NULL && irq->methods->info != NULL) {
-        flags = irq->methods->info(irq_obj, MP_IRQ_INFO_FLAGS);
+        flags = irq->methods->info(pcnt_in, MP_IRQ_INFO_FLAGS);
     }
     PCNT_TRACE("irq#%u flags=0x%x evt_l=0x%x evt_h=0x%x",
                (unsigned)my_n, (unsigned)flags,
