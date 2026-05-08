@@ -22,9 +22,10 @@ Key registers (ST-3215):
     0x2A  Goal position (low, high) — int16, 0..4095 over ~360°
     0x2E  Goal speed (low, high) — sign-magnitude; in wheel mode this
           is the velocity setpoint (bit 15 of high byte = direction)
-    0x38  Present position (low, high) — read only. In wheel mode this
-          is a free-running 16-bit signed step counter that wraps at
-          ±32767; we accumulate multi-turn revolutions in software.
+    0x38  Present position (low, high) — read only. 12-bit absolute
+          angle within one revolution: 0..4095 over 360°. Wraps to 0
+          at every full turn; we accumulate multi-turn revolutions in
+          software via a wrap heuristic in ``ST3215Wheel.angle``.
 
 Half-duplex wiring: most ST-3215 boards use a single data line driven by a
 TX/RX switching circuit, but MicroPython UART pins are usually separate. If
@@ -242,18 +243,16 @@ class ST3215Wheel(Motor):
 
     # --- internal helpers -------------------------------------------------
 
-    @staticmethod
-    def _signed16(raw):
-        # SCServo returns 0..65535; reinterpret as int16 so wraps are
-        # easy to detect.
-        return raw - 0x10000 if raw >= 0x8000 else raw
-
     def _read_present_pos(self):
+        # Present-position is a 12-bit absolute angle within one
+        # revolution, range 0..4095 (NOT a free-running multi-turn
+        # counter). It wraps to 0 at every full turn — multi-turn
+        # tracking is done in software via the wrap heuristic in
+        # angle().
         data = self._bus.read(self._id, _REG_PRESENT_POS, 2)
         if data is None:
             return None
-        raw = data[0] | (data[1] << 8)
-        return self._signed16(raw)
+        return (data[0] | (data[1] << 8)) & 0x0FFF
 
     def _write_goal_speed_signed(self, value):
         # Sign-magnitude format: bit 15 of the 16-bit value sets direction.
@@ -297,19 +296,23 @@ class ST3215Wheel(Motor):
         if raw is None:
             return None
         if self._last_raw is None:
-            # First read after construction or reset: take the present-
-            # position register at face value (no wrap could have
-            # happened yet — this IS the baseline).
+            # First read: take the absolute position as the baseline.
             self._accum_count = raw
         else:
             delta = raw - self._last_raw
-            # Wrap correction across the ±32767 boundary (full counter
-            # range = 65536). Any single read interval that produced
-            # more than half-range steps is treated as a wrap.
-            if delta >  32767:
-                delta -= 65536
-            elif delta < -32767:
-                delta += 65536
+            # Wrap correction across the 0..4095 boundary (full
+            # revolution = 4096 counts). Any single read interval
+            # that produced more than half-revolution of motion is
+            # treated as a wrap. To avoid mis-correction, the caller
+            # must poll fast enough that no single sample period
+            # advances more than 2048 counts (half a revolution) —
+            # at the ST-3215's max ~360 dps that's once per ~0.5s,
+            # but DriveBase polls every scheduler tick (1 kHz) so
+            # this is comfortable.
+            if delta >  2048:
+                delta -= 4096
+            elif delta < -2048:
+                delta += 4096
             self._accum_count += delta
         self._last_raw = raw
         deg = (self._accum_count - self._zero_offset_count) * 360.0 / _COUNTS_PER_REV

@@ -179,34 +179,38 @@ class TestST3215Wheel(unittest.TestCase):
         self.assertEqual(torque_writes[-1], (7, bytes([0])))
 
     def test_angle_accumulates_across_positive_wrap(self):
-        # Synthesise the bus reads: first 30000, then -30000 (wrapped through
-        # +32767 → -32767+1, so the real motion is +5536 counts).
+        # Synthesise the bus reads on the 12-bit (0..4095) absolute-
+        # position register. 3800 → 100 means the wheel moved +396
+        # counts the short way (across the 0/4095 boundary), not
+        # -3700 the long way. The wrap heuristic must pick the
+        # short-arc interpretation.
         m = ST3215Wheel(servo_id=8)
 
         # MicroPython doesn't allow attribute access on closures, so the
         # queue lives in an enclosing list (mutated via .pop()).
-        queue = [30000, (-30000) & 0xFFFF]
+        queue = [3800, 100]
 
         def fake_read(servo_id, register, nbytes):
             assert servo_id == 8 and register == _REG_PRESENT_POS and nbytes == 2
-            v = queue.pop(0)
-            v &= 0xFFFF
+            v = queue.pop(0) & 0xFFFF
             return bytes([v & 0xFF, (v >> 8) & 0xFF])
         m._bus.read = fake_read
 
         first  = m.angle()
         second = m.angle()
-        # After the wrap correction, total motion = +5536 counts.
-        # First read just sets the baseline (delta=0 from "no prior raw").
-        self.assertAlmostEqual(first, 30000 * 360.0 / 4096, places=2)
-        expected_total = (30000 + 5536) * 360.0 / 4096
+        # First read = absolute baseline at 3800 counts.
+        self.assertAlmostEqual(first, 3800 * 360.0 / 4096, places=2)
+        # Wrap correction: delta = 100 - 3800 = -3700, < -2048, so
+        # delta += 4096 → +396. accum = 3800 + 396 = 4196.
+        expected_total = (3800 + 396) * 360.0 / 4096
         self.assertAlmostEqual(second, expected_total, places=2)
 
     def test_reset_angle_zeroes_the_reading(self):
         m = ST3215Wheel(servo_id=9)
 
-        # Same closure-list pattern as the wrap test.
-        queue = [12345, 12345, 12345]
+        # 12-bit absolute position; pin all reads to the same raw value
+        # so reset_angle observes a stable baseline.
+        queue = [2000, 2000, 2000]
 
         def fake_read(servo_id, register, nbytes):
             v = queue[0] if len(queue) == 1 else queue.pop(0)
