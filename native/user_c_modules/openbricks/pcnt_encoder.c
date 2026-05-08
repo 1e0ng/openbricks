@@ -19,22 +19,33 @@
 // method, and uses both channels of the same unit (4x decoding) by
 // constructing a second PCNT object on ``channel=1`` during __init__.
 //
-// Wrap handling — threshold IRQs (since 1.4.0). PCNT's hardware counter
-// is signed 16-bit (±32767). At the MG370 GMR's edge rate (68 028
-// edges/wheel-rev × ~few rev/sec) the counter wraps 4-10 times per
-// second. Earlier versions used a "delta > half-range = wrap" heuristic
-// that only worked if ``count()`` was polled faster than ~RANGE/(2 ×
-// edge_rate) — broke for open-loop ``run()`` with multi-second sleeps,
-// where edges piled up unobserved and the heuristic's wrap correction
-// missed multiple wraps in a row.
+// Wrap handling — hardware min/max auto-reset (since 1.4.2). The PCNT
+// counter is signed 16-bit (±32767). At the MG370 GMR's edge rate
+// (68 028 edges/wheel-rev × ~few rev/sec) the counter wraps 4-10
+// times per second. Open-loop ``run()`` with multi-second sleeps
+// won't poll fast enough for any pure-software wrap heuristic to
+// keep up.
 //
-// Now we configure ``threshold0 = -16384`` and ``threshold1 = +16384``
-// (quarter-range margin from the hardware limits) and register an IRQ
-// that runs ``raw → accum, value(0)`` whenever a threshold is crossed.
-// IRQ rate is bounded — at most ~1 IRQ per 16384 edges, so even at
-// 200 k edges/sec that's 12 IRQ/sec, comfortable for the scheduler.
-// Wraps simply can't happen: by the time the counter reaches +16384 (or
-// -16384), the IRQ has already drained it back to zero.
+// We configure ``min = -16384`` / ``max = +16384`` so the PCNT
+// peripheral itself resets the counter to 0 when it crosses either
+// limit AND fires the corresponding IRQ_MIN / IRQ_MAX event. The
+// IRQ handler reads + clears flags via ``info(MP_IRQ_INFO_FLAGS)``
+// and adds the known limit value (±PCNT_LIMIT) to the int64
+// accumulator. Crucially the handler does NOT call back into
+// ``pcnt.value()`` — upstream's value() runs a synchronous-flush
+// loop that would re-dispatch us recursively (1.4.0 / 1.4.1 hung
+// the chip on the first crossing).
+//
+// IRQ-arg / info-arg gotchas worth remembering (see also
+// ``feedback_handler_arg_signature``):
+//   * Upstream calls our handler with ``self->irq->base.parent`` —
+//     i.e. the PCNT object, not the irq object (esp32_pcnt.c:358 +
+//     :434). 1.4.0/1.4.1/1.4.2 cast it as the irq and read garbage.
+//   * ``mp_irq_methods_t.info`` takes the parent (PCNT obj) too,
+//     per shared/runtime/mpirq.c:125. 1.4.4 passed the irq object
+//     and read garbage flags (got 0x63205d74 with both bits set).
+// 1.4.5 follows both conventions and caches the irq_obj at
+// construction so the dispatcher avoids per-fire attr lookups.
 //
 // Works on the whole ESP32 family with PCNT — original ESP32 (8 units),
 // ESP32-S2, ESP32-S3 (4 units). The ``esp32`` module is imported at
@@ -50,15 +61,23 @@
 #include "py/mphal.h"
 #include "shared/runtime/mpirq.h"
 
-// Diagnostic build (1.4.3): trace every PCNTEncoder hot-path call so a
-// hardware hang is observable from the console. Set to 0 once the
-// PCNT IRQ pipeline is verified working — leaving it on adds a UART
-// write per scheduler tick, which dominates the hot path.
+// Diagnostic levels:
+//   0 — silent.
+//   1 — IRQ + constructor traces only (low frequency, fires per
+//       limit crossing — useful for verifying the IRQ pipeline).
+//   2 — verbose: also trace every count()/read_raw/update call.
+//       Floods the UART at scheduler-tick rates; only enable for
+//       short reproducer scripts.
 #define OPENBRICKS_PCNT_TRACE 1
-#if OPENBRICKS_PCNT_TRACE
-#define PCNT_TRACE(fmt, ...) mp_printf(&mp_plat_print, "[pcnt] " fmt "\n", ##__VA_ARGS__)
+#if OPENBRICKS_PCNT_TRACE >= 1
+#define PCNT_TRACE(fmt, ...)  mp_printf(&mp_plat_print, "[pcnt] " fmt "\n", ##__VA_ARGS__)
 #else
-#define PCNT_TRACE(fmt, ...) ((void)0)
+#define PCNT_TRACE(fmt, ...)  ((void)0)
+#endif
+#if OPENBRICKS_PCNT_TRACE >= 2
+#define PCNT_TRACE2(fmt, ...) mp_printf(&mp_plat_print, "[pcnt] " fmt "\n", ##__VA_ARGS__)
+#else
+#define PCNT_TRACE2(fmt, ...) ((void)0)
 #endif
 
 
@@ -98,6 +117,10 @@ typedef struct _pcnt_encoder_obj_t {
     mp_obj_base_t base;
     mp_obj_t      pcnt;         // esp32.PCNT object for channel 0 (shared unit)
     mp_obj_t      value_fn;     // cached bound method: pcnt.value
+    mp_obj_t      irq_obj;      // cached mp_irq_obj_t* (from pcnt.irq()) so
+                                // the IRQ dispatcher can call info() without
+                                // a fresh mp_load_attr/mp_call round-trip
+                                // per fire.
     int64_t       accum;        // signed cumulative total since construction
                                 // / reset. 64-bit so the accumulator itself
                                 // doesn't overflow within any realistic
@@ -124,21 +147,21 @@ static volatile uint32_t _diag_pcnt_value_post = 0;
 
 static mp_int_t pcnt_read_raw(pcnt_encoder_obj_t *self) {
     _diag_pcnt_value_pre++;
-    PCNT_TRACE("read_raw enter (pre=%u post=%u)",
-               (unsigned)_diag_pcnt_value_pre,
-               (unsigned)_diag_pcnt_value_post);
+    PCNT_TRACE2("read_raw enter (pre=%u post=%u)",
+                (unsigned)_diag_pcnt_value_pre,
+                (unsigned)_diag_pcnt_value_post);
     mp_obj_t r = mp_call_function_0(self->value_fn);
     _diag_pcnt_value_post++;
     mp_int_t v = mp_obj_get_int(r);
-    PCNT_TRACE("read_raw exit (post=%u) raw=%d",
-               (unsigned)_diag_pcnt_value_post, (int)v);
+    PCNT_TRACE2("read_raw exit (post=%u) raw=%d",
+                (unsigned)_diag_pcnt_value_post, (int)v);
     return v;
 }
 
 static void pcnt_write_raw_zero(pcnt_encoder_obj_t *self) {
-    PCNT_TRACE("write_raw_zero enter");
+    PCNT_TRACE2("write_raw_zero enter");
     mp_call_function_1(self->value_fn, MP_OBJ_NEW_SMALL_INT(0));
-    PCNT_TRACE("write_raw_zero exit");
+    PCNT_TRACE2("write_raw_zero exit");
 }
 
 // (Earlier versions had a ``pcnt_drain_to_accum`` helper that read the
@@ -168,11 +191,11 @@ static int64_t pcnt_update_count(pcnt_encoder_obj_t *self) {
     }
     self->accum += (int64_t)delta;
     self->last_raw = raw;
-    PCNT_TRACE("update prev=%d raw=%d delta=%d wrap=%d accum_hi=%d accum_lo=%d irqs=%u",
-               (int)prev_last_raw, (int)raw, (int)delta, wrap_corr,
-               (int)(self->accum >> 32),
-               (int)(self->accum & 0xFFFFFFFF),
-               (unsigned)_diag_irq_count);
+    PCNT_TRACE2("update prev=%d raw=%d delta=%d wrap=%d accum_hi=%d accum_lo=%d irqs=%u",
+                (int)prev_last_raw, (int)raw, (int)delta, wrap_corr,
+                (int)(self->accum >> 32),
+                (int)(self->accum & 0xFFFFFFFF),
+                (unsigned)_diag_irq_count);
     return self->accum;
 }
 
@@ -185,90 +208,66 @@ static void pcnt_reset_count(pcnt_encoder_obj_t *self, int64_t value) {
 
 // --- IRQ dispatcher ---------------------------------------------------
 
-// Single C handler registered with each PCNT unit's ``irq()`` slot.
-// Runs in mp_irq scheduled context — not a hard ISR — so we *can*
-// call back into Python; we just must not, because of the
-// reentrancy trap below.
+// Registered as the ``handler=`` callback on each PCNT unit's
+// ``irq()`` slot. Runs in mp_irq scheduled context — soft IRQ,
+// safe to call back into Python — but MUST NOT call pcnt.value(),
+// because pcnt.value()'s flush loop re-dispatches us whenever
+// flags are still set (see file-header notes).
 //
-// REENTRANCY TRAP: ``esp32_pcnt_value()`` runs a while-true flush
-// loop that dispatches the IRQ handler whenever ``self->irq->flags``
-// is non-zero. Hardware can set those flags asynchronously at any
-// time (a real edge crossing the limit). So if our handler reads or
-// writes the counter via pcnt.value(), the flush loop in that
-// recursive value() call will dispatch us again as soon as the
-// hardware fires another IRQ — even if we cleared the previous
-// flags. With a fast-spinning encoder, this locks the chip in an
-// unbounded handler→value()→handler chain (1.4.0 / 1.4.1 hung the
-// chip on the first threshold crossing during a hand-spin).
-//
-// The 1.4.2 design avoids the trap entirely:
-//
-//   * Configure PCNT with min = -PCNT_LIMIT and max = +PCNT_LIMIT.
-//     The hardware peripheral itself resets the counter to 0 when
-//     it hits either limit — no software write needed.
-//   * Subscribe to IRQ_MIN | IRQ_MAX. When the IRQ fires, the
-//     ``info(MP_IRQ_INFO_FLAGS)`` call returns which limit fired
-//     (and atomically clears flags so the flush loop exits).
-//   * Add the known limit value (±PCNT_LIMIT) to ``accum``. Done.
-//
-// No counter read, no counter write inside the handler. Reentrancy
-// can't happen because there's no nested pcnt.value() call.
+// Job: read+clear the IRQ flags via info(), and add the known
+// ±PCNT_LIMIT delta to ``accum`` for whichever limit event fired.
+// Hardware has already auto-reset the counter to 0.
 static mp_obj_t _pcnt_encoder_irq_dispatch(mp_obj_t pcnt_in) {
     _diag_irq_count++;
     uint32_t my_n = _diag_irq_count;
     PCNT_TRACE("irq#%u enter", (unsigned)my_n);
 
-    // CRITICAL convention: ``mp_irq_methods_t.info`` is always called
-    // with the PARENT object as ``self_in``, not the irq object —
-    // see shared/runtime/mpirq.c:125 (mp_irq_flags) and the esp32
-    // pcnt info impl which casts to esp32_pcnt_obj_t (line 388).
-    //
-    // Our handler receives the PCNT object directly (upstream's flush
-    // loop and mp_irq_handler both pass ``self->irq->base.parent``).
-    // So we get the irq object from the PCNT to access methods/flags
-    // bookkeeping, but call ``info()`` with the PCNT.
-    //
-    // 1.4.0/1.4.1/1.4.2 cast the PCNT-as-handler-arg to mp_irq_obj_t*
-    // (read garbage method pointer, info() did nothing).
-    // 1.4.4 fixed that but passed the IRQ object to info() — also
-    // wrong: esp32_pcnt_irq_info treats self_in as the PCNT, so
-    // ``self->irq->flags`` read garbage and returned wild values
-    // like 0x63205d74 with multiple bits set.
-    mp_obj_t irq_attr = mp_load_attr(pcnt_in, MP_QSTR_irq);
-    mp_obj_t irq_obj  = mp_call_function_0(irq_attr);
-    mp_irq_obj_t *irq = MP_OBJ_TO_PTR(irq_obj);
-
-    mp_uint_t flags = 0;
-    if (irq->methods != NULL && irq->methods->info != NULL) {
-        flags = irq->methods->info(pcnt_in, MP_IRQ_INFO_FLAGS);
+    // Look up the encoder by PCNT object identity. ``pcnt_in`` is the
+    // argument upstream's flush loop and mp_irq_handler hand us
+    // (``self->irq->base.parent``, set at upstream esp32_pcnt.c:434
+    // to the PCNT itself). We cached ``irq_obj`` at construction so
+    // we can call ``info()`` with the right convention without a
+    // per-fire attr lookup.
+    pcnt_encoder_obj_t *enc = NULL;
+    for (int i = 0; i < MAX_PCNT_UNITS; i++) {
+        if (_encoders_by_unit[i] != NULL && _encoders_by_unit[i]->pcnt == pcnt_in) {
+            enc = _encoders_by_unit[i];
+            break;
+        }
     }
+    if (enc == NULL) {
+        PCNT_TRACE("irq#%u exit no-match", (unsigned)my_n);
+        return mp_const_none;
+    }
+
+    // CRITICAL convention: ``mp_irq_methods_t.info`` is always called
+    // with the PARENT (PCNT) object as ``self_in``. See
+    // shared/runtime/mpirq.c:125 — ``methods->info(self->parent, ...)``
+    // and esp32_pcnt.c:387–400 where the impl does
+    // ``MP_OBJ_TO_PTR(self_in) → esp32_pcnt_obj_t*`` then accesses
+    // ``self->irq->flags``.
+    mp_irq_obj_t *irq = MP_OBJ_TO_PTR(enc->irq_obj);
+    mp_uint_t flags = irq->methods->info(pcnt_in, MP_IRQ_INFO_FLAGS);
     PCNT_TRACE("irq#%u flags=0x%x evt_l=0x%x evt_h=0x%x",
                (unsigned)my_n, (unsigned)flags,
                (unsigned)_pcnt_evt_l_lim, (unsigned)_pcnt_evt_h_lim);
 
-    for (int i = 0; i < MAX_PCNT_UNITS; i++) {
-        pcnt_encoder_obj_t *enc = _encoders_by_unit[i];
-        if (enc != NULL && enc->pcnt == pcnt_in) {
-            if (_pcnt_evt_h_lim != -1 && (flags & (mp_uint_t)_pcnt_evt_h_lim)) {
-                enc->accum += (int64_t)PCNT_LIMIT;
-                PCNT_TRACE("irq#%u +H accum_hi=%d accum_lo=%d",
-                           (unsigned)my_n,
-                           (int)(enc->accum >> 32),
-                           (int)(enc->accum & 0xFFFFFFFF));
-            }
-            if (_pcnt_evt_l_lim != -1 && (flags & (mp_uint_t)_pcnt_evt_l_lim)) {
-                enc->accum -= (int64_t)PCNT_LIMIT;
-                PCNT_TRACE("irq#%u -L accum_hi=%d accum_lo=%d",
-                           (unsigned)my_n,
-                           (int)(enc->accum >> 32),
-                           (int)(enc->accum & 0xFFFFFFFF));
-            }
-            enc->last_raw = 0;
-            PCNT_TRACE("irq#%u exit unit=%d", (unsigned)my_n, i);
-            return mp_const_none;
-        }
+    if (_pcnt_evt_h_lim != -1 && (flags & (mp_uint_t)_pcnt_evt_h_lim)) {
+        enc->accum += (int64_t)PCNT_LIMIT;
+        PCNT_TRACE("irq#%u +H accum_hi=%d accum_lo=%d",
+                   (unsigned)my_n,
+                   (int)(enc->accum >> 32),
+                   (int)(enc->accum & 0xFFFFFFFF));
     }
-    PCNT_TRACE("irq#%u exit no-match", (unsigned)my_n);
+    if (_pcnt_evt_l_lim != -1 && (flags & (mp_uint_t)_pcnt_evt_l_lim)) {
+        enc->accum -= (int64_t)PCNT_LIMIT;
+        PCNT_TRACE("irq#%u -L accum_hi=%d accum_lo=%d",
+                   (unsigned)my_n,
+                   (int)(enc->accum >> 32),
+                   (int)(enc->accum & 0xFFFFFFFF));
+    }
+    enc->last_raw = 0;
+    PCNT_TRACE("irq#%u exit", (unsigned)my_n);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(_pcnt_encoder_irq_dispatch_obj,
@@ -367,6 +366,7 @@ static mp_obj_t pcnt_encoder_make_new(const mp_obj_type_t *type,
     pcnt_encoder_obj_t *self = mp_obj_malloc(pcnt_encoder_obj_t, type);
     self->pcnt     = pcnt_ch0;
     self->value_fn = mp_load_attr(pcnt_ch0, MP_QSTR_value);
+    self->irq_obj  = mp_const_none;   // populated below if IRQ arms
     self->accum    = 0;
     self->last_raw = pcnt_read_raw(self);
 
@@ -396,7 +396,10 @@ static mp_obj_t pcnt_encoder_make_new(const mp_obj_type_t *type,
             MP_OBJ_NEW_QSTR(MP_QSTR_handler), MP_OBJ_FROM_PTR(&_pcnt_encoder_irq_dispatch_obj),
             MP_OBJ_NEW_QSTR(MP_QSTR_trigger), MP_OBJ_NEW_SMALL_INT(trigger),
         };
-        mp_call_method_n_kw(0, 2, irq_args);
+        // ``pcnt.irq(...)`` returns the underlying mp_irq_obj_t —
+        // cache it so the IRQ dispatcher can call info() with O(1)
+        // overhead instead of a fresh attr lookup per fire.
+        self->irq_obj = mp_call_method_n_kw(0, 2, irq_args);
         nlr_pop();
         irq_armed = 1;
     }
@@ -419,12 +422,12 @@ static mp_obj_t pcnt_encoder_make_new(const mp_obj_type_t *type,
 static mp_obj_t pcnt_encoder_count(mp_obj_t self_in) {
     pcnt_encoder_obj_t *self = MP_OBJ_TO_PTR(self_in);
     _diag_count_calls++;
-    PCNT_TRACE("count#%u enter (irqs-so-far=%u)",
-               (unsigned)_diag_count_calls, (unsigned)_diag_irq_count);
+    PCNT_TRACE2("count#%u enter (irqs-so-far=%u)",
+                (unsigned)_diag_count_calls, (unsigned)_diag_irq_count);
     int64_t v = pcnt_update_count(self);
-    PCNT_TRACE("count#%u exit accum_hi=%d accum_lo=%d",
-               (unsigned)_diag_count_calls,
-               (int)(v >> 32), (int)(v & 0xFFFFFFFF));
+    PCNT_TRACE2("count#%u exit accum_hi=%d accum_lo=%d",
+                (unsigned)_diag_count_calls,
+                (int)(v >> 32), (int)(v & 0xFFFFFFFF));
     // ``mp_obj_new_int_from_ll`` returns a multi-precision int when the
     // value exceeds mp_int_t range, so 32-bit MicroPython ports don't
     // silently truncate the 64-bit accumulator on read.
