@@ -6,11 +6,14 @@ import tests._fakes  # noqa: F401
 import unittest
 
 from openbricks.drivers import st3215 as st3215_mod
-from openbricks.drivers.st3215 import ST3215
+from openbricks.drivers.st3215 import ST3215, ST3215Wheel
 
 
+_REG_OP_MODE       = 0x21
+_REG_TORQUE        = 0x28
 _REG_GOAL_POSITION = 0x2A
 _REG_GOAL_SPEED    = 0x2E
+_REG_PRESENT_POS   = 0x38
 _HEADER            = b"\xFF\xFF"
 
 
@@ -87,6 +90,132 @@ class TestST3215(unittest.TestCase):
         # A different UART id gets a separate bus.
         s3 = ST3215(servo_id=3, uart_id=1, tx=17, rx=16)
         self.assertIsNot(s1._bus, s3._bus)
+
+
+def _decode_write(packet):
+    """Pull (servo_id, register, data_bytes) out of an SCServo write packet."""
+    assert packet.startswith(_HEADER)
+    body = packet[2:-1]
+    sid, length, instr = body[0], body[1], body[2]
+    assert instr == 0x03   # WRITE
+    register = body[3]
+    data     = bytes(body[4:])
+    return sid, register, data
+
+
+def _writes_to(packets, register):
+    """Filter a UART tx log down to writes targeting one register."""
+    out = []
+    for pkt in packets:
+        sid, reg, data = _decode_write(pkt)
+        if reg == register:
+            out.append((sid, data))
+    return out
+
+
+class TestST3215Wheel(unittest.TestCase):
+    def setUp(self):
+        ST3215._buses = {}
+
+    def test_constructor_switches_servo_into_wheel_mode(self):
+        m = ST3215Wheel(servo_id=1)
+        mode_writes = _writes_to(m._bus._uart._tx_log, _REG_OP_MODE)
+        self.assertEqual(mode_writes, [(1, bytes([1]))])   # 1 = wheel
+
+    def test_constructor_enables_torque(self):
+        m = ST3215Wheel(servo_id=2)
+        torque_writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
+        self.assertEqual(torque_writes, [(2, bytes([1]))])
+
+    def test_run_speed_writes_signed_magnitude_to_goal_speed(self):
+        m = ST3215Wheel(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
+        m.run_speed(50)   # → magnitude = 500, sign bit clear
+        speed_writes = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
+        self.assertEqual(speed_writes[-1], (3, bytes([500 & 0xFF, 500 >> 8])))
+
+    def test_run_speed_negative_sets_high_bit(self):
+        m = ST3215Wheel(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
+        m.run_speed(-50)
+        speed_writes = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
+        # magnitude 500, plus the direction bit at bit 15 of the 16-bit value
+        v = 500 | 0x8000
+        self.assertEqual(speed_writes[-1], (3, bytes([v & 0xFF, (v >> 8) & 0xFF])))
+
+    def test_run_speed_clamps_to_max_dps(self):
+        m = ST3215Wheel(servo_id=3, steps_per_dps=10.0, max_dps=100.0)
+        m.run_speed(99999)
+        speed_writes = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
+        # Clamped to 100 dps × 10 steps/dps = 1000
+        self.assertEqual(speed_writes[-1], (3, bytes([1000 & 0xFF, 1000 >> 8])))
+
+    def test_invert_flips_run_speed_direction(self):
+        # Both servos default to uart_id=1 → they share a _SCServoBus,
+        # so the tx_log holds packets from both. Filter by servo_id to
+        # isolate each motor's last command.
+        m_plain = ST3215Wheel(servo_id=4, steps_per_dps=10.0, max_dps=1000.0)
+        m_inv   = ST3215Wheel(servo_id=5, steps_per_dps=10.0, max_dps=1000.0,
+                              invert=True)
+        m_plain.run_speed(50)
+        m_inv.run_speed(50)
+        all_speed_writes = _writes_to(m_plain._bus._uart._tx_log,
+                                      _REG_GOAL_SPEED)
+        plain = next(d for sid, d in reversed(all_speed_writes) if sid == 4)
+        inv   = next(d for sid, d in reversed(all_speed_writes) if sid == 5)
+        # plain should have sign bit clear; inv should have it set
+        self.assertEqual(plain[1] & 0x80, 0)
+        self.assertEqual(inv[1] & 0x80, 0x80)
+
+    def test_brake_writes_zero_speed(self):
+        m = ST3215Wheel(servo_id=6)
+        m.brake()
+        speed_writes = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
+        self.assertEqual(speed_writes[-1], (6, bytes([0, 0])))
+
+    def test_coast_disables_torque(self):
+        m = ST3215Wheel(servo_id=7)
+        m.coast()
+        torque_writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
+        # Constructor wrote a 1; coast should append a 0.
+        self.assertEqual(torque_writes[-1], (7, bytes([0])))
+
+    def test_angle_accumulates_across_positive_wrap(self):
+        # Synthesise the bus reads: first 30000, then -30000 (wrapped through
+        # +32767 → -32767+1, so the real motion is +5536 counts).
+        m = ST3215Wheel(servo_id=8)
+
+        def fake_read(servo_id, register, nbytes):
+            assert servo_id == 8 and register == _REG_PRESENT_POS and nbytes == 2
+            v = fake_read.queue.pop(0)
+            v &= 0xFFFF
+            return bytes([v & 0xFF, (v >> 8) & 0xFF])
+        fake_read.queue = [30000, -30000 & 0xFFFF]
+        m._bus.read = fake_read
+
+        first  = m.angle()
+        second = m.angle()
+        # After the wrap correction, total motion = +5536 counts.
+        # First read just sets the baseline (delta=0 from "no prior raw").
+        self.assertAlmostEqual(first, 30000 * 360.0 / 4096, places=2)
+        expected_total = (30000 + 5536) * 360.0 / 4096
+        self.assertAlmostEqual(second, expected_total, places=2)
+
+    def test_reset_angle_zeroes_the_reading(self):
+        m = ST3215Wheel(servo_id=9)
+
+        def fake_read(servo_id, register, nbytes):
+            v = fake_read.queue[fake_read.idx]
+            fake_read.idx = min(fake_read.idx + 1, len(fake_read.queue) - 1)
+            v &= 0xFFFF
+            return bytes([v & 0xFF, (v >> 8) & 0xFF])
+        fake_read.queue = [12345, 12345, 12345]
+        fake_read.idx   = 0
+        m._bus.read = fake_read
+
+        before = m.angle()
+        self.assertGreater(before, 0)
+        m.reset_angle(0)
+        after = m.angle()
+        self.assertAlmostEqual(after, 0.0, places=2)
 
 
 if __name__ == "__main__":
