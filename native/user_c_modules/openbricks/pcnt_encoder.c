@@ -196,6 +196,7 @@ static int64_t pcnt_update_count(pcnt_encoder_obj_t *self) {
                 (int)(self->accum >> 32),
                 (int)(self->accum & 0xFFFFFFFF),
                 (unsigned)_diag_irq_count);
+    (void)wrap_corr;   // only consumed by PCNT_TRACE2; quiet -Wunused under TRACE<2
     return self->accum;
 }
 
