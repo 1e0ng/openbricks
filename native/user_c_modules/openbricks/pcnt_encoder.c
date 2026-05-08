@@ -62,13 +62,15 @@
 #include "shared/runtime/mpirq.h"
 
 // Diagnostic levels:
-//   0 — silent.
-//   1 — IRQ + constructor traces only (low frequency, fires per
-//       limit crossing — useful for verifying the IRQ pipeline).
+//   0 — silent (default for shipped firmware).
+//   1 — IRQ + constructor traces (low frequency, fires per limit
+//       crossing). Used for v1.4.5 hardware verification — confirmed
+//       single-bit flags (0x10 / 0x20) and clean accum updates after
+//       the info()-arg fix.
 //   2 — verbose: also trace every count()/read_raw/update call.
 //       Floods the UART at scheduler-tick rates; only enable for
 //       short reproducer scripts.
-#define OPENBRICKS_PCNT_TRACE 1
+#define OPENBRICKS_PCNT_TRACE 0
 #if OPENBRICKS_PCNT_TRACE >= 1
 #define PCNT_TRACE(fmt, ...)  mp_printf(&mp_plat_print, "[pcnt] " fmt "\n", ##__VA_ARGS__)
 #else
@@ -220,8 +222,10 @@ static void pcnt_reset_count(pcnt_encoder_obj_t *self, int64_t value) {
 // Hardware has already auto-reset the counter to 0.
 static mp_obj_t _pcnt_encoder_irq_dispatch(mp_obj_t pcnt_in) {
     _diag_irq_count++;
+    #if OPENBRICKS_PCNT_TRACE >= 1
     uint32_t my_n = _diag_irq_count;
     PCNT_TRACE("irq#%u enter", (unsigned)my_n);
+    #endif
 
     // Look up the encoder by PCNT object identity. ``pcnt_in`` is the
     // argument upstream's flush loop and mp_irq_handler hand us
@@ -382,7 +386,9 @@ static mp_obj_t pcnt_encoder_make_new(const mp_obj_type_t *type,
     //
     // Wrapped in nlr to keep the constructor working in tests where
     // the fake esp32 module no-ops these attrs.
+    #if OPENBRICKS_PCNT_TRACE >= 1
     int irq_armed = 0;
+    #endif
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t MIN_obj = mp_load_attr(PCNT_cls, MP_QSTR_IRQ_MIN);
@@ -402,7 +408,9 @@ static mp_obj_t pcnt_encoder_make_new(const mp_obj_type_t *type,
         // overhead instead of a fresh attr lookup per fire.
         self->irq_obj = mp_call_method_n_kw(0, 2, irq_args);
         nlr_pop();
+        #if OPENBRICKS_PCNT_TRACE >= 1
         irq_armed = 1;
+        #endif
     }
     PCNT_TRACE("ctor unit=%d pin_a=%d pin_b=%d min=%d max=%d "
                "evt_l=0x%x evt_h=0x%x irq_armed=%d initial_raw=%d",
