@@ -54,9 +54,12 @@ from openbricks.interfaces import Motor, Servo
 
 _HEADER = b"\xFF\xFF"
 
-_INSTR_PING  = 0x01
-_INSTR_READ  = 0x02
-_INSTR_WRITE = 0x03
+_BROADCAST_ID = 0xFE
+
+_INSTR_PING       = 0x01
+_INSTR_READ       = 0x02
+_INSTR_WRITE      = 0x03
+_INSTR_SYNC_WRITE = 0x83
 
 _REG_OP_MODE       = 0x21
 _REG_TORQUE        = 0x28
@@ -135,6 +138,48 @@ class _SCServoBus:
         packet = _HEADER + body + bytes([self._checksum(body)])
         self._tx(packet)
         return len(self._rx(6)) == 6
+
+    def sync_write(self, register, data_len, servo_data):
+        """Broadcast SYNC WRITE: one packet writes ``register`` on N
+        servos simultaneously.
+
+        ``servo_data`` is a list of ``(servo_id, data_bytes)`` tuples
+        where each ``data_bytes`` is exactly ``data_len`` bytes long.
+
+        Two reasons to prefer this over N individual ``write()`` calls
+        when coordinating multiple servos on one bus:
+
+        * **Time alignment.** All servos apply their setpoint at the
+          same packet boundary; with individual writes, servo A gets
+          its command 1–5 ms before servo B and the wheels start at
+          slightly different times.
+        * **Bus bandwidth.** N writes = N packets + N status replies +
+          N round-trips. SYNC WRITE = one packet, no replies — about
+          5–10× less UART time on a 4-servo bus.
+
+        Servos do NOT reply to SYNC WRITE (it's broadcast, ID 0xFE),
+        so this method doesn't poll the RX line.
+        """
+        n = len(servo_data)
+        if n == 0:
+            return
+        # LEN field = number of param bytes + 2.
+        # Params for SYNC WRITE = ADDR(1) + DATA_LEN(1) + N × (ID(1) + data_len)
+        length = 4 + n * (1 + data_len)
+        body = bytearray()
+        body.append(_BROADCAST_ID)
+        body.append(length)
+        body.append(_INSTR_SYNC_WRITE)
+        body.append(register)
+        body.append(data_len)
+        for sid, data in servo_data:
+            if len(data) != data_len:
+                raise ValueError("sync_write data length mismatch")
+            body.append(sid)
+            body.extend(data)
+        body = bytes(body)
+        packet = _HEADER + body + bytes([self._checksum(body)])
+        self._tx(packet)
 
 
 class ST3215(Servo):
@@ -254,6 +299,25 @@ class ST3215Wheel(Motor):
             return None
         return (data[0] | (data[1] << 8)) & 0x0FFF
 
+    def _encode_goal_speed(self, deg_per_s):
+        """Compute the 16-bit goal-speed register value for ``deg_per_s``,
+        without writing it. Used both by ``run_speed()`` (single write)
+        and by ``SyncServoGroup`` (batched broadcast write).
+        """
+        dps = float(deg_per_s)
+        if self._invert:
+            dps = -dps
+        if dps >  self._max_dps: dps =  self._max_dps
+        if dps < -self._max_dps: dps = -self._max_dps
+        signed_value = int(dps * self._steps_per_dps)
+        magnitude = abs(signed_value)
+        if magnitude > 0x7FFF:
+            magnitude = 0x7FFF
+        v = magnitude
+        if signed_value < 0:
+            v |= 0x8000   # bit 15 sets direction in sign-magnitude
+        return v
+
     def _write_goal_speed_signed(self, value):
         # Sign-magnitude format: bit 15 of the 16-bit value sets direction.
         magnitude = abs(int(value))
@@ -275,12 +339,9 @@ class ST3215Wheel(Motor):
 
     def run_speed(self, deg_per_s):
         """Set continuous wheel velocity in degrees per second."""
-        dps = float(deg_per_s)
-        if self._invert:
-            dps = -dps
-        if dps >  self._max_dps: dps =  self._max_dps
-        if dps < -self._max_dps: dps = -self._max_dps
-        self._write_goal_speed_signed(int(dps * self._steps_per_dps))
+        v = self._encode_goal_speed(deg_per_s)
+        self._bus.write(self._id, _REG_GOAL_SPEED,
+                        bytes([v & 0xFF, (v >> 8) & 0xFF]))
 
     def brake(self):
         """Hold zero velocity (servo's internal loop actively brakes)."""
@@ -336,3 +397,71 @@ class ST3215Wheel(Motor):
 
     def ping(self):
         return self._bus.ping(self._id)
+
+
+class SyncServoGroup:
+    """Coordinated multi-servo writes via SCServo SYNC WRITE.
+
+    All servos must share one ``_SCServoBus`` (same UART). Mixed
+    servo types (``ST3215``, ``ST3215Wheel``, future ``ST3032`` etc.)
+    are fine since they all speak the same protocol — SYNC WRITE
+    just blasts the same register on all listed IDs.
+
+    Use this whenever you have multiple servos that should apply a
+    setpoint at the same packet boundary (drivebase wheels, multi-
+    finger gripper) — each servo receives its byte slot of the
+    broadcast packet at the same instant, instead of N serialised
+    individual writes.
+
+    Example
+    -------
+    ::
+
+        from openbricks.drivers.st3215 import ST3215Wheel, SyncServoGroup
+
+        left  = ST3215Wheel(servo_id=1)
+        right = ST3215Wheel(servo_id=2, invert=True)
+        group = SyncServoGroup([left, right])
+
+        # Both wheels start moving at the same packet boundary —
+        # one SYNC WRITE instead of two individual writes.
+        group.set_goal_speeds([200, 200])
+    """
+
+    def __init__(self, servos):
+        if not servos:
+            raise ValueError("SyncServoGroup needs at least one servo")
+        bus = servos[0]._bus
+        for s in servos[1:]:
+            if s._bus is not bus:
+                raise ValueError(
+                    "SyncServoGroup: all servos must share one UART bus")
+        self._bus    = bus
+        self._servos = list(servos)
+
+    def set_goal_speeds(self, speeds_dps):
+        """Write goal-speed on every servo in one SYNC WRITE packet.
+
+        ``speeds_dps`` is a list parallel to the servos given at
+        construction. Each servo's own ``_encode_goal_speed`` is
+        used, so per-servo ``invert`` / ``steps_per_dps`` /
+        ``max_dps`` are respected.
+
+        Servos that don't expose ``_encode_goal_speed`` (i.e. the
+        position-mode ``ST3215`` class) raise ``TypeError``.
+        """
+        if len(speeds_dps) != len(self._servos):
+            raise ValueError(
+                "speed count (%d) doesn't match servo count (%d)"
+                % (len(speeds_dps), len(self._servos)))
+        servo_data = []
+        for servo, dps in zip(self._servos, speeds_dps):
+            encode = getattr(servo, "_encode_goal_speed", None)
+            if encode is None:
+                raise TypeError(
+                    "servo id=%s isn't a wheel-mode servo "
+                    "(no _encode_goal_speed method)" % servo._id)
+            v = encode(dps)
+            servo_data.append(
+                (servo._id, bytes([v & 0xFF, (v >> 8) & 0xFF])))
+        self._bus.sync_write(_REG_GOAL_SPEED, 2, servo_data)
