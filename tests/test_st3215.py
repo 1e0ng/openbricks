@@ -6,7 +6,7 @@ import tests._fakes  # noqa: F401
 import unittest
 
 from openbricks.drivers import st3215 as st3215_mod
-from openbricks.drivers.st3215 import ST3215, ST3215Wheel
+from openbricks.drivers.st3215 import ST3215, ST3215Wheel, SyncServoGroup
 
 
 _REG_OP_MODE       = 0x21
@@ -223,6 +223,114 @@ class TestST3215Wheel(unittest.TestCase):
         m.reset_angle(0)
         after = m.angle()
         self.assertAlmostEqual(after, 0.0, places=2)
+
+
+class TestSyncServoGroup(unittest.TestCase):
+    def setUp(self):
+        ST3215._buses = {}
+
+    def test_constructor_rejects_servos_on_different_buses(self):
+        s1 = ST3215Wheel(servo_id=1, uart_id=1, tx=17, rx=16)
+        s2 = ST3215Wheel(servo_id=2, uart_id=2, tx=17, rx=16)
+        with self.assertRaises(ValueError):
+            SyncServoGroup([s1, s2])
+
+    def test_constructor_rejects_empty_list(self):
+        with self.assertRaises(ValueError):
+            SyncServoGroup([])
+
+    def test_set_goal_speeds_emits_one_sync_write_packet(self):
+        s1 = ST3215Wheel(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+        s2 = ST3215Wheel(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
+        group = SyncServoGroup([s1, s2])
+
+        # Drain any constructor packets so we examine only the sync write.
+        baseline = len(s1._bus._uart._tx_log)
+        group.set_goal_speeds([50, -50])
+
+        new_packets = s1._bus._uart._tx_log[baseline:]
+        self.assertEqual(len(new_packets), 1)
+        pkt = new_packets[0]
+
+        # Header + body + checksum.
+        self.assertTrue(pkt.startswith(_HEADER))
+        body = pkt[2:-1]
+        # Body layout: ID(0xFE) | LEN | INSTR(0x83) | ADDR | DATA_LEN |
+        #              ID1 | D1_lo | D1_hi | ID2 | D2_lo | D2_hi
+        self.assertEqual(body[0], 0xFE)            # broadcast
+        self.assertEqual(body[2], 0x83)            # SYNC WRITE
+        self.assertEqual(body[3], _REG_GOAL_SPEED) # register
+        self.assertEqual(body[4], 2)               # data_len
+        # Servo 1: speed = +50 dps × 10 steps/dps = 500 (no sign bit)
+        self.assertEqual(body[5], 1)
+        self.assertEqual(body[6], 500 & 0xFF)
+        self.assertEqual(body[7], (500 >> 8) & 0xFF)
+        # Servo 2: speed = -50 dps → magnitude 500 + sign bit
+        v2 = 500 | 0x8000
+        self.assertEqual(body[8], 2)
+        self.assertEqual(body[9],  v2 & 0xFF)
+        self.assertEqual(body[10], (v2 >> 8) & 0xFF)
+
+    def test_set_goal_speeds_respects_per_servo_invert(self):
+        s1 = ST3215Wheel(servo_id=10, steps_per_dps=10.0, max_dps=1000.0)
+        s2 = ST3215Wheel(servo_id=11, steps_per_dps=10.0, max_dps=1000.0,
+                         invert=True)
+        group = SyncServoGroup([s1, s2])
+        baseline = len(s1._bus._uart._tx_log)
+        group.set_goal_speeds([50, 50])   # both commanded forward
+        body = s1._bus._uart._tx_log[baseline:][0][2:-1]
+        # s1 (no invert) → sign bit clear in high byte
+        self.assertEqual(body[7] & 0x80, 0)
+        # s2 (invert=True) → sign bit set in high byte
+        self.assertEqual(body[10] & 0x80, 0x80)
+
+    def test_set_goal_speeds_packet_length_field_matches_payload(self):
+        servos = [ST3215Wheel(servo_id=i + 1) for i in range(4)]
+        group = SyncServoGroup(servos)
+        baseline = len(servos[0]._bus._uart._tx_log)
+        group.set_goal_speeds([0, 0, 0, 0])
+        pkt = servos[0]._bus._uart._tx_log[baseline:][0]
+        body = pkt[2:-1]
+        # LEN = 4 + N × (1 + data_len) = 4 + 4 × 3 = 16
+        self.assertEqual(body[1], 16)
+        # Total body = ID + LEN + INSTR + ADDR + DATA_LEN + 4×(ID+2bytes) = 5 + 12 = 17
+        self.assertEqual(len(body), 17)
+
+    def test_set_goal_speeds_count_must_match_servo_count(self):
+        s1 = ST3215Wheel(servo_id=1)
+        s2 = ST3215Wheel(servo_id=2)
+        group = SyncServoGroup([s1, s2])
+        with self.assertRaises(ValueError):
+            group.set_goal_speeds([100])      # too few
+        with self.assertRaises(ValueError):
+            group.set_goal_speeds([1, 2, 3])  # too many
+
+    def test_set_goal_speeds_rejects_position_mode_servos(self):
+        # Position-mode ST3215 doesn't have ``_encode_goal_speed`` —
+        # SyncServoGroup should refuse rather than write nonsense.
+        s_pos   = ST3215(servo_id=1)
+        s_wheel = ST3215Wheel(servo_id=2)
+        group = SyncServoGroup([s_pos, s_wheel])
+        with self.assertRaises(TypeError):
+            group.set_goal_speeds([100, 100])
+
+    def test_sync_write_does_not_read_response(self):
+        # Broadcast writes: no per-servo reply. Ensure we don't block
+        # on the RX path waiting for one.
+        s1 = ST3215Wheel(servo_id=1)
+        s2 = ST3215Wheel(servo_id=2)
+        group = SyncServoGroup([s1, s2])
+        # Track _rx calls — sync_write must not call into them.
+        original_rx = s1._bus._rx
+        rx_calls = [0]
+
+        def counting_rx(*args, **kwargs):
+            rx_calls[0] += 1
+            return original_rx(*args, **kwargs)
+        s1._bus._rx = counting_rx
+        before = rx_calls[0]
+        group.set_goal_speeds([100, 100])
+        self.assertEqual(rx_calls[0], before)
 
 
 if __name__ == "__main__":
