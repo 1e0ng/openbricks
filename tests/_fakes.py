@@ -232,6 +232,9 @@ class UART:
         chunk, self._rx_buf = self._rx_buf[:n], self._rx_buf[n:]
         return chunk
 
+    def any(self):
+        return len(self._rx_buf)
+
 
 class Timer:
     """Deterministic machine.Timer stand-in.
