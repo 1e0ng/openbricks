@@ -25,7 +25,7 @@ Key registers (ST-3215):
     0x38  Present position (low, high) — read only. 12-bit absolute
           angle within one revolution: 0..4095 over 360°. Wraps to 0
           at every full turn; we accumulate multi-turn revolutions in
-          software via a wrap heuristic in ``ST3215Wheel.angle``.
+          software via a wrap heuristic in ``ST3215Motor.angle``.
 
 Half-duplex wiring: most ST-3215 boards use a single data line driven by a
 TX/RX switching circuit, but MicroPython UART pins are usually separate. If
@@ -38,7 +38,7 @@ Two classes here:
 * ``ST3215`` — position-mode (Servo interface), for grippers / lifts /
   sensor turrets. ``move_to(angle)`` blocks until reached.
 
-* ``ST3215Wheel`` — continuous-rotation mode (Motor interface), for
+* ``ST3215Motor`` — continuous-rotation mode (Motor interface), for
   drivebase wheels. Switches the servo into mode=1 at construction
   and exposes ``run_speed(dps)`` / ``angle()`` / ``brake()`` so it
   drops into ``DriveBase`` the same way ``MG370Motor`` does.
@@ -243,7 +243,7 @@ class ST3215(Servo):
         return self._bus.ping(self._id)
 
 
-class ST3215Wheel(Motor):
+class ST3215Motor(Motor):
     """One ST-3215 in wheel/continuous-rotation mode.
 
     Implements the openbricks ``Motor`` interface so it drops directly
@@ -460,7 +460,7 @@ class SyncServoGroup:
     """Coordinated multi-servo writes via SCServo SYNC WRITE.
 
     All servos must share one ``_SCServoBus`` (same UART). Mixed
-    servo types (``ST3215``, ``ST3215Wheel``, future ``ST3032`` etc.)
+    servo types (``ST3215``, ``ST3215Motor``, future ``ST3032`` etc.)
     are fine since they all speak the same protocol — SYNC WRITE
     just blasts the same register on all listed IDs.
 
@@ -474,10 +474,10 @@ class SyncServoGroup:
     -------
     ::
 
-        from openbricks.drivers.st3215 import ST3215Wheel, SyncServoGroup
+        from openbricks.drivers.st3215 import ST3215Motor, SyncServoGroup
 
-        left  = ST3215Wheel(servo_id=1)
-        right = ST3215Wheel(servo_id=2, invert=True)
+        left  = ST3215Motor(servo_id=1)
+        right = ST3215Motor(servo_id=2, invert=True)
         group = SyncServoGroup([left, right])
 
         # Both wheels start moving at the same packet boundary —

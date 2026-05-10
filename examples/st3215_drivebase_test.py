@@ -21,18 +21,18 @@ Hardware:
 Edit the IDs / UART pins below to match your wiring:
 """
 
-from openbricks.drivers.st3215 import ST3215Wheel
+from openbricks.drivers.st3215 import ST3215Motor
 from openbricks.robotics import DriveBase
 from openbricks.tools import wait
 
 LEFT_ID, RIGHT_ID = 1, 2
 UART_ID, TX, RX   = 1, 17, 16
 
-left = ST3215Wheel(
+left = ST3215Motor(
     servo_id=LEFT_ID,
     uart_id=UART_ID, tx=TX, rx=RX,
 )
-right = ST3215Wheel(
+right = ST3215Motor(
     servo_id=RIGHT_ID,
     uart_id=UART_ID, tx=TX, rx=RX,
     invert=True,        # right motor mirrors left mounting; flip if it spins backwards

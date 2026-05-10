@@ -6,7 +6,7 @@ import tests._fakes  # noqa: F401
 import unittest
 
 from openbricks.drivers import st3215 as st3215_mod
-from openbricks.drivers.st3215 import ST3215, ST3215Wheel, SyncServoGroup
+from openbricks.drivers.st3215 import ST3215, ST3215Motor, SyncServoGroup
 
 
 _REG_OP_MODE       = 0x21
@@ -113,28 +113,28 @@ def _writes_to(packets, register):
     return out
 
 
-class TestST3215Wheel(unittest.TestCase):
+class TestST3215Motor(unittest.TestCase):
     def setUp(self):
         ST3215._buses = {}
 
     def test_constructor_switches_servo_into_wheel_mode(self):
-        m = ST3215Wheel(servo_id=1)
+        m = ST3215Motor(servo_id=1)
         mode_writes = _writes_to(m._bus._uart._tx_log, _REG_OP_MODE)
         self.assertEqual(mode_writes, [(1, bytes([1]))])   # 1 = wheel
 
     def test_constructor_enables_torque(self):
-        m = ST3215Wheel(servo_id=2)
+        m = ST3215Motor(servo_id=2)
         torque_writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
         self.assertEqual(torque_writes, [(2, bytes([1]))])
 
     def test_run_speed_writes_signed_magnitude_to_goal_speed(self):
-        m = ST3215Wheel(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
         m.run_speed(50)   # → magnitude = 500, sign bit clear
         speed_writes = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
         self.assertEqual(speed_writes[-1], (3, bytes([500 & 0xFF, 500 >> 8])))
 
     def test_run_speed_negative_sets_high_bit(self):
-        m = ST3215Wheel(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
         m.run_speed(-50)
         speed_writes = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
         # magnitude 500, plus the direction bit at bit 15 of the 16-bit value
@@ -142,7 +142,7 @@ class TestST3215Wheel(unittest.TestCase):
         self.assertEqual(speed_writes[-1], (3, bytes([v & 0xFF, (v >> 8) & 0xFF])))
 
     def test_run_speed_clamps_to_max_dps(self):
-        m = ST3215Wheel(servo_id=3, steps_per_dps=10.0, max_dps=100.0)
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=100.0)
         m.run_speed(99999)
         speed_writes = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
         # Clamped to 100 dps × 10 steps/dps = 1000
@@ -152,8 +152,8 @@ class TestST3215Wheel(unittest.TestCase):
         # Both servos default to uart_id=1 → they share a _SCServoBus,
         # so the tx_log holds packets from both. Filter by servo_id to
         # isolate each motor's last command.
-        m_plain = ST3215Wheel(servo_id=4, steps_per_dps=10.0, max_dps=1000.0)
-        m_inv   = ST3215Wheel(servo_id=5, steps_per_dps=10.0, max_dps=1000.0,
+        m_plain = ST3215Motor(servo_id=4, steps_per_dps=10.0, max_dps=1000.0)
+        m_inv   = ST3215Motor(servo_id=5, steps_per_dps=10.0, max_dps=1000.0,
                               invert=True)
         m_plain.run_speed(50)
         m_inv.run_speed(50)
@@ -166,13 +166,13 @@ class TestST3215Wheel(unittest.TestCase):
         self.assertEqual(inv[1] & 0x80, 0x80)
 
     def test_brake_writes_zero_speed(self):
-        m = ST3215Wheel(servo_id=6)
+        m = ST3215Motor(servo_id=6)
         m.brake()
         speed_writes = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
         self.assertEqual(speed_writes[-1], (6, bytes([0, 0])))
 
     def test_coast_disables_torque(self):
-        m = ST3215Wheel(servo_id=7)
+        m = ST3215Motor(servo_id=7)
         m.coast()
         torque_writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
         # Constructor wrote a 1; coast should append a 0.
@@ -184,7 +184,7 @@ class TestST3215Wheel(unittest.TestCase):
         # counts the short way (across the 0/4095 boundary), not
         # -3700 the long way. The wrap heuristic must pick the
         # short-arc interpretation.
-        m = ST3215Wheel(servo_id=8)
+        m = ST3215Motor(servo_id=8)
 
         # MicroPython doesn't allow attribute access on closures, so the
         # queue lives in an enclosing list (mutated via .pop()).
@@ -206,7 +206,7 @@ class TestST3215Wheel(unittest.TestCase):
         self.assertAlmostEqual(second, expected_total, places=2)
 
     def test_reset_angle_zeroes_the_reading(self):
-        m = ST3215Wheel(servo_id=9)
+        m = ST3215Motor(servo_id=9)
 
         # 12-bit absolute position; pin all reads to the same raw value
         # so reset_angle observes a stable baseline.
@@ -225,7 +225,7 @@ class TestST3215Wheel(unittest.TestCase):
         self.assertAlmostEqual(after, 0.0, places=2)
 
 
-class TestST3215WheelRunAngle(unittest.TestCase):
+class TestST3215MotorRunAngle(unittest.TestCase):
     def setUp(self):
         ST3215._buses = {}
 
@@ -242,7 +242,7 @@ class TestST3215WheelRunAngle(unittest.TestCase):
         motor.angle = fake_angle
 
     def test_run_angle_no_wait_kicks_off_at_cruise_speed(self):
-        m = ST3215Wheel(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
         # Provide a single angle reading for the start-position read.
         self._patch_angle(m, [0.0])
         baseline = len(m._bus._uart._tx_log)
@@ -259,7 +259,7 @@ class TestST3215WheelRunAngle(unittest.TestCase):
         self.assertEqual(v & 0x7FFF, 2000)
 
     def test_run_angle_no_wait_negative_target_drives_reverse(self):
-        m = ST3215Wheel(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
         self._patch_angle(m, [0.0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(200, -90, wait=False)
@@ -269,7 +269,7 @@ class TestST3215WheelRunAngle(unittest.TestCase):
         self.assertEqual(v & 0x8000, 0x8000)   # reverse direction
 
     def test_run_angle_brakes_when_within_tolerance(self):
-        m = ST3215Wheel(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
         # Angle sequence: start at 0, then 89 (close enough to 90 within
         # tolerance=2°). The first read is the baseline; the second is
         # the loop's first poll, which should converge.
@@ -283,7 +283,7 @@ class TestST3215WheelRunAngle(unittest.TestCase):
         self.assertEqual(speed_writes[-1][1], bytes([0, 0]))
 
     def test_run_angle_velocity_clamps_to_max_dps(self):
-        m = ST3215Wheel(servo_id=4, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=4, steps_per_dps=10.0, max_dps=1000.0)
         # Big position error → P-term wants velocity well over deg_per_s.
         # Start at 0, tick 1 still at 0, tick 2 at 360 (within tolerance
         # of the 360° target so the loop exits).
@@ -299,7 +299,7 @@ class TestST3215WheelRunAngle(unittest.TestCase):
         self.assertLessEqual(v & 0x7FFF, 1000)
 
     def test_run_angle_returns_none_on_initial_read_failure(self):
-        m = ST3215Wheel(servo_id=5)
+        m = ST3215Motor(servo_id=5)
 
         # First angle() returns None (bus silent).
         def fake_read(*_args, **_kwargs):
@@ -315,8 +315,8 @@ class TestSyncServoGroup(unittest.TestCase):
         ST3215._buses = {}
 
     def test_constructor_rejects_servos_on_different_buses(self):
-        s1 = ST3215Wheel(servo_id=1, uart_id=1, tx=17, rx=16)
-        s2 = ST3215Wheel(servo_id=2, uart_id=2, tx=17, rx=16)
+        s1 = ST3215Motor(servo_id=1, uart_id=1, tx=17, rx=16)
+        s2 = ST3215Motor(servo_id=2, uart_id=2, tx=17, rx=16)
         with self.assertRaises(ValueError):
             SyncServoGroup([s1, s2])
 
@@ -325,8 +325,8 @@ class TestSyncServoGroup(unittest.TestCase):
             SyncServoGroup([])
 
     def test_set_goal_speeds_emits_one_sync_write_packet(self):
-        s1 = ST3215Wheel(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
-        s2 = ST3215Wheel(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
+        s1 = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+        s2 = ST3215Motor(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
         group = SyncServoGroup([s1, s2])
 
         # Drain any constructor packets so we examine only the sync write.
@@ -357,8 +357,8 @@ class TestSyncServoGroup(unittest.TestCase):
         self.assertEqual(body[10], (v2 >> 8) & 0xFF)
 
     def test_set_goal_speeds_respects_per_servo_invert(self):
-        s1 = ST3215Wheel(servo_id=10, steps_per_dps=10.0, max_dps=1000.0)
-        s2 = ST3215Wheel(servo_id=11, steps_per_dps=10.0, max_dps=1000.0,
+        s1 = ST3215Motor(servo_id=10, steps_per_dps=10.0, max_dps=1000.0)
+        s2 = ST3215Motor(servo_id=11, steps_per_dps=10.0, max_dps=1000.0,
                          invert=True)
         group = SyncServoGroup([s1, s2])
         baseline = len(s1._bus._uart._tx_log)
@@ -370,7 +370,7 @@ class TestSyncServoGroup(unittest.TestCase):
         self.assertEqual(body[10] & 0x80, 0x80)
 
     def test_set_goal_speeds_packet_length_field_matches_payload(self):
-        servos = [ST3215Wheel(servo_id=i + 1) for i in range(4)]
+        servos = [ST3215Motor(servo_id=i + 1) for i in range(4)]
         group = SyncServoGroup(servos)
         baseline = len(servos[0]._bus._uart._tx_log)
         group.set_goal_speeds([0, 0, 0, 0])
@@ -382,8 +382,8 @@ class TestSyncServoGroup(unittest.TestCase):
         self.assertEqual(len(body), 17)
 
     def test_set_goal_speeds_count_must_match_servo_count(self):
-        s1 = ST3215Wheel(servo_id=1)
-        s2 = ST3215Wheel(servo_id=2)
+        s1 = ST3215Motor(servo_id=1)
+        s2 = ST3215Motor(servo_id=2)
         group = SyncServoGroup([s1, s2])
         with self.assertRaises(ValueError):
             group.set_goal_speeds([100])      # too few
@@ -394,7 +394,7 @@ class TestSyncServoGroup(unittest.TestCase):
         # Position-mode ST3215 doesn't have ``_encode_goal_speed`` —
         # SyncServoGroup should refuse rather than write nonsense.
         s_pos   = ST3215(servo_id=1)
-        s_wheel = ST3215Wheel(servo_id=2)
+        s_wheel = ST3215Motor(servo_id=2)
         group = SyncServoGroup([s_pos, s_wheel])
         with self.assertRaises(TypeError):
             group.set_goal_speeds([100, 100])
@@ -402,8 +402,8 @@ class TestSyncServoGroup(unittest.TestCase):
     def test_sync_write_does_not_read_response(self):
         # Broadcast writes: no per-servo reply. Ensure we don't block
         # on the RX path waiting for one.
-        s1 = ST3215Wheel(servo_id=1)
-        s2 = ST3215Wheel(servo_id=2)
+        s1 = ST3215Motor(servo_id=1)
+        s2 = ST3215Motor(servo_id=2)
         group = SyncServoGroup([s1, s2])
         # Track _rx calls — sync_write must not call into them.
         original_rx = s1._bus._rx
