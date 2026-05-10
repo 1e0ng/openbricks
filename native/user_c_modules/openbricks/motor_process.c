@@ -331,8 +331,18 @@ static mp_obj_t mp_reset(mp_obj_t self_in) {
     (void)self_in;
     motor_process_obj_t *self = mp_get();
     mp_do_stop(self);
-    mp_obj_t clear = mp_load_attr(MP_STATE_PORT(openbricks_mp_callbacks), MP_QSTR_clear);
-    mp_call_function_0(clear);
+    // Replace the callbacks list with a fresh empty one rather than
+    // calling .clear() on the existing one. After a soft-reset, the
+    // GC heap is wiped but root pointers are not always re-zeroed —
+    // ``MP_STATE_PORT(openbricks_mp_callbacks)`` can hold a dangling
+    // pointer that the allocator has since reused for an unrelated
+    // object (we've seen bytearray). Calling ``mp_load_attr(...,
+    // clear)`` on it then raises ``'bytearray' object has no attribute
+    // 'clear'`` and the reset itself fails — which is exactly what
+    // the launcher needs *not* to do, since it runs on every
+    // ``openbricks run``. Reassigning is robust to whatever junk the
+    // slot currently holds.
+    MP_STATE_PORT(openbricks_mp_callbacks) = mp_obj_new_list(0, NULL);
     ob_motor_process_reset(core_get());
     return mp_const_none;
 }
