@@ -43,6 +43,9 @@ Two classes here:
   and exposes ``run_speed(dps)`` / ``angle()`` / ``brake()`` so it
   drops into ``DriveBase`` the same way ``MG370Motor`` does.
 
+The ST-3032 (smaller sibling — 12 V, ~10 kg·cm, same SCS protocol)
+ships as marker subclasses in ``openbricks.drivers.st3032``.
+
 Only a minimal subset of the protocol is implemented here. PR welcome.
 """
 
@@ -460,8 +463,8 @@ class SyncServoGroup:
     """Coordinated multi-servo writes via SCServo SYNC WRITE.
 
     All servos must share one ``_SCServoBus`` (same UART). Mixed
-    servo types (``ST3215``, ``ST3215Motor``, future ``ST3032`` etc.)
-    are fine since they all speak the same protocol — SYNC WRITE
+    servo types (``ST3215``, ``ST3215Motor``, ``ST3032``, ``ST3032Motor``)
+    are fine since they all speak the same SCS protocol — SYNC WRITE
     just blasts the same register on all listed IDs.
 
     Use this whenever you have multiple servos that should apply a
