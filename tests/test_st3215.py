@@ -225,6 +225,91 @@ class TestST3215Wheel(unittest.TestCase):
         self.assertAlmostEqual(after, 0.0, places=2)
 
 
+class TestST3215WheelRunAngle(unittest.TestCase):
+    def setUp(self):
+        ST3215._buses = {}
+
+    def _patch_angle(self, motor, sequence):
+        """Make successive ``motor.angle()`` calls return the values
+        in ``sequence`` (degrees). Bypasses the raw register read +
+        12-bit wrap correction — those are tested separately. Last
+        value sticks once the sequence runs out so a converging
+        loop sees a stable terminal reading."""
+        angles = list(sequence)
+
+        def fake_angle():
+            return angles.pop(0) if len(angles) > 1 else angles[0]
+        motor.angle = fake_angle
+
+    def test_run_angle_no_wait_kicks_off_at_cruise_speed(self):
+        m = ST3215Wheel(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+        # Provide a single angle reading for the start-position read.
+        self._patch_angle(m, [0.0])
+        baseline = len(m._bus._uart._tx_log)
+        m.run_angle(200, 90, wait=False)
+
+        speed_writes = _writes_to(m._bus._uart._tx_log[baseline:],
+                                  _REG_GOAL_SPEED)
+        # Single goal-speed write at the cruise speed in the +direction.
+        self.assertEqual(len(speed_writes), 1)
+        sid, data = speed_writes[0]
+        v = data[0] | (data[1] << 8)
+        # No sign bit set (forward), magnitude = 200 dps × 10 steps/dps = 2000
+        self.assertEqual(v & 0x8000, 0)
+        self.assertEqual(v & 0x7FFF, 2000)
+
+    def test_run_angle_no_wait_negative_target_drives_reverse(self):
+        m = ST3215Wheel(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_angle(m, [0.0])
+        baseline = len(m._bus._uart._tx_log)
+        m.run_angle(200, -90, wait=False)
+        speed_writes = _writes_to(m._bus._uart._tx_log[baseline:],
+                                  _REG_GOAL_SPEED)
+        v = speed_writes[0][1][0] | (speed_writes[0][1][1] << 8)
+        self.assertEqual(v & 0x8000, 0x8000)   # reverse direction
+
+    def test_run_angle_brakes_when_within_tolerance(self):
+        m = ST3215Wheel(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
+        # Angle sequence: start at 0, then 89 (close enough to 90 within
+        # tolerance=2°). The first read is the baseline; the second is
+        # the loop's first poll, which should converge.
+        self._patch_angle(m, [0.0, 89.0])
+        baseline = len(m._bus._uart._tx_log)
+        m.run_angle(deg_per_s=200, target_angle=90,
+                    wait=True, tolerance_deg=2.0, poll_ms=0)
+        # Last write to GOAL_SPEED should be 0 (brake).
+        speed_writes = _writes_to(m._bus._uart._tx_log[baseline:],
+                                  _REG_GOAL_SPEED)
+        self.assertEqual(speed_writes[-1][1], bytes([0, 0]))
+
+    def test_run_angle_velocity_clamps_to_max_dps(self):
+        m = ST3215Wheel(servo_id=4, steps_per_dps=10.0, max_dps=1000.0)
+        # Big position error → P-term wants velocity well over deg_per_s.
+        # Start at 0, tick 1 still at 0, tick 2 at 360 (within tolerance
+        # of the 360° target so the loop exits).
+        self._patch_angle(m, [0.0, 0.0, 360.0])
+        baseline = len(m._bus._uart._tx_log)
+        m.run_angle(deg_per_s=100, target_angle=360,
+                    wait=True, tolerance_deg=2.0, kp=10.0, poll_ms=0)
+        speed_writes = _writes_to(m._bus._uart._tx_log[baseline:],
+                                  _REG_GOAL_SPEED)
+        # First in-loop write should be clamped to 100 dps × 10 = 1000 steps,
+        # NOT 360° × kp=10 × 10 = 36000 steps. (Brake comes after.)
+        v = speed_writes[0][1][0] | (speed_writes[0][1][1] << 8)
+        self.assertLessEqual(v & 0x7FFF, 1000)
+
+    def test_run_angle_returns_none_on_initial_read_failure(self):
+        m = ST3215Wheel(servo_id=5)
+
+        # First angle() returns None (bus silent).
+        def fake_read(*_args, **_kwargs):
+            return None
+        m._bus.read = fake_read
+        # Should NOT loop forever — returns cleanly.
+        result = m.run_angle(100, 90, wait=False)
+        self.assertIsNone(result)
+
+
 class TestSyncServoGroup(unittest.TestCase):
     def setUp(self):
         ST3215._buses = {}
