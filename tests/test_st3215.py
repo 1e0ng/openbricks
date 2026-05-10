@@ -81,6 +81,33 @@ class TestST3215(unittest.TestCase):
         servo = ST3215(servo_id=1)
         self.assertIsNone(servo.angle())
 
+    def test_tx_drains_stale_rx_bytes_first(self):
+        # Bug: half-duplex bus echo or a timed-out previous reply can
+        # leave bytes in the RX FIFO. Without draining before TX, the
+        # next read() pulls those stale bytes — symptom on real
+        # hardware: ping returns True (any 6 bytes pass the length
+        # check) but read() returns None (stale bytes don't form a
+        # valid reply). _tx must drain first.
+        servo = ST3215(servo_id=1)
+        # Pre-stuff the RX buffer with stale junk + the actual valid
+        # reply we expect to see for a present-position read.
+        # Real reply layout for a 2-byte read: FF FF ID LEN ERR D0 D1 CHK.
+        valid_reply = b"\xFF\xFF\x01\x04\x00\x39\x05\xBC"
+        servo._bus._uart._rx_buf = b"\xAA\x55\xDE\xAD" + valid_reply
+        # The read should drain the junk in _tx, send the read packet,
+        # then read the valid reply that we placed AFTER the junk.
+        # Since the fake UART has only one buffer, draining empties
+        # everything — so we restage the valid reply post-drain via
+        # a write-side hook on the fake.
+        original_write = servo._bus._uart.write
+        def write_then_stage(data):
+            servo._bus._uart._rx_buf = valid_reply
+            return original_write(data)
+        servo._bus._uart.write = write_then_stage
+        # Read should now succeed against the valid reply (D0=0x39 D1=0x05).
+        result = servo._bus.read(servo._id, _REG_PRESENT_POS, 2)
+        self.assertEqual(result, b"\x39\x05")
+
     def test_buses_are_shared_per_uart(self):
         # Two servos on the same UART params share one _SCServoBus instance.
         s1 = ST3215(servo_id=1, uart_id=2, tx=17, rx=16)

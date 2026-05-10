@@ -96,6 +96,16 @@ class _SCServoBus:
         return (~s) & 0xFF
 
     def _tx(self, data):
+        # Drain any bytes still sitting in the RX FIFO from boot, from
+        # half-duplex bus echo, or from a previous reply we didn't fully
+        # consume. Without this, the very next ``_rx`` would return
+        # stale residue and the SCS header check (``starts with 0xFFFF``)
+        # could either fail outright or — worse — succeed against
+        # noise that happens to start with 0xFFFF, mis-parsing the
+        # rest of the packet. Symptom: ``ping`` returns True (6 bytes
+        # of anything come back) but ``read`` returns None.
+        while self._uart.any():
+            self._uart.read(self._uart.any())
         if self._dir is not None:
             self._dir.value(1)
         self._uart.write(data)
