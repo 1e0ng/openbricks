@@ -393,6 +393,63 @@ class ST3215Wheel(Motor):
             offset_change_count = -offset_change_count
         self._zero_offset_count += offset_change_count
 
+    # --- closed-loop position move ----------------------------------------
+
+    def run_angle(self, deg_per_s, target_angle, wait=True,
+                  tolerance_deg=2.0, kp=2.0, poll_ms=20):
+        """Rotate by ``target_angle`` degrees at up to ``deg_per_s``.
+
+        Implementation: Python position-PID on top of the servo's
+        internal velocity loop. Each ``poll_ms`` tick we read the
+        current angle, compute ``target_velocity = kp × (target -
+        current)`` clamped to ``±deg_per_s``, and write that as the
+        goal-speed. As the position error shrinks the commanded
+        velocity tapers naturally — no separate decel ramp, no
+        open-loop "when to brake" decision (which is what makes the
+        simpler bang-bang approach overshoot at >50 Hz polling).
+
+        ``target_angle`` is RELATIVE — calling ``run_angle(200, 360)``
+        rotates 360° forward from the present position.
+
+        Convergence on a typical bench rig (Feetech ST-3215 over
+        1 Mbps UART, 50 Hz outer loop): within ~1–2° of the target
+        with the defaults. Tune ``kp`` up for faster convergence
+        (risk: chatter near target if poll_ms gets too coarse) or
+        ``tolerance_deg`` down for tighter end position (risk: the
+        loop can hang if the servo can't actually stop within that
+        band — in which case raise ``tolerance_deg`` first, before
+        chasing kp).
+
+        ``wait=False`` kicks off motion at the cruise speed in the
+        right direction and returns; the caller must poll and brake.
+        """
+        start = self.angle()
+        if start is None:
+            return
+        target  = start + float(target_angle)
+        max_dps = abs(float(deg_per_s))
+        tol     = abs(float(tolerance_deg))
+
+        if not wait:
+            direction = 1.0 if target_angle >= 0 else -1.0
+            self.run_speed(max_dps * direction)
+            return
+
+        while True:
+            current = self.angle()
+            if current is None:
+                time.sleep_ms(poll_ms)
+                continue
+            error = target - current
+            if abs(error) < tol:
+                break
+            target_dps = kp * error
+            if target_dps >  max_dps: target_dps =  max_dps
+            if target_dps < -max_dps: target_dps = -max_dps
+            self.run_speed(target_dps)
+            time.sleep_ms(poll_ms)
+        self.brake()
+
     # --- ST-3215-specific extras ------------------------------------------
 
     def ping(self):
