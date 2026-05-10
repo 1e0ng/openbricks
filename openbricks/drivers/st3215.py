@@ -399,59 +399,126 @@ class ST3215Motor(Motor):
     # --- closed-loop position move ----------------------------------------
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
-                  tolerance_deg=2.0, kp=2.0, poll_ms=20):
-        """Rotate by ``target_angle`` degrees at up to ``deg_per_s``.
+                  tolerance_deg=0.5, kp=None, poll_ms=None):
+        """Rotate by ``target_angle`` degrees at up to ``deg_per_s``,
+        ending within ``tolerance_deg`` of the target.
 
-        Implementation: Python position-PID on top of the servo's
-        internal velocity loop. Each ``poll_ms`` tick we read the
-        current angle, compute ``target_velocity = kp × (target -
-        current)`` clamped to ``±deg_per_s``, and write that as the
-        goal-speed. As the position error shrinks the commanded
-        velocity tapers naturally — no separate decel ramp, no
-        open-loop "when to brake" decision (which is what makes the
-        simpler bang-bang approach overshoot at >50 Hz polling).
+        Implementation: switch the servo into native position mode
+        (op_mode=0) for the duration of the move, write the goal-
+        position, and let the servo's internal PID handle convergence.
+        Restores wheel mode (op_mode=1) on completion. Sub-degree
+        accuracy on a typical bench rig — the encoder is 4096
+        counts/rev (≈0.088°/count) and the servo's internal PID will
+        park within a few counts.
 
-        ``target_angle`` is RELATIVE — calling ``run_angle(200, 360)``
-        rotates 360° forward from the present position.
+        ``target_angle`` is RELATIVE — ``run_angle(200, 360)`` rotates
+        360° forward from the present position.
 
-        Convergence on a typical bench rig (Feetech ST-3215 over
-        1 Mbps UART, 50 Hz outer loop): within ~1–2° of the target
-        with the defaults. Tune ``kp`` up for faster convergence
-        (risk: chatter near target if poll_ms gets too coarse) or
-        ``tolerance_deg`` down for tighter end position (risk: the
-        loop can hang if the servo can't actually stop within that
-        band — in which case raise ``tolerance_deg`` first, before
-        chasing kp).
+        Moves larger than ~180° are split into ≤180° sub-moves so the
+        servo's shortest-path routing in position mode always matches
+        the intended direction (a single 270° forward command would
+        otherwise be executed as 90° backward).
 
-        ``wait=False`` kicks off motion at the cruise speed in the
-        right direction and returns; the caller must poll and brake.
+        The legacy ``kp`` / ``poll_ms`` arguments are accepted for
+        back-compat with the velocity-mode implementation but no
+        longer apply — the PID lives on the servo, not in Python.
         """
-        start = self.angle()
-        if start is None:
+        if target_angle == 0:
             return
-        target  = start + float(target_angle)
         max_dps = abs(float(deg_per_s))
-        tol     = abs(float(tolerance_deg))
-
-        if not wait:
-            direction = 1.0 if target_angle >= 0 else -1.0
-            self.run_speed(max_dps * direction)
+        if max_dps <= 0:
             return
 
-        while True:
-            current = self.angle()
-            if current is None:
-                time.sleep_ms(poll_ms)
-                continue
-            error = target - current
-            if abs(error) < tol:
-                break
-            target_dps = kp * error
-            if target_dps >  max_dps: target_dps =  max_dps
-            if target_dps < -max_dps: target_dps = -max_dps
-            self.run_speed(target_dps)
-            time.sleep_ms(poll_ms)
-        self.brake()
+        # Encoder-count equivalents.
+        target_counts = int(round(float(target_angle) *
+                                  _COUNTS_PER_REV / 360.0))
+        if self._invert:
+            target_counts = -target_counts
+        tol_counts = int(round(abs(float(tolerance_deg)) *
+                               _COUNTS_PER_REV / 360.0))
+        if tol_counts < 1:
+            tol_counts = 1
+
+        # Goal-speed register is unsigned in position mode (direction
+        # is implied by goal-position vs present-position). Clamp to
+        # the per-instance max_dps configured for this servo.
+        capped_dps = max_dps if max_dps < self._max_dps else self._max_dps
+        speed_steps = int(round(capped_dps * self._steps_per_dps))
+        if speed_steps < 1:
+            speed_steps = 1
+        if speed_steps > 0x7FFF:
+            speed_steps = 0x7FFF
+
+        # Switch into position mode and set the velocity cap.
+        self._bus.write(self._id, _REG_OP_MODE, bytes([_MODE_POSITION]))
+        self._bus.write(self._id, _REG_GOAL_SPEED,
+                        bytes([speed_steps & 0xFF,
+                               (speed_steps >> 8) & 0xFF]))
+
+        # Sub-move size cap: < half a revolution so the servo's
+        # shortest-path routing unambiguously matches our direction.
+        # 2000 counts ≈ 175.8°.
+        _MAX_CHUNK = 2000
+
+        try:
+            if not wait:
+                # Single non-blocking sub-move toward the target.
+                # For >180° targets we still only kick off the first
+                # chunk; caller is expected to follow up.
+                present = self._read_present_pos()
+                if present is None:
+                    return
+                chunk = target_counts
+                if chunk >  _MAX_CHUNK: chunk =  _MAX_CHUNK
+                if chunk < -_MAX_CHUNK: chunk = -_MAX_CHUNK
+                target_pos = (present + chunk) % _COUNTS_PER_REV
+                self._bus.write(self._id, _REG_GOAL_POSITION,
+                                bytes([target_pos & 0xFF,
+                                       (target_pos >> 8) & 0xFF]))
+                return
+
+            remaining = target_counts
+            while abs(remaining) > tol_counts:
+                present = self._read_present_pos()
+                if present is None:
+                    return  # bus silent — bail rather than spin.
+
+                chunk = remaining
+                if chunk >  _MAX_CHUNK: chunk =  _MAX_CHUNK
+                if chunk < -_MAX_CHUNK: chunk = -_MAX_CHUNK
+                target_pos = (present + chunk) % _COUNTS_PER_REV
+                self._bus.write(self._id, _REG_GOAL_POSITION,
+                                bytes([target_pos & 0xFF,
+                                       (target_pos >> 8) & 0xFF]))
+
+                # Wait for the servo to reach this sub-target. Time
+                # budget: chunk_counts / steps_per_sec, ×3 for the
+                # accel/decel ramp, plus a 200 ms floor.
+                est_ms = int(abs(chunk) * 1000 / speed_steps + 200)
+                deadline = time.ticks_ms() + min(est_ms * 3, 5000)
+                while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+                    cur = self._read_present_pos()
+                    if cur is None:
+                        time.sleep_ms(10)
+                        continue
+                    # Shortest-path distance from cur to target_pos.
+                    err = (target_pos - cur) % _COUNTS_PER_REV
+                    if err > _COUNTS_PER_REV // 2:
+                        err -= _COUNTS_PER_REV
+                    if abs(err) <= tol_counts:
+                        break
+                    time.sleep_ms(10)
+
+                remaining -= chunk
+                # Keep the software multi-turn accumulator current —
+                # each chunk is ≤ half a rev so the wrap heuristic
+                # in angle() handles the correction correctly.
+                self.angle()
+        finally:
+            # Restore wheel mode and brake regardless of outcome.
+            self._bus.write(self._id, _REG_OP_MODE,
+                            bytes([_MODE_WHEEL]))
+            self._write_goal_speed_signed(0)
 
     # --- ST-3215-specific extras ------------------------------------------
 
