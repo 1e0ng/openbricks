@@ -21,14 +21,16 @@ permissions:
 
 # Belt-and-suspenders: the JS actions used below are pinned to
 # Node-24-native major versions (``actions/checkout@v5``,
-# ``actions/setup-python@v6``, ``codecov/codecov-action@v6``), so
-# the deprecation warning that prompted ``FORCE_JAVASCRIPT_ACTIONS_
-# TO_NODE24=true`` no longer fires. We keep the env var anyway as
-# free insurance for any future action we add that hasn't been
-# bumped yet — silently picks the new runtime instead of dropping
-# the user back into the deprecation warning. Once 2026-06-02 hits
-# and Node 24 becomes the default for all actions, this line is a
-# no-op and can be deleted. See:
+# ``actions/setup-python@v6``, ``codecov/codecov-action@v6``,
+# ``actions/upload-artifact@v7``, ``actions/download-artifact@v8``,
+# ``softprops/action-gh-release@v3``), so the deprecation warning
+# that prompted ``FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`` no
+# longer fires. We keep the env var anyway as free insurance for
+# any future action we add that hasn't been bumped yet — silently
+# picks the new runtime instead of dropping the user back into the
+# deprecation warning. Once 2026-06-02 hits and Node 24 becomes
+# the default for all actions, this line is a no-op and can be
+# deleted. See:
 # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -376,7 +378,7 @@ jobs:
           ls -lah release-out/
 
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: openbricks-${{ matrix.target }}-${{ steps.meta.outputs.version }}
           path: release-out/
@@ -428,7 +430,7 @@ jobs:
           qemu-system-xtensa --version | head -3
 
       - name: Download firmware artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: openbricks-${{ matrix.target }}-${{ needs.firmware.outputs.version }}
           path: firmware-out
@@ -521,7 +523,7 @@ jobs:
       # Download every matrix artifact (openbricks-esp32-*, openbricks-esp32s3-*, …)
       # and merge them into a single release-out/ directory.
       - name: Download firmware artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: openbricks-*-${{ needs.firmware.outputs.version }}
           path: release-out/
@@ -534,7 +536,7 @@ jobs:
       # new commit).
       - name: Publish rolling latest (main)
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
           name: latest (main)
@@ -561,7 +563,7 @@ jobs:
       # primary artifact users download.
       - name: Publish versioned release (tag)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           make_latest: true
@@ -589,7 +591,7 @@ jobs:
           python -m build --sdist
 
       - name: Upload sdist artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: openbricks-sdist
           path: tools/openbricks/dist/*.tar.gz
@@ -615,13 +617,13 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.0.0
+        uses: pypa/cibuildwheel@v3.4.1
         with:
           package-dir: tools/openbricks
           output-dir: wheelhouse
 
       - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           # Distinct artifact name per OS so the matrix legs don't
           # collide. ``publish-openbricks`` downloads the lot via a
@@ -649,13 +651,13 @@ jobs:
       id-token: write   # required by PyPI trusted publisher (OIDC)
     steps:
       - name: Download sdist artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: openbricks-sdist
           path: dist
 
       - name: Download wheel artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: openbricks-wheels-*
           path: dist
