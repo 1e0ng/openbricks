@@ -175,15 +175,22 @@ class DriveBase:
     # ---- fallbacks for open-loop motor pairs ----
     def _straight_fallback(self, distance_mm):
         target_wheel_deg = distance_mm / self._wheel_circumference * 360
-        self._left.reset_angle(0)
-        self._right.reset_angle(0)
+        # Snapshot the starting angle instead of calling ``reset_angle(0)``.
+        # Mutating the accumulator surprises any caller that reads
+        # ``motor.angle()`` after ``straight()`` — the value they get
+        # is "wheel motion since this most recent straight()", not
+        # the cumulative angle they were tracking. Pybricks DriveBase
+        # behaves this way too. We just subtract the starting offsets
+        # inside the loop and at the comparison.
+        start_left  = self._left.angle()
+        start_right = self._right.angle()
 
         direction = 1 if distance_mm >= 0 else -1
         speed = self._straight_speed_dps * direction
 
         while True:
-            left_deg  = self._left.angle()
-            right_deg = self._right.angle()
+            left_deg  = self._left.angle()  - start_left
+            right_deg = self._right.angle() - start_right
             avg = (left_deg + right_deg) / 2
             if direction > 0 and avg >= target_wheel_deg:
                 break
@@ -199,15 +206,15 @@ class DriveBase:
         arc_mm = math.radians(abs(angle_deg)) * (self._axle_track / 2)
         wheel_deg_each = arc_mm / self._wheel_circumference * 360
 
-        self._left.reset_angle(0)
-        self._right.reset_angle(0)
+        start_left  = self._left.angle()
+        start_right = self._right.angle()
 
         direction = 1 if angle_deg >= 0 else -1
         speed = self._turn_rate_dps
 
         while True:
-            left  = self._left.angle() * (-direction)
-            right = self._right.angle() * direction
+            left  = (self._left.angle()  - start_left)  * (-direction)
+            right = (self._right.angle() - start_right) * direction
             if left >= wheel_deg_each and right >= wheel_deg_each:
                 break
             self._run_at_dps(self._left,  -speed * direction)
