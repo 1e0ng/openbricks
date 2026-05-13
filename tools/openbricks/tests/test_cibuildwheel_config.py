@@ -64,14 +64,24 @@ class CibuildwheelConfigTests(unittest.TestCase):
                 "build line missing %s — wheels for that interpreter "
                 "won't be produced." % py)
 
-    def test_skips_pypy_musllinux_and_32bit(self):
+    def test_skips_musllinux_and_32bit(self):
         skip = self.cfg.get("skip", [])
         # Each skip pattern is fail-safe: if cibuildwheel ever changes
-        # its defaults, these stay explicit.
-        self.assertIn("pp*", skip)
+        # its defaults, these stay explicit. (PyPy isn't in this list:
+        # ``build`` already enumerates only ``cp*`` so PyPy is never a
+        # candidate, and cibuildwheel 3.4 warns about ``pp*`` as an
+        # unused selector when PyPy isn't in the enabled-groups set.)
         self.assertIn("*-musllinux*", skip)
         self.assertIn("*-manylinux_i686", skip)
         self.assertIn("*-win32", skip)
+
+    def test_build_line_excludes_pypy(self):
+        # Belt-and-suspenders for the dropped ``pp*`` skip: confirm the
+        # ``build`` line itself contains no PyPy patterns. If someone
+        # ever adds ``pp*`` to ``build``, this test catches it and
+        # whoever does it has to bring back the skip explicitly.
+        build = self.cfg.get("build", "")
+        self.assertNotIn("pp", build)
 
     def test_smoke_import_targets_a_real_attribute(self):
         # The test-command imports openbricks_sim._native and asserts
