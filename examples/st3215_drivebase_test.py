@@ -1,54 +1,117 @@
 # SPDX-License-Identifier: MIT
 """
-Smoke test for a 2x ST-3215-C018 drivebase.
+Bench test for a 2× ST-3215 drivebase on a URT-2 adapter.
 
-Drives forward 200 mm, brakes, prints both wheels' final angles. Use
-it to verify the ST-3215 wheel-mode pipeline (driver + DriveBase) on
-the bench.
+Pings both motors, exercises each individually, then runs the
+coordinated ``DriveBase`` moves (straight + turn). Output narrates
+each step so a failure pinpoints which layer broke.
 
 Hardware:
-    * 2x ST-3215-C018 (continuous-rotation variant) on one TTL bus
-    * ESP32-S3 on UART1 (TX=17, RX=16) — adjust if your board is
-      wired differently. Some adapters need a direction-enable GPIO
-      for true half-duplex; pass ``dir_pin=...`` if so.
-    * 7.4V supply (2S Li-ion or 7.4V LiPo) on the servo VCC rail.
-      The ESP32 logic side stays at 3.3V — the bus board takes care
-      of level shifting.
-    * Servo IDs: assign each servo a unique ID using a Feetech
-      programmer / FD-debug tool before wiring them onto a shared
-      bus. Defaults to ID 1 (left) and ID 2 (right) below.
+    * 2× ST-3215 (continuous-rotation, wheel mode), daisy-chained on
+      one URT-2. Left at ID=1, right at ID=2 (re-ID with
+      ``examples/st3215_reid.py`` if both are factory-default).
+    * ESP32-S3 GPIO14 → URT-2 RX, GPIO6 → URT-2 TX, common GND.
+    * 12 V into URT-2 servo rail. ESP32-S3 5 V from its own supply.
 
-Edit the IDs / UART pins below to match your wiring:
+Run with:
+    openbricks run -n ls examples/st3215_drivebase_test.py
+
+Chassis geometry — EDIT to your robot. Defaults are placeholders;
+on a bench with bare motors the values don't correspond to physical
+distance, but the coordinated-motion check still works.
 """
+
+import time
 
 from openbricks.drivers.st3215 import ST3215Motor
 from openbricks.robotics import DriveBase
-from openbricks.tools import wait
+
 
 LEFT_ID, RIGHT_ID = 1, 2
-UART_ID, TX, RX   = 1, 17, 16
+UART_ID, TX, RX   = 1, 14, 6
 
-left = ST3215Motor(
-    servo_id=LEFT_ID,
-    uart_id=UART_ID, tx=TX, rx=RX,
-)
-right = ST3215Motor(
-    servo_id=RIGHT_ID,
-    uart_id=UART_ID, tx=TX, rx=RX,
-    invert=True,        # right motor mirrors left mounting; flip if it spins backwards
-)
+WHEEL_DIAMETER_MM = 65    # EDIT to your wheels
+AXLE_TRACK_MM     = 120   # EDIT to your chassis
 
-# wheel_diameter / axle_track in mm — EDIT to your chassis.
-db = DriveBase(left, right, wheel_diameter_mm=65, axle_track_mm=120)
-db.settings(straight_speed=80, turn_rate=90)
+# Tame defaults — bump only after the basic test passes.
+STRAIGHT_SPEED = 80       # mm/s (per project test policy)
+TURN_RATE      = 90       # deg/s
 
-print("ping left  =", left.ping())
-print("ping right =", right.ping())
 
-print("before: left=%.1f° right=%.1f°" % (left.angle() or 0.0,
-                                          right.angle() or 0.0))
-db.straight(200)
-wait(200)
-print("after:  left=%.1f° right=%.1f°" % (left.angle() or 0.0,
-                                          right.angle() or 0.0))
-print("done.")
+def line(msg):
+    print(msg)
+
+
+def main():
+    line("--- ST-3215 drivebase bench test ---")
+
+    left  = ST3215Motor(servo_id=LEFT_ID,  uart_id=UART_ID, tx=TX, rx=RX)
+    right = ST3215Motor(servo_id=RIGHT_ID, uart_id=UART_ID, tx=TX, rx=RX,
+                        invert=True)   # flip if right wheel spins the wrong way
+
+    # --- 1. ping both ---------------------------------------------------
+    line("[1] ping both servos ...")
+    pl, pr = left.ping(), right.ping()
+    line("    left  (id=%d): %s" % (LEFT_ID,  "OK" if pl else "NO RESPONSE"))
+    line("    right (id=%d): %s" % (RIGHT_ID, "OK" if pr else "NO RESPONSE"))
+    if not (pl and pr):
+        line("    Aborting — fix the bus before continuing.")
+        return
+
+    # --- 2. baseline angles --------------------------------------------
+    line("[2] baseline angles ...")
+    al, ar = left.angle(), right.angle()
+    line("    left=%s°  right=%s°" % (al, ar))
+    if al is None or ar is None:
+        line("    angle() returned None — RX path is dead for at least one servo.")
+        return
+
+    # --- 3. individual run_speed (exercises each motor in isolation) ---
+    line("[3a] left  run_speed(+60 dps) for 1 s ...")
+    left.run_speed(60); time.sleep(1.0); left.brake()
+    line("    left delta = %.1f°" % ((left.angle() or 0) - (al or 0)))
+
+    time.sleep(0.3)
+
+    line("[3b] right run_speed(+60 dps) for 1 s ...")
+    right.run_speed(60); time.sleep(1.0); right.brake()
+    line("    right delta = %.1f°" % ((right.angle() or 0) - (ar or 0)))
+    line("    Expect both deltas to be the SAME SIGN (forward for both).")
+    line("    If right is opposite, change invert= in this script.")
+
+    time.sleep(0.5)
+
+    # --- 4. coordinated motion via DriveBase ---------------------------
+    db = DriveBase(left, right,
+                   wheel_diameter_mm=WHEEL_DIAMETER_MM,
+                   axle_track_mm=AXLE_TRACK_MM)
+    db.settings(straight_speed=STRAIGHT_SPEED, turn_rate=TURN_RATE)
+
+    line("[4] DriveBase straight(200 mm) at %d mm/s ..." % STRAIGHT_SPEED)
+    al_b, ar_b = left.angle(), right.angle()
+    db.straight(200)
+    al_a, ar_a = left.angle(), right.angle()
+    dl, dr = (al_a or 0) - (al_b or 0), (ar_a or 0) - (ar_b or 0)
+    # 200 mm at 65 mm wheel diameter → 200 / (π × 65) × 360 ≈ 352.7° per wheel.
+    line("    left delta  = %.1f° (target ~%.1f°)" %
+         (dl, 200 / (3.14159 * WHEEL_DIAMETER_MM) * 360))
+    line("    right delta = %.1f° (target ~%.1f°)" %
+         (dr, 200 / (3.14159 * WHEEL_DIAMETER_MM) * 360))
+    line("    Expect: left ≈ right (within ~5%%). Mismatch = slip or stuck wheel.")
+
+    time.sleep(0.5)
+
+    # --- 5. turn in place ----------------------------------------------
+    line("[5] DriveBase turn(+90°) at %d deg/s ..." % TURN_RATE)
+    al_b, ar_b = left.angle(), right.angle()
+    db.turn(90)
+    al_a, ar_a = left.angle(), right.angle()
+    dl, dr = (al_a or 0) - (al_b or 0), (ar_a or 0) - (ar_b or 0)
+    line("    left delta  = %+.1f°" % dl)
+    line("    right delta = %+.1f°" % dr)
+    line("    Expect: opposite signs (one wheel forward, one reverse).")
+
+    line("--- done ---")
+
+
+main()
