@@ -111,6 +111,61 @@ def main():
     line("    right delta = %+.1f°" % dr)
     line("    Expect: opposite signs (one wheel forward, one reverse).")
 
+    time.sleep(0.5)
+
+    # --- 6. run_angle precision moves on each motor --------------------
+    # Exercises ST3215Motor.run_angle (native position-mode PID with
+    # the anchor fix from 1.6.3). Single-rev moves should land within
+    # ±0.5° of target; multi-chunk +720° within ±1°.
+    line("[6a] left  run_angle(60 dps, +90°) ...")
+    a_before = left.angle()
+    left.run_angle(60, 90)
+    a_after = left.angle()
+    err = (a_after or 0) - (a_before or 0) - 90
+    line("    delta = %+.2f°  error = %+.2f° (pass: |err| ≤ 0.5°)" %
+         ((a_after or 0) - (a_before or 0), err))
+
+    time.sleep(0.3)
+
+    line("[6b] left  run_angle(60 dps, -90°) — return ...")
+    a_before = left.angle()
+    left.run_angle(60, -90)
+    a_after = left.angle()
+    err = (a_after or 0) - (a_before or 0) + 90
+    line("    delta = %+.2f°  error = %+.2f° (pass: |err| ≤ 0.5°)" %
+         ((a_after or 0) - (a_before or 0), err))
+
+    time.sleep(0.3)
+
+    line("[6c] right run_angle(60 dps, +90°) ...")
+    a_before = right.angle()
+    right.run_angle(60, 90)
+    a_after = right.angle()
+    err = (a_after or 0) - (a_before or 0) - 90
+    line("    delta = %+.2f°  error = %+.2f° (pass: |err| ≤ 0.5°)" %
+         ((a_after or 0) - (a_before or 0), err))
+
+    time.sleep(0.3)
+
+    line("[6d] right run_angle(60 dps, -90°) — return ...")
+    a_before = right.angle()
+    right.run_angle(60, -90)
+    a_after = right.angle()
+    err = (a_after or 0) - (a_before or 0) + 90
+    line("    delta = %+.2f°  error = %+.2f° (pass: |err| ≤ 0.5°)" %
+         ((a_after or 0) - (a_before or 0), err))
+
+    time.sleep(0.3)
+
+    # Multi-chunk: 720° exercises the ≤180° sub-move chunking.
+    line("[6e] left  run_angle(120 dps, +720°) — multi-chunk ...")
+    a_before = left.angle()
+    left.run_angle(120, 720)
+    a_after = left.angle()
+    err = (a_after or 0) - (a_before or 0) - 720
+    line("    delta = %+.2f°  error = %+.2f° (pass: |err| ≤ 1°)" %
+         ((a_after or 0) - (a_before or 0), err))
+
     line("--- done ---")
 
 
