@@ -459,7 +459,26 @@ class ST3215Motor(Motor):
         if speed_steps > 0x7FFF:
             speed_steps = 0x7FFF
 
-        # Switch into position mode and set the velocity cap.
+        # Lock the goal-position to where the wheel currently is BEFORE
+        # flipping into position mode. Otherwise the moment mode goes
+        # 1 → 0, the servo's position PID acts on whatever stale value
+        # is still sitting in the goal-position register (boot default,
+        # or the last value written by some unrelated code) — the
+        # wheel takes off toward that bogus target for as many ms as
+        # it takes us to issue the real goal-position write, and the
+        # whole move ends up off by the drift. Symptom: the first
+        # run_angle after open-loop spins undershoots by ~5-10° while
+        # subsequent ones are fine (goal-position is now sane).
+        #
+        # By writing goal-position = present before the mode switch,
+        # the position PID has nowhere to drift the moment it
+        # activates — it's already "at target".
+        anchor = self._read_present_pos()
+        if anchor is None:
+            return
+        self._bus.write(self._id, _REG_GOAL_POSITION,
+                        bytes([anchor & 0xFF, (anchor >> 8) & 0xFF]))
+        # Now safe to switch into position mode and set the velocity cap.
         self._bus.write(self._id, _REG_OP_MODE, bytes([_MODE_POSITION]))
         self._bus.write(self._id, _REG_GOAL_SPEED,
                         bytes([speed_steps & 0xFF,
