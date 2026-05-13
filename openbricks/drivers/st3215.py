@@ -88,6 +88,16 @@ class _SCServoBus:
     def __init__(self, uart_id, tx, rx, baud=1_000_000, dir_pin=None):
         self._uart = UART(uart_id, baudrate=baud, tx=tx, rx=rx, timeout=50)
         self._dir = Pin(dir_pin, Pin.OUT, value=0) if dir_pin is not None else None
+        # UART hardware takes ~10 ms to be ready for clean TX on
+        # ESP32-S3 — without this settle, the first packet sent
+        # (typically ST3215Motor's constructor write to op_mode)
+        # leaves the peripheral as malformed bits on the wire. The
+        # servo doesn't reply, the URT-2 adapter sometimes enters a
+        # sulk, and every subsequent read returns junk → ``ping()``
+        # falsely reports False even though the bus is otherwise
+        # fine. Bench-confirmed: settle here makes the constructor-
+        # plus-immediate-ping pattern work; skip and it doesn't.
+        time.sleep_ms(20)
 
     def _checksum(self, parts):
         s = 0
