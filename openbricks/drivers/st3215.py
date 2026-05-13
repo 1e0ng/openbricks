@@ -419,7 +419,8 @@ class ST3215Motor(Motor):
     # --- closed-loop position move ----------------------------------------
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
-                  tolerance_deg=0.5, kp=None, poll_ms=None):
+                  tolerance_deg=0.5, kp=None, poll_ms=None,
+                  debug=False):
         """Rotate by ``target_angle`` degrees at up to ``deg_per_s``,
         ending within ``tolerance_deg`` of the target.
 
@@ -442,6 +443,12 @@ class ST3215Motor(Motor):
         The legacy ``kp`` / ``poll_ms`` arguments are accepted for
         back-compat with the velocity-mode implementation but no
         longer apply — the PID lives on the servo, not in Python.
+
+        ``debug=True`` enables a position-trace dump: the function
+        captures (t_ms, present_pos) on every inner-loop poll plus
+        key transition points (anchor, target_pos, loop exit,
+        post-brake, post-settle) and prints them at the end. Off by
+        default so the production path stays quiet.
         """
         if target_angle == 0:
             return
@@ -483,9 +490,16 @@ class ST3215Motor(Motor):
         # By writing goal-position = present before the mode switch,
         # the position PID has nowhere to drift the moment it
         # activates — it's already "at target".
+        # Diagnostic trace (only populated when debug=True). Keep the
+        # untraced path identical to before — no per-poll overhead.
+        trace = [] if debug else None
+        t0 = time.ticks_ms() if debug else 0
+
         anchor = self._read_present_pos()
         if anchor is None:
             return
+        if debug:
+            trace.append(("anchor", time.ticks_diff(time.ticks_ms(), t0), anchor))
         self._bus.write(self._id, _REG_GOAL_POSITION,
                         bytes([anchor & 0xFF, (anchor >> 8) & 0xFF]))
         # Now safe to switch into position mode and set the velocity cap.
@@ -493,6 +507,8 @@ class ST3215Motor(Motor):
         self._bus.write(self._id, _REG_GOAL_SPEED,
                         bytes([speed_steps & 0xFF,
                                (speed_steps >> 8) & 0xFF]))
+        if debug:
+            trace.append(("mode_switched", time.ticks_diff(time.ticks_ms(), t0), None))
 
         # Sub-move size cap: < half a revolution so the servo's
         # shortest-path routing unambiguously matches our direction.
@@ -529,6 +545,9 @@ class ST3215Motor(Motor):
                 self._bus.write(self._id, _REG_GOAL_POSITION,
                                 bytes([target_pos & 0xFF,
                                        (target_pos >> 8) & 0xFF]))
+                if debug:
+                    trace.append(("chunk_start", time.ticks_diff(time.ticks_ms(), t0),
+                                  present, target_pos))
 
                 # Wait for the servo to reach this sub-target. Time
                 # budget: chunk_counts / steps_per_sec, ×3 for the
@@ -544,7 +563,12 @@ class ST3215Motor(Motor):
                     err = (target_pos - cur) % _COUNTS_PER_REV
                     if err > _COUNTS_PER_REV // 2:
                         err -= _COUNTS_PER_REV
+                    if debug:
+                        trace.append(("poll", time.ticks_diff(time.ticks_ms(), t0), cur, err))
                     if abs(err) <= tol_counts:
+                        if debug:
+                            trace.append(("loop_exit", time.ticks_diff(time.ticks_ms(), t0),
+                                          cur, err))
                         break
                     time.sleep_ms(10)
 
@@ -555,9 +579,28 @@ class ST3215Motor(Motor):
                 self.angle()
         finally:
             # Restore wheel mode and brake regardless of outcome.
+            if debug:
+                pre = self._read_present_pos()
+                trace.append(("pre_finally", time.ticks_diff(time.ticks_ms(), t0), pre))
             self._bus.write(self._id, _REG_OP_MODE,
                             bytes([_MODE_WHEEL]))
             self._write_goal_speed_signed(0)
+            if debug:
+                post = self._read_present_pos()
+                trace.append(("post_brake", time.ticks_diff(time.ticks_ms(), t0), post))
+                # Settle samples — show whether velocity carryover is
+                # still bleeding the wheel forward after the brake.
+                for delay_ms in (50, 200, 500):
+                    time.sleep_ms(delay_ms if delay_ms == 50 else delay_ms - 50)
+                    settle = self._read_present_pos()
+                    trace.append(("settle_+%dms" % delay_ms,
+                                  time.ticks_diff(time.ticks_ms(), t0), settle))
+                # Print at end so the inner-loop polling stays fast.
+                print("--- run_angle trace (id=%d, target=%+d°) ---" %
+                      (self._id, int(target_angle)))
+                for evt in trace:
+                    print("  ", evt)
+                print("--- end trace ---")
 
     # --- ST-3215-specific extras ------------------------------------------
 
