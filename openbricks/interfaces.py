@@ -38,6 +38,13 @@ class Motor:
         """Stop by cutting drive power (motor free-wheels)."""
         raise NotImplementedError
 
+    def hold(self):
+        """Stop and actively hold the current shaft angle via closed-loop
+        control. Only motors with position-mode hardware (e.g. ST-3215) or
+        a software position loop implement this; open-loop drivers raise
+        ``NotImplementedError`` — pick ``brake`` or ``coast`` instead."""
+        raise NotImplementedError
+
     # --- Optional closed-loop methods ---
     # Open-loop drivers may raise NotImplementedError or simply not override.
 

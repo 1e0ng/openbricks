@@ -305,6 +305,13 @@ class ST3215Motor(Motor):
         self._accum_count = 0         # accumulated counts since reset
         self._zero_offset_count = 0   # set by reset_angle()
 
+        # Cached register state so brake/coast/run_speed avoid redundant
+        # bus writes, and so motion commands can transparently restore
+        # the mode/torque after a prior ``coast`` or a ``run_angle`` that
+        # left the servo in position mode (``then="hold"``).
+        self._op_mode    = _MODE_WHEEL
+        self._torque_on  = True
+
         # Switch the servo into wheel/continuous mode.
         self._bus.write(self._id, _REG_OP_MODE, bytes([_MODE_WHEEL]))
         self._bus.write(self._id, _REG_TORQUE,  bytes([1]))
@@ -352,6 +359,24 @@ class ST3215Motor(Motor):
         self._bus.write(self._id, _REG_GOAL_SPEED,
                         bytes([v & 0xFF, (v >> 8) & 0xFF]))
 
+    def _ensure_mode(self, mode):
+        """Write op_mode only when it differs from our tracked state.
+        Saves a bus packet on the common case where the servo is already
+        in the desired mode (e.g. ``run_speed`` after another
+        ``run_speed``) and keeps the cache in sync after ``run_angle``
+        returns with ``then="hold"`` and leaves the servo in position
+        mode."""
+        if self._op_mode != mode:
+            self._bus.write(self._id, _REG_OP_MODE, bytes([mode]))
+            self._op_mode = mode
+
+    def _ensure_torque_on(self):
+        """Re-enable torque if a prior ``coast`` (or ``then="coast"``)
+        left it disabled. No-op otherwise."""
+        if not self._torque_on:
+            self._bus.write(self._id, _REG_TORQUE, bytes([1]))
+            self._torque_on = True
+
     # --- Motor interface --------------------------------------------------
 
     def run(self, power):
@@ -362,17 +387,39 @@ class ST3215Motor(Motor):
 
     def run_speed(self, deg_per_s):
         """Set continuous wheel velocity in degrees per second."""
+        self._ensure_mode(_MODE_WHEEL)
+        self._ensure_torque_on()
         v = self._encode_goal_speed(deg_per_s)
         self._bus.write(self._id, _REG_GOAL_SPEED,
                         bytes([v & 0xFF, (v >> 8) & 0xFF]))
 
     def brake(self):
         """Hold zero velocity (servo's internal loop actively brakes)."""
+        self._ensure_mode(_MODE_WHEEL)
+        self._ensure_torque_on()
         self._write_goal_speed_signed(0)
 
     def coast(self):
         """Disable torque — wheel free-wheels."""
         self._bus.write(self._id, _REG_TORQUE, bytes([0]))
+        self._torque_on = False
+
+    def hold(self):
+        """Actively hold the current shaft angle. Switches the servo
+        into position mode with goal_position locked at present_pos so
+        the internal PID resists rotation. Subsequent ``run_speed`` /
+        ``brake`` / ``coast`` calls will transparently restore wheel
+        mode."""
+        present = self._read_present_pos()
+        if present is None:
+            return   # bus silent — bail rather than write into the void
+        # Pin goal-position to current BEFORE flipping mode (same
+        # reasoning as run_angle's anchor: avoid the position PID
+        # acting on a stale goal during the mode switch).
+        self._bus.write(self._id, _REG_GOAL_POSITION,
+                        bytes([present & 0xFF, (present >> 8) & 0xFF]))
+        self._ensure_mode(_MODE_POSITION)
+        self._ensure_torque_on()
 
     def angle(self):
         """Return shaft angle in degrees, multi-turn accumulated."""
@@ -420,17 +467,16 @@ class ST3215Motor(Motor):
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
                   tolerance_deg=0.5, kp=None, poll_ms=None,
-                  debug=False):
+                  debug=False, then="coast"):
         """Rotate by ``target_angle`` degrees at up to ``deg_per_s``,
         ending within ``tolerance_deg`` of the target.
 
         Implementation: switch the servo into native position mode
         (op_mode=0) for the duration of the move, write the goal-
         position, and let the servo's internal PID handle convergence.
-        Restores wheel mode (op_mode=1) on completion. Sub-degree
-        accuracy on a typical bench rig — the encoder is 4096
-        counts/rev (≈0.088°/count) and the servo's internal PID will
-        park within a few counts.
+        Sub-degree accuracy on a typical bench rig — the encoder is
+        4096 counts/rev (≈0.088°/count) and the servo's internal PID
+        will park within a few counts.
 
         ``target_angle`` is RELATIVE — ``run_angle(200, 360)`` rotates
         360° forward from the present position.
@@ -440,6 +486,17 @@ class ST3215Motor(Motor):
         the intended direction (a single 270° forward command would
         otherwise be executed as 90° backward).
 
+        ``then`` selects the end-state, pybricks-style:
+
+        * ``"coast"`` (default) — cut torque; wheel free-wheels. The
+          next ``run_speed`` / ``brake`` / ``run_angle`` transparently
+          re-enables torque and restores wheel mode.
+        * ``"brake"`` — restore wheel mode and write goal_speed=0 so
+          the servo's velocity loop actively holds zero rotation rate.
+        * ``"hold"`` — leave the servo in position mode with goal_pos
+          locked at where the wheel stopped, so the position PID
+          actively resists rotation.
+
         The legacy ``kp`` / ``poll_ms`` arguments are accepted for
         back-compat with the velocity-mode implementation but no
         longer apply — the PID lives on the servo, not in Python.
@@ -447,9 +504,12 @@ class ST3215Motor(Motor):
         ``debug=True`` enables a position-trace dump: the function
         captures (t_ms, present_pos) on every inner-loop poll plus
         key transition points (anchor, target_pos, loop exit,
-        post-brake, post-settle) and prints them at the end. Off by
+        post-stop, post-settle) and prints them at the end. Off by
         default so the production path stays quiet.
         """
+        if then not in ("coast", "brake", "hold"):
+            raise ValueError(
+                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
         if target_angle == 0:
             return
         max_dps = abs(float(deg_per_s))
@@ -490,6 +550,10 @@ class ST3215Motor(Motor):
         # By writing goal-position = present before the mode switch,
         # the position PID has nowhere to drift the moment it
         # activates — it's already "at target".
+        # Re-enable torque in case a prior ``coast()`` / ``then="coast"``
+        # left it disabled; ``_ensure_torque_on`` is a no-op otherwise.
+        self._ensure_torque_on()
+
         # Diagnostic trace (only populated when debug=True). Keep the
         # untraced path identical to before — no per-poll overhead.
         trace = [] if debug else None
@@ -503,7 +567,7 @@ class ST3215Motor(Motor):
         self._bus.write(self._id, _REG_GOAL_POSITION,
                         bytes([anchor & 0xFF, (anchor >> 8) & 0xFF]))
         # Now safe to switch into position mode and set the velocity cap.
-        self._bus.write(self._id, _REG_OP_MODE, bytes([_MODE_POSITION]))
+        self._ensure_mode(_MODE_POSITION)
         self._bus.write(self._id, _REG_GOAL_SPEED,
                         bytes([speed_steps & 0xFF,
                                (speed_steps >> 8) & 0xFF]))
@@ -578,26 +642,46 @@ class ST3215Motor(Motor):
                 # in angle() handles the correction correctly.
                 self.angle()
         finally:
-            # Restore wheel mode and brake regardless of outcome.
+            # Dispatch on ``then`` (validated up front so this block
+            # can't raise ValueError and mask an earlier exception).
             if debug:
                 pre = self._read_present_pos()
                 trace.append(("pre_finally", time.ticks_diff(time.ticks_ms(), t0), pre))
-            self._bus.write(self._id, _REG_OP_MODE,
-                            bytes([_MODE_WHEEL]))
-            self._write_goal_speed_signed(0)
+            if then == "coast":
+                # Cut torque; leave op_mode in position. Skipping the
+                # wheel-mode flip is intentional: the previous default
+                # (mode→wheel + goal_speed=0) re-engaged the velocity
+                # loop on a fresh setpoint and bled the wheel forward
+                # by ~85 raw counts over the next 50 ms — the
+                # "settle" artifact visible in run_angle_debug traces.
+                # Coasting skips that phase entirely.
+                self.coast()
+            elif then == "brake":
+                self._ensure_mode(_MODE_WHEEL)
+                self._write_goal_speed_signed(0)
+            else:   # "hold"
+                # Re-anchor goal-position to where the wheel actually
+                # stopped (may differ from the loop's target by up to
+                # tol_counts). Leave the servo in position mode so the
+                # internal PID actively resists rotation.
+                present = self._read_present_pos()
+                if present is not None:
+                    self._bus.write(self._id, _REG_GOAL_POSITION,
+                                    bytes([present & 0xFF,
+                                           (present >> 8) & 0xFF]))
             if debug:
                 post = self._read_present_pos()
-                trace.append(("post_brake", time.ticks_diff(time.ticks_ms(), t0), post))
-                # Settle samples — show whether velocity carryover is
-                # still bleeding the wheel forward after the brake.
+                trace.append(("post_stop", time.ticks_diff(time.ticks_ms(), t0), post))
+                # Settle samples — show whether motion carries on
+                # after the chosen end-state.
                 for delay_ms in (50, 200, 500):
                     time.sleep_ms(delay_ms if delay_ms == 50 else delay_ms - 50)
                     settle = self._read_present_pos()
                     trace.append(("settle_+%dms" % delay_ms,
                                   time.ticks_diff(time.ticks_ms(), t0), settle))
                 # Print at end so the inner-loop polling stays fast.
-                print("--- run_angle trace (id=%d, target=%+d°) ---" %
-                      (self._id, int(target_angle)))
+                print("--- run_angle trace (id=%d, target=%+d°, then=%s) ---" %
+                      (self._id, int(target_angle), then))
                 for evt in trace:
                     print("  ", evt)
                 print("--- end trace ---")

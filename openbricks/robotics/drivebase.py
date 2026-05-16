@@ -114,20 +114,39 @@ class DriveBase:
         self._run_at_dps(self._left,  fwd_wheel_dps - diff_wheel_dps)
         self._run_at_dps(self._right, fwd_wheel_dps + diff_wheel_dps)
 
-    def stop(self):
+    def stop(self, then="coast"):
+        """Halt both wheels. ``then`` selects the end-state, pybricks-style:
+
+        * ``"coast"`` (default) — both motors free-wheel.
+        * ``"brake"`` — both motors actively resist motion at zero velocity.
+        * ``"hold"`` — both motors actively hold their current angle.
+          Requires motors that implement ``hold()`` (e.g. ``ST3215Motor``);
+          open-loop drivers raise ``NotImplementedError``.
+        """
         if self._native is not None:
             self._native.stop()
-        self._left.brake()
-        self._right.brake()
+        if then == "coast":
+            self._left.coast()
+            self._right.coast()
+        elif then == "brake":
+            self._left.brake()
+            self._right.brake()
+        elif then == "hold":
+            self._left.hold()
+            self._right.hold()
+        else:
+            raise ValueError(
+                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
 
     # ---- blocking moves via the C coupled controller ----
-    def straight(self, distance_mm):
+    def straight(self, distance_mm, then="coast"):
         """Drive forward by ``distance_mm``. Blocking, 2-DOF coupled.
 
-        Falls back to a pure-Python open-loop sweep for motors without
-        a native servo."""
+        ``then`` is forwarded to ``stop()`` — see its docstring for
+        the coast/brake/hold semantics. Falls back to a pure-Python
+        open-loop sweep for motors without a native servo."""
         if self._native is None:
-            self._straight_fallback(distance_mm)
+            self._straight_fallback(distance_mm, then=then)
             return
 
         # Ensure both servos are attached to motor_process; the native
@@ -141,12 +160,14 @@ class DriveBase:
 
         while not self._native.is_done():
             time.sleep_ms(10)
-        self.stop()
+        self.stop(then=then)
 
-    def turn(self, angle_deg):
-        """Turn in place by ``angle_deg`` body heading (positive = left)."""
+    def turn(self, angle_deg, then="coast"):
+        """Turn in place by ``angle_deg`` body heading (positive = left).
+
+        ``then`` is forwarded to ``stop()`` — see its docstring."""
         if self._native is None:
-            self._turn_fallback(angle_deg)
+            self._turn_fallback(angle_deg, then=then)
             return
 
         self._left.run_speed(0)
@@ -156,7 +177,7 @@ class DriveBase:
 
         while not self._native.is_done():
             time.sleep_ms(10)
-        self.stop()
+        self.stop(then=then)
 
     # ---- helpers ----
     @staticmethod
@@ -173,7 +194,7 @@ class DriveBase:
         motor.run(power)
 
     # ---- fallbacks for open-loop motor pairs ----
-    def _straight_fallback(self, distance_mm):
+    def _straight_fallback(self, distance_mm, then="coast"):
         target_wheel_deg = distance_mm / self._wheel_circumference * 360
         # Snapshot the starting angle instead of calling ``reset_angle(0)``.
         # Mutating the accumulator surprises any caller that reads
@@ -200,9 +221,9 @@ class DriveBase:
             self._run_at_dps(self._left,  speed - err)
             self._run_at_dps(self._right, speed + err)
             time.sleep_ms(10)
-        self.stop()
+        self.stop(then=then)
 
-    def _turn_fallback(self, angle_deg):
+    def _turn_fallback(self, angle_deg, then="coast"):
         arc_mm = math.radians(abs(angle_deg)) * (self._axle_track / 2)
         wheel_deg_each = arc_mm / self._wheel_circumference * 360
 
@@ -220,4 +241,4 @@ class DriveBase:
             self._run_at_dps(self._left,  -speed * direction)
             self._run_at_dps(self._right,  speed * direction)
             time.sleep_ms(10)
-        self.stop()
+        self.stop(then=then)

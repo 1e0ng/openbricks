@@ -299,18 +299,41 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self.assertEqual(ordered_targets[0], _REG_GOAL_POSITION)
         self.assertEqual(ordered_targets[1], _REG_OP_MODE)
 
-    def test_run_angle_switches_into_position_mode_then_back(self):
+    def test_run_angle_then_brake_switches_into_position_mode_then_back(self):
+        # With ``then="brake"`` the move ends by restoring wheel mode
+        # so the next ``run_speed`` is interpreted as a signed velocity
+        # rather than a position-mode speed cap.
         m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
-        # Anchor read + chunk-start read + inner-arrival read.
         target_counts = int(round(90 * 4096 / 360))   # = 1024
         self._patch_present_pos(m, [0, 0, target_counts])
         baseline = len(m._bus._uart._tx_log)
-        m.run_angle(deg_per_s=200, target_angle=90)
+        m.run_angle(deg_per_s=200, target_angle=90, then="brake")
 
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
         # First mode write into the move = position (0); last = wheel (1).
         self.assertEqual(mode_writes[0][1], bytes([0]))
         self.assertEqual(mode_writes[-1][1], bytes([1]))
+
+    def test_run_angle_default_coasts_and_does_not_restore_wheel_mode(self):
+        # New default: ``then="coast"`` cuts torque and leaves op_mode in
+        # position. Skipping the wheel-mode re-flip avoids the ~85-raw
+        # post-brake "settle" artifact observed on the bench. The next
+        # ``run_speed`` / ``brake`` transparently restores wheel mode via
+        # ``_ensure_mode``.
+        m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+        target_counts = int(round(90 * 4096 / 360))
+        self._patch_present_pos(m, [0, 0, target_counts])
+        baseline = len(m._bus._uart._tx_log)
+        m.run_angle(deg_per_s=200, target_angle=90)   # default then="coast"
+
+        mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
+        # Only one mode write in the move: into position. No wheel-mode
+        # flip back — coast doesn't need it.
+        self.assertEqual(len(mode_writes), 1)
+        self.assertEqual(mode_writes[0][1], bytes([0]))
+        # And torque was cut at the end.
+        torque_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_TORQUE)
+        self.assertEqual(torque_writes[-1][1], bytes([0]))
 
     def test_run_angle_writes_goal_position_at_present_plus_delta(self):
         m = ST3215Motor(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
@@ -400,12 +423,12 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self._patch_present_pos(m, [0, 0, 1024])
         baseline = len(m._bus._uart._tx_log)
         # 5000 dps × 10 steps/dps = 50000 steps — exceeds the 0x7FFF
-        # register cap and must clamp.
-        m.run_angle(deg_per_s=5000, target_angle=90)
+        # register cap and must clamp. Use ``then="brake"`` to also
+        # cover the trailing goal_speed=0 write that brake emits.
+        m.run_angle(deg_per_s=5000, target_angle=90, then="brake")
         speed_writes = _writes_to(m._bus._uart._tx_log[baseline:],
                                   _REG_GOAL_SPEED)
-        # Two speed writes happen: the cruise cap, then a final 0
-        # (brake) when wheel mode is restored.
+        # Two speed writes: the cruise cap, then a final 0 (brake).
         v_cruise = speed_writes[0][1][0] | (speed_writes[0][1][1] << 8)
         self.assertEqual(v_cruise, 0x7FFF)
         self.assertEqual(speed_writes[-1][1], bytes([0, 0]))
@@ -446,20 +469,88 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
         self.assertEqual(mode_writes, [])
 
-    def test_run_angle_silent_after_anchor_still_restores_wheel_mode(self):
+    def test_run_angle_then_brake_silent_after_anchor_still_restores_wheel_mode(self):
         # If the anchor read succeeds but a later read fails (bus
         # drops mid-move), the try/finally must still restore wheel
-        # mode so the next ``run_speed`` or ``brake`` works normally.
+        # mode so the next ``run_speed`` works normally. Only the
+        # ``then="brake"`` path explicitly restores wheel mode in
+        # finally — coast leaves op_mode alone and relies on the next
+        # call's ``_ensure_mode`` to do the flip.
         m = ST3215Motor(servo_id=11, steps_per_dps=10.0, max_dps=1000.0)
         reads = [500]   # anchor succeeds, then None forever.
         def fake():
             return reads.pop(0) if reads else None
         m._read_present_pos = fake
         baseline = len(m._bus._uart._tx_log)
-        m.run_angle(deg_per_s=200, target_angle=90)
+        m.run_angle(deg_per_s=200, target_angle=90, then="brake")
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
         self.assertEqual(mode_writes[0][1], bytes([0]))   # position
         self.assertEqual(mode_writes[-1][1], bytes([1]))  # wheel restored
+
+    def test_run_angle_then_hold_locks_goal_position_in_position_mode(self):
+        # ``then="hold"`` re-anchors goal_position to where the wheel
+        # actually stopped (which may differ from the loop's target by
+        # up to tol_counts) and leaves op_mode in position so the PID
+        # actively resists rotation. No wheel-mode flip, no torque cut.
+        m = ST3215Motor(servo_id=12, steps_per_dps=10.0, max_dps=1000.0)
+        # Anchor + chunk-start + inner-arrival + post-loop self.angle()
+        # + the hold path's re-read (= 5 reads). The final value 1022
+        # is what hold should write back as goal_position.
+        self._patch_present_pos(m, [0, 0, 1024, 1024, 1022])
+        baseline = len(m._bus._uart._tx_log)
+        m.run_angle(deg_per_s=200, target_angle=90, then="hold")
+
+        mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
+        # Only the flip INTO position mode; no flip back to wheel.
+        self.assertEqual(len(mode_writes), 1)
+        self.assertEqual(mode_writes[0][1], bytes([0]))
+        # Torque is NOT cut by hold.
+        torque_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_TORQUE)
+        self.assertEqual(torque_writes, [])
+        # The last goal-position write should be the re-anchored stop
+        # position (1022), not the loop's target (1024).
+        pos_writes = _writes_to(m._bus._uart._tx_log[baseline:],
+                                _REG_GOAL_POSITION)
+        final_goal = pos_writes[-1][1][0] | (pos_writes[-1][1][1] << 8)
+        self.assertEqual(final_goal, 1022)
+
+    def test_run_angle_then_invalid_raises_value_error(self):
+        m = ST3215Motor(servo_id=13, steps_per_dps=10.0, max_dps=1000.0)
+        with self.assertRaises(ValueError):
+            m.run_angle(deg_per_s=200, target_angle=90, then="freewheel")
+
+    def test_run_speed_after_coast_re_enables_torque(self):
+        # After ``coast`` (or ``run_angle(then="coast")``) the torque
+        # register is 0. The next ``run_speed`` must write torque=1
+        # before its goal_speed packet — otherwise the motor stays
+        # un-torqued and silently ignores the command.
+        m = ST3215Motor(servo_id=14, steps_per_dps=10.0, max_dps=1000.0)
+        m.coast()
+        baseline = len(m._bus._uart._tx_log)
+        m.run_speed(50)
+        torque_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_TORQUE)
+        self.assertEqual(torque_writes[-1][1], bytes([1]))
+
+    def test_brake_after_coast_re_enables_torque(self):
+        m = ST3215Motor(servo_id=15)
+        m.coast()
+        baseline = len(m._bus._uart._tx_log)
+        m.brake()
+        torque_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_TORQUE)
+        self.assertEqual(torque_writes[-1][1], bytes([1]))
+
+    def test_run_speed_after_hold_restores_wheel_mode(self):
+        # ``hold`` leaves the servo in position mode; the next
+        # ``run_speed`` must flip back to wheel mode before writing
+        # goal_speed, otherwise a negative dps value (sign bit at 0x8000)
+        # is misread as the position-mode unsigned speed cap.
+        m = ST3215Motor(servo_id=16, steps_per_dps=10.0, max_dps=1000.0)
+        m._read_present_pos = lambda: 500
+        m.hold()
+        baseline = len(m._bus._uart._tx_log)
+        m.run_speed(50)
+        mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
+        self.assertEqual(mode_writes[-1][1], bytes([1]))   # wheel
 
 
 class TestSyncServoGroup(unittest.TestCase):
