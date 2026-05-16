@@ -44,6 +44,7 @@ import tests._fakes  # noqa: F401
 
 
 _TEST_MODULES = [
+    "tests.test_interfaces",
     "tests.test_l298n",
     "tests.test_encoder",
     "tests.test_bno055",

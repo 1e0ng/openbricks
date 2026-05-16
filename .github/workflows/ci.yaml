@@ -97,6 +97,7 @@ jobs:
             tests.test_bluetooth_button \
             tests.test_ble_repl \
             tests.test_hub \
+            tests.test_interfaces \
             tests.test_launcher \
             tests.test_l298n \
             tests.test_tcs34725 \
@@ -139,6 +140,7 @@ jobs:
               tests.test_bluetooth_button \
               tests.test_ble_repl \
               tests.test_hub \
+              tests.test_interfaces \
               tests.test_launcher \
               tests.test_log
           python -m coverage report

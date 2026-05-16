@@ -101,17 +101,56 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         self.assertEqual(right._in1.value(), 1)
         self.assertEqual(right._in2.value(), 0)
 
-    def test_stop_engages_brake(self):
+    def test_stop_default_coasts(self):
+        # New default: ``stop()`` (and the implicit stop at the end of
+        # ``straight``/``turn``) coasts both wheels — pybricks-style.
+        # Coast on L298N drops both H-bridge inputs low and zeroes the
+        # PWM duty.
         left = L298NMotor(in1=1, in2=2, pwm=3)
         right = L298NMotor(in1=4, in2=5, pwm=6)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         db.stop()
 
+        self.assertEqual(left._in1.value(), 0)
+        self.assertEqual(left._in2.value(), 0)
+        self.assertEqual(right._in1.value(), 0)
+        self.assertEqual(right._in2.value(), 0)
+        self.assertEqual(left._pwm.duty(), 0)
+        self.assertEqual(right._pwm.duty(), 0)
+
+    def test_stop_then_brake_engages_brake(self):
+        # Explicit ``then="brake"`` falls back to the pre-1.6.7
+        # behaviour: short both H-bridge terminals high.
+        left = L298NMotor(in1=1, in2=2, pwm=3)
+        right = L298NMotor(in1=4, in2=5, pwm=6)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        db.stop(then="brake")
+
         self.assertEqual(left._in1.value(), 1)
         self.assertEqual(left._in2.value(), 1)
         self.assertEqual(right._in1.value(), 1)
         self.assertEqual(right._in2.value(), 1)
+
+    def test_stop_then_hold_raises_on_open_loop_motors(self):
+        # L298N can't actively hold — no encoder, no position loop.
+        # ``stop(then="hold")`` must raise rather than silently fall
+        # back to brake.
+        left = L298NMotor(in1=1, in2=2, pwm=3)
+        right = L298NMotor(in1=4, in2=5, pwm=6)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        with self.assertRaises(NotImplementedError):
+            db.stop(then="hold")
+
+    def test_stop_then_invalid_raises_value_error(self):
+        left = L298NMotor(in1=1, in2=2, pwm=3)
+        right = L298NMotor(in1=4, in2=5, pwm=6)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        with self.assertRaises(ValueError):
+            db.stop(then="freewheel")
 
 
 class TestDriveBaseClosedLoop(unittest.TestCase):
