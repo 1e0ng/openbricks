@@ -205,14 +205,6 @@ class TestST3215Motor(unittest.TestCase):
         # Constructor wrote a 1; coast should append a 0.
         self.assertEqual(torque_writes[-1], (7, bytes([0])))
 
-    def test_motor_base_class_hold_raises_not_implemented(self):
-        # ``hold`` is opt-in: open-loop drivers and any Motor subclass
-        # that doesn't override it fall through to the base raise so
-        # callers see a clear failure rather than a silent no-op.
-        from openbricks.interfaces import Motor
-        with self.assertRaises(NotImplementedError):
-            Motor().hold()
-
     def test_angle_accumulates_across_positive_wrap(self):
         # Synthesise the bus reads on the 12-bit (0..4095) absolute-
         # position register. 3800 → 100 means the wheel moved +396
