@@ -36,8 +36,10 @@ AXLE_TRACK_MM     = 120   # EDIT to your chassis
 SIDE_MM   = 200
 NUM_LAPS  = 1
 
-# Same full-speed defaults as the ST-3032 bench test. Dial down if
-# the chassis slips or the bus drops packets.
+# Conservative chassis speeds for a small bench robot — well below
+# the ST-3032 mechanical limit (datasheet no-load 888 dps at 12 V,
+# loaded working point ~600 dps; see ``docs/datasheets/feetech_sts3032.pdf``).
+# Dial down further if the chassis slips or the bus drops packets.
 STRAIGHT_SPEED_MM = 150
 TURN_RATE_DPS     = 200
 

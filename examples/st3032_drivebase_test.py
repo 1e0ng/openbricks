@@ -39,10 +39,16 @@ UART_ID, TX, RX   = 1, 14, 6
 WHEEL_DIAMETER_MM = 65    # EDIT to your wheels
 AXLE_TRACK_MM     = 120   # EDIT to your chassis
 
-# Full-speed test for ST-3032 (no-load ~300 dps at 12 V). Dial down
-# if the bench misbehaves — 60 dps was the previous cautious default.
-SPEED_DPS         = 300
-STRAIGHT_SPEED_MM = 150    # = 300 dps × π × 65 / 360 ≈ 170 mm/s, with margin
+# Full-driver-cap speed for ST-3032. Per the Feetech STS3032 datasheet
+# (``docs/datasheets/feetech_sts3032.pdf`` §5-3), no-load top speed at
+# 12 V is 148 RPM = 888 °/s; under rated 3.3 kg·cm load the working
+# point drops to ~2/3 of that. The driver's default ``max_dps=600``
+# clamps requests at the loaded operating point — instantiate with an
+# explicit ``max_dps=900`` if you want to chase the no-load number.
+# Bench/chassis speeds are kept conservative regardless: a small
+# robot on a table doesn't want 500 mm/s.
+SPEED_DPS         = 600
+STRAIGHT_SPEED_MM = 150
 TURN_RATE_DPS     = 200
 
 
