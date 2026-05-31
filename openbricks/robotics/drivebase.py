@@ -194,6 +194,22 @@ class DriveBase:
         motor.run(power)
 
     # ---- fallbacks for open-loop motor pairs ----
+    #
+    # Serial-bus servos (ST-3215, ST-3032) hit this path too, since
+    # they don't subscribe to the native motor_process scheduler.
+    # Their ``angle()`` returns ``None`` on a present-position read
+    # timeout — one EMI burst or one half-duplex collision is enough.
+    # We mirror ``ST3215Motor.run_angle``'s inner-loop pattern:
+    # tolerate a None tick (re-use the last good readings, hold the
+    # last commanded drive, sleep, retry), and only bail out after
+    # ``_MAX_CONSECUTIVE_NONE`` ticks in a row — ≈500 ms at the
+    # 10 ms loop period — when the bus is genuinely dead rather than
+    # just glitchy.
+
+    # Capacity for transient bus drops before _straight_fallback /
+    # _turn_fallback give up and stop. 50 × 10 ms = 500 ms.
+    _MAX_CONSECUTIVE_NONE = 50
+
     def _straight_fallback(self, distance_mm, then="coast"):
         target_wheel_deg = distance_mm / self._wheel_circumference * 360
         # Snapshot the starting angle instead of calling ``reset_angle(0)``.
@@ -203,15 +219,28 @@ class DriveBase:
         # the cumulative angle they were tracking. Pybricks DriveBase
         # behaves this way too. We just subtract the starting offsets
         # inside the loop and at the comparison.
-        start_left  = self._left.angle()
-        start_right = self._right.angle()
+        start_left  = self._read_angle_or_bail(self._left)
+        start_right = self._read_angle_or_bail(self._right)
+        if start_left is None or start_right is None:
+            self.stop(then=then)
+            return
 
         direction = 1 if distance_mm >= 0 else -1
         speed = self._straight_speed_dps * direction
 
+        consecutive_none = 0
         while True:
-            left_deg  = self._left.angle()  - start_left
-            right_deg = self._right.angle() - start_right
+            left_now  = self._left.angle()
+            right_now = self._right.angle()
+            if left_now is None or right_now is None:
+                consecutive_none += 1
+                if consecutive_none >= self._MAX_CONSECUTIVE_NONE:
+                    break
+                time.sleep_ms(10)
+                continue
+            consecutive_none = 0
+            left_deg  = left_now  - start_left
+            right_deg = right_now - start_right
             avg = (left_deg + right_deg) / 2
             if direction > 0 and avg >= target_wheel_deg:
                 break
@@ -227,18 +256,46 @@ class DriveBase:
         arc_mm = math.radians(abs(angle_deg)) * (self._axle_track / 2)
         wheel_deg_each = arc_mm / self._wheel_circumference * 360
 
-        start_left  = self._left.angle()
-        start_right = self._right.angle()
+        start_left  = self._read_angle_or_bail(self._left)
+        start_right = self._read_angle_or_bail(self._right)
+        if start_left is None or start_right is None:
+            self.stop(then=then)
+            return
 
         direction = 1 if angle_deg >= 0 else -1
         speed = self._turn_rate_dps
 
+        consecutive_none = 0
         while True:
-            left  = (self._left.angle()  - start_left)  * (-direction)
-            right = (self._right.angle() - start_right) * direction
+            left_now  = self._left.angle()
+            right_now = self._right.angle()
+            if left_now is None or right_now is None:
+                consecutive_none += 1
+                if consecutive_none >= self._MAX_CONSECUTIVE_NONE:
+                    break
+                time.sleep_ms(10)
+                continue
+            consecutive_none = 0
+            left  = (left_now  - start_left)  * (-direction)
+            right = (right_now - start_right) * direction
             if left >= wheel_deg_each and right >= wheel_deg_each:
                 break
             self._run_at_dps(self._left,  -speed * direction)
             self._run_at_dps(self._right,  speed * direction)
             time.sleep_ms(10)
         self.stop(then=then)
+
+    @staticmethod
+    def _read_angle_or_bail(motor, retries=5):
+        """Read ``motor.angle()``, retrying up to ``retries`` times if
+        the bus drops the reply. Returns the float on success or
+        ``None`` if every retry timed out. Used to seed the loop's
+        starting anchor — if we can't get a baseline, the whole
+        fallback bails cleanly rather than entering the loop with a
+        bogus reference."""
+        for _ in range(retries):
+            a = motor.angle()
+            if a is not None:
+                return a
+            time.sleep_ms(10)
+        return None

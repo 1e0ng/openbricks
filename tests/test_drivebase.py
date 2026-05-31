@@ -58,6 +58,36 @@ class _FakeClosedLoopMotor(Motor):
         self._angle_deg += self._target_dps * self._scale * seconds
 
 
+class _FakeFlappyMotor(_FakeClosedLoopMotor):
+    """``_FakeClosedLoopMotor`` with a controllable read-drop pattern,
+    for exercising the serial-bus-style ``angle() -> None`` case that
+    triggers the None-tolerance path in ``_straight_fallback`` /
+    ``_turn_fallback``.
+    """
+
+    def __init__(self, scale=1.0):
+        super().__init__(scale=scale)
+        self._silent = False
+        self._drop_indices = set()
+        self._call_count = 0
+
+    def go_silent(self):
+        """All subsequent ``angle()`` calls return ``None``."""
+        self._silent = True
+
+    def drop_calls(self, indices):
+        """0-indexed ``angle()`` call numbers that should return ``None``.
+        Everything else returns the real angle."""
+        self._drop_indices = set(indices)
+
+    def angle(self):
+        idx = self._call_count
+        self._call_count += 1
+        if self._silent or idx in self._drop_indices:
+            return None
+        return super().angle()
+
+
 def _wheel_deg_for_distance(distance_mm, wheel_diameter_mm):
     return distance_mm / (math.pi * wheel_diameter_mm) * 360
 
@@ -219,6 +249,112 @@ class TestDriveBaseClosedLoop(unittest.TestCase):
         db.settings(straight_speed=400, turn_rate=360)
         self.assertEqual(db._straight_speed_dps, 400)
         self.assertEqual(db._turn_rate_dps, 360)
+
+
+class TestDriveBaseFallbackBusGlitchTolerance(unittest.TestCase):
+    """Pre-1.6.8 regression: ``_straight_fallback`` / ``_turn_fallback``
+    crashed with ``TypeError: unsupported types for __sub__: 'NoneType',
+    'float'`` whenever ``motor.angle()`` returned ``None`` mid-loop —
+    a routine occurrence for serial-bus servos (ST-3215, ST-3032)
+    whose present-position read can time out under EMI or half-duplex
+    collisions. The fix mirrors ``run_angle``'s inner-loop pattern:
+    skip ``None`` ticks and only bail after ``_MAX_CONSECUTIVE_NONE``
+    ticks in a row."""
+
+    def setUp(self):
+        _reset_all()
+
+    def _patch_sleep_steps_motors(self, *motors):
+        original = time.sleep_ms
+
+        def stepped_sleep(ms):
+            original(ms)
+            for m in motors:
+                m.step(ms / 1000.0)
+
+        time.sleep_ms = stepped_sleep
+        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
+
+    def _patch_sleep_noop(self):
+        """Use when we don't want the test to spend real wall-clock
+        time waiting for the 500 ms bail window."""
+        original = time.sleep_ms
+        time.sleep_ms = lambda ms: None
+        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
+
+    def test_straight_survives_single_dropped_angle_read(self):
+        # Pre-fix: this would raise TypeError on the very first inner
+        # loop iteration. Post-fix: the None tick is skipped and the
+        # move completes normally.
+        left = _FakeFlappyMotor()
+        right = _FakeFlappyMotor()
+        # Anchor read = call 0; drop the first inner-loop read = call 1.
+        left.drop_calls([1])
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+
+        db.straight(100)
+
+        target = _wheel_deg_for_distance(100, wheel_diameter_mm=56)
+        avg = (left.angle() + right.angle()) / 2
+        self.assertGreaterEqual(avg, target)
+
+    def test_turn_survives_single_dropped_angle_read(self):
+        left = _FakeFlappyMotor()
+        right = _FakeFlappyMotor()
+        right.drop_calls([1])
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+
+        db.turn(90)  # would crash pre-fix; completes post-fix.
+
+    def test_straight_bails_cleanly_on_permanent_bus_silence(self):
+        # Anchor reads succeed, then both motors go silent. After
+        # ``_MAX_CONSECUTIVE_NONE`` ticks the loop should exit cleanly
+        # via ``stop()`` — no TypeError, no infinite loop.
+        left = _FakeFlappyMotor()
+        right = _FakeFlappyMotor()
+        # Anchor reads consume call 0; drop everything from call 1 on.
+        left.drop_calls(range(1, 1000))
+        right.drop_calls(range(1, 1000))
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_noop()
+
+        db.straight(100)   # must not raise.
+
+    def test_turn_bails_cleanly_on_permanent_bus_silence(self):
+        left = _FakeFlappyMotor()
+        right = _FakeFlappyMotor()
+        left.drop_calls(range(1, 1000))
+        right.drop_calls(range(1, 1000))
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_noop()
+
+        db.turn(90)        # must not raise.
+
+    def test_straight_bails_cleanly_when_anchor_read_keeps_failing(self):
+        # Bus is dead from the very first call. ``_read_angle_or_bail``
+        # retries 5 times, all None, then returns None. The fallback
+        # short-circuits via ``stop()`` rather than entering the inner
+        # loop with a bogus reference.
+        left = _FakeFlappyMotor()
+        right = _FakeFlappyMotor()
+        left.go_silent()
+        right.go_silent()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_noop()
+
+        db.straight(100)   # must not raise; must stop cleanly.
+
+    def test_turn_bails_cleanly_when_anchor_read_keeps_failing(self):
+        left = _FakeFlappyMotor()
+        right = _FakeFlappyMotor()
+        left.go_silent()
+        right.go_silent()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_noop()
+
+        db.turn(90)        # must not raise; must stop cleanly.
 
 
 if __name__ == "__main__":
