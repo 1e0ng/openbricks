@@ -269,24 +269,30 @@ class TestST3215MotorRunAngle(unittest.TestCase):
     """``run_angle`` drives the servo in STEP mode (op_mode=3) where the
     goal-position register is a SIGNED RELATIVE step, so moves past one
     full turn work without the single-turn 0/4095 boundary that capped
-    the old position-mode (op_mode=0) implementation. These tests pin
-    the protocol-level contract; actual PID convergence is on hardware.
+    the old position-mode (op_mode=0) implementation.
+
+    Bench finding (examples/st3032_stepmode_probe.py): in step mode the
+    present-position register reads *remaining counts to target*,
+    counting down to ~0 as the move completes (sign-magnitude). So
+    done-detection reads that register (``_read_step_remaining``), and
+    the shaft-angle accumulator is advanced by the counts travelled.
+    These tests drive the state machine by patching that register.
     """
 
     def setUp(self):
         ST3215._buses = {}
 
-    def _patch_angle(self, motor, sequence):
-        """Make successive ``motor.angle()`` calls return the user-frame
-        degree values in ``sequence`` (last value sticks). run_angle and
-        done() detect convergence purely via ``angle()``, so this drives
-        the state machine without touching the raw-count accumulator
-        (which has its own dedicated tests)."""
+    def _patch_remaining(self, motor, sequence):
+        """Make successive ``motor._read_step_remaining()`` calls return
+        the signed remaining-to-target counts in ``sequence`` (last
+        value sticks). A converging move is e.g. [N, N, 0]: the run_angle
+        bus-alive probe consumes one, then the await/poll loop sees the
+        move 'started' (|rem|>tol) and then 'parked' (|rem|<=tol)."""
         values = list(sequence)
 
         def fake():
             return values.pop(0) if len(values) > 1 else values[0]
-        motor.angle = fake
+        motor._read_step_remaining = fake
 
     # --- step-mode setup ---------------------------------------------------
 
@@ -294,15 +300,13 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         # First run_angle must unlock multi-turn: write min/max angle
         # limit = 0 and switch op_mode to step (3).
         m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 90])
+        self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90)
 
         log = m._bus._uart._tx_log[baseline:]
-        min_writes = _writes_to(log, _REG_MIN_ANGLE)
-        max_writes = _writes_to(log, _REG_MAX_ANGLE)
-        self.assertEqual(min_writes, [(1, bytes([0, 0]))])
-        self.assertEqual(max_writes, [(1, bytes([0, 0]))])
+        self.assertEqual(_writes_to(log, _REG_MIN_ANGLE), [(1, bytes([0, 0]))])
+        self.assertEqual(_writes_to(log, _REG_MAX_ANGLE), [(1, bytes([0, 0]))])
         mode_writes = _writes_to(log, _REG_OP_MODE)
         self.assertEqual(mode_writes[0][1], bytes([_MODE_STEP]))
 
@@ -310,9 +314,10 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         # The angle-limit registers are EEPROM; only the first run_angle
         # should write them. A second call must not re-touch them.
         m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 90, 180])
+        self._patch_remaining(m, [1024, 1024, 0])
         m.run_angle(deg_per_s=200, target_angle=90)
         baseline = len(m._bus._uart._tx_log)
+        self._patch_remaining(m, [1024, 1024, 0])
         m.run_angle(deg_per_s=200, target_angle=90)
         log = m._bus._uart._tx_log[baseline:]
         self.assertEqual(_writes_to(log, _REG_MIN_ANGLE), [])
@@ -333,7 +338,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
 
     def test_run_angle_writes_one_signed_relative_step(self):
         m = ST3215Motor(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 90])
+        self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90)   # +90° = +1024 counts
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
@@ -342,7 +347,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
 
     def test_run_angle_negative_target_sets_direction_bit(self):
         m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, -90])
+        self._patch_remaining(m, [-1024, -1024, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=-90)
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
@@ -353,7 +358,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         # 6144 counts — no chunking, no boundary. The old single-turn
         # implementation could not express this at all.
         m = ST3215Motor(servo_id=4, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 540])
+        self._patch_remaining(m, [6144, 6144, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=540)
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
@@ -364,7 +369,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         m = ST3215Motor(servo_id=5, steps_per_dps=10.0, max_dps=1000.0,
                         invert=True)
         # +90° asked; invert means command -1024 counts to the hardware.
-        self._patch_angle(m, [0, 90])
+        self._patch_remaining(m, [-1024, -1024, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90)
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
@@ -373,27 +378,20 @@ class TestST3215MotorRunAngle(unittest.TestCase):
     def test_run_angle_huge_move_splits_into_seven_turn_steps(self):
         # > 7 turns can't fit one step. 8 turns = 2880° = 32768 counts →
         # first step 28672 (7 turns), then 4096 (the remaining turn),
-        # each issued as done() advances past the previous step.
+        # each issued as the await/poll loop sees the previous one park.
         m = ST3215Motor(servo_id=6, steps_per_dps=10.0, max_dps=1000.0)
-        # angle() sequence: start, step1-parked (2520°), final (2880°).
-        self._patch_angle(m, [0, 2520, 2880])
+        # remaining seq: probe, step1 started, step1 parked, step2 started,
+        # step2 parked.
+        self._patch_remaining(m, [28672, 28672, 0, 4096, 0])
         baseline = len(m._bus._uart._tx_log)
-        m.run_angle(deg_per_s=200, target_angle=2880, wait=False)
-        # First step written immediately.
-        steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
-        self.assertEqual(_decode_signed_step(steps[0][1]), 28672)
-        # Drain done() to carry through the second step.
-        for _ in range(10):
-            if m.done():
-                break
-        self.assertTrue(m.done())
+        m.run_angle(deg_per_s=200, target_angle=2880)
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
         self.assertEqual([_decode_signed_step(s[1]) for s in steps],
                          [28672, 4096])
 
     def test_run_angle_writes_goal_speed_clamped_to_register_range(self):
         m = ST3215Motor(servo_id=7, steps_per_dps=10.0, max_dps=10000.0)
-        self._patch_angle(m, [0, 90])
+        self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
         # 5000 dps × 10 = 50000 steps — exceeds the 0x7FFF register cap.
         m.run_angle(deg_per_s=5000, target_angle=90, then="brake")
@@ -404,38 +402,63 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         # then="brake" also writes goal_speed=0 at the end.
         self.assertEqual(speed_writes[-1][1], bytes([0, 0]))
 
+    # --- angle accumulation across a step move ----------------------------
+
+    def test_angle_tracks_executed_step_counts(self):
+        # The headline measurement fix: after a step move, angle() must
+        # reflect the counts travelled (step register can't be read as a
+        # position in step mode, so the accumulator is advanced by the
+        # executed counts). +90° from a zeroed baseline reads back +90°.
+        m = ST3215Motor(servo_id=8, steps_per_dps=10.0, max_dps=1000.0)
+        # Establish a wheel-mode baseline and zero it.
+        m._read_present_pos = lambda: 500
+        m.reset_angle(0)
+        self.assertAlmostEqual(m.angle(), 0.0, places=1)
+        # Now a +90° step (1024 counts) that parks exactly (remaining→0).
+        self._patch_remaining(m, [1024, 1024, 0])
+        m.run_angle(deg_per_s=200, target_angle=90, then="hold")
+        self.assertAlmostEqual(m.angle(), 90.0, places=1)
+
+    def test_angle_tracks_negative_step_with_invert(self):
+        m = ST3215Motor(servo_id=9, steps_per_dps=10.0, max_dps=1000.0,
+                        invert=True)
+        m._read_present_pos = lambda: 500
+        m.reset_angle(0)
+        # User asks -90°; with invert the hardware step is +1024, but
+        # angle() must still report the user-frame -90°.
+        self._patch_remaining(m, [1024, 1024, 0])
+        m.run_angle(deg_per_s=200, target_angle=-90, then="hold")
+        self.assertAlmostEqual(m.angle(), -90.0, places=1)
+
     # --- end-state (then=) ------------------------------------------------
 
     def test_run_angle_default_coasts_and_stays_in_step_mode(self):
         # then="coast" cuts torque and leaves op_mode in step (no flip
         # back to wheel — the next run_speed/brake restores it lazily).
-        m = ST3215Motor(servo_id=8, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 90])
+        m = ST3215Motor(servo_id=10, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90)   # default coast
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
-        # Only the flip INTO step mode; no flip back.
         self.assertEqual(len(mode_writes), 1)
         self.assertEqual(mode_writes[0][1], bytes([_MODE_STEP]))
         torque_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_TORQUE)
         self.assertEqual(torque_writes[-1][1], bytes([0]))   # torque cut
 
     def test_run_angle_then_brake_restores_wheel_mode_and_zero_speed(self):
-        m = ST3215Motor(servo_id=9, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 90])
+        m = ST3215Motor(servo_id=11, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90, then="brake")
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
-        self.assertEqual(mode_writes[0][1], bytes([_MODE_STEP]))   # into step
-        self.assertEqual(mode_writes[-1][1], bytes([_MODE_WHEEL])) # back to wheel
+        self.assertEqual(mode_writes[0][1], bytes([_MODE_STEP]))    # into step
+        self.assertEqual(mode_writes[-1][1], bytes([_MODE_WHEEL]))  # back to wheel
         speed_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_SPEED)
         self.assertEqual(speed_writes[-1][1], bytes([0, 0]))
 
     def test_run_angle_then_hold_stays_in_step_mode_torque_on(self):
-        # then="hold": step mode already holds the target, so no wheel
-        # flip and no torque cut.
-        m = ST3215Motor(servo_id=10, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 90])
+        m = ST3215Motor(servo_id=12, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90, then="hold")
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
@@ -445,22 +468,22 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self.assertEqual(torque_writes, [])   # torque not cut
 
     def test_run_angle_then_invalid_raises_value_error(self):
-        m = ST3215Motor(servo_id=11, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=13, steps_per_dps=10.0, max_dps=1000.0)
         with self.assertRaises(ValueError):
             m.run_angle(deg_per_s=200, target_angle=90, then="freewheel")
 
     def test_run_angle_zero_target_is_a_noop(self):
-        m = ST3215Motor(servo_id=12)
+        m = ST3215Motor(servo_id=14)
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=0)
         self.assertEqual(len(m._bus._uart._tx_log), baseline)
 
     def test_run_angle_silent_bus_writes_no_step(self):
-        # If the baseline angle() read fails (bus silent) run_angle bails
-        # before commanding a move it can't track — no step write, no
-        # end-state dispatch (torque stays as it was).
-        m = ST3215Motor(servo_id=13, steps_per_dps=10.0, max_dps=1000.0)
-        m.angle = lambda: None
+        # If the bus-alive probe read fails (servo silent) run_angle
+        # bails before commanding a move it can't track — no step write,
+        # no end-state dispatch (torque stays as it was).
+        m = ST3215Motor(servo_id=15, steps_per_dps=10.0, max_dps=1000.0)
+        m._read_step_remaining = lambda: None
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90)
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
@@ -475,46 +498,59 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self.assertTrue(m.done())
 
     def test_run_angle_wait_false_returns_immediately_and_done_tracks(self):
-        # wait=False writes the step and returns; done() polls angle()
-        # and reports False until the shaft converges on the target.
+        # wait=False writes the step and returns; done() reads the
+        # remaining register and reports False until it counts down.
         m = ST3215Motor(servo_id=21, steps_per_dps=10.0, max_dps=1000.0)
-        # angle(): start=0, first done()=43.9° (short), second=90° (parked).
-        self._patch_angle(m, [0, 43.9, 90])
+        # remaining: probe(1024), done#1 started(512), done#2 parked(0).
+        self._patch_remaining(m, [1024, 512, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90, wait=False)
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
         self.assertEqual(_decode_signed_step(steps[0][1]), 1024)
-        self.assertFalse(m.done())   # 43.9° — still short
-        self.assertTrue(m.done())    # 90° — parked
+        self.assertFalse(m.done())   # 512 remaining — still moving
+        self.assertTrue(m.done())    # 0 — parked
         self.assertTrue(m.done())    # stays done
 
+    def test_run_angle_wait_false_ignores_stale_zero_at_kickoff(self):
+        # If the remaining register still reads ~0 from the previous
+        # move when done() is first called, it must NOT report done — the
+        # started latch waits for the register to go large first.
+        m = ST3215Motor(servo_id=25, steps_per_dps=10.0, max_dps=1000.0)
+        # probe(2), done#1 stale 0 (not started!), done#2 started 800,
+        # done#3 parked 0.
+        self._patch_remaining(m, [2, 0, 800, 0])
+        m.run_angle(deg_per_s=200, target_angle=90, wait=False)
+        self.assertFalse(m.done())   # stale 0 — latch not armed, NOT done
+        self.assertFalse(m.done())   # 800 — moving, now armed
+        self.assertTrue(m.done())    # 0 — really parked
+
     def test_run_angle_wait_false_defers_then_dispatch_until_done(self):
-        # then="coast" must cut torque only AFTER the move converges,
-        # not at run_angle() return time (else it kills the move).
+        # then="coast" must cut torque only AFTER the move parks, not at
+        # run_angle() return time (else it kills the move).
         m = ST3215Motor(servo_id=22, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 90])
+        self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90, wait=False, then="coast")
         # No torque write yet — coast deferred.
         self.assertEqual(_writes_to(m._bus._uart._tx_log[baseline:],
                                     _REG_TORQUE), [])
-        self.assertTrue(m.done())
-        # Now the coast has run.
+        self.assertFalse(m.done())   # started
+        self.assertTrue(m.done())    # parked → coast runs now
         torque_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_TORQUE)
         self.assertEqual(torque_writes[-1][1], bytes([0]))
 
     def test_run_speed_supersedes_pending_run_angle_wait_false(self):
         m = ST3215Motor(servo_id=23, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 10])   # never reaches 90 → stays pending
+        self._patch_remaining(m, [1024, 1024])   # never reaches 0 → pending
         m.run_angle(deg_per_s=200, target_angle=90, wait=False)
-        self.assertFalse(m.done())   # pending kicked off
+        self.assertFalse(m.done())   # pending kicked off (started)
         m.run_speed(50)              # supersede
         self.assertTrue(m.done())    # pending dropped
 
     # --- mode restoration after coast / hold ------------------------------
 
     def test_run_speed_after_coast_re_enables_torque(self):
-        m = ST3215Motor(servo_id=14, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=30, steps_per_dps=10.0, max_dps=1000.0)
         m.coast()
         baseline = len(m._bus._uart._tx_log)
         m.run_speed(50)
@@ -522,7 +558,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self.assertEqual(torque_writes[-1][1], bytes([1]))
 
     def test_brake_after_coast_re_enables_torque(self):
-        m = ST3215Motor(servo_id=15)
+        m = ST3215Motor(servo_id=31)
         m.coast()
         baseline = len(m._bus._uart._tx_log)
         m.brake()
@@ -532,7 +568,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
     def test_run_speed_after_hold_restores_wheel_mode(self):
         # hold() leaves the servo in position (or step) mode; the next
         # run_speed must flip back to wheel mode before writing goal_speed.
-        m = ST3215Motor(servo_id=16, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=32, steps_per_dps=10.0, max_dps=1000.0)
         m._read_present_pos = lambda: 500
         m.hold()
         baseline = len(m._bus._uart._tx_log)
@@ -544,7 +580,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         # A motor that never ran run_angle (e.g. a DriveBase wheel) must
         # hold WITHOUT zeroing its angle limits — otherwise its present-
         # position reads would go multi-turn and break wheel odometry.
-        m = ST3215Motor(servo_id=17, steps_per_dps=10.0, max_dps=1000.0)
+        m = ST3215Motor(servo_id=33, steps_per_dps=10.0, max_dps=1000.0)
         m._read_present_pos = lambda: 500
         baseline = len(m._bus._uart._tx_log)
         m.hold()
@@ -561,8 +597,8 @@ class TestST3215MotorRunAngle(unittest.TestCase):
     def test_hold_after_run_angle_uses_step_mode_zero_step(self):
         # Once run_angle has switched the motor into multi-turn step
         # mode, hold() keeps it there with a zero-count step.
-        m = ST3215Motor(servo_id=18, steps_per_dps=10.0, max_dps=1000.0)
-        self._patch_angle(m, [0, 90])
+        m = ST3215Motor(servo_id=34, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_remaining(m, [1024, 1024, 0])
         m.run_angle(deg_per_s=200, target_angle=90)   # zeroes limits, step mode
         baseline = len(m._bus._uart._tx_log)
         m.hold()
