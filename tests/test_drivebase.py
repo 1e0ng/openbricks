@@ -572,6 +572,14 @@ class TestDriveBaseStallTimeout(unittest.TestCase):
         self.assertEqual(left._target_dps, 0.0)
         self.assertEqual(right._target_dps, 0.0)
 
+    def test_move_budget_guards_against_zero_rate(self):
+        # A configured speed of 0 must not divide-by-zero — the rate is
+        # floored to 1 so the budget is finite (and the move just times
+        # out, since zero-speed wheels never reach the target).
+        self.assertEqual(DriveBase._move_budget_ms(0, 0), 1000)        # floor only
+        self.assertEqual(DriveBase._move_budget_ms(100, 0),
+                         DriveBase._move_budget_ms(100, 1))            # rate floored to 1
+
     def test_healthy_move_completes_well_within_budget(self):
         # Guard against an over-tight budget: a move whose wheels actually
         # turn must complete normally, not trip the timeout.

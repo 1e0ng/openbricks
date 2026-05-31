@@ -440,6 +440,38 @@ class EmergencyStopTests(unittest.TestCase):
         # quiet no-op, never raise.
         launcher._stop_all_motors()
 
+    def test_stop_all_motors_tolerates_a_wedged_bus(self):
+        # One bus failing to accept the broadcast must not stop us from
+        # trying the others — an e-stop tries every avenue.
+        from openbricks.drivers.st3215 import ST3215
+
+        class _BoomBus:
+            def write(self, *a, **k):
+                raise OSError("bus wedged")
+
+        ST3215._buses = {("wedged",): _BoomBus()}
+        launcher._stop_all_motors()   # must not raise
+
+    def test_stop_all_motors_survives_st3215_import_failure(self):
+        # If the serial-bus driver can't be imported for any reason, the
+        # e-stop must still not propagate — the KeyboardInterrupt has to
+        # get through to unwind the program.
+        import sys
+        name = "openbricks.drivers.st3215"
+        saved = sys.modules.get(name)
+
+        class _Empty:
+            pass
+
+        sys.modules[name] = _Empty()   # lacks ST3215 / regs → import fails
+        try:
+            launcher._stop_all_motors()   # must not raise
+        finally:
+            if saved is not None:
+                sys.modules[name] = saved
+            else:
+                sys.modules.pop(name, None)
+
 
 if __name__ == "__main__":
     unittest.main()
