@@ -48,6 +48,13 @@ class TestMotorInterface(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             Motor().run_angle(100, 90)
 
+    def test_done_returns_true_by_default(self):
+        # ``done()`` has a sensible base default rather than raising:
+        # drivers that don't support non-blocking moves can be polled
+        # safely. A wait=True call is finished before returning to the
+        # caller, by definition.
+        self.assertTrue(Motor().done())
+
 
 class TestServoInterface(unittest.TestCase):
     def test_move_to_raises_not_implemented(self):

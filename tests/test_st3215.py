@@ -457,6 +457,102 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         # the anchor read even happens.
         self.assertEqual(len(m._bus._uart._tx_log), baseline)
 
+    def test_done_returns_true_when_no_wait_false_move_pending(self):
+        # Pybricks-style ``done()``: True whenever nothing is in
+        # flight. Default state after construction is "no pending".
+        m = ST3215Motor(servo_id=20)
+        self.assertTrue(m.done())
+
+    def test_run_angle_wait_false_returns_immediately_and_sets_pending(self):
+        # ``wait=False`` writes the first chunk's goal-position and
+        # returns without blocking. ``done()`` then drives the state
+        # machine via polling. Until the present-position read shows
+        # the chunk has parked, ``done()`` returns False.
+        m = ST3215Motor(servo_id=21, steps_per_dps=10.0, max_dps=1000.0)
+        # Anchor read at start, then the wait=False branch reads
+        # present once more before writing the first chunk. While the
+        # motor "drives", subsequent ``done()`` calls each consume
+        # one read. We feed back values that say "still 200 counts
+        # short" for the first poll, then "parked" for the second.
+        self._patch_present_pos(m, [500, 500, 700, 1012])
+        m.run_angle(deg_per_s=200, target_angle=45, wait=False)
+        self.assertFalse(m.done())   # present=700, target=1012, err=312 > tol
+        self.assertTrue(m.done())    # present=1012, err=0, parks → True
+        # After completion ``done()`` keeps returning True.
+        self.assertTrue(m.done())
+
+    def test_run_angle_wait_false_multi_chunk_advances_via_done(self):
+        # 720° = 8192 counts, chunked at 2000 max → 5 chunks (4 × 2000
+        # + 192). Each ``done()`` invocation that detects the current
+        # chunk has parked spends TWO reads: one for the poll, one
+        # inside the ``self.angle()`` accumulator refresh. The state
+        # machine then writes the next chunk's goal-position and
+        # carries on, until the final chunk parks and the ``then=``
+        # dispatch runs.
+        m = ST3215Motor(servo_id=22, steps_per_dps=10.0, max_dps=1000.0)
+        # Chunk targets (starting from anchor=0):
+        #   1: 0 + 2000     = 2000
+        #   2: 2000 + 2000  = 4000
+        #   3: 4000 + 2000  = 6000 mod 4096 = 1904
+        #   4: 1904 + 2000  = 3904
+        #   5: 3904 + 192   = 4096 mod 4096 = 0     (remaining 192)
+        # Reads (poll + angle each chunk-completion):
+        reads = [0, 0,           # run_angle: anchor + wait=False present
+                 2000, 2000,     # done() #1: poll parks chunk 1, angle, advance
+                 4000, 4000,     # done() #2: parks chunk 2, advance
+                 1904, 1904,     # done() #3: parks chunk 3, advance
+                 3904, 3904,     # done() #4: parks chunk 4, advance
+                 0,    0,        # done() #5: parks final chunk 5 → coast
+                ]
+        self._patch_present_pos(m, reads)
+        baseline = len(m._bus._uart._tx_log)
+        m.run_angle(deg_per_s=200, target_angle=720, wait=False)
+        # Drain done() until it reports completion. Cap iterations so
+        # a hung state machine fails the test fast rather than hangs.
+        for _ in range(20):
+            if m.done():
+                break
+        self.assertTrue(m.done())
+        pos_writes = _writes_to(m._bus._uart._tx_log[baseline:],
+                                _REG_GOAL_POSITION)
+        # 1 anchor + 5 chunk targets = 6 goal-position writes.
+        self.assertEqual(len(pos_writes), 6)
+
+    def test_run_angle_wait_false_runs_then_dispatch_at_completion(self):
+        # ``then="coast"`` should cut torque AFTER the final chunk
+        # parks, not at run_angle() return time (that was the pre-
+        # refactor bug — finally fell through immediately and killed
+        # the move). Verify by checking torque writes: only ONE
+        # torque write (from the constructor, value 1); no torque=0
+        # before ``done()`` confirms completion.
+        m = ST3215Motor(servo_id=23, steps_per_dps=10.0, max_dps=1000.0)
+        # Anchor=0, wait=False present=0, then done() polls return
+        # 1024 (= 90° target) on first poll → final chunk parks → coast.
+        self._patch_present_pos(m, [0, 0, 1024])
+        baseline = len(m._bus._uart._tx_log)
+        m.run_angle(deg_per_s=200, target_angle=90, wait=False,
+                    then="coast")
+        torque_after_kickoff = _writes_to(m._bus._uart._tx_log[baseline:],
+                                          _REG_TORQUE)
+        # No torque write yet — coast is deferred until done().
+        self.assertEqual(torque_after_kickoff, [])
+        self.assertTrue(m.done())
+        # NOW the coast dispatch has run.
+        torque_after_done = _writes_to(m._bus._uart._tx_log[baseline:],
+                                       _REG_TORQUE)
+        self.assertEqual(torque_after_done[-1][1], bytes([0]))
+
+    def test_run_speed_supersedes_pending_run_angle_wait_false(self):
+        # New motion commands abandon any in-flight wait=False move
+        # — pybricks "new command wins". After the supersede, done()
+        # returns True (nothing pending).
+        m = ST3215Motor(servo_id=24, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_present_pos(m, [0, 0, 0])  # anchors only
+        m.run_angle(deg_per_s=200, target_angle=90, wait=False)
+        self.assertFalse(m.done())   # pending kicked off
+        m.run_speed(50)              # supersede
+        self.assertTrue(m.done())    # pending dropped
+
     def test_run_angle_silent_anchor_read_bails_before_mode_switch(self):
         # If the very first (anchor) present-pos read fails — bus
         # totally silent — run_angle returns BEFORE flipping into

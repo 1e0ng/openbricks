@@ -357,5 +357,107 @@ class TestDriveBaseFallbackBusGlitchTolerance(unittest.TestCase):
         db.turn(90)        # must not raise; must stop cleanly.
 
 
+class TestDriveBaseWaitFalse(unittest.TestCase):
+    """Pybricks-style ``wait=False`` + ``done()`` for concurrent
+    drivebase use. Each ``done()`` call runs one tick of the
+    fallback state machine — so polling cadence drives progress."""
+
+    def setUp(self):
+        _reset_all()
+
+    def _patch_sleep_steps_motors(self, *motors):
+        original = time.sleep_ms
+
+        def stepped_sleep(ms):
+            original(ms)
+            for m in motors:
+                m.step(ms / 1000.0)
+
+        time.sleep_ms = stepped_sleep
+        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
+
+    def test_done_returns_true_when_no_move_pending(self):
+        left = _FakeClosedLoopMotor()
+        right = _FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self.assertTrue(db.done())
+
+    def test_straight_wait_false_returns_immediately_then_converges_via_done(self):
+        # ``straight(wait=False)`` should arm state and return without
+        # blocking. The caller drives the move by polling ``done()``
+        # until it returns True. Convergence behaviour should match
+        # ``wait=True``.
+        left = _FakeClosedLoopMotor()
+        right = _FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+
+        db.straight(100, wait=False)
+        # Just-armed: motors haven't moved yet.
+        self.assertFalse(db.done())
+        # Poll done() in a tight loop (with sleep to advance the
+        # patched motor angle). Same cadence as the implicit
+        # wait=True loop.
+        for _ in range(5000):
+            if db.done():
+                break
+            time.sleep_ms(10)
+
+        target = _wheel_deg_for_distance(100, wheel_diameter_mm=56)
+        avg = (left.angle() + right.angle()) / 2
+        self.assertGreaterEqual(avg, target)
+        self.assertTrue(db.done())   # remains True after completion
+
+    def test_turn_wait_false_converges_via_done(self):
+        left = _FakeClosedLoopMotor()
+        right = _FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+
+        db.turn(90, wait=False)
+        for _ in range(5000):
+            if db.done():
+                break
+            time.sleep_ms(10)
+
+        arc_mm = math.radians(90) * (114 / 2)
+        expected = arc_mm / (math.pi * 56) * 360
+        self.assertLessEqual(left.angle(), -expected + 5)
+        self.assertGreaterEqual(right.angle(), expected - 5)
+        self.assertTrue(db.done())
+
+    def test_new_move_supersedes_pending_wait_false(self):
+        # Pybricks "new command wins": calling straight() while a
+        # wait=False turn is in flight abandons the turn and arms
+        # the straight. ``done()`` reflects the new move's state.
+        left = _FakeClosedLoopMotor()
+        right = _FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+
+        db.turn(90, wait=False)
+        self.assertFalse(db.done())
+        db.straight(100, wait=False)
+        # Still not done (now a fresh straight is pending).
+        self.assertFalse(db.done())
+        for _ in range(5000):
+            if db.done():
+                break
+            time.sleep_ms(10)
+        self.assertTrue(db.done())
+
+    def test_stop_clears_pending_wait_false_move(self):
+        # Explicit ``stop()`` aborts the pending move and ``done()``
+        # then reports completion immediately.
+        left = _FakeClosedLoopMotor()
+        right = _FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        db.straight(1000, wait=False)
+        self.assertFalse(db.done())
+        db.stop()
+        self.assertTrue(db.done())
+
+
 if __name__ == "__main__":
     unittest.main()

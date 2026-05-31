@@ -76,6 +76,11 @@ class DriveBase:
         self._straight_speed_dps = 200
         self._turn_rate_dps      = 180
 
+        # State for in-flight ``straight(wait=False)`` / ``turn(wait=False)``
+        # moves. ``None`` means nothing pending; ``done()`` returns
+        # True. ``stop()`` clears this. See ``done`` for the layout.
+        self._pending = None
+
     def settings(self, straight_speed=None, turn_rate=None):
         if straight_speed is not None:
             self._straight_speed_dps = straight_speed
@@ -115,7 +120,9 @@ class DriveBase:
         self._run_at_dps(self._right, fwd_wheel_dps + diff_wheel_dps)
 
     def stop(self, then="coast"):
-        """Halt both wheels. ``then`` selects the end-state, pybricks-style:
+        """Halt both wheels. Also clears any pending ``wait=False``
+        move (new command supersedes, pybricks-style). ``then``
+        selects the end-state:
 
         * ``"coast"`` (default) — both motors free-wheel.
         * ``"brake"`` — both motors actively resist motion at zero velocity.
@@ -123,6 +130,10 @@ class DriveBase:
           Requires motors that implement ``hold()`` (e.g. ``ST3215Motor``);
           open-loop drivers raise ``NotImplementedError``.
         """
+        if then not in ("coast", "brake", "hold"):
+            raise ValueError(
+                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        self._pending = None
         if self._native is not None:
             self._native.stop()
         if then == "coast":
@@ -131,53 +142,141 @@ class DriveBase:
         elif then == "brake":
             self._left.brake()
             self._right.brake()
-        elif then == "hold":
+        else:   # "hold"
             self._left.hold()
             self._right.hold()
-        else:
-            raise ValueError(
-                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+
+    def done(self):
+        """Pybricks-style status check for in-flight
+        ``straight(wait=False)`` / ``turn(wait=False)``. Returns
+        ``True`` if no move is pending or the active move has
+        reached its target (and ``stop(then=…)`` has run). Returns
+        ``False`` while the move is still progressing.
+
+        On the fallback path (serial-bus servo drivebases), each
+        ``done()`` invocation runs ONE tick of the heading-hold loop
+        — read both angles, compute deltas, write motor speeds. So
+        the caller has to keep polling for the move to advance;
+        ``time.sleep_ms(10)`` between polls is the natural cadence.
+        On the native path, the C scheduler runs the trajectory
+        independently at 1 kHz; ``done()`` just checks a flag.
+        """
+        if self._pending is None:
+            return True
+        mode = self._pending["mode"]
+        if mode == "straight_native" or mode == "turn_native":
+            if self._native.is_done():
+                self.stop(then=self._pending["then"])
+                return True
+            return False
+        if mode == "straight_fallback":
+            return self._straight_fallback_tick()
+        if mode == "turn_fallback":
+            return self._turn_fallback_tick()
+        # Unknown mode — treat as done to avoid wedging the caller.
+        self._pending = None
+        return True
 
     # ---- blocking moves via the C coupled controller ----
-    def straight(self, distance_mm, then="coast"):
-        """Drive forward by ``distance_mm``. Blocking, 2-DOF coupled.
+    def straight(self, distance_mm, then="coast", wait=True):
+        """Drive forward by ``distance_mm``. 2-DOF coupled.
 
         ``then`` is forwarded to ``stop()`` — see its docstring for
-        the coast/brake/hold semantics. Falls back to a pure-Python
-        open-loop sweep for motors without a native servo."""
-        if self._native is None:
-            self._straight_fallback(distance_mm, then=then)
-            return
+        coast/brake/hold semantics.
 
-        # Ensure both servos are attached to motor_process; the native
-        # drivebase writes directly to their target_dps but doesn't
-        # subscribe them itself.
-        self._left.run_speed(0)
-        self._right.run_speed(0)
+        ``wait=True`` (default) blocks until the move completes.
+        ``wait=False`` returns immediately after arming the move;
+        the caller polls ``done()`` to advance the state machine
+        (fallback path) or just check completion (native path), and
+        the ``then=`` dispatch is deferred until ``done()`` reports
+        the target was reached. Concurrent use with another
+        wait=False move on a separate ``DriveBase`` (or with motor
+        ``run_angle(wait=False)`` calls) is the intended pattern.
 
-        speed_mm_s = self._straight_speed_dps * self._wheel_circumference / 360
-        self._native.straight(float(distance_mm), float(speed_mm_s))
+        Any subsequent move command supersedes the previous pending
+        wait=False move (pybricks "new command wins").
 
-        while not self._native.is_done():
-            time.sleep_ms(10)
-        self.stop(then=then)
+        Falls back to a pure-Python heading-hold loop for motors
+        without a native servo (i.e. serial-bus ST-3215/ST-3032
+        drivebases)."""
+        if then not in ("coast", "brake", "hold"):
+            raise ValueError(
+                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        self._arm_straight(distance_mm, then)
+        if wait:
+            while not self.done():
+                time.sleep_ms(10)
 
-    def turn(self, angle_deg, then="coast"):
+    def turn(self, angle_deg, then="coast", wait=True):
         """Turn in place by ``angle_deg`` body heading (positive = left).
 
-        ``then`` is forwarded to ``stop()`` — see its docstring."""
-        if self._native is None:
-            self._turn_fallback(angle_deg, then=then)
+        Same ``then`` / ``wait`` semantics as ``straight()`` — see
+        its docstring."""
+        if then not in ("coast", "brake", "hold"):
+            raise ValueError(
+                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        self._arm_turn(angle_deg, then)
+        if wait:
+            while not self.done():
+                time.sleep_ms(10)
+
+    # ---- arm: stash pending state, kick off motion ----
+    def _arm_straight(self, distance_mm, then):
+        if self._native is not None:
+            # Ensure both servos are attached to motor_process; the
+            # native drivebase writes directly to their target_dps
+            # but doesn't subscribe them itself.
+            self._left.run_speed(0)
+            self._right.run_speed(0)
+            speed_mm_s = self._straight_speed_dps * self._wheel_circumference / 360
+            self._native.straight(float(distance_mm), float(speed_mm_s))
+            self._pending = {"mode": "straight_native", "then": then}
             return
+        # Fallback: snapshot anchors, stash state, motors start on
+        # first done() tick.
+        start_left  = self._read_angle_or_bail(self._left)
+        start_right = self._read_angle_or_bail(self._right)
+        if start_left is None or start_right is None:
+            self.stop(then=then)
+            return
+        target_wheel_deg = distance_mm / self._wheel_circumference * 360
+        direction = 1 if distance_mm >= 0 else -1
+        self._pending = {
+            "mode": "straight_fallback",
+            "target_wheel_deg": target_wheel_deg,
+            "direction": direction,
+            "start_left":  start_left,
+            "start_right": start_right,
+            "speed": self._straight_speed_dps * direction,
+            "consecutive_none": 0,
+            "then": then,
+        }
 
-        self._left.run_speed(0)
-        self._right.run_speed(0)
-
-        self._native.turn(float(angle_deg), float(self._turn_rate_dps))
-
-        while not self._native.is_done():
-            time.sleep_ms(10)
-        self.stop(then=then)
+    def _arm_turn(self, angle_deg, then):
+        if self._native is not None:
+            self._left.run_speed(0)
+            self._right.run_speed(0)
+            self._native.turn(float(angle_deg), float(self._turn_rate_dps))
+            self._pending = {"mode": "turn_native", "then": then}
+            return
+        start_left  = self._read_angle_or_bail(self._left)
+        start_right = self._read_angle_or_bail(self._right)
+        if start_left is None or start_right is None:
+            self.stop(then=then)
+            return
+        arc_mm = math.radians(abs(angle_deg)) * (self._axle_track / 2)
+        wheel_deg_each = arc_mm / self._wheel_circumference * 360
+        direction = 1 if angle_deg >= 0 else -1
+        self._pending = {
+            "mode": "turn_fallback",
+            "wheel_deg_each": wheel_deg_each,
+            "direction": direction,
+            "start_left":  start_left,
+            "start_right": start_right,
+            "speed": self._turn_rate_dps,
+            "consecutive_none": 0,
+            "then": then,
+        }
 
     # ---- helpers ----
     @staticmethod
@@ -210,80 +309,63 @@ class DriveBase:
     # _turn_fallback give up and stop. 50 × 10 ms = 500 ms.
     _MAX_CONSECUTIVE_NONE = 50
 
-    def _straight_fallback(self, distance_mm, then="coast"):
-        target_wheel_deg = distance_mm / self._wheel_circumference * 360
-        # Snapshot the starting angle instead of calling ``reset_angle(0)``.
-        # Mutating the accumulator surprises any caller that reads
-        # ``motor.angle()`` after ``straight()`` — the value they get
-        # is "wheel motion since this most recent straight()", not
-        # the cumulative angle they were tracking. Pybricks DriveBase
-        # behaves this way too. We just subtract the starting offsets
-        # inside the loop and at the comparison.
-        start_left  = self._read_angle_or_bail(self._left)
-        start_right = self._read_angle_or_bail(self._right)
-        if start_left is None or start_right is None:
-            self.stop(then=then)
-            return
+    def _straight_fallback_tick(self):
+        """One iteration of the fallback heading-hold loop.
 
-        direction = 1 if distance_mm >= 0 else -1
-        speed = self._straight_speed_dps * direction
+        Returns ``True`` when the target wheel angle has been reached
+        (and ``stop(then=…)`` has been run, clearing ``_pending``);
+        ``False`` while the move is still progressing or while we're
+        waiting for the bus to come back from a glitch. Snapshot
+        anchors live in ``self._pending`` from ``_arm_straight``."""
+        state = self._pending
+        left_now  = self._left.angle()
+        right_now = self._right.angle()
+        if left_now is None or right_now is None:
+            state["consecutive_none"] += 1
+            if state["consecutive_none"] >= self._MAX_CONSECUTIVE_NONE:
+                self.stop(then=state["then"])
+                return True
+            return False
+        state["consecutive_none"] = 0
+        left_deg  = left_now  - state["start_left"]
+        right_deg = right_now - state["start_right"]
+        avg = (left_deg + right_deg) / 2
+        direction = state["direction"]
+        target = state["target_wheel_deg"]
+        if (direction > 0 and avg >= target) or \
+           (direction < 0 and avg <= target):
+            self.stop(then=state["then"])
+            return True
+        err = left_deg - right_deg
+        speed = state["speed"]
+        self._run_at_dps(self._left,  speed - err)
+        self._run_at_dps(self._right, speed + err)
+        return False
 
-        consecutive_none = 0
-        while True:
-            left_now  = self._left.angle()
-            right_now = self._right.angle()
-            if left_now is None or right_now is None:
-                consecutive_none += 1
-                if consecutive_none >= self._MAX_CONSECUTIVE_NONE:
-                    break
-                time.sleep_ms(10)
-                continue
-            consecutive_none = 0
-            left_deg  = left_now  - start_left
-            right_deg = right_now - start_right
-            avg = (left_deg + right_deg) / 2
-            if direction > 0 and avg >= target_wheel_deg:
-                break
-            if direction < 0 and avg <= target_wheel_deg:
-                break
-            err = left_deg - right_deg
-            self._run_at_dps(self._left,  speed - err)
-            self._run_at_dps(self._right, speed + err)
-            time.sleep_ms(10)
-        self.stop(then=then)
-
-    def _turn_fallback(self, angle_deg, then="coast"):
-        arc_mm = math.radians(abs(angle_deg)) * (self._axle_track / 2)
-        wheel_deg_each = arc_mm / self._wheel_circumference * 360
-
-        start_left  = self._read_angle_or_bail(self._left)
-        start_right = self._read_angle_or_bail(self._right)
-        if start_left is None or start_right is None:
-            self.stop(then=then)
-            return
-
-        direction = 1 if angle_deg >= 0 else -1
-        speed = self._turn_rate_dps
-
-        consecutive_none = 0
-        while True:
-            left_now  = self._left.angle()
-            right_now = self._right.angle()
-            if left_now is None or right_now is None:
-                consecutive_none += 1
-                if consecutive_none >= self._MAX_CONSECUTIVE_NONE:
-                    break
-                time.sleep_ms(10)
-                continue
-            consecutive_none = 0
-            left  = (left_now  - start_left)  * (-direction)
-            right = (right_now - start_right) * direction
-            if left >= wheel_deg_each and right >= wheel_deg_each:
-                break
-            self._run_at_dps(self._left,  -speed * direction)
-            self._run_at_dps(self._right,  speed * direction)
-            time.sleep_ms(10)
-        self.stop(then=then)
+    def _turn_fallback_tick(self):
+        """One iteration of the fallback in-place-turn loop. Same
+        return semantics as ``_straight_fallback_tick``."""
+        state = self._pending
+        left_now  = self._left.angle()
+        right_now = self._right.angle()
+        if left_now is None or right_now is None:
+            state["consecutive_none"] += 1
+            if state["consecutive_none"] >= self._MAX_CONSECUTIVE_NONE:
+                self.stop(then=state["then"])
+                return True
+            return False
+        state["consecutive_none"] = 0
+        direction = state["direction"]
+        left  = (left_now  - state["start_left"])  * (-direction)
+        right = (right_now - state["start_right"]) * direction
+        if left >= state["wheel_deg_each"] and \
+           right >= state["wheel_deg_each"]:
+            self.stop(then=state["then"])
+            return True
+        speed = state["speed"]
+        self._run_at_dps(self._left,  -speed * direction)
+        self._run_at_dps(self._right,  speed * direction)
+        return False
 
     @staticmethod
     def _read_angle_or_bail(motor, retries=5):
