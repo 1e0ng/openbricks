@@ -76,6 +76,13 @@ _MODE_WHEEL    = 1
 # Hardware: 4096 encoder counts per output revolution.
 _COUNTS_PER_REV = 4096
 
+# Sub-move size cap used by ``run_angle`` to split big moves: must be
+# strictly less than half a revolution so the servo's shortest-path
+# routing in position mode unambiguously matches our intended
+# direction (a single 270° forward command would otherwise be
+# executed as 90° backward). 2000 counts ≈ 175.8°.
+_MAX_CHUNK_COUNTS = 2000
+
 # Speed register units. The Feetech datasheet uses "step/sec"; one step
 # is 360/4096 ≈ 0.0879 deg, so 1 dps ≈ 11.378 step/sec. Exposed as a
 # kwarg in case future ST-3215 revisions ship with a different scale.
@@ -312,6 +319,14 @@ class ST3215Motor(Motor):
         self._op_mode    = _MODE_WHEEL
         self._torque_on  = True
 
+        # State for ``run_angle(wait=False)``. ``None`` means no
+        # non-blocking move is in flight; ``done()`` returns True.
+        # Layout: dict with keys ``remaining`` (signed counts still
+        # to travel after the current chunk), ``chunk_target`` (raw
+        # 0..4095 goal-position written for the current chunk),
+        # ``tol_counts``, ``then``. See ``_poll_pending``.
+        self._pending = None
+
         # Switch the servo into wheel/continuous mode.
         self._bus.write(self._id, _REG_OP_MODE, bytes([_MODE_WHEEL]))
         self._bus.write(self._id, _REG_TORQUE,  bytes([1]))
@@ -377,6 +392,35 @@ class ST3215Motor(Motor):
             self._bus.write(self._id, _REG_TORQUE, bytes([1]))
             self._torque_on = True
 
+    def _abandon_pending(self):
+        """Drop any in-flight ``run_angle(wait=False)`` state.
+
+        Called at the start of every motion command — pybricks-style
+        "new command supersedes." The new command will overwrite the
+        servo's goal_position / op_mode / goal_speed anyway, so all
+        we need to do is forget the bookkeeping; the next ``done()``
+        call returns ``True``.
+        """
+        self._pending = None
+
+    def _dispatch_then(self, then):
+        """Run the end-of-move register dance for the given ``then``
+        mode. Does NOT touch ``_pending`` — caller manages that.
+        Used by both the ``run_angle(wait=True)`` finally block and
+        the ``done()`` completion path for ``wait=False``."""
+        if then == "coast":
+            self._bus.write(self._id, _REG_TORQUE, bytes([0]))
+            self._torque_on = False
+        elif then == "brake":
+            self._ensure_mode(_MODE_WHEEL)
+            self._write_goal_speed_signed(0)
+        else:   # "hold"
+            present = self._read_present_pos()
+            if present is not None:
+                self._bus.write(self._id, _REG_GOAL_POSITION,
+                                bytes([present & 0xFF,
+                                       (present >> 8) & 0xFF]))
+
     # --- Motor interface --------------------------------------------------
 
     def run(self, power):
@@ -387,6 +431,7 @@ class ST3215Motor(Motor):
 
     def run_speed(self, deg_per_s):
         """Set continuous wheel velocity in degrees per second."""
+        self._abandon_pending()
         self._ensure_mode(_MODE_WHEEL)
         self._ensure_torque_on()
         v = self._encode_goal_speed(deg_per_s)
@@ -395,12 +440,14 @@ class ST3215Motor(Motor):
 
     def brake(self):
         """Hold zero velocity (servo's internal loop actively brakes)."""
+        self._abandon_pending()
         self._ensure_mode(_MODE_WHEEL)
         self._ensure_torque_on()
         self._write_goal_speed_signed(0)
 
     def coast(self):
         """Disable torque — wheel free-wheels."""
+        self._abandon_pending()
         self._bus.write(self._id, _REG_TORQUE, bytes([0]))
         self._torque_on = False
 
@@ -410,6 +457,7 @@ class ST3215Motor(Motor):
         the internal PID resists rotation. Subsequent ``run_speed`` /
         ``brake`` / ``coast`` calls will transparently restore wheel
         mode."""
+        self._abandon_pending()
         present = self._read_present_pos()
         if present is None:
             return   # bus silent — bail rather than write into the void
@@ -420,6 +468,62 @@ class ST3215Motor(Motor):
                         bytes([present & 0xFF, (present >> 8) & 0xFF]))
         self._ensure_mode(_MODE_POSITION)
         self._ensure_torque_on()
+
+    def done(self):
+        """Pybricks-style status check for an in-flight
+        ``run_angle(wait=False)`` move. Returns ``True`` if no move
+        is in flight (the normal case) or the active move has parked
+        within ``tolerance_deg`` of the final target. Returns
+        ``False`` while any chunk is still being tracked.
+
+        Calling ``done()`` is what advances the chunk state machine
+        for multi-revolution moves — each call reads present-position
+        once, checks whether the current chunk has parked, and if so
+        either writes the next chunk's goal-position or runs the
+        end-of-move ``then=`` dispatch and clears the pending state.
+        So polling cadence matters: the wheel sits idle at each
+        chunk boundary until the next ``done()`` advances it. With
+        a typical ``time.sleep_ms(10)`` poll period that's a single-
+        tick gap, but if you don't poll, the move stalls."""
+        if self._pending is None:
+            return True
+        return self._poll_pending()
+
+    def _poll_pending(self):
+        """One iteration of the wait=False state machine. See ``done``."""
+        state = self._pending
+        present = self._read_present_pos()
+        if present is None:
+            # Bus glitch — keep waiting, mirror run_angle's inner
+            # loop tolerance to transient drops.
+            return False
+        # Shortest-path distance from present to the current chunk's
+        # target (the servo's internal PID routes shortest-path too).
+        err = (state["chunk_target"] - present) % _COUNTS_PER_REV
+        if err > _COUNTS_PER_REV // 2:
+            err -= _COUNTS_PER_REV
+        if abs(err) > state["tol_counts"]:
+            return False
+        # Current chunk parked. Refresh the software multi-turn
+        # accumulator so ``angle()`` stays current across the move.
+        self.angle()
+        if abs(state["remaining"]) <= state["tol_counts"]:
+            # Final chunk — run end-of-move dispatch and clear.
+            then = state["then"]
+            self._pending = None
+            self._dispatch_then(then)
+            return True
+        # More chunks to go: kick off the next one.
+        chunk = state["remaining"]
+        if chunk >  _MAX_CHUNK_COUNTS: chunk =  _MAX_CHUNK_COUNTS
+        if chunk < -_MAX_CHUNK_COUNTS: chunk = -_MAX_CHUNK_COUNTS
+        new_target = (present + chunk) % _COUNTS_PER_REV
+        self._bus.write(self._id, _REG_GOAL_POSITION,
+                        bytes([new_target & 0xFF,
+                               (new_target >> 8) & 0xFF]))
+        state["chunk_target"] = new_target
+        state["remaining"] -= chunk
+        return False
 
     def angle(self):
         """Return shaft angle in degrees, multi-turn accumulated."""
@@ -497,6 +601,27 @@ class ST3215Motor(Motor):
           locked at where the wheel stopped, so the position PID
           actively resists rotation.
 
+        ``wait=False`` kicks off the move and returns immediately
+        without blocking. Use it for concurrent multi-motor moves,
+        pybricks-style::
+
+            left.run_angle(60, 720, wait=False)
+            right.run_angle(60, 720, wait=False)
+            while not (left.done() and right.done()):
+                time.sleep_ms(10)
+
+        Multi-revolution targets are supported in ``wait=False`` mode
+        too: ``done()`` runs the chunk-advance state machine pull-
+        based, so polling ``done()`` is what carries the move through
+        each ≤180° sub-target. Don't poll = the wheel parks at the
+        first chunk and waits forever. The end-state ``then=`` dispatch
+        is deferred until ``done()`` reports the final chunk has parked.
+
+        Any subsequent motion command (``run``, ``run_speed``, ``brake``,
+        ``coast``, ``hold``, ``run_angle``) supersedes a pending
+        ``wait=False`` move — the new command takes over and the
+        pending state is dropped (pybricks "new command wins").
+
         The legacy ``kp`` / ``poll_ms`` arguments are accepted for
         back-compat with the velocity-mode implementation but no
         longer apply — the PID lives on the servo, not in Python.
@@ -504,8 +629,9 @@ class ST3215Motor(Motor):
         ``debug=True`` enables a position-trace dump: the function
         captures (t_ms, present_pos) on every inner-loop poll plus
         key transition points (anchor, target_pos, loop exit,
-        post-stop, post-settle) and prints them at the end. Off by
-        default so the production path stays quiet.
+        post-stop, post-settle) and prints them at the end. Only
+        meaningful for ``wait=True``; ``wait=False`` returns before
+        the trace can be populated.
         """
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
@@ -550,6 +676,9 @@ class ST3215Motor(Motor):
         # By writing goal-position = present before the mode switch,
         # the position PID has nowhere to drift the moment it
         # activates — it's already "at target".
+        # New command supersedes any pending wait=False move.
+        self._abandon_pending()
+
         # Re-enable torque in case a prior ``coast()`` / ``then="coast"``
         # left it disabled; ``_ensure_torque_on`` is a no-op otherwise.
         self._ensure_torque_on()
@@ -574,28 +703,33 @@ class ST3215Motor(Motor):
         if debug:
             trace.append(("mode_switched", time.ticks_diff(time.ticks_ms(), t0), None))
 
-        # Sub-move size cap: < half a revolution so the servo's
-        # shortest-path routing unambiguously matches our direction.
-        # 2000 counts ≈ 175.8°.
-        _MAX_CHUNK = 2000
+        if not wait:
+            # Non-blocking path: write the first chunk's goal-position,
+            # stash everything ``done()`` needs to advance through the
+            # remaining chunks and run the ``then=`` dispatch. We
+            # intentionally do NOT enter the try/finally — running
+            # ``_dispatch_then`` here would cut torque (coast) or
+            # write goal_speed=0 (brake) before the motor has moved a
+            # single count, undoing the move.
+            present = self._read_present_pos()
+            if present is None:
+                return
+            chunk = target_counts
+            if chunk >  _MAX_CHUNK_COUNTS: chunk =  _MAX_CHUNK_COUNTS
+            if chunk < -_MAX_CHUNK_COUNTS: chunk = -_MAX_CHUNK_COUNTS
+            chunk_target = (present + chunk) % _COUNTS_PER_REV
+            self._bus.write(self._id, _REG_GOAL_POSITION,
+                            bytes([chunk_target & 0xFF,
+                                   (chunk_target >> 8) & 0xFF]))
+            self._pending = {
+                "remaining":    target_counts - chunk,
+                "chunk_target": chunk_target,
+                "tol_counts":   tol_counts,
+                "then":         then,
+            }
+            return
 
         try:
-            if not wait:
-                # Single non-blocking sub-move toward the target.
-                # For >180° targets we still only kick off the first
-                # chunk; caller is expected to follow up.
-                present = self._read_present_pos()
-                if present is None:
-                    return
-                chunk = target_counts
-                if chunk >  _MAX_CHUNK: chunk =  _MAX_CHUNK
-                if chunk < -_MAX_CHUNK: chunk = -_MAX_CHUNK
-                target_pos = (present + chunk) % _COUNTS_PER_REV
-                self._bus.write(self._id, _REG_GOAL_POSITION,
-                                bytes([target_pos & 0xFF,
-                                       (target_pos >> 8) & 0xFF]))
-                return
-
             remaining = target_counts
             while abs(remaining) > tol_counts:
                 present = self._read_present_pos()
@@ -603,8 +737,8 @@ class ST3215Motor(Motor):
                     return  # bus silent — bail rather than spin.
 
                 chunk = remaining
-                if chunk >  _MAX_CHUNK: chunk =  _MAX_CHUNK
-                if chunk < -_MAX_CHUNK: chunk = -_MAX_CHUNK
+                if chunk >  _MAX_CHUNK_COUNTS: chunk =  _MAX_CHUNK_COUNTS
+                if chunk < -_MAX_CHUNK_COUNTS: chunk = -_MAX_CHUNK_COUNTS
                 target_pos = (present + chunk) % _COUNTS_PER_REV
                 self._bus.write(self._id, _REG_GOAL_POSITION,
                                 bytes([target_pos & 0xFF,
@@ -644,31 +778,20 @@ class ST3215Motor(Motor):
         finally:
             # Dispatch on ``then`` (validated up front so this block
             # can't raise ValueError and mask an earlier exception).
+            # ``_dispatch_then`` is the same code path ``done()`` runs
+            # at the end of a ``wait=False`` multi-chunk move, keeping
+            # the two paths byte-for-byte identical on the wire.
+            # Note for ``"coast"``: cutting torque without flipping
+            # back to wheel mode is intentional — the previous default
+            # (mode→wheel + goal_speed=0) re-engaged the velocity loop
+            # on a fresh setpoint and bled the wheel forward by ~85
+            # raw counts over the next 50 ms (the "settle" artifact
+            # visible in run_angle_debug traces). Coasting skips that
+            # phase entirely.
             if debug:
                 pre = self._read_present_pos()
                 trace.append(("pre_finally", time.ticks_diff(time.ticks_ms(), t0), pre))
-            if then == "coast":
-                # Cut torque; leave op_mode in position. Skipping the
-                # wheel-mode flip is intentional: the previous default
-                # (mode→wheel + goal_speed=0) re-engaged the velocity
-                # loop on a fresh setpoint and bled the wheel forward
-                # by ~85 raw counts over the next 50 ms — the
-                # "settle" artifact visible in run_angle_debug traces.
-                # Coasting skips that phase entirely.
-                self.coast()
-            elif then == "brake":
-                self._ensure_mode(_MODE_WHEEL)
-                self._write_goal_speed_signed(0)
-            else:   # "hold"
-                # Re-anchor goal-position to where the wheel actually
-                # stopped (may differ from the loop's target by up to
-                # tol_counts). Leave the servo in position mode so the
-                # internal PID actively resists rotation.
-                present = self._read_present_pos()
-                if present is not None:
-                    self._bus.write(self._id, _REG_GOAL_POSITION,
-                                    bytes([present & 0xFF,
-                                           (present >> 8) & 0xFF]))
+            self._dispatch_then(then)
             if debug:
                 post = self._read_present_pos()
                 trace.append(("post_stop", time.ticks_diff(time.ticks_ms(), t0), post))

@@ -61,8 +61,18 @@ class Motor:
         raise NotImplementedError
 
     def run_angle(self, deg_per_s, target_angle, wait=True):
-        """Rotate by ``target_angle`` degrees at ``deg_per_s``, blocking if ``wait``."""
+        """Rotate by ``target_angle`` degrees at ``deg_per_s``. Blocks
+        if ``wait``; otherwise returns immediately and the caller polls
+        ``done()`` to advance the move and detect completion."""
         raise NotImplementedError
+
+    def done(self):
+        """Return ``True`` if no non-blocking move is in flight or
+        the active ``run_angle(wait=False)`` move has reached its
+        target. Drivers that don't support non-blocking moves always
+        return ``True`` (a wait=True call is finished before
+        returning to the caller, by definition)."""
+        return True
 
 
 class Servo:
