@@ -385,5 +385,61 @@ class RunProgramTests(unittest.TestCase):
         self.assertFalse(launcher._singleton._running)
 
 
+class EmergencyStopTests(unittest.TestCase):
+    """The button-stop path must actually halt the motors, not just
+    unwind the program. Raising ``KeyboardInterrupt`` exits the program
+    but leaves serial-bus servos spinning at their last command — so
+    ``_raise_interrupt`` (and the KeyboardInterrupt safety net) call
+    ``_stop_all_motors`` first."""
+
+    def setUp(self):
+        from openbricks.drivers.st3215 import ST3215
+        ST3215._buses = {}
+        self.addCleanup(_cleanup_program)
+
+    def test_raise_interrupt_stops_motors_then_raises(self):
+        calls = []
+        original = launcher._stop_all_motors
+        launcher._stop_all_motors = lambda: calls.append(1)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                launcher._raise_interrupt(None)
+        finally:
+            launcher._stop_all_motors = original
+        self.assertEqual(calls, [1])   # stop ran before the raise unwound
+
+    def test_stop_all_motors_broadcasts_torque_off_to_serial_bus(self):
+        from openbricks.drivers.st3215 import ST3215Motor
+        m = ST3215Motor(servo_id=1, uart_id=1, tx=17, rx=16)
+        baseline = len(m._bus._uart._tx_log)
+        launcher._stop_all_motors()
+        # Expect a broadcast (ID 0xFE) WRITE (0x03) to the torque
+        # register (0x28) with value 0 — coast every servo on the bus.
+        found = False
+        for pkt in m._bus._uart._tx_log[baseline:]:
+            body = pkt[2:-1]
+            if (body[0] == 0xFE and body[2] == 0x03 and
+                    body[3] == 0x28 and body[4] == 0):
+                found = True
+        self.assertTrue(found, "expected a broadcast torque-off write")
+
+    def test_exec_program_raw_stops_motors_on_keyboard_interrupt(self):
+        calls = []
+        original = launcher._stop_all_motors
+        launcher._stop_all_motors = lambda: calls.append(1)
+        path = _write_program("raise KeyboardInterrupt\n")
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                launcher._exec_program_raw(path)
+        finally:
+            launcher._stop_all_motors = original
+        self.assertEqual(calls, [1])
+
+    def test_stop_all_motors_is_safe_with_no_motors(self):
+        # No buses registered, native module maybe absent — must be a
+        # quiet no-op, never raise.
+        launcher._stop_all_motors()
+
+
 if __name__ == "__main__":
     unittest.main()

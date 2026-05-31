@@ -103,9 +103,55 @@ class Launcher:
             self._pending = None
 
 
+# ---- emergency stop ----
+
+def _stop_all_motors():
+    """Best-effort: cut drive to every motor we can reach, regardless of
+    the user program's structure.
+
+    Raising ``KeyboardInterrupt`` to unwind the program does NOT stop the
+    motors — a serial-bus servo keeps spinning at its last commanded
+    velocity and the native 1 kHz scheduler keeps ticking. So the
+    button-stop path calls this first, hitting both reachable groups:
+
+    * **Native scheduler** — ``motor_process.stop()`` halts the 1 kHz
+      tick that drives closed-loop (PWM/encoder) motors.
+    * **Serial-bus servos** (ST-3215 / ST-3032) — broadcast a torque-off
+      (coast) to *every* servo on *every* known bus via the shared bus
+      registry and the broadcast ID. Torque-off halts a servo in any
+      mode (wheel / step / position), so it doesn't matter what the
+      program was doing.
+
+    Every step is wrapped defensively: an emergency stop must try every
+    avenue even if one bus is wedged — a failure to reach one motor must
+    not prevent stopping the others. This is the one place a broad
+    ``except`` is correct rather than papering over a bug.
+    """
+    try:
+        from _openbricks_native import motor_process
+        motor_process.stop()
+    except Exception:
+        pass
+    try:
+        from openbricks.drivers.st3215 import (
+            ST3215, _REG_TORQUE, _BROADCAST_ID)
+        for bus in list(ST3215._buses.values()):
+            try:
+                bus.write(_BROADCAST_ID, _REG_TORQUE, bytes([0]))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 # ---- mid-run interrupt ----
 
 def _raise_interrupt(_):
+    # Emergency stop FIRST, then unwind the program. Stopping the motors
+    # before the raise means a button press halts the robot immediately —
+    # even if the interrupt lands mid-operation, and even if the program
+    # would otherwise catch the KeyboardInterrupt and keep going.
+    _stop_all_motors()
     raise KeyboardInterrupt
 
 
@@ -178,6 +224,11 @@ def _exec_program_raw(program_path):
         try:
             exec(code, {"__name__": "__main__"})
         except KeyboardInterrupt:
+            # Safety net: also covers a REPL Ctrl-C from ``openbricks run``
+            # (which doesn't pass through ``_raise_interrupt``). Idempotent
+            # with the button path — stopping an already-stopped motor is
+            # harmless.
+            _stop_all_motors()
             raise
         except Exception as e:
             pe = getattr(sys, "print_exception", None)

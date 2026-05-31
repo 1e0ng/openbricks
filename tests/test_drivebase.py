@@ -500,5 +500,89 @@ class TestDriveBaseWaitFalse(unittest.TestCase):
         self.assertGreater(right._target_dps, 0)
 
 
+class _FakeStalledMotor(_FakeClosedLoopMotor):
+    """Closed-loop motor whose shaft never moves despite a commanded
+    speed — models a mechanically blocked wheel or one that has entered
+    the servo's overload protection. The bus still answers (``angle()``
+    returns a real number), it just never climbs toward the target."""
+
+    def step(self, seconds):
+        pass  # shaft frozen
+
+
+class TestDriveBaseStallTimeout(unittest.TestCase):
+    """A fallback straight/turn whose wheels can't reach the target must
+    not loop forever (``done()`` returning ``False`` indefinitely). After
+    a generous wall-clock budget it stops the motors and raises."""
+
+    def setUp(self):
+        _reset_all()
+
+    def _patch_sleep_steps_motors(self, *motors):
+        original = time.sleep_ms
+
+        def stepped_sleep(ms):
+            original(ms)   # advances the virtual clock (deadline relies on it)
+            for m in motors:
+                m.step(ms / 1000.0)
+
+        time.sleep_ms = stepped_sleep
+        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
+
+    def test_straight_raises_when_wheels_stall(self):
+        left = _FakeStalledMotor()
+        right = _FakeStalledMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+        with self.assertRaises(RuntimeError):
+            db.straight(100)
+
+    def test_turn_raises_when_wheels_stall(self):
+        left = _FakeStalledMotor()
+        right = _FakeStalledMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+        with self.assertRaises(RuntimeError):
+            db.turn(90)
+
+    def test_turn_wait_false_raises_on_stall_via_done(self):
+        # The user-reported shape: a wait=False poll loop must terminate
+        # (here, by raising) instead of spinning forever.
+        left = _FakeStalledMotor()
+        right = _FakeStalledMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+        db.turn(90, wait=False)
+        with self.assertRaises(RuntimeError):
+            for _ in range(100000):   # bounded so a non-raising bug fails fast
+                if db.done():
+                    break
+                time.sleep_ms(10)
+
+    def test_stall_timeout_stops_motors_before_raising(self):
+        left = _FakeStalledMotor()
+        right = _FakeStalledMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+        try:
+            db.straight(100)
+        except RuntimeError:
+            pass
+        # stop(then="coast") drove both targets to zero before the raise.
+        self.assertEqual(left._target_dps, 0.0)
+        self.assertEqual(right._target_dps, 0.0)
+
+    def test_healthy_move_completes_well_within_budget(self):
+        # Guard against an over-tight budget: a move whose wheels actually
+        # turn must complete normally, not trip the timeout.
+        left = _FakeClosedLoopMotor()
+        right = _FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+        db.straight(100)   # must NOT raise
+        target = _wheel_deg_for_distance(100, wheel_diameter_mm=56)
+        self.assertGreaterEqual((left.angle() + right.angle()) / 2, target)
+
+
 if __name__ == "__main__":
     unittest.main()
