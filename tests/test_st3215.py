@@ -569,7 +569,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
         self.assertEqual(_decode_signed_step(steps[-1][1]), 0)
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
-        self.assertNotIn(bytes([_MODE_WHEEL]), [w[1] for w in mode_writes])
+        self.assertFalse(bytes([_MODE_WHEEL]) in [w[1] for w in mode_writes])
 
 
 class TestSyncServoGroup(unittest.TestCase):
