@@ -458,6 +458,47 @@ class TestDriveBaseWaitFalse(unittest.TestCase):
         db.stop()
         self.assertTrue(db.done())
 
+    def test_straight_wait_false_kicks_off_motors_immediately(self):
+        # Regression for 1.6.9 hub-yt symptom "the whole function is
+        # skipped": pre-1.6.10 the fallback ``_arm_straight`` only
+        # snapshotted anchors and stashed _pending, leaving motors
+        # idle until the first ``done()`` poll. From the caller's
+        # perspective, ``straight(wait=False)`` did nothing visible.
+        # Post-fix the motors are commanded to cruise speed on the
+        # call itself; subsequent ``done()`` ticks apply heading-hold
+        # corrections and check the target.
+        left = _FakeClosedLoopMotor()
+        right = _FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        db.settings(straight_speed=200, turn_rate=180)
+        db.straight(100, wait=False)
+
+        # No done() polled yet — but both motors should already have
+        # received a non-zero speed command.
+        self.assertNotEqual(left._target_dps, 0.0)
+        self.assertNotEqual(right._target_dps, 0.0)
+        # Forward straight = both wheels same sign.
+        self.assertGreater(left._target_dps, 0)
+        self.assertGreater(right._target_dps, 0)
+
+    def test_turn_wait_false_kicks_off_motors_immediately(self):
+        # Same regression as test_straight_wait_false_kicks_off, but
+        # for turn(). Turn in place = wheels run opposite signs.
+        left = _FakeClosedLoopMotor()
+        right = _FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        db.settings(straight_speed=200, turn_rate=180)
+        db.turn(90, wait=False)
+
+        self.assertNotEqual(left._target_dps, 0.0)
+        self.assertNotEqual(right._target_dps, 0.0)
+        # Positive turn rate (= turn left) means left reverses,
+        # right advances.
+        self.assertLess(left._target_dps, 0)
+        self.assertGreater(right._target_dps, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

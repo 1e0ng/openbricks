@@ -153,13 +153,18 @@ class DriveBase:
         reached its target (and ``stop(then=…)`` has run). Returns
         ``False`` while the move is still progressing.
 
-        On the fallback path (serial-bus servo drivebases), each
-        ``done()`` invocation runs ONE tick of the heading-hold loop
-        — read both angles, compute deltas, write motor speeds. So
-        the caller has to keep polling for the move to advance;
-        ``time.sleep_ms(10)`` between polls is the natural cadence.
+        On the fallback path (serial-bus servo drivebases), motors
+        start moving on the ``straight()`` / ``turn()`` call itself;
+        each ``done()`` invocation then runs ONE tick of the
+        heading-hold loop — read both angles, apply differential
+        correction, check the target. **You must keep polling until
+        ``done()`` returns True** or the motors will continue running
+        at the open-loop cruise speed past the target. The natural
+        cadence is ``time.sleep_ms(10)`` between polls.
+
         On the native path, the C scheduler runs the trajectory
-        independently at 1 kHz; ``done()`` just checks a flag.
+        independently at 1 kHz; ``done()`` just checks a flag and
+        motors stop automatically when the trajectory completes.
         """
         if self._pending is None:
             return True
@@ -241,16 +246,24 @@ class DriveBase:
             return
         target_wheel_deg = distance_mm / self._wheel_circumference * 360
         direction = 1 if distance_mm >= 0 else -1
+        speed = self._straight_speed_dps * direction
         self._pending = {
             "mode": "straight_fallback",
             "target_wheel_deg": target_wheel_deg,
             "direction": direction,
             "start_left":  start_left,
             "start_right": start_right,
-            "speed": self._straight_speed_dps * direction,
+            "speed": speed,
             "consecutive_none": 0,
             "then": then,
         }
+        # Kick off motion immediately so ``wait=False`` looks like
+        # pybricks — motors start on the call, not on first ``done()``.
+        # ``err`` is zero at t=0 (present == anchor), so both wheels
+        # get exactly the cruise speed. Subsequent ``done()`` ticks
+        # apply heading-hold corrections.
+        self._run_at_dps(self._left,  speed)
+        self._run_at_dps(self._right, speed)
 
     def _arm_turn(self, angle_deg, then):
         if self._native is not None:
@@ -267,16 +280,21 @@ class DriveBase:
         arc_mm = math.radians(abs(angle_deg)) * (self._axle_track / 2)
         wheel_deg_each = arc_mm / self._wheel_circumference * 360
         direction = 1 if angle_deg >= 0 else -1
+        speed = self._turn_rate_dps
         self._pending = {
             "mode": "turn_fallback",
             "wheel_deg_each": wheel_deg_each,
             "direction": direction,
             "start_left":  start_left,
             "start_right": start_right,
-            "speed": self._turn_rate_dps,
+            "speed": speed,
             "consecutive_none": 0,
             "then": then,
         }
+        # Kick off motion immediately — same reasoning as
+        # ``_arm_straight``. In-place turn means opposite wheel signs.
+        self._run_at_dps(self._left,  -speed * direction)
+        self._run_at_dps(self._right,  speed * direction)
 
     # ---- helpers ----
     @staticmethod
