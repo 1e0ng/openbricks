@@ -320,9 +320,19 @@ class ST3215Motor(Motor):
         self._steps_per_dps = float(steps_per_dps)
         self._max_dps       = float(max_dps)
 
-        # Software multi-turn accumulator state.
-        self._last_raw    = None      # last present-position read (signed 16-bit)
-        self._accum_count = 0         # accumulated counts since reset
+        # Software multi-turn accumulator state. ``_accum_count`` is the
+        # absolute shaft position in motor-frame encoder counts. In
+        # wheel/position mode it is rebuilt from present-position reads
+        # (the wrap heuristic in ``angle()``); in step mode the present
+        # register reads remaining-to-target instead of position, so
+        # there we bump ``_accum_count`` by the executed step counts as
+        # each ``run_angle`` step parks. ``_accum_initialized`` marks
+        # whether a baseline has been taken; ``_last_raw is None`` marks
+        # "rebaseline on next read" (after a mode change) WITHOUT
+        # discarding the accumulated count.
+        self._last_raw    = None
+        self._accum_count = 0
+        self._accum_initialized = False
         self._zero_offset_count = 0   # set by reset_angle()
 
         # Cached register state so brake/coast/run_speed avoid redundant
@@ -341,12 +351,14 @@ class ST3215Motor(Motor):
 
         # State for ``run_angle(wait=False)``. ``None`` means no
         # non-blocking move is in flight; ``done()`` returns True.
-        # Layout: dict with keys ``goal_deg`` (absolute accumulated
-        # shaft angle the move is converging to, user frame),
-        # ``tol_deg``, ``then``, and ``remaining_counts`` (signed
-        # motor-frame counts still to issue as further steps once the
-        # current step parks — non-zero only for >7-turn moves). See
-        # ``_poll_pending``.
+        # Layout: dict with keys
+        # ``first`` (signed counts of the step currently in flight),
+        # ``remaining_counts`` (signed motor-frame counts still to issue
+        # as further steps once the current one parks — non-zero only
+        # for >7-turn moves), ``tol_counts``, ``then``, and ``started``
+        # (whether the present `remaining` register has been seen large
+        # enough to confirm the move actually launched, guarding against
+        # a stale ~0 read at kickoff). See ``_poll_pending``.
         self._pending = None
 
         # Switch the servo into wheel/continuous mode.
@@ -360,11 +372,33 @@ class ST3215Motor(Motor):
         # revolution, range 0..4095 (NOT a free-running multi-turn
         # counter). It wraps to 0 at every full turn — multi-turn
         # tracking is done in software via the wrap heuristic in
-        # angle().
+        # angle(). Valid only in wheel/position mode; in STEP mode the
+        # same register reads remaining-to-target (see
+        # ``_read_step_remaining``).
         data = self._bus.read(self._id, _REG_PRESENT_POS, 2)
         if data is None:
             return None
         return (data[0] | (data[1] << 8)) & 0x0FFF
+
+    def _read_step_remaining(self):
+        """Read the present-position register interpreted as STEP-mode
+        *remaining distance to target*.
+
+        Bench-confirmed (examples/st3032_stepmode_probe.py): in step
+        mode (op_mode=3) the present-position register does NOT hold an
+        absolute position — it holds the signed number of encoder
+        counts still to travel for the current relative step, counting
+        down to ~0 (a ±2-count deadband) as the move completes. The
+        value is sign-magnitude (bit 15 = direction), e.g. 0x87B1 =
+        −1969 counts remaining, 0x1FAE = +8110 remaining, 0x8002 = −2
+        (parked). So |remaining| ≤ tol is the move-complete signal.
+        """
+        data = self._bus.read(self._id, _REG_PRESENT_POS, 2)
+        if data is None:
+            return None
+        raw = data[0] | (data[1] << 8)
+        magnitude = raw & 0x7FFF
+        return -magnitude if (raw & 0x8000) else magnitude
 
     def _encode_goal_speed(self, deg_per_s):
         """Compute the 16-bit goal-speed register value for ``deg_per_s``,
@@ -401,11 +435,18 @@ class ST3215Motor(Motor):
         Saves a bus packet on the common case where the servo is already
         in the desired mode (e.g. ``run_speed`` after another
         ``run_speed``) and keeps the cache in sync after ``run_angle``
-        returns with ``then="hold"`` and leaves the servo in position
-        mode."""
+        returns with ``then="hold"`` and leaves the servo in step mode.
+
+        A mode change invalidates the present-position delta baseline:
+        the register's meaning differs between modes (absolute position
+        in wheel/position mode vs remaining-to-target in step mode), so
+        force ``angle()`` to rebaseline on its next read rather than
+        treat the cross-mode jump as real shaft motion. The accumulated
+        count itself is preserved."""
         if self._op_mode != mode:
             self._bus.write(self._id, _REG_OP_MODE, bytes([mode]))
             self._op_mode = mode
+            self._last_raw = None
 
     def _ensure_torque_on(self):
         """Re-enable torque if a prior ``coast`` (or ``then="coast"``)
@@ -555,20 +596,20 @@ class ST3215Motor(Motor):
     def done(self):
         """Pybricks-style status check for an in-flight
         ``run_angle(wait=False)`` move. Returns ``True`` if no move
-        is in flight (the normal case) or the active move has converged
-        within ``tolerance_deg`` of the final target. Returns ``False``
-        while the move is still running.
+        is in flight (the normal case) or the active move has parked
+        (its remaining-to-target register has counted down to within
+        tolerance). Returns ``False`` while the move is still running.
 
         Calling ``done()`` is what advances the move: each call reads
-        the shaft angle once and compares it to the move's target. For
-        a move larger than 7 turns (issued as back-to-back steps),
-        ``done()`` writes the next step once the current one parks, and
-        on the final step runs the end-of-move ``then=`` dispatch and
-        clears the pending state. So polling cadence matters for
-        >7-turn moves — the wheel sits idle at each step boundary until
-        the next ``done()`` advances it. With a typical
-        ``time.sleep_ms(10)`` poll that's a single-tick gap; if you
-        never poll, a multi-step move stalls after the first step."""
+        the step-mode remaining register once. For a move larger than 7
+        turns (issued as back-to-back steps), ``done()`` writes the next
+        step once the current one parks, and on the final step runs the
+        end-of-move ``then=`` dispatch and clears the pending state. So
+        polling cadence matters for >7-turn moves — the wheel sits idle
+        at each step boundary until the next ``done()`` advances it.
+        With a typical ``time.sleep_ms(10)`` poll that's a single-tick
+        gap; if you never poll, a multi-step move stalls after the
+        first step."""
         if self._pending is None:
             return True
         return self._poll_pending()
@@ -576,38 +617,69 @@ class ST3215Motor(Motor):
     def _poll_pending(self):
         """One iteration of the wait=False state machine. See ``done``."""
         state = self._pending
-        cur = self.angle()
-        if cur is None:
-            # Bus glitch — keep waiting, mirror run_angle's tolerance
-            # to transient drops.
+        rem = self._read_step_remaining()
+        if rem is None:
+            # Bus glitch — keep waiting, tolerate transient drops.
             return False
-        if abs(cur - state["goal_deg"]) > state["tol_deg"]:
+        tol = state["tol_counts"]
+        if not state["started"]:
+            # Guard against a stale ~0 read before the servo has loaded
+            # the step: only start watching for completion once the
+            # remaining register confirms the move launched.
+            if abs(rem) > tol:
+                state["started"] = True
             return False
-        # Current step parked.
+        if abs(rem) > tol:
+            return False
+        # Current step parked — bank the counts it actually travelled.
+        self._advance_accum(state["first"] - rem)
         if state["remaining_counts"] == 0:
             # Whole move complete — run end-of-move dispatch and clear.
             then = state["then"]
             self._pending = None
             self._dispatch_then(then)
             return True
-        # >7-turn move: issue the next step and extend the target.
+        # >7-turn move: issue the next step.
         step = state["remaining_counts"]
         if step >  _MAX_STEP_COUNTS: step =  _MAX_STEP_COUNTS
         if step < -_MAX_STEP_COUNTS: step = -_MAX_STEP_COUNTS
         self._write_step(step)
         state["remaining_counts"] -= step
-        step_user_deg = (-step if self._invert else step) * 360.0 / _COUNTS_PER_REV
-        state["goal_deg"] += step_user_deg
+        state["first"]   = step
+        state["started"] = False
         return False
 
+    def _deg_from_accum(self):
+        deg = (self._accum_count - self._zero_offset_count) * 360.0 / _COUNTS_PER_REV
+        return -deg if self._invert else deg
+
     def angle(self):
-        """Return shaft angle in degrees, multi-turn accumulated."""
+        """Return shaft angle in degrees, multi-turn accumulated.
+
+        In STEP mode the present-position register reads remaining-to-
+        target rather than absolute position, so we can't derive the
+        angle from it — return the software accumulator, which
+        ``run_angle`` advances by the executed step counts as each step
+        parks. In wheel/position mode, rebuild the accumulator from the
+        encoder via the wrap heuristic.
+        """
+        if self._op_mode == _MODE_STEP:
+            if not self._accum_initialized:
+                return None
+            return self._deg_from_accum()
+
         raw = self._read_present_pos()
         if raw is None:
             return None
-        if self._last_raw is None:
-            # First read: take the absolute position as the baseline.
+        if not self._accum_initialized:
+            # First read ever: take the absolute position as the baseline.
             self._accum_count = raw
+            self._accum_initialized = True
+        elif self._last_raw is None:
+            # Rebaseline after a mode change: adopt this read as the new
+            # delta reference WITHOUT adding a (cross-mode, meaningless)
+            # delta and WITHOUT discarding the accumulated count.
+            pass
         else:
             delta = raw - self._last_raw
             # Wrap correction across the 0..4095 boundary (full
@@ -625,8 +697,15 @@ class ST3215Motor(Motor):
                 delta += 4096
             self._accum_count += delta
         self._last_raw = raw
-        deg = (self._accum_count - self._zero_offset_count) * 360.0 / _COUNTS_PER_REV
-        return -deg if self._invert else deg
+        return self._deg_from_accum()
+
+    def _advance_accum(self, executed_counts):
+        """Add ``executed_counts`` (motor-frame) of completed step
+        motion to the software accumulator. Used by ``run_angle`` /
+        ``done`` because step mode's present register can't be read as
+        a position."""
+        self._accum_count += int(executed_counts)
+        self._accum_initialized = True
 
     def reset_angle(self, angle=0):
         """Set the current shaft angle to ``angle`` (degrees)."""
@@ -670,8 +749,11 @@ class ST3215Motor(Motor):
         envelope); larger moves are issued as back-to-back ±7-turn
         steps, each parking before the next — still no boundary to
         cross. The servo's internal PID handles convergence (≈0.088°
-        per encoder count); completion is detected by polling the
-        software-accumulated shaft angle (``angle()``).
+        per encoder count); completion is detected by reading the
+        step-mode *remaining-to-target* register and waiting for it to
+        count down to ~0 (see ``_read_step_remaining``). The shaft-angle
+        accumulator is advanced by the counts actually travelled so
+        ``angle()`` / ``reset_angle`` stay correct across the move.
 
         ``then`` selects the end-state, pybricks-style:
 
@@ -735,6 +817,13 @@ class ST3215Motor(Motor):
         if speed_steps > 0x7FFF:
             speed_steps = 0x7FFF
 
+        # Completion tolerance in counts (the step register parks within
+        # a ~±2-count deadband, so keep a small floor).
+        tol_counts = int(round(abs(float(tolerance_deg)) *
+                               _COUNTS_PER_REV / 360.0))
+        if tol_counts < 3:
+            tol_counts = 3
+
         # New command supersedes any pending wait=False move.
         self._abandon_pending()
         self._ensure_torque_on()
@@ -744,10 +833,10 @@ class ST3215Motor(Motor):
                         bytes([speed_steps & 0xFF,
                                (speed_steps >> 8) & 0xFF]))
 
-        # Baseline shaft angle (user frame). Bail if the bus is silent
-        # rather than command a move we can't track.
-        start_deg = self.angle()
-        if start_deg is None:
+        # Bail if the bus is silent rather than command a move we can't
+        # track. (The value read here — the previous step's remaining —
+        # is irrelevant; we only care that the servo is answering.)
+        if self._read_step_remaining() is None:
             return
 
         # First step (clamped to the ±7-turn envelope).
@@ -756,30 +845,19 @@ class ST3215Motor(Motor):
         if first < -_MAX_STEP_COUNTS: first = -_MAX_STEP_COUNTS
         self._write_step(first)
         remaining_counts = target_counts - first
-        # User-frame goal for just this first step (matters only for
-        # >7-turn moves, where we converge step-by-step).
-        first_user_deg = (-first if self._invert else first) * 360.0 / _COUNTS_PER_REV
-        step_goal_deg = start_deg + first_user_deg
 
         if not wait:
             self._pending = {
-                "goal_deg":         step_goal_deg,
-                "tol_deg":          abs(float(tolerance_deg)),
-                "then":             then,
+                "first":            first,
                 "remaining_counts": remaining_counts,
+                "tol_counts":       tol_counts,
+                "then":             then,
+                "started":          False,
             }
             return
 
-        tol_deg = abs(float(tolerance_deg))
         while True:
-            # Converge on the current step's goal.
-            est_ms = int(abs(first) * 1000 / speed_steps + 200)
-            deadline = time.ticks_ms() + min(est_ms * 3, 6000)
-            while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-                cur = self.angle()
-                if cur is not None and abs(cur - step_goal_deg) <= tol_deg:
-                    break
-                time.sleep_ms(10)
+            self._advance_accum(self._await_step(first, speed_steps, tol_counts))
             if remaining_counts == 0:
                 break
             # Issue the next ±7-turn step.
@@ -788,10 +866,39 @@ class ST3215Motor(Motor):
             if first < -_MAX_STEP_COUNTS: first = -_MAX_STEP_COUNTS
             self._write_step(first)
             remaining_counts -= first
-            first_user_deg = (-first if self._invert else first) * 360.0 / _COUNTS_PER_REV
-            step_goal_deg += first_user_deg
 
         self._dispatch_then(then)
+
+    def _await_step(self, step, speed_steps, tol_counts):
+        """Block until the in-flight step parks (its remaining register
+        counts down to within ``tol_counts`` of 0) or a time budget
+        expires. Returns the counts actually travelled (``step`` minus
+        the final remaining), for the shaft-angle accumulator.
+
+        A ``started`` latch guards against a stale ~0 read at kickoff:
+        we only watch for completion once the remaining register has
+        first been seen larger than tolerance (the move launched)."""
+        # Backstop deadline scales with the move (estimated travel time
+        # ×3 for the accel/decel ramp). It only bites on a stall —
+        # normal moves return the instant the step parks below tol — so
+        # there is no fixed ceiling that could cut a slow multi-turn step
+        # short.
+        est_ms = int(abs(step) * 1000 / speed_steps + 200)
+        deadline = time.ticks_ms() + est_ms * 3
+        started = False
+        last_rem = step
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            rem = self._read_step_remaining()
+            if rem is not None:
+                last_rem = rem
+                if not started:
+                    if abs(rem) > tol_counts:
+                        started = True
+                elif abs(rem) <= tol_counts:
+                    last_rem = rem
+                    break
+            time.sleep_ms(10)
+        return step - last_rem
 
     # --- ST-3215-specific extras ------------------------------------------
 
