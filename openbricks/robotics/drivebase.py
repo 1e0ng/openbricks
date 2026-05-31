@@ -256,6 +256,9 @@ class DriveBase:
             "speed": speed,
             "consecutive_none": 0,
             "then": then,
+            "start_ms":  time.ticks_ms(),
+            "budget_ms": self._move_budget_ms(target_wheel_deg,
+                                              self._straight_speed_dps),
         }
         # Kick off motion immediately so ``wait=False`` looks like
         # pybricks — motors start on the call, not on first ``done()``.
@@ -290,6 +293,9 @@ class DriveBase:
             "speed": speed,
             "consecutive_none": 0,
             "then": then,
+            "start_ms":  time.ticks_ms(),
+            "budget_ms": self._move_budget_ms(wheel_deg_each,
+                                              self._turn_rate_dps),
         }
         # Kick off motion immediately — same reasoning as
         # ``_arm_straight``. In-place turn means opposite wheel signs.
@@ -327,6 +333,24 @@ class DriveBase:
     # _turn_fallback give up and stop. 50 × 10 ms = 500 ms.
     _MAX_CONSECUTIVE_NONE = 50
 
+    @staticmethod
+    def _move_budget_ms(travel_deg, rate_dps):
+        """Wall-clock budget for a fallback move to reach its target.
+
+        The fallback drives the wheels open-loop at cruise speed and
+        watches ``angle()`` climb toward the target. If a wheel stalls
+        (mechanically blocked, in the servo's overload protection, or
+        slipping) while the bus still answers, that climb stops and the
+        target is never met — without this budget the move's ``done()``
+        would return ``False`` forever. Travel ÷ rate is the ideal
+        constant-velocity time; ×4 leaves headroom for ramp-up,
+        friction and heading-hold slowdown, and a 1 s floor covers tiny
+        moves. Only a genuine stall overruns it."""
+        rate = abs(rate_dps)
+        if rate < 1:
+            rate = 1
+        return int(abs(travel_deg) / rate * 1000.0 * 4 + 1000)
+
     def _straight_fallback_tick(self):
         """One iteration of the fallback heading-hold loop.
 
@@ -336,6 +360,12 @@ class DriveBase:
         waiting for the bus to come back from a glitch. Snapshot
         anchors live in ``self._pending`` from ``_arm_straight``."""
         state = self._pending
+        if time.ticks_diff(time.ticks_ms(), state["start_ms"]) > state["budget_ms"]:
+            self.stop(then=state["then"])
+            raise RuntimeError(
+                "DriveBase.straight did not reach target within %d ms — "
+                "wheel stalled, in overload protection, or blocked"
+                % state["budget_ms"])
         left_now  = self._left.angle()
         right_now = self._right.angle()
         if left_now is None or right_now is None:
@@ -364,6 +394,12 @@ class DriveBase:
         """One iteration of the fallback in-place-turn loop. Same
         return semantics as ``_straight_fallback_tick``."""
         state = self._pending
+        if time.ticks_diff(time.ticks_ms(), state["start_ms"]) > state["budget_ms"]:
+            self.stop(then=state["then"])
+            raise RuntimeError(
+                "DriveBase.turn did not reach target within %d ms — "
+                "wheel stalled, in overload protection, or blocked"
+                % state["budget_ms"])
         left_now  = self._left.angle()
         right_now = self._right.angle()
         if left_now is None or right_now is None:
