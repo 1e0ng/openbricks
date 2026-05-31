@@ -64,24 +64,37 @@ _INSTR_READ       = 0x02
 _INSTR_WRITE      = 0x03
 _INSTR_SYNC_WRITE = 0x83
 
+# Angle-limit registers (each int16, low byte first). When BOTH are
+# written to 0 the STS servo leaves single-turn position mode and
+# allows multi-turn moves — the prerequisite for step mode (see
+# ``run_angle`` / the FeeTech STS tutorial §13 "How to realize the
+# step function").
+_REG_MIN_ANGLE     = 0x09
+_REG_MAX_ANGLE     = 0x0B
+
 _REG_OP_MODE       = 0x21
 _REG_TORQUE        = 0x28
 _REG_GOAL_POSITION = 0x2A
 _REG_GOAL_SPEED    = 0x2E
 _REG_PRESENT_POS   = 0x38
 
-_MODE_POSITION = 0
-_MODE_WHEEL    = 1
+_MODE_POSITION = 0   # single-turn absolute position (0..4095 = 0..360°)
+_MODE_WHEEL    = 1   # continuous velocity (wheel)
+_MODE_STEP     = 3   # step servo: goal_position is a SIGNED RELATIVE
+                     # step; multi-turn capable (needs angle limits=0)
 
 # Hardware: 4096 encoder counts per output revolution.
 _COUNTS_PER_REV = 4096
 
-# Sub-move size cap used by ``run_angle`` to split big moves: must be
-# strictly less than half a revolution so the servo's shortest-path
-# routing in position mode unambiguously matches our intended
-# direction (a single 270° forward command would otherwise be
-# executed as 90° backward). 2000 counts ≈ 175.8°.
-_MAX_CHUNK_COUNTS = 2000
+# Largest relative step issued to the servo in a single goal-position
+# write while in step mode. The STS multi-turn range is ±7 turns
+# (datasheet 7-13); we cap one step at exactly 7 turns so a single
+# write never exceeds the absolute-position envelope. Moves larger
+# than this are issued as back-to-back steps, each completing before
+# the next — there is no boundary to cross, so direction is always
+# unambiguous (unlike the old single-turn ``% 4096`` chunking, which
+# reversed past the 0/4095 wrap). 7 × 4096 = 28672 (< 0x7FFF reg max).
+_MAX_STEP_COUNTS = 7 * _COUNTS_PER_REV
 
 # Speed register units. The Feetech datasheet uses "step/sec"; one step
 # is 360/4096 ≈ 0.0879 deg, so 1 dps ≈ 11.378 step/sec. Exposed as a
@@ -315,16 +328,25 @@ class ST3215Motor(Motor):
         # Cached register state so brake/coast/run_speed avoid redundant
         # bus writes, and so motion commands can transparently restore
         # the mode/torque after a prior ``coast`` or a ``run_angle`` that
-        # left the servo in position mode (``then="hold"``).
+        # left the servo in step mode (``then="hold"``).
         self._op_mode    = _MODE_WHEEL
         self._torque_on  = True
 
+        # Whether this servo's angle-limit registers have been zeroed
+        # to unlock multi-turn step mode. Done lazily on the first
+        # ``run_angle`` (NOT at construction) so a servo used purely as
+        # a ``DriveBase`` wheel keeps its stock single-turn limits and
+        # its present-position reads keep wrapping cleanly at one rev.
+        self._step_limits_zeroed = False
+
         # State for ``run_angle(wait=False)``. ``None`` means no
         # non-blocking move is in flight; ``done()`` returns True.
-        # Layout: dict with keys ``remaining`` (signed counts still
-        # to travel after the current chunk), ``chunk_target`` (raw
-        # 0..4095 goal-position written for the current chunk),
-        # ``tol_counts``, ``then``. See ``_poll_pending``.
+        # Layout: dict with keys ``goal_deg`` (absolute accumulated
+        # shaft angle the move is converging to, user frame),
+        # ``tol_deg``, ``then``, and ``remaining_counts`` (signed
+        # motor-frame counts still to issue as further steps once the
+        # current step parks — non-zero only for >7-turn moves). See
+        # ``_poll_pending``.
         self._pending = None
 
         # Switch the servo into wheel/continuous mode.
@@ -392,6 +414,44 @@ class ST3215Motor(Motor):
             self._bus.write(self._id, _REG_TORQUE, bytes([1]))
             self._torque_on = True
 
+    def _ensure_step_limits(self):
+        """Zero the min/max angle-limit registers so the servo will
+        accept multi-turn relative moves in step mode.
+
+        Per the FeeTech STS tutorial (§13): step mode is enabled by
+        setting *both* angle limits to 0 and op_mode to 3. With the
+        limits at their single-turn defaults (0..4095) the servo
+        clamps a step move to one revolution; zeroing them unlocks the
+        ±7-turn envelope.
+
+        Written once per power session (guarded by an in-memory flag),
+        the first time ``run_angle`` runs on this motor — never at
+        construction — so a wheel-only motor never has its limits
+        touched. These are EEPROM registers, but a single write per
+        session is well within endurance.
+        """
+        if self._step_limits_zeroed:
+            return
+        self._bus.write(self._id, _REG_MIN_ANGLE, bytes([0, 0]))
+        self._bus.write(self._id, _REG_MAX_ANGLE, bytes([0, 0]))
+        self._step_limits_zeroed = True
+
+    def _write_step(self, counts):
+        """Write one signed relative step to the goal-position register
+        (step mode). Direction is carried in bit 15 (sign-magnitude),
+        the same encoding the servo uses for goal-speed; the magnitude
+        is the number of encoder counts to advance from the current
+        commanded position. The servo's position PID drives the move
+        and holds at the end."""
+        magnitude = abs(int(counts))
+        if magnitude > 0x7FFF:
+            magnitude = 0x7FFF
+        v = magnitude
+        if counts < 0:
+            v |= 0x8000
+        self._bus.write(self._id, _REG_GOAL_POSITION,
+                        bytes([v & 0xFF, (v >> 8) & 0xFF]))
+
     def _abandon_pending(self):
         """Drop any in-flight ``run_angle(wait=False)`` state.
 
@@ -407,19 +467,25 @@ class ST3215Motor(Motor):
         """Run the end-of-move register dance for the given ``then``
         mode. Does NOT touch ``_pending`` — caller manages that.
         Used by both the ``run_angle(wait=True)`` finally block and
-        the ``done()`` completion path for ``wait=False``."""
+        the ``done()`` completion path for ``wait=False``.
+
+        At entry the servo is in step mode (op_mode=3) holding the
+        move's target position:
+
+        * ``coast`` — cut torque; the wheel free-wheels.
+        * ``brake`` — restore wheel mode and write goal_speed=0 so the
+          velocity loop actively holds zero rotation rate.
+        * ``hold`` — leave the servo in step mode; its position PID is
+          already holding the target and resisting rotation, so no
+          further write is needed.
+        """
         if then == "coast":
             self._bus.write(self._id, _REG_TORQUE, bytes([0]))
             self._torque_on = False
         elif then == "brake":
             self._ensure_mode(_MODE_WHEEL)
             self._write_goal_speed_signed(0)
-        else:   # "hold"
-            present = self._read_present_pos()
-            if present is not None:
-                self._bus.write(self._id, _REG_GOAL_POSITION,
-                                bytes([present & 0xFF,
-                                       (present >> 8) & 0xFF]))
+        # else "hold": step mode already holds the target — nothing to do.
 
     # --- Motor interface --------------------------------------------------
 
@@ -452,18 +518,35 @@ class ST3215Motor(Motor):
         self._torque_on = False
 
     def hold(self):
-        """Actively hold the current shaft angle. Switches the servo
-        into position mode with goal_position locked at present_pos so
-        the internal PID resists rotation. Subsequent ``run_speed`` /
-        ``brake`` / ``coast`` calls will transparently restore wheel
-        mode."""
+        """Actively hold the current shaft angle so the position PID
+        resists rotation. Subsequent ``run_speed`` / ``brake`` /
+        ``coast`` calls transparently restore wheel mode.
+
+        Holding never crosses a turn boundary (the shaft is meant to
+        stay put), so the mechanism is chosen to avoid disturbing the
+        servo's turn model:
+
+        * If this motor has already been switched to multi-turn step
+          mode (a prior ``run_angle``), hold with a zero-count step —
+          step mode keeps holding its current target.
+        * Otherwise (e.g. a ``DriveBase`` wheel that has only ever run
+          in velocity mode), hold in single-turn position mode with
+          goal=present. This deliberately does NOT zero the angle-limit
+          registers, so a wheel motor keeps its stock single-turn
+          present-position reads and its odometry stays intact.
+        """
         self._abandon_pending()
+        if self._step_limits_zeroed:
+            self._ensure_mode(_MODE_STEP)
+            self._ensure_torque_on()
+            # Zero-count step: "stay at the current commanded position".
+            self._write_step(0)
+            return
         present = self._read_present_pos()
         if present is None:
             return   # bus silent — bail rather than write into the void
-        # Pin goal-position to current BEFORE flipping mode (same
-        # reasoning as run_angle's anchor: avoid the position PID
-        # acting on a stale goal during the mode switch).
+        # Anchor goal=present BEFORE the mode flip so the position PID
+        # activates already-at-target and can't drift.
         self._bus.write(self._id, _REG_GOAL_POSITION,
                         bytes([present & 0xFF, (present >> 8) & 0xFF]))
         self._ensure_mode(_MODE_POSITION)
@@ -472,19 +555,20 @@ class ST3215Motor(Motor):
     def done(self):
         """Pybricks-style status check for an in-flight
         ``run_angle(wait=False)`` move. Returns ``True`` if no move
-        is in flight (the normal case) or the active move has parked
-        within ``tolerance_deg`` of the final target. Returns
-        ``False`` while any chunk is still being tracked.
+        is in flight (the normal case) or the active move has converged
+        within ``tolerance_deg`` of the final target. Returns ``False``
+        while the move is still running.
 
-        Calling ``done()`` is what advances the chunk state machine
-        for multi-revolution moves — each call reads present-position
-        once, checks whether the current chunk has parked, and if so
-        either writes the next chunk's goal-position or runs the
-        end-of-move ``then=`` dispatch and clears the pending state.
-        So polling cadence matters: the wheel sits idle at each
-        chunk boundary until the next ``done()`` advances it. With
-        a typical ``time.sleep_ms(10)`` poll period that's a single-
-        tick gap, but if you don't poll, the move stalls."""
+        Calling ``done()`` is what advances the move: each call reads
+        the shaft angle once and compares it to the move's target. For
+        a move larger than 7 turns (issued as back-to-back steps),
+        ``done()`` writes the next step once the current one parks, and
+        on the final step runs the end-of-move ``then=`` dispatch and
+        clears the pending state. So polling cadence matters for
+        >7-turn moves — the wheel sits idle at each step boundary until
+        the next ``done()`` advances it. With a typical
+        ``time.sleep_ms(10)`` poll that's a single-tick gap; if you
+        never poll, a multi-step move stalls after the first step."""
         if self._pending is None:
             return True
         return self._poll_pending()
@@ -492,37 +576,28 @@ class ST3215Motor(Motor):
     def _poll_pending(self):
         """One iteration of the wait=False state machine. See ``done``."""
         state = self._pending
-        present = self._read_present_pos()
-        if present is None:
-            # Bus glitch — keep waiting, mirror run_angle's inner
-            # loop tolerance to transient drops.
+        cur = self.angle()
+        if cur is None:
+            # Bus glitch — keep waiting, mirror run_angle's tolerance
+            # to transient drops.
             return False
-        # Shortest-path distance from present to the current chunk's
-        # target (the servo's internal PID routes shortest-path too).
-        err = (state["chunk_target"] - present) % _COUNTS_PER_REV
-        if err > _COUNTS_PER_REV // 2:
-            err -= _COUNTS_PER_REV
-        if abs(err) > state["tol_counts"]:
+        if abs(cur - state["goal_deg"]) > state["tol_deg"]:
             return False
-        # Current chunk parked. Refresh the software multi-turn
-        # accumulator so ``angle()`` stays current across the move.
-        self.angle()
-        if abs(state["remaining"]) <= state["tol_counts"]:
-            # Final chunk — run end-of-move dispatch and clear.
+        # Current step parked.
+        if state["remaining_counts"] == 0:
+            # Whole move complete — run end-of-move dispatch and clear.
             then = state["then"]
             self._pending = None
             self._dispatch_then(then)
             return True
-        # More chunks to go: kick off the next one.
-        chunk = state["remaining"]
-        if chunk >  _MAX_CHUNK_COUNTS: chunk =  _MAX_CHUNK_COUNTS
-        if chunk < -_MAX_CHUNK_COUNTS: chunk = -_MAX_CHUNK_COUNTS
-        new_target = (present + chunk) % _COUNTS_PER_REV
-        self._bus.write(self._id, _REG_GOAL_POSITION,
-                        bytes([new_target & 0xFF,
-                               (new_target >> 8) & 0xFF]))
-        state["chunk_target"] = new_target
-        state["remaining"] -= chunk
+        # >7-turn move: issue the next step and extend the target.
+        step = state["remaining_counts"]
+        if step >  _MAX_STEP_COUNTS: step =  _MAX_STEP_COUNTS
+        if step < -_MAX_STEP_COUNTS: step = -_MAX_STEP_COUNTS
+        self._write_step(step)
+        state["remaining_counts"] -= step
+        step_user_deg = (-step if self._invert else step) * 360.0 / _COUNTS_PER_REV
+        state["goal_deg"] += step_user_deg
         return False
 
     def angle(self):
@@ -575,31 +650,38 @@ class ST3215Motor(Motor):
         """Rotate by ``target_angle`` degrees at up to ``deg_per_s``,
         ending within ``tolerance_deg`` of the target.
 
-        Implementation: switch the servo into native position mode
-        (op_mode=0) for the duration of the move, write the goal-
-        position, and let the servo's internal PID handle convergence.
-        Sub-degree accuracy on a typical bench rig — the encoder is
-        4096 counts/rev (≈0.088°/count) and the servo's internal PID
-        will park within a few counts.
+        ``target_angle`` is RELATIVE and UNBOUNDED — ``run_angle(200,
+        360)`` rotates one full turn forward, ``run_angle(200, 1080)``
+        three turns, ``run_angle(200, -540)`` one and a half turns
+        back. Direction is the sign of ``target_angle``.
 
-        ``target_angle`` is RELATIVE — ``run_angle(200, 360)`` rotates
-        360° forward from the present position.
+        Implementation: the servo is driven in **step mode** (op_mode=3)
+        for the move. In step mode the goal-position register is a
+        *signed relative step* — write N counts and the shaft advances
+        N counts from where it is, with no single-turn 0/4095 wrap to
+        cross (the prerequisite is angle limits = 0, set once on the
+        first call by ``_ensure_step_limits``). This is what makes
+        moves past 180° / past one full turn work: the older
+        single-turn position mode (op_mode=0) clamps to 0..4095 and a
+        target across the boundary was executed the *wrong way round*,
+        capping real motion at roughly half a turn.
 
-        Moves larger than ~180° are split into ≤180° sub-moves so the
-        servo's shortest-path routing in position mode always matches
-        the intended direction (a single 270° forward command would
-        otherwise be executed as 90° backward).
+        A single step write covers up to ±7 turns (the STS multi-turn
+        envelope); larger moves are issued as back-to-back ±7-turn
+        steps, each parking before the next — still no boundary to
+        cross. The servo's internal PID handles convergence (≈0.088°
+        per encoder count); completion is detected by polling the
+        software-accumulated shaft angle (``angle()``).
 
         ``then`` selects the end-state, pybricks-style:
 
         * ``"coast"`` (default) — cut torque; wheel free-wheels. The
           next ``run_speed`` / ``brake`` / ``run_angle`` transparently
-          re-enables torque and restores wheel mode.
+          re-enables torque and restores the mode it needs.
         * ``"brake"`` — restore wheel mode and write goal_speed=0 so
           the servo's velocity loop actively holds zero rotation rate.
-        * ``"hold"`` — leave the servo in position mode with goal_pos
-          locked at where the wheel stopped, so the position PID
-          actively resists rotation.
+        * ``"hold"`` — leave the servo in step mode; its position PID
+          is already holding the target and resisting rotation.
 
         ``wait=False`` kicks off the move and returns immediately
         without blocking. Use it for concurrent multi-motor moves,
@@ -611,27 +693,21 @@ class ST3215Motor(Motor):
                 time.sleep_ms(10)
 
         Multi-revolution targets are supported in ``wait=False`` mode
-        too: ``done()`` runs the chunk-advance state machine pull-
-        based, so polling ``done()`` is what carries the move through
-        each ≤180° sub-target. Don't poll = the wheel parks at the
-        first chunk and waits forever. The end-state ``then=`` dispatch
-        is deferred until ``done()`` reports the final chunk has parked.
+        too. For a move within ±7 turns the whole thing is one step
+        write and ``done()`` simply reports convergence; for a larger
+        move ``done()`` issues each subsequent ±7-turn step once the
+        previous one parks, so you must keep polling. The end-state
+        ``then=`` dispatch is deferred until ``done()`` reports the
+        final step has converged.
 
         Any subsequent motion command (``run``, ``run_speed``, ``brake``,
         ``coast``, ``hold``, ``run_angle``) supersedes a pending
         ``wait=False`` move — the new command takes over and the
         pending state is dropped (pybricks "new command wins").
 
-        The legacy ``kp`` / ``poll_ms`` arguments are accepted for
-        back-compat with the velocity-mode implementation but no
-        longer apply — the PID lives on the servo, not in Python.
-
-        ``debug=True`` enables a position-trace dump: the function
-        captures (t_ms, present_pos) on every inner-loop poll plus
-        key transition points (anchor, target_pos, loop exit,
-        post-stop, post-settle) and prints them at the end. Only
-        meaningful for ``wait=True``; ``wait=False`` returns before
-        the trace can be populated.
+        The legacy ``kp`` / ``poll_ms`` / ``debug`` arguments are
+        accepted for back-compat with the velocity-mode implementation
+        but no longer apply — the PID lives on the servo, not in Python.
         """
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
@@ -642,19 +718,16 @@ class ST3215Motor(Motor):
         if max_dps <= 0:
             return
 
-        # Encoder-count equivalents.
+        # Motor-frame target in encoder counts (``invert`` flips the
+        # commanded direction; ``angle()`` already reports user-frame
+        # degrees, so done-detection below stays in user frame).
         target_counts = int(round(float(target_angle) *
                                   _COUNTS_PER_REV / 360.0))
         if self._invert:
             target_counts = -target_counts
-        tol_counts = int(round(abs(float(tolerance_deg)) *
-                               _COUNTS_PER_REV / 360.0))
-        if tol_counts < 1:
-            tol_counts = 1
 
-        # Goal-speed register is unsigned in position mode (direction
-        # is implied by goal-position vs present-position). Clamp to
-        # the per-instance max_dps configured for this servo.
+        # Goal-speed register is unsigned in step mode (direction is in
+        # the goal-position sign). Clamp to the per-instance max_dps.
         capped_dps = max_dps if max_dps < self._max_dps else self._max_dps
         speed_steps = int(round(capped_dps * self._steps_per_dps))
         if speed_steps < 1:
@@ -662,152 +735,63 @@ class ST3215Motor(Motor):
         if speed_steps > 0x7FFF:
             speed_steps = 0x7FFF
 
-        # Lock the goal-position to where the wheel currently is BEFORE
-        # flipping into position mode. Otherwise the moment mode goes
-        # 1 → 0, the servo's position PID acts on whatever stale value
-        # is still sitting in the goal-position register (boot default,
-        # or the last value written by some unrelated code) — the
-        # wheel takes off toward that bogus target for as many ms as
-        # it takes us to issue the real goal-position write, and the
-        # whole move ends up off by the drift. Symptom: the first
-        # run_angle after open-loop spins undershoots by ~5-10° while
-        # subsequent ones are fine (goal-position is now sane).
-        #
-        # By writing goal-position = present before the mode switch,
-        # the position PID has nowhere to drift the moment it
-        # activates — it's already "at target".
         # New command supersedes any pending wait=False move.
         self._abandon_pending()
-
-        # Re-enable torque in case a prior ``coast()`` / ``then="coast"``
-        # left it disabled; ``_ensure_torque_on`` is a no-op otherwise.
         self._ensure_torque_on()
-
-        # Diagnostic trace (only populated when debug=True). Keep the
-        # untraced path identical to before — no per-poll overhead.
-        trace = [] if debug else None
-        t0 = time.ticks_ms() if debug else 0
-
-        anchor = self._read_present_pos()
-        if anchor is None:
-            return
-        if debug:
-            trace.append(("anchor", time.ticks_diff(time.ticks_ms(), t0), anchor))
-        self._bus.write(self._id, _REG_GOAL_POSITION,
-                        bytes([anchor & 0xFF, (anchor >> 8) & 0xFF]))
-        # Now safe to switch into position mode and set the velocity cap.
-        self._ensure_mode(_MODE_POSITION)
+        self._ensure_step_limits()       # angle limits = 0 (once)
+        self._ensure_mode(_MODE_STEP)    # op_mode = 3
         self._bus.write(self._id, _REG_GOAL_SPEED,
                         bytes([speed_steps & 0xFF,
                                (speed_steps >> 8) & 0xFF]))
-        if debug:
-            trace.append(("mode_switched", time.ticks_diff(time.ticks_ms(), t0), None))
+
+        # Baseline shaft angle (user frame). Bail if the bus is silent
+        # rather than command a move we can't track.
+        start_deg = self.angle()
+        if start_deg is None:
+            return
+
+        # First step (clamped to the ±7-turn envelope).
+        first = target_counts
+        if first >  _MAX_STEP_COUNTS: first =  _MAX_STEP_COUNTS
+        if first < -_MAX_STEP_COUNTS: first = -_MAX_STEP_COUNTS
+        self._write_step(first)
+        remaining_counts = target_counts - first
+        # User-frame goal for just this first step (matters only for
+        # >7-turn moves, where we converge step-by-step).
+        first_user_deg = (-first if self._invert else first) * 360.0 / _COUNTS_PER_REV
+        step_goal_deg = start_deg + first_user_deg
 
         if not wait:
-            # Non-blocking path: write the first chunk's goal-position,
-            # stash everything ``done()`` needs to advance through the
-            # remaining chunks and run the ``then=`` dispatch. We
-            # intentionally do NOT enter the try/finally — running
-            # ``_dispatch_then`` here would cut torque (coast) or
-            # write goal_speed=0 (brake) before the motor has moved a
-            # single count, undoing the move.
-            present = self._read_present_pos()
-            if present is None:
-                return
-            chunk = target_counts
-            if chunk >  _MAX_CHUNK_COUNTS: chunk =  _MAX_CHUNK_COUNTS
-            if chunk < -_MAX_CHUNK_COUNTS: chunk = -_MAX_CHUNK_COUNTS
-            chunk_target = (present + chunk) % _COUNTS_PER_REV
-            self._bus.write(self._id, _REG_GOAL_POSITION,
-                            bytes([chunk_target & 0xFF,
-                                   (chunk_target >> 8) & 0xFF]))
             self._pending = {
-                "remaining":    target_counts - chunk,
-                "chunk_target": chunk_target,
-                "tol_counts":   tol_counts,
-                "then":         then,
+                "goal_deg":         step_goal_deg,
+                "tol_deg":          abs(float(tolerance_deg)),
+                "then":             then,
+                "remaining_counts": remaining_counts,
             }
             return
 
-        try:
-            remaining = target_counts
-            while abs(remaining) > tol_counts:
-                present = self._read_present_pos()
-                if present is None:
-                    return  # bus silent — bail rather than spin.
+        tol_deg = abs(float(tolerance_deg))
+        while True:
+            # Converge on the current step's goal.
+            est_ms = int(abs(first) * 1000 / speed_steps + 200)
+            deadline = time.ticks_ms() + min(est_ms * 3, 6000)
+            while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+                cur = self.angle()
+                if cur is not None and abs(cur - step_goal_deg) <= tol_deg:
+                    break
+                time.sleep_ms(10)
+            if remaining_counts == 0:
+                break
+            # Issue the next ±7-turn step.
+            first = remaining_counts
+            if first >  _MAX_STEP_COUNTS: first =  _MAX_STEP_COUNTS
+            if first < -_MAX_STEP_COUNTS: first = -_MAX_STEP_COUNTS
+            self._write_step(first)
+            remaining_counts -= first
+            first_user_deg = (-first if self._invert else first) * 360.0 / _COUNTS_PER_REV
+            step_goal_deg += first_user_deg
 
-                chunk = remaining
-                if chunk >  _MAX_CHUNK_COUNTS: chunk =  _MAX_CHUNK_COUNTS
-                if chunk < -_MAX_CHUNK_COUNTS: chunk = -_MAX_CHUNK_COUNTS
-                target_pos = (present + chunk) % _COUNTS_PER_REV
-                self._bus.write(self._id, _REG_GOAL_POSITION,
-                                bytes([target_pos & 0xFF,
-                                       (target_pos >> 8) & 0xFF]))
-                if debug:
-                    trace.append(("chunk_start", time.ticks_diff(time.ticks_ms(), t0),
-                                  present, target_pos))
-
-                # Wait for the servo to reach this sub-target. Time
-                # budget: chunk_counts / steps_per_sec, ×3 for the
-                # accel/decel ramp, plus a 200 ms floor.
-                est_ms = int(abs(chunk) * 1000 / speed_steps + 200)
-                deadline = time.ticks_ms() + min(est_ms * 3, 5000)
-                while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-                    cur = self._read_present_pos()
-                    if cur is None:
-                        time.sleep_ms(10)
-                        continue
-                    # Shortest-path distance from cur to target_pos.
-                    err = (target_pos - cur) % _COUNTS_PER_REV
-                    if err > _COUNTS_PER_REV // 2:
-                        err -= _COUNTS_PER_REV
-                    if debug:
-                        trace.append(("poll", time.ticks_diff(time.ticks_ms(), t0), cur, err))
-                    if abs(err) <= tol_counts:
-                        if debug:
-                            trace.append(("loop_exit", time.ticks_diff(time.ticks_ms(), t0),
-                                          cur, err))
-                        break
-                    time.sleep_ms(10)
-
-                remaining -= chunk
-                # Keep the software multi-turn accumulator current —
-                # each chunk is ≤ half a rev so the wrap heuristic
-                # in angle() handles the correction correctly.
-                self.angle()
-        finally:
-            # Dispatch on ``then`` (validated up front so this block
-            # can't raise ValueError and mask an earlier exception).
-            # ``_dispatch_then`` is the same code path ``done()`` runs
-            # at the end of a ``wait=False`` multi-chunk move, keeping
-            # the two paths byte-for-byte identical on the wire.
-            # Note for ``"coast"``: cutting torque without flipping
-            # back to wheel mode is intentional — the previous default
-            # (mode→wheel + goal_speed=0) re-engaged the velocity loop
-            # on a fresh setpoint and bled the wheel forward by ~85
-            # raw counts over the next 50 ms (the "settle" artifact
-            # visible in run_angle_debug traces). Coasting skips that
-            # phase entirely.
-            if debug:
-                pre = self._read_present_pos()
-                trace.append(("pre_finally", time.ticks_diff(time.ticks_ms(), t0), pre))
-            self._dispatch_then(then)
-            if debug:
-                post = self._read_present_pos()
-                trace.append(("post_stop", time.ticks_diff(time.ticks_ms(), t0), post))
-                # Settle samples — show whether motion carries on
-                # after the chosen end-state.
-                for delay_ms in (50, 200, 500):
-                    time.sleep_ms(delay_ms if delay_ms == 50 else delay_ms - 50)
-                    settle = self._read_present_pos()
-                    trace.append(("settle_+%dms" % delay_ms,
-                                  time.ticks_diff(time.ticks_ms(), t0), settle))
-                # Print at end so the inner-loop polling stays fast.
-                print("--- run_angle trace (id=%d, target=%+d°, then=%s) ---" %
-                      (self._id, int(target_angle), then))
-                for evt in trace:
-                    print("  ", evt)
-                print("--- end trace ---")
+        self._dispatch_then(then)
 
     # --- ST-3215-specific extras ------------------------------------------
 
