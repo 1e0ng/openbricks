@@ -423,6 +423,31 @@ class EmergencyStopTests(unittest.TestCase):
             launcher._request_interrupt(inst)
             self.assertEqual(inst._pending, "stop")
 
+    def test_request_interrupt_calls_native_hook_when_present(self):
+        # Exercise the native-hook code path even under CPython (where
+        # _openbricks_native is absent) by injecting a fake module. Without
+        # this, the ``request_keyboard_interrupt()`` line is only reached
+        # in the MP job, which doesn't feed the openbricks-py coverage flag.
+        import sys
+        rec = []
+
+        class _FakeNative:
+            def request_keyboard_interrupt(self_):
+                rec.append(1)
+
+        saved = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = _FakeNative()
+        try:
+            inst = launcher.Launcher(_make_button())
+            launcher._request_interrupt(inst)
+        finally:
+            if saved is not None:
+                sys.modules["_openbricks_native"] = saved
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertEqual(rec, [1])        # native hook was called
+        self.assertIsNone(inst._pending)  # no fallback flag set
+
     def test_stop_all_motors_broadcasts_torque_off_to_serial_bus(self):
         from openbricks.drivers.st3215 import ST3215Motor
         m = ST3215Motor(servo_id=1, uart_id=1, tx=17, rx=16)
