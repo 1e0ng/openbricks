@@ -387,26 +387,41 @@ class RunProgramTests(unittest.TestCase):
 
 class EmergencyStopTests(unittest.TestCase):
     """The button-stop path must actually halt the motors, not just
-    unwind the program. Raising ``KeyboardInterrupt`` exits the program
-    but leaves serial-bus servos spinning at their last command — so
-    ``_raise_interrupt`` (and the KeyboardInterrupt safety net) call
-    ``_stop_all_motors`` first."""
+    unwind the program. The injected ``KeyboardInterrupt`` exits the
+    program but leaves serial-bus servos spinning at their last command —
+    so ``_exec_program_raw``'s KeyboardInterrupt handler calls
+    ``_stop_all_motors`` as the interrupt unwinds."""
 
     def setUp(self):
         from openbricks.drivers.st3215 import ST3215
         ST3215._buses = {}
         self.addCleanup(_cleanup_program)
 
-    def test_raise_interrupt_stops_motors_then_raises(self):
-        calls = []
-        original = launcher._stop_all_motors
-        launcher._stop_all_motors = lambda: calls.append(1)
+    def test_request_interrupt_injects_real_keyboard_interrupt(self):
+        # On a build with the native hook (the firmware + the native test
+        # binary), _request_interrupt arms a real pending KeyboardInterrupt
+        # — the Ctrl-C mechanism — which fires at the next bytecode and
+        # actually stops a running program. On desktop (no native module)
+        # it falls back to the _pending flag. Assert whichever path is live.
+        inst = launcher.Launcher(_make_button())
         try:
-            with self.assertRaises(KeyboardInterrupt):
-                launcher._raise_interrupt(None)
-        finally:
-            launcher._stop_all_motors = original
-        self.assertEqual(calls, [1])   # stop ran before the raise unwound
+            from _openbricks_native import request_keyboard_interrupt  # noqa: F401
+            has_native = True
+        except (ImportError, AttributeError):
+            has_native = False
+
+        if has_native:
+            fired = False
+            try:
+                launcher._request_interrupt(inst)
+                for _ in range(100000):     # let the pending exception land
+                    pass
+            except KeyboardInterrupt:
+                fired = True
+            self.assertTrue(fired, "native hook must inject a KeyboardInterrupt")
+        else:
+            launcher._request_interrupt(inst)
+            self.assertEqual(inst._pending, "stop")
 
     def test_stop_all_motors_broadcasts_torque_off_to_serial_bus(self):
         from openbricks.drivers.st3215 import ST3215Motor

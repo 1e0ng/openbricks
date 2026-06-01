@@ -146,26 +146,32 @@ def _stop_all_motors():
 
 # ---- mid-run interrupt ----
 
-def _raise_interrupt(_):
-    # Emergency stop FIRST, then unwind the program. Stopping the motors
-    # before the raise means a button press halts the robot immediately —
-    # even if the interrupt lands mid-operation, and even if the program
-    # would otherwise catch the KeyboardInterrupt and keep going.
-    _stop_all_motors()
-    raise KeyboardInterrupt
-
-
 def _request_interrupt(launcher_instance):
-    """Ask MicroPython to raise ``KeyboardInterrupt`` in the running
-    program at the next bytecode boundary.
+    """Stop the running program by injecting a ``KeyboardInterrupt`` into
+    the MAIN thread — the same pending-exception path the REPL uses for a
+    host Ctrl-C.
 
-    Module-level so tests can swap it out — the ``micropython`` module
-    is read-only on MP and can't be patched directly.
+    NOT ``micropython.schedule(func)`` where ``func`` raises: bench-
+    confirmed that only unwinds the scheduled callback (it prints a
+    traceback) and leaves the running program going. And while a program
+    *started* via the button runs inside the scheduled ``_scheduled_start``,
+    the scheduled-callback queue is locked, so a second scheduled callback
+    can't fire at all. The native ``request_keyboard_interrupt`` hook sets
+    the VM's pending exception, which is checked between every bytecode
+    regardless of scheduler state — so it stops the program immediately
+    whether it was launched by the button (inside the scheduler) or by
+    ``openbricks run`` (main thread). The ``KeyboardInterrupt`` then
+    unwinds to ``_exec_program_raw``'s handler, which stops the motors.
+
+    Falls back to the ``_pending`` flag on desktop, where the native hook
+    isn't present (and there's no running program to interrupt anyway).
+
+    Module-level so tests can swap it out.
     """
     try:
-        import micropython
-        micropython.schedule(_raise_interrupt, None)
-    except (ImportError, AttributeError, RuntimeError):
+        from _openbricks_native import request_keyboard_interrupt
+        request_keyboard_interrupt()
+    except (ImportError, AttributeError):
         launcher_instance._pending = "stop"
 
 
@@ -224,10 +230,10 @@ def _exec_program_raw(program_path):
         try:
             exec(code, {"__name__": "__main__"})
         except KeyboardInterrupt:
-            # Safety net: also covers a REPL Ctrl-C from ``openbricks run``
-            # (which doesn't pass through ``_raise_interrupt``). Idempotent
-            # with the button path — stopping an already-stopped motor is
-            # harmless.
+            # The button-stop's injected KeyboardInterrupt (and a REPL
+            # Ctrl-C from ``openbricks run``) both unwind to here — stop
+            # every motor before propagating so the robot halts no matter
+            # how the program was running. Idempotent if already stopped.
             _stop_all_motors()
             raise
         except Exception as e:
