@@ -69,7 +69,15 @@ class Launcher:
 
     def _tick(self, _timer=None):
         """Called on every ``poll_ms`` tick. Edge-detects press→release
-        cycles and dispatches start/stop. Safe for IRQ context."""
+        cycles and dispatches a program START when idle. Safe for IRQ
+        context.
+
+        STOP is NOT handled here. Interrupting a running program needs a
+        pending exception raised from a context with no Python frame —
+        which a soft Timer callback like this one is not (it would unwind
+        itself, not the program). That's done by the native armed GPIO
+        ISR installed in ``_ensure_launcher`` (see ``_install_stop_button``
+        / ``_arm_stop_button``)."""
         pressed = self._btn.value() == 0
         if pressed:
             self._was_pressed = True
@@ -78,18 +86,16 @@ class Launcher:
             return
         # Released after a press — fire once.
         self._was_pressed = False
-        if self._running:
-            _request_interrupt(self)
-        else:
+        if not self._running:
             _request_start(self)
+        # else: running — the native armed stop-button ISR handles stop.
 
     def _drain_pending(self):
-        """Consume a queued ``_pending`` fallback.
+        """Consume a queued ``_pending`` start fallback.
 
-        Only needed when ``_request_start`` / ``_request_interrupt``
-        couldn't reach ``micropython.schedule`` (CPython tests). Under
-        MicroPython, schedule runs the start/stop callbacks itself and
-        this method is a no-op.
+        Only needed when ``_request_start`` couldn't reach
+        ``micropython.schedule`` (CPython tests). Under MicroPython,
+        schedule runs the start callback itself and this is a no-op.
         """
         if self._pending == "start" and not self._running:
             self._pending = None
@@ -99,8 +105,6 @@ class Launcher:
             finally:
                 self._running = False
             print("openbricks: idle. Press button to run", self._program_path)
-        elif self._pending == "stop":
-            self._pending = None
 
 
 # ---- emergency stop ----
@@ -144,35 +148,34 @@ def _stop_all_motors():
         pass
 
 
-# ---- mid-run interrupt ----
+# ---- hardware stop button (native C GPIO ISR) ----
 
-def _request_interrupt(launcher_instance):
-    """Stop the running program by injecting a ``KeyboardInterrupt`` into
-    the MAIN thread — the same pending-exception path the REPL uses for a
-    host Ctrl-C.
+def _install_stop_button(button_pin):
+    """Install the native C-level GPIO interrupt that stops a running
+    program on a button press.
 
-    NOT ``micropython.schedule(func)`` where ``func`` raises: bench-
-    confirmed that only unwinds the scheduled callback (it prints a
-    traceback) and leaves the running program going. And while a program
-    *started* via the button runs inside the scheduled ``_scheduled_start``,
-    the scheduled-callback queue is locked, so a second scheduled callback
-    can't fire at all. The native ``request_keyboard_interrupt`` hook sets
-    the VM's pending exception, which is checked between every bytecode
-    regardless of scheduler state — so it stops the program immediately
-    whether it was launched by the button (inside the scheduler) or by
-    ``openbricks run`` (main thread). The ``KeyboardInterrupt`` then
-    unwinds to ``_exec_program_raw``'s handler, which stops the motors.
-
-    Falls back to the ``_pending`` flag on desktop, where the native hook
-    isn't present (and there's no running program to interrupt anyway).
-
-    Module-level so tests can swap it out.
-    """
+    This must be a C ISR, not a Python Timer/Pin.irq callback: on esp32
+    those run in a scheduled (soft) context with their own Python frame,
+    so a ``KeyboardInterrupt`` set there unwinds the callback instead of
+    the program. The C ISR has no Python frame — exactly like the UART
+    ISR that delivers a host Ctrl-C — so the interrupt lands in the
+    running program. No-op where the native module is absent (desktop)."""
     try:
-        from _openbricks_native import request_keyboard_interrupt
-        request_keyboard_interrupt()
+        from _openbricks_native import install_stop_button
+        install_stop_button(button_pin)
     except (ImportError, AttributeError):
-        launcher_instance._pending = "stop"
+        pass
+
+
+def _arm_stop_button(armed):
+    """Arm/disarm the native stop-button ISR. Armed only while a user
+    program is executing, so a press while idle doesn't tear down the
+    boot/idle loop. No-op where the native module is absent."""
+    try:
+        from _openbricks_native import set_stop_armed
+        set_stop_armed(bool(armed))
+    except (ImportError, AttributeError):
+        pass
 
 
 def _scheduled_start(launcher_instance):
@@ -226,28 +229,37 @@ def _exec_program_raw(program_path):
     with open(program_path) as f:
         code = f.read()
     from openbricks import log as _log
-    with _log.session() as sess:
-        try:
-            exec(code, {"__name__": "__main__"})
-        except KeyboardInterrupt:
-            # The button-stop's injected KeyboardInterrupt (and a REPL
-            # Ctrl-C from ``openbricks run``) both unwind to here — stop
-            # every motor before propagating so the robot halts no matter
-            # how the program was running. Idempotent if already stopped.
-            _stop_all_motors()
-            raise
-        except Exception as e:
-            pe = getattr(sys, "print_exception", None)
-            if pe is not None:
-                pe(e)
-            else:
-                import traceback
-                traceback.print_exception(type(e), e, e.__traceback__)
-            # Tracebacks above go to the live console only — print()
-            # is the only stream we tee. Mirror a short summary into
-            # the log file so it shows up in ``openbricks-dev log``
-            # too.
-            sess.write_text("Exception: %r\n" % (e,))
+    # Arm the hardware stop button for the duration of the run. A press
+    # now fires the native GPIO ISR, which injects a KeyboardInterrupt
+    # into this exec; disarm in the finally so an idle press can't tear
+    # down the boot/idle loop.
+    _arm_stop_button(True)
+    try:
+        with _log.session() as sess:
+            try:
+                exec(code, {"__name__": "__main__"})
+            except KeyboardInterrupt:
+                # The button-stop's injected KeyboardInterrupt (and a REPL
+                # Ctrl-C from ``openbricks run``) both unwind to here —
+                # stop every motor before propagating so the robot halts
+                # no matter how the program was running. Idempotent if
+                # already stopped.
+                _stop_all_motors()
+                raise
+            except Exception as e:
+                pe = getattr(sys, "print_exception", None)
+                if pe is not None:
+                    pe(e)
+                else:
+                    import traceback
+                    traceback.print_exception(type(e), e, e.__traceback__)
+                # Tracebacks above go to the live console only — print()
+                # is the only stream we tee. Mirror a short summary into
+                # the log file so it shows up in ``openbricks-dev log``
+                # too.
+                sess.write_text("Exception: %r\n" % (e,))
+    finally:
+        _arm_stop_button(False)
 
 
 def _exec_program(program_path):
@@ -286,6 +298,10 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
     _singleton._timer = Timer(timer_id)
     _singleton._timer.init(
         period=poll_ms, mode=Timer.PERIODIC, callback=_singleton._tick)
+    # The Timer poll handles START; STOP is a native C GPIO ISR (a soft
+    # Python callback can't interrupt the running program). Install it on
+    # the same pin — it's armed only while a program runs.
+    _install_stop_button(button_pin)
     return _singleton
 
 
@@ -318,9 +334,9 @@ def run(program_path=DEFAULT_PROGRAM_PATH, button_pin=DEFAULT_BUTTON_PIN,
 def run_program(program_path=DEFAULT_PROGRAM_PATH):
     """Client-triggered entry for ``openbricks-dev run``.
 
-    Sets the ``_running`` flag so a button press routes through
-    ``_request_interrupt``, then exec's the program in the main
-    thread. Propagates ``KeyboardInterrupt`` so the raw-REPL
+    Sets the ``_running`` flag, then exec's the program in the main
+    thread (``_exec_program_raw`` arms the native stop button for the
+    duration). Propagates ``KeyboardInterrupt`` so the raw-REPL
     disconnect signals "stopped" back to the client (which then
     exits).
 

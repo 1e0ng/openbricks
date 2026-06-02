@@ -41,10 +41,81 @@ static mp_obj_t openbricks_request_keyboard_interrupt(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(openbricks_request_keyboard_interrupt_obj,
                                  openbricks_request_keyboard_interrupt);
 
+// ---- hardware stop button -------------------------------------------------
+//
+// The program-stop button must interrupt a *running user program*. Doing
+// that from a Python Timer / Pin.irq callback does NOT work on esp32:
+// those run in a scheduled (soft) context with their own Python frame, so
+// the KeyboardInterrupt unwinds the callback instead of the program
+// (bench-confirmed traceback in launcher._tick). The REPL's host Ctrl-C
+// works because it is raised from the UART RX *C interrupt* — no Python
+// frame. So we replicate that: a C-level GPIO ISR that calls
+// ``mp_sched_keyboard_interrupt()`` directly.
+//
+// ``install_stop_button(gpio)`` adds a falling-edge ISR on the button pin
+// (already configured input+pull-up by the launcher; the GPIO ISR service
+// is installed at boot by machine_pins_init). ``set_stop_armed(bool)``
+// gates it: the launcher arms it only while a program runs, so a press
+// while idle doesn't tear down the boot/idle loop.
+
+#if defined(ESP_PLATFORM)
+
+#include "driver/gpio.h"
+#include "mphalport.h"   // mp_hal_wake_main_task_from_isr
+
+static volatile bool ob_stop_armed = false;
+
+static void ob_stop_button_isr(void *arg) {
+    (void)arg;
+    if (ob_stop_armed) {
+        mp_sched_keyboard_interrupt();
+        mp_hal_wake_main_task_from_isr();
+    }
+}
+
+static mp_obj_t openbricks_install_stop_button(mp_obj_t gpio_in) {
+    gpio_num_t gpio = (gpio_num_t)mp_obj_get_int(gpio_in);
+    gpio_set_intr_type(gpio, GPIO_INTR_NEGEDGE);
+    gpio_isr_handler_add(gpio, ob_stop_button_isr, NULL);
+    gpio_intr_enable(gpio);
+    return mp_const_none;
+}
+
+static mp_obj_t openbricks_set_stop_armed(mp_obj_t armed_in) {
+    ob_stop_armed = mp_obj_is_true(armed_in);
+    return mp_const_none;
+}
+
+#else  // non-esp32 (unix test build): no GPIO — inert stubs so the
+       // launcher's calls are harmless and the module still links.
+
+static bool ob_stop_armed_stub = false;
+
+static mp_obj_t openbricks_install_stop_button(mp_obj_t gpio_in) {
+    (void)gpio_in;
+    return mp_const_none;
+}
+
+static mp_obj_t openbricks_set_stop_armed(mp_obj_t armed_in) {
+    ob_stop_armed_stub = mp_obj_is_true(armed_in);
+    return mp_const_none;
+}
+
+#endif
+
+static MP_DEFINE_CONST_FUN_OBJ_1(openbricks_install_stop_button_obj,
+                                 openbricks_install_stop_button);
+static MP_DEFINE_CONST_FUN_OBJ_1(openbricks_set_stop_armed_obj,
+                                 openbricks_set_stop_armed);
+
 static const mp_rom_map_elem_t openbricks_native_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),           MP_ROM_QSTR(MP_QSTR__openbricks_native) },
     { MP_ROM_QSTR(MP_QSTR_request_keyboard_interrupt),
       MP_ROM_PTR(&openbricks_request_keyboard_interrupt_obj) },
+    { MP_ROM_QSTR(MP_QSTR_install_stop_button),
+      MP_ROM_PTR(&openbricks_install_stop_button_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_stop_armed),
+      MP_ROM_PTR(&openbricks_set_stop_armed_obj) },
     { MP_ROM_QSTR(MP_QSTR_motor_process),      MP_ROM_PTR(&motor_process_singleton) },
     { MP_ROM_QSTR(MP_QSTR_Servo),              MP_ROM_PTR(&openbricks_servo_type) },
     { MP_ROM_QSTR(MP_QSTR_TrapezoidalProfile), MP_ROM_PTR(&openbricks_trajectory_type) },
