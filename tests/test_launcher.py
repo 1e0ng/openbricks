@@ -292,6 +292,26 @@ class StopRequestTests(unittest.TestCase):
                 sys.modules.pop("_openbricks_native", None)
         self.assertIsNotNone(t)   # a periodic Timer was created
 
+    def test_request_stop_falls_back_to_pending_without_native(self):
+        # Cover the fallback branch: when the native hook is missing,
+        # _request_stop sets the _pending flag instead.
+        import sys
+
+        class _Empty:        # lacks request_stop -> import fails -> fallback
+            pass
+
+        inst = launcher.Launcher(_make_button())
+        saved = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = _Empty()
+        try:
+            launcher._request_stop(inst)
+        finally:
+            if saved is not None:
+                sys.modules["_openbricks_native"] = saved
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertEqual(inst._pending, "stop")
+
 
 class ScheduledStartTests(unittest.TestCase):
     """``_scheduled_start`` is the callback MicroPython runs between
@@ -474,6 +494,20 @@ class EmergencyStopTests(unittest.TestCase):
         except KeyboardInterrupt:
             fired = True
         self.assertFalse(fired, "disarmed stop_tick must not interrupt")
+
+    def test_stop_button_debug_reports_state(self):
+        try:
+            from _openbricks_native import (
+                set_stop_armed, request_stop, stop_button_debug)
+        except (ImportError, AttributeError):
+            return
+        set_stop_armed(True)
+        request_stop()
+        d = stop_button_debug()          # (tick_count, fire_count, armed, requested)
+        self.assertEqual(len(d), 4)
+        self.assertEqual(d[2], 1)        # armed
+        self.assertEqual(d[3], 1)        # requested
+        set_stop_armed(False)            # also clears requested
 
     def test_exec_program_raw_arms_then_disarms_stop_button(self):
         # The native stop button is armed for the duration of the run and
