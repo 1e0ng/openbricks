@@ -61,23 +61,23 @@ class Launcher:
         self._running        = False
         self._was_pressed    = False
         self._pending        = None        # None | "start" | "stop"  (test fallback)
-        # Timer stays alive for hub uptime — we never ``.deinit()`` it.
-        # Keeping the reference here stops GC from collecting it.
-        self._timer          = None
+        # Timers stay alive for hub uptime — we never ``.deinit()`` them.
+        # Keeping the references here stops GC from collecting them.
+        self._timer          = None    # Timer(0): START + stop-press detect
+        self._stop_timer     = None    # Timer(1): native stop_tick (injects)
 
     # ---- timer callback ----
 
     def _tick(self, _timer=None):
         """Called on every ``poll_ms`` tick. Edge-detects press→release
-        cycles and dispatches a program START when idle. Safe for IRQ
-        context.
+        cycles. When idle, dispatches a program START; when running,
+        flags a STOP via ``_request_stop``.
 
-        STOP is NOT handled here. Interrupting a running program needs a
-        pending exception raised from a context with no Python frame —
-        which a soft Timer callback like this one is not (it would unwind
-        itself, not the program). That's done by the native armed GPIO
-        ISR installed in ``_ensure_launcher`` (see ``_install_stop_button``
-        / ``_arm_stop_button``)."""
+        This (a soft Python callback) only *detects* the press and sets a
+        flag — it can't inject the interrupt, because a pending exception
+        set in a Python callback frame unwinds the callback, not the
+        program. The native C-function ``stop_tick`` Timer callback (set
+        up in ``_ensure_launcher``) does the injection."""
         pressed = self._btn.value() == 0
         if pressed:
             self._was_pressed = True
@@ -88,7 +88,11 @@ class Launcher:
         self._was_pressed = False
         if not self._running:
             _request_start(self)
-        # else: running — the native armed stop-button ISR handles stop.
+        else:
+            # Running: flag a stop. The native C-function stop_tick Timer
+            # callback injects the KeyboardInterrupt (this Python callback
+            # can't — it would unwind itself).
+            _request_stop(self)
 
     def _drain_pending(self):
         """Consume a queued ``_pending`` start fallback.
@@ -148,23 +152,43 @@ def _stop_all_motors():
         pass
 
 
-# ---- hardware stop button (native C GPIO ISR) ----
+# ---- hardware stop button (native C-function Timer callback) ----
 
-def _install_stop_button(button_pin):
-    """Install the native C-level GPIO interrupt that stops a running
-    program on a button press.
+def _install_stop_tick(timer_id):
+    """Start a fast ``machine.Timer`` whose callback is the native
+    C-function ``stop_tick``.
 
-    This must be a C ISR, not a Python Timer/Pin.irq callback: on esp32
-    those run in a scheduled (soft) context with their own Python frame,
-    so a ``KeyboardInterrupt`` set there unwinds the callback instead of
-    the program. The C ISR has no Python frame — exactly like the UART
-    ISR that delivers a host Ctrl-C — so the interrupt lands in the
-    running program. No-op where the native module is absent (desktop)."""
+    The stop interrupt must be injected from a context with no Python
+    frame (a Python callback would unwind itself, not the program). The
+    user C module can't use ESP-IDF headers, so the portable answer —
+    the same one ``motor_process`` uses — is a C-function registered as a
+    Timer callback: a C callback runs no Python bytecodes, so the pending
+    ``KeyboardInterrupt`` it sets is raised in the running program, not in
+    the callback. ``_tick`` (Python) does the press detection and calls
+    ``request_stop``; this tick injects the interrupt. Returns the Timer
+    (kept alive by the caller) or ``None`` off-hardware."""
     try:
-        from _openbricks_native import install_stop_button
-        install_stop_button(button_pin)
+        from machine import Timer
+        from _openbricks_native import stop_tick
     except (ImportError, AttributeError):
-        pass
+        return None
+    try:
+        t = Timer(timer_id)
+        t.init(period=20, mode=Timer.PERIODIC, callback=stop_tick)
+        return t
+    except (ValueError, OSError, TypeError):
+        return None
+
+
+def _request_stop(launcher_instance):
+    """Flag a stop from the Python button watcher. The native C
+    ``stop_tick`` Timer callback picks it up and injects the interrupt.
+    No-op where the native module is absent."""
+    try:
+        from _openbricks_native import request_stop
+        request_stop()
+    except (ImportError, AttributeError):
+        launcher_instance._pending = "stop"
 
 
 def _arm_stop_button(armed):
@@ -298,10 +322,11 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
     _singleton._timer = Timer(timer_id)
     _singleton._timer.init(
         period=poll_ms, mode=Timer.PERIODIC, callback=_singleton._tick)
-    # The Timer poll handles START; STOP is a native C GPIO ISR (a soft
-    # Python callback can't interrupt the running program). Install it on
-    # the same pin — it's armed only while a program runs.
-    _install_stop_button(button_pin)
+    # The Timer(0) poll handles START and detects a stop press. STOP
+    # delivery is a separate fast Timer whose callback is the native
+    # C-function stop_tick (a soft Python callback can't inject the
+    # interrupt into the running program; a C-function callback can).
+    _singleton._stop_timer = _install_stop_tick(timer_id + 1)
     return _singleton
 
 

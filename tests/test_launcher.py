@@ -223,11 +223,9 @@ class RunProgramResetsMotorProcessTests(unittest.TestCase):
 
 
 class StopRequestTests(unittest.TestCase):
-    """The Timer poll (``_tick``) does NOT handle stop. Interrupting a
-    running program needs a pending exception from a context with no
-    Python frame — the native C GPIO ISR does that (armed by
-    ``_exec_program_raw``). ``_tick`` while running must therefore be a
-    no-op, NOT start a second program."""
+    """A press while running requests a STOP (``_request_stop``), never a
+    second START. ``_tick`` only flags it; the native C-function
+    ``stop_tick`` Timer callback injects the interrupt."""
 
     def setUp(self):
         self.btn = _make_button()
@@ -236,18 +234,83 @@ class StopRequestTests(unittest.TestCase):
         # Pretend a program is already executing.
         self.launcher._running = True
 
-    def test_short_press_while_running_does_not_start_again(self):
-        calls = []
-        original = launcher._request_start
-        launcher._request_start = lambda inst: calls.append(inst)
+    def test_short_press_while_running_requests_stop_not_start(self):
+        starts = []
+        stops = []
+        orig_start = launcher._request_start
+        orig_stop = launcher._request_stop
+        launcher._request_start = lambda inst: starts.append(inst)
+        launcher._request_stop = lambda inst: stops.append(inst)
         try:
             _press(self.btn, hold_ms=200, tick_fn=self.launcher._tick)
         finally:
-            launcher._request_start = original
-        # While running, a press is handled by the native stop ISR — the
-        # Timer poll must not (re)dispatch a start.
-        self.assertEqual(calls, [])
-        self.assertIsNone(self.launcher._pending)
+            launcher._request_start = orig_start
+            launcher._request_stop = orig_stop
+        self.assertEqual(starts, [])               # no (re)start
+        self.assertEqual(stops, [self.launcher])   # stop requested once
+
+    def test_request_stop_calls_native_when_present(self):
+        # Exercise the native path under CPython too (the openbricks-py
+        # coverage flag is measured there, where _openbricks_native is
+        # otherwise absent and only the fallback branch would run).
+        import sys
+        rec = []
+
+        class _FakeNative:
+            def request_stop(self_):
+                rec.append(1)
+
+        saved = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = _FakeNative()
+        try:
+            launcher._request_stop(self.launcher)
+        finally:
+            if saved is not None:
+                sys.modules["_openbricks_native"] = saved
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertEqual(rec, [1])
+        self.assertIsNone(self.launcher._pending)   # native path, no fallback
+
+    def test_install_stop_tick_creates_timer_with_native_callback(self):
+        # Cover the Timer-creation lines under CPython by making the native
+        # stop_tick import succeed (it's otherwise absent on desktop).
+        import sys
+
+        class _FakeNative:
+            def stop_tick(self_, timer_arg):
+                pass
+
+        saved = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = _FakeNative()
+        try:
+            t = launcher._install_stop_tick(1)
+        finally:
+            if saved is not None:
+                sys.modules["_openbricks_native"] = saved
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertIsNotNone(t)   # a periodic Timer was created
+
+    def test_request_stop_falls_back_to_pending_without_native(self):
+        # Cover the fallback branch: when the native hook is missing,
+        # _request_stop sets the _pending flag instead.
+        import sys
+
+        class _Empty:        # lacks request_stop -> import fails -> fallback
+            pass
+
+        inst = launcher.Launcher(_make_button())
+        saved = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = _Empty()
+        try:
+            launcher._request_stop(inst)
+        finally:
+            if saved is not None:
+                sys.modules["_openbricks_native"] = saved
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertEqual(inst._pending, "stop")
 
 
 class ScheduledStartTests(unittest.TestCase):
@@ -391,6 +454,60 @@ class EmergencyStopTests(unittest.TestCase):
         from openbricks.drivers.st3215 import ST3215
         ST3215._buses = {}
         self.addCleanup(_cleanup_program)
+
+    def test_stop_tick_injects_interrupt_when_armed_and_requested(self):
+        # The core mechanism: the native C-function stop_tick callback,
+        # when armed + a stop was requested, injects a real
+        # KeyboardInterrupt that lands in the running code. (Off-hardware
+        # there's no native module — skip.)
+        try:
+            from _openbricks_native import (
+                stop_tick, request_stop, set_stop_armed)
+        except (ImportError, AttributeError):
+            return
+        set_stop_armed(True)
+        request_stop()
+        fired = False
+        try:
+            stop_tick(None)              # C-function callback fires the kbd
+            for _ in range(100000):      # let the pending exception land
+                pass
+        except KeyboardInterrupt:
+            fired = True
+        finally:
+            set_stop_armed(False)
+        self.assertTrue(fired, "stop_tick must inject a KeyboardInterrupt")
+
+    def test_stop_tick_is_noop_when_not_armed(self):
+        try:
+            from _openbricks_native import (
+                stop_tick, request_stop, set_stop_armed)
+        except (ImportError, AttributeError):
+            return
+        set_stop_armed(False)
+        request_stop()                   # request, but disarmed
+        fired = False
+        try:
+            stop_tick(None)
+            for _ in range(50000):
+                pass
+        except KeyboardInterrupt:
+            fired = True
+        self.assertFalse(fired, "disarmed stop_tick must not interrupt")
+
+    def test_stop_button_debug_reports_state(self):
+        try:
+            from _openbricks_native import (
+                set_stop_armed, request_stop, stop_button_debug)
+        except (ImportError, AttributeError):
+            return
+        set_stop_armed(True)
+        request_stop()
+        d = stop_button_debug()          # (tick_count, fire_count, armed, requested)
+        self.assertEqual(len(d), 4)
+        self.assertEqual(d[2], 1)        # armed
+        self.assertEqual(d[3], 1)        # requested
+        set_stop_armed(False)            # also clears requested
 
     def test_exec_program_raw_arms_then_disarms_stop_button(self):
         # The native stop button is armed for the duration of the run and
