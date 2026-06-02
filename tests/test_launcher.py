@@ -223,14 +223,11 @@ class RunProgramResetsMotorProcessTests(unittest.TestCase):
 
 
 class StopRequestTests(unittest.TestCase):
-    """Short press while ``_running`` is True requests mid-run stop.
-
-    MicroPython hands the request to ``micropython.schedule`` so the
-    ``KeyboardInterrupt`` lands between bytecodes of the running
-    program. CPython (where ``schedule`` doesn't exist) falls back to
-    a ``_pending = 'stop'`` flag on the launcher. We assert on
-    whichever path is live.
-    """
+    """The Timer poll (``_tick``) does NOT handle stop. Interrupting a
+    running program needs a pending exception from a context with no
+    Python frame — the native C GPIO ISR does that (armed by
+    ``_exec_program_raw``). ``_tick`` while running must therefore be a
+    no-op, NOT start a second program."""
 
     def setUp(self):
         self.btn = _make_button()
@@ -239,20 +236,18 @@ class StopRequestTests(unittest.TestCase):
         # Pretend a program is already executing.
         self.launcher._running = True
 
-    def test_short_press_while_running_calls_request_interrupt(self):
-        # Swap the module-level helper for a recorder so we see the
-        # call without letting the real raise fire (and without touching
-        # ``micropython.schedule``, which is read-only on MP).
+    def test_short_press_while_running_does_not_start_again(self):
         calls = []
-        original = launcher._request_interrupt
-        launcher._request_interrupt = lambda inst: calls.append(inst)
+        original = launcher._request_start
+        launcher._request_start = lambda inst: calls.append(inst)
         try:
             _press(self.btn, hold_ms=200, tick_fn=self.launcher._tick)
         finally:
-            launcher._request_interrupt = original
-
-        self.assertEqual(len(calls), 1)
-        self.assertIs(calls[0], self.launcher)
+            launcher._request_start = original
+        # While running, a press is handled by the native stop ISR — the
+        # Timer poll must not (re)dispatch a start.
+        self.assertEqual(calls, [])
+        self.assertIsNone(self.launcher._pending)
 
 
 class ScheduledStartTests(unittest.TestCase):
@@ -397,56 +392,69 @@ class EmergencyStopTests(unittest.TestCase):
         ST3215._buses = {}
         self.addCleanup(_cleanup_program)
 
-    def test_request_interrupt_injects_real_keyboard_interrupt(self):
-        # On a build with the native hook (the firmware + the native test
-        # binary), _request_interrupt arms a real pending KeyboardInterrupt
-        # — the Ctrl-C mechanism — which fires at the next bytecode and
-        # actually stops a running program. On desktop (no native module)
-        # it falls back to the _pending flag. Assert whichever path is live.
-        inst = launcher.Launcher(_make_button())
-        try:
-            from _openbricks_native import request_keyboard_interrupt  # noqa: F401
-            has_native = True
-        except (ImportError, AttributeError):
-            has_native = False
-
-        if has_native:
-            fired = False
-            try:
-                launcher._request_interrupt(inst)
-                for _ in range(100000):     # let the pending exception land
-                    pass
-            except KeyboardInterrupt:
-                fired = True
-            self.assertTrue(fired, "native hook must inject a KeyboardInterrupt")
-        else:
-            launcher._request_interrupt(inst)
-            self.assertEqual(inst._pending, "stop")
-
-    def test_request_interrupt_calls_native_hook_when_present(self):
-        # Exercise the native-hook code path even under CPython (where
-        # _openbricks_native is absent) by injecting a fake module. Without
-        # this, the ``request_keyboard_interrupt()`` line is only reached
-        # in the MP job, which doesn't feed the openbricks-py coverage flag.
+    def test_exec_program_raw_arms_then_disarms_stop_button(self):
+        # The native stop button is armed for the duration of the run and
+        # disarmed afterward, so a press while idle can't tear down the
+        # idle loop. Inject a fake native module to record the calls.
         import sys
-        rec = []
+        events = []
 
         class _FakeNative:
-            def request_keyboard_interrupt(self_):
-                rec.append(1)
+            def set_stop_armed(self_, armed):
+                events.append(("armed", bool(armed)))
 
         saved = sys.modules.get("_openbricks_native")
         sys.modules["_openbricks_native"] = _FakeNative()
+        path = _write_program("pass\n")
         try:
-            inst = launcher.Launcher(_make_button())
-            launcher._request_interrupt(inst)
+            launcher._exec_program_raw(path)
         finally:
             if saved is not None:
                 sys.modules["_openbricks_native"] = saved
             else:
                 sys.modules.pop("_openbricks_native", None)
-        self.assertEqual(rec, [1])        # native hook was called
-        self.assertIsNone(inst._pending)  # no fallback flag set
+        # Armed True before the run, False after — in that order.
+        self.assertEqual(events, [("armed", True), ("armed", False)])
+
+    def test_exec_program_raw_disarms_stop_button_on_keyboard_interrupt(self):
+        # Even when the program is stopped mid-run, the finally must disarm.
+        import sys
+        events = []
+
+        class _FakeNative:
+            def set_stop_armed(self_, armed):
+                events.append(bool(armed))
+
+        saved = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = _FakeNative()
+        path = _write_program("raise KeyboardInterrupt\n")
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                launcher._exec_program_raw(path)
+        finally:
+            if saved is not None:
+                sys.modules["_openbricks_native"] = saved
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertEqual(events[-1], False)   # disarmed despite the interrupt
+
+    def test_native_request_keyboard_interrupt_actually_interrupts(self):
+        # Pin the native primitive itself: on a build with the C module it
+        # injects a real pending KeyboardInterrupt that stops a loop. (The
+        # launcher's stop path is the C GPIO ISR, untestable off-hardware,
+        # but it calls the same mp_sched_keyboard_interrupt under the hood.)
+        try:
+            from _openbricks_native import request_keyboard_interrupt
+        except (ImportError, AttributeError):
+            return  # desktop: nothing to assert
+        fired = False
+        try:
+            request_keyboard_interrupt()
+            for _ in range(100000):
+                pass
+        except KeyboardInterrupt:
+            fired = True
+        self.assertTrue(fired)
 
     def test_stop_all_motors_broadcasts_torque_off_to_serial_bus(self):
         from openbricks.drivers.st3215 import ST3215Motor
