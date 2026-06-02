@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
-"""Run after flashing v1.8.6. Installs+arms the FreeRTOS-task stop button
-and prints its live debug counter while you press.
+"""Run after flashing the stop-button fix. The launcher auto-installs the
+native stop_tick Timer and arms it for the duration of this run, so just
+loop and press — and watch the debug counter.
 
     openbricks run -n ls examples/stop_button_status.py
 
-debug tuple = (task_started, loop_ticks, edges_fired, armed, gpio)
-  * loop_ticks climbing   -> the poll task IS running
-  * edges_fired climbs on a press -> it detected the press while armed
-If the loop STOPS on a press, the stop button works. If not, the tuple
-says exactly which link is broken — no more guessing.
+debug tuple = (stop_tick_ticks, fires, armed, requested)
+  * stop_tick_ticks climbing -> the native C-function Timer callback runs
+  * armed = 1                -> _exec_program_raw armed it for this run
+  * on a press: requested flips 1 then fires increments, loop stops
 """
 
 import time
@@ -17,10 +17,8 @@ import openbricks
 import _openbricks_native as n
 
 print("fw", openbricks.__version__)
-n.install_stop_button(4)
-n.set_stop_armed(True)
-print("installed + armed. debug = (task_started, ticks, edges, armed, gpio)")
-print(">>> PRESS the button — the loop should stop. <<<")
+print("debug = (stop_tick_ticks, fires, armed, requested)")
+print(">>> PRESS the GPIO-4 button — the loop should stop. <<<")
 i = 0
 try:
     while i < 600:                      # ~30 s
@@ -30,6 +28,4 @@ try:
         time.sleep_ms(50)
 except KeyboardInterrupt:
     print("STOPPED — stop button WORKS. final:", n.stop_button_debug())
-finally:
-    n.set_stop_armed(False)
 print("end. final debug:", n.stop_button_debug())

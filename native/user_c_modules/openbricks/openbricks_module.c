@@ -43,121 +43,74 @@ static MP_DEFINE_CONST_FUN_OBJ_0(openbricks_request_keyboard_interrupt_obj,
 
 // ---- hardware stop button -------------------------------------------------
 //
-// The program-stop button must interrupt a *running user program*. Three
-// facts (all bench-confirmed on the target) pin the design:
+// Stopping a *running user program* requires injecting the interrupt the
+// way a host Ctrl-C does — ``mp_sched_keyboard_interrupt()`` from a context
+// with NO Python frame. A *Python* Timer/Pin.irq callback has its own
+// Python frame, so the pending exception fires inside the callback and the
+// program runs on (bench-confirmed). And this user C module cannot use
+// ESP-IDF headers (see pcnt_encoder.c), which ruled out the GPIO-ISR /
+// esp_timer / FreeRTOS-task attempts — they compiled as inert stubs.
 //
-//   1. The interrupt only reaches the program when injected the way a host
-//      Ctrl-C is — ``mp_sched_keyboard_interrupt()`` from a context with NO
-//      Python frame. A Python Timer / Pin.irq callback runs in a soft
-//      Python frame, so the KeyboardInterrupt unwinds the callback, not the
-//      program. (esp32 Pin.irq has no hard= option, and an esp_timer
-//      callback didn't fire on this hub either.)
-//   2. The button *level* is reliably readable (the launcher's poll-based
-//      START works) even though edge interrupts don't.
-//   3. Ctrl-C — delivered from the BLE FreeRTOS *task* calling exactly this
-//      function — DOES stop a running program here.
+// The portable answer is the pattern motor_process already uses: a
+// C-FUNCTION registered as a ``machine.Timer`` callback. Per MicroPython's
+// mp_handle_pending (checks the pending exception BEFORE running scheduler
+// callbacks), a pending KeyboardInterrupt set inside a C-function callback
+// — which runs no Python bytecodes afterward — is not raised within the
+// callback; it's raised at the next bytecode of the MAIN program. So:
 //
-// So we run our own FreeRTOS task that polls the level and, on a falling
-// edge while armed, injects the interrupt. A plain task's loop is
-// guaranteed to run (it doesn't depend on the esp_timer service), and it's
-// the same task→mp_sched_keyboard_interrupt path Ctrl-C already uses.
-// ``install_stop_button(gpio)`` starts it; ``set_stop_armed(bool)`` gates
-// it so an idle press doesn't tear down the boot loop. ``stop_button_debug``
-// reports (task_started, loop_ticks, edges_fired, armed, gpio) so a failure
-// is read off a counter, not guessed at.
-
-#if defined(ESP_PLATFORM)
-
-#include "driver/gpio.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "mphalport.h"   // mp_hal_wake_main_task
+//   * the launcher's Python ``_tick`` detects the press (reading the pin
+//     level already works — START uses it) and calls ``request_stop()``;
+//   * the C ``stop_tick`` Timer callback sees the request and injects the
+//     interrupt, which lands in the running program.
+//
+// ``set_stop_armed(bool)`` gates it to program runs. ``stop_button_debug``
+// reports (tick_count, fire_count, armed, requested) so any failure is read
+// off a counter. All portable — no IDF headers, no platform guard, so it
+// actually compiles INTO the firmware (the previous versions did not).
 
 static volatile bool ob_stop_armed = false;
-static int ob_stop_gpio = -1;
-static volatile uint32_t ob_stop_ticks = 0;   // loop iterations (is it running?)
-static volatile uint32_t ob_stop_edges = 0;   // falling edges injected while armed
-static TaskHandle_t ob_stop_task = NULL;
+static volatile bool ob_stop_requested = false;
+static volatile uint32_t ob_stop_ticks = 0;   // stop_tick invocations
+static volatile uint32_t ob_stop_fires = 0;   // interrupts injected
 
-static void ob_stop_task_fn(void *arg) {
-    (void)arg;
-    int last = 1;
-    if (ob_stop_gpio >= 0) {
-        last = gpio_get_level((gpio_num_t)ob_stop_gpio);
-    }
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(15));
-        ob_stop_ticks++;
-        if (ob_stop_gpio < 0) {
-            continue;
-        }
-        int level = gpio_get_level((gpio_num_t)ob_stop_gpio);
-        // Falling edge (press, active-low) while a program is running.
-        if (ob_stop_armed && last != 0 && level == 0) {
-            ob_stop_edges++;
-            mp_sched_keyboard_interrupt();
-            mp_hal_wake_main_task();
-        }
-        last = level;
-    }
-}
-
-static mp_obj_t openbricks_install_stop_button(mp_obj_t gpio_in) {
-    ob_stop_gpio = mp_obj_get_int(gpio_in);
-    if (ob_stop_task == NULL) {
-        // Priority above the MP main task so the poll runs even during a
-        // tight loop; pinned to core 0 where the MP task lives.
-        xTaskCreatePinnedToCore(ob_stop_task_fn, "ob_stop", 4096, NULL,
-                                5, &ob_stop_task, 0);
+// C-function machine.Timer callback — runs in the scheduler with no Python
+// frame, so the injected KeyboardInterrupt reaches the running program.
+static mp_obj_t openbricks_stop_tick(mp_obj_t timer_arg) {
+    (void)timer_arg;
+    ob_stop_ticks++;
+    if (ob_stop_armed && ob_stop_requested) {
+        ob_stop_requested = false;
+        ob_stop_fires++;
+        mp_sched_keyboard_interrupt();
     }
     return mp_const_none;
 }
+static MP_DEFINE_CONST_FUN_OBJ_1(openbricks_stop_tick_obj, openbricks_stop_tick);
+
+static mp_obj_t openbricks_request_stop(void) {
+    ob_stop_requested = true;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(openbricks_request_stop_obj, openbricks_request_stop);
 
 static mp_obj_t openbricks_set_stop_armed(mp_obj_t armed_in) {
     ob_stop_armed = mp_obj_is_true(armed_in);
+    if (!ob_stop_armed) {
+        ob_stop_requested = false;   // drop a stale request on disarm
+    }
     return mp_const_none;
 }
+static MP_DEFINE_CONST_FUN_OBJ_1(openbricks_set_stop_armed_obj, openbricks_set_stop_armed);
 
 static mp_obj_t openbricks_stop_button_debug(void) {
-    mp_obj_t items[5] = {
-        mp_obj_new_int(ob_stop_task != NULL ? 1 : 0),
+    mp_obj_t items[4] = {
         mp_obj_new_int((mp_int_t)ob_stop_ticks),
-        mp_obj_new_int((mp_int_t)ob_stop_edges),
+        mp_obj_new_int((mp_int_t)ob_stop_fires),
         mp_obj_new_int(ob_stop_armed ? 1 : 0),
-        mp_obj_new_int(ob_stop_gpio),
+        mp_obj_new_int(ob_stop_requested ? 1 : 0),
     };
-    return mp_obj_new_tuple(5, items);
+    return mp_obj_new_tuple(4, items);
 }
-
-#else  // non-esp32 (unix test build): no GPIO — inert stubs so the
-       // launcher's calls are harmless and the module still links.
-
-static bool ob_stop_armed_stub = false;
-
-static mp_obj_t openbricks_install_stop_button(mp_obj_t gpio_in) {
-    (void)gpio_in;
-    return mp_const_none;
-}
-
-static mp_obj_t openbricks_set_stop_armed(mp_obj_t armed_in) {
-    ob_stop_armed_stub = mp_obj_is_true(armed_in);
-    return mp_const_none;
-}
-
-static mp_obj_t openbricks_stop_button_debug(void) {
-    mp_obj_t items[5] = {
-        mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0),
-        mp_obj_new_int(ob_stop_armed_stub ? 1 : 0), mp_obj_new_int(-1),
-    };
-    return mp_obj_new_tuple(5, items);
-}
-
-#endif
-
-static MP_DEFINE_CONST_FUN_OBJ_1(openbricks_install_stop_button_obj,
-                                 openbricks_install_stop_button);
-static MP_DEFINE_CONST_FUN_OBJ_1(openbricks_set_stop_armed_obj,
-                                 openbricks_set_stop_armed);
 static MP_DEFINE_CONST_FUN_OBJ_0(openbricks_stop_button_debug_obj,
                                  openbricks_stop_button_debug);
 
@@ -165,12 +118,14 @@ static const mp_rom_map_elem_t openbricks_native_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),           MP_ROM_QSTR(MP_QSTR__openbricks_native) },
     { MP_ROM_QSTR(MP_QSTR_request_keyboard_interrupt),
       MP_ROM_PTR(&openbricks_request_keyboard_interrupt_obj) },
-    { MP_ROM_QSTR(MP_QSTR_install_stop_button),
-      MP_ROM_PTR(&openbricks_install_stop_button_obj) },
-    { MP_ROM_QSTR(MP_QSTR_stop_button_debug),
-      MP_ROM_PTR(&openbricks_stop_button_debug_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_tick),
+      MP_ROM_PTR(&openbricks_stop_tick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_request_stop),
+      MP_ROM_PTR(&openbricks_request_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_stop_armed),
       MP_ROM_PTR(&openbricks_set_stop_armed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_button_debug),
+      MP_ROM_PTR(&openbricks_stop_button_debug_obj) },
     { MP_ROM_QSTR(MP_QSTR_motor_process),      MP_ROM_PTR(&motor_process_singleton) },
     { MP_ROM_QSTR(MP_QSTR_Servo),              MP_ROM_PTR(&openbricks_servo_type) },
     { MP_ROM_QSTR(MP_QSTR_TrapezoidalProfile), MP_ROM_PTR(&openbricks_trajectory_type) },
