@@ -249,6 +249,49 @@ class StopRequestTests(unittest.TestCase):
         self.assertEqual(starts, [])               # no (re)start
         self.assertEqual(stops, [self.launcher])   # stop requested once
 
+    def test_request_stop_calls_native_when_present(self):
+        # Exercise the native path under CPython too (the openbricks-py
+        # coverage flag is measured there, where _openbricks_native is
+        # otherwise absent and only the fallback branch would run).
+        import sys
+        rec = []
+
+        class _FakeNative:
+            def request_stop(self_):
+                rec.append(1)
+
+        saved = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = _FakeNative()
+        try:
+            launcher._request_stop(self.launcher)
+        finally:
+            if saved is not None:
+                sys.modules["_openbricks_native"] = saved
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertEqual(rec, [1])
+        self.assertIsNone(self.launcher._pending)   # native path, no fallback
+
+    def test_install_stop_tick_creates_timer_with_native_callback(self):
+        # Cover the Timer-creation lines under CPython by making the native
+        # stop_tick import succeed (it's otherwise absent on desktop).
+        import sys
+
+        class _FakeNative:
+            def stop_tick(self_, timer_arg):
+                pass
+
+        saved = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = _FakeNative()
+        try:
+            t = launcher._install_stop_tick(1)
+        finally:
+            if saved is not None:
+                sys.modules["_openbricks_native"] = saved
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertIsNotNone(t)   # a periodic Timer was created
+
 
 class ScheduledStartTests(unittest.TestCase):
     """``_scheduled_start`` is the callback MicroPython runs between
