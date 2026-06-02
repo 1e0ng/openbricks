@@ -43,41 +43,63 @@ static MP_DEFINE_CONST_FUN_OBJ_0(openbricks_request_keyboard_interrupt_obj,
 
 // ---- hardware stop button -------------------------------------------------
 //
-// The program-stop button must interrupt a *running user program*. Doing
-// that from a Python Timer / Pin.irq callback does NOT work on esp32:
-// those run in a scheduled (soft) context with their own Python frame, so
-// the KeyboardInterrupt unwinds the callback instead of the program
-// (bench-confirmed traceback in launcher._tick). The REPL's host Ctrl-C
-// works because it is raised from the UART RX *C interrupt* — no Python
-// frame. So we replicate that: a C-level GPIO ISR that calls
-// ``mp_sched_keyboard_interrupt()`` directly.
+// The program-stop button must interrupt a *running user program*. Two
+// hardware facts pin the design (both bench-confirmed on the target):
 //
-// ``install_stop_button(gpio)`` adds a falling-edge ISR on the button pin
-// (already configured input+pull-up by the launcher; the GPIO ISR service
-// is installed at boot by machine_pins_init). ``set_stop_armed(bool)``
-// gates it: the launcher arms it only while a program runs, so a press
-// while idle doesn't tear down the boot/idle loop.
+//   1. Stopping the program works only by injecting the interrupt the way
+//      a host Ctrl-C does — ``mp_sched_keyboard_interrupt()`` from a
+//      context with NO Python frame. A Python Timer / Pin.irq callback
+//      runs in a scheduled (soft) Python frame, so the KeyboardInterrupt
+//      unwinds the callback instead of the program. (And esp32 Pin.irq
+//      has no hard= option.)
+//   2. GPIO4's *level* is reliably readable (the launcher's poll-based
+//      START works), but its edge *interrupt* proved unreliable here.
+//
+// So instead of a GPIO edge ISR we run a periodic ``esp_timer`` that
+// POLLS the button level from its (C, no-Python-frame) task callback and,
+// on a falling edge while armed, injects the interrupt. This depends only
+// on the two proven facts above. ``install_stop_button(gpio)`` starts the
+// poll timer; ``set_stop_armed(bool)`` gates it so a press while idle
+// doesn't tear down the boot/idle loop.
 
 #if defined(ESP_PLATFORM)
 
 #include "driver/gpio.h"
-#include "mphalport.h"   // mp_hal_wake_main_task_from_isr
+#include "esp_timer.h"
+#include "mphalport.h"   // mp_hal_wake_main_task
 
 static volatile bool ob_stop_armed = false;
+static int ob_stop_gpio = -1;
+static int ob_stop_last_level = 1;
+static esp_timer_handle_t ob_stop_timer = NULL;
 
-static void ob_stop_button_isr(void *arg) {
+static void ob_stop_poll_cb(void *arg) {
     (void)arg;
-    if (ob_stop_armed) {
-        mp_sched_keyboard_interrupt();
-        mp_hal_wake_main_task_from_isr();
+    if (ob_stop_gpio < 0) {
+        return;
     }
+    int level = gpio_get_level((gpio_num_t)ob_stop_gpio);
+    // Falling edge (press, active-low) while a program is running.
+    if (ob_stop_armed && ob_stop_last_level != 0 && level == 0) {
+        mp_sched_keyboard_interrupt();
+        mp_hal_wake_main_task();
+    }
+    ob_stop_last_level = level;
 }
 
 static mp_obj_t openbricks_install_stop_button(mp_obj_t gpio_in) {
-    gpio_num_t gpio = (gpio_num_t)mp_obj_get_int(gpio_in);
-    gpio_set_intr_type(gpio, GPIO_INTR_NEGEDGE);
-    gpio_isr_handler_add(gpio, ob_stop_button_isr, NULL);
-    gpio_intr_enable(gpio);
+    ob_stop_gpio = mp_obj_get_int(gpio_in);
+    ob_stop_last_level = gpio_get_level((gpio_num_t)ob_stop_gpio);
+    if (ob_stop_timer == NULL) {
+        const esp_timer_create_args_t targs = {
+            .callback = ob_stop_poll_cb,
+            .arg = NULL,
+            .name = "ob_stop_poll",
+        };
+        if (esp_timer_create(&targs, &ob_stop_timer) == ESP_OK) {
+            esp_timer_start_periodic(ob_stop_timer, 15000);  // 15 ms
+        }
+    }
     return mp_const_none;
 }
 
