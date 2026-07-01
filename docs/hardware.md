@@ -54,16 +54,85 @@ ESP32 has enough pins for everything here, but a few gotchas:
 
 A conservative default:
 
-| Function          | GPIO(s)      |
-|-------------------|--------------|
-| I2C0 (SDA, SCL)   | 21, 22       |
-| UART1 (TX, RX)    | 17, 16       |
-| Left motor dir    | 25, 26       |
-| Left motor PWM    | 27           |
-| Left encoder A, B | 32, 33       |
-| Right motor dir   | 14, 12       |
-| Right motor PWM   | 13           |
-| Right encoder A, B| 34, 35 (in)  |
+| Function          | GPIO(s)      | Devices on this line                     |
+|-------------------|--------------|------------------------------------------|
+| I2C0 (SDA, SCL)   | 21, 22       | Colour sensor (TCS34725, 0x29) + IMU (BNO055, 0x28), shared bus |
+| UART1 (TX, RX)    | 17, 16       | ST-3215 serial bus servos                |
+| Left motor dir    | 25, 26       | L298N / TB6612 IN1, IN2                   |
+| Left motor PWM    | 27           | L298N / TB6612 ENA                        |
+| Left encoder A, B | 32, 33       | JGB37-520 encoder channels               |
+| Right motor dir   | 14, 12       | L298N / TB6612 IN3, IN4                   |
+| Right motor PWM   | 13           | L298N / TB6612 ENB                        |
+| Right encoder A, B| 34, 35 (in)  | JGB37-520 encoder channels               |
+
+The colour sensor and IMU share I2C0 — see [Sensor wiring](#sensor-wiring-i2c)
+below for the per-pin breakout connections.
+
+## Sensor wiring (I2C)
+
+The TCS34725 colour sensor and the BNO055 IMU are both I2C devices. Any
+number of I2C devices can share one two-wire bus *as long as each has a
+distinct address* — wire every breakout to the same SDA/SCL pins and
+power rail. In the starter build that's one colour sensor (`0x29`) and
+one IMU (`0x28`), which coexist happily:
+
+| Breakout pin | Connect to        | Notes |
+|--------------|-------------------|-------|
+| VIN (or VCC) | 3.3V              | The breakouts have onboard regulators, but the ESP32's own 3.3V is cleanest. Don't feed 5V into an ESP32 GPIO. |
+| GND          | GND               | Common ground with the ESP32 — same as everything else. |
+| SDA          | GPIO 21           | Shared by every device on the bus. |
+| SCL          | GPIO 22           | Shared by every device on the bus. |
+
+The Adafruit breakouts include ~10 kΩ SDA/SCL pull-ups, so for a handful
+of devices you don't need to add your own. In code, one `I2C` object
+drives the whole bus:
+
+```python
+from machine import I2C, Pin
+i2c = I2C(0, sda=Pin(21), scl=Pin(22), freq=400_000)
+
+from openbricks.drivers.tcs34725 import TCS34725
+from openbricks.drivers.bno055 import BNO055
+color = TCS34725(i2c)   # 0x29
+imu   = BNO055(i2c)     # 0x28
+```
+
+### Multiple colour sensors
+
+The TCS34725's address is **fixed at `0x29`** — the chip has no
+address-select pins — so you *cannot* put two of them on the same bus;
+they'd both answer to `0x29` and collide. A line-following or sorting
+robot that wants several colour sensors has two options:
+
+- **A second I2C bus.** The ESP32 has two hardware I2C controllers, so a
+  second sensor can live on I2C1 with any two free GPIOs:
+
+  ```python
+  bus0 = I2C(0, sda=Pin(21), scl=Pin(22), freq=400_000)
+  bus1 = I2C(1, sda=Pin(19), scl=Pin(18), freq=400_000)
+  left  = TCS34725(bus0)   # 0x29 on bus 0
+  right = TCS34725(bus1)   # 0x29 on bus 1
+  ```
+
+  That tops out at two colour sensors (plus the IMU, which can share
+  either bus at `0x28`).
+
+- **A TCA9548A I2C multiplexer** for three or more. It fans one bus out
+  to eight isolated channels; you select a channel, then talk to the
+  `0x29` sensor on it. Wire all colour sensors through the mux and the
+  IMU straight to the bus.
+
+### TCS34725 LED pin
+
+The colour sensor breakout has two extra pins beyond power and I2C:
+
+- **LED** — drives the onboard white illumination LED. On Adafruit
+  boards it defaults **on** (tied to VIN through the ADC-enable trace).
+  To control it, wire it to a spare GPIO and drive high/low; to force it
+  **off**, tie LED to GND. Leave it on for consistent colour readings —
+  ambient light alone is unreliable across environments.
+- **INT** — the interrupt output. The driver polls, so leave INT
+  **unconnected**.
 
 ## Calibrating encoder counts
 
