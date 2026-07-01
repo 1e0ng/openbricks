@@ -65,20 +65,26 @@ class LoadWorldTests(unittest.TestCase):
         # Settle briefly.
         for _ in range(200):
             mujoco.mj_step(m, d)
-        x0 = d.xpos[cid, 0]
+        x0, y0 = float(d.xpos[cid, 0]), float(d.xpos[cid, 1])
         # Drive forward for 2 s.
         d.ctrl[act_l] = 0.3
         d.ctrl[act_r] = 0.3
         for _ in range(2000):
             mujoco.mj_step(m, d)
-        x1 = d.xpos[cid, 0]
-        # +ctrl on both wheels spins them in the "forward" direction
-        # for this hinge-axis orientation → chassis translates along
-        # +X. The exact distance depends on wheel radius and gear; we
-        # just assert "moved meaningfully" since numerics will wiggle.
-        self.assertGreater(abs(x1 - x0), 0.02,
-                           "motor ctrl should move the chassis (x went "
-                           "from %.3f to %.3f)" % (x0, x1))
+        x1, y1 = float(d.xpos[cid, 0]), float(d.xpos[cid, 1])
+        # +ctrl on both wheels drives the chassis "forward" for this
+        # hinge-axis orientation. The heading it settles into isn't
+        # axis-aligned (it drives mostly along -Y here), so assert on
+        # total planar displacement rather than any single world axis —
+        # a per-axis projection is small and platform-numerics-sensitive
+        # (it flaked on CI at |dx|=0.0018 while the chassis had actually
+        # travelled ~0.13 m). Distance is orientation-independent and
+        # clears the threshold by ~6x.
+        dist = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+        self.assertGreater(dist, 0.02,
+                           "motor ctrl should move the chassis (moved "
+                           "%.4f m: (%.3f,%.3f) -> (%.3f,%.3f))"
+                           % (dist, x0, y0, x1, y1))
 
 
 class LegoPropExpansionTests(unittest.TestCase):
