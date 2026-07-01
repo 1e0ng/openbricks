@@ -122,6 +122,20 @@ robot that wants several colour sensors has two options:
   `0x29` sensor on it. Wire all colour sensors through the mux and the
   IMU straight to the bus.
 
+  The `openbricks.drivers.tca9548a.TCA9548A` driver makes this
+  transparent: `mux[n]` behaves like an I2C bus that auto-selects
+  channel `n`, so the sensor driver is constructed exactly as it would
+  be on a bare bus:
+
+  ```python
+  from openbricks.drivers.tca9548a import TCA9548A
+  from openbricks.drivers.tcs34725 import TCS34725
+
+  i2c = I2C(0, sda=Pin(21), scl=Pin(22), freq=400_000)
+  mux = TCA9548A(i2c)                 # 0x70 by default
+  sensors = [TCS34725(mux[ch]) for ch in range(4)]   # four 0x29 sensors
+  ```
+
 ### TCS34725 LED pin
 
 The colour sensor breakout has two extra pins beyond power and I2C:

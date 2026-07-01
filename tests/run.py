@@ -49,6 +49,7 @@ _TEST_MODULES = [
     "tests.test_encoder",
     "tests.test_bno055",
     "tests.test_tcs34725",
+    "tests.test_tca9548a",
     "tests.test_color_sorter",
     "tests.test_st3215",
     "tests.test_trajectory",

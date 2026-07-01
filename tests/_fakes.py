@@ -201,12 +201,19 @@ class I2C:
         self.scl = scl
         self.freq = freq
         self._regs = {}
+        # Log of plain (register-less) writes, e.g. a TCA9548A channel
+        # select: list of (addr, bytes) in call order.
+        self._writes = []
 
     def readfrom_mem(self, addr, reg, n):
         return self._regs.get(addr, {}).get(reg, b"\x00" * n)
 
     def writeto_mem(self, addr, reg, data):
         self._regs.setdefault(addr, {})[reg] = bytes(data)
+
+    def writeto(self, addr, buf, stop=True):
+        self._writes.append((addr, bytes(buf)))
+        return len(buf)
 
 
 class UART:
