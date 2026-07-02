@@ -160,6 +160,10 @@ robot that wants several colour sensors has two options:
   sensors = [TCS34725(mux[ch]) for ch in range(4)]   # four 0x29 sensors
   ```
 
+  For a complete program — a 3-sensor line-follower array that reduces
+  the row of readings to a steering signal — see
+  `examples/color_array.py`.
+
 ### TCS34725 LED pin
 
 The colour sensor breakout has two extra pins beyond power and I2C:
