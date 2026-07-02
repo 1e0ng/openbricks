@@ -26,7 +26,7 @@ from machine import I2C
 # the I2C handle the user code instantiates is just a stub the
 # BNO055 stores. The shim's BNO055 binds straight to the chassis
 # IMU site regardless.
-i2c = I2C(0, scl=22, sda=21, freq=400_000)
+i2c = I2C(0, sda=15, scl=16, freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
 imu = BNO055(i2c=i2c, address=0x28)
 
 m_left  = JGB37Motor(in1=12, in2=14, pwm=27,

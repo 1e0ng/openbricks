@@ -83,13 +83,14 @@ here don't carry over:
   and the strapping pins are 0/3/45/46.
 - On both chips the I2C, UART, and PWM peripherals route through the
   **GPIO matrix**, so their pins aren't fixed — you assign them in code.
-  On an S3, just choose any two free GPIOs for the bus, e.g.:
+  The examples that ship with openbricks default to the **ESP32-S3
+  DevKitC-1** convention used across the codebase, GPIO **15 (SDA) / 16
+  (SCL)**:
 
   ```python
-  i2c = I2C(0, sda=Pin(8), scl=Pin(9), freq=400_000)
+  i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3
+  i2c = I2C(0, sda=Pin(21), scl=Pin(22), freq=400_000)   # classic ESP32
   ```
-
-  and substitute those numbers wherever the examples say `21`/`22`.
 
 ## Sensor wiring (I2C)
 

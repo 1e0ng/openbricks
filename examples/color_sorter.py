@@ -13,8 +13,9 @@ Because it's just "nearest point in RGB space", adding a colour is a
 one-line addition to ``PALETTE`` — no new branches to hand-tune.
 
 Hardware:
-    * ESP32
-    * TCS34725 breakout on I2C bus 0 (SDA=21, SCL=22, 3.3V, GND)
+    * ESP32-S3 (or classic ESP32)
+    * TCS34725 breakout on I2C bus 0 (3.3V, GND)
+        SDA=15, SCL=16 on ESP32-S3; SDA=21, SCL=22 on classic ESP32
 
 Calibration matters: TCS34725 readings shift with ambient light and
 integration time. The values below are only a starting point — for
@@ -57,7 +58,7 @@ def main():
     from openbricks.drivers.tcs34725 import TCS34725
     from openbricks.tools import wait
 
-    i2c = I2C(0, sda=Pin(21), scl=Pin(22), freq=400_000)
+    i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
     sensor = TCS34725(i2c, integration_ms=50, gain=4)
 
     print("Hold a coloured brick under the sensor (Ctrl-C to stop)...")

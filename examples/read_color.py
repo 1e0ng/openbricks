@@ -3,8 +3,9 @@
 Example: read RGB from a TCS34725 over I2C and classify the color.
 
 Hardware:
-    * ESP32
-    * TCS34725 breakout on I2C bus 0 (SDA=21, SCL=22, 3.3V, GND)
+    * ESP32-S3 (or classic ESP32)
+    * TCS34725 breakout on I2C bus 0 (3.3V, GND)
+        SDA=15, SCL=16 on ESP32-S3; SDA=21, SCL=22 on classic ESP32
 """
 
 from machine import I2C, Pin
@@ -13,7 +14,7 @@ from openbricks.drivers.tcs34725 import TCS34725
 from openbricks.tools import wait
 
 
-i2c = I2C(0, sda=Pin(21), scl=Pin(22), freq=400_000)
+i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
 color = TCS34725(i2c, integration_ms=50, gain=4)
 
 
