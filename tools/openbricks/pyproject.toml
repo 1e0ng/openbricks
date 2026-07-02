@@ -164,6 +164,14 @@ skip = [
 # the C extension. Catches a broken wheel at build time instead of
 # after publish.
 test-command = 'python -c "from openbricks_sim import _native; assert hasattr(_native, \"TrapezoidalProfile\"); print(_native.__file__)"'
+# Don't test the x86_64 slice of the universal2 macOS wheel. The arm64
+# runner would run that test under Rosetta (`arch -x86_64 pip install`),
+# and installing our deps pulls in `cryptography`, which ships only
+# arm64 macOS wheels — so the x86_64 install builds it from source and
+# fails on a missing OpenSSL. The wheel itself still builds fat (both
+# arches) and the native arm64 slice is still test-installed; we just
+# skip the cross-arch test that can't resolve its own dependencies.
+test-skip = "*_universal2:x86_64"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
