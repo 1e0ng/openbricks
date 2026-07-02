@@ -68,6 +68,29 @@ A conservative default:
 The colour sensor and IMU share I2C0 — see [Sensor wiring](#sensor-wiring-i2c)
 below for the per-pin breakout connections.
 
+### ESP32-S3: different pin numbers
+
+The map above (and the `21`/`22` I2C pins used throughout the examples)
+is for the **classic ESP32 DevKit v1** — the recommended starter board.
+The **ESP32-S3** numbers its pins differently, and several assumptions
+here don't carry over:
+
+- **GPIO 22–25 don't exist on the S3** — the pin list is 0–21 then
+  26–48. So `SCL = 22` is impossible; you must pick different pins.
+- The input-only range (34–39) and the SPI-flash pins (6–11) are
+  classic-ESP32 quirks. On the S3, GPIO 26–32 (and 33–37 on octal-PSRAM
+  modules) are taken by flash/PSRAM, GPIO 19/20 are the native-USB D-/D+,
+  and the strapping pins are 0/3/45/46.
+- On both chips the I2C, UART, and PWM peripherals route through the
+  **GPIO matrix**, so their pins aren't fixed — you assign them in code.
+  On an S3, just choose any two free GPIOs for the bus, e.g.:
+
+  ```python
+  i2c = I2C(0, sda=Pin(8), scl=Pin(9), freq=400_000)
+  ```
+
+  and substitute those numbers wherever the examples say `21`/`22`.
+
 ## Sensor wiring (I2C)
 
 The TCS34725 colour sensor and the BNO055 IMU are both I2C devices. Any
@@ -80,8 +103,8 @@ one IMU (`0x28`), which coexist happily:
 |--------------|-------------------|-------|
 | VIN (or VCC) | 3.3V              | The breakouts have onboard regulators, but the ESP32's own 3.3V is cleanest. Don't feed 5V into an ESP32 GPIO. |
 | GND          | GND               | Common ground with the ESP32 — same as everything else. |
-| SDA          | GPIO 21           | Shared by every device on the bus. |
-| SCL          | GPIO 22           | Shared by every device on the bus. |
+| SDA          | GPIO 21           | Classic-ESP32 default; any free GPIO works. Shared by every device on the bus. |
+| SCL          | GPIO 22           | Classic-ESP32 default. **No GPIO 22 on the ESP32-S3** — see [ESP32-S3 pin numbers](#esp32-s3-different-pin-numbers). Shared by every device on the bus. |
 
 The Adafruit breakouts include ~10 kΩ SDA/SCL pull-ups, so for a handful
 of devices you don't need to add your own. In code, one `I2C` object
