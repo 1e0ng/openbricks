@@ -4,12 +4,12 @@ Example: greet the user on an SSD1306 OLED and tick an uptime counter.
 
 Wiring (any I2C SSD1306, typically 128x64 at address 0x3C):
 
-    ESP32 classic DevKitC-V4     ESP32-S3 DevKitC-1
+    ESP32-S3 DevKitC-1           ESP32 classic DevKitC-V4
     --------------------------   --------------------------
     OLED VCC -> 3.3V             OLED VCC -> 3.3V
     OLED GND -> GND              OLED GND -> GND
-    OLED SDA -> GPIO 21          OLED SDA -> GPIO 15
-    OLED SCL -> GPIO 22          OLED SCL -> GPIO 16
+    OLED SDA -> GPIO 15          OLED SDA -> GPIO 21
+    OLED SCL -> GPIO 16          OLED SCL -> GPIO 22
 
 Set ``SDA_PIN`` / ``SCL_PIN`` below to match your board.
 
@@ -35,8 +35,8 @@ from openbricks.drivers.ssd1306 import SSD1306
 from openbricks.hub import ESP32DevkitHub
 
 # ----- wiring -----
-SDA_PIN = 21     # ESP32 DevKitC-V4 default; use 15 on ESP32-S3 DevKitC-1
-SCL_PIN = 22     # ESP32 DevKitC-V4 default; use 16 on ESP32-S3 DevKitC-1
+SDA_PIN = 15     # ESP32-S3 DevKitC-1 default; use 21 on classic ESP32 DevKitC-V4
+SCL_PIN = 16     # ESP32-S3 DevKitC-1 default; use 22 on classic ESP32 DevKitC-V4
 OLED_ADDR = 0x3C
 
 

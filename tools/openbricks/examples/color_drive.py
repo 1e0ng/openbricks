@@ -24,7 +24,7 @@ from openbricks.robotics.drivebase import DriveBase
 from machine import I2C
 
 
-i2c    = I2C(0, scl=22, sda=21, freq=400_000)
+i2c    = I2C(0, sda=15, scl=16, freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
 sensor = TCS34725(i2c=i2c, address=0x29)
 
 m_left  = JGB37Motor(in1=12, in2=14, pwm=27,
