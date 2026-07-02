@@ -3,26 +3,28 @@
 Example: drive forward 500 mm, turn 90°, repeat.
 
 Hardware:
-    * ESP32
+    * ESP32-S3 (or classic ESP32)
     * 2x JGB37-520 motors with quadrature encoders
     * 1x L298N dual H-bridge (powers both motors)
     * Two 18650 cells or similar 7.4V battery on the L298N motor supply
 
-Wiring (edit the GPIOs to match your board):
+Wiring (edit the GPIOs to match your board; defaults are for the
+ESP32-S3 DevKitC-1 — avoid GPIO 19/20 = USB, 26-37 = flash/PSRAM,
+0/3/45/46 = strapping. On a classic ESP32, remap to that board's pins):
 
     Left motor  (L298N channel A)
-        IN1  -> GPIO 25
-        IN2  -> GPIO 26
-        ENA  -> GPIO 27   (PWM)
-        ENC A-> GPIO 32
-        ENC B-> GPIO 33
+        IN1  -> GPIO 4
+        IN2  -> GPIO 5
+        ENA  -> GPIO 6    (PWM)
+        ENC A-> GPIO 7
+        ENC B-> GPIO 8
 
     Right motor (L298N channel B)
-        IN3  -> GPIO 14
-        IN4  -> GPIO 12
-        ENB  -> GPIO 13   (PWM)
-        ENC A-> GPIO 34   (input-only pin is fine)
-        ENC B-> GPIO 35
+        IN3  -> GPIO 9
+        IN4  -> GPIO 10
+        ENB  -> GPIO 11   (PWM)
+        ENC A-> GPIO 12
+        ENC B-> GPIO 13
 """
 
 from openbricks.drivers.jgb37_520 import JGB37Motor
@@ -31,13 +33,13 @@ from openbricks.tools import wait
 
 
 left = JGB37Motor(
-    in1=25, in2=26, pwm=27,
-    encoder_a=32, encoder_b=33,
+    in1=4, in2=5, pwm=6,
+    encoder_a=7, encoder_b=8,
     counts_per_output_rev=1320,  # 11 CPR * 30:1 gearbox * 4 (quadrature)
 )
 right = JGB37Motor(
-    in1=14, in2=12, pwm=13,
-    encoder_a=34, encoder_b=35,
+    in1=9, in2=10, pwm=11,
+    encoder_a=12, encoder_b=13,
     counts_per_output_rev=1320,
     invert=True,  # mirror image of the left motor
 )

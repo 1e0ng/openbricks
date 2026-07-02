@@ -4,7 +4,7 @@ Example: a small robot that rolls forward until its colour sensor sees red,
 then demos a servo wave.
 
 Hardware:
-    * ESP32 (or ESP32-S3) DevKitC
+    * ESP32-S3 DevKitC-1 (or classic ESP32 DevKitC-V4)
     * 2× JGB37-520 DC gear motors (with Hall-effect quadrature encoders)
         driven by a shared L298N (or TB6612FNG) H-bridge
     * 1× BNO055 9-DOF IMU on I2C
@@ -27,16 +27,19 @@ from openbricks.robotics import DriveBase
 
 # ----- wiring -----
 
-I2C_SDA  = 21   # ESP32 DevKitC-V4 defaults; use 15/16 on ESP32-S3 DevKitC-1
-I2C_SCL  = 22
+# Pins below are for the ESP32-S3 DevKitC-1 (avoid GPIO 19/20 = USB,
+# 26-37 = flash/PSRAM, 0/3/45/46 = strapping). On a classic ESP32
+# DevKitC-V4 use I2C 21/22 and remap the rest to that board's pins.
+I2C_SDA  = 15
+I2C_SCL  = 16
 
-LEFT_IN1,  LEFT_IN2,  LEFT_PWM  = 25, 26, 27
-LEFT_EA,   LEFT_EB               = 32, 33
+LEFT_IN1,  LEFT_IN2,  LEFT_PWM  = 4, 5, 6
+LEFT_EA,   LEFT_EB               = 7, 8
 
-RIGHT_IN1, RIGHT_IN2, RIGHT_PWM = 14, 12, 13
-RIGHT_EA,  RIGHT_EB              = 34, 35
+RIGHT_IN1, RIGHT_IN2, RIGHT_PWM = 9, 10, 11
+RIGHT_EA,  RIGHT_EB              = 12, 13
 
-SERVO_TX, SERVO_RX = 17, 16
+SERVO_TX, SERVO_RX = 17, 18
 SERVO_ID = 1
 
 WHEEL_DIAMETER_MM = 56
