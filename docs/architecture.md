@@ -25,7 +25,7 @@ Owning the firmware shapes several decisions:
 ├─────────────────────────────────────────────────────────┤
 │  Abstract interfaces   (Motor, Servo, IMU, ColorSensor)  │
 ├─────────────────────────────────────────────────────────┤
-│  Concrete drivers      (l298n, jgb37_520, bno055, …)     │
+│  Concrete drivers      (st3032, tcs34725, bno055, …)     │
 ├─────────────────────────────────────────────────────────┤
 │  MicroPython HAL       (machine.Pin, I2C, UART, PWM)     │
 ├─────────────────────────────────────────────────────────┤
@@ -38,7 +38,7 @@ The two middle layers are what make this different from "a pile of MicroPython
 scripts." Interfaces (`openbricks/interfaces.py`) define the contract each
 family of component obeys; drivers implement that contract; everything above
 the interface line depends only on interfaces, not on specific chips. That's
-why swapping an L298N motor for an ST-3215 servo only changes the driver
+why swapping a JGB37-520 DC motor for an ST-3032 serial servo only changes the driver
 you instantiate — the `DriveBase` class asks for "a `Motor`" and doesn't
 know or care what's underneath.
 
