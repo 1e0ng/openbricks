@@ -177,8 +177,9 @@ db.settings(acceleration=180)   # wheel-deg/s²; default 720
 
 ## Alternative: DC gear motors with encoders
 
-The original starter build — still fully supported, and the
-configuration the MuJoCo simulator's chassis matches.
+The original starter build — still fully supported. (Both this and
+the serial-servo build run in the MuJoCo simulator via the driver
+shim.)
 
 | Part | Qty | Notes |
 |------|----:|-------|

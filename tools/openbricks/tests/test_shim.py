@@ -283,11 +283,108 @@ class MachineFakeTests(_ShimTestBase):
         # Reads return 0 by convention (no-op fake).
 
 
+class ShimSerialMotorTests(_ShimTestBase):
+    """ST3215Motor / ST3032Motor resolve to shim classes and answer
+    the Motor API from MuJoCo. These are the classes the serial-bus
+    (fallback) DriveBase path drives."""
+
+    def test_st3032motor_resolves_to_shim_class(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        self.assertIs(ST3032Motor, shim.ShimST3032Motor)
+
+    def test_st3215motor_resolves_to_shim_class(self):
+        from openbricks.drivers.st3215 import ST3215Motor
+        self.assertIs(ST3215Motor, shim.ShimST3215Motor)
+
+    def test_run_speed_advances_angle(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        start = m.angle()
+        m.run_speed(300)
+        time.sleep_ms(500)
+        self.assertGreater(m.angle(), start + 10)
+        m.coast()
+
+    def test_invert_is_ignored_as_wiring_concern(self):
+        # The sim chassis defines both wheel hinges on the same axis
+        # (+speed = forward on both sides), so the mirrored-mounting
+        # compensation must not flip the sim wheel.
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+        start = m.angle()
+        m.run_speed(300)
+        time.sleep_ms(500)
+        self.assertGreater(m.angle(), start + 10)
+        m.coast()
+
+    def test_run_speed_clamps_to_max_dps(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6, max_dps=600)
+        m.run_speed(5000)
+        self.assertEqual(m._target_dps, 600.0)
+        m.coast()
+
+    def test_run_angle_blocking_reaches_target(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        m.reset_angle(0)
+        m.run_angle(300, 180)
+        self.assertTrue(m.done())
+        self.assertAlmostEqual(m.angle(), 180.0, delta=15.0)
+
+    def test_run_angle_wait_false_completes_via_done(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        m.reset_angle(0)
+        m.run_angle(300, 90, wait=False)
+        self.assertFalse(m.done())
+        deadline = 0
+        while not m.done() and deadline < 5000:
+            time.sleep_ms(10)
+            deadline += 10
+        self.assertTrue(m.done())
+        self.assertAlmostEqual(m.angle(), 90.0, delta=15.0)
+
+    def test_ping_reports_present(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        self.assertTrue(m.ping())
+
+    def test_third_serial_motor_exhausts_slots(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
+        with self.assertRaises(RuntimeError):
+            ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
+
+
 class FullFirmwareCodeIntegrationTest(_ShimTestBase):
     """End-to-end: import the *real* openbricks driver classes through
     the shim, construct them with hardware-style pin numbers, and drive
     a straight move. If this passes, firmware-targeting user code can
     run unchanged inside the sim."""
+
+    def test_st3032_drivebase_straight(self):
+        # The user's actual robot: two ST-3032 serial servos through
+        # the openbricks DriveBase wrapper. No ._servo on the shim
+        # motors → the wrapper's serial-bus FALLBACK loop runs (with
+        # its trapezoid ramp), polling angle() and commanding
+        # run_speed() against MuJoCo. The bench script's invert=True
+        # on the right motor rides along as an ignored wiring concern.
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics.drivebase import DriveBase
+
+        left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                            invert=True)
+        db = DriveBase(left, right,
+                       wheel_diameter_mm=65, axle_track_mm=120)
+        db.settings(straight_speed=150, acceleration=360)
+        db.straight(50)
+        x_mm, _, _ = self.robot.chassis_pose()
+        self.assertGreater(x_mm, 5.0,
+                           "serial-bus drivebase.straight should have "
+                           "moved the chassis +X (got x=%.1f mm)" % x_mm)
 
     def test_settings_acceleration_reaches_the_sim_core(self):
         # The knob a user sets in firmware code (settings(acceleration=…))

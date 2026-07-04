@@ -90,9 +90,9 @@ ships:
   (`*_core.c` files compile into both targets, so the sim's hot-path
   math is byte-identical). Lives under `tools/openbricks/openbricks_sim/`.
   Optional via `pip install openbricks[sim]`.
-- A driver shim that lets `from openbricks.drivers.jgb37_520 import
-  JGB37Motor` (and BNO055 / TCS34725 / HC-SR04 / VL53L0X / VL53L1X)
-  run unchanged in MuJoCo — `openbricks sim run main.py` installs
+- A driver shim that lets `from openbricks.drivers.st3032 import
+  ST3032Motor` (and ST3215Motor / JGB37Motor / BNO055 / TCS34725 /
+  HC-SR04 / VL53L0X / VL53L1X) run unchanged in MuJoCo — `openbricks sim run main.py` installs
   no-op `machine` fakes and replaces the I2C driver classes with
   sim-aware versions.
 - Per-run log capture on the hub: every program execution tee'd to

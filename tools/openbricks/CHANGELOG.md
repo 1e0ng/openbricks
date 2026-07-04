@@ -3,6 +3,34 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.20 — serial-bus servos (ST-3032 / ST-3215) run in the sim
+
+`openbricks sim run` now covers serial-bus drivebases. The shim
+replaces `ST3215Motor` / `ST3032Motor` at the class level (they talk
+UART directly, like the I2C drivers), binding each constructed motor
+to the next chassis wheel slot. The openbricks `DriveBase` wrapper
+then runs its serial-bus fallback loop — the same code path as
+hardware — against MuJoCo.
+
+Each shim motor emulates the servo's internal wheel-mode controller
+with a per-tick P velocity loop on the exact MuJoCo joint velocity
+(`data.qvel`). It is deliberately not routed through `SimMotor`'s
+count-based servo core: integer encoder-count quantisation at 1 kHz
+makes that observer's velocity estimate swing thousands of dps around
+a ~250 dps wheel, and the resulting bang-bang torque never accumulates
+the wheel rotation the fallback loop's position check waits for.
+
+Semantics: `run_speed` / `run` / `run_angle(wait=)` / `done` /
+`brake` / `hold` / `coast` / `angle` / `reset_angle` / `ping`, with
+`max_dps` honoured. `invert=` and bus identity (`servo_id`, pins,
+baud) are ignored as wiring concerns — the sim chassis defines both
+wheel hinges on the same axis, and slot binding is by construction
+order (first = left). Wheel rotation tracks the command exactly
+(88.2° landed vs 88.1° target in the drivebase test); millimetre
+travel reflects the model's wheel size, since the fallback path
+doesn't resize the sim chassis the way the native `ShimDriveBase`
+path does.
+
 ## 0.10.13 — `openbricks flash` uses esptool v5 commands when available
 
 `openbricks flash` invoked `esptool.py write_flash` and `erase_flash`
