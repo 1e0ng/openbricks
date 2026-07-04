@@ -35,6 +35,7 @@ void ob_drivebase_init(ob_drivebase_t *db,
     db->axle_track_mm          = axle_track_mm;
     db->kp_sum                 = kp_sum;
     db->kp_diff                = kp_diff;
+    db->accel_dps2             = (ob_float_t)OB_DRIVEBASE_DEFAULT_ACCEL_DPS2;
 
     ob_trajectory_init(&db->fwd,  0.0, 0.0, 0.0, 0.0);
     db->fwd_start_ms = 0;
@@ -84,7 +85,7 @@ void ob_drivebase_straight(ob_drivebase_t *db,
     ob_float_t diff_pos = db_diff_pos_encoder(db);
 
     ob_trajectory_init(&db->fwd, sum_pos, sum_pos + distance_deg,
-                       speed_dps, (ob_float_t)OB_DRIVEBASE_DEFAULT_ACCEL_DPS2);
+                       speed_dps, db->accel_dps2);
     db->fwd_start_ms = now_ms;
     db->fwd_active   = true;
 
@@ -125,7 +126,7 @@ void ob_drivebase_turn(ob_drivebase_t *db,
 
     ob_trajectory_init(&db->turn, diff_pos, diff_pos + signed_delta,
                        rate_wheel_dps,
-                       (ob_float_t)OB_DRIVEBASE_DEFAULT_ACCEL_DPS2);
+                       db->accel_dps2);
     db->turn_start_ms = now_ms;
     db->turn_active   = true;
 

@@ -63,6 +63,12 @@ typedef struct {
     ob_float_t kp_sum;
     ob_float_t kp_diff;
 
+    // Trajectory acceleration, wheel-degrees/s². Shared by both the
+    // forward and turn profiles (they always were — this field just
+    // makes the old hardcoded constant settable). Bindings expose it
+    // as ``set_accel``; they validate > 0 before writing.
+    ob_float_t accel_dps2;
+
     // Trajectories.
     ob_trajectory_t fwd;
     long            fwd_start_ms;

@@ -182,6 +182,22 @@ static mp_obj_t db_is_done(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(db_is_done_obj, db_is_done);
 
 
+// Set the trajectory acceleration (wheel-degrees/s²) used by
+// subsequent straight() / turn() moves. Shared by both profiles.
+// An in-flight move keeps the acceleration it was armed with.
+static mp_obj_t db_set_accel(mp_obj_t self_in, mp_obj_t accel_in) {
+    drivebase_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_float_t accel = mp_obj_get_float(accel_in);
+    if (!(accel > (mp_float_t)0.0)) {
+        mp_raise_ValueError(MP_ERROR_TEXT(
+            "acceleration must be > 0 deg/s^2"));
+    }
+    self->core.accel_dps2 = (ob_float_t)accel;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(db_set_accel_obj, db_set_accel);
+
+
 // ---------------------------------------------------------------------
 // Constructor
 
@@ -253,6 +269,7 @@ static const mp_rom_map_elem_t db_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stop),     MP_ROM_PTR(&db_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_done),  MP_ROM_PTR(&db_is_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_use_gyro), MP_ROM_PTR(&db_use_gyro_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_accel), MP_ROM_PTR(&db_set_accel_obj) },
 };
 static MP_DEFINE_CONST_DICT(db_locals_dict, db_locals_dict_table);
 
