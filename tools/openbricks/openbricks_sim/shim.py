@@ -423,6 +423,11 @@ class ShimDriveBase:
     def is_done(self):
         return self._db.is_done()
 
+    def set_accel(self, accel_dps2):
+        # Same surface as the firmware binding, so the openbricks
+        # wrapper's ``settings(acceleration=...)`` works under the sim.
+        self._db.set_accel(float(accel_dps2))
+
     def use_gyro(self, enable):
         if enable and self._imu is None:
             raise RuntimeError(

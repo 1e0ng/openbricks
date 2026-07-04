@@ -247,6 +247,53 @@ class DriveBaseParityTests(unittest.TestCase):
         self.assertAlmostEqual(self.db.target_left_dps(),  l_off, delta=2.0)
         self.assertAlmostEqual(self.db.target_right_dps(), r_off, delta=2.0)
 
+    # ------- set_accel: tunable trajectory acceleration -------
+
+    def test_set_accel_rejects_non_positive(self):
+        with self.assertRaises(ValueError):
+            self.db.set_accel(0.0)
+        with self.assertRaises(ValueError):
+            self.db.set_accel(-720.0)
+
+    def test_lower_accel_ramps_the_setpoint_slower(self):
+        # Sample the commanded wheel speed 100 ms into a long move.
+        # Default 720 deg/s² puts the feed-forward at ~72 dps; after
+        # set_accel(90) the same point in the ramp reads ~9 dps.
+        sim = _SyntheticTwoWheel(self.db, self.left, self.right)
+        self.db.straight(sim.now_ms, 500.0, 200.0)
+        sim.step(100)
+        fast_dps = self.db.target_left_dps()
+        self.db.stop()
+
+        self.db.set_accel(90.0)
+        self.db.straight(sim.now_ms, 500.0, 200.0)
+        sim.step(100)
+        slow_dps = self.db.target_left_dps()
+
+        self.assertGreater(fast_dps, 0.0)
+        self.assertGreater(slow_dps, 0.0)
+        # 8x ratio in theory; assert a comfortable 3x so feedback
+        # wiggle can't flake it.
+        self.assertGreater(fast_dps, slow_dps * 3.0)
+
+    def test_set_accel_applies_to_turn_too(self):
+        # The core shares one acceleration between the forward and
+        # turn profiles — pin that a gentler setting slows turn ramps.
+        sim = _SyntheticTwoWheel(self.db, self.left, self.right)
+        self.db.turn(sim.now_ms, 90.0, 180.0)
+        sim.step(100)
+        fast_dps = abs(self.db.target_right_dps())
+        self.db.stop()
+
+        self.db.set_accel(90.0)
+        self.db.turn(sim.now_ms, 90.0, 180.0)
+        sim.step(100)
+        slow_dps = abs(self.db.target_right_dps())
+
+        self.assertGreater(fast_dps, 0.0)
+        self.assertGreater(slow_dps, 0.0)
+        self.assertGreater(fast_dps, slow_dps * 3.0)
+
 
 if __name__ == "__main__":
     unittest.main()

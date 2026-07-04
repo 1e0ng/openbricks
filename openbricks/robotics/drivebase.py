@@ -81,11 +81,37 @@ class DriveBase:
         # True. ``stop()`` clears this. See ``done`` for the layout.
         self._pending = None
 
-    def settings(self, straight_speed=None, turn_rate=None):
+    def settings(self, straight_speed=None, turn_rate=None,
+                 acceleration=None):
+        """Tune cruise + ramp parameters for subsequent moves.
+
+        Args:
+            straight_speed: cruise speed for ``straight()``, wheel-deg/s.
+            turn_rate: cruise rate for ``turn()``, wheel-deg/s.
+            acceleration: trajectory acceleration, wheel-deg/s², shared
+                by ``straight()`` and ``turn()`` ramps. Default 720
+                (2 wheel-rev/s²) — lower it if the robot pitches or
+                lifts its rear on launch. In mm/s² that's
+                ``acceleration * wheel_circumference / 360``. Native
+                (encoder-servo) path only: the serial-bus fallback
+                drives at cruise speed with no ramp, so it raises to
+                keep a silently-ignored setting from masquerading as
+                a gentler launch.
+        """
         if straight_speed is not None:
             self._straight_speed_dps = straight_speed
         if turn_rate is not None:
             self._turn_rate_dps = turn_rate
+        if acceleration is not None:
+            if not acceleration > 0:
+                raise ValueError(
+                    "acceleration must be > 0 deg/s^2 (got %r)"
+                    % (acceleration,))
+            if self._native is None:
+                raise NotImplementedError(
+                    "acceleration requires closed-loop motors (native "
+                    "DriveBase); the fallback path has no ramp")
+            self._native.set_accel(float(acceleration))
 
     def use_gyro(self, enable):
         """Switch the heading feedback source between encoder-diff (default)

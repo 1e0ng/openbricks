@@ -691,3 +691,8 @@ class SimDriveBase:
 
     def set_heading_override(self, body_delta_deg: float) -> None:
         self.db.set_heading_override(float(body_delta_deg))
+
+    def set_accel(self, accel_dps2: float) -> None:
+        """Trajectory acceleration (wheel-deg/s²) for subsequent
+        ``straight()`` / ``turn()`` moves. Native validates > 0."""
+        self.db.set_accel(float(accel_dps2))

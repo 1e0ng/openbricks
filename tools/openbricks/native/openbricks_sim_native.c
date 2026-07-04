@@ -596,6 +596,24 @@ static PyObject *DriveBase_target_right_dps(DriveBaseObject *self, PyObject *Py_
 }
 
 
+/* set_accel(accel_dps2) — trajectory acceleration (wheel-deg/s²) used
+ * by subsequent straight()/turn() moves. Mirrors the firmware
+ * binding's method of the same name. */
+static PyObject *DriveBase_set_accel(DriveBaseObject *self, PyObject *arg) {
+    double accel = PyFloat_AsDouble(arg);
+    if (accel == -1.0 && PyErr_Occurred()) {
+        return NULL;
+    }
+    if (!(accel > 0.0)) {
+        PyErr_SetString(PyExc_ValueError,
+                        "acceleration must be > 0 deg/s^2");
+        return NULL;
+    }
+    self->core.accel_dps2 = (ob_float_t)accel;
+    Py_RETURN_NONE;
+}
+
+
 static PyMethodDef DriveBase_methods[] = {
     {"straight",             (PyCFunction)DriveBase_straight,             METH_VARARGS,
      "straight(now_ms, distance_mm, speed_mm_s). Kick off a straight move."},
@@ -616,6 +634,8 @@ static PyMethodDef DriveBase_methods[] = {
      "Current per-tick velocity setpoint for the left servo."},
     {"target_right_dps",     (PyCFunction)DriveBase_target_right_dps,     METH_NOARGS,
      "Current per-tick velocity setpoint for the right servo."},
+    {"set_accel",            (PyCFunction)DriveBase_set_accel,            METH_O,
+     "set_accel(accel_dps2). Trajectory acceleration (wheel-deg/s^2) for subsequent moves."},
     {NULL, NULL, 0, NULL},
 };
 
