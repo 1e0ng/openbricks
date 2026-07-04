@@ -162,6 +162,19 @@ class ShimDriveBaseTests(_ShimTestBase):
             DriveBase(left="not a servo", right=None,
                        wheel_diameter_mm=60, axle_track_mm=150)
 
+    def test_set_accel_delegates_to_native(self):
+        from _openbricks_native import Servo, DriveBase
+        l = Servo(in1=12, in2=14, pwm=27, encoder=None)
+        r = Servo(in1=13, in2=15, pwm=26, encoder=None)
+        db = DriveBase(left=l, right=r,
+                        wheel_diameter_mm=60.0, axle_track_mm=150.0)
+        # The ValueError lives in the C extension — its propagation
+        # proves the call traverses ShimDriveBase → SimDriveBase →
+        # _native rather than dying in a missing passthrough.
+        with self.assertRaises(ValueError):
+            db.set_accel(-1.0)
+        db.set_accel(90.0)   # valid value accepted
+
     def test_straight_via_busy_wait(self):
         from _openbricks_native import Servo, DriveBase
         l = Servo(in1=12, in2=14, pwm=27, encoder=None)
@@ -275,6 +288,26 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
     the shim, construct them with hardware-style pin numbers, and drive
     a straight move. If this passes, firmware-targeting user code can
     run unchanged inside the sim."""
+
+    def test_settings_acceleration_reaches_the_sim_core(self):
+        # The knob a user sets in firmware code (settings(acceleration=…))
+        # must land in the sim's C core through wrapper → ShimDriveBase →
+        # SimDriveBase → _native. The C-side ValueError propagating back
+        # up through all four layers is the proof.
+        from openbricks.drivers.jgb37_520 import JGB37Motor
+        from openbricks.robotics.drivebase import DriveBase
+
+        m_left  = JGB37Motor(in1=12, in2=14, pwm=27,
+                              encoder_a=18, encoder_b=19)
+        m_right = JGB37Motor(in1=13, in2=15, pwm=26,
+                              encoder_a=20, encoder_b=21)
+        db = DriveBase(m_left, m_right,
+                        wheel_diameter_mm=60, axle_track_mm=150)
+        db.settings(acceleration=90)          # accepted end to end
+        with self.assertRaises(ValueError):
+            db.settings(acceleration=0)       # wrapper-level gate
+        with self.assertRaises(ValueError):
+            db._native.set_accel(-5.0)        # C-level gate, via shim
 
     def test_jgb37_drivebase_straight(self):
         # Add the openbricks package to sys.path the same way
