@@ -50,17 +50,31 @@ def _install_symmetric_sim(left, right):
     motor_process.register(tick)
 
 
-class _OpenLoopMotor:
-    """Motor with no native servo — forces the wrapper's fallback path."""
+class _RecordingFallbackMotor:
+    """Closed-loop-shaped motor with no ``_servo`` — forces the
+    wrapper's fallback path (the serial-bus ST-3215/ST-3032 shape).
+    Records every commanded speed; ``step()`` integrates the shaft."""
 
-    def run(self, power):
-        pass
+    def __init__(self):
+        self._angle = 0.0
+        self._dps = 0.0
+        self.commands = []
+
+    def run_speed(self, dps):
+        self._dps = float(dps)
+        self.commands.append(float(dps))
+
+    def angle(self):
+        return self._angle
 
     def coast(self):
-        pass
+        self._dps = 0.0
 
     def brake(self):
-        pass
+        self._dps = 0.0
+
+    def step(self, seconds):
+        self._angle += self._dps * seconds
 
 
 def _timed_straight_ms(acceleration):
@@ -100,13 +114,74 @@ class TestDriveBaseAcceleration(unittest.TestCase):
         with self.assertRaises(ValueError):
             db._native.set_accel(0.0)
 
-    def test_fallback_path_raises_not_implemented(self):
-        # Serial-bus fallback drives at cruise with no ramp; a silently
-        # ignored acceleration would fake a fix, so it raises.
-        db = DriveBase(_OpenLoopMotor(), _OpenLoopMotor(),
-                       wheel_diameter_mm=56, axle_track_mm=114)
-        with self.assertRaises(NotImplementedError):
-            db.settings(acceleration=100)
+    # ---- serial-bus fallback path (ST-3215 / ST-3032 shape) ----
+
+    def _patch_sleep_steps_motors(self, *motors):
+        original = time.sleep_ms
+
+        def stepped_sleep(ms):
+            original(ms)
+            for m in motors:
+                m.step(ms / 1000.0)
+
+        time.sleep_ms = stepped_sleep
+        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
+
+    def _fallback_db(self):
+        left  = _RecordingFallbackMotor()
+        right = _RecordingFallbackMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+        return db, left, right
+
+    def test_fallback_launch_is_ramped_not_a_step(self):
+        # The fallback used to command full cruise speed on the very
+        # first tick — an effectively infinite acceleration that
+        # pitched real (ST-3032) chassis on launch. Now the first
+        # command is the crawl floor and the peak stays within cruise.
+        db, left, _right = self._fallback_db()
+        db.settings(straight_speed=200, acceleration=100)
+        db.straight(100)
+        first = abs(left.commands[0])
+        peak  = max(abs(c) for c in left.commands)
+        self.assertLess(first, 200 * 0.2,
+                        "launch command %.1f dps is a cruise step" % first)
+        # 100 mm at accel 100 is a triangular profile: peak =
+        # sqrt(D*a) = sqrt(204.6*100) ~ 143 dps, below cruise.
+        self.assertLess(peak, 200 * 0.9)
+
+    def test_fallback_move_still_reaches_target(self):
+        db, left, right = self._fallback_db()
+        db.settings(straight_speed=200, acceleration=100)
+        db.straight(100)
+        import math
+        target = 100 / (math.pi * 56) * 360
+        avg = (left.angle() + right.angle()) / 2
+        self.assertGreaterEqual(avg, target)
+
+    def test_fallback_gentle_accel_does_not_trip_stall_budget(self):
+        # accel=20 makes this ~6.4 s of profile time; the old
+        # constant-velocity ×4 budget (~3 s) would have raised a
+        # spurious stall RuntimeError.
+        db, left, right = self._fallback_db()
+        db.settings(straight_speed=200, acceleration=20)
+        db.straight(100)   # must complete without RuntimeError
+        self.assertGreater((left.angle() + right.angle()) / 2, 0)
+
+    def test_fallback_turn_is_ramped_too(self):
+        db, left, _right = self._fallback_db()
+        db.settings(turn_rate=180, acceleration=100)
+        db.turn(90)
+        first = abs(left.commands[0])
+        self.assertLess(first, 180 * 0.2)
+
+    def test_fallback_default_launch_uses_720(self):
+        # No settings() call: the fallback ramps at the same 720
+        # deg/s² default as the native path (not the old step).
+        db, left, _right = self._fallback_db()
+        db.straight(100)
+        first = abs(left.commands[0])
+        self.assertLess(first, 200 * 0.2)
 
     def test_lower_acceleration_slows_the_launch(self):
         # 100 mm at 200 dps: with the default 720 deg/s² the trapezoid
