@@ -75,6 +75,11 @@ class DriveBase:
         # ``settings()``.
         self._straight_speed_dps = 200
         self._turn_rate_dps      = 180
+        # Trajectory acceleration (wheel-deg/s²). Mirrors the native
+        # core's default so both paths launch identically. The native
+        # path stores its own copy (set via set_accel); this one drives
+        # the fallback's trapezoid.
+        self._accel_dps2 = 720.0
 
         # State for in-flight ``straight(wait=False)`` / ``turn(wait=False)``
         # moves. ``None`` means nothing pending; ``done()`` returns
@@ -92,11 +97,11 @@ class DriveBase:
                 by ``straight()`` and ``turn()`` ramps. Default 720
                 (2 wheel-rev/s²) — lower it if the robot pitches or
                 lifts its rear on launch. In mm/s² that's
-                ``acceleration * wheel_circumference / 360``. Native
-                (encoder-servo) path only: the serial-bus fallback
-                drives at cruise speed with no ramp, so it raises to
-                keep a silently-ignored setting from masquerading as
-                a gentler launch.
+                ``acceleration * wheel_circumference / 360``. Applies
+                on both paths: the native (encoder-servo) controller
+                arms its C trajectory with it, and the serial-bus
+                fallback shapes its per-tick speed command with the
+                same trapezoid.
         """
         if straight_speed is not None:
             self._straight_speed_dps = straight_speed
@@ -107,11 +112,9 @@ class DriveBase:
                 raise ValueError(
                     "acceleration must be > 0 deg/s^2 (got %r)"
                     % (acceleration,))
-            if self._native is None:
-                raise NotImplementedError(
-                    "acceleration requires closed-loop motors (native "
-                    "DriveBase); the fallback path has no ramp")
-            self._native.set_accel(float(acceleration))
+            self._accel_dps2 = float(acceleration)
+            if self._native is not None:
+                self._native.set_accel(float(acceleration))
 
     def use_gyro(self, enable):
         """Switch the heading feedback source between encoder-diff (default)
@@ -185,7 +188,7 @@ class DriveBase:
         heading-hold loop — read both angles, apply differential
         correction, check the target. **You must keep polling until
         ``done()`` returns True** or the motors will continue running
-        at the open-loop cruise speed past the target. The natural
+        at the open-loop profile speed past the target. The natural
         cadence is ``time.sleep_ms(10)`` between polls.
 
         On the native path, the C scheduler runs the trajectory
@@ -288,11 +291,14 @@ class DriveBase:
         }
         # Kick off motion immediately so ``wait=False`` looks like
         # pybricks — motors start on the call, not on first ``done()``.
-        # ``err`` is zero at t=0 (present == anchor), so both wheels
-        # get exactly the cruise speed. Subsequent ``done()`` ticks
-        # apply heading-hold corrections.
-        self._run_at_dps(self._left,  speed)
-        self._run_at_dps(self._right, speed)
+        # The launch is profile-shaped: at t=0 the trapezoid commands
+        # the crawl floor, not cruise — a serial-bus drivebase used to
+        # step straight to cruise speed here, an effectively infinite
+        # acceleration that pitched real chassis on launch. Subsequent
+        # ``done()`` ticks ramp up and apply heading-hold corrections.
+        v0 = self._profile_speed(speed, 0.0, abs(target_wheel_deg))
+        self._run_at_dps(self._left,  v0 * direction)
+        self._run_at_dps(self._right, v0 * direction)
 
     def _arm_turn(self, angle_deg, then):
         if self._native is not None:
@@ -325,10 +331,35 @@ class DriveBase:
         }
         # Kick off motion immediately — same reasoning as
         # ``_arm_straight``. In-place turn means opposite wheel signs.
-        self._run_at_dps(self._left,  -speed * direction)
-        self._run_at_dps(self._right,  speed * direction)
+        v0 = self._profile_speed(speed, 0.0, wheel_deg_each)
+        self._run_at_dps(self._left,  -v0 * direction)
+        self._run_at_dps(self._right,  v0 * direction)
 
     # ---- helpers ----
+    # Minimum fallback speed command (dps). The decel curve approaches
+    # zero speed exactly at the target; real serial-bus servos stall on
+    # friction below a crawl speed and would time out just short of the
+    # goal. The floor keeps the final approach moving — the target
+    # check, not the profile, ends the move.
+    _FALLBACK_MIN_DPS = 15.0
+
+    def _profile_speed(self, cruise_dps, elapsed_s, remaining_deg):
+        """Trapezoidal speed command for the fallback loop: ramp up at
+        ``self._accel_dps2`` from move start, cruise, and ramp down so
+        v² = 2·a·remaining reaches ~0 at the target. Returns a positive
+        magnitude, floored at ``_FALLBACK_MIN_DPS``."""
+        v = abs(cruise_dps)
+        v_ramp = self._accel_dps2 * elapsed_s
+        if v_ramp < v:
+            v = v_ramp
+        if remaining_deg > 0:
+            v_decel = math.sqrt(2.0 * self._accel_dps2 * remaining_deg)
+            if v_decel < v:
+                v = v_decel
+        if v < self._FALLBACK_MIN_DPS:
+            v = self._FALLBACK_MIN_DPS
+        return v
+
     @staticmethod
     def _run_at_dps(motor, dps):
         run_speed = getattr(motor, "run_speed", None)
@@ -359,23 +390,32 @@ class DriveBase:
     # _turn_fallback give up and stop. 50 × 10 ms = 500 ms.
     _MAX_CONSECUTIVE_NONE = 50
 
-    @staticmethod
-    def _move_budget_ms(travel_deg, rate_dps):
+    def _move_budget_ms(self, travel_deg, rate_dps):
         """Wall-clock budget for a fallback move to reach its target.
 
-        The fallback drives the wheels open-loop at cruise speed and
-        watches ``angle()`` climb toward the target. If a wheel stalls
-        (mechanically blocked, in the servo's overload protection, or
-        slipping) while the bus still answers, that climb stops and the
-        target is never met — without this budget the move's ``done()``
-        would return ``False`` forever. Travel ÷ rate is the ideal
-        constant-velocity time; ×4 leaves headroom for ramp-up,
-        friction and heading-hold slowdown, and a 1 s floor covers tiny
-        moves. Only a genuine stall overruns it."""
+        The fallback watches ``angle()`` climb toward the target. If a
+        wheel stalls (mechanically blocked, in the servo's overload
+        protection, or slipping) while the bus still answers, that
+        climb stops and the target is never met — without this budget
+        the move's ``done()`` would return ``False`` forever.
+
+        The ideal time is the trapezoid duration at the configured
+        acceleration (triangular profile when the move is too short to
+        reach cruise); ×4 leaves headroom for friction and heading-hold
+        slowdown, and a 1 s floor covers tiny moves. Only a genuine
+        stall overruns it."""
+        travel = abs(travel_deg)
         rate = abs(rate_dps)
         if rate < 1:
             rate = 1
-        return int(abs(travel_deg) / rate * 1000.0 * 4 + 1000)
+        accel = self._accel_dps2
+        if travel * accel >= rate * rate:
+            # Trapezoid: cruise phase exists.
+            ideal_s = travel / rate + rate / accel
+        else:
+            # Triangular: never reaches cruise.
+            ideal_s = 2.0 * math.sqrt(travel / accel)
+        return int(ideal_s * 1000.0 * 4 + 1000)
 
     def _straight_fallback_tick(self):
         """One iteration of the fallback heading-hold loop.
@@ -411,7 +451,11 @@ class DriveBase:
             self.stop(then=state["then"])
             return True
         err = left_deg - right_deg
-        speed = state["speed"]
+        # Trapezoid-shaped speed magnitude for this tick: ramp from
+        # move start, cruise, decelerate into the remaining distance.
+        elapsed_s = time.ticks_diff(time.ticks_ms(), state["start_ms"]) / 1000.0
+        remaining = (target - avg) * direction
+        speed = self._profile_speed(state["speed"], elapsed_s, remaining) * direction
         self._run_at_dps(self._left,  speed - err)
         self._run_at_dps(self._right, speed + err)
         return False
@@ -442,7 +486,11 @@ class DriveBase:
            right >= state["wheel_deg_each"]:
             self.stop(then=state["then"])
             return True
-        speed = state["speed"]
+        # Same trapezoid shaping as the straight tick, on the average
+        # per-wheel progress toward this turn's arc length.
+        elapsed_s = time.ticks_diff(time.ticks_ms(), state["start_ms"]) / 1000.0
+        remaining = state["wheel_deg_each"] - (left + right) / 2
+        speed = self._profile_speed(state["speed"], elapsed_s, remaining)
         self._run_at_dps(self._left,  -speed * direction)
         self._run_at_dps(self._right,  speed * direction)
         return False
