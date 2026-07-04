@@ -105,7 +105,7 @@ Then run it:
 openbricks run -n RobotA main.py             # on a real hub over BLE
 ```
 
-To iterate without hardware, the MuJoCo simulator runs the same firmware APIs — `openbricks sim run main.py --world empty`. The sim's driver shim replaces `machine`, `openbricks._native`, and the I2C driver classes with sim-aware versions; its chassis models the encoder-motor drive (`JGB37Motor`), so use that motor class in sim-targeted scripts — serial-bus servos are hardware-only for now. See `tools/openbricks/examples/` for sim samples and `tools/openbricks/CHANGELOG.md` for the migration story if you're coming from the legacy `openbricks-dev` / `openbricks-sim` packages.
+To iterate without hardware, the MuJoCo simulator runs the same firmware APIs — `openbricks sim run main.py --world empty`, including the `main.py` above. The sim's driver shim replaces `machine`, `openbricks._native`, and the driver classes (serial-bus `ST3032Motor` / `ST3215Motor`, encoder-motor `JGB37Motor`, and the I2C sensors) with sim-aware versions, so the script runs unchanged; bus/pin arguments are ignored as wiring concerns. See `tools/openbricks/examples/` for sim samples and `tools/openbricks/CHANGELOG.md` for the migration story if you're coming from the legacy `openbricks-dev` / `openbricks-sim` packages.
 
 ## Why openbricks (vs Pybricks)
 

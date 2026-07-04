@@ -33,8 +33,15 @@ MuJoCo:
     sleep makes that idiom advance MuJoCo physics so ``is_done()``
     actually flips.
 
-Slot allocation is sequential: the first ``Servo(...)`` constructed
-binds to ``chassis_motor_l`` / ``chassis_enc_l``, the second to the
+  * Serial-bus wheel servos — ``ST3215Motor`` / ``ST3032Motor`` are
+    replaced at the class level (they talk UART directly, like the
+    I2C drivers). The openbricks ``DriveBase`` wrapper sees no
+    ``._servo`` on them and runs its serial-bus fallback loop —
+    the same code path as hardware — against MuJoCo.
+
+Slot allocation is sequential: the first motor constructed —
+``Servo(...)`` or a serial ``ST3215Motor(...)`` / ``ST3032Motor(...)``
+— binds to ``chassis_motor_l`` / ``chassis_enc_l``, the second to the
 ``_r`` pair. The default chassis has exactly two motor slots; trying
 to construct a third raises ``RuntimeError``.
 
@@ -46,6 +53,7 @@ while installed.
 
 from __future__ import annotations
 
+import math
 import sys
 import time as _real_time
 import types
@@ -217,6 +225,211 @@ class ShimServo:
 
     def coast(self):
         self._adapter.coast()
+
+
+class ShimST3215Motor:
+    """Drop-in for ``openbricks.drivers.st3215.ST3215Motor`` (and the
+    ``ST3032Motor`` marker subclass).
+
+    On firmware these are serial-bus wheel servos: no ``._servo``
+    attribute, so the openbricks ``DriveBase`` wrapper drives them
+    through its pure-Python *fallback* loop (``run_speed`` + ``angle``
+    polling). Under the sim the same code path runs — each shim motor
+    binds the next chassis wheel slot and answers those calls from
+    MuJoCo, so a serial-bus ``main.py`` runs unchanged.
+
+    A real STS32xx runs its own internal wheel-mode velocity loop, so
+    the shim implements one too: a per-tick P controller on the exact
+    MuJoCo joint velocity (``data.qvel``). Deliberately *not* routed
+    through :class:`SimMotor`'s count-based servo core — integer
+    encoder-count quantisation at 1 kHz makes that observer's velocity
+    estimate swing thousands of dps around a ~250 dps wheel, and the
+    resulting bang-bang torque never accumulates the wheel rotation
+    the fallback loop's position check waits for. ``qvel`` is exact,
+    and a plain P loop on it is flat at every gain we tested.
+
+    Two firmware arguments are deliberately ignored as wiring
+    concerns (like ``tx=`` / ``rx=`` / ``dir_pin=``):
+
+    * ``invert=`` — compensates for mirrored physical mounting. The
+      sim chassis defines both wheel hinges on the same axis, so
+      +speed is already "forward" on both sides; honouring the flag
+      would spin the robot in place.
+    * bus identity (``servo_id`` / ``uart_id`` / ``baud``) — slot
+      binding is by construction order (first constructed = left),
+      same convention as :class:`ShimServo`.
+
+    ``max_dps`` *is* honoured — the firmware driver clamps every
+    speed command to it, and scripts tuned against that clamp should
+    behave identically here.
+
+    Scale caveat: wheel *rotation* tracks commands exactly, but
+    millimetre travel reflects the sim model's wheel size. The
+    serial path can't resize the chassis to the script's
+    ``wheel_diameter_mm`` the way the native :class:`ShimDriveBase`
+    path does (the openbricks wrapper never constructs a shim
+    drivebase on this path), so treat sim distances as behavioural,
+    not calibrated.
+    """
+
+    # Velocity-loop P gain, power-% per dps of error. Empirically
+    # flat from 0.005 through 1.0 on the default chassis; 0.5 tracks
+    # a 150 dps command to within ~1 dps.
+    _KP_VEL = 0.5
+    # run_angle approach shaping: decelerate so v² = 2·a·remaining,
+    # with a crawl floor so friction can't stall short of the target.
+    _DECEL_DPS2 = 720.0
+    _MIN_APPROACH_DPS = 15.0
+
+    def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
+                 baud=1_000_000, dir_pin=None,
+                 invert=False, max_dps=600.0, **_ignored):
+        sensor_name, actuator_name = _next_motor_slot()
+        rt = _INSTALLED.runtime
+        self._rt = rt
+        # Reuse SimMotor purely for the (sensor, actuator) plumbing —
+        # ids, ctrl scale, raw angle read. Its servo core is never
+        # ticked (see class docstring for why).
+        self._plumb = SimMotor(rt, sensor_name, actuator_name)
+        joint_id  = int(rt.model.sensor_objid[self._plumb._sensor_id])
+        self._dof = int(rt.model.jnt_dofadr[joint_id])
+        self._actuator_id = self._plumb._actuator_id
+        self._ctrl_scale  = self._plumb._ctrl_scale
+
+        self._max_dps      = float(max_dps)
+        self._angle_offset = 0.0
+        # Control mode for the per-tick loop:
+        #   "speed" — hold self._target_dps (0.0 == active brake/hold)
+        #   "angle" — decel-shaped approach to self._move["target"]
+        #   "idle"  — attached but commanding zero torque (coast; the
+        #             tick can't detach itself mid-iteration, so a
+        #             move that ends inside the tick parks here)
+        self._mode       = "idle"
+        self._target_dps = 0.0
+        self._move       = None
+        self._attached   = False
+
+    # ----- tick loop -------------------------------------------------
+
+    def _attach(self):
+        if not self._attached:
+            self._rt.add_tick(self._tick)
+            self._attached = True
+
+    def _detach(self):
+        if self._attached:
+            self._rt.remove_tick(self._tick)
+            self._attached = False
+
+    def _vel_dps(self):
+        return float(self._rt.data.qvel[self._dof]) * (180.0 / math.pi)
+
+    def _tick(self, now_ms):
+        if self._mode == "idle":
+            self._rt.data.ctrl[self._actuator_id] = 0.0
+            return
+        if self._mode == "angle":
+            mv = self._move
+            remaining = mv["target"] - self.angle()
+            if remaining * mv["direction"] <= mv["tol"]:
+                # Reached (or crossed) the target. Can't detach from
+                # inside the tick loop; park in the end-state mode.
+                self._move = None
+                if mv["then"] in ("brake", "hold"):
+                    self._mode = "speed"      # active zero velocity
+                    self._target_dps = 0.0
+                else:
+                    self._mode = "idle"       # coast
+                    self._rt.data.ctrl[self._actuator_id] = 0.0
+                    return
+                v_cmd = 0.0
+            else:
+                v = math.sqrt(2.0 * self._DECEL_DPS2 * abs(remaining))
+                if v > mv["cruise"]:
+                    v = mv["cruise"]
+                if v < self._MIN_APPROACH_DPS:
+                    v = self._MIN_APPROACH_DPS
+                v_cmd = v * mv["direction"]
+        else:   # "speed"
+            v_cmd = self._target_dps
+        power = self._KP_VEL * (v_cmd - self._vel_dps())
+        if power >  100.0: power =  100.0
+        if power < -100.0: power = -100.0
+        self._rt.data.ctrl[self._actuator_id] = power * self._ctrl_scale
+
+    def _clamp(self, dps):
+        if dps >  self._max_dps: return  self._max_dps
+        if dps < -self._max_dps: return -self._max_dps
+        return dps
+
+    # ----- Motor interface -------------------------------------------
+
+    def run(self, power):
+        p = max(-100.0, min(100.0, float(power)))
+        self.run_speed(self._max_dps * p / 100.0)
+
+    def run_speed(self, deg_per_s):
+        self._mode = "speed"
+        self._move = None
+        self._target_dps = self._clamp(float(deg_per_s))
+        self._attach()
+
+    def brake(self):
+        # Actively hold zero velocity — same net behaviour as the
+        # servo's wheel-mode brake.
+        self.run_speed(0.0)
+
+    def hold(self):
+        # No position PID in the shim; active zero velocity plus
+        # MuJoCo joint damping is the honest analogue.
+        self.run_speed(0.0)
+
+    def coast(self):
+        self._mode = "idle"
+        self._move = None
+        self._detach()
+        self._rt.data.ctrl[self._actuator_id] = 0.0
+
+    def angle(self):
+        return self._plumb.angle() - self._angle_offset
+
+    def reset_angle(self, angle=0):
+        self._angle_offset = self._plumb.angle() - float(angle)
+
+    def ping(self):
+        return True
+
+    # ----- run_angle / done ------------------------------------------
+
+    def run_angle(self, deg_per_s, target_angle, wait=True,
+                  tolerance_deg=0.5, then="coast", **_ignored):
+        """Rotate by ``target_angle`` (relative, unbounded) at up to
+        ``deg_per_s``, ending within ``tolerance_deg``. Firmware
+        tuning knobs (``kp``, ``poll_ms``, ``debug``) are accepted
+        and ignored — the shim's velocity loop handles tracking."""
+        delta = float(target_angle)
+        self._move = {
+            "target":    self.angle() + delta,
+            "direction": 1.0 if delta >= 0 else -1.0,
+            "cruise":    abs(self._clamp(float(deg_per_s))),
+            "tol":       float(tolerance_deg),
+            "then":      then,
+        }
+        self._mode = "angle"
+        self._attach()
+        if not wait:
+            return
+        while self._mode == "angle":
+            _real_time.sleep_ms(10)
+
+    def done(self):
+        return self._mode != "angle"
+
+
+class ShimST3032Motor(ShimST3215Motor):
+    """Drop-in for ``openbricks.drivers.st3032.ST3032Motor`` — the
+    firmware class is a marker subclass of ``ST3215Motor``, and so is
+    the shim."""
 
 
 class ShimTCS34725:
@@ -576,10 +789,18 @@ def _patch_pure_python_drivers(state: "_ShimState") -> None:
     # the import fails (e.g. openbricks repo not on sys.path) skip
     # silently — user script just doesn't use that driver.
     targets = [
-        ("openbricks.drivers.tcs34725", "TCS34725", ShimTCS34725),
-        ("openbricks.drivers.hcsr04",   "HCSR04",   ShimHCSR04),
-        ("openbricks.drivers.vl53l0x",  "VL53L0X",  ShimVL53L0X),
-        ("openbricks.drivers.vl53l1x",  "VL53L1X",  ShimVL53L1X),
+        ("openbricks.drivers.tcs34725", "TCS34725",    ShimTCS34725),
+        ("openbricks.drivers.hcsr04",   "HCSR04",      ShimHCSR04),
+        ("openbricks.drivers.vl53l0x",  "VL53L0X",     ShimVL53L0X),
+        ("openbricks.drivers.vl53l1x",  "VL53L1X",     ShimVL53L1X),
+        # Serial-bus wheel servos: the firmware classes drive UART
+        # directly (no ``_openbricks_native`` involvement), so like
+        # the I2C drivers they're replaced at the class level. The
+        # openbricks DriveBase wrapper then runs its serial-bus
+        # fallback loop against the shim motors — the same code path
+        # as hardware.
+        ("openbricks.drivers.st3215",   "ST3215Motor", ShimST3215Motor),
+        ("openbricks.drivers.st3032",   "ST3032Motor", ShimST3032Motor),
     ]
     for mod_name, attr, replacement in targets:
         try:
