@@ -83,7 +83,7 @@ async def _log_async(name, op_program, scan_timeout):
             await run_mod._stream_output(blink, sys.stdout)
         finally:
             try:
-                await run_mod._leave_raw_repl(link)
+                await run_mod._restore_idle_loop(link)
             except Exception:
                 pass
 

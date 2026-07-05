@@ -132,7 +132,7 @@ class RunFlowTests(unittest.TestCase):
         self.assertIn(b"\x03\x03", joined)      # Ctrl-C interrupt
         self.assertIn(b"\r\x01", joined)        # Ctrl-A (enter raw)
         self.assertIn(b"\x05A\x01", joined)     # raw-paste request
-        self.assertIn(b"\r\x02", joined)        # Ctrl-B (leave raw)
+        self.assertIn(b"launcher.run()", joined)  # idle loop restored on exit
         self.assertTrue(fake.closed)
 
     def test_button_press_stop_surfaces_as_clean_message(self):
@@ -191,6 +191,9 @@ class RawPasteErrorTests(unittest.TestCase):
             with self.assertRaises(run_mod.RunError) as ctx:
                 asyncio.run(run_mod._run_async("RobotA", tmp.name, 5.0))
         self.assertIn("raw-paste", str(ctx.exception))
+        # Even on the error path, the finally must hand the hub back
+        # to the launcher idle loop (button start/stop keeps working).
+        self.assertIn(b"launcher.run()", b"".join(fake.writes))
 
 
 class ErrorPathTests(unittest.TestCase):

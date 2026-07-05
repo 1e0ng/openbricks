@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.21 — BLE tools restore the hub's idle loop on exit
+
+`openbricks run` / `upload` / `log` all get their REPL by Ctrl-C'ing
+whatever the hub was doing — usually the frozen main.py's
+`launcher.run()` idle loop — and used to leave the hub parked at the
+REPL on exit. Firmware 1.9.0 made main-thread idle-loop draining the
+path where the button stop works; parked at the REPL, a button press
+falls back to the degraded schedule-exec start (stop button
+unavailable for that run, with a printed warning).
+
+Each tool now sends a fire-and-forget `launcher.run()` raw-REPL exec
+before disconnecting, so the hub returns to the same state the frozen
+main.py boots into: button press starts /program.py in the main
+thread, stop button works. The next tool invocation Ctrl-Cs the
+restored loop exactly like it always Ctrl-C'd the boot one.
+
 ## 0.10.20 — serial-bus servos (ST-3032 / ST-3215) run in the sim
 
 `openbricks sim run` now covers serial-bus drivebases. The shim

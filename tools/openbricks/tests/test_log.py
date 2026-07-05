@@ -95,7 +95,7 @@ class RunDispatchTests(unittest.TestCase):
         self._patches = [
             patch.object(log_mod.NUSLink, "connect", side_effect=_fake_connect),
             patch.object(log_mod.run_mod, "_enter_raw_repl", _stub_enter),
-            patch.object(log_mod.run_mod, "_leave_raw_repl", _stub_leave),
+            patch.object(log_mod.run_mod, "_restore_idle_loop", _stub_leave),
             patch.object(log_mod.run_mod, "_raw_paste_upload", _stub_upload),
             patch.object(log_mod.run_mod, "_stream_output", _stub_stream),
         ]
