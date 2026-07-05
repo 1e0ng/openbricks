@@ -93,7 +93,7 @@ async def _upload_async(name, script_path, target_path, scan_timeout):
             await run_mod._stream_output(blink, link, sys.stdout)
         finally:
             try:
-                await run_mod._leave_raw_repl(link)
+                await run_mod._restore_idle_loop(link)
             except Exception:
                 pass
 

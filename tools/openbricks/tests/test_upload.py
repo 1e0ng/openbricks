@@ -133,7 +133,7 @@ class UploadFlowTests(unittest.TestCase):
         # Raw REPL fully entered and cleanly exited.
         self.assertIn(b"\x01", joined)      # Ctrl-A (enter raw)
         self.assertIn(b"\x05A\x01", joined) # raw-paste request
-        self.assertIn(b"\r\x02", joined)    # Ctrl-B (leave raw)
+        self.assertIn(b"launcher.run()", joined)  # idle loop restored on exit
         # The upload program writes to the default /program.py path.
         self.assertIn(b"'/program.py'", joined)
         # User script bytes got embedded in the upload literal.
