@@ -88,6 +88,7 @@ class TestMixedFamilySyncGroup(unittest.TestCase):
         s_3215 = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
         s_3032 = ST3032Motor(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
         group = SyncServoGroup([s_3215, s_3032])
+        group.set_goal_speeds([0, 0])   # pre-warm: first call enables torque
         baseline = len(s_3215._bus._uart._tx_log)
         group.set_goal_speeds([50, -50])
         new_packets = s_3215._bus._uart._tx_log[baseline:]
