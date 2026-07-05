@@ -44,6 +44,22 @@ DEFAULT_POLL_MS      = 50
 DEFAULT_PROGRAM_PATH = "/program.py"
 
 
+def _now_ms():
+    """Monotonic milliseconds — ``time.ticks_ms`` on MicroPython,
+    wall-clock fallback for CPython tests."""
+    ticks = getattr(time, "ticks_ms", None)
+    if ticks is not None:
+        return ticks()
+    return int(time.time() * 1000)
+
+
+def _ticks_diff(a, b):
+    diff = getattr(time, "ticks_diff", None)
+    if diff is not None:
+        return diff(a, b)
+    return a - b
+
+
 class Launcher:
     """Shared state for the program-button watcher.
 
@@ -60,11 +76,27 @@ class Launcher:
 
         self._running        = False
         self._was_pressed    = False
-        self._pending        = None        # None | "start" | "stop"  (test fallback)
+        self._pending        = None        # None | "start" | "stop"
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
         self._timer          = None    # Timer(0): START + stop-press detect
         self._stop_timer     = None    # Timer(1): native stop_tick (injects)
+        # Last time the main-thread idle loop drained. ``_request_start``
+        # uses this to decide whether a queued "start" will actually be
+        # picked up (idle loop alive → main-thread exec, button-stop
+        # works) or whether it must fall back to the degraded
+        # schedule-exec path (see ``_scheduled_start``).
+        self._idle_drain_ms  = None
+
+    def _mark_idle_alive(self):
+        self._idle_drain_ms = _now_ms()
+
+    def _idle_loop_alive(self):
+        """True while the main-thread idle loop is actively draining
+        (last pass within a few poll periods)."""
+        if self._idle_drain_ms is None:
+            return False
+        return _ticks_diff(_now_ms(), self._idle_drain_ms) < self._poll_ms * 4
 
     # ---- timer callback ----
 
@@ -95,11 +127,13 @@ class Launcher:
             _request_stop(self)
 
     def _drain_pending(self):
-        """Consume a queued ``_pending`` start fallback.
+        """Consume a queued ``_pending`` start — the PRIMARY start path.
 
-        Only needed when ``_request_start`` couldn't reach
-        ``micropython.schedule`` (CPython tests). Under MicroPython,
-        schedule runs the start callback itself and this is a no-op.
+        Runs in the main thread (called from ``run()``'s idle loop), so
+        the program executes with the scheduler unlocked: Timer
+        callbacks keep firing between its bytecodes and the stop
+        button works. Programs must never be exec'd from a scheduled
+        callback — see ``_request_start``.
         """
         if self._pending == "start" and not self._running:
             self._pending = None
@@ -108,6 +142,10 @@ class Launcher:
                 _exec_program(self._program_path)
             finally:
                 self._running = False
+                # Re-mark liveness immediately so a start-press landing
+                # in the instant after a long program ends doesn't
+                # misread the idle loop as gone.
+                self._mark_idle_alive()
             print("openbricks: idle. Press button to run", self._program_path)
 
 
@@ -203,18 +241,28 @@ def _arm_stop_button(armed):
 
 
 def _scheduled_start(launcher_instance):
-    """Run ``/program.py`` from the MicroPython scheduler queue.
+    """DEGRADED fallback: run ``/program.py`` from the MicroPython
+    scheduler queue.
 
-    Why schedule instead of setting a flag for the idle loop to drain:
-    after ``openbricks-dev run`` interrupts the frozen ``main.py``,
-    the idle loop is gone — we're sitting at the REPL. But the Timer
-    keeps firing, so routing start through ``micropython.schedule``
-    makes button-press-to-restart work even with nothing actively
-    draining. This is what lets the user press the button again after
-    ``run`` exits and have the robot start again.
+    Only used when the main-thread idle loop is gone (hub parked at
+    the REPL after ``openbricks run`` interrupted the frozen
+    ``main.py``, or a dev Ctrl-C over USB). The Timer keeps firing,
+    so routing start through ``micropython.schedule`` still lets a
+    button press launch the program with nothing actively draining.
+
+    The price — and why this is a fallback rather than the primary
+    path: ``mp_sched_run_pending`` holds the scheduler LOCKED for the
+    entire callback, i.e. for the entire user program. Timer
+    callbacks are dispatched through that same scheduler queue, so
+    while the program runs neither the button watcher ``_tick`` nor
+    the native ``stop_tick`` injector can fire: **the stop button is
+    dead for the whole run**. Announce it instead of degrading
+    silently.
     """
     if launcher_instance._running:
         return  # already running; ignore (the raise path handles stop)
+    print("openbricks: starting from REPL context — the stop button "
+          "is unavailable for this run (use 'openbricks stop').")
     launcher_instance._running = True
     try:
         _exec_program(launcher_instance._program_path)
@@ -225,12 +273,32 @@ def _scheduled_start(launcher_instance):
 
 
 def _request_start(launcher_instance):
-    """Schedule a program start from the button-watcher Timer.
+    """Queue a program start from the button-watcher Timer.
 
-    Module-level so tests can swap it out. Falls back to the
-    ``_pending`` flag if ``micropython.schedule`` isn't available
-    (CPython).
+    Primary path: set ``_pending = "start"`` for the main-thread idle
+    loop to drain — the program then executes in the main thread,
+    where Timer callbacks keep firing between its bytecodes and the
+    stop button works. (``_tick`` runs as a *scheduled* callback;
+    exec'ing the program from here — or from anything scheduled —
+    would hold the scheduler lock for the whole run and starve the
+    stop path. That was the "start button doesn't stop the program"
+    bug.)
+
+    Degraded path: when the idle loop isn't draining (hub parked at
+    the REPL), fall back to schedule-exec — see ``_scheduled_start``.
+
+    Module-level so tests can swap it out.
     """
+    if launcher_instance._idle_loop_alive():
+        launcher_instance._pending = "start"
+        return
+    _start_via_schedule(launcher_instance)
+
+
+def _start_via_schedule(launcher_instance):
+    """Degraded-path dispatch, split out as a patchable seam for tests.
+    Falls back to the ``_pending`` flag where ``micropython.schedule``
+    isn't available (CPython)."""
     try:
         import micropython
         micropython.schedule(_scheduled_start, launcher_instance)
@@ -352,6 +420,7 @@ def run(program_path=DEFAULT_PROGRAM_PATH, button_pin=DEFAULT_BUTTON_PIN,
     launcher._program_path = program_path
     print("openbricks: idle. Press button to run", program_path)
     while True:
+        launcher._mark_idle_alive()
         launcher._drain_pending()
         time.sleep_ms(poll_ms)
 
