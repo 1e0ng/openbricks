@@ -369,6 +369,8 @@ class TimerIdDefaultTests(unittest.TestCase):
         def _stub(button_pin, poll_ms, timer_id):
             captured["timer_id"] = timer_id
             class _Inst:
+                def _mark_idle_alive(self):
+                    pass
                 def _drain_pending(self):
                     raise KeyboardInterrupt()  # exit the run loop
             inst = _Inst()
@@ -636,6 +638,66 @@ class EmergencyStopTests(unittest.TestCase):
                 sys.modules[name] = saved
             else:
                 sys.modules.pop(name, None)
+
+
+class StartPathSelectionTests(unittest.TestCase):
+    """Regression tests for the "start button doesn't stop the program"
+    bug: a program exec'd inside ``micropython.schedule`` runs with the
+    scheduler LOCKED, which starves the Timer-dispatched stop path for
+    the whole run. While the main-thread idle loop is draining, a start
+    press must therefore queue ``_pending = "start"`` (main-thread
+    exec, stop button works) and must NOT go through schedule-exec."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launch = launcher.Launcher(self.btn)
+        self.schedule_calls = []
+        self._orig = launcher._start_via_schedule
+        launcher._start_via_schedule = (
+            lambda inst: self.schedule_calls.append(inst))
+        self.addCleanup(
+            setattr, launcher, "_start_via_schedule", self._orig)
+
+    def test_alive_idle_loop_start_uses_pending_flag(self):
+        self.launch._mark_idle_alive()
+        launcher._request_start(self.launch)
+        self.assertEqual(self.launch._pending, "start")
+        self.assertEqual(self.schedule_calls, [])
+
+    def test_no_idle_loop_falls_back_to_schedule(self):
+        # Never marked — hub parked at the REPL. Degraded schedule-exec
+        # (with its printed warning) is the only way to start.
+        launcher._request_start(self.launch)
+        self.assertIsNone(self.launch._pending)
+        self.assertEqual(self.schedule_calls, [self.launch])
+
+    def test_stale_idle_loop_falls_back_to_schedule(self):
+        self.launch._mark_idle_alive()
+        advance_ms(self.launch._poll_ms * 10)   # loop stopped draining
+        launcher._request_start(self.launch)
+        self.assertEqual(self.schedule_calls, [self.launch])
+
+    def test_idle_loop_alive_tracks_recent_marks(self):
+        self.assertFalse(self.launch._idle_loop_alive())
+        self.launch._mark_idle_alive()
+        self.assertTrue(self.launch._idle_loop_alive())
+        advance_ms(self.launch._poll_ms * 2)
+        self.assertTrue(self.launch._idle_loop_alive())
+        advance_ms(self.launch._poll_ms * 10)
+        self.assertFalse(self.launch._idle_loop_alive())
+
+    def test_drain_remarks_liveness_after_long_program(self):
+        # A start press landing right after a long program ends must
+        # not misread the idle loop as gone: _drain_pending re-marks
+        # liveness when the exec finishes.
+        path = _write_program("pass\n")
+        self.addCleanup(_cleanup_program)
+        self.launch._program_path = path
+        self.launch._mark_idle_alive()
+        advance_ms(self.launch._poll_ms * 10)   # "program ran for ages"
+        self.launch._pending = "start"
+        self.launch._drain_pending()
+        self.assertTrue(self.launch._idle_loop_alive())
 
 
 if __name__ == "__main__":
