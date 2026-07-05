@@ -43,9 +43,28 @@ class TestST3215(unittest.TestCase):
         # a fresh UART.
         ST3215._buses = {}
 
+    def test_constructor_coasts_torque_off(self):
+        # Pybricks-consistent: constructing the servo cuts torque, so
+        # an arm left holding by a previous program goes limp until
+        # the first move_to.
+        servo = ST3215(servo_id=1)
+        tx = servo._bus._uart._tx_log
+        self.assertEqual(len(tx), 1)
+        torque_body = bytes([1, 4, 0x03, _REG_TORQUE, 0])
+        self.assertEqual(
+            tx[0], _HEADER + torque_body + bytes([_checksum(torque_body)]))
+
     def test_move_to_writes_goal_position_packet(self):
         servo = ST3215(servo_id=1, uart_id=1, tx=17, rx=16)
+        baseline = len(servo._bus._uart._tx_log)
         servo.move_to(180, wait=False)
+        tx = servo._bus._uart._tx_log[baseline:]
+
+        # A fresh servo coasts; move_to first re-enables torque, then
+        # writes the goal position.
+        torque_body = bytes([1, 4, 0x03, _REG_TORQUE, 1])
+        self.assertEqual(
+            tx[0], _HEADER + torque_body + bytes([_checksum(torque_body)]))
 
         # 180 deg on a 0..4095 raw range maps to int(4095 * 180 / 360) = 2047.
         raw = 2047
@@ -54,15 +73,24 @@ class TestST3215(unittest.TestCase):
         length = len(data) + 3
         body = bytes([1, length, 0x03]) + params
         expected = _HEADER + body + bytes([_checksum(body)])
+        self.assertEqual(tx[1], expected)
 
-        self.assertEqual(servo._bus._uart._tx_log[0], expected)
+    def test_second_move_to_skips_redundant_torque_write(self):
+        servo = ST3215(servo_id=1)
+        servo.move_to(90, wait=False)
+        baseline = len(servo._bus._uart._tx_log)
+        servo.move_to(180, wait=False)
+        # Torque is cached on — the second move is exactly one packet.
+        self.assertEqual(len(servo._bus._uart._tx_log) - baseline, 1)
 
     def test_move_to_with_speed_writes_two_packets(self):
         servo = ST3215(servo_id=2)
+        baseline = len(servo._bus._uart._tx_log)
         servo.move_to(90, speed=500, wait=False)
 
-        # First packet: set goal speed. Second: goal position.
-        tx = servo._bus._uart._tx_log
+        # After the one-time torque enable: goal speed, then goal
+        # position.
+        tx = servo._bus._uart._tx_log[baseline + 1:]
         self.assertEqual(len(tx), 2)
 
         speed = 500
@@ -73,7 +101,7 @@ class TestST3215(unittest.TestCase):
     def test_checksum_is_ones_complement_of_body_sum(self):
         servo = ST3215(servo_id=1)
         servo.move_to(0, wait=False)
-        packet = servo._bus._uart._tx_log[0]
+        packet = servo._bus._uart._tx_log[-1]
         # packet = 0xFF 0xFF <body> <chk>
         body = packet[2:-1]
         chk = packet[-1]
@@ -81,8 +109,9 @@ class TestST3215(unittest.TestCase):
 
     def test_ping_emits_ping_instruction(self):
         servo = ST3215(servo_id=7)
+        baseline = len(servo._bus._uart._tx_log)
         servo.ping()
-        packet = servo._bus._uart._tx_log[0]
+        packet = servo._bus._uart._tx_log[baseline]
         body = packet[2:-1]
         # Instruction byte is at offset 2 within body: [id, length, instr].
         self.assertEqual(body[0], 7)      # servo id
@@ -162,10 +191,23 @@ class TestST3215Motor(unittest.TestCase):
         mode_writes = _writes_to(m._bus._uart._tx_log, _REG_OP_MODE)
         self.assertEqual(mode_writes, [(1, bytes([1]))])   # 1 = wheel
 
-    def test_constructor_enables_torque(self):
+    def test_constructor_coasts_torque_off(self):
+        # Pybricks-consistent: a constructed motor coasts until its
+        # first motion command. The explicit 0 also releases a hold
+        # left behind by a previous program on the same power session.
         m = ST3215Motor(servo_id=2)
         torque_writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
-        self.assertEqual(torque_writes, [(2, bytes([1]))])
+        self.assertEqual(torque_writes, [(2, bytes([0]))])
+
+    def test_first_run_speed_enables_torque(self):
+        m = ST3215Motor(servo_id=2)
+        m.run_speed(100)
+        torque_writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
+        self.assertEqual(torque_writes, [(2, bytes([0])), (2, bytes([1]))])
+        # Second command: torque cached on, no third write.
+        m.run_speed(200)
+        torque_writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
+        self.assertEqual(len(torque_writes), 2)
 
     def test_run_speed_writes_signed_magnitude_to_goal_speed(self):
         m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=1000.0)
@@ -213,9 +255,9 @@ class TestST3215Motor(unittest.TestCase):
 
     def test_coast_disables_torque(self):
         m = ST3215Motor(servo_id=7)
+        m.run_speed(100)   # enables torque
         m.coast()
         torque_writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
-        # Constructor wrote a 1; coast should append a 0.
         self.assertEqual(torque_writes[-1], (7, bytes([0])))
 
     def test_angle_accumulates_across_positive_wrap(self):
@@ -459,6 +501,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
     def test_run_angle_then_hold_stays_in_step_mode_torque_on(self):
         m = ST3215Motor(servo_id=12, steps_per_dps=10.0, max_dps=1000.0)
         self._patch_remaining(m, [1024, 1024, 0])
+        m.brake()   # enable torque; motors now coast at construction
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90, then="hold")
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
@@ -529,6 +572,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         # run_angle() return time (else it kills the move).
         m = ST3215Motor(servo_id=22, steps_per_dps=10.0, max_dps=1000.0)
         self._patch_remaining(m, [1024, 1024, 0])
+        m.brake()   # enable torque; motors now coast at construction
         baseline = len(m._bus._uart._tx_log)
         m.run_angle(deg_per_s=200, target_angle=90, wait=False, then="coast")
         # No torque write yet — coast deferred.
@@ -627,7 +671,12 @@ class TestSyncServoGroup(unittest.TestCase):
         s2 = ST3215Motor(servo_id=2, steps_per_dps=10.0, max_dps=1000.0)
         group = SyncServoGroup([s1, s2])
 
-        # Drain any constructor packets so we examine only the sync write.
+        # Motors coast at construction; the group's first command
+        # restores torque per member (tested separately). Pre-warm so
+        # the baseline captures the steady-state one-packet contract.
+        group.set_goal_speeds([0, 0])
+        # Drain constructor + pre-warm packets so we examine only the
+        # sync write.
         baseline = len(s1._bus._uart._tx_log)
         group.set_goal_speeds([50, -50])
 
@@ -659,6 +708,7 @@ class TestSyncServoGroup(unittest.TestCase):
         s2 = ST3215Motor(servo_id=11, steps_per_dps=10.0, max_dps=1000.0,
                          invert=True)
         group = SyncServoGroup([s1, s2])
+        group.set_goal_speeds([0, 0])   # pre-warm: first call enables torque
         baseline = len(s1._bus._uart._tx_log)
         group.set_goal_speeds([50, 50])   # both commanded forward
         body = s1._bus._uart._tx_log[baseline:][0][2:-1]
@@ -670,6 +720,7 @@ class TestSyncServoGroup(unittest.TestCase):
     def test_set_goal_speeds_packet_length_field_matches_payload(self):
         servos = [ST3215Motor(servo_id=i + 1) for i in range(4)]
         group = SyncServoGroup(servos)
+        group.set_goal_speeds([0, 0, 0, 0])   # pre-warm: enables torque
         baseline = len(servos[0]._bus._uart._tx_log)
         group.set_goal_speeds([0, 0, 0, 0])
         pkt = servos[0]._bus._uart._tx_log[baseline:][0]
@@ -697,12 +748,34 @@ class TestSyncServoGroup(unittest.TestCase):
         with self.assertRaises(TypeError):
             group.set_goal_speeds([100, 100])
 
+    def test_first_group_command_enables_torque_on_members(self):
+        # Motors coast at construction; a goal-speed write to a
+        # torque-off servo is silently ignored by the hardware. The
+        # group's first command must therefore restore torque per
+        # member before the sync write — and only once (cached).
+        s1 = ST3215Motor(servo_id=1)
+        s2 = ST3215Motor(servo_id=2)
+        group = SyncServoGroup([s1, s2])
+        baseline = len(s1._bus._uart._tx_log)
+        group.set_goal_speeds([50, 50])
+        new = s1._bus._uart._tx_log[baseline:]
+        torque_writes = [p for p in new if p[2 + 3] == _REG_TORQUE]
+        self.assertEqual(len(torque_writes), 2)   # one per member
+        # Second command: no more torque packets, just the sync write.
+        baseline = len(s1._bus._uart._tx_log)
+        group.set_goal_speeds([60, 60])
+        self.assertEqual(len(s1._bus._uart._tx_log) - baseline, 1)
+
     def test_sync_write_does_not_read_response(self):
         # Broadcast writes: no per-servo reply. Ensure we don't block
         # on the RX path waiting for one.
         s1 = ST3215Motor(servo_id=1)
         s2 = ST3215Motor(servo_id=2)
         group = SyncServoGroup([s1, s2])
+        # Pre-warm: the first group command restores torque via
+        # per-servo register writes (which do drain a status byte);
+        # steady-state sync writes must not touch the RX path.
+        group.set_goal_speeds([0, 0])
         # Track _rx calls — sync_write must not call into them.
         original_rx = s1._bus._rx
         rx_calls = [0]

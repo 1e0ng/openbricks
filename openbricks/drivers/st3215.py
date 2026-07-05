@@ -246,6 +246,20 @@ class ST3215(Servo):
         self._min = min_raw
         self._max = max_raw
         self._range = range_deg
+        # Pybricks-consistent: a freshly-constructed servo coasts until
+        # its first ``move_to`` (which re-enables torque). Writing 0 —
+        # rather than merely not writing — also releases a hold left
+        # behind by a previous program on the same power session.
+        self._torque_on = False
+        self._bus.write(self._id, _REG_TORQUE, bytes([0]))
+
+    def _ensure_torque_on(self):
+        """Re-enable torque before a motion command if construction
+        (or a future coast) left it disabled. Cached — no redundant
+        bus packet on back-to-back moves."""
+        if not self._torque_on:
+            self._bus.write(self._id, _REG_TORQUE, bytes([1]))
+            self._torque_on = True
 
     def _deg_to_raw(self, angle_deg):
         # Clamp angle and map to raw counts.
@@ -259,6 +273,7 @@ class ST3215(Servo):
         return (raw - self._min) * self._range / (self._max - self._min)
 
     def move_to(self, angle_deg, speed=None, wait=True):
+        self._ensure_torque_on()
         if speed is not None:
             s = int(speed)
             self._bus.write(self._id, _REG_GOAL_SPEED,
@@ -340,7 +355,7 @@ class ST3215Motor(Motor):
         # the mode/torque after a prior ``coast`` or a ``run_angle`` that
         # left the servo in step mode (``then="hold"``).
         self._op_mode    = _MODE_WHEEL
-        self._torque_on  = True
+        self._torque_on  = False
 
         # Whether this servo's angle-limit registers have been zeroed
         # to unlock multi-turn step mode. Done lazily on the first
@@ -361,9 +376,14 @@ class ST3215Motor(Motor):
         # a stale ~0 read at kickoff). See ``_poll_pending``.
         self._pending = None
 
-        # Switch the servo into wheel/continuous mode.
+        # Switch the servo into wheel/continuous mode and cut torque:
+        # Pybricks-consistent, a freshly-constructed motor coasts until
+        # its first motion command (every command path re-enables via
+        # ``_ensure_torque_on``). Writing 0 — rather than merely not
+        # writing — also releases a hold left behind by a previous
+        # program on the same power session.
         self._bus.write(self._id, _REG_OP_MODE, bytes([_MODE_WHEEL]))
-        self._bus.write(self._id, _REG_TORQUE,  bytes([1]))
+        self._bus.write(self._id, _REG_TORQUE,  bytes([0]))
 
     # --- internal helpers -------------------------------------------------
 
@@ -826,18 +846,22 @@ class ST3215Motor(Motor):
 
         # New command supersedes any pending wait=False move.
         self._abandon_pending()
+
+        # Bail if the bus is silent rather than command a move we can't
+        # track. Probed BEFORE the mode/torque writes so a glitching
+        # servo is left exactly as it was — since motors coast at
+        # construction, enabling torque first and then bailing would
+        # leave a stiff servo with no move commanded. (The value read
+        # here is irrelevant; we only care that the servo answers.)
+        if self._read_step_remaining() is None:
+            return
+
         self._ensure_torque_on()
         self._ensure_step_limits()       # angle limits = 0 (once)
         self._ensure_mode(_MODE_STEP)    # op_mode = 3
         self._bus.write(self._id, _REG_GOAL_SPEED,
                         bytes([speed_steps & 0xFF,
                                (speed_steps >> 8) & 0xFF]))
-
-        # Bail if the bus is silent rather than command a move we can't
-        # track. (The value read here — the previous step's remaining —
-        # is irrelevant; we only care that the servo is answering.)
-        if self._read_step_remaining() is None:
-            return
 
         # First step (clamped to the ±7-turn envelope).
         first = target_counts
@@ -971,4 +995,12 @@ class SyncServoGroup:
             v = encode(dps)
             servo_data.append(
                 (servo._id, bytes([v & 0xFF, (v >> 8) & 0xFF])))
+        # Motors coast at construction (and after ``coast()``), so a
+        # goal-speed write alone would be silently ignored by a
+        # torque-off servo. Restore mode + torque per member first —
+        # both are cached, so steady-state group commands still cost
+        # exactly one SYNC WRITE packet.
+        for servo in self._servos:
+            servo._ensure_mode(_MODE_WHEEL)
+            servo._ensure_torque_on()
         self._bus.sync_write(_REG_GOAL_SPEED, 2, servo_data)
