@@ -107,8 +107,9 @@ sensors = [TCS34725(mux[ch]) for ch in range(3)]       # left, mid, right
 imu = BNO055(i2c)                                      # 0x28, straight on the bus
 ```
 
-For a complete program — a 3-sensor line-follower array that reduces
-the row of readings to a steering signal — see
+For a complete program — a 2-sensor array that combines each sensor's
+``ambient()`` and ``rgb()`` readings to name the colour under it
+(red / blue / green / yellow / white / black) — see
 `examples/color_array.py`.
 
 Simplifications when you need fewer parts:

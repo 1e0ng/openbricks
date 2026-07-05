@@ -1,61 +1,70 @@
 # SPDX-License-Identifier: MIT
 """
-Demo: a 3-sensor TCS34725 line-follower array through a TCA9548A mux.
+Demo: name the colour under each of 2 TCS34725s through a TCA9548A mux.
 
-One TCS34725 tells you "am I over the line?"; a row of them tells you
-*where* the line is, which is what a line follower actually steers on.
-But the TCS34725's I2C address is fixed at 0x29, so several of them
-can't share a bus — this is exactly the job the TCA9548A multiplexer
+The TCS34725's I2C address is fixed at 0x29, so two of them can't
+share a bare bus — this is exactly the job the TCA9548A multiplexer
 exists for. Each sensor hangs off its own mux channel, and ``mux[n]``
 behaves like a normal I2C bus, so the driver is constructed unchanged.
 
-``line_position()`` reduces the row of ambient readings to a single
-steering signal in [-1, +1]: the darkness-weighted centroid across the
-array. -1 means the line is under the leftmost sensor, +1 the
-rightmost, 0 centered. Feed it to a P(ID) controller as the error term.
+Each loop reads **both signals** from every sensor and combines them:
+
+  * ``ambient()`` (0..100) — brightness. Separates black (too dark to
+    trust hue at all) and, together with the channel spread, white.
+  * ``rgb()`` (0..255 each, clear-normalised) — hue. Splits the
+    chromatic colours: red, yellow, green, blue.
+
+``classify()`` reduces one sensor's (ambient, rgb) pair to one of
+``red / blue / green / yellow / white / black``.
 
 Hardware:
     * ESP32-S3 (or classic ESP32)
     * TCA9548A breakout on I2C bus 0 (3.3V, GND)
         SDA=15, SCL=16 on ESP32-S3; SDA=21, SCL=22 on classic ESP32
-    * 3x TCS34725, one per mux channel 0..2, left-to-right,
-      facing the floor
+    * 2x TCS34725, one per mux channel 0..1, facing the surface
+
+Calibration matters: TCS34725 readings shift with illumination LED,
+distance, and surface gloss. The thresholds below are starting points
+— print ``sensor.ambient()`` and ``sensor.rgb()`` over each of your
+own surfaces and adjust.
 """
 
-# Readings at or above this ambient (0..100) count as fully "floor";
-# darkness below it is what the centroid weighs. On a white floor with
-# a black tape line, floor reads ~60-90 and tape ~5-20; calibrate by
-# printing sensor.ambient() over both surfaces.
-FLOOR_AMBIENT = 60
+# Below this ambient the surface is too dark to trust the normalised
+# hue (the clear channel is mostly noise): call it black outright.
+BLACK_AMBIENT = 12
+
+# Channel spread (max - min of r, g, b) below which the surface is
+# achromatic — grey-ish. Bright grey is white; dim grey is black.
+NEUTRAL_SPREAD = 45
+WHITE_AMBIENT = 35
+
+# Yellow is "red AND green both strong"; a green channel at least
+# this fraction of red separates it from pure red.
+YELLOW_G_OVER_R = 0.6
 
 
-def line_position(ambients, floor=FLOOR_AMBIENT):
-    """Reduce per-sensor ambient readings to a position in [-1, +1].
+def classify(ambient, rgb):
+    """Reduce one sensor's (ambient 0..100, (r, g, b) 0..255) reading
+    to ``"red" / "blue" / "green" / "yellow" / "white" / "black"``.
 
-    Each sensor contributes weight ``max(0, floor - ambient)`` — how
-    much darker than the floor it reads. The weighted centroid of the
-    sensor positions (spread evenly from -1 to +1, left to right) is
-    the line position estimate.
-
-    Returns ``None`` when no sensor reads darker than ``floor`` — the
-    line is lost, which callers must handle explicitly (spin to
-    search, stop, ...) rather than mistaking it for "centered".
+    Decision order: black by darkness first (hue is noise down
+    there), then white/black by neutral spread + brightness, then the
+    chromatic colours by channel dominance.
     """
-    n = len(ambients)
-    if n < 2:
-        raise ValueError("need at least 2 sensors, got %d" % n)
-    total = 0
-    weighted = 0.0
-    for i, ambient in enumerate(ambients):
-        w = floor - ambient
-        if w <= 0:
-            continue
-        pos = -1.0 + 2.0 * i / (n - 1)   # sensor i's position in [-1, 1]
-        total += w
-        weighted += w * pos
-    if total == 0:
-        return None
-    return weighted / total
+    r, g, b = rgb
+    if ambient < BLACK_AMBIENT:
+        return "black"
+    spread = max(r, g, b) - min(r, g, b)
+    if spread < NEUTRAL_SPREAD:
+        return "white" if ambient >= WHITE_AMBIENT else "black"
+    if b >= r and b >= g:
+        return "blue"
+    if g >= r:
+        return "green"
+    # Red-dominant: yellow when green rides high alongside red.
+    if g >= r * YELLOW_G_OVER_R:
+        return "yellow"
+    return "red"
 
 
 def main():
@@ -67,16 +76,18 @@ def main():
 
     i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
     mux = TCA9548A(i2c)                                    # 0x70 default
-    sensors = [TCS34725(mux[ch]) for ch in range(3)]       # left, mid, right
+    sensors = [TCS34725(mux[ch]) for ch in range(2)]
 
-    print("Line array over a dark line on a light floor (Ctrl-C to stop)...")
+    print("Hold surfaces under both sensors (Ctrl-C to stop)...")
     while True:
-        ambients = [s.ambient() for s in sensors]
-        pos = line_position(ambients)
-        if pos is None:
-            print("ambients={}  ->  line lost".format(ambients))
-        else:
-            print("ambients={}  ->  position {:+.2f}".format(ambients, pos))
+        parts = []
+        for i, s in enumerate(sensors):
+            ambient = s.ambient()
+            rgb = s.rgb()
+            parts.append("s%d: ambient=%3d rgb=(%3d,%3d,%3d) -> %s" % (
+                i, ambient, rgb[0], rgb[1], rgb[2],
+                classify(ambient, rgb)))
+        print("  |  ".join(parts))
         wait(200)
 
 
