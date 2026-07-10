@@ -214,6 +214,16 @@ assignments; the classic-ESP32 equivalents are in git history):
 | Right motor PWM   | 11               | L298N / TB6612 ENB |
 | Right encoder A, B| 12, 13           | JGB37-520 encoder channels |
 
+> **Pin-conflict caveat.** This map claims GPIO 4 and 5, which are also
+> the firmware's default **program button** (4) and **BLE-toggle
+> button** (5) — see {class}`openbricks.hub.ESP32S3DevkitHub`. Driving
+> IN1/IN2 on those pins works only if you don't use the buttons; worse,
+> the launcher polls GPIO 4 as an input, so a motor driver toggling it
+> low reads as a button press and stops your program. If you run this
+> build behind the frozen launcher, move either the motor pins or the
+> buttons (`ESP32S3DevkitHub(bluetooth_button_pin=…)`,
+> `launcher.run(button_pin=…)`).
+
 ### Calibrating encoder counts
 
 The default in `jgb37_520.py` is `counts_per_output_rev=1320`, which is

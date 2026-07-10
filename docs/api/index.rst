@@ -27,4 +27,5 @@ The API is layered:
    drivers_misc
    interfaces
    hub
+   tools
    runtime

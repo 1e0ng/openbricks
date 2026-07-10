@@ -16,6 +16,7 @@ sdist rather than a checkout).
 """
 
 import pathlib
+import re
 import unittest
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -89,6 +90,26 @@ class NoStaleNamesTests(unittest.TestCase):
         self.assertEqual(hits, [],
                          "``pybricks-dev`` is a misspelling of the Pybricks "
                          "tool ``pybricksdev``:\n" + "\n".join(hits))
+
+    def test_no_stale_cli_invocations_in_workflows(self):
+        """Workflows may legitimately keep the old *package/tag* name
+        (deprecation job, tag namespaces, codecov flag) — but any
+        ``openbricks-dev <subcommand>`` string is a user-facing CLI
+        instruction and must use the current name. Caught the rolling
+        release body telling users to run ``openbricks-dev flash``."""
+        pattern = re.compile(
+            r"openbricks-dev\s+(flash|list|run|upload|stop|log|download|sim)\b")
+        workflows = _REPO_ROOT / ".github" / "workflows"
+        hits = []
+        for f in sorted(workflows.glob("*.y*ml")):
+            for i, line in enumerate(
+                    f.read_text(encoding="utf-8").splitlines(), 1):
+                if pattern.search(line):
+                    hits.append("{}:{}: {}".format(
+                        f.relative_to(_REPO_ROOT), i, line.strip()))
+        self.assertEqual(hits, [],
+                         "workflows instruct users to run the retired "
+                         "``openbricks-dev`` CLI:\n" + "\n".join(hits))
 
 
 if __name__ == "__main__":
