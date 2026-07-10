@@ -2,6 +2,8 @@
 
 Host-side tooling for openbricks hubs — same UX as `pybricksdev`, built on commodity Python tooling (`bleak`, `esptool`, `mpremote`). One package, one console script: `openbricks flash / list / run / upload / stop / log`. The MuJoCo-backed simulator is built in too — `openbricks sim …` opens the sim's CLI when the `[sim]` extra is installed.
 
+**Website**: <https://openbricks.dev> · **Documentation**: <https://docs.openbricks.dev>
+
 ## Install
 
 Recommended — with [`pipx`](https://pipx.pypa.io/) so the CLI lands in an isolated venv and avoids the "externally managed environment" error on modern macOS / Linux distros:
