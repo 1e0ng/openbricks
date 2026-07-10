@@ -207,22 +207,20 @@ assignments; the classic-ESP32 equivalents are in git history):
 
 | Function          | ESP32-S3 GPIO(s) | Devices on this line |
 |-------------------|------------------|----------------------|
-| Left motor dir    | 4, 5             | L298N / TB6612 IN1, IN2 |
-| Left motor PWM    | 6                | L298N / TB6612 ENA |
+| Left motor dir    | 1, 2             | L298N / TB6612 IN1, IN2 |
+| Left motor PWM    | 17               | L298N / TB6612 ENA |
 | Left encoder A, B | 7, 8             | JGB37-520 encoder channels |
 | Right motor dir   | 9, 10            | L298N / TB6612 IN3, IN4 |
 | Right motor PWM   | 11               | L298N / TB6612 ENB |
 | Right encoder A, B| 12, 13           | JGB37-520 encoder channels |
 
-> **Pin-conflict caveat.** This map claims GPIO 4 and 5, which are also
-> the firmware's default **program button** (4) and **BLE-toggle
-> button** (5) — see {class}`openbricks.hub.ESP32S3DevkitHub`. Driving
-> IN1/IN2 on those pins works only if you don't use the buttons; worse,
-> the launcher polls GPIO 4 as an input, so a motor driver toggling it
-> low reads as a button press and stops your program. If you run this
-> build behind the frozen launcher, move either the motor pins or the
-> buttons (`ESP32S3DevkitHub(bluetooth_button_pin=…)`,
-> `launcher.run(button_pin=…)`).
+The map deliberately leaves GPIO **4 and 5** free — those are the
+firmware's default **program button** and **BLE-toggle button** (see
+{class}`openbricks.hub.ESP32S3DevkitHub`). The launcher polls GPIO 4
+as an input, so a motor driver toggling it would read as button
+presses and stop your program. GPIO 15/16 (I2C) and 14/6 (serial-bus
+UART) are also kept free so sensors and a serial-servo arm can join
+the same build unchanged.
 
 ### Calibrating encoder counts
 
