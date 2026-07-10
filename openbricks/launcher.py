@@ -385,6 +385,10 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
     if _singleton is not None:
         return _singleton
     from machine import Pin, Timer
+    from openbricks import pins
+    pins.check(button_pin, "program button", output=False)
+    pins.claim(button_pin, "program button",
+               "launcher.run(button_pin=...) moves it")
     btn = Pin(button_pin, Pin.IN, Pin.PULL_UP)
     _singleton = Launcher(btn, poll_ms=poll_ms)
     _singleton._timer = Timer(timer_id)

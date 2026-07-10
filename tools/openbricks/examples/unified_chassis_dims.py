@@ -45,10 +45,10 @@ AXLE_TRACK_MM     = 150
 DRIVE_DISTANCE_MM = 200
 
 
-m_left  = JGB37Motor(in1=12, in2=14, pwm=27,
-                     encoder_a=18, encoder_b=19)
-m_right = JGB37Motor(in1=13, in2=15, pwm=26,
-                     encoder_a=20, encoder_b=21)
+m_left  = JGB37Motor(in1=1, in2=2, pwm=17,
+                     encoder_a=7, encoder_b=8)
+m_right = JGB37Motor(in1=9, in2=10, pwm=11,
+                     encoder_a=12, encoder_b=13)
 db = DriveBase(m_left, m_right,
                wheel_diameter_mm=WHEEL_DIAMETER_MM,
                axle_track_mm=AXLE_TRACK_MM)

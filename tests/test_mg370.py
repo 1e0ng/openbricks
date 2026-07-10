@@ -16,8 +16,8 @@ from tests._fakes_pcnt import _FakePCNT
 
 def _make_motor(**overrides):
     kwargs = dict(
-        in1=1, in2=2, pwm=3,
-        encoder_a=4, encoder_b=5,
+        in1=1, in2=2, pwm=17,
+        encoder_a=7, encoder_b=8,
         pcnt_unit=0,
     )
     kwargs.update(overrides)
@@ -157,8 +157,8 @@ class TestMG370Motor(unittest.TestCase):
 
     def test_two_motors_use_different_pcnt_units(self):
         left = _make_motor(pcnt_unit=0)
-        right = _make_motor(pcnt_unit=1, in1=11, in2=12, pwm=13,
-                            encoder_a=14, encoder_b=15)
+        right = _make_motor(pcnt_unit=1, in1=9, in2=10, pwm=11,
+                            encoder_a=12, encoder_b=13)
         # Independent counters in hardware.
         _FakePCNT._UNITS[0]["value"] = 100
         _FakePCNT._UNITS[1]["value"] = 200

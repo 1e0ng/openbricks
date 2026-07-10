@@ -50,8 +50,8 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         _reset_all()
 
     def test_requires_imu_attached(self):
-        left  = _make_motor(1, 2, 3, 10, 11)
-        right = _make_motor(4, 5, 6, 12, 13)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
         with self.assertRaises(ValueError):
             db.use_gyro(True)
@@ -59,8 +59,8 @@ class TestDriveBaseUseGyro(unittest.TestCase):
     def test_use_gyro_toggle_without_native_raises(self):
         # L298NMotor has no ``_servo`` — no native path, so use_gyro
         # should error rather than silently do nothing.
-        left  = L298NMotor(in1=1, in2=2, pwm=3)
-        right = L298NMotor(in1=4, in2=5, pwm=6)
+        left  = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
         with self.assertRaises(RuntimeError):
             db.use_gyro(True)
@@ -72,8 +72,8 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         correction that would steer the robot back onto heading."""
         imu = _FakeIMU(heading=0.0)
 
-        left  = _make_motor(1, 2, 3, 10, 11)
-        right = _make_motor(4, 5, 6, 12, 13)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
 
         # Reach in and build the native drivebase directly — easier than
         # routing through the Python DriveBase + blocking straight() for
@@ -106,8 +106,8 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         """Toggling use_gyro off makes the controller ignore the IMU."""
         imu = _FakeIMU(heading=0.0)
 
-        left  = _make_motor(1, 2, 3, 10, 11)
-        right = _make_motor(4, 5, 6, 12, 13)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
         ndb = NativeDB(
             left=left._servo, right=right._servo,
             wheel_diameter_mm=56, axle_track_mm=114,

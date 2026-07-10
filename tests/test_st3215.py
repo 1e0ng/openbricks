@@ -55,7 +55,7 @@ class TestST3215(unittest.TestCase):
             tx[0], _HEADER + torque_body + bytes([_checksum(torque_body)]))
 
     def test_move_to_writes_goal_position_packet(self):
-        servo = ST3215(servo_id=1, uart_id=1, tx=17, rx=16)
+        servo = ST3215(servo_id=1, uart_id=1, tx=14, rx=6)
         baseline = len(servo._bus._uart._tx_log)
         servo.move_to(180, wait=False)
         tx = servo._bus._uart._tx_log[baseline:]
@@ -152,12 +152,12 @@ class TestST3215(unittest.TestCase):
 
     def test_buses_are_shared_per_uart(self):
         # Two servos on the same UART params share one _SCServoBus instance.
-        s1 = ST3215(servo_id=1, uart_id=2, tx=17, rx=16)
-        s2 = ST3215(servo_id=2, uart_id=2, tx=17, rx=16)
+        s1 = ST3215(servo_id=1, uart_id=2, tx=14, rx=6)
+        s2 = ST3215(servo_id=2, uart_id=2, tx=14, rx=6)
         self.assertIs(s1._bus, s2._bus)
 
         # A different UART id gets a separate bus.
-        s3 = ST3215(servo_id=3, uart_id=1, tx=17, rx=16)
+        s3 = ST3215(servo_id=3, uart_id=1, tx=14, rx=6)
         self.assertIsNot(s1._bus, s3._bus)
 
 
@@ -657,8 +657,8 @@ class TestSyncServoGroup(unittest.TestCase):
         ST3215._buses = {}
 
     def test_constructor_rejects_servos_on_different_buses(self):
-        s1 = ST3215Motor(servo_id=1, uart_id=1, tx=17, rx=16)
-        s2 = ST3215Motor(servo_id=2, uart_id=2, tx=17, rx=16)
+        s1 = ST3215Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        s2 = ST3215Motor(servo_id=2, uart_id=2, tx=14, rx=6)
         with self.assertRaises(ValueError):
             SyncServoGroup([s1, s2])
 

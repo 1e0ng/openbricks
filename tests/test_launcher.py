@@ -577,7 +577,7 @@ class EmergencyStopTests(unittest.TestCase):
 
     def test_stop_all_motors_broadcasts_torque_off_to_serial_bus(self):
         from openbricks.drivers.st3215 import ST3215Motor
-        m = ST3215Motor(servo_id=1, uart_id=1, tx=17, rx=16)
+        m = ST3215Motor(servo_id=1, uart_id=1, tx=14, rx=6)
         baseline = len(m._bus._uart._tx_log)
         launcher._stop_all_motors()
         # Expect a broadcast (ID 0xFE) WRITE (0x03) to the torque
