@@ -23,10 +23,62 @@ class BluetoothStateTests(unittest.TestCase):
     def setUp(self):
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
+        del bluetooth._state_listeners[:]
         # A name must be flashed for BLE to activate; plant one for the
         # tests that enable the radio. Tests exercising the no-name
         # error path clear it via _FakeNVS._reset_for_test() again.
         _set_hub_name("TestHub")
+
+    # Listeners are plain closures held in a variable — MicroPython
+    # bound methods compare by identity, so ``seen.append`` style
+    # registration couldn't be removed again under the MP test job.
+    @staticmethod
+    def _recording_listener():
+        seen = []
+
+        def cb(enabled):
+            seen.append(enabled)
+        return seen, cb
+
+    def test_state_listener_fires_on_set_enabled(self):
+        seen, cb = self._recording_listener()
+        bluetooth.add_state_listener(cb)
+        bluetooth.set_enabled(False)
+        bluetooth.set_enabled(True)
+        self.assertEqual(seen, [False, True])
+
+    def test_state_listener_fires_on_toggle(self):
+        seen, cb = self._recording_listener()
+        bluetooth.add_state_listener(cb)
+        bluetooth.toggle()   # default state is on → toggles to off
+        self.assertEqual(seen, [False])
+
+    def test_state_listener_not_fired_when_enable_fails(self):
+        # No hub name → set_enabled(True) raises before any state
+        # change; the listener must not report a change that never
+        # happened.
+        _FakeNVS._reset_for_test()
+        seen, cb = self._recording_listener()
+        bluetooth.add_state_listener(cb)
+        try:
+            bluetooth.set_enabled(True)
+        except bluetooth.HubNameNotSetError:
+            pass
+        self.assertEqual(seen, [])
+
+    def test_remove_state_listener(self):
+        seen, cb = self._recording_listener()
+        bluetooth.add_state_listener(cb)
+        bluetooth.remove_state_listener(cb)
+        bluetooth.set_enabled(False)
+        self.assertEqual(seen, [])
+
+    def test_add_state_listener_is_idempotent(self):
+        seen, cb = self._recording_listener()
+        bluetooth.add_state_listener(cb)
+        bluetooth.add_state_listener(cb)
+        bluetooth.set_enabled(False)
+        self.assertEqual(seen, [False])
 
     def test_default_is_enabled_when_no_key_stored(self):
         self.assertTrue(bluetooth.is_enabled())

@@ -43,6 +43,16 @@ DEFAULT_BUTTON_PIN   = 4
 DEFAULT_POLL_MS      = 50
 DEFAULT_PROGRAM_PATH = "/program.py"
 
+# Hardware-timer inventory (ESP32 / ESP32-S3 both have exactly 0..3):
+#   0 — launcher button poll (this module)
+#   1 — BLE-toggle button poll (openbricks.bluetooth_button)
+#   2 — motor_process 1 kHz scheduler (native C module)
+#   3 — stop-tick interrupt injector (this module)
+# The stop tick used to take ``timer_id + 1`` = 1, silently stealing
+# the BLE toggle's timer the moment the launcher started: the BLE
+# button went dead and the status LED stopped following BLE state.
+STOP_TIMER_ID = 3
+
 
 def _now_ms():
     """Monotonic milliseconds — ``time.ticks_ms`` on MicroPython,
@@ -80,7 +90,7 @@ class Launcher:
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
         self._timer          = None    # Timer(0): START + stop-press detect
-        self._stop_timer     = None    # Timer(1): native stop_tick (injects)
+        self._stop_timer     = None    # Timer(STOP_TIMER_ID=3): stop_tick
         # Last time the main-thread idle loop drained. ``_request_start``
         # uses this to decide whether a queued "start" will actually be
         # picked up (idle loop alive → main-thread exec, button-stop
@@ -398,7 +408,7 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
     # delivery is a separate fast Timer whose callback is the native
     # C-function stop_tick (a soft Python callback can't inject the
     # interrupt into the running program; a C-function callback can).
-    _singleton._stop_timer = _install_stop_tick(timer_id + 1)
+    _singleton._stop_timer = _install_stop_tick(STOP_TIMER_ID)
     return _singleton
 
 
