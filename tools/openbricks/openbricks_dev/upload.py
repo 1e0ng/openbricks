@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev upload -n NAME script.py`` — stage a script on the
+``openbricks upload -n NAME script.py`` — stage a script on the
 hub. The hub does **not** run it automatically; the user presses the
 hub button to launch (and presses again to stop).
 

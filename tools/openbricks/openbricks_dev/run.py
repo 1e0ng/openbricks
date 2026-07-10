@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev run -n NAME script.py`` — stage a script to the hub,
+``openbricks run -n NAME script.py`` — stage a script to the hub,
 launch it immediately, stream output back, exit when the program stops.
 
-Semantics mirror ``pybricks-dev run``:
+Semantics mirror ``pybricksdev run``:
 
 * The script is written to ``/program.py`` on the hub (same file
-  ``openbricks-dev upload`` stages to).
+  ``openbricks upload`` stages to).
 * The hub's launcher execs it right away — no button press required to
   start.
 * While running, pressing the hub button raises ``KeyboardInterrupt``
@@ -46,7 +46,7 @@ _RAW_REPL_BANNER     = b"raw REPL; CTRL-B to exit\r\n>"
 _FLOW_ACK   = b"\x01"
 _FLOW_ABORT = b"\x04"
 
-# Where the script lands; same target as ``openbricks-dev upload`` so
+# Where the script lands; same target as ``openbricks upload`` so
 # the post-run state matches what a follow-up button press would rerun.
 _TARGET_PATH = "/program.py"
 

@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
 """
 Per-run log capture: tee ``print(...)`` output to a file on flash so
-untethered runs can be inspected later via ``openbricks-dev log``.
+untethered runs can be inspected later via ``openbricks log``.
 
 The launcher wraps every program execution with ``log.session()`` so
 the user's ``print`` output streams to *both* the live USB / BLE
 console (when one's listening) and a rotating file on flash. With
 nobody listening on the live channel, the file is the only record.
-``openbricks-dev log`` reads the most recent files back over BLE.
+``openbricks log`` reads the most recent files back over BLE.
 
 Storage layout::
 
@@ -202,12 +202,12 @@ def session():
     return _LogSession()
 
 
-# ---- public read API (used by openbricks-dev log) -------------------
+# ---- public read API (used by openbricks log) -------------------
 
 
 def list_runs():
     """Return a list of ``(index, full_path)`` tuples, oldest first.
-    Used by the on-hub helper that ``openbricks-dev log`` invokes via
+    Used by the on-hub helper that ``openbricks log`` invokes via
     raw-paste to enumerate available runs."""
     return [(idx, LOG_DIR + "/" + name) for idx, name in _list_existing()]
 

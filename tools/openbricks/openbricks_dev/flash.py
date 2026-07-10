@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev flash`` — flash firmware + bake in the hub's BLE name.
+``openbricks flash`` — flash firmware + bake in the hub's BLE name.
 
 Two-step flow:
 

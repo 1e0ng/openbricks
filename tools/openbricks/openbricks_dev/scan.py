@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev list`` — scan for BLE devices in range and print them.
+``openbricks list`` — scan for BLE devices in range and print them.
 
 Uses ``bleak`` so it works on macOS, Linux (BlueZ), and Windows without
 platform-specific tooling. Output is sorted by RSSI so the closest /

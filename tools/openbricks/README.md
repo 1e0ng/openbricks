@@ -64,7 +64,7 @@ openbricks run -n RobotA examples/hello.py
 Stages the script to `/program.py` (same target as `upload`) and triggers the hub's launcher to execute it immediately. Output streams back to your terminal in real time.
 
 - **Button stop.** Pressing the hub button while the program runs raises `KeyboardInterrupt` via the same launcher path `upload`+button uses. The client sees the clean "stopped by button press" line and exits.
-- **Program completion.** When the program finishes (or raises), the client disconnects and exits — same as `pybricks-dev run`.
+- **Program completion.** When the program finishes (or raises), the client disconnects and exits — same as `pybricksdev run`.
 - **Script persists.** Because `run` stages to `/program.py`, the hub can re-run the last program via a button press without another upload. `upload` and `run` differ only in whether the client auto-launches after upload.
 
 Stderr (e.g. exception tracebacks) arrives after stdout and is surfaced with a blank-line separator. No paste-mode `===` echo — raw-paste mode is clean.
@@ -100,7 +100,7 @@ Pass `--path /alt.py` to stage at a different filename (if you've written your o
 ## Tests
 
 ```
-cd tools/openbricks-dev
+cd tools/openbricks
 PYTHONPATH=. python -m unittest discover -s tests -t .
 ```
 

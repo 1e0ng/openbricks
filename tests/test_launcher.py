@@ -179,7 +179,7 @@ class DrainAndExecTests(unittest.TestCase):
 
 class RunProgramResetsMotorProcessTests(unittest.TestCase):
     """``run_program`` is the entry point for both BLE-triggered runs
-    (``openbricks-dev run``) and button-press launches. Each call must
+    (``openbricks run``) and button-press launches. Each call must
     wipe the native scheduler's callback list so the new program
     doesn't inherit dead servo / drivebase tick subscriptions from the
     previous run.
@@ -318,7 +318,7 @@ class ScheduledStartTests(unittest.TestCase):
     bytecodes after a short-press-while-idle. It execs the staged
     program and leaves the launcher back in the idle state, so
     pressing the button AGAIN starts it again — even when main.py's
-    idle loop isn't running (which is the post-``openbricks-dev run``
+    idle loop isn't running (which is the post-``openbricks run``
     state)."""
 
     def setUp(self):
@@ -392,7 +392,7 @@ class TimerIdDefaultTests(unittest.TestCase):
 
 
 class RunProgramTests(unittest.TestCase):
-    """``launcher.run_program`` is the entry point ``openbricks-dev run``
+    """``launcher.run_program`` is the entry point ``openbricks run``
     jumps into via raw REPL. Must set ``_running`` so button-stop works,
     propagate ``KeyboardInterrupt``, and swallow other exceptions (the
     user sees the traceback via the normal REPL error-framing path)."""
