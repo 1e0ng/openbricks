@@ -78,8 +78,9 @@ sim = [
 dev = ["pytest", "coverage", "build"]
 
 [project.urls]
-Homepage = "https://github.com/1e0ng/openbricks"
-Source   = "https://github.com/1e0ng/openbricks"
+Homepage      = "https://openbricks.dev"
+Documentation = "https://docs.openbricks.dev"
+Source        = "https://github.com/1e0ng/openbricks"
 Issues   = "https://github.com/1e0ng/openbricks/issues"
 Releases = "https://github.com/1e0ng/openbricks/releases"
 
