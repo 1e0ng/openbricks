@@ -1,0 +1,75 @@
+name: website
+
+# Builds and deploys the two public sites:
+#
+#   docs.openbricks.dev  — Sphinx docs, deployed to THIS repo's GitHub
+#                          Pages (artifact/workflow build type; the
+#                          custom domain lives in the repo's Pages
+#                          settings, no CNAME file needed).
+#   openbricks.dev       — static landing page in ``website/``, pushed
+#                          to the ``openbricks-site`` repo's gh-pages
+#                          branch (one repo = one Pages site, so the
+#                          second domain needs a second repo; keeping
+#                          the source here means one source of truth).
+#
+# The docs build runs with ``-W`` on every PR too — a docstring that
+# breaks the API reference fails CI, which is the regression test for
+# the docs toolchain.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install docs toolchain
+        run: pip install -r docs/requirements.txt
+      - name: Build docs (warnings are errors)
+        run: sphinx-build -W --keep-going -b html docs docs/_build/html
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/_build/html
+
+  deploy-docs:
+    # docs.openbricks.dev
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-docs
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  deploy-site:
+    # openbricks.dev — cross-repo push; SITE_DEPLOY_TOKEN is a PAT with
+    # push access to 1e0ng/openbricks-site.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          personal_token: ${{ secrets.SITE_DEPLOY_TOKEN }}
+          external_repository: 1e0ng/openbricks-site
+          publish_branch: gh-pages
+          publish_dir: website
+          cname: openbricks.dev

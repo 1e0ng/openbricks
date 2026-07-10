@@ -11,12 +11,14 @@ in the FeeTech SCServo / Dynamixel-style protocol):
     CHECKSUM = ~(ID + LEN + INSTR + sum(PARAM)) & 0xFF
     LEN      = number of params + 2
 
-Common instructions:
+Common instructions::
+
     0x01 PING            ->  probe the servo
     0x02 READ            ->  READ  reg len
     0x03 WRITE           ->  WRITE reg value...
 
-Key registers (ST-3215):
+Key registers (ST-3215)::
+
     0x21  Operation Mode — 0 = position, 1 = wheel/continuous
     0x28  Torque Switch  — 1 = enable, 0 = coast
     0x2A  Goal position (low, high) — int16, 0..4095 over ~360°

@@ -7,7 +7,7 @@ PWM pin (EN-A or EN-B). It's open-loop: the class knows nothing about the
 physical motor speed or position. For closed-loop use, wrap one of these in
 ``jgb37_520.JGB37Motor`` (which adds an encoder).
 
-Pinout recap for one channel:
+Pinout recap for one channel::
 
     IN1  = direction bit A
     IN2  = direction bit B

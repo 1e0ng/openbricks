@@ -9,7 +9,7 @@ mechanical / electrical.
 
 Full datasheet: ``docs/datasheets/feetech_sts3032.pdf`` (model
 ST-3032-C062, Edition A/0 2025-11-30). Headline specs at typical
-12 V operation, all ±10% per Feetech:
+12 V operation, all ±10% per Feetech::
 
     Working voltage      9–14 V (typ 12 V)        ST-3215 typ 6–12.6 V
     No-load speed        0.067 s/60° = 148 RPM = 888 °/s

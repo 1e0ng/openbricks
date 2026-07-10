@@ -1,0 +1,31 @@
+# Command-line tool
+
+`pipx install openbricks` installs one console script, `openbricks`,
+which mirrors the `pybricksdev` workflow: flash firmware over USB, then
+run / upload / stop programs and pull logs over BLE. With the `[sim]`
+extra installed, `openbricks sim …` forwards to the
+{doc}`MuJoCo-backed simulator <simulator>`.
+
+A typical session:
+
+```console
+$ openbricks flash --name RobotA --port /dev/cu.usbserial-0001 \
+      --firmware openbricks-esp32s3-firmware-latest.bin
+$ openbricks list                    # hubs in BLE range
+$ openbricks run -n RobotA main.py   # push + stream output
+$ openbricks upload -n RobotA main.py  # stage; start it with the hub button
+$ openbricks stop -n RobotA          # Ctrl-C a running program
+$ openbricks log -n RobotA           # dump the most recent run log
+```
+
+## Reference
+
+The reference below is generated from the CLI's own argument parser, so
+it always matches the installed version.
+
+```{eval-rst}
+.. argparse::
+   :module: openbricks_dev.cli
+   :func: _build_parser
+   :prog: openbricks
+```
