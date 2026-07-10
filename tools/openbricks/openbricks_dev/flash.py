@@ -24,6 +24,18 @@ import time
 _NVS_NAMESPACE = "openbricks"
 _NVS_KEY       = "hub_name"
 
+# MicroPython's makeimg.py starts the merged ``firmware.bin`` at the
+# chip's bootloader offset: 0x1000 on the classic ESP32, 0x0 on the
+# ESP32-S3. The image must be written back at that same base or the ROM
+# never finds the bootloader ("Invalid image block, can't boot"). The
+# partition table always lives at flash address 0x8000, and every
+# partition-table entry opens with the magic bytes ``AA 50`` — so the
+# magic's *file* offset (0x8000 - base) tells us which base the image
+# was built for.
+_PT_MAGIC        = b"\xaa\x50"
+_PT_FLASH_OFFSET = 0x8000
+_IMAGE_BASES     = (0x0, 0x1000)
+
 
 class FlashError(Exception):
     """Raised by ``run`` when any step of the flash / name-write fails."""
@@ -152,6 +164,42 @@ def _read_hub_name(mpremote, port):
     return out.strip()
 
 
+def _image_base_offset(firmware_path):
+    """Return the flash address (as a ``"0x…"`` string) the merged image
+    must be written at, derived from where the partition-table magic
+    sits inside the file itself.
+
+    Detecting from the image — rather than from ``--chip``, which
+    defaults to ``auto`` — means the offset is right even when the user
+    never names the chip. Exactly one candidate base must match; zero
+    (not a merged MicroPython image?) or several (can't disambiguate)
+    raise instead of guessing, because a wrong offset bricks the boot
+    path until the next reflash.
+    """
+    try:
+        with open(firmware_path, "rb") as f:
+            head = f.read(_PT_FLASH_OFFSET + len(_PT_MAGIC))
+    except OSError as e:
+        _die("cannot read firmware image %s: %s" % (firmware_path, e))
+    matches = [
+        base for base in _IMAGE_BASES
+        if head[_PT_FLASH_OFFSET - base:
+                _PT_FLASH_OFFSET - base + len(_PT_MAGIC)] == _PT_MAGIC
+    ]
+    if len(matches) != 1:
+        _die(
+            "cannot determine the flash offset of %s: expected the "
+            "partition-table magic at file offset 0x7000 (classic ESP32 "
+            "image, flashed at 0x1000) or 0x8000 (ESP32-S3 image, flashed "
+            "at 0x0); found it at %s. Is this a merged firmware.bin from "
+            "scripts/build_firmware.sh / the Releases page?"
+            % (firmware_path,
+               ", ".join("0x%x" % (_PT_FLASH_OFFSET - b) for b in matches)
+               or "neither")
+        )
+    return "0x%x" % matches[0]
+
+
 def _validate_name(name):
     if not name:
         _die("--name cannot be empty")
@@ -176,14 +224,19 @@ def run(args):
     esptool, write_cmd, erase_cmd = _esptool_paths_and_commands()
     mpremote = _require_tool("mpremote")
 
-    print("=== openbricks flash: name=%r port=%s ===" % (args.name, args.port))
+    # Resolve the write offset from the image before touching the chip,
+    # so an unrecognizable image fails the flash *before* the erase.
+    write_offset = _image_base_offset(args.firmware)
+
+    print("=== openbricks flash: name=%r port=%s offset=%s ==="
+          % (args.name, args.port, write_offset))
 
     if not args.skip_erase:
         _run([esptool, "--chip", args.chip, "--port", args.port, erase_cmd])
 
     _run([
         esptool, "--chip", args.chip, "--port", args.port,
-        "--baud", args.baud, write_cmd, "0x0", args.firmware,
+        "--baud", args.baud, write_cmd, write_offset, args.firmware,
     ])
 
     # esptool leaves the device reset; give USB-CDC ports time to

@@ -102,6 +102,7 @@ jobs:
             tests.test_l298n \
             tests.test_tcs34725 \
             tests.test_st3215 \
+            tests.test_st3032 \
             tests.test_ssd1306 \
             tests.test_tb6612 \
             tests.test_motor_process_timer_id \
