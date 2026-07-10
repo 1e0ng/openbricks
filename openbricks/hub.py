@@ -45,6 +45,8 @@ hub rather than through it.
 
 from machine import Pin
 
+from openbricks import pins
+
 
 # ---- abstract base classes ----
 #
@@ -163,8 +165,15 @@ class ESP32DevkitHub(Hub):
     """
 
     def __init__(self, led_pin=2, bluetooth_button_pin=5, bluetooth=True):
+        pins.check(led_pin, "status LED")
+        pins.check(bluetooth_button_pin, "Bluetooth-toggle button",
+                   output=False)
         self.led = SimpleLED(led_pin)
         self.bluetooth_button = PushButton(bluetooth_button_pin, active_low=True)
+        pins.claim(led_pin, "status LED",
+                   "ESP32DevkitHub led_pin=... moves it")
+        pins.claim(bluetooth_button_pin, "Bluetooth-toggle button",
+                   "ESP32DevkitHub bluetooth_button_pin=... moves it")
         self.bluetooth_toggle = None
         if bluetooth:
             _install_bluetooth_toggle(self)
@@ -187,8 +196,17 @@ class ESP32S3DevkitHub(Hub):
 
     def __init__(self, led_pin=48, bluetooth_button_pin=5, brightness=0.2,
                  bluetooth=True):
+        if led_pin is not None:
+            pins.check(led_pin, "status LED")
+        pins.check(bluetooth_button_pin, "Bluetooth-toggle button",
+                   output=False)
         self.led = NeoPixelLED(led_pin, brightness=brightness) if led_pin is not None else None
         self.bluetooth_button = PushButton(bluetooth_button_pin, active_low=True)
+        if led_pin is not None:
+            pins.claim(led_pin, "status LED",
+                       "ESP32S3DevkitHub led_pin=... moves it")
+        pins.claim(bluetooth_button_pin, "Bluetooth-toggle button",
+                   "ESP32S3DevkitHub bluetooth_button_pin=... moves it")
         self.bluetooth_toggle = None
         if bluetooth:
             _install_bluetooth_toggle(self)

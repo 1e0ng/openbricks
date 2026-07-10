@@ -61,8 +61,8 @@ class TestDriveBaseNative2DOF(unittest.TestCase):
         """Left wheel has 10% more friction (advances at 0.9x its target).
         2-DOF coupling should still bring both wheels to within a few
         degrees of each other at the end of the move."""
-        left  = _make_motor(1, 2, 3, 10, 11)
-        right = _make_motor(4, 5, 6, 12, 13)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
         _install_asymmetric_sim(left, right, left_scale=0.9, right_scale=1.0)
 
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
@@ -80,8 +80,8 @@ class TestDriveBaseNative2DOF(unittest.TestCase):
         self.assertLess(heading_err, target_wheel_deg * 0.05)
 
     def test_turn_converges_in_native_path(self):
-        left  = _make_motor(1, 2, 3, 10, 11)
-        right = _make_motor(4, 5, 6, 12, 13)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
         _install_asymmetric_sim(left, right)
 
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)

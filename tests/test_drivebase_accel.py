@@ -81,8 +81,8 @@ def _timed_straight_ms(acceleration):
     """Run a 100 mm straight at 200 dps cruise and return the virtual
     elapsed ms. ``acceleration=None`` keeps the 720 deg/s² default."""
     _reset_all()
-    left  = _make_motor(1, 2, 3, 10, 11)
-    right = _make_motor(4, 5, 6, 12, 13)
+    left  = _make_motor(1, 2, 17, 7, 8)
+    right = _make_motor(9, 10, 11, 12, 13)
     _install_symmetric_sim(left, right)
     db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
     db.settings(straight_speed=200)
@@ -98,8 +98,8 @@ class TestDriveBaseAcceleration(unittest.TestCase):
         _reset_all()
 
     def test_settings_rejects_non_positive_acceleration(self):
-        left  = _make_motor(1, 2, 3, 10, 11)
-        right = _make_motor(4, 5, 6, 12, 13)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
         with self.assertRaises(ValueError):
             db.settings(acceleration=0)
@@ -108,8 +108,8 @@ class TestDriveBaseAcceleration(unittest.TestCase):
 
     def test_native_set_accel_rejects_non_positive(self):
         # The C binding validates too — the wrapper isn't the only gate.
-        left  = _make_motor(1, 2, 3, 10, 11)
-        right = _make_motor(4, 5, 6, 12, 13)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
         with self.assertRaises(ValueError):
             db._native.set_accel(0.0)
@@ -196,8 +196,8 @@ class TestDriveBaseAcceleration(unittest.TestCase):
         # settings() is sticky — a second straight() after one gentle
         # move is still gentle (no reset back to the default).
         _reset_all()
-        left  = _make_motor(1, 2, 3, 10, 11)
-        right = _make_motor(4, 5, 6, 12, 13)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
         _install_symmetric_sim(left, right)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
         db.settings(straight_speed=200, acceleration=90)

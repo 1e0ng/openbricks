@@ -27,9 +27,9 @@ from machine import Pin
 
 sensor = HCSR04(trig=18, echo=19, timeout_us=30_000)
 
-m_left  = JGB37Motor(in1=12, in2=14, pwm=27,
-                     encoder_a=20, encoder_b=21)
-m_right = JGB37Motor(in1=13, in2=15, pwm=26,
+m_left  = JGB37Motor(in1=1, in2=2, pwm=17,
+                     encoder_a=12, encoder_b=13)
+m_right = JGB37Motor(in1=9, in2=10, pwm=11,
                      encoder_a=22, encoder_b=23)
 db = DriveBase(m_left, m_right,
                wheel_diameter_mm=60,

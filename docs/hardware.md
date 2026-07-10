@@ -66,6 +66,13 @@ Pin gotchas on the ESP32-S3:
   use. On a **classic ESP32**, the usual equivalents are I2C on
   21/22 and any two free pins for the UART.
 
+The firmware enforces the hard cases at construction time: a driver
+asked to wire a nonexistent, flash, or USB pin — or a pin the runtime
+already owns, like the program button — raises
+{class}`openbricks.pins.ReservedPinError` naming the pin, the role,
+and the reason, instead of failing somewhere far from the mistake.
+See {mod}`openbricks.pins`.
+
 ## Sensor wiring (I2C)
 
 The baseline build has **several colour sensors** (a line-follower /

@@ -5,6 +5,13 @@ These modules run behind the scenes on the hub — the frozen ``main.py``
 wires them up at boot. They're documented here because their behavior
 (button semantics, log rotation, BLE persistence) is user-visible.
 
+Reserved-GPIO guard
+-------------------
+
+.. automodule:: openbricks.pins
+   :members:
+   :undoc-members:
+
 Program launcher
 ----------------
 

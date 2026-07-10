@@ -20,8 +20,8 @@ from openbricks.drivers.jgb37_520 import JGB37Motor
 
 def _make_motor(**overrides):
     kwargs = dict(
-        in1=1, in2=2, pwm=3,
-        encoder_a=4, encoder_b=5,
+        in1=1, in2=2, pwm=17,
+        encoder_a=7, encoder_b=8,
         counts_per_output_rev=1320,
     )
     kwargs.update(overrides)

@@ -55,6 +55,7 @@ import time
 
 from machine import UART, Pin
 
+from openbricks import pins
 from openbricks.interfaces import Motor, Servo
 
 _HEADER = b"\xFF\xFF"
@@ -108,6 +109,10 @@ class _SCServoBus:
     """Shared UART bus. One instance per physical bus; many servos per bus."""
 
     def __init__(self, uart_id, tx, rx, baud=1_000_000, dir_pin=None):
+        pins.check(tx, "serial-bus UART TX")
+        pins.check(rx, "serial-bus UART RX", output=False)
+        if dir_pin is not None:
+            pins.check(dir_pin, "serial-bus direction pin")
         self._uart = UART(uart_id, baudrate=baud, tx=tx, rx=rx, timeout=50)
         self._dir = Pin(dir_pin, Pin.OUT, value=0) if dir_pin is not None else None
         # UART hardware takes ~10 ms to be ready for clean TX on

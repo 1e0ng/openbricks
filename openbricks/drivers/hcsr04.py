@@ -25,6 +25,7 @@ the cold-path use cases (line-following, wall avoidance, mission
 import machine
 import time
 
+from openbricks import pins
 from openbricks.distance import DistanceSensor
 
 
@@ -46,6 +47,8 @@ class HCSR04(DistanceSensor):
     """
 
     def __init__(self, trig, echo, timeout_us=_DEFAULT_TIMEOUT_US):
+        pins.check(trig, "HC-SR04 TRIG")
+        pins.check(echo, "HC-SR04 ECHO", output=False)
         self._trig = machine.Pin(trig, machine.Pin.OUT, value=0)
         self._echo = machine.Pin(echo, machine.Pin.IN)
         self._timeout_us = int(timeout_us)

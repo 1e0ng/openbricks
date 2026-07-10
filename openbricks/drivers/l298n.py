@@ -23,6 +23,7 @@ Pinout recap for one channel::
 
 from machine import Pin, PWM
 
+from openbricks import pins
 from openbricks.interfaces import Motor
 
 _PWM_FREQ_HZ = 20_000  # Above audible range; fine for most hobby H-bridges.
@@ -37,7 +38,15 @@ class L298NMotor(Motor):
             pwm: GPIO number for the EN pin (speed/duty).
             invert: swap forward/reverse. Handy when wiring goes the wrong way.
             pwm_freq: PWM frequency in Hz.
+
+        Raises:
+            openbricks.pins.ReservedPinError: when a pin is reserved
+                on the running chip (flash, USB, nonexistent) or
+                already owned by the runtime (program / BLE button).
         """
+        pins.check(in1, "H-bridge IN1")
+        pins.check(in2, "H-bridge IN2")
+        pins.check(pwm, "H-bridge PWM/EN")
         self._in1 = Pin(in1, Pin.OUT, value=0)
         self._in2 = Pin(in2, Pin.OUT, value=0)
         self._pwm = PWM(Pin(pwm), freq=pwm_freq, duty=0)
