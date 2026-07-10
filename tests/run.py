@@ -75,6 +75,7 @@ _TEST_MODULES = [
     "tests.test_hcsr04",
     "tests.test_vl53l0x",
     "tests.test_vl53l1x",
+    "tests.test_example_pins",
 ]
 
 
