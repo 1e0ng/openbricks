@@ -7,10 +7,26 @@ the verification flow (write, read back, compare).
 """
 
 import argparse
+import os
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
 from openbricks_dev import flash
+
+
+def _fake_image(base):
+    """Write a minimal merged-image lookalike to a temp file and return
+    its path: 0xFF padding with the partition-table magic at file offset
+    ``0x8000 - base`` — exactly how MicroPython's makeimg.py lays out an
+    image built for flash address ``base``."""
+    buf = bytearray(b"\xff" * (flash._PT_FLASH_OFFSET + 2))
+    off = flash._PT_FLASH_OFFSET - base
+    buf[off:off + 2] = flash._PT_MAGIC
+    fd, path = tempfile.mkstemp(suffix=".bin")
+    with os.fdopen(fd, "wb") as f:
+        f.write(buf)
+    return path
 
 
 def _args(**overrides):
@@ -61,10 +77,18 @@ class RunHappyPathTests(unittest.TestCase):
         # Never actually sleep in tests.
         self._sleep = patch("openbricks_dev.flash.time.sleep")
         self._sleep.start()
+        # A real (fake) image file on disk — flash.run reads it to
+        # determine the write offset. S3 layout → offset 0x0.
+        self.firmware = _fake_image(0x0)
 
     def tearDown(self):
         self._which.stop()
         self._sleep.stop()
+        os.unlink(self.firmware)
+
+    def _run_args(self, **overrides):
+        overrides.setdefault("firmware", self.firmware)
+        return _args(**overrides)
 
     def test_full_flow_success(self):
         # subprocess.call for erase_flash / write_flash / final reset.
@@ -88,17 +112,17 @@ class RunHappyPathTests(unittest.TestCase):
 
         with patch("subprocess.call", side_effect=_fake_call), \
              patch("subprocess.run", side_effect=_fake_run):
-            rc = flash.run(_args())
+            rc = flash.run(self._run_args())
 
         self.assertEqual(rc, 0)
         # Three subprocess.call invocations: erase, write, reset.
         self.assertEqual(len(call_history), 3)
         # First: erase-flash (esptool v5 kebab-case form).
         self.assertIn("erase-flash", call_history[0])
-        # Second: write-flash at 0x0 with the firmware path.
+        # Second: write-flash at 0x0 (S3-layout image) with the firmware path.
         self.assertIn("write-flash", call_history[1])
         self.assertIn("0x0", call_history[1])
-        self.assertIn("firmware.bin", call_history[1])
+        self.assertIn(self.firmware, call_history[1])
         # Third: mpremote-driven hardware reset at the end. Since 0.10.17
         # this is ``resume exec --no-follow machine.reset()`` rather than
         # the ``mpremote reset`` alias (which would soft-reset the chip
@@ -120,7 +144,7 @@ class RunHappyPathTests(unittest.TestCase):
         with patch("subprocess.call",
                    side_effect=lambda cmd: call_history.append(cmd) or 0), \
              patch("subprocess.run", side_effect=lambda *a, **k: next(run_responses)):
-            flash.run(_args(skip_erase=True))
+            flash.run(self._run_args(skip_erase=True))
         self.assertEqual(len(call_history), 2)
         self.assertNotIn("erase-flash", call_history[0])
 
@@ -134,7 +158,7 @@ class RunHappyPathTests(unittest.TestCase):
         with patch("subprocess.call", return_value=0), \
              patch("subprocess.run", side_effect=lambda *a, **k: next(run_responses)):
             with self.assertRaises(flash.FlashError) as ctx:
-                flash.run(_args())
+                flash.run(self._run_args())
         self.assertIn("verification failed", str(ctx.exception))
 
     def test_write_flash_failure_raises(self):
@@ -144,8 +168,88 @@ class RunHappyPathTests(unittest.TestCase):
                    side_effect=lambda cmd: next(returncodes)), \
              patch("subprocess.run"):
             with self.assertRaises(flash.FlashError) as ctx:
-                flash.run(_args())
+                flash.run(self._run_args())
         self.assertIn("command failed", str(ctx.exception))
+
+    def test_classic_esp32_image_writes_at_0x1000(self):
+        """The classic-ESP32 merged image starts at flash 0x1000; writing
+        it at 0x0 (the pre-0.10.22 behavior) puts the bootloader where
+        the ROM never looks and the board can't boot."""
+        classic = _fake_image(0x1000)
+        self.addCleanup(os.unlink, classic)
+        call_history = []
+        run_responses = iter([
+            MagicMock(returncode=0, stdout="ok\n", stderr=""),
+            MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
+            MagicMock(returncode=0, stdout="RobotA\n", stderr=""),
+        ])
+        with patch("subprocess.call",
+                   side_effect=lambda cmd: call_history.append(cmd) or 0), \
+             patch("subprocess.run", side_effect=lambda *a, **k: next(run_responses)):
+            flash.run(self._run_args(firmware=classic))
+        self.assertIn("write-flash", call_history[1])
+        self.assertIn("0x1000", call_history[1])
+        self.assertNotIn("0x0", call_history[1])
+
+    def test_unrecognizable_image_fails_before_erase(self):
+        """No partition-table magic at either candidate offset → refuse
+        to flash, and refuse *before* the erase wipes the chip."""
+        fd, bogus = tempfile.mkstemp(suffix=".bin")
+        with os.fdopen(fd, "wb") as f:
+            f.write(b"\xff" * (flash._PT_FLASH_OFFSET + 2))
+        self.addCleanup(os.unlink, bogus)
+        call_history = []
+        with patch("subprocess.call",
+                   side_effect=lambda cmd: call_history.append(cmd) or 0), \
+             patch("subprocess.run"):
+            with self.assertRaises(flash.FlashError) as ctx:
+                flash.run(self._run_args(firmware=bogus))
+        self.assertIn("cannot determine the flash offset", str(ctx.exception))
+        self.assertEqual(call_history, [],
+                         "no esptool command may run before the image "
+                         "layout is understood")
+
+
+class ImageBaseOffsetTests(unittest.TestCase):
+    """``_image_base_offset`` derives the write address from the image."""
+
+    def test_s3_layout_gives_0x0(self):
+        path = _fake_image(0x0)
+        self.addCleanup(os.unlink, path)
+        self.assertEqual(flash._image_base_offset(path), "0x0")
+
+    def test_classic_layout_gives_0x1000(self):
+        path = _fake_image(0x1000)
+        self.addCleanup(os.unlink, path)
+        self.assertEqual(flash._image_base_offset(path), "0x1000")
+
+    def test_ambiguous_image_raises(self):
+        # Magic at both candidate offsets — refuse to guess.
+        buf = bytearray(b"\xff" * (flash._PT_FLASH_OFFSET + 2))
+        for base in flash._IMAGE_BASES:
+            off = flash._PT_FLASH_OFFSET - base
+            buf[off:off + 2] = flash._PT_MAGIC
+        fd, path = tempfile.mkstemp(suffix=".bin")
+        with os.fdopen(fd, "wb") as f:
+            f.write(buf)
+        self.addCleanup(os.unlink, path)
+        with self.assertRaises(flash.FlashError):
+            flash._image_base_offset(path)
+
+    def test_missing_file_raises(self):
+        with self.assertRaises(flash.FlashError) as ctx:
+            flash._image_base_offset("/nonexistent/firmware.bin")
+        self.assertIn("cannot read firmware image", str(ctx.exception))
+
+    def test_truncated_image_raises(self):
+        # Shorter than the partition-table region → neither offset can
+        # match; must raise, not IndexError.
+        fd, path = tempfile.mkstemp(suffix=".bin")
+        with os.fdopen(fd, "wb") as f:
+            f.write(b"\xff" * 64)
+        self.addCleanup(os.unlink, path)
+        with self.assertRaises(flash.FlashError):
+            flash._image_base_offset(path)
 
 
 class ToolMissingTests(unittest.TestCase):
