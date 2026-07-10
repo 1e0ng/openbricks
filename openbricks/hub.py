@@ -152,7 +152,7 @@ class ESP32DevkitHub(Hub):
     """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BLE-toggle
     button on GPIO 5.
 
-    ``bluetooth`` default True wires the button to a long-press BLE
+    ``bluetooth`` default True wires the button to a short-press BLE
     toggle and restores the persisted state at boot (see
     ``openbricks.bluetooth_button`` / ``openbricks.bluetooth``). The
     onboard LED is single-colour so no colour feedback, just the toggle.
@@ -198,7 +198,7 @@ class ESP32S3DevkitHub(Hub):
 #
 # Called from the hub constructors when ``bluetooth=True`` (the default).
 # Restores the persisted BLE state (default on for a fresh board),
-# installs a long-press handler on the BOOT button that toggles it,
+# installs a short-press handler on the BLE-toggle button that flips it,
 # and — if the hub has an RGB-capable LED — paints the LED to match
 # the current state (blue = on, yellow = off).
 #
@@ -209,7 +209,7 @@ class ESP32S3DevkitHub(Hub):
 def _install_bluetooth_toggle(hub):
     """Called from the hub constructors when ``bluetooth=True``.
 
-    Builds a long-press watcher on the hub's button (recolouring the
+    Builds a short-press watcher on the hub's button (recolouring the
     LED on each toggle if it's RGB-capable) and stashes the watcher
     on ``hub.bluetooth_toggle`` so callers can ``stop()`` it later
     if they want the button for something else.

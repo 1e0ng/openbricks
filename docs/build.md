@@ -128,14 +128,19 @@ make -C native/micropython/ports/unix \
 ./native/micropython/ports/unix/build-standard/micropython tests/run.py
 ```
 
-The runner spawns one MP subprocess per test module for state isolation. Expected result: all 10 modules green, 85 tests.
+The runner spawns one MP subprocess per test module for state isolation (the module list lives in `tests/run.py::_TEST_MODULES`). Expected final line: `all modules passed.`
 
 ## CI
 
-GitHub Actions runs two jobs on every push / PR (see `.github/workflows/ci.yaml`):
+GitHub Actions runs several job groups on every push / PR (see `.github/workflows/ci.yaml`):
 
-- **`test`** — builds the unix MP binary with the `_openbricks_native` user_c_module and runs `tests/run.py`. No ESP-IDF needed.
-- **`firmware`** — a matrix job (targets: `esp32`, `esp32s3`) that builds each image inside the `espressif/idf:v5.5.4` container, then uploads `firmware.bin` + bootloader + partition-table for each target as a workflow artifact.
+- **`test`** — builds the unix MP binary with the `_openbricks_native` user_c_module and runs `tests/run.py`. No ESP-IDF needed. This is the merge gate for firmware changes.
+- **`cpython-tests`** / **`openbricks-py`** — the CPython-compatible subset of the firmware tests under stock CPython (catches MP/CPython interpreter divergence), the latter with coverage upload.
+- **`openbricks-host`** — the host CLI + sim test suite (`tools/openbricks/tests`) with coverage, plus a `--help` smoke test of every subcommand and a headless preview of every shipped sim world.
+- **`coverage`** — the firmware suite again on the gcov-instrumented unix MP build; uploads C-core coverage.
+- **`firmware`** — a matrix job (targets: `esp32`, `esp32s3`) that builds each image inside the `espressif/idf:v5.5.4` container and uploads `firmware.bin` + bootloader + partition-table per target as a workflow artifact.
+- **`qemu-smoke`** — boots the just-built ESP32-S3 image in Espressif's QEMU and asserts the bootloader reaches app entry with no panic markers.
+- **`release`** / **`build-openbricks-sdist`** / **`build-openbricks-wheels`** / **`publish-openbricks`** — firmware GitHub Releases (rolling `latest` on main pushes, versioned on `v*` tags) and the PyPI sdist + cibuildwheel wheels published on `openbricks/v*` tags.
 
 Successful PRs produce a flashable image downloadable from the Actions run.
 
@@ -143,7 +148,7 @@ Successful PRs produce a flashable image downloadable from the Actions run.
 
 **"IDF_PATH is not set"** — source `export.sh` in the shell that runs the build script. Each new shell needs it.
 
-**Build fails at `modbluetooth_nimble.c`** — BLE is disabled in `boards/openbricks_esp32/mpconfigboard.h` + `sdkconfig.board`; if you're re-enabling it, also un-disable in the `mpconfigboard.cmake` `SDKCONFIG_DEFAULTS` list.
+**Build fails at `modbluetooth_nimble.c`** — BLE (NimBLE) is *enabled* on both boards via `boards/sdkconfig.ble` in each board's `mpconfigboard.cmake` `SDKCONFIG_DEFAULTS` list; it's what `openbricks run` / `upload` / `stop` ride on, so don't disable it. A failure here usually means an ESP-IDF / MicroPython version mismatch — see the `WIFI_AUTH_MAX` entry below. (WiFi, by contrast, *is* deliberately disabled in `sdkconfig.board` + `mpconfigboard.h`.)
 
 **Build fails at `network_wlan.c` with a `_Static_assert` about `WIFI_AUTH_MAX`** — ESP-IDF / MP version mismatch. Either bump ESP-IDF into the supported range (5.3–5.5 for current MP master) or bump the MP submodule.
 

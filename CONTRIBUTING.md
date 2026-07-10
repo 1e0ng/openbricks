@@ -31,9 +31,20 @@ Unit tests live in `tests/` and use plain `unittest`. They don't require
 hardware — drivers should be testable by injecting fake `I2C` / `UART` /
 `Pin` objects. See `tests/test_l298n.py` for the pattern.
 
-Run tests on the desktop with CPython:
+The full suite runs against the real C module under the unix MicroPython
+binary (`python -m unittest discover` under CPython does **not** work —
+every test that touches `_openbricks_native` fails to import). Build the
+binary once (see `docs/build.md` → Running tests), then:
 
-    python -m unittest discover -s tests
+    ./native/micropython/ports/unix/build-standard/micropython tests/run.py
+
+For quick desktop iteration on a test that doesn't need the C module,
+run just that module under CPython:
+
+    python3 -m unittest tests.test_l298n
+
+(The CPython-compatible subset CI runs is the `cpython-tests` job list
+in `.github/workflows/ci.yaml`.)
 
 ## Releases
 

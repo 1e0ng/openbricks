@@ -554,7 +554,7 @@ jobs:
             - `openbricks-esp32-firmware-latest.bin` — original ESP32 (Xtensa LX6)
             - `openbricks-esp32s3-firmware-latest.bin` — ESP32-S3 (Xtensa LX7, native USB)
 
-            Flash with `openbricks-dev flash` or `esptool.py` — see `docs/build.md`.
+            Flash with `openbricks flash` or `esptool.py` — see `docs/build.md`.
           files: release-out/*
           # action-gh-release is idempotent: re-running replaces the
           # release's assets in place.
