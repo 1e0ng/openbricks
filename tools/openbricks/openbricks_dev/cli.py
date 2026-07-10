@@ -55,7 +55,7 @@ def _build_parser():
     )
     p_flash.add_argument(
         "--port", required=True,
-        help="Serial port (/dev/ttyUSB0, /dev/cu.usbserial-*, COM5 ...).",
+        help="Serial port (/dev/ttyUSB0, /dev/cu.usbserial-XXXX, COM5 ...).",
     )
     p_flash.add_argument(
         "--firmware", required=True,

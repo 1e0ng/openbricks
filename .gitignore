@@ -37,3 +37,4 @@ coverage.xml
 robot.local.json
 *.so
 tools/openbricks/native/_shared/
+docs/_build/

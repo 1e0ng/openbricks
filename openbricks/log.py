@@ -191,7 +191,9 @@ class _LogSession:
 
 
 def session():
-    """Construct a fresh :class:`_LogSession`. Use as a context manager::
+    """Construct a fresh :class:`_LogSession`.
+
+    Use as a context manager::
 
         with log.session() as sess:
             run_user_program()

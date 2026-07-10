@@ -9,6 +9,8 @@
 
 > A Pybricks-style MicroPython firmware for **open hardware** — commodity MCUs, commodity motors, commodity sensors.
 
+**Website**: <https://openbricks.dev> · **Documentation**: <https://docs.openbricks.dev>
+
 Pybricks gives LEGO users a delightful Python API, but it only runs on a handful of LEGO hubs with LEGO-branded motors and sensors. `openbricks` takes the same shape — a custom MicroPython firmware that bakes the robotics library into the runtime — and targets commodity components you can buy off the shelf.
 
 Like Pybricks, openbricks is a **firmware you flash to an MCU**, not a library you `pip install` on top of stock MicroPython. That means we own the runtime: background control loops, hardware timers, and native C extensions all live inside the firmware image. The motor scheduler and per-motor state machine are already in C (see `native/user_c_modules/openbricks/`); the state observer, trapezoidal trajectory planner, and 2-DOF drivebase controller get the same treatment in upcoming milestones. The three-layer API you write code against (drivers → abstract interfaces → robotics) is what `import openbricks` gives you out of the box.
