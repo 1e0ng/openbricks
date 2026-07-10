@@ -61,11 +61,12 @@ class BluetoothToggleButton:
             poll_ms: polling period. Default 50 ms (20 Hz) — well under
                 human reaction time, negligible CPU.
             timer_id: ``machine.Timer`` hardware ID (0..3 on
-                ESP32-S3). Default 1 stays out of the way of the
-                ``launcher`` (which takes timer 0). The previous
-                default ``-1`` (virtual timer) was supported by older
-                MicroPython but raises ``ValueError: invalid Timer
-                number`` on the v1.27+ MP we vendor.
+                ESP32-S3). Default 1 — the reserved inventory is
+                0 = launcher poll, 1 = this toggle, 2 = motor_process,
+                3 = the launcher's stop tick (``STOP_TIMER_ID``). The
+                previous default ``-1`` (virtual timer) was supported
+                by older MicroPython but raises ``ValueError: invalid
+                Timer number`` on the v1.27+ MP we vendor.
             color_on, color_off: ``(r, g, b)`` tuples the LED is set to
                 when BLE is enabled / disabled. Defaults: blue / yellow.
         """
@@ -76,6 +77,13 @@ class BluetoothToggleButton:
         self._color_on      = tuple(color_on)
         self._color_off     = tuple(color_off)
         self._timer         = None
+        # Stable callback object for bluetooth.add/remove_state_listener.
+        # A bound method (``self._on_state_change``) is a fresh object on
+        # every attribute access under MicroPython, where bound methods
+        # compare by identity — remove() would never match. A closure
+        # created once here keeps its identity for the toggle's lifetime.
+        self._state_listener = (
+            lambda enabled: self._paint(bool(enabled)))
 
         # Edge-detection state: True from the moment we first saw the
         # button pressed until the subsequent release (when we fire).
@@ -86,11 +94,16 @@ class BluetoothToggleButton:
     def start(self):
         """Begin polling. Safe to call repeatedly — the second call is a no-op.
 
-        On first call, paints the LED (if one was provided) to reflect the
-        current persisted BLE state, so the boot indicator matches reality.
+        On first call, paints the LED (if one was provided) to reflect
+        the current persisted BLE state, and registers with
+        ``bluetooth.add_state_listener`` so the LED also follows state
+        changes made *without* the button — ``bluetooth.set_enabled``
+        from user code or a tool over the REPL.
         """
         if self._timer is not None:
             return
+        from openbricks import bluetooth
+        bluetooth.add_state_listener(self._state_listener)
         self._apply_led_for_current_state()
         self._timer = Timer(self._timer_id)
         self._timer.init(
@@ -100,9 +113,12 @@ class BluetoothToggleButton:
         )
 
     def stop(self):
-        """Stop polling and release the timer."""
+        """Stop polling, release the timer, and unregister the LED
+        state listener."""
         if self._timer is None:
             return
+        from openbricks import bluetooth
+        bluetooth.remove_state_listener(self._state_listener)
         self._timer.deinit()
         self._timer = None
         self._was_pressed = False
@@ -122,20 +138,28 @@ class BluetoothToggleButton:
         # Imported inside the method so tests that don't install the BLE
         # fake don't explode at module-load time. In production both
         # imports succeed because the firmware freezes the module in.
+        # The LED repaint rides the state listener registered in
+        # ``start()`` — ``toggle()`` fires it.
         from openbricks import bluetooth
         bluetooth.toggle()
-        self._apply_led_for_current_state()
 
     def _apply_led_for_current_state(self):
-        """Paint the LED to match the current persisted BLE state, if an
-        RGB-capable LED was provided. Silently no-ops on plain on/off
-        LEDs (whose ``.rgb()`` raises ``NotImplementedError``) so the
-        hub can pass ``self.led`` unconditionally without caring which
-        variant it is."""
+        """Paint the LED to match the current persisted BLE state.
+        Early-out with no LED so LED-less hubs skip the NVS read."""
         if self._led is None:
             return
         from openbricks import bluetooth
-        color = self._color_on if bluetooth.is_enabled() else self._color_off
+        self._paint(bluetooth.is_enabled())
+
+    def _paint(self, enabled):
+        """Paint the LED for ``enabled``, if an RGB-capable LED was
+        provided. Silently no-ops on plain on/off LEDs (whose
+        ``.rgb()`` raises ``NotImplementedError``) so the hub can pass
+        ``self.led`` unconditionally without caring which variant it
+        is."""
+        if self._led is None:
+            return
+        color = self._color_on if enabled else self._color_off
         try:
             self._led.rgb(*color)
         except NotImplementedError:

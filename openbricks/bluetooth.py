@@ -93,6 +93,33 @@ def set_enabled(enabled):
         # Start the REPL bridge *after* active(True) — gatts_register_services
         # errors otherwise.
         ble_repl.start()
+    for cb in tuple(_state_listeners):
+        cb(bool(enabled))
+
+
+# ---- state-change listeners ----
+#
+# Registered callbacks run after every successful ``set_enabled`` (and
+# therefore after every ``toggle``), with the new state as their only
+# argument. This is how the status LED follows BLE state regardless of
+# who changed it — button press, user code, or a tool over the REPL.
+# Without it, only the button path repainted and a programmatic
+# ``set_enabled(True)`` left the LED stale.
+_state_listeners = []
+
+
+def add_state_listener(callback):
+    """Register ``callback(enabled)`` to run after each state change.
+    Adding the same callback twice is a no-op."""
+    if callback not in _state_listeners:
+        _state_listeners.append(callback)
+
+
+def remove_state_listener(callback):
+    """Unregister a callback added with :func:`add_state_listener`.
+    Unknown callbacks are a no-op."""
+    if callback in _state_listeners:
+        _state_listeners.remove(callback)
 
 
 def toggle():
