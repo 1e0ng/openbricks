@@ -11,7 +11,7 @@ to re-run after our app exits — see the long note in
 
 Pybricks-style workflow:
 
-* BLE + NUS REPL up first so the openbricks-dev tool can always reach
+* BLE + NUS REPL up first so the openbricks tool can always reach
   the hub (via ``bluetooth.apply_persisted_state()``).
 * If BLE didn't activate (e.g. fresh chip with no hub name in NVS),
   drop straight to the REPL — entering ``launcher.run()`` would

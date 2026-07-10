@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev log -n NAME`` — pull a script-run log file off a hub.
+``openbricks log -n NAME`` — pull a script-run log file off a hub.
 
 Every program executed via :mod:`openbricks.launcher` (button-press OR
-``openbricks-dev run``) gets its ``stdout`` + ``stderr`` tee'd to a
+``openbricks run``) gets its ``stdout`` + ``stderr`` tee'd to a
 file under ``/openbricks_logs/`` on the hub. Three rotating slots —
 ``run_0.log`` through ``run_2.log``. ``log`` reads any of them back.
 

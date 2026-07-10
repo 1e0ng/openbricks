@@ -67,7 +67,7 @@ def set_enabled(enabled):
     can still be silenced.
 
     When enabling, also starts the NUS REPL bridge (``openbricks.ble_repl``)
-    so ``openbricks-dev run`` / ``stop`` can push scripts over BLE. When
+    so ``openbricks run`` / ``stop`` can push scripts over BLE. When
     disabling, the bridge is torn down first so dupterm isn't left
     pointing at an inactive stack.
     """

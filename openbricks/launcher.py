@@ -4,9 +4,9 @@ Button-gated user-program launcher.
 
 Pybricks-style workflow:
 
-* ``openbricks-dev upload`` stages a script at ``/program.py`` but
+* ``openbricks upload`` stages a script at ``/program.py`` but
   does not run it — the user presses the program button to launch.
-* ``openbricks-dev run`` stages the same script and triggers the
+* ``openbricks run`` stages the same script and triggers the
   launcher immediately. Output streams back to the client; pressing
   the program button stops the program; when the program stops, the
   terminal exits.
@@ -25,7 +25,7 @@ Wiring:
 
 The watcher runs off a ``machine.Timer`` kept alive for the whole hub
 uptime (we never ``deinit`` it), so button-press-to-run survives
-``openbricks-dev run`` interrupting the main idle loop.
+``openbricks run`` interrupting the main idle loop.
 
 Typical ``main.py`` (the firmware ships a frozen default; users can
 override by writing to ``/main.py`` in VFS):
@@ -316,7 +316,7 @@ def _exec_program_raw(program_path):
     ``print()`` / exception traceback is *also* tee'd to a flash
     file. The live console (USB-CDC / BLE-NUS) still sees everything;
     the file is only a backup for inspecting an untethered run later
-    via ``openbricks-dev log``.
+    via ``openbricks log``.
     """
     with open(program_path) as f:
         code = f.read()
@@ -347,7 +347,7 @@ def _exec_program_raw(program_path):
                     traceback.print_exception(type(e), e, e.__traceback__)
                 # Tracebacks above go to the live console only — print()
                 # is the only stream we tee. Mirror a short summary into
-                # the log file so it shows up in ``openbricks-dev log``
+                # the log file so it shows up in ``openbricks log``
                 # too.
                 sess.write_text("Exception: %r\n" % (e,))
     finally:
@@ -426,7 +426,7 @@ def run(program_path=DEFAULT_PROGRAM_PATH, button_pin=DEFAULT_BUTTON_PIN,
 
 
 def run_program(program_path=DEFAULT_PROGRAM_PATH):
-    """Client-triggered entry for ``openbricks-dev run``.
+    """Client-triggered entry for ``openbricks run``.
 
     Sets the ``_running`` flag, then exec's the program in the main
     thread (``_exec_program_raw`` arms the native stop button for the

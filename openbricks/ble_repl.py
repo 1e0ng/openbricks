@@ -187,7 +187,7 @@ class _BLEUART:
         ((self._tx_handle, self._rx_handle),) = self._ble.gatts_register_services(
             ((bluetooth.UUID(_UART_SERVICE_UUID), (
                 (bluetooth.UUID(_UART_TX_UUID), _FLAG_NOTIFY),
-                # RX needs BOTH flags. The host-side openbricks-dev
+                # RX needs BOTH flags. The host-side openbricks
                 # uses ``write_gatt_char(..., response=False)`` for
                 # the streaming-REPL hot path; bleak / CoreBluetooth
                 # silently drop that write if WRITE_NO_RESPONSE isn't
@@ -202,7 +202,7 @@ class _BLEUART:
         )
         # Append-mode rx buffer: back-to-back writes from the central
         # accumulate instead of overwriting. Without this, a quick
-        # "Ctrl-C Ctrl-A" from openbricks-dev run loses one of the two.
+        # "Ctrl-C Ctrl-A" from openbricks run loses one of the two.
         #
         # rxbuf=512 (was 100 in upstream BLEUART): MicroPython's
         # raw-paste protocol uses a 128-byte window and after the

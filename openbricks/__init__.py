@@ -10,7 +10,7 @@ from openbricks.interfaces import Motor, Servo, IMU, ColorSensor  # noqa: F401
 # ---- hub name ----
 #
 # A short string that identifies this specific hub — the same role as
-# ``pybricks-dev run -n <name>``. Used as the BLE advertising name so
+# ``pybricksdev run -n <name>``. Used as the BLE advertising name so
 # future code-transfer tooling can target one hub on a bench full of
 # them.
 #

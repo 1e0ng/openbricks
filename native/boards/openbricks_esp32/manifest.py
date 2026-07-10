@@ -20,7 +20,7 @@ package(
 )
 
 # Default ``main.py`` — drives the Pybricks-style button-gated launcher
-# so ``openbricks-dev download`` can stage code without running it.
+# so ``openbricks download`` can stage code without running it.
 # Users who want different boot behaviour write to ``/main.py`` in VFS;
 # that file takes priority over this frozen default.
 freeze("$(MPY_DIR)/../../native/frozen")
