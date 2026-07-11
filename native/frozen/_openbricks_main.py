@@ -44,7 +44,8 @@ import sys
 
 
 def _main():
-    from openbricks import bluetooth, ble_repl
+    import openbricks
+    from openbricks import bluetooth
 
     # BLE + NUS REPL up first so ``openbricks run`` / ``upload`` /
     # ``stop`` are always reachable, even if the rest of main fails.
@@ -53,13 +54,22 @@ def _main():
     # warning instead of raising.
     bluetooth.apply_persisted_state()
 
-    # Fresh-chip path: no hub name in NVS → BLE not activated. Don't
-    # enter the blocking launcher loop — the next step in the
-    # ``openbricks flash`` flow is ``mpremote ... exec`` to write the
-    # hub name, and that needs the chip's REPL reachable. Returning
-    # here drops us into the friendly REPL.
-    if not ble_repl.is_running():
-        print("openbricks: BLE inactive — dropping to REPL for setup.")
+    # Fresh-chip path: no hub NAME in NVS → nothing can advertise, and
+    # the next step in the ``openbricks flash`` flow is ``mpremote ...
+    # exec`` writing the name — that needs the chip's REPL reachable,
+    # so don't enter the blocking launcher loop. Returning here drops
+    # us into the friendly REPL.
+    #
+    # This is deliberately the ONLY early-out. Until 1.10.2 the gate
+    # was ``ble_repl.is_running()``, which is also False when the user
+    # toggled BLE off with the button: that boot then wired neither
+    # the hub nor the launcher — status LED dark (not even yellow),
+    # both buttons dead, and no way to re-enable BLE short of USB or a
+    # full-erase reflash. A named hub with BLE persisted-off must
+    # still get its hub (LED yellow, short-press re-enables BLE) and
+    # launcher (program button works).
+    if openbricks._read_hub_name() is None:
+        print("openbricks: no hub name — dropping to REPL for setup.")
         return
 
     # Try to wire the platform hub so the BLE-toggle long-press works.

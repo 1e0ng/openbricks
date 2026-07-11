@@ -109,7 +109,8 @@ jobs:
             tests.test_pcnt_encoder_irq_contract \
             tests.test_example_pins \
             tests.test_pins \
-            tests.test_timer_allocation
+            tests.test_timer_allocation \
+            tests.test_boot_main
 
   openbricks-py:
     # Python-layer coverage of the firmware package (``openbricks/``).
