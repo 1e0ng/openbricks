@@ -30,12 +30,16 @@ from machine import I2C, Pin
 from openbricks.tools import wait
 
 from openbricks.drivers.st3032 import ST3032Motor
+from openbricks.drivers.st3215 import SyncServoGroup
 from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.drivers.tcs34725 import TCS34725
 
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
 right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6, invert=True)
+# One SYNC WRITE starts both wheels at the same packet boundary,
+# instead of two serialised bus writes.
+wheels = SyncServoGroup([left_motor, right_motor])
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux = TCA9548A(i2c)
@@ -51,32 +55,35 @@ LINE_AMBIENT = 5
 
 def align_on_line():
     # Drive forward until each sensor sees the line; brake that side.
+    #
+    # No print() inside the poll loop: each one streams over the BLE
+    # console and stretches a 10 ms tick to many times that, so the
+    # wheel brakes long after its sensor crossed the line. Readings
+    # are collected and reported after each wheel stops instead.
 
-    approach_dps=100
-    poll_ms=10
-    timeout_ms=8000
+    approach_dps = 100
+    poll_ms = 10
+    timeout_ms = 8000
 
     left_done = False
     right_done = False
-    left_motor.run_speed(approach_dps)
-    right_motor.run_speed(approach_dps)
+    left_ambient = None
+    right_ambient = None
+    wheels.set_goal_speeds([approach_dps, approach_dps])
     try:
         for _ in range(max(1, timeout_ms // poll_ms)):
             if not left_done:
                 left_ambient = left_sensor.ambient()
-                print('left ambient:', left_ambient)
-                print('left rgb:', left_sensor.rgb())
-
                 if left_ambient < LINE_AMBIENT:
                     left_motor.brake()
                     left_done = True
+                    print('left wheel stopped (ambient=%d)' % left_ambient)
             if not right_done:
                 right_ambient = right_sensor.ambient()
-                print('right ambient:', right_ambient)
-
                 if right_ambient < LINE_AMBIENT:
                     right_motor.brake()
                     right_done = True
+                    print('right wheel stopped (ambient=%d)' % right_ambient)
 
             if left_done and right_done:
                 return
@@ -89,8 +96,9 @@ def align_on_line():
         if not right_done:
             right_motor.brake()
     raise RuntimeError(
-        "no line found within %d ms — is the line in reach, and is "
-        "LINE_AMBIENT calibrated for your mat?" % timeout_ms)
+        "no line found within %d ms (last ambient: left=%r right=%r) — "
+        "is the line in reach, and is LINE_AMBIENT calibrated for "
+        "your mat?" % (timeout_ms, left_ambient, right_ambient))
 
 
 def main():
