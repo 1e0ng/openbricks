@@ -54,6 +54,14 @@ class TCS34725(ColorSensor):
         elif atime > 255:
             atime = 255
         self._write_u8(_ATIME, atime)
+        # Full-scale ADC count for this integration time (datasheet:
+        # MAX COUNT = 1024 x cycles, capped at 65535). At the default
+        # 24 ms (10 cycles) the clear channel saturates at 10240 —
+        # NOT 65535. Scaling ambient() against 65535 made it top out
+        # around 15 and read 0 on any real surface (caught on
+        # hardware by examples/line_align.py).
+        cycles = 256 - atime
+        self._full_scale = min(65535, 1024 * cycles)
 
         gain_map = {1: 0x00, 4: 0x01, 16: 0x02, 60: 0x03}
         self._write_u8(_CONTROL, gain_map.get(gain, 0x01))
@@ -91,10 +99,15 @@ class TCS34725(ColorSensor):
         )
 
     def ambient(self):
-        """Return clear-channel brightness scaled to 0..100."""
+        """Return clear-channel brightness scaled to 0..100.
+
+        100 means the clear ADC is saturated *for the configured
+        integration time* — 1024 counts per 2.4 ms cycle, capped at
+        65535 (datasheet "MAX COUNT"). Scale non-linearly would be
+        nicer but keep it simple.
+        """
         c, _r, _g, _b = self.raw()
-        # 65535 is the ADC max; scale non-linearly would be nicer but keep it simple.
-        return min(100, int(c * 100 / 65535))
+        return min(100, int(c * 100 / self._full_scale))
 
     # --- low level ---
     def _read_u8(self, reg):
