@@ -1,49 +1,47 @@
-# LED diagnostic — safe, no motors. Flashes the WS2812 candidates and
-# reports what the boot sequence actually wired.
+# LED diagnostic — safe, no motors. Hammers the WS2812 candidates hard
+# enough to separate "marginal signal" from "dead LED".
+import os
 import time
 
-print("=== 1) raw WS2812 probe on GPIO 48 and 38 ===")
-# DevKitC-1 v1.0 has the RGB LED on GPIO 48; v1.1 boards (and several
-# clones) moved it to GPIO 38. Watch the board: report which pin (if
-# any) flashes green.
+print("=== 0) environment ===")
+print(os.uname())
+
+print("=== 1) full-white WS2812 probe, both bitstream timings ===")
+# Full white (255,255,255) at both neopixel timings (800 kHz default
+# and 400 kHz) on every plausible RGB-LED pin for S3 devkits:
+#   48 = DevKitC-1 v1.0, 38 = v1.1 and many clones, 47/21 = misc clones.
+# Watch the board: report the pin + timing of any light, however dim.
 from machine import Pin
 import neopixel
-for p in (48, 38):
-    try:
-        np = neopixel.NeoPixel(Pin(p), 1)
-        np[0] = (0, 60, 0)
-        np.write()
-        print("GPIO %d: wrote GREEN — is the LED lit now?" % p)
-        time.sleep(2)
-        np[0] = (0, 0, 0)
-        np.write()
-    except Exception as e:
-        print("GPIO %d: raised %r" % (p, e))
+for p in (48, 38, 47, 21):
+    for timing in (1, 0):
+        try:
+            np = neopixel.NeoPixel(Pin(p), 1, timing=timing)
+            np[0] = (255, 255, 255)
+            np.write()
+            print("GPIO %d timing=%d: wrote FULL WHITE — lit?" % (p, timing))
+            time.sleep(1.5)
+            np[0] = (0, 0, 0)
+            np.write()
+        except Exception as e:
+            print("GPIO %d timing=%d: raised %r" % (p, timing, e))
 
-print("=== 2) what boot wired (pin claims) ===")
-# {48: LED, 5: button, 4: program} = S3 hub constructed at boot.
-# {2: LED, ...} = boot silently fell back to the classic-ESP32 hub.
-# {4 only} = both hub constructors raised.
+print("=== 2) raw machine.bitstream on GPIO 48 ===")
+# Bypass the neopixel class: clock 24 bits of 0xFF straight out with
+# explicit WS2812 timing. If neopixel is broken but this lights, the
+# neopixel layer is at fault; if neither lights anywhere, the LED (or
+# its data trace / power) is dead — software can't tell those apart.
 try:
-    from openbricks import pins
-    print("claims:", pins._claims)
-except ImportError:
-    print("no openbricks.pins (firmware older than 1.10.0)")
-
-print("=== 3) reconstruct the S3 hub and catch the real error ===")
-try:
-    from openbricks.hub import ESP32S3DevkitHub
-    h = ESP32S3DevkitHub(bluetooth=False)
-    print("hub constructed OK, led =", h.led)
-    if h.led is not None:
-        h.led.rgb(0, 0, 255)
-        print("painted BLUE via hub.led — is it lit?")
-        time.sleep(2)
-        h.led.rgb(0, 0, 0)
+    from machine import bitstream
+    pin = Pin(48, Pin.OUT)
+    bitstream(pin, 0, (400, 850, 800, 450), b"\xff\xff\xff")
+    print("bitstream wrote 0xFFFFFF on GPIO 48 — lit?")
+    time.sleep(1.5)
+    bitstream(pin, 0, (400, 850, 800, 450), b"\x00\x00\x00")
 except Exception as e:
-    print("ESP32S3DevkitHub RAISED:", repr(e))
+    print("bitstream raised %r" % (e,))
 
-print("=== 4) BLE state ===")
+print("=== 3) BLE state (for the record) ===")
 from openbricks import bluetooth
 print("bluetooth.is_enabled():", bluetooth.is_enabled())
-print("=== done ===")
+print("=== done — report which step, if any, lit the LED ===")
