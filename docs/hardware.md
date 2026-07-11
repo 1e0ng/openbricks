@@ -73,6 +73,18 @@ already owns, like the program button — raises
 and the reason, instead of failing somewhere far from the mistake.
 See {mod}`openbricks.pins`.
 
+### If the status LED never lights
+
+The onboard WS2812 speaks a write-only protocol — the firmware can't
+tell a dead LED from a working one, so a blown pixel looks like
+software silently failing. Run `examples/led_probe.py` on the hub: it
+drives full white at both timings across every plausible RGB pin
+(48/38/47/21) plus a raw `machine.bitstream` write. If nothing lights
+through all of that, the LED (or its data trace) is dead hardware —
+WS2812s do die from voltage transients, especially on benches with
+12 V servo rails. Fix: wire any external WS2812 to 3.3V / GND /
+GPIO 48 and it becomes the status LED with no firmware change.
+
 ## Sensor wiring (I2C)
 
 The baseline build has **several colour sensors** (a line-follower /
