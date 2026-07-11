@@ -80,8 +80,13 @@ tell a dead LED from a working one, so a blown pixel looks like
 software silently failing. Run `examples/led_probe.py` on the hub: it
 drives full white at both timings across every plausible RGB pin
 (48/38/47/21) plus a raw `machine.bitstream` write. If nothing lights
-through all of that, the problem is physical, and on clone boards it
-usually isn't even a dead LED: check the schematic for **population
+through all of that, the problem is physical. The decisive check is a
+**power-off ohmmeter reading from the LED's data pin (or its GPIO) to
+GND**: a WS2812 whose DI input has failed as an internal short reads
+~0 Ω there and clamps the GPIO — the pin measures millivolts even
+when driven high, every write "succeeds" into the short, and the
+symptom history is "worked once, then went dark for good". Lift the
+data link to free the pin. Also check the schematic for **population
 options in the LED circuit**. The ESP32-S3-COREBOARD V1.4
 (`docs/datasheets/esp32s3_coreboard_v1.4_schematic.pdf`) routes
 GPIO 48 to the WS2812 through a 0 Ω `RGB` link and feeds the LED's
