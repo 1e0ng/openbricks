@@ -70,13 +70,43 @@ class TestTCS34725(unittest.TestCase):
         i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(0, 100, 100, 100)
         self.assertEqual(s.rgb(), (0, 0, 0))
 
-    def test_ambient_scales_to_percent(self):
+    def test_ambient_scales_against_integration_full_scale(self):
+        # Datasheet MAX COUNT = 1024 x cycles. Default integration is
+        # 24 ms = 10 cycles -> the clear channel saturates at 10240,
+        # not 65535. The old 65535 divisor made ambient() top out
+        # around 15 and read 0 on every real surface.
+        i2c = _make_i2c_with_id()
+        s = TCS34725(i2c)   # default integration_ms=24
+        i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(10240, 0, 0, 0)
+        self.assertEqual(s.ambient(), 100)
+        i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(5120, 0, 0, 0)
+        self.assertEqual(s.ambient(), 50)
+        i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(0, 0, 0, 0)
+        self.assertEqual(s.ambient(), 0)
+
+    def test_ambient_typical_mat_reading_is_not_zero(self):
+        # The hardware symptom that exposed the bug: a normal indoor
+        # reading (clear of a few hundred counts) must not floor to 0.
+        i2c = _make_i2c_with_id()
+        s = TCS34725(i2c)
+        i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(2048, 0, 0, 0)
+        self.assertEqual(s.ambient(), 20)
+
+    def test_ambient_clamps_at_100(self):
+        # A count above the theoretical full scale (sensor quirk /
+        # different ATIME written behind the driver's back) must clamp.
         i2c = _make_i2c_with_id()
         s = TCS34725(i2c)
         i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(65535, 0, 0, 0)
         self.assertEqual(s.ambient(), 100)
-        i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(0, 0, 0, 0)
-        self.assertEqual(s.ambient(), 0)
+
+    def test_ambient_full_scale_caps_at_65535_for_long_integration(self):
+        # 614.4 ms = 256 cycles -> 1024 x 256 = 262144, but the ADC
+        # register is 16-bit: full scale caps at 65535.
+        i2c = _make_i2c_with_id()
+        s = TCS34725(i2c, integration_ms=614)
+        i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(65535, 0, 0, 0)
+        self.assertEqual(s.ambient(), 100)
         i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(32767, 0, 0, 0)
         self.assertEqual(s.ambient(), 49)
 
