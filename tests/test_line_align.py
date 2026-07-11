@@ -7,8 +7,7 @@ import unittest
 
 # Same import arrangement as tests/test_color_array.py: the example
 # lives in examples/, resolved via a relative sys.path entry that
-# works under both CPython and tests/run.py. line_align has no
-# module-level hardware imports.
+# works under both CPython and tests/run.py.
 if "examples" not in sys.path:
     sys.path.insert(0, "examples")
 
@@ -39,24 +38,37 @@ def _on_line_after(n_polls, poll_counter):
 
 
 class AlignOnLineTests(unittest.TestCase):
+    """``line_align.wait`` (openbricks.tools.wait — MicroPython's
+    ``time.sleep_ms`` underneath) is patched to a poll counter so the
+    loop runs instantly and deterministically under both CPython and
+    unix MicroPython."""
+
+    def setUp(self):
+        self._polls = [0]
+        self._real_wait = line_align.wait
+        polls = self._polls
+
+        def _counting_wait(_ms):
+            polls[0] += 1
+        line_align.wait = _counting_wait
+
+    def tearDown(self):
+        line_align.wait = self._real_wait
+
     def _run(self, left_at, right_at, timeout_ms=100, poll_ms=10):
         """Drive align_on_line with sensors that trigger at the given
         poll indices (None = never). Returns the event log."""
         log = []
         left = _FakeMotor("L", log)
         right = _FakeMotor("R", log)
-        polls = [0]
-
-        def wait_ms(_ms):
-            polls[0] += 1
-
         never = 10 ** 9
         line_align.align_on_line(
             left, right,
-            _on_line_after(left_at if left_at is not None else never, polls),
-            _on_line_after(right_at if right_at is not None else never, polls),
-            approach_dps=100, poll_ms=poll_ms, timeout_ms=timeout_ms,
-            wait_ms=wait_ms)
+            _on_line_after(left_at if left_at is not None else never,
+                           self._polls),
+            _on_line_after(right_at if right_at is not None else never,
+                           self._polls),
+            approach_dps=100, poll_ms=poll_ms, timeout_ms=timeout_ms)
         return log
 
     def test_both_start_forward_at_approach_speed(self):
@@ -87,14 +99,13 @@ class AlignOnLineTests(unittest.TestCase):
         self.assertEqual(len(brakes), 2)
 
     def test_timeout_raises_and_brakes_both(self):
-        log = []
-        left = _FakeMotor("L", log)
-        right = _FakeMotor("R", log)
         try:
+            log = []
+            left = _FakeMotor("L", log)
+            right = _FakeMotor("R", log)
             line_align.align_on_line(
-                left, right,
-                lambda: False, lambda: False,
-                poll_ms=10, timeout_ms=50, wait_ms=lambda _ms: None)
+                left, right, lambda: False, lambda: False,
+                poll_ms=10, timeout_ms=50)
         except RuntimeError:
             pass
         else:
@@ -111,9 +122,8 @@ class AlignOnLineTests(unittest.TestCase):
         right = _FakeMotor("R", log)
         try:
             line_align.align_on_line(
-                left, right,
-                lambda: True, lambda: False,
-                poll_ms=10, timeout_ms=50, wait_ms=lambda _ms: None)
+                left, right, lambda: True, lambda: False,
+                poll_ms=10, timeout_ms=50)
         except RuntimeError:
             pass
         else:

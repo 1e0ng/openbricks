@@ -26,6 +26,8 @@ Hardware (same bus layout as ``color_array.py`` / ``full_robot.py``):
       both facing the mat at the front of the chassis
 """
 
+from openbricks.tools import wait
+
 # Below this ambient (0..100) the surface counts as the line. Between
 # a typical mat (~30+) and a matte black line (~5-10); calibrate on
 # your own surfaces.
@@ -33,8 +35,7 @@ LINE_AMBIENT = 15
 
 
 def align_on_line(left_motor, right_motor, left_on_line, right_on_line,
-                  approach_dps=100, poll_ms=10, timeout_ms=8000,
-                  wait_ms=None):
+                  approach_dps=100, poll_ms=10, timeout_ms=8000):
     """Drive forward until each sensor sees the line; brake that side.
 
     Args:
@@ -50,12 +51,7 @@ def align_on_line(left_motor, right_motor, left_on_line, right_on_line,
             budget. On timeout both wheels brake and ``RuntimeError``
             is raised — no line within reach, or a sensor that never
             triggers (mis-calibrated ``LINE_AMBIENT``).
-        wait_ms: injectable sleep for tests; defaults to
-            ``openbricks.tools.wait``.
     """
-    if wait_ms is None:
-        from openbricks.tools import wait as wait_ms
-
     left_done = False
     right_done = False
     left_motor.run_speed(approach_dps)
@@ -70,7 +66,7 @@ def align_on_line(left_motor, right_motor, left_on_line, right_on_line,
                 right_done = True
             if left_done and right_done:
                 return
-            wait_ms(poll_ms)
+            wait(poll_ms)
     finally:
         # Whatever ends the loop — success, timeout, Ctrl-C — no
         # wheel keeps creeping.
@@ -89,7 +85,6 @@ def main():
     from openbricks.drivers.st3032 import ST3032Motor
     from openbricks.drivers.tca9548a import TCA9548A
     from openbricks.drivers.tcs34725 import TCS34725
-    from openbricks.tools import wait
 
     left = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
     right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
