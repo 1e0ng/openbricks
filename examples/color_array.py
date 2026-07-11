@@ -67,7 +67,7 @@ def main():
 
     i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
     mux = TCA9548A(i2c)                                    # 0x70 default
-    sensors = [TCS34725(mux[ch]) for ch in range(3)]       # left, mid, right
+    sensors = [TCS34725(mux[ch]) for ch in range(2)]       # left, mid, right
 
     print("Line array over a dark line on a light floor (Ctrl-C to stop)...")
     while True:
