@@ -34,19 +34,19 @@ from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.drivers.tcs34725 import TCS34725
 
 
-left_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-right_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
+right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6, invert=True)
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux = TCA9548A(i2c)
-left_sensor = TCS34725(mux[0])
-right_sensor = TCS34725(mux[1])
+left_sensor = TCS34725(mux[1])
+right_sensor = TCS34725(mux[0])
 
 
 # Below this ambient (0..100) the surface counts as the line. Between
 # a typical mat (~30+) and a matte black line (~5-10); calibrate on
 # your own surfaces.
-LINE_AMBIENT = 15
+LINE_AMBIENT = 5
 
 
 def align_on_line():
