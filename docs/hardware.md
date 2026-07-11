@@ -80,10 +80,17 @@ tell a dead LED from a working one, so a blown pixel looks like
 software silently failing. Run `examples/led_probe.py` on the hub: it
 drives full white at both timings across every plausible RGB pin
 (48/38/47/21) plus a raw `machine.bitstream` write. If nothing lights
-through all of that, the LED (or its data trace) is dead hardware —
-WS2812s do die from voltage transients, especially on benches with
-12 V servo rails. Fix: wire any external WS2812 to 3.3V / GND /
-GPIO 48 and it becomes the status LED with no firmware change.
+through all of that, the problem is physical, and on clone boards it
+usually isn't even a dead LED: check the schematic for **population
+options in the LED circuit**. The ESP32-S3-COREBOARD V1.4
+(`docs/datasheets/esp32s3_coreboard_v1.4_schematic.pdf`) routes
+GPIO 48 to the WS2812 through a 0 Ω `RGB` link and feeds the LED's
+VDD from the **5 V rail** through a second optional link — if either
+link is unpopulated (or the board is powered via 3.3 V only, leaving
+the 5 V rail dead), the LED never lights while every write succeeds.
+Bridge the link / feed 5 V, or wire any external WS2812 to
+3.3V / GND / GPIO 48 — it becomes the status LED with no firmware
+change.
 
 ## Sensor wiring (I2C)
 
