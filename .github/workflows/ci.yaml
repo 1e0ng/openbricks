@@ -110,7 +110,8 @@ jobs:
             tests.test_example_pins \
             tests.test_pins \
             tests.test_timer_allocation \
-            tests.test_boot_main
+            tests.test_boot_main \
+            tests.test_line_align
 
   openbricks-py:
     # Python-layer coverage of the firmware package (``openbricks/``).

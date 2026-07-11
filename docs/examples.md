@@ -14,6 +14,13 @@ Two representative ones are reproduced below.
    :language: python
 ```
 
+## Square up on a line (two color sensors)
+
+```{eval-rst}
+.. literalinclude:: ../examples/line_align.py
+   :language: python
+```
+
 ## Full robot (drivebase + IMU + color sensor array)
 
 ```{eval-rst}
