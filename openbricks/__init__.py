@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """openbricks — Pybricks-style robotics for open hardware on MicroPython."""
 
-__version__ = "1.8.11"
+__version__ = "1.10.1"
 
 # Re-export the most useful things for ergonomic imports.
 from openbricks.interfaces import Motor, Servo, IMU, ColorSensor  # noqa: F401
@@ -10,7 +10,7 @@ from openbricks.interfaces import Motor, Servo, IMU, ColorSensor  # noqa: F401
 # ---- hub name ----
 #
 # A short string that identifies this specific hub — the same role as
-# ``pybricks-dev run -n <name>``. Used as the BLE advertising name so
+# ``pybricksdev run -n <name>``. Used as the BLE advertising name so
 # future code-transfer tooling can target one hub on a bench full of
 # them.
 #

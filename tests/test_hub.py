@@ -11,6 +11,7 @@ from machine import Timer
 
 from tests._fakes_ble import _FakeBLE, _FakeNVS
 
+from openbricks import pins as _pins
 from openbricks.hub import (
     Button,
     ESP32DevkitHub,
@@ -67,6 +68,9 @@ class PushButtonTests(unittest.TestCase):
 
 
 class ESP32DevkitHubTests(unittest.TestCase):
+    def tearDown(self):
+        _pins._claims_reset()
+
     # bluetooth=False on the structural tests so we test hub wiring in
     # isolation without pulling the BLE auto-wire into the frame.
 
@@ -108,6 +112,9 @@ class NeoPixelLEDTests(unittest.TestCase):
 
 
 class ESP32S3DevkitHubTests(unittest.TestCase):
+    def tearDown(self):
+        _pins._claims_reset()
+
     def test_onboard_led_is_neopixel(self):
         hub = ESP32S3DevkitHub(bluetooth=False)
         self.assertIsInstance(hub.led, NeoPixelLED)
@@ -131,11 +138,14 @@ class ESP32S3DevkitHubTests(unittest.TestCase):
 
 
 class HubBluetoothAutoWireTests(unittest.TestCase):
-    """Default ``bluetooth=True`` should wire the long-press watcher
+    """Default ``bluetooth=True`` should wire the short-press watcher
     and (on RGB-capable hubs) paint the LED to match the persisted
     BLE state. The hub does NOT activate BLE itself — that's
     ``main.py``'s job (since 1.0.10; double-activation in 1.0.0-1.0.9
     silently broke advertising)."""
+
+    def tearDown(self):
+        _pins._claims_reset()
 
     def setUp(self):
         _FakeNVS._reset_for_test()

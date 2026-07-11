@@ -55,7 +55,7 @@ def _build_parser():
     )
     p_flash.add_argument(
         "--port", required=True,
-        help="Serial port (/dev/ttyUSB0, /dev/cu.usbserial-*, COM5 ...).",
+        help="Serial port (/dev/ttyUSB0, /dev/cu.usbserial-XXXX, COM5 ...).",
     )
     p_flash.add_argument(
         "--firmware", required=True,
@@ -85,7 +85,7 @@ def _build_parser():
     )
     p_run.add_argument(
         "-n", "--name", required=True,
-        help="Hub name baked in at flash time (``openbricks-dev flash --name``).",
+        help="Hub name baked in at flash time (``openbricks flash --name``).",
     )
     p_run.add_argument(
         "script", metavar="SCRIPT", nargs="?",
@@ -155,7 +155,7 @@ def _build_parser():
         help="Send Ctrl-C to a hub running a program.",
         description="Connect to the named hub over BLE and send a single "
                     "Ctrl-C, which MicroPython surfaces as KeyboardInterrupt. "
-                    "Use when a long-running ``openbricks-dev run`` has "
+                    "Use when a long-running ``openbricks run`` has "
                     "already ended and you just want the hub to idle again.",
     )
     p_stop.add_argument(
@@ -191,7 +191,7 @@ def _build_parser():
         "log",
         help="Pull a script-run log file off a hub.",
         description="Every program executed via the launcher (button "
-                    "press OR ``openbricks-dev run``) gets its stdout / "
+                    "press OR ``openbricks run``) gets its stdout / "
                     "stderr tee'd to a flash file under "
                     "``/openbricks_logs/``. Three rotating slots are "
                     "kept (run_0..run_2). With no flags this prints "

@@ -174,10 +174,52 @@ class _RecordingLED:
 
 class BluetoothToggleButtonLEDTests(unittest.TestCase):
     def setUp(self):
+        from openbricks import bluetooth
         _FakeNVS._reset_for_test()
         _FakeBLE._reset_for_test()
         Timer.reset_for_test()
+        del bluetooth._state_listeners[:]
         _plant_hub_name()
+
+    def test_programmatic_set_enabled_repaints_the_led(self):
+        # The LED must follow BLE state changed WITHOUT the button —
+        # e.g. user code or a tool calling bluetooth.set_enabled().
+        # Before the state-listener fix only a button press repainted.
+        from openbricks import bluetooth
+        led = _RecordingLED()
+        helper = BluetoothToggleButton(_StubButton(), led=led, poll_ms=50)
+        helper.start()   # paints blue (default state on)
+        self.assertEqual(led.last_rgb, (0, 0, 255))
+
+        bluetooth.set_enabled(False)
+        self.assertEqual(led.last_rgb, (255, 200, 0),
+                         "LED must turn yellow when BLE is disabled "
+                         "programmatically")
+
+        bluetooth.set_enabled(True)
+        self.assertEqual(led.last_rgb, (0, 0, 255),
+                         "LED must turn blue when BLE is enabled "
+                         "programmatically")
+
+    def test_stop_unregisters_the_led_listener(self):
+        from openbricks import bluetooth
+        led = _RecordingLED()
+        helper = BluetoothToggleButton(_StubButton(), led=led, poll_ms=50)
+        helper.start()
+        helper.stop()
+        led.last_rgb = None
+        bluetooth.set_enabled(False)
+        self.assertIsNone(led.last_rgb,
+                          "stopped toggle must not keep repainting")
+
+    def test_repeated_start_stop_does_not_leak_listeners(self):
+        from openbricks import bluetooth
+        helper = BluetoothToggleButton(_StubButton(), led=_RecordingLED(),
+                                       poll_ms=50)
+        for _ in range(3):
+            helper.start()
+            helper.stop()
+        self.assertEqual(len(bluetooth._state_listeners), 0)
 
     def test_start_paints_blue_when_ble_enabled(self):
         btn = _StubButton()

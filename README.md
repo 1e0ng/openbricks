@@ -9,9 +9,11 @@
 
 > A Pybricks-style MicroPython firmware for **open hardware** — commodity MCUs, commodity motors, commodity sensors.
 
+**Website**: <https://openbricks.dev> · **Documentation**: <https://docs.openbricks.dev>
+
 Pybricks gives LEGO users a delightful Python API, but it only runs on a handful of LEGO hubs with LEGO-branded motors and sensors. `openbricks` takes the same shape — a custom MicroPython firmware that bakes the robotics library into the runtime — and targets commodity components you can buy off the shelf.
 
-Like Pybricks, openbricks is a **firmware you flash to an MCU**, not a library you `pip install` on top of stock MicroPython. That means we own the runtime: background control loops, hardware timers, and native C extensions all live inside the firmware image. The motor scheduler and per-motor state machine are already in C (see `native/user_c_modules/openbricks/`); the state observer, trapezoidal trajectory planner, and 2-DOF drivebase controller get the same treatment in upcoming milestones. The three-layer API you write code against (drivers → abstract interfaces → robotics) is what `import openbricks` gives you out of the box.
+Like Pybricks, openbricks is a **firmware you flash to an MCU**, not a library you `pip install` on top of stock MicroPython. That means we own the runtime: background control loops, hardware timers, and native C extensions all live inside the firmware image. The entire 1 kHz hot path is C (see `native/user_c_modules/openbricks/`): motor scheduler, per-motor state machine, state observer, trapezoidal trajectory planner, and 2-DOF drivebase controller. The three-layer API you write code against (drivers → abstract interfaces → robotics) is what `import openbricks` gives you out of the box.
 
 ## What's in the box
 
@@ -121,7 +123,7 @@ Pybricks is the gold-standard MicroPython firmware for educational robotics — 
 
 ## Status
 
-**openbricks 1.0.** All foundational milestones (M0–M5) shipped. Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, 2-DOF coupled drivebase, and both quadrature encoders (software-IRQ and hardware-PCNT) all live as `user_c_modules` inside the firmware — the entire tick body is C, nothing on the hot path goes through a Python frame. The hub abstraction (status LED, user button) and SSD1306 OLED driver round out the on-hub user surface; ESP32 + ESP32-S3 firmware images both build from the same codebase. Every bundled driver works end to end; the test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
+**All foundational milestones (M0–M5) shipped.** Pbio-parity control is landed in C: always-on 1 kHz scheduler, trapezoidal trajectory planner, α-β state observer, 2-DOF coupled drivebase, and both quadrature encoders (software-IRQ and hardware-PCNT) all live as `user_c_modules` inside the firmware — the entire tick body is C, nothing on the hot path goes through a Python frame. The hub abstraction (status LED, user button) and SSD1306 OLED driver round out the on-hub user surface; ESP32 + ESP32-S3 firmware images both build from the same codebase. Every bundled driver works end to end; the test suite runs against the real C implementation under the unix MicroPython binary (no Python mirrors).
 
 **Flashable firmware is published automatically**: every push to `main` updates a rolling [`latest` pre-release](../../releases/tag/latest), and every `v*` tag gets a versioned release. Download the `openbricks-<target>-firmware-<version>.bin` for your board and flash with `openbricks flash` (see `tools/openbricks/README.md`) or `esptool.py` directly — details in `docs/build.md`.
 

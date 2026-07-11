@@ -33,8 +33,8 @@ class TestST3032(unittest.TestCase):
 
     def test_shares_bus_registry_with_st3215(self):
         # Same UART params → same bus instance, regardless of model.
-        s_3215 = ST3215(servo_id=1, uart_id=1, tx=17, rx=16)
-        s_3032 = ST3032(servo_id=2, uart_id=1, tx=17, rx=16)
+        s_3215 = ST3215(servo_id=1, uart_id=1, tx=14, rx=6)
+        s_3032 = ST3032(servo_id=2, uart_id=1, tx=14, rx=6)
         self.assertIs(s_3215._bus, s_3032._bus)
 
     def test_emits_identical_move_to_packet_as_st3215(self):
@@ -54,8 +54,8 @@ class TestST3032Motor(unittest.TestCase):
         self.assertTrue(issubclass(ST3032Motor, Motor))
 
     def test_shares_bus_registry_with_st3215(self):
-        s_motor_3215 = ST3215Motor(servo_id=1, uart_id=1, tx=17, rx=16)
-        s_motor_3032 = ST3032Motor(servo_id=2, uart_id=1, tx=17, rx=16)
+        s_motor_3215 = ST3215Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        s_motor_3032 = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
         self.assertIs(s_motor_3215._bus, s_motor_3032._bus)
 
     def test_constructor_emits_same_mode_and_torque_packets_as_st3215(self):

@@ -3,6 +3,42 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.22 — `flash` writes the classic ESP32 at the right offset
+
+`openbricks flash` hardcoded write offset `0x0`, which is correct for
+the ESP32-S3 but wrong for the classic ESP32: MicroPython's merged
+`firmware.bin` for that chip starts at flash address `0x1000` (the
+chip's bootloader offset), so writing it at `0x0` put the bootloader
+where the ROM never looks and the board failed to boot with
+`Invalid image block, can't boot`.
+
+The offset is now derived from the image itself — the partition table
+always lives at flash `0x8000`, so its magic bytes sit at file offset
+`0x8000 - base`, which pins the base the image was built for (`0x1000`
+classic, `0x0` S3). No reliance on `--chip`, which defaults to `auto`.
+An image matching neither layout (or both) aborts the flash *before*
+the erase step rather than guessing.
+
+Also wires the previously-orphaned `tests/test_st3032.py` into the
+firmware test runner and the CPython CI job — it was in the tree but
+executed by nothing.
+
+## 0.10.21 — BLE tools restore the hub's idle loop on exit
+
+`openbricks run` / `upload` / `log` all get their REPL by Ctrl-C'ing
+whatever the hub was doing — usually the frozen main.py's
+`launcher.run()` idle loop — and used to leave the hub parked at the
+REPL on exit. Firmware 1.9.0 made main-thread idle-loop draining the
+path where the button stop works; parked at the REPL, a button press
+falls back to the degraded schedule-exec start (stop button
+unavailable for that run, with a printed warning).
+
+Each tool now sends a fire-and-forget `launcher.run()` raw-REPL exec
+before disconnecting, so the hub returns to the same state the frozen
+main.py boots into: button press starts /program.py in the main
+thread, stop button works. The next tool invocation Ctrl-Cs the
+restored loop exactly like it always Ctrl-C'd the boot one.
+
 ## 0.10.20 — serial-bus servos (ST-3032 / ST-3215) run in the sim
 
 `openbricks sim run` now covers serial-bus drivebases. The shim

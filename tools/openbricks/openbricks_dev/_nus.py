@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 """
-Shared NUS (Nordic UART Service) client helper for ``openbricks-dev``.
+Shared NUS (Nordic UART Service) client helper for ``openbricks``.
 
 Thin wrapper around ``bleak`` that:
 
 * Scans for a hub advertising the openbricks NUS service by its GAP
-  name (the string baked into NVS at ``openbricks-dev flash`` time).
+  name (the string baked into NVS at ``openbricks flash`` time).
 * Opens a :class:`NUSLink` context that exposes two async primitives:
   ``write(bytes)`` pushes bytes into the hub's REPL stdin;
   ``read(timeout)`` yields whatever stdout/stderr the hub has notified

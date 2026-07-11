@@ -2,6 +2,8 @@
 
 Host-side tooling for openbricks hubs — same UX as `pybricksdev`, built on commodity Python tooling (`bleak`, `esptool`, `mpremote`). One package, one console script: `openbricks flash / list / run / upload / stop / log`. The MuJoCo-backed simulator is built in too — `openbricks sim …` opens the sim's CLI when the `[sim]` extra is installed.
 
+**Website**: <https://openbricks.dev> · **Documentation**: <https://docs.openbricks.dev>
+
 ## Install
 
 Recommended — with [`pipx`](https://pipx.pypa.io/) so the CLI lands in an isolated venv and avoids the "externally managed environment" error on modern macOS / Linux distros:
@@ -26,7 +28,7 @@ pip install -e 'tools/openbricks[sim]'
 
 `[sim]` adds `mujoco` (~50 MB, native OpenGL) and `numpy` — most users (flash + run + log) don't need it. Without `[sim]`, `openbricks sim …` prints a helpful "pip install openbricks[sim]" hint instead of crashing.
 
-> **Note (0.10.x):** the package currently ships sdist-only. `pip install openbricks` compiles the bundled native extension (`openbricks_sim._native`) on first install, so a C compiler + Python headers are required (`gcc` / `clang` on Linux/macOS, MSVC on Windows). Manylinux wheels via cibuildwheel are a follow-up — when those land, fresh installs will be faster and toolchain-free.
+> **Note:** binary wheels (manylinux, macOS universal2, Windows AMD64; CPython 3.9–3.13) ship on PyPI since 0.10.3, so installs are toolchain-free on common platforms. On anything outside that matrix, pip falls back to the sdist and compiles the bundled native extension (`openbricks_sim._native`), which needs a C compiler + Python headers.
 
 ## Commands
 
@@ -62,7 +64,7 @@ openbricks run -n RobotA examples/hello.py
 Stages the script to `/program.py` (same target as `upload`) and triggers the hub's launcher to execute it immediately. Output streams back to your terminal in real time.
 
 - **Button stop.** Pressing the hub button while the program runs raises `KeyboardInterrupt` via the same launcher path `upload`+button uses. The client sees the clean "stopped by button press" line and exits.
-- **Program completion.** When the program finishes (or raises), the client disconnects and exits — same as `pybricks-dev run`.
+- **Program completion.** When the program finishes (or raises), the client disconnects and exits — same as `pybricksdev run`.
 - **Script persists.** Because `run` stages to `/program.py`, the hub can re-run the last program via a button press without another upload. `upload` and `run` differ only in whether the client auto-launches after upload.
 
 Stderr (e.g. exception tracebacks) arrives after stdout and is surfaced with a blank-line separator. No paste-mode `===` echo — raw-paste mode is clean.
@@ -98,7 +100,7 @@ Pass `--path /alt.py` to stage at a different filename (if you've written your o
 ## Tests
 
 ```
-cd tools/openbricks-dev
+cd tools/openbricks
 PYTHONPATH=. python -m unittest discover -s tests -t .
 ```
 

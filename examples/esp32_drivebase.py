@@ -10,12 +10,16 @@ Hardware:
 
 Wiring (edit the GPIOs to match your board; defaults are for the
 ESP32-S3 DevKitC-1 — avoid GPIO 19/20 = USB, 26-37 = flash/PSRAM,
-0/3/45/46 = strapping. On a classic ESP32, remap to that board's pins):
+0/3/45/46 = strapping, 4/5 = the firmware's default program / BLE
+buttons, 15/16 = the I2C convention, 14/6 = the serial-bus UART
+convention. The launcher polls GPIO 4 as an input, so a motor driver
+toggling it would read as button presses and stop your program.
+On a classic ESP32, remap to that board's pins):
 
     Left motor  (L298N channel A)
-        IN1  -> GPIO 4
-        IN2  -> GPIO 5
-        ENA  -> GPIO 6    (PWM)
+        IN1  -> GPIO 1
+        IN2  -> GPIO 2
+        ENA  -> GPIO 17   (PWM)
         ENC A-> GPIO 7
         ENC B-> GPIO 8
 
@@ -33,7 +37,7 @@ from openbricks.tools import wait
 
 
 left = JGB37Motor(
-    in1=4, in2=5, pwm=6,
+    in1=1, in2=2, pwm=17,
     encoder_a=7, encoder_b=8,
     counts_per_output_rev=1320,  # 11 CPR * 30:1 gearbox * 4 (quadrature)
 )

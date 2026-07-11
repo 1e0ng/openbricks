@@ -102,10 +102,14 @@ jobs:
             tests.test_l298n \
             tests.test_tcs34725 \
             tests.test_st3215 \
+            tests.test_st3032 \
             tests.test_ssd1306 \
             tests.test_tb6612 \
             tests.test_motor_process_timer_id \
-            tests.test_pcnt_encoder_irq_contract
+            tests.test_pcnt_encoder_irq_contract \
+            tests.test_example_pins \
+            tests.test_pins \
+            tests.test_timer_allocation
 
   openbricks-py:
     # Python-layer coverage of the firmware package (``openbricks/``).
@@ -395,7 +399,8 @@ jobs:
     #   * boot path regressions (frozen main.py not loaded, FRIENDLY_REPL
     #     gate, _boot.py panic)
     #   * Timer(-1)-on-S3-style bugs (the launcher's Timer 0, the BLE
-    #     button's Timer 1, motor_process's Timer 2 must all be hardware)
+    #     button's Timer 1, motor_process's Timer 2, and the stop
+    #     tick's Timer 3 must all be hardware and mutually distinct)
     #   * PSRAM init / NULL-deref panics
     #
     # Does NOT catch BLE radio bugs (QEMU doesn't simulate the BLE
@@ -554,7 +559,7 @@ jobs:
             - `openbricks-esp32-firmware-latest.bin` — original ESP32 (Xtensa LX6)
             - `openbricks-esp32s3-firmware-latest.bin` — ESP32-S3 (Xtensa LX7, native USB)
 
-            Flash with `openbricks-dev flash` or `esptool.py` — see `docs/build.md`.
+            Flash with `openbricks flash` or `esptool.py` — see `docs/build.md`.
           files: release-out/*
           # action-gh-release is idempotent: re-running replaces the
           # release's assets in place.

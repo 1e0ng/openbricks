@@ -33,6 +33,6 @@ All pbio-parity control code, in C, baked into the firmware image:
 
 `boards/openbricks_esp32/` and `boards/openbricks_esp32s3/` each freeze the whole `openbricks/` Python package into a dedicated image. They share `native/user_c_modules/openbricks/` — the C module builds for both Xtensa cores unchanged.
 
-## What's coming
+## Status
 
-M4 (hub abstraction — status LED, user button — plus the SSD1306 OLED driver) is on `main`. Remaining: M5 — 1.0 polish + release (version bump, CHANGELOG, docs audit).
+All milestone work through M5 landed: the hub abstraction (status LED, user button) and SSD1306 OLED driver are on `main`, and CI publishes flashable images automatically — a rolling `latest` pre-release on every push to `main`, and a versioned GitHub Release on every `v*` tag.

@@ -31,19 +31,34 @@ Unit tests live in `tests/` and use plain `unittest`. They don't require
 hardware — drivers should be testable by injecting fake `I2C` / `UART` /
 `Pin` objects. See `tests/test_l298n.py` for the pattern.
 
-Run tests on the desktop with CPython:
+The full suite runs against the real C module under the unix MicroPython
+binary (`python -m unittest discover` under CPython does **not** work —
+every test that touches `_openbricks_native` fails to import). Build the
+binary once (see `docs/build.md` → Running tests), then:
 
-    python -m unittest discover -s tests
+    ./native/micropython/ports/unix/build-standard/micropython tests/run.py
+
+For quick desktop iteration on a test that doesn't need the C module,
+run just that module under CPython:
+
+    python3 -m unittest tests.test_l298n
+
+(The CPython-compatible subset CI runs is the `cpython-tests` job list
+in `.github/workflows/ci.yaml`.)
 
 ## Releases
 
-Firmware and `openbricks-dev` (the host CLI) are versioned and tagged
-independently so one can't hold the other hostage.
+Firmware and `openbricks` (the host CLI + sim package) are versioned
+and tagged independently so one can't hold the other hostage.
 
-| Component        | `__version__` lives in                                       | Tag pattern              | Released                                |
-|------------------|--------------------------------------------------------------|--------------------------|-----------------------------------------|
-| Firmware         | `openbricks/__init__.py`                                     | `v0.9.3`                 | GitHub release (firmware `.bin` files)  |
-| `openbricks-dev` | `tools/openbricks-dev/openbricks_dev/__init__.py`            | `openbricks-dev/v0.10.0` | PyPI (via OIDC trusted publisher)       |
+| Component    | `__version__` lives in                         | Tag pattern          | Released                                |
+|--------------|------------------------------------------------|----------------------|-----------------------------------------|
+| Firmware     | `openbricks/__init__.py`                       | `v1.9.0`             | GitHub release (firmware `.bin` files)  |
+| `openbricks` | `tools/openbricks/openbricks_dev/__init__.py`  | `openbricks/v0.10.21`| PyPI (via OIDC trusted publisher)       |
+
+(The host package was previously published as `openbricks-dev`; the old
+`openbricks-dev/v*` tags are frozen and the PyPI name now redirects
+users via a final deprecation release.)
 
 Each package's `__init__.py::__version__` is the single source of truth;
 `pyproject.toml` reads it back via `attr = "<pkg>.__version__"`.
@@ -51,17 +66,17 @@ Each package's `__init__.py::__version__` is the single source of truth;
 Cutting a release:
 
     # Firmware only
-    scripts/bump-version.py --firmware 0.9.3
+    scripts/bump-version.py --firmware 1.9.0
     # commit, push, merge PR, then:
-    git tag v0.9.3 && git push origin v0.9.3
+    git tag v1.9.0 && git push origin v1.9.0
 
-    # openbricks-dev only
-    scripts/bump-version.py --openbricks-dev 0.10.0
+    # Host CLI + sim only
+    scripts/bump-version.py --openbricks 0.10.21
     # commit, push, merge PR, then:
-    git tag openbricks-dev/v0.10.0 && git push origin openbricks-dev/v0.10.0
+    git tag openbricks/v0.10.21 && git push origin openbricks/v0.10.21
 
     # Both at once (rare — firmware changes usually ship alone)
-    scripts/bump-version.py --firmware 0.9.3 --openbricks-dev 0.10.0
+    scripts/bump-version.py --firmware 1.9.0 --openbricks 0.10.21
 
 ## Licensing
 

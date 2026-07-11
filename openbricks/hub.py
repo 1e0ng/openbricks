@@ -45,6 +45,8 @@ hub rather than through it.
 
 from machine import Pin
 
+from openbricks import pins
+
 
 # ---- abstract base classes ----
 #
@@ -152,7 +154,7 @@ class ESP32DevkitHub(Hub):
     """ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BLE-toggle
     button on GPIO 5.
 
-    ``bluetooth`` default True wires the button to a long-press BLE
+    ``bluetooth`` default True wires the button to a short-press BLE
     toggle and restores the persisted state at boot (see
     ``openbricks.bluetooth_button`` / ``openbricks.bluetooth``). The
     onboard LED is single-colour so no colour feedback, just the toggle.
@@ -163,8 +165,15 @@ class ESP32DevkitHub(Hub):
     """
 
     def __init__(self, led_pin=2, bluetooth_button_pin=5, bluetooth=True):
+        pins.check(led_pin, "status LED")
+        pins.check(bluetooth_button_pin, "Bluetooth-toggle button",
+                   output=False)
         self.led = SimpleLED(led_pin)
         self.bluetooth_button = PushButton(bluetooth_button_pin, active_low=True)
+        pins.claim(led_pin, "status LED",
+                   "ESP32DevkitHub led_pin=... moves it")
+        pins.claim(bluetooth_button_pin, "Bluetooth-toggle button",
+                   "ESP32DevkitHub bluetooth_button_pin=... moves it")
         self.bluetooth_toggle = None
         if bluetooth:
             _install_bluetooth_toggle(self)
@@ -187,8 +196,17 @@ class ESP32S3DevkitHub(Hub):
 
     def __init__(self, led_pin=48, bluetooth_button_pin=5, brightness=0.2,
                  bluetooth=True):
+        if led_pin is not None:
+            pins.check(led_pin, "status LED")
+        pins.check(bluetooth_button_pin, "Bluetooth-toggle button",
+                   output=False)
         self.led = NeoPixelLED(led_pin, brightness=brightness) if led_pin is not None else None
         self.bluetooth_button = PushButton(bluetooth_button_pin, active_low=True)
+        if led_pin is not None:
+            pins.claim(led_pin, "status LED",
+                       "ESP32S3DevkitHub led_pin=... moves it")
+        pins.claim(bluetooth_button_pin, "Bluetooth-toggle button",
+                   "ESP32S3DevkitHub bluetooth_button_pin=... moves it")
         self.bluetooth_toggle = None
         if bluetooth:
             _install_bluetooth_toggle(self)
@@ -198,7 +216,7 @@ class ESP32S3DevkitHub(Hub):
 #
 # Called from the hub constructors when ``bluetooth=True`` (the default).
 # Restores the persisted BLE state (default on for a fresh board),
-# installs a long-press handler on the BOOT button that toggles it,
+# installs a short-press handler on the BLE-toggle button that flips it,
 # and — if the hub has an RGB-capable LED — paints the LED to match
 # the current state (blue = on, yellow = off).
 #
@@ -209,7 +227,7 @@ class ESP32S3DevkitHub(Hub):
 def _install_bluetooth_toggle(hub):
     """Called from the hub constructors when ``bluetooth=True``.
 
-    Builds a long-press watcher on the hub's button (recolouring the
+    Builds a short-press watcher on the hub's button (recolouring the
     LED on each toggle if it's RGB-capable) and stashes the watcher
     on ``hub.bluetooth_toggle`` so callers can ``stop()`` it later
     if they want the button for something else.

@@ -105,8 +105,8 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         _reset_all()
 
     def test_drive_straight_drives_both_wheels_forward(self):
-        left = L298NMotor(in1=1, in2=2, pwm=3)
-        right = L298NMotor(in1=4, in2=5, pwm=6)
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         db.drive(100, 0)
@@ -119,8 +119,8 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         self.assertGreater(left._pwm.duty(), 0)
 
     def test_drive_pure_turn_drives_wheels_opposite(self):
-        left = L298NMotor(in1=1, in2=2, pwm=3)
-        right = L298NMotor(in1=4, in2=5, pwm=6)
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         # Positive turn rate means turn left: left wheel reverses, right advances.
@@ -136,8 +136,8 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         # ``straight``/``turn``) coasts both wheels — pybricks-style.
         # Coast on L298N drops both H-bridge inputs low and zeroes the
         # PWM duty.
-        left = L298NMotor(in1=1, in2=2, pwm=3)
-        right = L298NMotor(in1=4, in2=5, pwm=6)
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         db.stop()
@@ -152,8 +152,8 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
     def test_stop_then_brake_engages_brake(self):
         # Explicit ``then="brake"`` falls back to the pre-1.6.7
         # behaviour: short both H-bridge terminals high.
-        left = L298NMotor(in1=1, in2=2, pwm=3)
-        right = L298NMotor(in1=4, in2=5, pwm=6)
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         db.stop(then="brake")
@@ -167,16 +167,16 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         # L298N can't actively hold — no encoder, no position loop.
         # ``stop(then="hold")`` must raise rather than silently fall
         # back to brake.
-        left = L298NMotor(in1=1, in2=2, pwm=3)
-        right = L298NMotor(in1=4, in2=5, pwm=6)
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         with self.assertRaises(NotImplementedError):
             db.stop(then="hold")
 
     def test_stop_then_invalid_raises_value_error(self):
-        left = L298NMotor(in1=1, in2=2, pwm=3)
-        right = L298NMotor(in1=4, in2=5, pwm=6)
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         with self.assertRaises(ValueError):

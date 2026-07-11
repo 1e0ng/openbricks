@@ -17,7 +17,7 @@ class TB6612AliasTests(unittest.TestCase):
 
     def test_forward_drives_in1_high_in2_low(self):
         # Sanity check: the alias still obeys the L298NMotor behaviour.
-        m = TB6612Motor(in1=1, in2=2, pwm=3)
+        m = TB6612Motor(in1=1, in2=2, pwm=17)
         m.run(50)
         self.assertEqual(m._in1.value(), 1)
         self.assertEqual(m._in2.value(), 0)

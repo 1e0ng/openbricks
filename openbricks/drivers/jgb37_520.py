@@ -21,6 +21,7 @@ import time
 
 from machine import Pin, PWM
 
+from openbricks import pins
 from openbricks._native import QuadratureEncoder, Servo
 from openbricks.interfaces import Motor
 
@@ -44,6 +45,11 @@ class JGB37Motor(Motor):
         # which flips both motor command and encoder together (motors
         # wired backwards end-to-end).
         from openbricks.drivers.mg370 import _InvertedEncoder
+        pins.check(in1, "H-bridge IN1")
+        pins.check(in2, "H-bridge IN2")
+        pins.check(pwm, "H-bridge PWM/EN")
+        pins.check(encoder_a, "encoder channel A", output=False)
+        pins.check(encoder_b, "encoder channel B", output=False)
         self._in1 = Pin(in1, Pin.OUT, value=0)
         self._in2 = Pin(in2, Pin.OUT, value=0)
         self._pwm = PWM(Pin(pwm), freq=_PWM_FREQ_HZ, duty=0)

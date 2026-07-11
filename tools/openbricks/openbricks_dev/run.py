@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev run -n NAME script.py`` — stage a script to the hub,
+``openbricks run -n NAME script.py`` — stage a script to the hub,
 launch it immediately, stream output back, exit when the program stops.
 
-Semantics mirror ``pybricks-dev run``:
+Semantics mirror ``pybricksdev run``:
 
 * The script is written to ``/program.py`` on the hub (same file
-  ``openbricks-dev upload`` stages to).
+  ``openbricks upload`` stages to).
 * The hub's launcher execs it right away — no button press required to
   start.
 * While running, pressing the hub button raises ``KeyboardInterrupt``
@@ -46,7 +46,7 @@ _RAW_REPL_BANNER     = b"raw REPL; CTRL-B to exit\r\n>"
 _FLOW_ACK   = b"\x01"
 _FLOW_ABORT = b"\x04"
 
-# Where the script lands; same target as ``openbricks-dev upload`` so
+# Where the script lands; same target as ``openbricks upload`` so
 # the post-run state matches what a follow-up button press would rerun.
 _TARGET_PATH = "/program.py"
 
@@ -172,6 +172,34 @@ async def _enter_raw_repl(blink, link):
 
 async def _leave_raw_repl(link):
     await link.write(b"\r" + _CTRL_B)
+
+
+# Fire-and-forget raw-REPL exec that re-enters the launcher idle loop.
+# ``launcher.run()`` blocks forever by design, so callers must NOT wait
+# for completion — send and disconnect.
+_RESTORE_IDLE_SNIPPET = (
+    b"from openbricks import launcher\r"
+    b"launcher.run()\r"
+)
+
+
+async def _restore_idle_loop(link):
+    """Re-enter the hub's launcher idle loop before disconnecting.
+
+    Every BLE tool gets its REPL by Ctrl-C'ing whatever the hub was
+    doing — usually the frozen main.py's ``launcher.run()`` idle loop.
+    Leaving the hub parked at the REPL afterwards breaks the button
+    workflow: with no idle loop draining, a button press starts the
+    program through the degraded schedule-exec path, where the
+    scheduler lock starves the Timer-based stop button for the whole
+    run (see ``launcher._scheduled_start``). Restoring the loop on
+    exit keeps button starts on the main-thread path, stop button
+    included.
+
+    Plain raw-REPL exec (code + Ctrl-D); the next tool invocation
+    Ctrl-Cs it exactly like the frozen main.py loop it replaces.
+    """
+    await link.write(_RESTORE_IDLE_SNIPPET + _CTRL_D)
 
 
 async def _raw_paste_upload(blink, link, script_bytes):
@@ -326,7 +354,7 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
                 raise
         finally:
             try:
-                await _leave_raw_repl(link)
+                await _restore_idle_loop(link)
             except Exception:
                 pass
 

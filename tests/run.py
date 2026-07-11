@@ -53,6 +53,7 @@ _TEST_MODULES = [
     "tests.test_color_sorter",
     "tests.test_color_array",
     "tests.test_st3215",
+    "tests.test_st3032",
     "tests.test_trajectory",
     "tests.test_observer",
     "tests.test_scheduler",
@@ -74,6 +75,9 @@ _TEST_MODULES = [
     "tests.test_hcsr04",
     "tests.test_vl53l0x",
     "tests.test_vl53l1x",
+    "tests.test_example_pins",
+    "tests.test_pins",
+    "tests.test_timer_allocation",
 ]
 
 

@@ -66,6 +66,13 @@ Pin gotchas on the ESP32-S3:
   use. On a **classic ESP32**, the usual equivalents are I2C on
   21/22 and any two free pins for the UART.
 
+The firmware enforces the hard cases at construction time: a driver
+asked to wire a nonexistent, flash, or USB pin — or a pin the runtime
+already owns, like the program button — raises
+{class}`openbricks.pins.ReservedPinError` naming the pin, the role,
+and the reason, instead of failing somewhere far from the mistake.
+See {mod}`openbricks.pins`.
+
 ## Sensor wiring (I2C)
 
 The baseline build has **several colour sensors** (a line-follower /
@@ -107,8 +114,9 @@ sensors = [TCS34725(mux[ch]) for ch in range(3)]       # left, mid, right
 imu = BNO055(i2c)                                      # 0x28, straight on the bus
 ```
 
-For a complete program — a 3-sensor line-follower array that reduces
-the row of readings to a steering signal — see
+For a complete program — a 2-sensor array that combines each sensor's
+``ambient()`` and ``rgb()`` readings to name the colour under it
+(red / blue / green / yellow / white / black) — see
 `examples/color_array.py`.
 
 Simplifications when you need fewer parts:
@@ -206,12 +214,20 @@ assignments; the classic-ESP32 equivalents are in git history):
 
 | Function          | ESP32-S3 GPIO(s) | Devices on this line |
 |-------------------|------------------|----------------------|
-| Left motor dir    | 4, 5             | L298N / TB6612 IN1, IN2 |
-| Left motor PWM    | 6                | L298N / TB6612 ENA |
+| Left motor dir    | 1, 2             | L298N / TB6612 IN1, IN2 |
+| Left motor PWM    | 17               | L298N / TB6612 ENA |
 | Left encoder A, B | 7, 8             | JGB37-520 encoder channels |
 | Right motor dir   | 9, 10            | L298N / TB6612 IN3, IN4 |
 | Right motor PWM   | 11               | L298N / TB6612 ENB |
 | Right encoder A, B| 12, 13           | JGB37-520 encoder channels |
+
+The map deliberately leaves GPIO **4 and 5** free — those are the
+firmware's default **program button** and **BLE-toggle button** (see
+{class}`openbricks.hub.ESP32S3DevkitHub`). The launcher polls GPIO 4
+as an input, so a motor driver toggling it would read as button
+presses and stop your program. GPIO 15/16 (I2C) and 14/6 (serial-bus
+UART) are also kept free so sensors and a serial-servo arm can join
+the same build unchanged.
 
 ### Calibrating encoder counts
 

@@ -1,0 +1,18 @@
+/* docs.openbricks.dev branding on top of sphinx_rtd_theme. */
+
+/* Header / nav accent: brick orange instead of RTD blue. */
+.wy-side-nav-search,
+.wy-nav-top {
+  background: #d9531e;
+}
+
+.wy-side-nav-search > a,
+.wy-side-nav-search .wy-dropdown > a {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Keep long signatures readable. */
+.rst-content dl.py dt {
+  white-space: normal;
+}

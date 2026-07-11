@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """
-``openbricks-dev stop -n NAME`` — interrupt the script currently running
+``openbricks stop -n NAME`` — interrupt the script currently running
 on a hub. Sends a single Ctrl-C over the NUS REPL bridge, which the
 MicroPython REPL interprets as ``KeyboardInterrupt``.
 """

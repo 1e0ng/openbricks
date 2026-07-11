@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>openbricks — Pybricks-style MicroPython firmware for open hardware</title>
+<meta name="description" content="openbricks is a Pybricks-style MicroPython firmware for commodity MCUs, motors, and sensors. Flash an ESP32, wire up off-the-shelf servos, and drive robots with a clean Python API.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='10' y='35' width='80' height='55' rx='8' fill='%23d9531e'/%3E%3Ccircle cx='32' cy='35' r='13' fill='%23d9531e'/%3E%3Ccircle cx='68' cy='35' r='13' fill='%23d9531e'/%3E%3C/svg%3E">
+<style>
+:root {
+  --accent: #d9531e;
+  --accent-dark: #b8431a;
+  --bg: #ffffff;
+  --bg-alt: #f6f4f1;
+  --fg: #1e2126;
+  --fg-muted: #5b6069;
+  --border: #e3ddd6;
+  --code-bg: #23272e;
+  --code-fg: #e6e1da;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c;
+    --bg-alt: #1e2126;
+    --fg: #e8e6e3;
+    --fg-muted: #a3a8b0;
+    --border: #2e323a;
+    --code-bg: #0f1114;
+    --code-fg: #dcd7d0;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 0;
+}
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; color: var(--fg); }
+.logo svg { display: block; }
+nav a { color: var(--fg-muted); margin-left: 22px; font-weight: 500; }
+nav a:hover { color: var(--accent); text-decoration: none; }
+
+.hero { padding: 56px 0 40px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
+.hero h1 { font-size: 42px; line-height: 1.15; letter-spacing: -0.02em; }
+.hero h1 em { color: var(--accent); font-style: normal; }
+.hero p.lead { margin: 18px 0 26px; font-size: 19px; color: var(--fg-muted); }
+.btns { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn {
+  display: inline-block; padding: 11px 22px; border-radius: 8px;
+  font-weight: 600; border: 1px solid transparent;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-dark); text-decoration: none; }
+.btn-ghost { border-color: var(--border); color: var(--fg); }
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+
+pre.code {
+  background: var(--code-bg); color: var(--code-fg);
+  border-radius: 12px; padding: 20px 22px; overflow-x: auto;
+  font-size: 14px; line-height: 1.6;
+  box-shadow: 0 12px 30px rgba(0,0,0,.18);
+}
+.code .kw { color: #c678dd; }
+.code .fn { color: #61afef; }
+.code .st { color: #98c379; }
+.code .cm { color: #7f848e; font-style: italic; }
+.code .nu { color: #d19a66; }
+
+section { padding: 56px 0; }
+section.alt { background: var(--bg-alt); }
+h2 { font-size: 28px; letter-spacing: -0.01em; margin-bottom: 8px; }
+.sub { color: var(--fg-muted); margin-bottom: 32px; max-width: 720px; }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.card {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+  padding: 22px;
+}
+section:not(.alt) .card { background: var(--bg-alt); border-color: transparent; }
+.card h3 { font-size: 17px; margin-bottom: 8px; }
+.card p { font-size: 15px; color: var(--fg-muted); }
+.card code { font-size: 13px; background: rgba(127,127,127,.13); padding: 1px 5px; border-radius: 4px; }
+
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; counter-reset: step; }
+.step { position: relative; padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
+.step::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; top: -14px; left: 18px;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-weight: 700; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.step h3 { font-size: 16px; margin: 4px 0 10px; }
+.step pre { background: var(--code-bg); color: var(--code-fg); border-radius: 8px; padding: 12px 14px; font-size: 12.5px; overflow-x: auto; line-height: 1.55; }
+
+table.hw { width: 100%; border-collapse: collapse; font-size: 15px; }
+table.hw th, table.hw td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+table.hw th { color: var(--fg-muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+table.hw td code { font-size: 13px; }
+.tablewrap { overflow-x: auto; }
+
+footer { padding: 36px 0 48px; border-top: 1px solid var(--border); color: var(--fg-muted); font-size: 14px; }
+footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; padding-top: 32px; }
+  .hero h1 { font-size: 32px; }
+  .grid, .steps { grid-template-columns: 1fr; }
+  .steps { gap: 28px; }
+  nav a { margin-left: 14px; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header>
+  <div class="logo">
+    <svg width="26" height="26" viewBox="0 0 100 100" aria-hidden="true"><rect x="10" y="35" width="80" height="55" rx="8" fill="#d9531e"/><circle cx="32" cy="35" r="13" fill="#d9531e"/><circle cx="68" cy="35" r="13" fill="#d9531e"/></svg>
+    openbricks
+  </div>
+  <nav>
+    <a href="https://docs.openbricks.dev">Docs</a>
+    <a href="https://github.com/1e0ng/openbricks">GitHub</a>
+    <a href="https://pypi.org/project/openbricks/">PyPI</a>
+  </nav>
+</header>
+
+<div class="hero">
+  <div>
+    <h1>Pybricks-style robotics, on <em>open hardware</em></h1>
+    <p class="lead">openbricks is a MicroPython firmware you flash to a commodity ESP32 board. Wire up off-the-shelf servos and sensors, and drive robots with a clean Python API — motor control runs at 1&nbsp;kHz in native C inside the firmware.</p>
+    <div class="btns">
+      <a class="btn btn-primary" href="https://docs.openbricks.dev/install.html">Get started</a>
+      <a class="btn btn-ghost" href="https://docs.openbricks.dev">Documentation</a>
+      <a class="btn btn-ghost" href="https://github.com/1e0ng/openbricks/releases">Firmware downloads</a>
+    </div>
+  </div>
+  <pre class="code"><span class="kw">from</span> openbricks.drivers.st3032 <span class="kw">import</span> ST3032Motor
+<span class="kw">from</span> openbricks.robotics <span class="kw">import</span> DriveBase
+
+left  = <span class="fn">ST3032Motor</span>(servo_id=<span class="nu">1</span>, tx=<span class="nu">14</span>, rx=<span class="nu">6</span>)
+right = <span class="fn">ST3032Motor</span>(servo_id=<span class="nu">2</span>, tx=<span class="nu">14</span>, rx=<span class="nu">6</span>,
+                     invert=<span class="kw">True</span>)
+
+db = <span class="fn">DriveBase</span>(left, right,
+               wheel_diameter_mm=<span class="nu">56</span>,
+               axle_track_mm=<span class="nu">114</span>)
+
+db.<span class="fn">straight</span>(<span class="nu">500</span>)  <span class="cm"># millimetres</span>
+db.<span class="fn">turn</span>(<span class="nu">90</span>)       <span class="cm"># degrees</span></pre>
+</div>
+</div>
+
+<section class="alt">
+<div class="wrap">
+  <h2>A firmware, not a library</h2>
+  <p class="sub">Pybricks gives LEGO users a delightful Python API, but only on LEGO hubs with LEGO motors. openbricks takes the same shape — a custom MicroPython firmware with the robotics library baked into the runtime — and targets parts you can buy anywhere.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>Native control loops</h3>
+      <p>The motor scheduler, trapezoidal trajectory planner, state observer, and 2-DOF drivebase controller are compiled C inside the image, ticking at 1&nbsp;kHz off a hardware timer. Python is for your program, not the hot path.</p>
+    </div>
+    <div class="card">
+      <h3>Commodity hardware</h3>
+      <p>ESP32-S3 and classic ESP32 boards, Feetech serial-bus servos, DC gear motors with encoders, and I2C sensors from any electronics shop. No proprietary hubs, no vendor lock-in.</p>
+    </div>
+    <div class="card">
+      <h3>Batteries-included tooling</h3>
+      <p>One CLI does it all: <code>openbricks flash</code> over USB, then <code>run</code>, <code>upload</code>, <code>stop</code>, and <code>log</code> over BLE — plus a MuJoCo-backed simulator so you can develop without a robot on the desk.</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<section>
+<div class="wrap">
+  <h2>Up and running in three steps</h2>
+  <p class="sub">Full walkthrough in the <a href="https://docs.openbricks.dev/install.html">installation guide</a>.</p>
+  <div class="steps">
+    <div class="step">
+      <h3>Install the tooling</h3>
+      <pre>pipx install 'openbricks[sim]'</pre>
+      <p style="font-size:14px;color:var(--fg-muted)">CLI + simulator. Drop <code>[sim]</code> for flash/run/log only.</p>
+    </div>
+    <div class="step">
+      <h3>Flash a hub</h3>
+      <pre>openbricks flash --name RobotA \
+  --port /dev/ttyUSB0 \
+  --firmware openbricks-esp32s3.bin</pre>
+      <p style="font-size:14px;color:var(--fg-muted)">Prebuilt images for ESP32-S3 and ESP32 on every release.</p>
+    </div>
+    <div class="step">
+      <h3>Run your program</h3>
+      <pre>openbricks run -n RobotA main.py</pre>
+      <p style="font-size:14px;color:var(--fg-muted)">Pushed over BLE, output streamed back live. Or try it first in the sim: <code>openbricks sim run main.py</code></p>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="alt">
+<div class="wrap">
+  <h2>Supported components</h2>
+  <p class="sub">Every driver ships frozen into the firmware — <code>import openbricks</code> and go. New components just implement one of the abstract interfaces. Wiring notes in the <a href="https://docs.openbricks.dev/hardware.html">hardware guide</a>.</p>
+  <div class="tablewrap">
+  <table class="hw">
+    <tr><th>Component</th><th>Type</th><th>Module</th></tr>
+    <tr><td>ST-3032 (Feetech STS3032)</td><td>Serial bus servo — recommended drive motor</td><td><code>drivers.st3032</code></td></tr>
+    <tr><td>ST-3215</td><td>Serial bus servo — arms / grippers</td><td><code>drivers.st3215</code></td></tr>
+    <tr><td>JGB37-520 / MG370</td><td>DC gear motors with quadrature encoders</td><td><code>drivers.jgb37_520</code>, <code>drivers.mg370</code></td></tr>
+    <tr><td>L298N / TB6612FNG</td><td>H-bridge motor drivers</td><td><code>drivers.l298n</code>, <code>drivers.tb6612</code></td></tr>
+    <tr><td>BNO055</td><td>9-DOF IMU with onboard fusion</td><td><code>drivers.bno055</code></td></tr>
+    <tr><td>TCS34725</td><td>RGB + clear color sensor</td><td><code>drivers.tcs34725</code></td></tr>
+    <tr><td>HC-SR04 / VL53L0X / VL53L1X</td><td>Ultrasonic &amp; laser distance sensors</td><td><code>drivers.hcsr04</code>, <code>drivers.vl53l0x</code>, <code>drivers.vl53l1x</code></td></tr>
+    <tr><td>TCA9548A</td><td>8-channel I2C multiplexer</td><td><code>drivers.tca9548a</code></td></tr>
+    <tr><td>SSD1306</td><td>OLED display</td><td><code>drivers.ssd1306</code></td></tr>
+  </table>
+  </div>
+</div>
+</section>
+
+<footer>
+<div class="wrap">
+  <div>© 2026 the openbricks contributors · MIT license</div>
+  <div>
+    <a href="https://docs.openbricks.dev">Docs</a> ·
+    <a href="https://github.com/1e0ng/openbricks">GitHub</a> ·
+    <a href="https://pypi.org/project/openbricks/">PyPI</a> ·
+    <a href="https://github.com/1e0ng/openbricks/releases">Releases</a>
+  </div>
+</div>
+</footer>
+
+</body>
+</html>

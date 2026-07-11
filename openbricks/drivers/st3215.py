@@ -11,12 +11,14 @@ in the FeeTech SCServo / Dynamixel-style protocol):
     CHECKSUM = ~(ID + LEN + INSTR + sum(PARAM)) & 0xFF
     LEN      = number of params + 2
 
-Common instructions:
+Common instructions::
+
     0x01 PING            ->  probe the servo
     0x02 READ            ->  READ  reg len
     0x03 WRITE           ->  WRITE reg value...
 
-Key registers (ST-3215):
+Key registers (ST-3215)::
+
     0x21  Operation Mode — 0 = position, 1 = wheel/continuous
     0x28  Torque Switch  — 1 = enable, 0 = coast
     0x2A  Goal position (low, high) — int16, 0..4095 over ~360°
@@ -53,6 +55,7 @@ import time
 
 from machine import UART, Pin
 
+from openbricks import pins
 from openbricks.interfaces import Motor, Servo
 
 _HEADER = b"\xFF\xFF"
@@ -106,6 +109,10 @@ class _SCServoBus:
     """Shared UART bus. One instance per physical bus; many servos per bus."""
 
     def __init__(self, uart_id, tx, rx, baud=1_000_000, dir_pin=None):
+        pins.check(tx, "serial-bus UART TX")
+        pins.check(rx, "serial-bus UART RX", output=False)
+        if dir_pin is not None:
+            pins.check(dir_pin, "serial-bus direction pin")
         self._uart = UART(uart_id, baudrate=baud, tx=tx, rx=rx, timeout=50)
         self._dir = Pin(dir_pin, Pin.OUT, value=0) if dir_pin is not None else None
         # UART hardware takes ~10 ms to be ready for clean TX on
