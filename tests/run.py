@@ -52,6 +52,7 @@ _TEST_MODULES = [
     "tests.test_tca9548a",
     "tests.test_color_sorter",
     "tests.test_color_array",
+    "tests.test_line_align",
     "tests.test_st3215",
     "tests.test_st3032",
     "tests.test_trajectory",
