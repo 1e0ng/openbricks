@@ -444,6 +444,48 @@ class RunProgramResetsMotorProcessTests(unittest.TestCase):
                         "program should still execute after the reset")
 
 
+class TickPumpsBleTxTests(unittest.TestCase):
+    """Every ``_tick`` must pump ``ble_repl``'s TX buffer.
+
+    The pump is the liveness backstop for a flush chain that died with
+    bytes still buffered (scheduler queue full, or a paced
+    notify-failure retry): without it, a finished writer — e.g. the
+    ``openbricks log`` dump program after its last print — leaves the
+    tail (and the raw-REPL terminator) stuck in ``_tx_buf`` forever."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+
+    def test_tick_calls_pump_tx(self):
+        from openbricks import ble_repl
+        calls = []
+        orig = ble_repl.pump_tx
+        ble_repl.pump_tx = lambda: calls.append(1)
+        try:
+            self.launcher._tick()
+            self.launcher._tick()
+        finally:
+            ble_repl.pump_tx = orig
+        self.assertEqual(len(calls), 2)
+
+    def test_pump_failure_does_not_kill_the_tick(self):
+        # The tick also owns the stop button — a raising backstop must
+        # never unwind it.
+        from openbricks import ble_repl
+
+        def _boom():
+            raise RuntimeError("pump exploded")
+
+        orig = ble_repl.pump_tx
+        ble_repl.pump_tx = _boom
+        try:
+            self.launcher._tick()   # must not raise
+        finally:
+            ble_repl.pump_tx = orig
+
+
 class StopRequestTests(unittest.TestCase):
     """A press while running requests a STOP (``_request_stop``), never a
     second START. ``_tick`` only flags it; the native C-function

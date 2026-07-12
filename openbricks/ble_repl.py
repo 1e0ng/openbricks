@@ -264,17 +264,31 @@ class _BLEUART:
         return result
 
     def write(self, data):
+        """Notify ``data`` to every connected central.
+
+        Returns ``True`` when the bytes are handled — delivered to at
+        least one central, or deliberately dropped because nobody is
+        connected — and ``False`` when every notify failed (NimBLE
+        raises ``OSError`` when its msys buffer pool is exhausted,
+        which a fast dump like ``openbricks log`` reliably provokes).
+        The caller keeps the bytes and retries on ``False``; treating
+        that error as fire-and-forget silently lost one TX chunk per
+        exhaustion, which read back as missing / seemingly duplicated
+        log lines on the host (the 1.11.0 ``log`` corruption)."""
         if not self._connections:
             _log("write_no_conn", len(data))
-            return
+            return True
+        ok = False
         for conn_handle in self._connections:
             try:
                 self._ble.gatts_notify(conn_handle, self._tx_handle, data)
+                ok = True
                 _log("notify_ok", conn_handle, len(data))
             except OSError as e:
-                # Peer went away mid-notify; ignore — disconnect IRQ
-                # will tidy up.
+                # Buffer exhaustion, or the peer went away mid-notify
+                # (the disconnect IRQ will tidy the latter up).
                 _log("notify_err", conn_handle, len(data), str(e))
+        return ok
 
     def close(self):
         for conn_handle in list(self._connections):
@@ -357,12 +371,34 @@ class _BLEUARTStream(_IOBASE):
     # anywhere leaves no state to strand — the next write (the
     # KeyboardInterrupt traceback itself, usually) re-schedules.
 
+    # TX buffer hard cap. Bytes are retained across notify failures
+    # (see ``_flush``), so a persistently jammed link plus a chatty
+    # program could otherwise grow ``_tx_buf`` without bound. When the
+    # cap is hit the OLDEST bytes are dropped — for a console stream
+    # the tail is the valuable part.
+    _TX_MAX = 8192
+
     def _flush(self, _arg):
         if not self._tx_buf:
             return
+        # Peek-then-trim: the chunk leaves the buffer only after the
+        # notify reports success. The previous trim-before-write order
+        # lost the chunk whenever gatts_notify raised (NimBLE buffer
+        # exhaustion under a sustained dump) — at-least-once beats
+        # at-most-once here, because a lost chunk can be the raw-REPL
+        # ``\x04`` terminator, which hangs the host until its timeout.
+        # The residual race — an injected KeyboardInterrupt landing
+        # between the successful write and the trim — re-sends at most
+        # one 100-byte chunk, only during a button stop.
         data = bytes(self._tx_buf[0:100])
+        if not self._uart.write(data):
+            # Notify failed; keep the bytes. Deliberately NOT
+            # re-scheduling here: an immediate retry can spin the
+            # scheduler drain loop while the stack's buffers are
+            # still full. The retry is paced instead — the next
+            # ``write()`` or the launcher's ``pump_tx`` tick.
+            return
         self._tx_buf = self._tx_buf[100:]
-        self._uart.write(data)
         if self._tx_buf:
             self._schedule_flush()
 
@@ -371,11 +407,15 @@ class _BLEUARTStream(_IOBASE):
             _SCHEDULE(self._flush, None)
         except RuntimeError:
             # Scheduler queue full. The bytes stay in ``_tx_buf``;
-            # the next ``write()`` or in-flight flush re-requests.
+            # the next ``write()`` or ``pump_tx`` re-requests.
             pass
 
     def write(self, buf):
         self._tx_buf += buf
+        overflow = len(self._tx_buf) - self._TX_MAX
+        if overflow > 0:
+            self._tx_buf = self._tx_buf[overflow:]
+            _log("tx_overflow", overflow)
         self._schedule_flush()
 
 
@@ -390,6 +430,24 @@ _state = {"bridge": None, "stream": None}
 
 def is_running():
     return _state["bridge"] is not None
+
+
+def pump_tx():
+    """Re-arm the TX flush if bytes are sitting in the buffer.
+
+    Liveness backstop, called from the launcher's poll tick. A flush
+    chain dies in two ways: ``micropython.schedule``'s queue was full
+    at re-schedule time, or a notify failed and the retry is
+    deliberately paced (see ``_flush``). In both cases the buffered
+    bytes wait for the *next* ``write()`` — which never comes when the
+    writer already finished. That was the ``openbricks log``
+    end-of-dump stall: the file content and the raw-REPL terminator
+    sat in ``_tx_buf`` forever while the host timed out. The pump
+    gives the chain a fresh start at tick cadence; it is idempotent
+    and no-ops when the buffer is empty or the bridge is down."""
+    stream = _state["stream"]
+    if stream is not None and stream._tx_buf:
+        stream._schedule_flush()
 
 
 def start():
