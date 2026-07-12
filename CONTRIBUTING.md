@@ -54,7 +54,7 @@ and tagged independently so one can't hold the other hostage.
 | Component    | `__version__` lives in                         | Tag pattern          | Released                                |
 |--------------|------------------------------------------------|----------------------|-----------------------------------------|
 | Firmware     | `openbricks/__init__.py`                       | `v1.9.0`             | GitHub release (firmware `.bin` files)  |
-| `openbricks` | `tools/openbricks/openbricks_dev/__init__.py`  | `openbricks/v0.10.21`| PyPI (via OIDC trusted publisher)       |
+| `openbricks` | `tools/openbricks/openbricks_dev/__init__.py`  | `cli/v0.10.24`       | PyPI (via OIDC trusted publisher)       |
 
 (The host package was previously published as `openbricks-dev`; the old
 `openbricks-dev/v*` tags are frozen and the PyPI name now redirects
@@ -71,12 +71,12 @@ Cutting a release:
     git tag v1.9.0 && git push origin v1.9.0
 
     # Host CLI + sim only
-    scripts/bump-version.py --openbricks 0.10.21
+    scripts/bump-version.py --openbricks 0.10.24
     # commit, push, merge PR, then:
-    git tag openbricks/v0.10.21 && git push origin openbricks/v0.10.21
+    git tag cli/v0.10.24 && git push origin cli/v0.10.24
 
     # Both at once (rare — firmware changes usually ship alone)
-    scripts/bump-version.py --firmware 1.9.0 --openbricks 0.10.21
+    scripts/bump-version.py --firmware 1.9.0 --openbricks 0.10.24
 
 ## Licensing
 
