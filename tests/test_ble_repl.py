@@ -520,6 +520,51 @@ class BridgeWriteReturnTests(unittest.TestCase):
         self.assertFalse(self.uart.write(b"x"))
 
 
+class RingLogTests(unittest.TestCase):
+    """The BLE event log must keep the LAST N events, not the first N
+    — a wedge minutes after boot is only diagnosable if late events
+    survive (the first-500 design left the 1.12.0 log --list failure
+    traceless because connect chatter filled it in the first minute)."""
+
+    def setUp(self):
+        ble_repl.clear_log()
+        self._orig_max = ble_repl._LOG_MAX
+        ble_repl._LOG_MAX = 5
+
+    def tearDown(self):
+        ble_repl._LOG_MAX = self._orig_max
+        ble_repl.clear_log()
+
+    def test_under_capacity_keeps_everything_in_order(self):
+        for i in range(3):
+            ble_repl._log("ev", i)
+        self.assertEqual([e[2] for e in ble_repl.log_entries()],
+                         [(0,), (1,), (2,)])
+
+    def test_over_capacity_drops_oldest(self):
+        for i in range(8):
+            ble_repl._log("ev", i)
+        entries = ble_repl.log_entries()
+        self.assertEqual(len(entries), 5)
+        self.assertEqual([e[2] for e in entries],
+                         [(3,), (4,), (5,), (6,), (7,)])
+
+    def test_wraps_repeatedly(self):
+        for i in range(23):
+            ble_repl._log("ev", i)
+        self.assertEqual([e[2] for e in ble_repl.log_entries()],
+                         [(18,), (19,), (20,), (21,), (22,)])
+
+    def test_clear_resets_ring_position(self):
+        for i in range(7):
+            ble_repl._log("ev", i)
+        ble_repl.clear_log()
+        ble_repl._log("fresh", 0)
+        entries = ble_repl.log_entries()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0][1], "fresh")
+
+
 class BluetoothIntegrationTests(unittest.TestCase):
     """``openbricks.bluetooth.set_enabled(True)`` should start the
     REPL bridge; ``set_enabled(False)`` should stop it."""
