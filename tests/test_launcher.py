@@ -653,6 +653,24 @@ class HardwarePressLatchTests(unittest.TestCase):
         self.launcher._tick()
         self.assertEqual(self.stops, [])
 
+    def test_sync_survives_counter_failure(self):
+        self.pcnt.raise_on_value = RuntimeError("pcnt wedged")
+        self.launcher._sync_press_counter()   # must not raise
+        self.assertEqual(self.launcher._press_count_seen, 0)
+
+    def test_remote_start_mid_hold_release_fires_stop(self):
+        # Press-down while idle, program starts remotely during the
+        # hold, release -> the release is a stop request.
+        self.btn._value = 0
+        self.launcher._tick()                 # press-down at idle
+        self.launcher._running = True         # remote start mid-hold
+        self.btn._value = 1
+        self.launcher._tick()                 # release
+        self.assertEqual(len(self.stops), 1)
+        self.assertTrue(
+            any(n == "button pressed -> stop" for n in self.notes),
+            self.notes)
+
     def test_counter_failure_does_not_kill_tick_or_level_path(self):
         self.launcher._running = True
         self.pcnt.raise_on_value = RuntimeError("pcnt wedged")
