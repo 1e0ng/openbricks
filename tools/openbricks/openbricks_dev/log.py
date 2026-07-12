@@ -80,7 +80,7 @@ async def _log_async(name, op_program, scan_timeout):
         await run_mod._enter_raw_repl(blink, link)
         try:
             await run_mod._raw_paste_upload(blink, link, op_program)
-            await run_mod._stream_output(blink, sys.stdout)
+            await run_mod._stream_output(blink, link, sys.stdout)
         finally:
             try:
                 await run_mod._restore_idle_loop(link)
