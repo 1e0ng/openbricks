@@ -555,6 +555,38 @@ class RingLogTests(unittest.TestCase):
         self.assertEqual([e[2] for e in ble_repl.log_entries()],
                          [(18,), (19,), (20,), (21,), (22,)])
 
+    def test_dump_log_prints_all_entries_with_wrap_marker(self):
+        import builtins
+        for i in range(8):
+            ble_repl._log("ev", i)
+        lines = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: lines.append(
+            " ".join(str(x) for x in a))
+        try:
+            ble_repl.dump_log()
+        finally:
+            builtins.print = orig_print
+        self.assertEqual(len(lines), 6)   # header + 5 ring entries
+        self.assertIn("older events dropped", lines[0])
+        self.assertIn("ev", lines[1])
+
+    def test_dump_log_unwrapped_has_no_drop_marker(self):
+        import builtins
+        ble_repl._log("only", 1)
+        lines = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: lines.append(
+            " ".join(str(x) for x in a))
+        try:
+            ble_repl.dump_log()
+        finally:
+            builtins.print = orig_print
+        self.assertEqual(len(lines), 2)
+        self.assertFalse("dropped" in lines[0],
+                         "unwrapped dump must not claim drops: %r"
+                         % lines[0])
+
     def test_clear_resets_ring_position(self):
         for i in range(7):
             ble_repl._log("ev", i)
