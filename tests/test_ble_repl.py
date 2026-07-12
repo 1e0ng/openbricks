@@ -262,11 +262,14 @@ class StreamProtocolTests(unittest.TestCase):
 class _RecordingUart:
     """Bare uart stand-in for ``_BLEUARTStream`` TX tests: records
     every write; can raise once to simulate a KeyboardInterrupt
-    landing mid-flush."""
+    landing mid-flush, or reject N writes to simulate gatts_notify
+    failing on NimBLE buffer exhaustion (returns False like the real
+    ``_BLEUART.write``)."""
 
     def __init__(self):
         self.writes = []
         self.raise_once = None
+        self.reject_next = 0
         self._handler = None
 
     def irq(self, handler):
@@ -276,7 +279,11 @@ class _RecordingUart:
         if self.raise_once is not None:
             exc, self.raise_once = self.raise_once, None
             raise exc
+        if self.reject_next > 0:
+            self.reject_next -= 1
+            return False
         self.writes.append(bytes(data))
+        return True
 
     def any(self):
         return 0
@@ -334,7 +341,9 @@ class TxSchedulingTests(unittest.TestCase):
 
     def test_interrupt_mid_flush_recovers(self):
         # KeyboardInterrupt inside the flush body (during the notify)
-        # loses at most that one chunk; the next write must revive TX.
+        # must not lose bytes: since 1.11.1 the chunk leaves the
+        # buffer only after a successful notify, so an interrupted
+        # notify leaves it queued and the next write delivers it.
         self.stream.write(b"a" * 150)
         self.uart.raise_once = KeyboardInterrupt()
         try:
@@ -345,9 +354,9 @@ class TxSchedulingTests(unittest.TestCase):
         self.stream.write(b"tail")
         self._run_queued()
         joined = b"".join(self.uart.writes)
-        self.assertTrue(joined.endswith(b"tail"),
-                        "TX never recovered after mid-flush interrupt: %r"
-                        % joined)
+        self.assertEqual(
+            joined, b"a" * 150 + b"tail",
+            "mid-flush interrupt lost or duplicated bytes: %r" % joined)
 
     def test_schedule_queue_full_is_tolerated(self):
         self.fail_schedule_with = RuntimeError("schedule queue full")
@@ -364,6 +373,151 @@ class TxSchedulingTests(unittest.TestCase):
         self.assertEqual(b"".join(self.uart.writes), b"x" * 250)
         for chunk in self.uart.writes:
             self.assertTrue(len(chunk) <= 100)
+
+
+class TxReliabilityTests(unittest.TestCase):
+    """Notify failures must not lose bytes, and a dead flush chain
+    must be revivable without a new write.
+
+    The 1.11.0 ``openbricks log`` corruption: a fast dump exhausts
+    NimBLE's notify buffers, ``gatts_notify`` raises, and the old
+    trim-before-write flush had already dropped the chunk — read back
+    on the host as missing bytes (which LOOK like duplicated lines,
+    because log lines repeat every ~58 bytes). And when the dump
+    program finished printing, a flush chain that died on a full
+    scheduler queue had no next ``write()`` to revive it, so the tail
+    (including the raw-REPL ``\\x04`` terminator) sat in ``_tx_buf``
+    forever — the host's 30 s "hub went quiet" timeout."""
+
+    def setUp(self):
+        self._orig_schedule = ble_repl._SCHEDULE
+        self.queue = []
+        self.fail_schedule_with = None
+        this = self
+
+        def fake_schedule(fn, arg):
+            if this.fail_schedule_with is not None:
+                raise this.fail_schedule_with
+            this.queue.append((fn, arg))
+        ble_repl._SCHEDULE = fake_schedule
+        self.uart = _RecordingUart()
+        self.stream = ble_repl._BLEUARTStream(self.uart)
+        self._orig_state_stream = ble_repl._state["stream"]
+
+    def tearDown(self):
+        ble_repl._SCHEDULE = self._orig_schedule
+        ble_repl._state["stream"] = self._orig_state_stream
+
+    def _run_queued(self):
+        while self.queue:
+            fn, arg = self.queue.pop(0)
+            fn(arg)
+
+    def test_notify_failure_keeps_bytes(self):
+        self.stream.write(b"precious")
+        self.uart.reject_next = 1
+        self._run_queued()
+        # The chunk was rejected — nothing delivered, nothing lost.
+        self.assertEqual(self.uart.writes, [])
+        self.assertEqual(bytes(self.stream._tx_buf), b"precious")
+
+    def test_notify_failure_does_not_spin_scheduler(self):
+        # A failed notify must NOT immediately re-schedule (that can
+        # spin the scheduler drain loop while the stack's buffers are
+        # still full) — the retry is paced by pump_tx / next write.
+        self.stream.write(b"abc")
+        self.uart.reject_next = 1
+        self._run_queued()
+        self.assertEqual(len(self.queue), 0)
+
+    def test_pump_tx_revives_dead_chain(self):
+        # Chain death: scheduler queue full at write time.
+        self.fail_schedule_with = RuntimeError("schedule queue full")
+        self.stream.write(b"stuck tail")
+        self.fail_schedule_with = None
+        self.assertEqual(self.uart.writes, [])
+        # No further writes ever come. The pump must revive TX.
+        ble_repl._state["stream"] = self.stream
+        ble_repl.pump_tx()
+        self._run_queued()
+        self.assertEqual(b"".join(self.uart.writes), b"stuck tail")
+
+    def test_pump_tx_noop_on_empty_buffer(self):
+        ble_repl._state["stream"] = self.stream
+        ble_repl.pump_tx()
+        self.assertEqual(len(self.queue), 0)
+
+    def test_pump_tx_noop_when_bridge_down(self):
+        ble_repl._state["stream"] = None
+        ble_repl.pump_tx()   # must not raise
+        self.assertEqual(len(self.queue), 0)
+
+    def test_pump_retries_after_notify_failure(self):
+        self.stream.write(b"0123456789" * 15)   # 150 bytes, 2 chunks
+        self.uart.reject_next = 1
+        self._run_queued()   # first chunk rejected, chain paced out
+        ble_repl._state["stream"] = self.stream
+        ble_repl.pump_tx()
+        self._run_queued()
+        self.assertEqual(b"".join(self.uart.writes), b"0123456789" * 15)
+
+    def test_tx_overflow_drops_oldest(self):
+        self.stream._TX_MAX = 10
+        self.fail_schedule_with = RuntimeError("no flush drains")
+        self.stream.write(b"aaaaaaaa")   # 8 bytes
+        self.stream.write(b"bbbbbbbb")   # 16 total -> capped to last 10
+        self.fail_schedule_with = None
+        self.assertEqual(bytes(self.stream._tx_buf), b"aa" + b"bbbbbbbb")
+        ble_repl._state["stream"] = self.stream
+        ble_repl.pump_tx()
+        self._run_queued()
+        self.assertEqual(b"".join(self.uart.writes), b"aabbbbbbbb")
+
+
+class BridgeWriteReturnTests(unittest.TestCase):
+    """``_BLEUART.write`` must report delivery so the flush layer can
+    keep undelivered bytes."""
+
+    def setUp(self):
+        _FakeBLE._reset_for_test()
+        _FakeNVS._reset_for_test()
+        _FakeOsDupterm._reset_for_test()
+        if ble_repl.is_running():
+            ble_repl.stop()
+        _set_hub_name("TestHub")
+        import bluetooth
+        ble = bluetooth.BLE()
+        ble.active(True)
+        self.uart = ble_repl._BLEUART(ble, name="TestHub")
+        self.ble = ble
+
+    def test_no_connection_reports_handled(self):
+        # Nobody listening: the bytes are deliberately dropped, which
+        # counts as handled (True) — retaining them would grow the
+        # buffer without bound while the hub prints offline.
+        self.assertTrue(self.uart.write(b"x"))
+
+    def test_delivered_reports_true(self):
+        self.uart._connections.add(11)
+        self.assertTrue(self.uart.write(b"x"))
+
+    def test_notify_oserror_reports_false(self):
+        # Delegating wrapper instead of monkeypatching the fake's
+        # method — instance-level method shadowing is exactly the MP
+        # trap tests/_fakes idioms warn about.
+        class _NotifyBoom:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+            def gatts_notify(self, conn, handle, data):
+                raise OSError(12)   # ENOMEM: msys buffer exhaustion
+
+        self.uart._connections.add(11)
+        self.uart._ble = _NotifyBoom(self.ble)
+        self.assertFalse(self.uart.write(b"x"))
 
 
 class BluetoothIntegrationTests(unittest.TestCase):

@@ -171,6 +171,18 @@ class Launcher:
         set in a Python callback frame unwinds the callback, not the
         program. The native C-function ``stop_tick`` Timer callback (set
         up in ``_ensure_launcher``) does the injection."""
+        # BLE TX liveness backstop: revive a flush chain that died with
+        # bytes still buffered (scheduler queue full at re-schedule
+        # time, or a paced notify-failure retry — see
+        # ``ble_repl._flush``). Runs before the button logic so the
+        # early ``return``s below can't skip it. Wrapped like
+        # ``estop.engage()`` in ``_fire_stop``: a backstop must never
+        # kill the tick that also owns the stop button.
+        try:
+            from openbricks import ble_repl
+            ble_repl.pump_tx()
+        except Exception:
+            pass
         if self._running:
             if self._stop_retry_ms is not None and _ticks_diff(
                     _now_ms(), self._stop_retry_ms) >= self.STOP_RETRY_MS:
