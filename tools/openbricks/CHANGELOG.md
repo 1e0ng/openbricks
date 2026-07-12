@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.23 — BLE raw-REPL handshake retries instead of one-shot
+
+`openbricks run` / `upload` / `log` sent a single Ctrl-C + Ctrl-A and
+then waited up to 30 s for the raw-REPL banner. The Ctrl-C is
+delivered on the hub as an injected KeyboardInterrupt, which raises
+in whatever main-thread frame is executing — a scheduled callback
+(BLE TX flush, button poll) can eat it, the same disease the stop
+button had. One eaten interrupt cost a 30 s hang and a failed
+connect with `notify_count=0`.
+
+The handshake now retries: Ctrl-C + Ctrl-A every 4 s, up to 6
+attempts (both are idempotent at the REPL). The timeout error names
+the attempt count so a genuinely wedged hub is still diagnosable.
+
 ## 0.10.22 — `flash` writes the classic ESP32 at the right offset
 
 `openbricks flash` hardcoded write offset `0x0`, which is correct for

@@ -45,6 +45,76 @@ class _ScriptedLink:
         self.closed = True
 
 
+class _DeafHubLink:
+    """Link whose hub ignores interrupts until the N-th Ctrl-C —
+    simulating the injected KeyboardInterrupt being eaten by a
+    scheduled callback on the hub. Only once enough interrupts have
+    landed does the Ctrl-A produce the raw-REPL banner."""
+
+    def __init__(self, wake_after):
+        self.writes = []
+        self._wake_after = wake_after
+        self._interrupts = 0
+        self._banner_queued = False
+
+    def stats(self):
+        # Shape of NUSLink.stats() — read by _format_timeout when an
+        # attempt times out.
+        return {"connected": True, "notify_count": 0, "byte_count": 0,
+                "last_byte_ago": None, "uptime": 1.0}
+
+    async def write(self, data):
+        self.writes.append(bytes(data))
+        self._interrupts += bytes(data).count(b"\x03")
+        if b"\x01" in data and self._interrupts >= self._wake_after:
+            self._banner_queued = True
+
+    async def read(self, timeout=None):
+        if self._banner_queued:
+            self._banner_queued = False
+            return _BANNER
+        return b""
+
+
+class EnterRawReplRetryTests(unittest.TestCase):
+    """One eaten Ctrl-C must not fail the connect — the handshake is
+    retried (the client-side counterpart of the hub's stop-button
+    e-stop hardening)."""
+
+    def _enter(self, link):
+        blink = run_mod._BufferedLink(link)
+        asyncio.run(run_mod._enter_raw_repl(blink, link))
+        return link
+
+    def test_first_attempt_success(self):
+        link = self._enter(_DeafHubLink(wake_after=1))
+        # Exactly one Ctrl-A sent — no spurious retries.
+        ctrl_as = sum(1 for w in link.writes if b"\x01" in w)
+        self.assertEqual(ctrl_as, 1)
+
+    def test_recovers_when_first_interrupts_are_eaten(self):
+        # Hub wakes only on the 5th Ctrl-C: attempts 1-2 (2 Ctrl-C
+        # each) are eaten, attempt 3 crosses the threshold. The old
+        # one-shot handshake failed here with notify_count=0.
+        link = self._enter(_DeafHubLink(wake_after=5))
+        ctrl_as = sum(1 for w in link.writes if b"\x01" in w)
+        self.assertEqual(ctrl_as, 3)
+
+    def test_raises_after_all_attempts_exhausted(self):
+        link = _DeafHubLink(wake_after=10 ** 9)
+        blink = run_mod._BufferedLink(link)
+        try:
+            asyncio.run(run_mod._enter_raw_repl(blink, link))
+        except run_mod.RunError as e:
+            self.assertIn("attempt %d/%d" % (run_mod._RAW_REPL_ATTEMPTS,
+                                             run_mod._RAW_REPL_ATTEMPTS),
+                          str(e))
+        else:
+            self.fail("expected RunError after exhausting retries")
+        ctrl_as = sum(1 for w in link.writes if b"\x01" in w)
+        self.assertEqual(ctrl_as, run_mod._RAW_REPL_ATTEMPTS)
+
+
 def _args(name="RobotA", script="s.py", scan_timeout=5.0, inline_code=None):
     return argparse.Namespace(
         name=name, script=script, scan_timeout=scan_timeout,
