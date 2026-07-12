@@ -140,7 +140,7 @@ GitHub Actions runs several job groups on every push / PR (see `.github/workflow
 - **`coverage`** — the firmware suite again on the gcov-instrumented unix MP build; uploads C-core coverage.
 - **`firmware`** — a matrix job (targets: `esp32`, `esp32s3`) that builds each image inside the `espressif/idf:v5.5.4` container and uploads `firmware.bin` + bootloader + partition-table per target as a workflow artifact.
 - **`qemu-smoke`** — boots the just-built ESP32-S3 image in Espressif's QEMU and asserts the bootloader reaches app entry with no panic markers.
-- **`release`** / **`build-openbricks-sdist`** / **`build-openbricks-wheels`** / **`publish-openbricks`** — firmware GitHub Releases (rolling `latest` on main pushes, versioned on `v*` tags) and the PyPI sdist + cibuildwheel wheels published on `openbricks/v*` tags.
+- **`release`** / **`build-openbricks-sdist`** / **`build-openbricks-wheels`** / **`publish-openbricks`** — firmware GitHub Releases (rolling `latest` on main pushes, versioned on `v*` tags) and the PyPI sdist + cibuildwheel wheels published on `cli/v*` tags (releases up to 0.10.24 used `openbricks/v*`).
 
 Successful PRs produce a flashable image downloadable from the Actions run.
 

@@ -5,12 +5,13 @@ on:
     branches: [main]
     tags:
       # Firmware releases use the plain ``v*`` namespace; the host
-      # tooling uses its own ``openbricks/v*`` namespace so the two
-      # can be cut independently. ``openbricks-dev/v*`` is kept for
-      # one final 0.9.3 deprecation publish — see the
+      # tooling uses its own ``cli/v*`` namespace so the two can be
+      # cut independently (releases up to 0.10.24 used
+      # ``openbricks/v*``). ``openbricks-dev/v*`` is kept for one
+      # final 0.9.3 deprecation publish — see the
       # ``publish-openbricks-dev-deprecation`` job.
       - "v*"
-      - "openbricks/v*"
+      - "cli/v*"
       - "openbricks-dev/v*"
   pull_request:
     branches: [main]
@@ -308,9 +309,9 @@ jobs:
   firmware:
     # Skip firmware builds for host-tooling tags — those cut a CLI /
     # sim release and don't touch the firmware image. Both
-    # ``openbricks/v*`` (the unified package) and ``openbricks-dev/v*``
+    # ``cli/v*`` (the unified package) and ``openbricks-dev/v*``
     # (the legacy deprecation namespace) qualify.
-    if: ${{ !startsWith(github.ref, 'refs/tags/openbricks/') &&
+    if: ${{ !startsWith(github.ref, 'refs/tags/cli/') &&
             !startsWith(github.ref, 'refs/tags/openbricks-dev/') }}
     runs-on: ubuntu-latest
     strategy:
@@ -412,7 +413,7 @@ jobs:
     # ``continue-on-error: true`` while we shake out the exact
     # qemu-system-xtensa flags. Flip to false once it's stable.
     needs: [firmware]
-    if: ${{ !startsWith(github.ref, 'refs/tags/openbricks/') &&
+    if: ${{ !startsWith(github.ref, 'refs/tags/cli/') &&
             !startsWith(github.ref, 'refs/tags/openbricks-dev/') }}
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -643,7 +644,7 @@ jobs:
 
   publish-openbricks:
     # Publish the unified ``openbricks`` package (CLI + sim) to PyPI
-    # on every ``openbricks/v*`` tag push. Versioned independently
+    # on every ``cli/v*`` tag push. Versioned independently
     # from the firmware (separate ``VERSION`` files, separate tag
     # namespaces) so cutting a host-tooling release doesn't require
     # a firmware release and vice versa.
@@ -653,7 +654,7 @@ jobs:
     # PyPI's Trusted Publisher (OIDC) — no API token is stored in
     # the repo.
     needs: [build-openbricks-sdist, build-openbricks-wheels]
-    if: startsWith(github.ref, 'refs/tags/openbricks/v')
+    if: startsWith(github.ref, 'refs/tags/cli/v')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

@@ -24,12 +24,13 @@ is present.
 Tags use separate namespaces:
 
   * firmware:   ``git tag v<version>``
-  * openbricks: ``git tag openbricks/v<version>``
+  * openbricks: ``git tag cli/v<version>``
 
 The ``openbricks`` package was previously published as
 ``openbricks-dev`` (host CLI) and ``openbricks-sim`` (sim) before the
-unification PR. Old tags ``openbricks-dev/v*`` are frozen — the new
-namespace is ``openbricks/v*``.
+unification PR. Old tags ``openbricks-dev/v*`` are frozen, and
+``openbricks/v*`` (used up to 0.10.24) is retired — the namespace is
+``cli/v*``.
 """
 
 import argparse
@@ -50,7 +51,7 @@ _FIRMWARE = {
 _HOST = {
     "label":    "openbricks",
     "init":     "tools/openbricks/openbricks_dev/__init__.py",
-    "tag_hint": "git tag openbricks/v{version}",
+    "tag_hint": "git tag cli/v{version}",
 }
 
 
@@ -83,7 +84,7 @@ def main(argv=None):
                     help="New firmware version (tag: v<version>).")
     ap.add_argument("--openbricks", metavar="X.Y.Z",
                     help="New openbricks (host) version "
-                         "(tag: openbricks/v<version>).")
+                         "(tag: cli/v<version>).")
     args = ap.parse_args(argv)
 
     if not args.firmware and not args.openbricks:
