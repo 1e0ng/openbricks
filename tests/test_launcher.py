@@ -200,6 +200,112 @@ class StopRestartRegressionTests(unittest.TestCase):
         self.assertEqual(self.starts, [])
 
 
+class StartLockoutTests(unittest.TestCase):
+    """The post-stop lockout is anchored at the stopping press's
+    RELEASE and sized at 400 ms — a deliberate quick restart after
+    that works, and a swallowed press is announced + recorded instead
+    of silently reading as \'start button not detected\'."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+        self.starts = []
+        self._orig_start = launcher._request_start
+        self._orig_stop = launcher._request_stop
+        launcher._request_start = lambda inst: self.starts.append(inst)
+        launcher._request_stop = lambda inst: None
+        self.addCleanup(
+            setattr, launcher, "_request_start", self._orig_start)
+        self.addCleanup(
+            setattr, launcher, "_request_stop", self._orig_stop)
+
+    def _stop_cycle(self):
+        self.launcher._running = True
+        _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
+        self.launcher._running = False
+
+    def test_quick_deliberate_restart_after_lockout_works(self):
+        # The 750ms-from-fire lockout swallowed this exact press.
+        self._stop_cycle()
+        advance_ms(launcher.Launcher.START_LOCKOUT_MS + 60)
+        _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
+        self.assertEqual(len(self.starts), 1)
+
+    def test_lockout_anchored_at_release_not_fire(self):
+        # Long-held stop press: fire at press-down, release 1 s later.
+        # A press 200 ms after the RELEASE is inside the window even
+        # though it is far past fire+400.
+        self.launcher._running = True
+        _press(self.btn, hold_ms=1000, tick_fn=self.launcher._tick)
+        self.launcher._running = False
+        advance_ms(100)
+        _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
+        self.assertEqual(self.starts, [])
+
+    def test_swallowed_press_is_announced_and_recorded(self):
+        import builtins
+        self._stop_cycle()
+        advance_ms(50)
+        printed = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: printed.append(
+            " ".join(str(x) for x in a))
+        try:
+            _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
+        finally:
+            builtins.print = orig_print
+        self.assertEqual(self.starts, [])
+        self.assertTrue(
+            any("start press ignored" in s for s in printed), printed)
+        tags = [e[1:] for e in launcher._EVENTS]
+        self.assertTrue(
+            any(tag == "release" and args and args[0] == "lockout-swallowed"
+                for tag, args in tags), launcher._EVENTS)
+
+
+class LauncherEventRingTests(unittest.TestCase):
+    """The always-on button event ring — idle presses have no run log,
+    this is their only trace."""
+
+    def setUp(self):
+        del launcher._EVENTS[:]
+        launcher._EVENTS_NEXT[0] = 0
+        self.addCleanup(lambda: (launcher._EVENTS.clear(),))
+
+    def test_records_press_and_release(self):
+        btn = _make_button()
+        inst = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
+        orig = launcher._request_start
+        launcher._request_start = lambda i: None
+        try:
+            _press(btn, hold_ms=100, tick_fn=inst._tick)
+        finally:
+            launcher._request_start = orig
+        tags = [e[1] for e in launcher._EVENTS]
+        self.assertIn("press-down", tags)
+        self.assertIn("release", tags)
+
+    def test_ring_wraps(self):
+        for i in range(launcher._EVENTS_MAX + 10):
+            launcher._event("ev", i)
+        self.assertEqual(len(launcher._EVENTS), launcher._EVENTS_MAX)
+
+    def test_dump_events_prints(self):
+        import builtins
+        launcher._event("hello", 1)
+        lines = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: lines.append(
+            " ".join(str(x) for x in a))
+        try:
+            launcher.dump_events()
+        finally:
+            builtins.print = orig_print
+        self.assertEqual(len(lines), 2)
+        self.assertIn("hello", lines[1])
+
+
 class StopRetryTests(unittest.TestCase):
     """A stop request must be re-injected until the program dies —
     a one-shot request is lost whenever the injected KeyboardInterrupt
