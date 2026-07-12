@@ -106,9 +106,15 @@ class _FakeTime:
     sleep_ms = staticmethod(_sleep_ms)
     sleep_us = staticmethod(_sleep_us)
     # Pass-through to the real time module for wall-clock-only helpers
-    # we don't need to virtualise.
+    # we don't need to virtualise. ``gmtime`` feeds the epoch-offset
+    # detection in ``openbricks.log`` (1970- vs 2000-based epochs);
+    # ``time_ns`` feeds its per-line stamps. Under unix MP / CPython
+    # both are the real 1970-based clock, exactly what firmware code
+    # must handle.
     time = _real_time.time
     sleep = _real_time.sleep
+    gmtime = _real_time.gmtime
+    time_ns = _real_time.time_ns
 
 
 sys.modules["time"] = _FakeTime

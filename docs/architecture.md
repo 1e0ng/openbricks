@@ -96,9 +96,22 @@ ships:
   no-op `machine` fakes and replaces the I2C driver classes with
   sim-aware versions.
 - Per-run log capture on the hub: every program execution tee'd to
-  `/openbricks_logs/run_N.log` (3 rotating slots, 64 KB each).
-  `openbricks log -n NAME` reads them back over BLE — useful for
-  untethered runs where no live console was attached.
+  `/openbricks_logs/run_N.log` (3 rotating slots, 64 KB each). Each
+  line is prefixed with a raw UTC Unix-epoch-milliseconds stamp;
+  `openbricks log -n NAME` reads the file back over BLE and renders
+  the stamp as `[YYYY-MM-DD HH:MM:SS.mmm]` in your local timezone —
+  useful for untethered runs where no live console was attached. The
+  CLI syncs the hub's RTC from the host clock on every connect
+  (run / upload / log), so runs started after any connect carry real
+  wall-clock time; a hub that powered up and never saw a connect
+  stamps from 2000-01-01, which is self-diagnosing. Button presses
+  leave stamped entries too: a run's log opens with a header line —
+  `started: button press | firmware 1.12.0 | program /program.py |
+  uptime N ms | free N B` — and a stop press writes `button pressed
+  -> stop` the moment it lands, followed by `estop engaged` and a
+  final `stopped: KeyboardInterrupt (N ms after press, M retries)`
+  debrief, so a misbehaving stop chain is diagnosable from the log
+  alone.
 
 The Python module names on the host are deliberately split
 (`openbricks_dev` for the CLI, `openbricks_sim` for the sim) so they

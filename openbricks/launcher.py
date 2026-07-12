@@ -92,6 +92,7 @@ class Launcher:
         self._press_stopped  = False       # this press already fired STOP
         self._last_stop_ms   = None        # when the last STOP fired
         self._stop_retry_ms  = None        # last injection request time
+        self._stop_retry_count = 0         # injections re-requested this stop
         self._pending        = None        # None | "start" | "stop"
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
@@ -145,11 +146,16 @@ class Launcher:
         from openbricks import estop
         self._last_stop_ms = _now_ms()
         self._stop_retry_ms = self._last_stop_ms
+        self._stop_retry_count = 0
         try:
             estop.engage()
-        except Exception:
+            # Breadcrumb AFTER the kill so the file write can't delay
+            # it; no injection is pending yet (that request comes
+            # next), so no KeyboardInterrupt can land in this write.
+            _note("estop engaged: motors killed, motion latched")
+        except Exception as e:
             # The latch itself must never fail the stop request.
-            pass
+            _note("estop engage FAILED: %r" % (e,))
         _request_stop(self)
 
     def _tick(self, _timer=None):
@@ -187,8 +193,12 @@ class Launcher:
             if self._stop_retry_ms is not None and _ticks_diff(
                     _now_ms(), self._stop_retry_ms) >= self.STOP_RETRY_MS:
                 # A stop is in flight but the program is still alive —
-                # the previous injection was eaten. Re-request.
+                # the previous injection was eaten. Re-request. (No log
+                # note here: an injection is pending and could land
+                # inside the file write, eaten by _tick instead of the
+                # program. The count lands in the stop debrief line.)
                 self._stop_retry_ms = _now_ms()
+                self._stop_retry_count += 1
                 _request_stop(self)
         else:
             self._stop_retry_ms = None
@@ -198,6 +208,10 @@ class Launcher:
                 self._was_pressed = True
                 if self._running:
                     self._press_stopped = True
+                    # Note BEFORE _fire_stop: the injection request is
+                    # not pending yet, so no KeyboardInterrupt can land
+                    # inside this file write.
+                    _note("button pressed -> stop")
                     self._fire_stop()
                 else:
                     self._press_stopped = False
@@ -213,6 +227,7 @@ class Launcher:
         if self._running:
             # Program came up between press-down and release (remote
             # start mid-hold) — a button event during a run means stop.
+            _note("button pressed -> stop")
             self._fire_stop()
             return
         if self._last_stop_ms is not None and _ticks_diff(
@@ -236,7 +251,7 @@ class Launcher:
             estop.clear()   # fresh run — stale latch must not kill it
             self._running = True
             try:
-                _exec_program(self._program_path)
+                _exec_program(self._program_path, origin="button press")
             finally:
                 self._running = False
                 estop.clear()
@@ -284,6 +299,54 @@ def _stop_all_motors():
                 bus.write(_BROADCAST_ID, _REG_TORQUE, bytes([0]))
             except Exception:
                 pass
+    except Exception:
+        pass
+
+
+def _run_header(program_path):
+    """Environment summary for the run log's first line: firmware
+    version, program path, milliseconds since boot (a tiny uptime
+    right after an unexpected reboot is itself a clue), and free
+    heap. Every probe is independent — a failing one reports ? and
+    must not cost the run its log."""
+    try:
+        from openbricks import __version__ as _ver
+    except Exception:
+        _ver = "?"
+    try:
+        import time as _t
+        up = _t.ticks_ms()
+    except Exception:
+        up = "?"
+    try:
+        import gc
+        free = gc.mem_free()
+    except Exception:
+        free = "?"
+    return "firmware %s | program %s | uptime %s ms | free %s B" % (
+        _ver, program_path, up, free)
+
+
+def _stop_debrief():
+    """One-line summary of the in-flight stop for the run log: how
+    long after the press the program actually died, and how many
+    injection retries that took. A KeyboardInterrupt with no recorded
+    press is a host-side Ctrl-C (openbricks run / stop)."""
+    inst = _singleton
+    if inst is None or inst._last_stop_ms is None:
+        return "no stop press recorded (host Ctrl-C?)"
+    return "%d ms after press, %d retries" % (
+        _ticks_diff(_now_ms(), inst._last_stop_ms),
+        inst._stop_retry_count)
+
+
+def _note(text):
+    """Mirror a button event into the active run's log file (stamped;
+    file only). Guarded — a logging failure must never break the tick
+    that owns the stop button."""
+    try:
+        from openbricks import log as _log
+        _log.note(text)
     except Exception:
         pass
 
@@ -365,7 +428,8 @@ def _scheduled_start(launcher_instance):
     estop.clear()
     launcher_instance._running = True
     try:
-        _exec_program(launcher_instance._program_path)
+        _exec_program(launcher_instance._program_path,
+                      origin="button press (degraded REPL-parked path)")
     finally:
         launcher_instance._running = False
     print("openbricks: idle. Press button to run",
@@ -408,9 +472,12 @@ def _start_via_schedule(launcher_instance):
 
 # ---- program exec helpers ----
 
-def _exec_program_raw(program_path):
+def _exec_program_raw(program_path, origin=None):
     """Load and run ``program_path`` in a fresh namespace. Propagates
     ``KeyboardInterrupt``; prints other exceptions and returns.
+    ``origin`` (e.g. "button press", "remote (openbricks run)") is
+    written as the run log's first stamped line, so every button
+    press that starts a program leaves a log entry.
 
     Wraps the run in a :func:`openbricks.log.session` so every
     ``print()`` / exception traceback is *also* tee'd to a flash
@@ -428,6 +495,8 @@ def _exec_program_raw(program_path):
     _arm_stop_button(True)
     try:
         with _log.session() as sess:
+            sess.write_text("started: %s | %s\n" % (
+                origin or "unknown", _run_header(program_path)))
             try:
                 exec(code, {"__name__": "__main__"})
             except KeyboardInterrupt:
@@ -441,6 +510,10 @@ def _exec_program_raw(program_path):
                 # halts no matter how the program was running.
                 # Idempotent if already stopped.
                 _stop_all_motors()
+                # Safe to write now: the button is disarmed, so no
+                # further injection can land inside this file write.
+                sess.write_text(
+                    "stopped: KeyboardInterrupt (%s)\n" % _stop_debrief())
                 raise
             except Exception as e:
                 pe = getattr(sys, "print_exception", None)
@@ -458,11 +531,11 @@ def _exec_program_raw(program_path):
         _arm_stop_button(False)
 
 
-def _exec_program(program_path):
+def _exec_program(program_path, origin=None):
     """Button-gated path: swallow ``KeyboardInterrupt`` and missing-file
     errors so the idle loop keeps running between button presses."""
     try:
-        _exec_program_raw(program_path)
+        _exec_program_raw(program_path, origin=origin)
         print("openbricks: program finished.")
     except OSError:
         print("openbricks: no program at", program_path)
@@ -558,7 +631,7 @@ def run_program(program_path=DEFAULT_PROGRAM_PATH):
     estop.clear()   # fresh run — a stale latch must not kill it at birth
     launcher._running = True
     try:
-        _exec_program_raw(program_path)
+        _exec_program_raw(program_path, origin="remote (openbricks run)")
     finally:
         launcher._running = False
         # Program is dead; release the latch so idle-time commands

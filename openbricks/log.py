@@ -17,8 +17,18 @@ Storage layout::
 
 Each run gets the next index; when the directory already holds
 ``MAX_RUNS`` files we delete the oldest before opening the new one.
-Indices are recycled rather than monotonically growing so flash
-usage is bounded.
+Indices grow monotonically (run_9 is the tenth run ever; only the
+newest ``MAX_RUNS`` files exist at a time), so flash usage is
+bounded while filenames stay unambiguous across rotations.
+
+Every line is prefixed with a raw int64 **UTC Unix epoch in
+milliseconds** (e.g. ``1783950123456 left ambient: 33``). No
+formatting, no timezone on the hub — the host CLI converts to the
+user's local time at display. The ESP32 RTC starts at 2000-01-01 on
+power-up; the CLI syncs it from the host clock on every connect, so
+runs started after any ``openbricks run`` / ``log`` / ``upload``
+carry real wall-clock stamps (an unsynced run shows year-2000
+dates, which is self-diagnosing).
 
 The session is also bytes-capped: once a run's log file passes
 ``MAX_BYTES`` bytes, further writes are dropped from the file (the
@@ -37,11 +47,26 @@ exception handler so tracebacks are captured.
 
 import builtins
 import os
+import time
 
 
 LOG_DIR    = "/openbricks_logs"
 MAX_RUNS   = 3
 MAX_BYTES  = 64 * 1024
+
+# MicroPython embedded ports count time from 2000-01-01 UTC; the unix
+# port and CPython from 1970-01-01. Detect once so stored stamps are
+# true Unix epoch regardless of runtime.
+_EPOCH_OFFSET_MS = 946684800000 if time.gmtime(0)[0] == 2000 else 0
+
+
+def _epoch_ms():
+    """Current UTC Unix epoch in milliseconds (int)."""
+    try:
+        return time.time_ns() // 1000000 + _EPOCH_OFFSET_MS
+    except AttributeError:
+        # No time_ns on this runtime — whole-second resolution.
+        return int(time.time()) * 1000 + _EPOCH_OFFSET_MS
 
 
 # ---- internal helpers ------------------------------------------------
@@ -95,6 +120,26 @@ def _next_run_path():
 
 # ---- public session API ---------------------------------------------
 
+# The session currently teeing prints (one program runs at a time).
+# ``note()`` uses it to drop button-event lines into the run's log.
+_ACTIVE = None
+
+
+def note(text):
+    """Write one stamped line to the active run's log file.
+
+    No-op when no program is running (there is no file to write to).
+    File only — the live console is deliberately not touched; callers
+    that want a console message print one themselves. Used by the
+    launcher so every button press that starts or stops a run leaves
+    a timestamped entry in that run's log."""
+    sess = _ACTIVE
+    if sess is None:
+        return
+    if not text.endswith("\n"):
+        text += "\n"
+    sess.write_text(text)
+
 
 class _LogSession:
     """Context manager. ``__enter__`` opens the next run log file and
@@ -102,21 +147,51 @@ class _LogSession:
     restores ``builtins.print`` and closes the file."""
 
     def __init__(self):
-        self._file       = None
-        self._path       = None
-        self._prev_print = None
-        self._written    = 0
+        self._file          = None
+        self._path          = None
+        self._prev_print    = None
+        self._budget        = [0]
+        self._at_line_start = True
 
-    def _make_tee_print(self, original_print, fp, budget_holder):
-        """Build the replacement ``print`` function.
+    def _append(self, payload):
+        """Stamp, budget-check, and write ``payload`` to the file.
 
-        ``budget_holder`` is a single-element list so the closure can
-        mutate the running byte count without the (now-deprecated on
-        MP) ``nonlocal`` keyword."""
+        Every new file line is prefixed with ``"<epoch_ms> "`` — a raw
+        int64 UTC Unix-epoch-milliseconds number, converted to local
+        time only by the host CLI at display. A ``print(..., end='')``
+        continuation lands mid-line and is NOT re-stamped; blank lines
+        carry no stamp. May raise on flash errors — callers decide
+        whether that is swallowed."""
+        if self._file is None or self._budget[0] >= MAX_BYTES:
+            return
+        stamp = "%d " % _epoch_ms()
+        parts = payload.split("\n")
+        out = []
+        i = 0
+        n = len(parts)
+        while i < n:
+            seg = parts[i]
+            if seg:
+                if self._at_line_start:
+                    out.append(stamp)
+                out.append(seg)
+                self._at_line_start = False
+            if i < n - 1:
+                out.append("\n")
+                self._at_line_start = True
+            i += 1
+        text = "".join(out)
+        remaining = MAX_BYTES - self._budget[0]
+        if len(text) > remaining:
+            text = text[:remaining]
+        self._file.write(text)
+        self._file.flush()
+        self._budget[0] += len(text)
+
+    def _make_tee_print(self, original_print):
+        """Build the replacement ``print`` function."""
         def _tee_print(*args, **kwargs):
             original_print(*args, **kwargs)
-            if fp is None or budget_holder[0] >= MAX_BYTES:
-                return
             try:
                 # Reproduce print's stringification: sep / end default
                 # to " " and "\n". We don't honour file= here — every
@@ -124,15 +199,9 @@ class _LogSession:
                 # log file too (which is the whole point).
                 sep = kwargs.get("sep", " ")
                 end = kwargs.get("end", "\n")
-                payload = sep.join(str(a) for a in args) + end
-                remaining = MAX_BYTES - budget_holder[0]
-                if len(payload) > remaining:
-                    payload = payload[:remaining]
-                fp.write(payload)
-                fp.flush()
-                budget_holder[0] += len(payload)
+                self._append(sep.join(str(a) for a in args) + end)
             except Exception:
-                # Flash error / OOM — drop the byte; live print
+                # Flash error / OOM — drop the bytes; live print
                 # already happened.
                 pass
         return _tee_print
@@ -147,13 +216,17 @@ class _LogSession:
             return self
 
         self._prev_print = builtins.print
-        budget = [0]
-        builtins.print = self._make_tee_print(
-            self._prev_print, self._file, budget)
-        self._budget = budget
+        self._budget = [0]
+        self._at_line_start = True
+        builtins.print = self._make_tee_print(self._prev_print)
+        global _ACTIVE
+        _ACTIVE = self
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
+        global _ACTIVE
+        if _ACTIVE is self:
+            _ACTIVE = None
         if self._prev_print is not None:
             builtins.print = self._prev_print
             self._prev_print = None
@@ -172,20 +245,13 @@ class _LogSession:
         return self._path
 
     def write_text(self, s):
-        """Append raw text to the log file directly, bypassing
-        ``print``. Used by the launcher's exception handler so the
-        traceback (which goes through ``sys.print_exception``, not
-        ``print``) lands in the file too."""
-        if self._file is None:
-            return
-        if self._budget[0] >= MAX_BYTES:
-            return
+        """Append text to the log file directly, bypassing ``print``
+        (lines still get the epoch-ms stamp). Used by the launcher's
+        exception handler so the traceback (which goes through
+        ``sys.print_exception``, not ``print``) lands in the file
+        too."""
         try:
-            remaining = MAX_BYTES - self._budget[0]
-            payload = s if len(s) <= remaining else s[:remaining]
-            self._file.write(payload)
-            self._file.flush()
-            self._budget[0] += len(payload)
+            self._append(s)
         except Exception:
             pass
 

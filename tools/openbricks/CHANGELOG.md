@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.11.0 — timestamped run logs + RTC sync on connect
+
+Every hub log line now carries a timestamp. The hub (firmware
+1.12.0+) stores a raw int64 UTC Unix-epoch-milliseconds prefix per
+line — no formatting, no timezone on the device — and `openbricks
+log` renders it as `[YYYY-MM-DD HH:MM:SS.mmm]` in the host's local
+timezone at display.
+
+The ESP32 has no NTP and its RTC powers up at 2000-01-01, so the CLI
+now syncs the hub RTC from the host clock (in UTC) on every connect
+— `run`, `upload`, and `log` all prepend the sync. Runs started
+after any connect carry real wall-clock stamps; a hub that never saw
+a connect since power-up stamps from 2000-01-01, which is
+self-diagnosing.
+
+Compatibility: logs written by older firmware have no stamps and
+pass through unchanged; new-firmware logs read with an older CLI
+show the raw epoch numbers.
+
 ## 0.10.24 — `log` works again (missed in the 0.10.23 signature change)
 
 Every `openbricks log` invocation died with

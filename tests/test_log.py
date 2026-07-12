@@ -97,6 +97,121 @@ class SessionTeesPrintsToFile(_LogPathPatch):
         self.assertIn("Exception: ValueError(boom)", data)
 
 
+class TimestampTests(_LogPathPatch):
+    """Every file line starts with a raw int64 UTC epoch-ms stamp.
+
+    The hub stores only the number (no formatting, no timezone) —
+    the host CLI converts to local time at display. A ``print(...,
+    end='')`` continuation must not re-stamp mid-line, and blank
+    lines carry no stamp."""
+
+    _TS = 1783950123456
+
+    def setUp(self):
+        _LogPathPatch.setUp(self)
+        self._prev_epoch = log._epoch_ms
+        ts = self._TS
+        log._epoch_ms = lambda: ts
+
+    def tearDown(self):
+        log._epoch_ms = self._prev_epoch
+        _LogPathPatch.tearDown(self)
+
+    def _read(self, sess):
+        with open(sess.path) as f:
+            return f.read()
+
+    def test_each_line_prefixed_with_epoch_ms(self):
+        with log.session() as sess:
+            print("hello")
+            print("world")
+        self.assertEqual(
+            self._read(sess),
+            "%d hello\n%d world\n" % (self._TS, self._TS))
+
+    def test_multiline_print_stamps_every_line(self):
+        with log.session() as sess:
+            print("a\nb")
+        self.assertEqual(
+            self._read(sess), "%d a\n%d b\n" % (self._TS, self._TS))
+
+    def test_end_continuation_not_restamped_mid_line(self):
+        with log.session() as sess:
+            print("left ", end="")
+            print("right")
+        self.assertEqual(
+            self._read(sess), "%d left right\n" % self._TS)
+
+    def test_blank_line_carries_no_stamp(self):
+        with log.session() as sess:
+            print("a")
+            print()
+            print("b")
+        self.assertEqual(
+            self._read(sess),
+            "%d a\n\n%d b\n" % (self._TS, self._TS))
+
+    def test_write_text_lines_are_stamped(self):
+        with log.session() as sess:
+            sess.write_text("Traceback:\n  boom\n")
+        self.assertEqual(
+            self._read(sess),
+            "%d Traceback:\n%d   boom\n" % (self._TS, self._TS))
+
+    def test_budget_counts_stamped_bytes(self):
+        log.MAX_BYTES = 40
+        with log.session() as sess:
+            for _ in range(20):
+                print("xxxxxxxxxx")
+        data = self._read(sess)
+        self.assertTrue(len(data) <= 40,
+                        "stamps must count against MAX_BYTES: %d bytes"
+                        % len(data))
+
+    def test_epoch_ms_is_true_unix_epoch(self):
+        # Sanity on the live clock (offset logic for 2000-based
+        # embedded epochs): any real runtime must report a value
+        # after 2017 and before 2100.
+        now = self._prev_epoch()
+        self.assertTrue(1500000000000 < now < 4102444800000,
+                        "epoch-ms out of range: %d" % now)
+
+
+class NoteTests(_LogPathPatch):
+    """``log.note`` drops a stamped line into the active run's log —
+    the launcher uses it so every button press that starts or stops a
+    run leaves an entry."""
+
+    _TS = 1783950123456
+
+    def setUp(self):
+        _LogPathPatch.setUp(self)
+        self._prev_epoch = log._epoch_ms
+        ts = self._TS
+        log._epoch_ms = lambda: ts
+
+    def tearDown(self):
+        log._epoch_ms = self._prev_epoch
+        _LogPathPatch.tearDown(self)
+
+    def test_note_writes_stamped_line_into_active_session(self):
+        with log.session() as sess:
+            print("running")
+            log.note("button pressed -> stop")
+        with open(sess.path) as f:
+            data = f.read()
+        self.assertIn("%d button pressed -> stop\n" % self._TS, data)
+
+    def test_note_without_active_session_is_noop(self):
+        log.note("nobody home")   # must not raise
+
+    def test_session_exit_clears_active(self):
+        with log.session():
+            pass
+        self.assertIsNone(log._ACTIVE)
+        log.note("late")          # must not raise, nothing to write to
+
+
 class RotationTests(_LogPathPatch):
 
     def test_first_run_creates_run_0(self):

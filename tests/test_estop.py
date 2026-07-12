@@ -144,5 +144,17 @@ class EngageKillsMotorsTests(_GateCase):
             "one wedged bus must not stop the others from stopping")
 
 
+def tearDownModule():
+    # CPython 3.11/3.12 quirk: a KeyboardInterrupt that escapes an
+    # ``exec()`` marks the interpreter as interrupt-killed (process
+    # exit code 130) even when the caller catches it — fixed in later
+    # CPython, absent on MicroPython. Several tests here exec
+    # programs that raise KeyboardInterrupt (the stop-button paths);
+    # whether the suite's exit code survived used to depend on test
+    # ORDER (a later clean exec resets the flag). One deliberate
+    # clean exec at module teardown makes it deterministic.
+    exec("pass")
+
+
 if __name__ == "__main__":
     unittest.main()

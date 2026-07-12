@@ -306,15 +306,40 @@ async def _stream_output(blink, link, out):
             out.flush()
 
 
-def _compose_bootstrap(user_bytes):
-    """Build the raw-paste payload: write /program.py, then trigger the
-    hub-side launcher. Wrapping the launcher call in a try/except turns
-    a ``KeyboardInterrupt`` (from a button-press stop) into a clean
-    print instead of a raw traceback — the client is exiting anyway,
-    and we'd rather not scare the user with the message that comes
-    with an uncaught interrupt.
+def rtc_sync_lines():
+    """Hub-side lines that set the RTC from the host's UTC clock.
+
+    The ESP32 has no NTP; its RTC starts at 2000-01-01 on power-up,
+    which would make the per-line epoch-ms stamps in the run logs
+    (``openbricks/log.py``) meaningless. Every connect path (run /
+    upload / log) prepends these lines, so any run started after a
+    connect carries real wall-clock stamps. The RTC is set in UTC —
+    conversion to local time happens only on the host at display.
+    Guarded because unix-MicroPython test runs have no ``machine``.
     """
-    lines = [
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    return [
+        "try:",
+        "    import machine",
+        "    machine.RTC().datetime("
+        "(%d, %d, %d, %d, %d, %d, %d, 0))"
+        % (now.year, now.month, now.day, now.weekday(),
+           now.hour, now.minute, now.second),
+        "except Exception:",
+        "    pass",
+    ]
+
+
+def _compose_bootstrap(user_bytes):
+    """Build the raw-paste payload: sync the RTC, write /program.py,
+    then trigger the hub-side launcher. Wrapping the launcher call in
+    a try/except turns a ``KeyboardInterrupt`` (from a button-press
+    stop) into a clean print instead of a raw traceback — the client
+    is exiting anyway, and we'd rather not scare the user with the
+    message that comes with an uncaught interrupt.
+    """
+    lines = rtc_sync_lines() + [
         "with open(%r, 'wb') as f:" % _TARGET_PATH,
         "    f.write(%s)" % repr(user_bytes),
         "from openbricks import launcher",
