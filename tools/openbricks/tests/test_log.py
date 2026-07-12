@@ -2,6 +2,8 @@
 """Tests for ``openbricks_dev.log`` — argparse + on-hub program shape."""
 
 import argparse
+import inspect
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -83,21 +85,37 @@ class RunDispatchTests(unittest.TestCase):
     def setUp(self):
         self.fake = _FakeLink()
         self.uploaded = []
+        self.streamed = []
 
         async def _fake_connect(name, scan_timeout=5.0):
             return self.fake
-        async def _stub_enter(blink, link): return None
-        async def _stub_leave(link): return None
-        async def _stub_upload(blink, link, prog):
-            self.uploaded.append(prog)
-        async def _stub_stream(blink, out): return None
+
+        def _bound_stub(real, record=None, pick=None):
+            # Stub that enforces the REAL helper's signature, so a
+            # caller passing the wrong arity fails here the same way
+            # it would on a live hub. (0.10.23 shipped `log` calling
+            # _stream_output without `link` because the old stub
+            # accepted 2 args.)
+            sig = inspect.signature(real)
+            async def _stub(*args, **kwargs):
+                bound = sig.bind(*args, **kwargs)
+                if record is not None:
+                    record.append(bound.arguments[pick] if pick
+                                  else bound.arguments)
+            return _stub
 
         self._patches = [
             patch.object(log_mod.NUSLink, "connect", side_effect=_fake_connect),
-            patch.object(log_mod.run_mod, "_enter_raw_repl", _stub_enter),
-            patch.object(log_mod.run_mod, "_restore_idle_loop", _stub_leave),
-            patch.object(log_mod.run_mod, "_raw_paste_upload", _stub_upload),
-            patch.object(log_mod.run_mod, "_stream_output", _stub_stream),
+            patch.object(log_mod.run_mod, "_enter_raw_repl",
+                         _bound_stub(log_mod.run_mod._enter_raw_repl)),
+            patch.object(log_mod.run_mod, "_restore_idle_loop",
+                         _bound_stub(log_mod.run_mod._restore_idle_loop)),
+            patch.object(log_mod.run_mod, "_raw_paste_upload",
+                         _bound_stub(log_mod.run_mod._raw_paste_upload,
+                                     self.uploaded, pick="script_bytes")),
+            patch.object(log_mod.run_mod, "_stream_output",
+                         _bound_stub(log_mod.run_mod._stream_output,
+                                     self.streamed)),
         ]
         for p in self._patches:
             p.start()
@@ -124,6 +142,17 @@ class RunDispatchTests(unittest.TestCase):
         log_mod.run(self._args(list=True))
         self.assertIn(b"list_runs()", self.uploaded[0])
         self.assertNotIn(b"read_run", self.uploaded[0])
+
+    def test_stream_output_called_with_link_and_stdout(self):
+        # Regression for 0.10.23: `openbricks log` called
+        # _stream_output(blink, out) after the helper grew a `link`
+        # parameter (upload.py was updated, log.py was not), so every
+        # log invocation died with a TypeError before reading a byte.
+        log_mod.run(self._args(list=True))
+        self.assertEqual(len(self.streamed), 1)
+        args = self.streamed[0]
+        self.assertIs(args["link"], self.fake)
+        self.assertIs(args["out"], sys.stdout)
 
     def test_connect_failure_raises_log_error(self):
         async def _raise(name, scan_timeout=5.0):

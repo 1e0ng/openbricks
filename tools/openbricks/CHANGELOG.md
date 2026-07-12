@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.10.24 — `log` works again (missed in the 0.10.23 signature change)
+
+Every `openbricks log` invocation died with
+`_stream_output() missing 1 required positional argument: 'out'`
+before reading a byte: 0.10.23 added a `link` parameter to
+`_stream_output` for timeout diagnostics and updated the `run` and
+`upload` call sites, but not `log`. The test suite missed it because
+the log dispatch tests stubbed `_stream_output` with the same stale
+2-arg signature. The stubs now bind against the real helpers'
+signatures, so an arity drift in any of the shared raw-REPL helpers
+fails the suite instead of the user.
+
 ## 0.10.23 — BLE raw-REPL handshake retries instead of one-shot
 
 `openbricks run` / `upload` / `log` sent a single Ctrl-C + Ctrl-A and
