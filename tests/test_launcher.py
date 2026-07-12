@@ -120,6 +120,79 @@ class PressClassificationTests(unittest.TestCase):
         self.assertFalse(self.launcher._was_pressed)
 
 
+class StopRestartRegressionTests(unittest.TestCase):
+    """Pressing stop must not restart the program.
+
+    The stop unwinds the program within milliseconds of the press, so
+    ``_running`` is already False by the time the button is released
+    (or bounces). The release/bounce then read as a fresh idle press
+    and restarted the program the user just stopped. Fixed by firing
+    the stop on press-down + consuming its release + a post-stop
+    lockout on starts."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+        self.starts = []
+        self.stops = []
+        self._orig_start = launcher._request_start
+        self._orig_stop = launcher._request_stop
+        launcher._request_start = lambda inst: self.starts.append(inst)
+        launcher._request_stop = lambda inst: self.stops.append(inst)
+        self.addCleanup(
+            setattr, launcher, "_request_start", self._orig_start)
+        self.addCleanup(
+            setattr, launcher, "_request_stop", self._orig_stop)
+
+    def test_stop_fires_on_press_down_not_release(self):
+        self.launcher._running = True
+        self.btn._value = 0          # pressed, not yet released
+        self.launcher._tick()
+        self.assertEqual(len(self.stops), 1,
+                         "stop must fire the moment the press lands")
+
+    def test_release_after_stop_does_not_start(self):
+        self.launcher._running = True
+        self.btn._value = 0
+        self.launcher._tick()        # stop fires; program unwinds...
+        self.launcher._running = False
+        advance_ms(100)
+        self.btn._value = 1          # ...then the button is released
+        self.launcher._tick()
+        self.assertEqual(self.starts, [],
+                         "the stop press's own release restarted the "
+                         "program")
+        self.assertEqual(len(self.stops), 1)
+
+    def test_bounce_after_stop_is_swallowed_by_lockout(self):
+        self.launcher._running = True
+        _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
+        self.launcher._running = False
+        # Contact bounce / finger re-contact ~200 ms after the stop.
+        advance_ms(200)
+        _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
+        self.assertEqual(self.starts, [],
+                         "a press right after the stop restarted the "
+                         "program")
+
+    def test_start_works_again_after_lockout(self):
+        self.launcher._running = True
+        _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
+        self.launcher._running = False
+        advance_ms(launcher.Launcher.START_LOCKOUT_MS + 100)
+        _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
+        self.assertEqual(len(self.starts), 1,
+                         "a deliberate press after the lockout must "
+                         "still start the program")
+
+    def test_full_stop_press_cycle_fires_exactly_one_stop(self):
+        self.launcher._running = True
+        _press(self.btn, hold_ms=300, tick_fn=self.launcher._tick)
+        self.assertEqual(len(self.stops), 1)
+        self.assertEqual(self.starts, [])
+
+
 class DrainAndExecTests(unittest.TestCase):
     """The queued 'start' is consumed by ``_drain_pending``, which
     loads and execs the program file."""
