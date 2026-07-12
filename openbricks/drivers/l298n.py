@@ -24,6 +24,7 @@ Pinout recap for one channel::
 from machine import Pin, PWM
 
 from openbricks import pins
+from openbricks import estop
 from openbricks.interfaces import Motor
 
 _PWM_FREQ_HZ = 20_000  # Above audible range; fine for most hobby H-bridges.
@@ -54,6 +55,7 @@ class L298NMotor(Motor):
 
     def run(self, power):
         """Power is -100..100."""
+        estop.check()
         if power > 100:
             power = 100
         elif power < -100:

@@ -131,6 +131,9 @@ class StopRestartRegressionTests(unittest.TestCase):
     lockout on starts."""
 
     def setUp(self):
+        from openbricks import estop
+        estop.clear()
+        self.addCleanup(estop.clear)
         self.btn = _make_button()
         self.launcher = launcher.Launcher(
             self.btn, program_path="/ignored.py", poll_ms=50)
@@ -187,10 +190,156 @@ class StopRestartRegressionTests(unittest.TestCase):
                          "still start the program")
 
     def test_full_stop_press_cycle_fires_exactly_one_stop(self):
+        # Hold shorter than STOP_RETRY_MS: a single press-release must
+        # produce exactly one request (the press-down one) — the
+        # release must not add a second. Longer holds legitimately
+        # re-request while the program survives (see StopRetryTests).
         self.launcher._running = True
-        _press(self.btn, hold_ms=300, tick_fn=self.launcher._tick)
+        _press(self.btn, hold_ms=100, tick_fn=self.launcher._tick)
         self.assertEqual(len(self.stops), 1)
         self.assertEqual(self.starts, [])
+
+
+class StopRetryTests(unittest.TestCase):
+    """A stop request must be re-injected until the program dies —
+    a one-shot request is lost whenever the injected KeyboardInterrupt
+    lands in a scheduled callback instead of the program (the
+    "first press ignored, second press works" bug)."""
+
+    def setUp(self):
+        from openbricks import estop
+        estop.clear()
+        self.addCleanup(estop.clear)
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+        self.stops = []
+        self._orig_stop = launcher._request_stop
+        launcher._request_stop = lambda inst: self.stops.append(inst)
+        self.addCleanup(
+            setattr, launcher, "_request_stop", self._orig_stop)
+
+    def test_stop_is_retried_while_program_survives(self):
+        self.launcher._running = True
+        self.btn._value = 0
+        self.launcher._tick()                 # press: first request
+        self.assertEqual(len(self.stops), 1)
+        self.btn._value = 1
+        for _ in range(20):                   # program stays alive 1 s
+            advance_ms(50)
+            self.launcher._tick()
+        self.assertTrue(
+            len(self.stops) >= 3,
+            "expected retries every %d ms while the program survives; "
+            "got %d request(s)" % (launcher.Launcher.STOP_RETRY_MS,
+                                   len(self.stops)))
+
+    def test_retries_cease_once_program_is_dead(self):
+        self.launcher._running = True
+        self.btn._value = 0
+        self.launcher._tick()
+        self.btn._value = 1
+        self.launcher._tick()
+        self.launcher._running = False        # program died
+        n = len(self.stops)
+        for _ in range(20):
+            advance_ms(50)
+            self.launcher._tick()
+        self.assertEqual(len(self.stops), n,
+                         "no retries after the program is dead")
+
+    def test_press_engages_the_estop_latch(self):
+        from openbricks import estop
+        self.launcher._running = True
+        self.btn._value = 0
+        self.launcher._tick()
+        self.assertTrue(estop.is_engaged(),
+                        "press-down must latch the e-stop immediately")
+
+
+class DisarmBeforeCleanupTests(unittest.TestCase):
+    """The KeyboardInterrupt handler must disarm the stop button
+    BEFORE stopping motors — a retry landing inside the cleanup would
+    abort the very motor-stop it asked for."""
+
+    def setUp(self):
+        self.addCleanup(_cleanup_program)
+
+    def test_disarm_precedes_motor_stop(self):
+        order = []
+        orig_arm = launcher._arm_stop_button
+        orig_stop_motors = launcher._stop_all_motors
+        launcher._arm_stop_button = lambda armed: order.append(
+            ("arm", armed))
+        launcher._stop_all_motors = lambda: order.append(("motors",))
+        self.addCleanup(
+            setattr, launcher, "_arm_stop_button", orig_arm)
+        self.addCleanup(
+            setattr, launcher, "_stop_all_motors", orig_stop_motors)
+
+        path = _write_program("raise KeyboardInterrupt\n")
+        try:
+            launcher._exec_program_raw(path)
+        except KeyboardInterrupt:
+            pass
+        self.assertTrue(("motors",) in order)
+        first_disarm = order.index(("arm", False))
+        motors = order.index(("motors",))
+        self.assertTrue(first_disarm < motors,
+                        "disarm must come before motor cleanup: %r"
+                        % order)
+
+
+class EStopNoInjectionIntegrationTests(unittest.TestCase):
+    """THE 'always works' test: the interrupt injection is disabled
+    entirely (every request dropped — the worst-case eaten-interrupt
+    world), the program drives a motor in a loop, the button is
+    pressed mid-run — and the program must still terminate, because
+    the e-stop latch turns its own next motor command into the stop."""
+
+    def setUp(self):
+        from openbricks import estop
+        estop.clear()
+        self.addCleanup(estop.clear)
+        self.addCleanup(_cleanup_program)
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path=None, poll_ms=50)
+        launcher._singleton = self.launcher
+        self.addCleanup(setattr, launcher, "_singleton", None)
+        # Injection permanently dead.
+        self._orig_stop = launcher._request_stop
+        launcher._request_stop = lambda inst: None
+        self.addCleanup(
+            setattr, launcher, "_request_stop", self._orig_stop)
+
+    def test_motor_program_stops_without_any_injection(self):
+        from openbricks import estop
+        path = _write_program(
+            "from openbricks import launcher\n"
+            "from openbricks.drivers.l298n import L298NMotor\n"
+            "inst = launcher._singleton\n"
+            "m = L298NMotor(in1=1, in2=2, pwm=17)\n"
+            "inst._test_iterations = 0\n"
+            "for i in range(1000):\n"
+            "    inst._test_iterations = i\n"
+            "    if i == 3:\n"
+            "        inst._btn._value = 0\n"   # the press lands
+            "    inst._tick()\n"               # timer keeps polling
+            "    m.run(30)\n"
+        )
+        self.launcher._program_path = path
+        self.launcher._pending = "start"
+        self.launcher._drain_pending()
+
+        self.assertEqual(
+            getattr(self.launcher, "_test_iterations", None), 3,
+            "program must die on its first motor command after the "
+            "press — with zero interrupt deliveries")
+        self.assertFalse(self.launcher._running)
+        self.assertFalse(
+            estop.is_engaged(),
+            "latch must be released once the program is dead")
 
 
 class DrainAndExecTests(unittest.TestCase):

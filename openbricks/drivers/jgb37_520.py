@@ -22,6 +22,7 @@ import time
 from machine import Pin, PWM
 
 from openbricks import pins
+from openbricks import estop
 from openbricks._native import QuadratureEncoder, Servo
 from openbricks.interfaces import Motor
 
@@ -67,6 +68,7 @@ class JGB37Motor(Motor):
 
     # --- Open-loop passthroughs (native Servo detaches from scheduler) ---
     def run(self, power):
+        estop.check()
         self._servo.run(float(power))
 
     def brake(self):
@@ -84,6 +86,7 @@ class JGB37Motor(Motor):
 
     def run_speed(self, deg_per_s):
         """Enter closed-loop speed control with the given target (deg/s)."""
+        estop.check()
         self._servo.run_speed(float(deg_per_s))
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
@@ -100,6 +103,7 @@ class JGB37Motor(Motor):
         caller can poll ``self._servo.is_done()`` or eventually call
         ``brake()`` / ``coast()``.
         """
+        estop.check()
         self._servo.run_target(float(target_angle),
                                abs(float(deg_per_s)),
                                float(accel_dps2))

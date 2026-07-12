@@ -19,9 +19,12 @@ start-or-stop, and every press on the BLE pin means toggle-BLE.
 
 Wiring:
 
-* Press while idle → start ``/program.py``.
-* Press while running → raise ``KeyboardInterrupt`` via
-  ``micropython.schedule``, cleanly stopping the program.
+* Press while idle → start ``/program.py`` (on release, with a
+  post-stop lockout against bounce).
+* Press while running → the stop fires on press-DOWN: the e-stop
+  latch engages (motors halt + motion commands raise — see
+  :mod:`openbricks.estop`), and a ``KeyboardInterrupt`` injection is
+  requested and *retried* until the program is actually dead.
 
 The watcher runs off a ``machine.Timer`` kept alive for the whole hub
 uptime (we never ``deinit`` it), so button-press-to-run survives
@@ -88,6 +91,7 @@ class Launcher:
         self._was_pressed    = False
         self._press_stopped  = False       # this press already fired STOP
         self._last_stop_ms   = None        # when the last STOP fired
+        self._stop_retry_ms  = None        # last injection request time
         self._pending        = None        # None | "start" | "stop"
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
@@ -122,29 +126,67 @@ class Launcher:
     # the stop button doesn't work).
     START_LOCKOUT_MS = 750
 
+    # While a stop is in flight but the program hasn't died yet, the
+    # injection is re-requested at this cadence. The injected
+    # KeyboardInterrupt raises in whatever main-thread frame is
+    # executing — a scheduled callback (e.g. the BLE TX flush) can eat
+    # it — so a one-shot request meant a press could be silently lost
+    # ("first press ignored, second press works"). Retries make an
+    # eaten injection cost one retry period instead of the press. The
+    # robot itself is already stopping either way: the e-stop latch
+    # engaged at press-down, independent of injection delivery.
+    STOP_RETRY_MS = 300
+
+    def _fire_stop(self):
+        """Everything a stop press triggers, in order of importance:
+        latch the e-stop (motors die + motion commands raise, no
+        interrupt needed), then request the interrupt injection that
+        tears the program down."""
+        from openbricks import estop
+        self._last_stop_ms = _now_ms()
+        self._stop_retry_ms = self._last_stop_ms
+        try:
+            estop.engage()
+        except Exception:
+            # The latch itself must never fail the stop request.
+            pass
+        _request_stop(self)
+
     def _tick(self, _timer=None):
         """Called on every ``poll_ms`` tick.
 
-        While a program runs, a STOP is flagged on **press-down**
+        While a program runs, a STOP fires on **press-down**
         (Pybricks-style: reacts a poll period sooner, and the release
-        that follows is consumed so it can't double-fire). While idle,
-        a START fires on release of a full press-release cycle —
-        unless it lands inside the post-stop lockout, which swallows
-        the bounce that used to restart a just-stopped program.
+        that follows is consumed so it can't double-fire). The stop
+        engages the e-stop latch — the robot halts and motion commands
+        raise regardless of interrupt delivery — and the interrupt
+        request is retried every ``STOP_RETRY_MS`` until the program
+        is actually dead. While idle, a START fires on release of a
+        full press-release cycle — unless it lands inside the
+        post-stop lockout, which swallows the bounce that used to
+        restart a just-stopped program.
 
         This (a soft Python callback) only *detects* the press and sets a
         flag — it can't inject the interrupt, because a pending exception
         set in a Python callback frame unwinds the callback, not the
         program. The native C-function ``stop_tick`` Timer callback (set
         up in ``_ensure_launcher``) does the injection."""
+        if self._running:
+            if self._stop_retry_ms is not None and _ticks_diff(
+                    _now_ms(), self._stop_retry_ms) >= self.STOP_RETRY_MS:
+                # A stop is in flight but the program is still alive —
+                # the previous injection was eaten. Re-request.
+                self._stop_retry_ms = _now_ms()
+                _request_stop(self)
+        else:
+            self._stop_retry_ms = None
         pressed = self._btn.value() == 0
         if pressed:
             if not self._was_pressed:
                 self._was_pressed = True
                 if self._running:
                     self._press_stopped = True
-                    self._last_stop_ms = _now_ms()
-                    _request_stop(self)
+                    self._fire_stop()
                 else:
                     self._press_stopped = False
             return
@@ -159,8 +201,7 @@ class Launcher:
         if self._running:
             # Program came up between press-down and release (remote
             # start mid-hold) — a button event during a run means stop.
-            self._last_stop_ms = _now_ms()
-            _request_stop(self)
+            self._fire_stop()
             return
         if self._last_stop_ms is not None and _ticks_diff(
                 _now_ms(), self._last_stop_ms) < self.START_LOCKOUT_MS:
@@ -179,11 +220,14 @@ class Launcher:
         """
         if self._pending == "start" and not self._running:
             self._pending = None
+            from openbricks import estop
+            estop.clear()   # fresh run — stale latch must not kill it
             self._running = True
             try:
                 _exec_program(self._program_path)
             finally:
                 self._running = False
+                estop.clear()
                 # Re-mark liveness immediately so a start-press landing
                 # in the instant after a long program ends doesn't
                 # misread the idle loop as gone.
@@ -305,6 +349,8 @@ def _scheduled_start(launcher_instance):
         return  # already running; ignore (the raise path handles stop)
     print("openbricks: starting from REPL context — the stop button "
           "is unavailable for this run (use 'openbricks stop').")
+    from openbricks import estop
+    estop.clear()
     launcher_instance._running = True
     try:
         _exec_program(launcher_instance._program_path)
@@ -374,10 +420,14 @@ def _exec_program_raw(program_path):
                 exec(code, {"__name__": "__main__"})
             except KeyboardInterrupt:
                 # The button-stop's injected KeyboardInterrupt (and a REPL
-                # Ctrl-C from ``openbricks run``) both unwind to here —
-                # stop every motor before propagating so the robot halts
-                # no matter how the program was running. Idempotent if
-                # already stopped.
+                # Ctrl-C from ``openbricks run``) both unwind to here.
+                # Disarm FIRST: the stop request is retried until the
+                # program dies, and a retry landing inside the cleanup
+                # below would abort the very motor-stop it asked for.
+                _arm_stop_button(False)
+                # Then stop every motor before propagating so the robot
+                # halts no matter how the program was running.
+                # Idempotent if already stopped.
                 _stop_all_motors()
                 raise
             except Exception as e:
@@ -492,11 +542,16 @@ def run_program(program_path=DEFAULT_PROGRAM_PATH):
     """
     _reset_motor_process()
     launcher = _ensure_launcher()
+    from openbricks import estop
+    estop.clear()   # fresh run — a stale latch must not kill it at birth
     launcher._running = True
     try:
         _exec_program_raw(program_path)
     finally:
         launcher._running = False
+        # Program is dead; release the latch so idle-time commands
+        # (REPL experiments, the next run) work again.
+        estop.clear()
 
 
 def _reset_motor_process():

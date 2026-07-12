@@ -56,6 +56,7 @@ import time
 from machine import UART, Pin
 
 from openbricks import pins
+from openbricks import estop
 from openbricks.interfaces import Motor, Servo
 
 _HEADER = b"\xFF\xFF"
@@ -280,6 +281,7 @@ class ST3215(Servo):
         return (raw - self._min) * self._range / (self._max - self._min)
 
     def move_to(self, angle_deg, speed=None, wait=True):
+        estop.check()
         self._ensure_torque_on()
         if speed is not None:
             s = int(speed)
@@ -565,6 +567,7 @@ class ST3215Motor(Motor):
 
     def run_speed(self, deg_per_s):
         """Set continuous wheel velocity in degrees per second."""
+        estop.check()
         self._abandon_pending()
         self._ensure_mode(_MODE_WHEEL)
         self._ensure_torque_on()
@@ -818,6 +821,7 @@ class ST3215Motor(Motor):
         accepted for back-compat with the velocity-mode implementation
         but no longer apply — the PID lives on the servo, not in Python.
         """
+        estop.check()
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
@@ -988,6 +992,7 @@ class SyncServoGroup:
         Servos that don't expose ``_encode_goal_speed`` (i.e. the
         position-mode ``ST3215`` class) raise ``TypeError``.
         """
+        estop.check()
         if len(speeds_dps) != len(self._servos):
             raise ValueError(
                 "speed count (%d) doesn't match servo count (%d)"
