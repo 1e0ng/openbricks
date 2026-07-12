@@ -92,6 +92,7 @@ class Launcher:
         self._press_stopped  = False       # this press already fired STOP
         self._last_stop_ms   = None        # when the last STOP fired
         self._stop_retry_ms  = None        # last injection request time
+        self._stop_retry_count = 0         # injections re-requested this stop
         self._pending        = None        # None | "start" | "stop"
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
@@ -145,11 +146,16 @@ class Launcher:
         from openbricks import estop
         self._last_stop_ms = _now_ms()
         self._stop_retry_ms = self._last_stop_ms
+        self._stop_retry_count = 0
         try:
             estop.engage()
-        except Exception:
+            # Breadcrumb AFTER the kill so the file write can't delay
+            # it; no injection is pending yet (that request comes
+            # next), so no KeyboardInterrupt can land in this write.
+            _note("estop engaged: motors killed, motion latched")
+        except Exception as e:
             # The latch itself must never fail the stop request.
-            pass
+            _note("estop engage FAILED: %r" % (e,))
         _request_stop(self)
 
     def _tick(self, _timer=None):
@@ -187,8 +193,12 @@ class Launcher:
             if self._stop_retry_ms is not None and _ticks_diff(
                     _now_ms(), self._stop_retry_ms) >= self.STOP_RETRY_MS:
                 # A stop is in flight but the program is still alive —
-                # the previous injection was eaten. Re-request.
+                # the previous injection was eaten. Re-request. (No log
+                # note here: an injection is pending and could land
+                # inside the file write, eaten by _tick instead of the
+                # program. The count lands in the stop debrief line.)
                 self._stop_retry_ms = _now_ms()
+                self._stop_retry_count += 1
                 _request_stop(self)
         else:
             self._stop_retry_ms = None
@@ -291,6 +301,19 @@ def _stop_all_motors():
                 pass
     except Exception:
         pass
+
+
+def _stop_debrief():
+    """One-line summary of the in-flight stop for the run log: how
+    long after the press the program actually died, and how many
+    injection retries that took. A KeyboardInterrupt with no recorded
+    press is a host-side Ctrl-C (openbricks run / stop)."""
+    inst = _singleton
+    if inst is None or inst._last_stop_ms is None:
+        return "no stop press recorded (host Ctrl-C?)"
+    return "%d ms after press, %d retries" % (
+        _ticks_diff(_now_ms(), inst._last_stop_ms),
+        inst._stop_retry_count)
 
 
 def _note(text):
@@ -463,6 +486,10 @@ def _exec_program_raw(program_path, origin=None):
                 # halts no matter how the program was running.
                 # Idempotent if already stopped.
                 _stop_all_motors()
+                # Safe to write now: the button is disarmed, so no
+                # further injection can land inside this file write.
+                sess.write_text(
+                    "stopped: KeyboardInterrupt (%s)\n" % _stop_debrief())
                 raise
             except Exception as e:
                 pe = getattr(sys, "print_exception", None)

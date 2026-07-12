@@ -510,7 +510,10 @@ class ButtonPressLogEntryTests(unittest.TestCase):
         finally:
             log_mod.note = orig_note
             launcher._request_stop = orig_stop
-        self.assertEqual(notes, ["button pressed -> stop"])
+        self.assertEqual(
+            notes,
+            ["button pressed -> stop",
+             "estop engaged: motors killed, motion latched"])
 
     def test_note_failure_does_not_kill_the_tick(self):
         from openbricks import log as log_mod
@@ -553,6 +556,118 @@ class ButtonPressLogEntryTests(unittest.TestCase):
                 pass
         self.assertIn("started: button press\n", data)
         self.assertIn("body", data)
+
+
+class StopBreadcrumbTests(unittest.TestCase):
+    """The stop path writes enough into the run log to tell WHICH link
+    failed on a dead press: no 'button pressed' line = press never
+    detected; no 'estop engaged' line = engage failed; no 'stopped:'
+    line = program never died (injection eaten forever); the debrief
+    carries press-to-death latency and retry count."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+        self._orig_singleton = launcher._singleton
+
+    def tearDown(self):
+        launcher._singleton = self._orig_singleton
+
+    def _capture_notes(self):
+        from openbricks import log as log_mod
+        notes = []
+        orig = log_mod.note
+        log_mod.note = lambda text: notes.append(text)
+        return notes, log_mod, orig
+
+    def test_fire_stop_notes_estop_engaged(self):
+        notes, log_mod, orig_note = self._capture_notes()
+        orig_stop = launcher._request_stop
+        launcher._request_stop = lambda inst: None
+        try:
+            self.launcher._fire_stop()
+        finally:
+            log_mod.note = orig_note
+            launcher._request_stop = orig_stop
+        self.assertEqual(
+            notes, ["estop engaged: motors killed, motion latched"])
+        self.assertEqual(self.launcher._stop_retry_count, 0)
+
+    def test_fire_stop_notes_engage_failure(self):
+        from openbricks import estop
+        notes, log_mod, orig_note = self._capture_notes()
+        orig_stop = launcher._request_stop
+        orig_engage = estop.engage
+
+        def _boom():
+            raise RuntimeError("bus wedged")
+
+        estop.engage = _boom
+        launcher._request_stop = lambda inst: None
+        try:
+            self.launcher._fire_stop()   # must not raise
+        finally:
+            log_mod.note = orig_note
+            launcher._request_stop = orig_stop
+            estop.engage = orig_engage
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(notes[0].startswith("estop engage FAILED:"),
+                        notes[0])
+
+    def test_retry_increments_count(self):
+        orig_stop = launcher._request_stop
+        launcher._request_stop = lambda inst: None
+        try:
+            self.launcher._running = True
+            self.launcher._fire_stop()
+            # Age the last request past STOP_RETRY_MS, tick, repeat.
+            for expected in (1, 2):
+                self.launcher._stop_retry_ms -= (
+                    self.launcher.STOP_RETRY_MS + 1)
+                self.launcher._tick()
+                self.assertEqual(
+                    self.launcher._stop_retry_count, expected)
+        finally:
+            launcher._request_stop = orig_stop
+
+    def test_debrief_without_press(self):
+        launcher._singleton = None
+        self.assertIn("no stop press recorded", launcher._stop_debrief())
+
+    def test_debrief_with_press_and_retries(self):
+        launcher._singleton = self.launcher
+        self.launcher._last_stop_ms = launcher._now_ms()
+        self.launcher._stop_retry_count = 3
+        s = launcher._stop_debrief()
+        self.assertIn("ms after press", s)
+        self.assertIn("3 retries", s)
+
+    def test_interrupted_run_logs_stopped_debrief(self):
+        import tests.test_log as tlog
+        from openbricks import log as log_mod
+        tlog._wipe(tlog._TEST_LOG_DIR)
+        prev_dir = log_mod.LOG_DIR
+        log_mod.LOG_DIR = tlog._TEST_LOG_DIR
+        launcher._singleton = None   # debrief: host Ctrl-C variant
+        prog = tlog._TEST_LOG_DIR + "_stop_prog.py"
+        try:
+            with open(prog, "w") as f:
+                f.write("raise KeyboardInterrupt\n")
+            launcher._exec_program(prog, origin="button press")
+            runs = log_mod.list_runs()
+            self.assertEqual(len(runs), 1)
+            data = log_mod.read_run(runs[0][0])
+        finally:
+            log_mod.LOG_DIR = prev_dir
+            tlog._wipe(tlog._TEST_LOG_DIR)
+            try:
+                os.remove(prog)
+            except OSError:
+                pass
+        self.assertIn("started: button press", data)
+        self.assertIn("stopped: KeyboardInterrupt", data)
+        self.assertIn("no stop press recorded", data)
 
 
 class StopRequestTests(unittest.TestCase):
