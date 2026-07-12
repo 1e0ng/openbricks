@@ -668,6 +668,71 @@ class HardwarePressLatchTests(unittest.TestCase):
         self.assertEqual(len(self.stops), 1)
 
 
+class PressCounterInstallTests(unittest.TestCase):
+    """_install_press_counter drives esp32.PCNT correctly, and its
+    unavailable-fallback is announced, not silent."""
+
+    class _FakePCNTClass:
+        INCREMENT = "inc"
+        IGNORE = "ign"
+        instances = []
+
+        def __init__(self, unit, **kwargs):
+            self.unit = unit
+            self.kwargs = kwargs
+            self.started = False
+            type(self).instances.append(self)
+
+        def start(self):
+            self.started = True
+
+    def test_installs_falling_edge_counter_on_unit_3(self):
+        import sys
+        fake_cls = self._FakePCNTClass
+        del fake_cls.instances[:]
+
+        class _FakeEsp32Module:
+            PCNT = fake_cls
+        had = "esp32" in sys.modules
+        prev = sys.modules.get("esp32")
+        sys.modules["esp32"] = _FakeEsp32Module
+        try:
+            pcnt = launcher._install_press_counter(4)
+        finally:
+            if had:
+                sys.modules["esp32"] = prev
+            else:
+                del sys.modules["esp32"]
+        self.assertIsNotNone(pcnt)
+        self.assertEqual(pcnt.unit, launcher.STOP_PCNT_UNIT)
+        self.assertEqual(pcnt.kwargs.get("falling"), fake_cls.INCREMENT)
+        self.assertEqual(pcnt.kwargs.get("rising"), fake_cls.IGNORE)
+        self.assertTrue(pcnt.started)
+
+    def test_unavailable_is_announced_and_returns_none(self):
+        # No esp32 module on this runtime (or construction failed):
+        # must return None and print the tick-bound announcement.
+        import builtins
+        import sys
+        printed = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: printed.append(
+            " ".join(str(x) for x in a))
+        had = "esp32" in sys.modules
+        prev = sys.modules.get("esp32")
+        if had:
+            del sys.modules["esp32"]
+        try:
+            pcnt = launcher._install_press_counter(4)
+        finally:
+            builtins.print = orig_print
+            if had:
+                sys.modules["esp32"] = prev
+        self.assertIsNone(pcnt)
+        self.assertTrue(
+            any("press latch unavailable" in s for s in printed), printed)
+
+
 class TickStarvationTests(unittest.TestCase):
     """_tick measures its own inter-run gap: a machine.Timer callback
     is silently DROPPED when the scheduler queue is full, and during
