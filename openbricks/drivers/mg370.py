@@ -21,6 +21,7 @@ import time
 from machine import Pin, PWM
 
 from openbricks import pins
+from openbricks import estop
 from openbricks._native import PCNTEncoder, Servo
 from openbricks.interfaces import Motor
 
@@ -97,6 +98,7 @@ class MG370Motor(Motor):
 
     # --- Open-loop passthroughs ---
     def run(self, power):
+        estop.check()
         self._servo.run(float(power))
 
     def brake(self):
@@ -113,10 +115,12 @@ class MG370Motor(Motor):
         self._servo.reset_angle(float(angle))
 
     def run_speed(self, deg_per_s):
+        estop.check()
         self._servo.run_speed(float(deg_per_s))
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
                   accel_dps2=720.0):
+        estop.check()
         self._servo.run_target(float(target_angle),
                                abs(float(deg_per_s)),
                                float(accel_dps2))

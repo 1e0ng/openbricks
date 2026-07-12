@@ -110,6 +110,7 @@ jobs:
             tests.test_example_pins \
             tests.test_pins \
             tests.test_timer_allocation \
+            tests.test_estop \
             tests.test_boot_main
 
   openbricks-py:

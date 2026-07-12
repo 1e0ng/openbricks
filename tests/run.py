@@ -79,6 +79,7 @@ _TEST_MODULES = [
     "tests.test_pins",
     "tests.test_timer_allocation",
     "tests.test_boot_main",
+    "tests.test_estop",
 ]
 
 
