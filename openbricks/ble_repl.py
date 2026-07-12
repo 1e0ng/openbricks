@@ -79,17 +79,39 @@ except (ImportError, AttributeError):
 
 _LOG = []
 _LOG_MAX = 500
+# Ring write index, meaningful once the log is full. Single-element
+# list so scheduled/IRQ contexts mutate in place without ``global``.
+_LOG_NEXT = [0]
 
 
 def _log(tag, *args):
-    """Append a timestamped event to the in-memory log. No-op once
-    the log is full — we'd rather lose late events than have logging
-    raise from a hot path."""
-    if len(_LOG) < _LOG_MAX:
-        try:
-            _LOG.append((_TICKS(), tag, args))
-        except MemoryError:
-            pass
+    """Record a timestamped event, keeping the LAST ``_LOG_MAX``.
+
+    This used to stop recording once full ("first 500 events since
+    boot"), which made it useless for exactly its purpose: a BLE
+    failure minutes after boot left no trace because chatty connect
+    traffic had already filled the log in the first minute. A ring
+    keeps the most recent window instead. Failures inside logging are
+    swallowed — a diagnostic must never take down the hot path."""
+    try:
+        entry = (_TICKS(), tag, args)
+        if len(_LOG) < _LOG_MAX:
+            _LOG.append(entry)
+        else:
+            i = _LOG_NEXT[0]
+            _LOG[i] = entry
+            _LOG_NEXT[0] = (i + 1) % _LOG_MAX
+    except MemoryError:
+        pass
+
+
+def log_entries():
+    """The recorded events, oldest first (unwraps the ring)."""
+    n = len(_LOG)
+    if n < _LOG_MAX:
+        return list(_LOG)
+    start = _LOG_NEXT[0]
+    return [_LOG[(start + k) % n] for k in range(n)]
 
 
 def dump_log():
@@ -101,15 +123,17 @@ def dump_log():
     item by item is bounded; the bytes added during the print sit in
     _tx_buf until later and don't grow the log.
     """
-    n = len(_LOG)
-    print("ble_repl event log (%d / %d):" % (n, _LOG_MAX))
-    for entry in _LOG:
+    entries = log_entries()
+    wrapped = " (older events dropped)" if len(_LOG) == _LOG_MAX else ""
+    print("ble_repl event log (last %d%s):" % (len(entries), wrapped))
+    for entry in entries:
         t, tag, args = entry
         print("  %d %s %s" % (t, tag, args))
 
 
 def clear_log():
     _LOG[:] = []
+    _LOG_NEXT[0] = 0
 
 
 # ---- BLE constants ----------------------------------------------------
@@ -339,22 +363,45 @@ class _BLEUARTStream(_IOBASE):
         if hasattr(os, "dupterm_notify"):
             os.dupterm_notify(None)
 
+    # Exception armor on every dupterm-facing method. MicroPython
+    # DEACTIVATES a dupterm stream whose read()/write() raises
+    # (extmod/os_dupterm.c: mp_os_deactivate, "dupterm: Exception in
+    # ... method, deactivating") — the message goes to the USB
+    # console, so over BLE the symptom is a hub that connects, logs
+    # every host byte, and never sends another notify. The stop
+    # button's injected KeyboardInterrupt raises at an arbitrary
+    # main-thread bytecode — including inside these methods during a
+    # print storm — so a stop press could silently kill the BLE
+    # console until reboot (the 1.12.0 bench wedge). Swallowing here
+    # is safe: eating one injection costs one 300 ms launcher retry
+    # (the e-stop latch already stopped the robot), while a
+    # deactivated dupterm is permanent.
+
     def read(self, sz=None):
-        return self._uart.read(sz)
+        try:
+            return self._uart.read(sz)
+        except BaseException:
+            return None
 
     def readinto(self, buf):
-        avail = self._uart.read(len(buf))
-        if not avail:
+        try:
+            avail = self._uart.read(len(buf))
+            if not avail:
+                return None
+            for i in range(len(avail)):
+                buf[i] = avail[i]
+            return len(avail)
+        except BaseException:
             return None
-        for i in range(len(avail)):
-            buf[i] = avail[i]
-        return len(avail)
 
     def ioctl(self, op, arg):
-        if op == _MP_STREAM_POLL:
-            if self._uart.any():
-                return _MP_STREAM_POLL_RD
-        return 0
+        try:
+            if op == _MP_STREAM_POLL:
+                if self._uart.any():
+                    return _MP_STREAM_POLL_RD
+            return 0
+        except BaseException:
+            return 0
 
     # No "already scheduled" flag — deliberately. The stop button
     # injects KeyboardInterrupt at an arbitrary bytecode boundary of
@@ -411,12 +458,22 @@ class _BLEUARTStream(_IOBASE):
             pass
 
     def write(self, buf):
-        self._tx_buf += buf
-        overflow = len(self._tx_buf) - self._TX_MAX
-        if overflow > 0:
-            self._tx_buf = self._tx_buf[overflow:]
-            _log("tx_overflow", overflow)
-        self._schedule_flush()
+        # Same armor rationale as read/readinto/ioctl above: an
+        # exception escaping write() (stop-button KeyboardInterrupt
+        # landing mid-body, MemoryError growing the buffer) makes
+        # MicroPython deactivate the dupterm slot permanently. Worst
+        # case of swallowing: this chunk is lost or the flush waits
+        # for the pump tick.
+        try:
+            self._tx_buf += buf
+            overflow = len(self._tx_buf) - self._TX_MAX
+            if overflow > 0:
+                self._tx_buf = self._tx_buf[overflow:]
+                _log("tx_overflow", overflow)
+            self._schedule_flush()
+        except BaseException:
+            pass
+        return len(buf)
 
 
 # ---- Public API ------------------------------------------------------

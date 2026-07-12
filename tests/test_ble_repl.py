@@ -520,6 +520,146 @@ class BridgeWriteReturnTests(unittest.TestCase):
         self.assertFalse(self.uart.write(b"x"))
 
 
+class DupTermArmorTests(unittest.TestCase):
+    """No exception may escape the stream methods dupterm calls.
+
+    MicroPython deactivates a dupterm stream whose method raises
+    (extmod/os_dupterm.c mp_os_deactivate) — after that the hub still
+    connects and logs every received byte but never sends a notify
+    again until reboot. The stop button's injected KeyboardInterrupt
+    can land inside any of these methods mid-print-storm, which is
+    exactly how the 1.12.0 bench hub lost its BLE console."""
+
+    class _RaisingUart:
+        def __init__(self, exc):
+            self._exc = exc
+
+        def irq(self, handler):
+            pass
+
+        def read(self, sz=None):
+            raise self._exc
+
+        def any(self):
+            raise self._exc
+
+        def write(self, data):
+            raise self._exc
+
+    def test_write_swallows_interrupt_from_schedule(self):
+        orig = ble_repl._SCHEDULE
+        def _boom(fn, arg):
+            raise KeyboardInterrupt()
+        ble_repl._SCHEDULE = _boom
+        try:
+            stream = ble_repl._BLEUARTStream(_RecordingUart())
+            n = stream.write(b"hello")   # must not raise
+        finally:
+            ble_repl._SCHEDULE = orig
+        self.assertEqual(n, 5)
+        # Bytes stay buffered for the pump to deliver later.
+        self.assertEqual(bytes(stream._tx_buf), b"hello")
+
+    def test_write_returns_length_on_success(self):
+        orig = ble_repl._SCHEDULE
+        ble_repl._SCHEDULE = lambda fn, arg: None
+        try:
+            stream = ble_repl._BLEUARTStream(_RecordingUart())
+            self.assertEqual(stream.write(b"abc"), 3)
+        finally:
+            ble_repl._SCHEDULE = orig
+
+    def test_read_paths_swallow_interrupt(self):
+        stream = ble_repl._BLEUARTStream(
+            self._RaisingUart(KeyboardInterrupt()))
+        self.assertIsNone(stream.read())        # must not raise
+        self.assertIsNone(stream.readinto(bytearray(4)))
+
+    def test_ioctl_swallows_interrupt(self):
+        stream = ble_repl._BLEUARTStream(
+            self._RaisingUart(KeyboardInterrupt()))
+        # 3 = MP_STREAM_POLL (the module's _MP_STREAM_POLL is a MP
+        # const and not visible as an attribute).
+        self.assertEqual(stream.ioctl(3, 0), 0)
+
+
+class RingLogTests(unittest.TestCase):
+    """The BLE event log must keep the LAST N events, not the first N
+    — a wedge minutes after boot is only diagnosable if late events
+    survive (the first-500 design left the 1.12.0 log --list failure
+    traceless because connect chatter filled it in the first minute)."""
+
+    def setUp(self):
+        ble_repl.clear_log()
+        self._orig_max = ble_repl._LOG_MAX
+        ble_repl._LOG_MAX = 5
+
+    def tearDown(self):
+        ble_repl._LOG_MAX = self._orig_max
+        ble_repl.clear_log()
+
+    def test_under_capacity_keeps_everything_in_order(self):
+        for i in range(3):
+            ble_repl._log("ev", i)
+        self.assertEqual([e[2] for e in ble_repl.log_entries()],
+                         [(0,), (1,), (2,)])
+
+    def test_over_capacity_drops_oldest(self):
+        for i in range(8):
+            ble_repl._log("ev", i)
+        entries = ble_repl.log_entries()
+        self.assertEqual(len(entries), 5)
+        self.assertEqual([e[2] for e in entries],
+                         [(3,), (4,), (5,), (6,), (7,)])
+
+    def test_wraps_repeatedly(self):
+        for i in range(23):
+            ble_repl._log("ev", i)
+        self.assertEqual([e[2] for e in ble_repl.log_entries()],
+                         [(18,), (19,), (20,), (21,), (22,)])
+
+    def test_dump_log_prints_all_entries_with_wrap_marker(self):
+        import builtins
+        for i in range(8):
+            ble_repl._log("ev", i)
+        lines = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: lines.append(
+            " ".join(str(x) for x in a))
+        try:
+            ble_repl.dump_log()
+        finally:
+            builtins.print = orig_print
+        self.assertEqual(len(lines), 6)   # header + 5 ring entries
+        self.assertIn("older events dropped", lines[0])
+        self.assertIn("ev", lines[1])
+
+    def test_dump_log_unwrapped_has_no_drop_marker(self):
+        import builtins
+        ble_repl._log("only", 1)
+        lines = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: lines.append(
+            " ".join(str(x) for x in a))
+        try:
+            ble_repl.dump_log()
+        finally:
+            builtins.print = orig_print
+        self.assertEqual(len(lines), 2)
+        self.assertFalse("dropped" in lines[0],
+                         "unwrapped dump must not claim drops: %r"
+                         % lines[0])
+
+    def test_clear_resets_ring_position(self):
+        for i in range(7):
+            ble_repl._log("ev", i)
+        ble_repl.clear_log()
+        ble_repl._log("fresh", 0)
+        entries = ble_repl.log_entries()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0][1], "fresh")
+
+
 class BluetoothIntegrationTests(unittest.TestCase):
     """``openbricks.bluetooth.set_enabled(True)`` should start the
     REPL bridge; ``set_enabled(False)`` should stop it."""
