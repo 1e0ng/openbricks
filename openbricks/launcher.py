@@ -43,6 +43,11 @@ import time
 
 
 DEFAULT_BUTTON_PIN   = 4
+
+# PCNT unit for the hardware press latch. Encoder motors claim units
+# 0/1 (one unit per PCNTEncoder, see drivers/mg370.py); unit 3 exists
+# on every PCNT-capable chip (classic ESP32 has 8 units, S3 has 4).
+STOP_PCNT_UNIT = 3
 DEFAULT_POLL_MS      = 50
 DEFAULT_PROGRAM_PATH = "/program.py"
 
@@ -95,6 +100,8 @@ class Launcher:
         self._stop_retry_count = 0         # injections re-requested this stop
         self._tick_last_ms   = None        # last _tick run (starvation detect)
         self._tick_gap_max   = 0           # worst inter-tick gap seen
+        self._press_pcnt     = None        # hardware falling-edge counter
+        self._press_count_seen = 0         # counter value already consumed
         self._pending        = None        # None | "start" | "stop"
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
@@ -106,6 +113,17 @@ class Launcher:
         # works) or whether it must fall back to the degraded
         # schedule-exec path (see ``_scheduled_start``).
         self._idle_drain_ms  = None
+
+    def _sync_press_counter(self):
+        """Mark the hardware press counter's current value as
+        consumed. Called at idle and before each run starts, so edges
+        counted OUTSIDE a run never stop the next one at birth."""
+        if self._press_pcnt is None:
+            return
+        try:
+            self._press_count_seen = self._press_pcnt.value()
+        except Exception:
+            pass
 
     def _mark_idle_alive(self):
         self._idle_drain_ms = _now_ms()
@@ -206,6 +224,25 @@ class Launcher:
                 _note("tick starved %d ms (scheduler saturated?)" % gap)
         self._tick_last_ms = now
         if self._running:
+            # Hardware press latch: the PCNT peripheral counted every
+            # falling edge on the button in silicon, including during
+            # scheduler blackouts (a program blocking in C I2C stalls
+            # the drain for 100-200 ms, and machine.Timer ticks are
+            # silently dropped while the queue is full — a quick
+            # ~120-160 ms press fit entirely inside such a gap and
+            # was never seen; the 4-presses-1-stop bench repro). The
+            # tick may run LATE, but the edge count means the press
+            # cannot be LOST.
+            if self._press_pcnt is not None and self._stop_retry_ms is None:
+                try:
+                    n = self._press_pcnt.value()
+                except Exception:
+                    n = self._press_count_seen
+                if n != self._press_count_seen:
+                    self._press_count_seen = n
+                    self._press_stopped = True  # consume the release
+                    _note("button press latched by hardware counter -> stop")
+                    self._fire_stop()
             if self._stop_retry_ms is not None and _ticks_diff(
                     _now_ms(), self._stop_retry_ms) >= self.STOP_RETRY_MS:
                 # A stop is in flight but the program is still alive —
@@ -218,17 +255,23 @@ class Launcher:
                 _request_stop(self)
         else:
             self._stop_retry_ms = None
+            # Consume idle-time presses (BLE-toggle fumbles, handling
+            # bumps) so a stale count can't stop the NEXT run at birth.
+            self._sync_press_counter()
         pressed = self._btn.value() == 0
         if pressed:
             if not self._was_pressed:
                 self._was_pressed = True
                 if self._running:
                     self._press_stopped = True
-                    # Note BEFORE _fire_stop: the injection request is
-                    # not pending yet, so no KeyboardInterrupt can land
-                    # inside this file write.
-                    _note("button pressed -> stop")
-                    self._fire_stop()
+                    if self._stop_retry_ms is None:
+                        # Not already stopping (the hardware latch may
+                        # have fired for this same press). Note BEFORE
+                        # _fire_stop: the injection request is not
+                        # pending yet, so no KeyboardInterrupt can land
+                        # inside this file write.
+                        _note("button pressed -> stop")
+                        self._fire_stop()
                 else:
                     self._press_stopped = False
             return
@@ -243,8 +286,9 @@ class Launcher:
         if self._running:
             # Program came up between press-down and release (remote
             # start mid-hold) — a button event during a run means stop.
-            _note("button pressed -> stop")
-            self._fire_stop()
+            if self._stop_retry_ms is None:
+                _note("button pressed -> stop")
+                self._fire_stop()
             return
         if self._last_stop_ms is not None and _ticks_diff(
                 _now_ms(), self._last_stop_ms) < self.START_LOCKOUT_MS:
@@ -265,6 +309,7 @@ class Launcher:
             self._pending = None
             from openbricks import estop
             estop.clear()   # fresh run — stale latch must not kill it
+            self._sync_press_counter()
             self._running = True
             try:
                 _exec_program(self._program_path, origin="button press")
@@ -356,6 +401,35 @@ def _stop_debrief():
         inst._stop_retry_count, inst._tick_gap_max)
 
 
+def _install_press_counter(button_pin):
+    """Hardware falling-edge counter on the stop button (esp32.PCNT).
+
+    Tick-based level polling alone LOSES short presses: machine.Timer
+    callbacks dispatch through micropython.schedule's bounded queue,
+    and a program blocking inside C (I2C sensor reads) stalls the
+    drain — measured blackouts reach ~200 ms while a quick press is
+    ~120-160 ms. The PCNT peripheral counts the edge in silicon
+    regardless of what Python is doing. Returns None off-ESP32 or if
+    the unit is taken; the announcement makes the degraded (tick-bound)
+    mode visible instead of silent."""
+    try:
+        import esp32
+        from machine import Pin
+        pcnt = esp32.PCNT(
+            STOP_PCNT_UNIT,
+            pin=Pin(button_pin, Pin.IN, Pin.PULL_UP),
+            falling=esp32.PCNT.INCREMENT,
+            rising=esp32.PCNT.IGNORE,
+            filter=1023,   # max hardware glitch filter (~12.8 us)
+        )
+        pcnt.start()
+        return pcnt
+    except Exception as e:
+        print("openbricks: hardware press latch unavailable (%r); "
+              "stop presses are tick-bound" % (e,))
+        return None
+
+
 def _note(text):
     """Mirror a button event into the active run's log file (stamped;
     file only). Guarded — a logging failure must never break the tick
@@ -442,6 +516,7 @@ def _scheduled_start(launcher_instance):
           "is unavailable for this run (use 'openbricks stop').")
     from openbricks import estop
     estop.clear()
+    launcher_instance._sync_press_counter()
     launcher_instance._running = True
     try:
         _exec_program(launcher_instance._program_path,
@@ -584,6 +659,8 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
                "launcher.run(button_pin=...) moves it")
     btn = Pin(button_pin, Pin.IN, Pin.PULL_UP)
     _singleton = Launcher(btn, poll_ms=poll_ms)
+    _singleton._press_pcnt = _install_press_counter(button_pin)
+    _singleton._sync_press_counter()
     _singleton._timer = Timer(timer_id)
     _singleton._timer.init(
         period=poll_ms, mode=Timer.PERIODIC, callback=_singleton._tick)
@@ -645,6 +722,7 @@ def run_program(program_path=DEFAULT_PROGRAM_PATH):
     launcher = _ensure_launcher()
     from openbricks import estop
     estop.clear()   # fresh run — a stale latch must not kill it at birth
+    launcher._sync_press_counter()
     launcher._running = True
     try:
         _exec_program_raw(program_path, origin="remote (openbricks run)")
