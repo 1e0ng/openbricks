@@ -562,6 +562,195 @@ class ButtonPressLogEntryTests(unittest.TestCase):
         self.assertIn("body", data)
 
 
+class _FakePressCounter:
+    """Stand-in for esp32.PCNT: tests bump .count to simulate hardware
+    edges landing between (or during) ticks."""
+
+    def __init__(self):
+        self.count = 0
+        self.raise_on_value = None
+
+    def value(self):
+        if self.raise_on_value is not None:
+            raise self.raise_on_value
+        return self.count
+
+
+class HardwarePressLatchTests(unittest.TestCase):
+    """The PCNT edge counter makes a press late-but-never-lost: a
+    press falling entirely inside a scheduler blackout (measured
+    ~200 ms; a quick press is ~120-160 ms) is invisible to level
+    polling but still counted in silicon, and the next tick that DOES
+    run must fire the stop."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+        self.pcnt = _FakePressCounter()
+        self.launcher._press_pcnt = self.pcnt
+        self.launcher._sync_press_counter()
+        self.stops = []
+        self.notes = []
+        from openbricks import log as log_mod
+        self._orig_stop = launcher._request_stop
+        self._orig_note = log_mod.note
+        self._log_mod = log_mod
+        launcher._request_stop = lambda inst: self.stops.append(inst)
+        log_mod.note = lambda text: self.notes.append(text)
+
+    def tearDown(self):
+        launcher._request_stop = self._orig_stop
+        self._log_mod.note = self._orig_note
+
+    def test_missed_press_fires_on_next_tick(self):
+        # Press + release happened entirely between ticks: the level
+        # is back HIGH, only the hardware count knows.
+        self.launcher._running = True
+        self.pcnt.count += 2   # press edge + one bounce edge
+        self.launcher._tick()
+        self.assertEqual(len(self.stops), 1)
+        self.assertTrue(
+            any("hardware counter" in n for n in self.notes), self.notes)
+        # Counter consumed: the same edges never fire twice.
+        del self.stops[:]
+        self.launcher._tick()
+        self.assertEqual(self.stops, [])
+
+    def test_level_path_does_not_double_fire_after_latch(self):
+        # Latch fired while the finger is still down; the level path
+        # sees press-down next tick and must not fire a second stop.
+        self.launcher._running = True
+        self.pcnt.count += 1
+        self.launcher._tick()          # latch fires, stop in flight
+        self.assertEqual(len(self.stops), 1)
+        self.btn._value = 0            # still held
+        self.launcher._tick()
+        self.assertEqual(len(self.stops), 1)
+        # Release of that press must not START anything (consumed).
+        starts = []
+        orig_start = launcher._request_start
+        launcher._request_start = lambda inst: starts.append(inst)
+        try:
+            self.launcher._running = False
+            self.btn._value = 1
+            self.launcher._tick()
+        finally:
+            launcher._request_start = orig_start
+        self.assertEqual(starts, [])
+
+    def test_idle_presses_do_not_stop_the_next_run(self):
+        self.pcnt.count += 3           # fumbling at idle
+        self.launcher._tick()          # idle branch consumes
+        self.launcher._running = True
+        self.launcher._tick()
+        self.assertEqual(self.stops, [])
+
+    def test_sync_before_run_consumes_stale_count(self):
+        self.pcnt.count += 5
+        self.launcher._sync_press_counter()
+        self.launcher._running = True
+        self.launcher._tick()
+        self.assertEqual(self.stops, [])
+
+    def test_sync_survives_counter_failure(self):
+        self.pcnt.raise_on_value = RuntimeError("pcnt wedged")
+        self.launcher._sync_press_counter()   # must not raise
+        self.assertEqual(self.launcher._press_count_seen, 0)
+
+    def test_remote_start_mid_hold_release_fires_stop(self):
+        # Press-down while idle, program starts remotely during the
+        # hold, release -> the release is a stop request.
+        self.btn._value = 0
+        self.launcher._tick()                 # press-down at idle
+        self.launcher._running = True         # remote start mid-hold
+        self.btn._value = 1
+        self.launcher._tick()                 # release
+        self.assertEqual(len(self.stops), 1)
+        self.assertTrue(
+            any(n == "button pressed -> stop" for n in self.notes),
+            self.notes)
+
+    def test_counter_failure_does_not_kill_tick_or_level_path(self):
+        self.launcher._running = True
+        self.pcnt.raise_on_value = RuntimeError("pcnt wedged")
+        self.btn._value = 0            # real press, level path
+        self.launcher._tick()          # must not raise
+        self.assertEqual(len(self.stops), 1)
+
+    def test_no_counter_level_path_unchanged(self):
+        self.launcher._press_pcnt = None
+        self.launcher._running = True
+        self.btn._value = 0
+        self.launcher._tick()
+        self.assertEqual(len(self.stops), 1)
+
+
+class PressCounterInstallTests(unittest.TestCase):
+    """_install_press_counter drives esp32.PCNT correctly, and its
+    unavailable-fallback is announced, not silent."""
+
+    class _FakePCNTClass:
+        INCREMENT = "inc"
+        IGNORE = "ign"
+        instances = []
+
+        def __init__(self, unit, **kwargs):
+            self.unit = unit
+            self.kwargs = kwargs
+            self.started = False
+            type(self).instances.append(self)
+
+        def start(self):
+            self.started = True
+
+    def test_installs_falling_edge_counter_on_unit_3(self):
+        import sys
+        fake_cls = self._FakePCNTClass
+        del fake_cls.instances[:]
+
+        class _FakeEsp32Module:
+            PCNT = fake_cls
+        had = "esp32" in sys.modules
+        prev = sys.modules.get("esp32")
+        sys.modules["esp32"] = _FakeEsp32Module
+        try:
+            pcnt = launcher._install_press_counter(4)
+        finally:
+            if had:
+                sys.modules["esp32"] = prev
+            else:
+                del sys.modules["esp32"]
+        self.assertIsNotNone(pcnt)
+        self.assertEqual(pcnt.unit, launcher.STOP_PCNT_UNIT)
+        self.assertEqual(pcnt.kwargs.get("falling"), fake_cls.INCREMENT)
+        self.assertEqual(pcnt.kwargs.get("rising"), fake_cls.IGNORE)
+        self.assertTrue(pcnt.started)
+
+    def test_unavailable_is_announced_and_returns_none(self):
+        # No esp32 module on this runtime (or construction failed):
+        # must return None and print the tick-bound announcement.
+        import builtins
+        import sys
+        printed = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: printed.append(
+            " ".join(str(x) for x in a))
+        had = "esp32" in sys.modules
+        prev = sys.modules.get("esp32")
+        if had:
+            del sys.modules["esp32"]
+        try:
+            pcnt = launcher._install_press_counter(4)
+        finally:
+            builtins.print = orig_print
+            if had:
+                sys.modules["esp32"] = prev
+        self.assertIsNone(pcnt)
+        self.assertTrue(
+            any("press latch unavailable" in s for s in printed), printed)
+
+
 class TickStarvationTests(unittest.TestCase):
     """_tick measures its own inter-run gap: a machine.Timer callback
     is silently DROPPED when the scheduler queue is full, and during
