@@ -105,9 +105,13 @@ ships:
   (run / upload / log), so runs started after any connect carry real
   wall-clock time; a hub that powered up and never saw a connect
   stamps from 2000-01-01, which is self-diagnosing. Button presses
-  leave stamped entries too: a run's log opens with `started: button
-  press` (or `started: remote (openbricks run)`), and a stop press
-  writes `button pressed -> stop` the moment it lands.
+  leave stamped entries too: a run's log opens with a header line —
+  `started: button press | firmware 1.12.0 | program /program.py |
+  uptime N ms | free N B` — and a stop press writes `button pressed
+  -> stop` the moment it lands, followed by `estop engaged` and a
+  final `stopped: KeyboardInterrupt (N ms after press, M retries)`
+  debrief, so a misbehaving stop chain is diagnosable from the log
+  alone.
 
 The Python module names on the host are deliberately split
 (`openbricks_dev` for the CLI, `openbricks_sim` for the sim) so they

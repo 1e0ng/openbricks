@@ -303,6 +303,30 @@ def _stop_all_motors():
         pass
 
 
+def _run_header(program_path):
+    """Environment summary for the run log's first line: firmware
+    version, program path, milliseconds since boot (a tiny uptime
+    right after an unexpected reboot is itself a clue), and free
+    heap. Every probe is independent — a failing one reports ? and
+    must not cost the run its log."""
+    try:
+        from openbricks import __version__ as _ver
+    except Exception:
+        _ver = "?"
+    try:
+        import time as _t
+        up = _t.ticks_ms()
+    except Exception:
+        up = "?"
+    try:
+        import gc
+        free = gc.mem_free()
+    except Exception:
+        free = "?"
+    return "firmware %s | program %s | uptime %s ms | free %s B" % (
+        _ver, program_path, up, free)
+
+
 def _stop_debrief():
     """One-line summary of the in-flight stop for the run log: how
     long after the press the program actually died, and how many
@@ -471,8 +495,8 @@ def _exec_program_raw(program_path, origin=None):
     _arm_stop_button(True)
     try:
         with _log.session() as sess:
-            if origin:
-                sess.write_text("started: %s\n" % origin)
+            sess.write_text("started: %s | %s\n" % (
+                origin or "unknown", _run_header(program_path)))
             try:
                 exec(code, {"__name__": "__main__"})
             except KeyboardInterrupt:

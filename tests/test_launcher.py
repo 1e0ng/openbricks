@@ -554,7 +554,11 @@ class ButtonPressLogEntryTests(unittest.TestCase):
                 os.remove(prog)
             except OSError:
                 pass
-        self.assertIn("started: button press\n", data)
+        self.assertIn("started: button press | firmware ", data)
+        from openbricks import __version__ as fw_ver
+        self.assertIn("firmware %s" % fw_ver, data)
+        self.assertIn("program " + prog, data)
+        self.assertIn("uptime ", data)
         self.assertIn("body", data)
 
 
