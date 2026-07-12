@@ -93,6 +93,8 @@ class Launcher:
         self._last_stop_ms   = None        # when the last STOP fired
         self._stop_retry_ms  = None        # last injection request time
         self._stop_retry_count = 0         # injections re-requested this stop
+        self._tick_last_ms   = None        # last _tick run (starvation detect)
+        self._tick_gap_max   = 0           # worst inter-tick gap seen
         self._pending        = None        # None | "start" | "stop"
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
@@ -189,6 +191,20 @@ class Launcher:
             ble_repl.pump_tx()
         except Exception:
             pass
+        # Starvation self-detection: Timer callbacks dispatch through
+        # micropython.schedule's bounded queue, and a full queue DROPS
+        # ticks silently — during such a gap a button press is
+        # invisible. Measure the gap between consecutive runs and
+        # leave a stamped note in the run log when it stretches, so a
+        # silently-missed press shows WHY right where it happened.
+        now = _now_ms()
+        if self._tick_last_ms is not None:
+            gap = _ticks_diff(now, self._tick_last_ms)
+            if gap > self._tick_gap_max:
+                self._tick_gap_max = gap
+            if gap >= self._poll_ms * 4:
+                _note("tick starved %d ms (scheduler saturated?)" % gap)
+        self._tick_last_ms = now
         if self._running:
             if self._stop_retry_ms is not None and _ticks_diff(
                     _now_ms(), self._stop_retry_ms) >= self.STOP_RETRY_MS:
@@ -335,9 +351,9 @@ def _stop_debrief():
     inst = _singleton
     if inst is None or inst._last_stop_ms is None:
         return "no stop press recorded (host Ctrl-C?)"
-    return "%d ms after press, %d retries" % (
+    return "%d ms after press, %d retries; worst tick gap %d ms" % (
         _ticks_diff(_now_ms(), inst._last_stop_ms),
-        inst._stop_retry_count)
+        inst._stop_retry_count, inst._tick_gap_max)
 
 
 def _note(text):

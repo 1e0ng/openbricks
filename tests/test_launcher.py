@@ -562,6 +562,63 @@ class ButtonPressLogEntryTests(unittest.TestCase):
         self.assertIn("body", data)
 
 
+class TickStarvationTests(unittest.TestCase):
+    """_tick measures its own inter-run gap: a machine.Timer callback
+    is silently DROPPED when the scheduler queue is full, and during
+    such a gap a button press is invisible. A stretched gap must leave
+    a stamped note in the run log, and the worst gap rides the stop
+    debrief."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+
+    def _capture_notes(self):
+        from openbricks import log as log_mod
+        notes = []
+        orig = log_mod.note
+        log_mod.note = lambda text: notes.append(text)
+        return notes, log_mod, orig
+
+    def test_healthy_cadence_notes_nothing(self):
+        notes, log_mod, orig = self._capture_notes()
+        try:
+            for _ in range(5):
+                self.launcher._tick()
+                advance_ms(50)
+        finally:
+            log_mod.note = orig
+        self.assertEqual(notes, [])
+
+    def test_starved_gap_leaves_note_and_updates_max(self):
+        notes, log_mod, orig = self._capture_notes()
+        try:
+            self.launcher._tick()
+            advance_ms(50)
+            self.launcher._tick()
+            advance_ms(400)          # 8 lost ticks
+            self.launcher._tick()
+        finally:
+            log_mod.note = orig
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(notes[0].startswith("tick starved 400 ms"),
+                        notes[0])
+        self.assertEqual(self.launcher._tick_gap_max, 400)
+
+    def test_debrief_reports_worst_tick_gap(self):
+        orig_singleton = launcher._singleton
+        launcher._singleton = self.launcher
+        try:
+            self.launcher._last_stop_ms = launcher._now_ms()
+            self.launcher._stop_retry_count = 1
+            self.launcher._tick_gap_max = 275
+            s = launcher._stop_debrief()
+        finally:
+            launcher._singleton = orig_singleton
+        self.assertIn("worst tick gap 275 ms", s)
+
+
 class StopBreadcrumbTests(unittest.TestCase):
     """The stop path writes enough into the run log to tell WHICH link
     failed on a dead press: no 'button pressed' line = press never

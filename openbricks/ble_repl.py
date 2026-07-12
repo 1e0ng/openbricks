@@ -465,12 +465,25 @@ class _BLEUARTStream(_IOBASE):
         # case of swallowing: this chunk is lost or the flush waits
         # for the pump tick.
         try:
+            was_empty = not self._tx_buf
             self._tx_buf += buf
             overflow = len(self._tx_buf) - self._TX_MAX
             if overflow > 0:
                 self._tx_buf = self._tx_buf[overflow:]
                 _log("tx_overflow", overflow)
-            self._schedule_flush()
+            # Schedule only on the empty->non-empty transition. A
+            # non-empty buffer means a flush chain is (normally)
+            # already re-scheduling itself, and if that chain died the
+            # launcher pump revives it within one poll tick. The old
+            # schedule-per-write flooded the 8-deep scheduler queue
+            # during print storms, and machine.Timer callbacks share
+            # that queue: a full queue silently DROPS timer ticks —
+            # including the button watcher, which is how a stop press
+            # went completely unseen (no 'button pressed' breadcrumb).
+            # The decision derives from buffer content, not a flag, so
+            # an interrupt unwinding anywhere strands nothing.
+            if was_empty:
+                self._schedule_flush()
         except BaseException:
             pass
         return len(buf)
