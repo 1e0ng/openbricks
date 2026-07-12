@@ -329,13 +329,19 @@ class TxSchedulingTests(unittest.TestCase):
         self.stream.write(b"hello")
         # Simulate the injected KeyboardInterrupt unwinding the queued
         # callback before it executed a single statement: the flush
-        # simply never runs.
+        # simply never runs. Since 1.12.2 the reviver is the launcher
+        # pump (write() only schedules on empty->non-empty, to keep
+        # the scheduler queue clear for Timer ticks).
         del self.queue[:]
         self.stream.write(b" world")
+        ble_repl._state["stream"] = self.stream
+        try:
+            ble_repl.pump_tx()
+        finally:
+            ble_repl._state["stream"] = None
         self.assertTrue(
             len(self.queue) >= 1,
-            "write() after a lost flush must schedule a new one — "
-            "the flag-based code wedged TX here")
+            "pump after a lost flush must schedule a new one")
         self._run_queued()
         self.assertEqual(b"".join(self.uart.writes), b"hello world")
 
@@ -352,6 +358,11 @@ class TxSchedulingTests(unittest.TestCase):
             pass
         del self.queue[:]
         self.stream.write(b"tail")
+        ble_repl._state["stream"] = self.stream
+        try:
+            ble_repl.pump_tx()   # the dead-chain reviver since 1.12.2
+        finally:
+            ble_repl._state["stream"] = None
         self._run_queued()
         joined = b"".join(self.uart.writes)
         self.assertEqual(
@@ -363,9 +374,38 @@ class TxSchedulingTests(unittest.TestCase):
         self.stream.write(b"abc")   # must not raise out of print()
         self.assertEqual(self.uart.writes, [])
         self.fail_schedule_with = None
-        self.stream.write(b"def")
+        self.stream.write(b"def")   # buffer non-empty: no re-schedule
+        ble_repl._state["stream"] = self.stream
+        try:
+            ble_repl.pump_tx()      # the reviver for a dead chain
+        finally:
+            ble_repl._state["stream"] = None
         self._run_queued()
         self.assertEqual(b"".join(self.uart.writes), b"abcdef")
+
+    def test_write_schedules_only_on_empty_to_nonempty(self):
+        # Per-write scheduling flooded the 8-deep scheduler queue
+        # during print storms and starved machine.Timer ticks (the
+        # invisible-stop-press bug). While bytes are already buffered,
+        # further writes must not add queue entries.
+        self.stream.write(b"first")
+        self.assertEqual(len(self.queue), 1)
+        self.stream.write(b"second")
+        self.stream.write(b"third")
+        self.assertEqual(len(self.queue), 1,
+                         "writes onto a non-empty buffer must not "
+                         "schedule more flushes")
+        self._run_queued()
+        self.assertEqual(b"".join(self.uart.writes), b"firstsecondthird")
+
+    def test_write_schedules_again_after_full_drain(self):
+        self.stream.write(b"a")
+        self._run_queued()
+        self.assertEqual(len(self.queue), 0)
+        self.stream.write(b"b")    # buffer was drained empty
+        self.assertEqual(len(self.queue), 1)
+        self._run_queued()
+        self.assertEqual(b"".join(self.uart.writes), b"ab")
 
     def test_flush_chunks_at_100_bytes(self):
         self.stream.write(b"x" * 250)
