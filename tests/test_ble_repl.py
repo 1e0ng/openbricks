@@ -259,6 +259,113 @@ class StreamProtocolTests(unittest.TestCase):
         self.assertTrue(callable(self.uart._handler))
 
 
+class _RecordingUart:
+    """Bare uart stand-in for ``_BLEUARTStream`` TX tests: records
+    every write; can raise once to simulate a KeyboardInterrupt
+    landing mid-flush."""
+
+    def __init__(self):
+        self.writes = []
+        self.raise_once = None
+        self._handler = None
+
+    def irq(self, handler):
+        self._handler = handler
+
+    def write(self, data):
+        if self.raise_once is not None:
+            exc, self.raise_once = self.raise_once, None
+            raise exc
+        self.writes.append(bytes(data))
+
+    def any(self):
+        return 0
+
+    def read(self, sz=None):
+        return b""
+
+
+class TxSchedulingTests(unittest.TestCase):
+    """The TX flush path must survive the stop button.
+
+    The stop button injects KeyboardInterrupt at an arbitrary bytecode
+    of whatever the main thread runs — including the scheduled
+    ``_flush`` callback itself. The old flag-based batching stranded
+    ``_scheduled=True`` when the interrupt unwound ``_flush`` at entry,
+    after which no write ever scheduled a flush again: the hub kept
+    advertising and accepting connections but never sent a notify
+    (the "cannot reconnect after button stop" bug)."""
+
+    def setUp(self):
+        self._orig_schedule = ble_repl._SCHEDULE
+        self.queue = []
+        self.fail_schedule_with = None
+        this = self
+
+        def fake_schedule(fn, arg):
+            if this.fail_schedule_with is not None:
+                raise this.fail_schedule_with
+            this.queue.append((fn, arg))
+        ble_repl._SCHEDULE = fake_schedule
+        self.uart = _RecordingUart()
+        self.stream = ble_repl._BLEUARTStream(self.uart)
+
+    def tearDown(self):
+        ble_repl._SCHEDULE = self._orig_schedule
+
+    def _run_queued(self):
+        while self.queue:
+            fn, arg = self.queue.pop(0)
+            fn(arg)
+
+    def test_flush_lost_to_interrupt_does_not_wedge_tx(self):
+        self.stream.write(b"hello")
+        # Simulate the injected KeyboardInterrupt unwinding the queued
+        # callback before it executed a single statement: the flush
+        # simply never runs.
+        del self.queue[:]
+        self.stream.write(b" world")
+        self.assertTrue(
+            len(self.queue) >= 1,
+            "write() after a lost flush must schedule a new one — "
+            "the flag-based code wedged TX here")
+        self._run_queued()
+        self.assertEqual(b"".join(self.uart.writes), b"hello world")
+
+    def test_interrupt_mid_flush_recovers(self):
+        # KeyboardInterrupt inside the flush body (during the notify)
+        # loses at most that one chunk; the next write must revive TX.
+        self.stream.write(b"a" * 150)
+        self.uart.raise_once = KeyboardInterrupt()
+        try:
+            self._run_queued()
+        except KeyboardInterrupt:
+            pass
+        del self.queue[:]
+        self.stream.write(b"tail")
+        self._run_queued()
+        joined = b"".join(self.uart.writes)
+        self.assertTrue(joined.endswith(b"tail"),
+                        "TX never recovered after mid-flush interrupt: %r"
+                        % joined)
+
+    def test_schedule_queue_full_is_tolerated(self):
+        self.fail_schedule_with = RuntimeError("schedule queue full")
+        self.stream.write(b"abc")   # must not raise out of print()
+        self.assertEqual(self.uart.writes, [])
+        self.fail_schedule_with = None
+        self.stream.write(b"def")
+        self._run_queued()
+        self.assertEqual(b"".join(self.uart.writes), b"abcdef")
+
+    def test_flush_chunks_at_100_bytes(self):
+        self.stream.write(b"x" * 250)
+        self._run_queued()
+        self.assertEqual(b"".join(self.uart.writes), b"x" * 250)
+        for chunk in self.uart.writes:
+            self.assertTrue(len(chunk) <= 100)
+
+
 class BluetoothIntegrationTests(unittest.TestCase):
     """``openbricks.bluetooth.set_enabled(True)`` should start the
     REPL bridge; ``set_enabled(False)`` should stop it."""
