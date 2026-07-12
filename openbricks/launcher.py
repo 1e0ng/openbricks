@@ -96,6 +96,7 @@ class Launcher:
         self._was_pressed    = False
         self._press_stopped  = False       # this press already fired STOP
         self._last_stop_ms   = None        # when the last STOP fired
+        self._lockout_until_ms = None      # starts swallowed until here
         self._stop_retry_ms  = None        # last injection request time
         self._stop_retry_count = 0         # injections re-requested this stop
         self._tick_last_ms   = None        # last _tick run (starvation detect)
@@ -137,15 +138,20 @@ class Launcher:
 
     # ---- timer callback ----
 
-    # After a STOP fires, presses can't START the program again until
-    # this lockout passes. The stop unwinds the program within
-    # milliseconds, so any contact bounce / finger re-contact after the
-    # stopping press reads as a *fresh* press with ``_running`` already
-    # False — without the lockout that second event restarted the
-    # program the user just stopped (and, when the idle loop wasn't
-    # draining, restarted it on the degraded schedule-exec path where
-    # the stop button doesn't work).
-    START_LOCKOUT_MS = 750
+    # After a STOP, presses can't START the program again until this
+    # lockout passes. The stop unwinds the program within milliseconds,
+    # so contact bounce / finger re-contact after the stopping press
+    # reads as a *fresh* press with ``_running`` already False —
+    # without the lockout that second event restarted the program the
+    # user just stopped. Anchored at the stopping press's RELEASE
+    # (bounce is a release-adjacent phenomenon), re-armed at stop-fire
+    # as a fallback for presses whose release was never observed. The
+    # original 750 ms from stop-FIRE swallowed deliberate quick
+    # restarts ("start press not detected" bench report); 400 ms from
+    # release still swallows bounce and finger re-contact (the
+    # regression test pins re-contact at release+200 ms dispatching
+    # at +300 ms) with margin.
+    START_LOCKOUT_MS = 400
 
     # While a stop is in flight but the program hasn't died yet, the
     # injection is re-requested at this cadence. The injected
@@ -167,6 +173,8 @@ class Launcher:
         self._last_stop_ms = _now_ms()
         self._stop_retry_ms = self._last_stop_ms
         self._stop_retry_count = 0
+        self._lockout_until_ms = self._last_stop_ms + self.START_LOCKOUT_MS
+        _event("stop-fire")
         try:
             estop.engage()
             # Breadcrumb AFTER the kill so the file write can't delay
@@ -241,6 +249,7 @@ class Launcher:
                 if n != self._press_count_seen:
                     self._press_count_seen = n
                     self._press_stopped = True  # consume the release
+                    _event("latch-stop")
                     _note("button press latched by hardware counter -> stop")
                     self._fire_stop()
             if self._stop_retry_ms is not None and _ticks_diff(
@@ -262,6 +271,7 @@ class Launcher:
         if pressed:
             if not self._was_pressed:
                 self._was_pressed = True
+                _event("press-down", "running" if self._running else "idle")
                 if self._running:
                     self._press_stopped = True
                     if self._stop_retry_ms is None:
@@ -280,8 +290,11 @@ class Launcher:
         # Released after a press — dispatch at most once.
         self._was_pressed = False
         if self._press_stopped:
-            # Release of the press that already fired the stop.
+            # Release of the press that already fired the stop. Bounce
+            # follows THIS moment — re-anchor the lockout here.
             self._press_stopped = False
+            self._lockout_until_ms = _now_ms() + self.START_LOCKOUT_MS
+            _event("release", "stop-consumed")
             return
         if self._running:
             # Program came up between press-down and release (remote
@@ -290,10 +303,18 @@ class Launcher:
                 _note("button pressed -> stop")
                 self._fire_stop()
             return
-        if self._last_stop_ms is not None and _ticks_diff(
-                _now_ms(), self._last_stop_ms) < self.START_LOCKOUT_MS:
-            # Bounce / re-contact right after a stop: swallow it.
-            return
+        if self._lockout_until_ms is not None:
+            remaining = _ticks_diff(self._lockout_until_ms, _now_ms())
+            if remaining > 0:
+                # Bounce / re-contact right after a stop: swallow it —
+                # but SAY so. A silently-swallowed deliberate press
+                # reads as "start button not detected".
+                _event("release", "lockout-swallowed", remaining)
+                print("openbricks: start press ignored "
+                      "(%d ms left of post-stop lockout)" % remaining)
+                return
+            self._lockout_until_ms = None
+        _event("release", "start")
         _request_start(self)
 
     def _drain_pending(self):
@@ -399,6 +420,39 @@ def _stop_debrief():
     return "%d ms after press, %d retries; worst tick gap %d ms" % (
         _ticks_diff(_now_ms(), inst._last_stop_ms),
         inst._stop_retry_count, inst._tick_gap_max)
+
+
+# In-memory button/dispatch event ring. Run logs only exist while a
+# program runs — an IDLE press that gets swallowed (or never seen)
+# leaves no trace anywhere else. 64 entries of (ticks_ms, tag, args),
+# newest kept; dump with ``launcher.dump_events()`` over USB after a
+# "my start press did nothing" report.
+_EVENTS = []
+_EVENTS_MAX = 64
+_EVENTS_NEXT = [0]
+
+
+def _event(tag, *args):
+    try:
+        entry = (_now_ms(), tag, args)
+        if len(_EVENTS) < _EVENTS_MAX:
+            _EVENTS.append(entry)
+        else:
+            i = _EVENTS_NEXT[0]
+            _EVENTS[i] = entry
+            _EVENTS_NEXT[0] = (i + 1) % _EVENTS_MAX
+    except MemoryError:
+        pass
+
+
+def dump_events():
+    """Print the launcher button-event ring, oldest first."""
+    n = len(_EVENTS)
+    start = _EVENTS_NEXT[0] if n == _EVENTS_MAX else 0
+    print("launcher event ring (last %d):" % n)
+    for k in range(n):
+        ms, tag, args = _EVENTS[(start + k) % n]
+        print("  %d %s %s" % (ms, tag, args))
 
 
 def _install_press_counter(button_pin):
