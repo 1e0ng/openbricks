@@ -315,7 +315,6 @@ class _BLEUARTStream(_IOBASE):
     def __init__(self, uart):
         self._uart = uart
         self._tx_buf = bytearray()
-        self._scheduled = False
         self._uart.irq(self._on_rx)
 
     def _on_rx(self):
@@ -343,22 +342,41 @@ class _BLEUARTStream(_IOBASE):
                 return _MP_STREAM_POLL_RD
         return 0
 
+    # No "already scheduled" flag — deliberately. The stop button
+    # injects KeyboardInterrupt at an arbitrary bytecode boundary of
+    # whatever the main thread is executing, and scheduled callbacks
+    # run on the main thread: with a flag, an interrupt landing at
+    # ``_flush``'s entry (before the flag-clearing statement) unwound
+    # the callback with the flag stranded True, and every later
+    # ``write()`` believed a flush was pending — BLE TX dead until
+    # reboot, while advertising and connections still worked (the
+    # 1.10.4 bug: "hub connects but never notifies after a button
+    # stop"). Scheduling per write is idempotent instead: duplicate
+    # flushes no-op on an empty buffer, a full scheduler queue just
+    # defers to the next write, and an interrupt unwinding ``_flush``
+    # anywhere leaves no state to strand — the next write (the
+    # KeyboardInterrupt traceback itself, usually) re-schedules.
+
     def _flush(self, _arg):
-        self._scheduled = False
         if not self._tx_buf:
             return
         data = bytes(self._tx_buf[0:100])
         self._tx_buf = self._tx_buf[100:]
         self._uart.write(data)
-        if self._tx_buf and not self._scheduled:
+        if self._tx_buf:
+            self._schedule_flush()
+
+    def _schedule_flush(self):
+        try:
             _SCHEDULE(self._flush, None)
-            self._scheduled = True
+        except RuntimeError:
+            # Scheduler queue full. The bytes stay in ``_tx_buf``;
+            # the next ``write()`` or in-flight flush re-requests.
+            pass
 
     def write(self, buf):
         self._tx_buf += buf
-        if not self._scheduled:
-            _SCHEDULE(self._flush, None)
-            self._scheduled = True
+        self._schedule_flush()
 
 
 # ---- Public API ------------------------------------------------------
