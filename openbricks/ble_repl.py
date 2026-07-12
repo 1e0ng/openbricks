@@ -363,22 +363,45 @@ class _BLEUARTStream(_IOBASE):
         if hasattr(os, "dupterm_notify"):
             os.dupterm_notify(None)
 
+    # Exception armor on every dupterm-facing method. MicroPython
+    # DEACTIVATES a dupterm stream whose read()/write() raises
+    # (extmod/os_dupterm.c: mp_os_deactivate, "dupterm: Exception in
+    # ... method, deactivating") — the message goes to the USB
+    # console, so over BLE the symptom is a hub that connects, logs
+    # every host byte, and never sends another notify. The stop
+    # button's injected KeyboardInterrupt raises at an arbitrary
+    # main-thread bytecode — including inside these methods during a
+    # print storm — so a stop press could silently kill the BLE
+    # console until reboot (the 1.12.0 bench wedge). Swallowing here
+    # is safe: eating one injection costs one 300 ms launcher retry
+    # (the e-stop latch already stopped the robot), while a
+    # deactivated dupterm is permanent.
+
     def read(self, sz=None):
-        return self._uart.read(sz)
+        try:
+            return self._uart.read(sz)
+        except BaseException:
+            return None
 
     def readinto(self, buf):
-        avail = self._uart.read(len(buf))
-        if not avail:
+        try:
+            avail = self._uart.read(len(buf))
+            if not avail:
+                return None
+            for i in range(len(avail)):
+                buf[i] = avail[i]
+            return len(avail)
+        except BaseException:
             return None
-        for i in range(len(avail)):
-            buf[i] = avail[i]
-        return len(avail)
 
     def ioctl(self, op, arg):
-        if op == _MP_STREAM_POLL:
-            if self._uart.any():
-                return _MP_STREAM_POLL_RD
-        return 0
+        try:
+            if op == _MP_STREAM_POLL:
+                if self._uart.any():
+                    return _MP_STREAM_POLL_RD
+            return 0
+        except BaseException:
+            return 0
 
     # No "already scheduled" flag — deliberately. The stop button
     # injects KeyboardInterrupt at an arbitrary bytecode boundary of
@@ -435,12 +458,22 @@ class _BLEUARTStream(_IOBASE):
             pass
 
     def write(self, buf):
-        self._tx_buf += buf
-        overflow = len(self._tx_buf) - self._TX_MAX
-        if overflow > 0:
-            self._tx_buf = self._tx_buf[overflow:]
-            _log("tx_overflow", overflow)
-        self._schedule_flush()
+        # Same armor rationale as read/readinto/ioctl above: an
+        # exception escaping write() (stop-button KeyboardInterrupt
+        # landing mid-body, MemoryError growing the buffer) makes
+        # MicroPython deactivate the dupterm slot permanently. Worst
+        # case of swallowing: this chunk is lost or the flush waits
+        # for the pump tick.
+        try:
+            self._tx_buf += buf
+            overflow = len(self._tx_buf) - self._TX_MAX
+            if overflow > 0:
+                self._tx_buf = self._tx_buf[overflow:]
+                _log("tx_overflow", overflow)
+            self._schedule_flush()
+        except BaseException:
+            pass
+        return len(buf)
 
 
 # ---- Public API ------------------------------------------------------
