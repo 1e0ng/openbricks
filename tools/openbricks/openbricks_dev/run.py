@@ -161,13 +161,36 @@ class _BufferedLink:
         self._buf = bytearray()
 
 
+# Raw-REPL entry is retried: the Ctrl-C is delivered on the hub as an
+# injected KeyboardInterrupt, which raises in whatever main-thread
+# frame is executing — a scheduled callback (BLE TX flush, button
+# poll) can eat it, the same disease the stop button had. One eaten
+# interrupt must cost one retry period, not a 30 s hang and a failed
+# connect. Ctrl-C and Ctrl-A are both idempotent at the REPL, so
+# re-sending is always safe. Shared by run / upload / log.
+_RAW_REPL_ATTEMPTS = 6
+_RAW_REPL_WAIT_S   = 4.0
+
+
 async def _enter_raw_repl(blink, link):
-    blink._step = "interrupting any running program (Ctrl-C)"
-    await link.write(b"\r" + _CTRL_C + _CTRL_C)
-    await blink.drain()
-    blink._step = "waiting for raw REPL banner after Ctrl-A"
-    await link.write(b"\r" + _CTRL_A)
-    await blink.read_until(_RAW_REPL_BANNER)
+    last_err = None
+    for attempt in range(1, _RAW_REPL_ATTEMPTS + 1):
+        blink._step = (
+            "interrupting any running program (Ctrl-C, attempt %d/%d)"
+            % (attempt, _RAW_REPL_ATTEMPTS))
+        await link.write(b"\r" + _CTRL_C + _CTRL_C)
+        await blink.drain()
+        blink._step = (
+            "waiting for raw REPL banner after Ctrl-A (attempt %d/%d)"
+            % (attempt, _RAW_REPL_ATTEMPTS))
+        await link.write(b"\r" + _CTRL_A)
+        try:
+            await blink.read_until(_RAW_REPL_BANNER,
+                                   timeout=_RAW_REPL_WAIT_S)
+            return
+        except RunError as e:
+            last_err = e
+    raise last_err
 
 
 async def _leave_raw_repl(link):
