@@ -86,6 +86,8 @@ class Launcher:
 
         self._running        = False
         self._was_pressed    = False
+        self._press_stopped  = False       # this press already fired STOP
+        self._last_stop_ms   = None        # when the last STOP fired
         self._pending        = None        # None | "start" | "stop"
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
@@ -110,10 +112,25 @@ class Launcher:
 
     # ---- timer callback ----
 
+    # After a STOP fires, presses can't START the program again until
+    # this lockout passes. The stop unwinds the program within
+    # milliseconds, so any contact bounce / finger re-contact after the
+    # stopping press reads as a *fresh* press with ``_running`` already
+    # False — without the lockout that second event restarted the
+    # program the user just stopped (and, when the idle loop wasn't
+    # draining, restarted it on the degraded schedule-exec path where
+    # the stop button doesn't work).
+    START_LOCKOUT_MS = 750
+
     def _tick(self, _timer=None):
-        """Called on every ``poll_ms`` tick. Edge-detects press→release
-        cycles. When idle, dispatches a program START; when running,
-        flags a STOP via ``_request_stop``.
+        """Called on every ``poll_ms`` tick.
+
+        While a program runs, a STOP is flagged on **press-down**
+        (Pybricks-style: reacts a poll period sooner, and the release
+        that follows is consumed so it can't double-fire). While idle,
+        a START fires on release of a full press-release cycle —
+        unless it lands inside the post-stop lockout, which swallows
+        the bounce that used to restart a just-stopped program.
 
         This (a soft Python callback) only *detects* the press and sets a
         flag — it can't inject the interrupt, because a pending exception
@@ -122,19 +139,34 @@ class Launcher:
         up in ``_ensure_launcher``) does the injection."""
         pressed = self._btn.value() == 0
         if pressed:
-            self._was_pressed = True
+            if not self._was_pressed:
+                self._was_pressed = True
+                if self._running:
+                    self._press_stopped = True
+                    self._last_stop_ms = _now_ms()
+                    _request_stop(self)
+                else:
+                    self._press_stopped = False
             return
         if not self._was_pressed:
             return
-        # Released after a press — fire once.
+        # Released after a press — dispatch at most once.
         self._was_pressed = False
-        if not self._running:
-            _request_start(self)
-        else:
-            # Running: flag a stop. The native C-function stop_tick Timer
-            # callback injects the KeyboardInterrupt (this Python callback
-            # can't — it would unwind itself).
+        if self._press_stopped:
+            # Release of the press that already fired the stop.
+            self._press_stopped = False
+            return
+        if self._running:
+            # Program came up between press-down and release (remote
+            # start mid-hold) — a button event during a run means stop.
+            self._last_stop_ms = _now_ms()
             _request_stop(self)
+            return
+        if self._last_stop_ms is not None and _ticks_diff(
+                _now_ms(), self._last_stop_ms) < self.START_LOCKOUT_MS:
+            # Bounce / re-contact right after a stop: swallow it.
+            return
+        _request_start(self)
 
     def _drain_pending(self):
         """Consume a queued ``_pending`` start — the PRIMARY start path.
