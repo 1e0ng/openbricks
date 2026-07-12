@@ -143,6 +143,31 @@ class ComposeTests(unittest.TestCase):
         self.assertIn(b"from openbricks import launcher", boot)
         self.assertIn(b"launcher.run_program(", boot)
 
+    def test_bootstrap_syncs_rtc_before_running(self):
+        # The hub's run-log epoch stamps need a synced RTC; the sync
+        # must come BEFORE the program starts so its prints get real
+        # wall-clock time.
+        boot = run_mod._compose_bootstrap(b"x=1\n")
+        self.assertIn(b"machine.RTC().datetime(", boot)
+        self.assertTrue(
+            boot.index(b"machine.RTC().datetime(")
+            < boot.index(b"launcher.run_program("))
+
+    def test_rtc_sync_lines_encode_utc_now(self):
+        from datetime import datetime, timezone
+        before = datetime.now(timezone.utc)
+        lines = run_mod.rtc_sync_lines()
+        after = datetime.now(timezone.utc)
+        joined = "\n".join(lines)
+        self.assertIn("machine.RTC().datetime(", joined)
+        # The encoded year/month/day must be today's UTC date (both
+        # endpoints checked so a midnight rollover can't flake).
+        self.assertTrue(
+            ("(%d, %d, %d," % (before.year, before.month, before.day))
+            in joined
+            or ("(%d, %d, %d," % (after.year, after.month, after.day))
+            in joined)
+
     def test_bootstrap_catches_keyboard_interrupt(self):
         """Button-press stop raises KeyboardInterrupt through
         run_program; the bootstrap must catch it so the hub prints a

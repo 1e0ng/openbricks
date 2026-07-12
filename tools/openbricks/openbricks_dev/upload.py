@@ -55,7 +55,7 @@ def _compose_upload_program(target_path, payload):
     exec's this, writes the file, and prints a size confirmation that
     streams back to our terminal.
     """
-    lines = [
+    lines = run_mod.rtc_sync_lines() + [
         "with open(%r, 'wb') as f:" % target_path,
         "    f.write(%s)" % repr(payload),
         "print('uploaded', %d, 'bytes to', %r)" % (len(payload), target_path),

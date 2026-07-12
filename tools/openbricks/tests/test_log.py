@@ -55,6 +55,96 @@ class ComposeProgramTests(unittest.TestCase):
         self.assertIn(b"_log.list_runs()", prog)
         self.assertIn(b"--no log--", prog)
 
+    def test_all_programs_sync_the_rtc(self):
+        # The hub's per-line epoch stamps are only meaningful if its
+        # RTC (which powers up at 2000-01-01, no NTP) gets set from
+        # the host clock on every connect.
+        for prog in (log_mod._compose_list_program(),
+                     log_mod._compose_dump_program(None),
+                     log_mod._compose_dump_program(1)):
+            self.assertIn(b"machine.RTC().datetime(", prog)
+
+
+class StampRendererTests(unittest.TestCase):
+    """Leading int64 epoch-ms stamps become local-time brackets; the
+    conversion to local time happens ONLY here, per the store-epoch/
+    render-local rule."""
+
+    class _Sink:
+        def __init__(self):
+            self.chunks = []
+            self.flushes = 0
+
+        def write(self, s):
+            self.chunks.append(s)
+
+        def flush(self):
+            self.flushes += 1
+
+        @property
+        def text(self):
+            return "".join(self.chunks)
+
+    def _expected(self, ms):
+        from datetime import datetime
+        dt = datetime.fromtimestamp(ms / 1000.0)
+        return "[%s.%03d]" % (dt.strftime("%Y-%m-%d %H:%M:%S"),
+                              dt.microsecond // 1000)
+
+    def test_stamped_line_rendered_in_local_time(self):
+        sink = self._Sink()
+        r = log_mod._StampRenderer(sink)
+        r.write("1783950123456 left ambient: 33\n")
+        r.drain()
+        self.assertEqual(
+            sink.text,
+            "%s left ambient: 33\n" % self._expected(1783950123456))
+
+    def test_unstamped_lines_pass_through(self):
+        sink = self._Sink()
+        r = log_mod._StampRenderer(sink)
+        r.write("-- run_9 (/openbricks_logs/run_9.log) --\n")
+        r.write("plain text\n")
+        r.write("run_9\t123\t/openbricks_logs/run_9.log\n")
+        r.drain()
+        self.assertEqual(
+            sink.text,
+            "-- run_9 (/openbricks_logs/run_9.log) --\n"
+            "plain text\n"
+            "run_9\t123\t/openbricks_logs/run_9.log\n")
+
+    def test_partial_lines_buffer_across_chunks(self):
+        # BLE chunk boundaries land anywhere — including inside the
+        # stamp digits. The renderer must reassemble before parsing.
+        sink = self._Sink()
+        r = log_mod._StampRenderer(sink)
+        r.write("17839501")
+        r.write("23456 hello\nnext")
+        self.assertEqual(
+            sink.text,
+            "%s hello\n" % self._expected(1783950123456))
+        r.drain()
+        self.assertEqual(
+            sink.text,
+            "%s hello\nnext" % self._expected(1783950123456))
+
+    def test_unsynced_hub_year_2000_stamp_still_renders(self):
+        # 12-digit ms stamp = an RTC never set (2000-01-01 dates);
+        # rendering it makes the unsynced state self-diagnosing.
+        sink = self._Sink()
+        r = log_mod._StampRenderer(sink)
+        r.write("946684800000 boot print\n")
+        r.drain()
+        self.assertEqual(
+            sink.text, "%s boot print\n" % self._expected(946684800000))
+
+    def test_short_number_prefix_is_not_a_stamp(self):
+        sink = self._Sink()
+        r = log_mod._StampRenderer(sink)
+        r.write("12345 not a stamp\n")
+        r.drain()
+        self.assertEqual(sink.text, "12345 not a stamp\n")
+
 
 class _FakeLink:
     def __init__(self):
@@ -152,7 +242,9 @@ class RunDispatchTests(unittest.TestCase):
         self.assertEqual(len(self.streamed), 1)
         args = self.streamed[0]
         self.assertIs(args["link"], self.fake)
-        self.assertIs(args["out"], sys.stdout)
+        # 0.11.0 wraps stdout in the timestamp renderer.
+        self.assertIsInstance(args["out"], log_mod._StampRenderer)
+        self.assertIs(args["out"]._out, sys.stdout)
 
     def test_connect_failure_raises_log_error(self):
         async def _raise(name, scan_timeout=5.0):

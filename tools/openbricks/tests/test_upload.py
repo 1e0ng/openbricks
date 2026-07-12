@@ -41,6 +41,10 @@ class ComposeTests(unittest.TestCase):
         self.assertIn(b"'wb'", prog)
         self.assertIn(b"f.write(", prog)
 
+    def test_upload_program_syncs_rtc(self):
+        prog = ul._compose_upload_program("/program.py", b"payload")
+        self.assertIn(b"machine.RTC().datetime(", prog)
+
     def test_custom_path_surfaces_in_program(self):
         prog = ul._compose_upload_program("/user/alt.py", b"X")
         self.assertIn(b"'/user/alt.py'", prog)
@@ -55,7 +59,7 @@ class ComposeTests(unittest.TestCase):
         upload program MUST NOT call machine.reset()."""
         prog = ul._compose_upload_program("/program.py", b"X")
         self.assertNotIn(b"machine.reset", prog)
-        self.assertNotIn(b"import machine", prog)
+        self.assertNotIn(b"machine.reset", prog)
 
     def test_payload_bytes_round_trip(self):
         # Raw bytes with NULs / high bits / quotes / newlines must
@@ -129,7 +133,7 @@ class UploadFlowTests(unittest.TestCase):
         joined = b"".join(fake.writes)
         # No reset should be issued anywhere in the upload.
         self.assertNotIn(b"machine.reset", joined)
-        self.assertNotIn(b"import machine", joined)
+        self.assertNotIn(b"machine.reset", joined)
         # Raw REPL fully entered and cleanly exited.
         self.assertIn(b"\x01", joined)      # Ctrl-A (enter raw)
         self.assertIn(b"\x05A\x01", joined) # raw-paste request

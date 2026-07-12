@@ -486,6 +486,75 @@ class TickPumpsBleTxTests(unittest.TestCase):
             ble_repl.pump_tx = orig
 
 
+class ButtonPressLogEntryTests(unittest.TestCase):
+    """Every button press that interacts with a run leaves a log
+    entry: a stop press notes into the active run's log, and a
+    button-started run's log opens with a stamped "started:" line."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+
+    def test_stop_press_notes_into_log(self):
+        from openbricks import log as log_mod
+        notes = []
+        orig_note = log_mod.note
+        orig_stop = launcher._request_stop
+        log_mod.note = lambda text: notes.append(text)
+        launcher._request_stop = lambda inst: None
+        try:
+            self.launcher._running = True
+            self.btn._value = 0           # press-down
+            self.launcher._tick()
+        finally:
+            log_mod.note = orig_note
+            launcher._request_stop = orig_stop
+        self.assertEqual(notes, ["button pressed -> stop"])
+
+    def test_note_failure_does_not_kill_the_tick(self):
+        from openbricks import log as log_mod
+
+        def _boom(text):
+            raise RuntimeError("flash died")
+
+        orig_note = log_mod.note
+        orig_stop = launcher._request_stop
+        log_mod.note = _boom
+        launcher._request_stop = lambda inst: None
+        try:
+            self.launcher._running = True
+            self.btn._value = 0
+            self.launcher._tick()        # must not raise
+        finally:
+            log_mod.note = orig_note
+            launcher._request_stop = orig_stop
+
+    def test_button_started_run_logs_origin_line(self):
+        import tests.test_log as tlog
+        from openbricks import log as log_mod
+        tlog._wipe(tlog._TEST_LOG_DIR)
+        prev_dir = log_mod.LOG_DIR
+        log_mod.LOG_DIR = tlog._TEST_LOG_DIR
+        prog = tlog._TEST_LOG_DIR + "_prog.py"
+        try:
+            with open(prog, "w") as f:
+                f.write("print('body')\n")
+            launcher._exec_program(prog, origin="button press")
+            runs = log_mod.list_runs()
+            self.assertEqual(len(runs), 1)
+            data = log_mod.read_run(runs[0][0])
+        finally:
+            log_mod.LOG_DIR = prev_dir
+            tlog._wipe(tlog._TEST_LOG_DIR)
+            try:
+                os.remove(prog)
+            except OSError:
+                pass
+        self.assertIn("started: button press\n", data)
+        self.assertIn("body", data)
+
+
 class StopRequestTests(unittest.TestCase):
     """A press while running requests a STOP (``_request_stop``), never a
     second START. ``_tick`` only flags it; the native C-function
