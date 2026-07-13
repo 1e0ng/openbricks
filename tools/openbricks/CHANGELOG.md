@@ -3,21 +3,33 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
-## 0.13.0 — firmware default acceleration 720 → 1440 deg/s²; sim stays 720
+## 0.13.0 — default acceleration 720 → 1440 deg/s²; sim physics fixed
 
-Firmware 1.13.0 doubles the default acceleration to 1440
-wheel-deg/s² across the Python-fallback `DriveBase`, the native C
-drivebase/servo paths, and the encoder-motor driver constructors.
-Explicit `settings(acceleration=...)` / `accel` arguments are
-unaffected.
+The default acceleration doubles to 1440 wheel-deg/s² everywhere:
+`DriveBase` ramps (Python fallback and native C), encoder-motor
+`run_target`, the MG370/JGB37-520 driver constructors, and the
+simulator. Explicit `settings(acceleration=...)` / `accel`
+arguments are unaffected. A drift-guard test pins all six
+definition sites to the same value.
 
-The SIMULATOR deliberately keeps 720: its contact physics can't
-track 1440-steep ramps (the doubled launch torque slips the wheels —
-a 100 mm straight excursions ~250 mm backward before recovering,
-measured on the empty world). Sim defaults are tuned to sim physics;
-a drift-guard test pins the firmware sites to 1440 and the sim's
-divergence to 720 so neither drifts silently. The underlying sim
-tracking fidelity is tracked as its own issue.
+Unifying the sim required fixing two long-standing physics bugs
+(issue #234) that had made its chassis tracking loose at ANY
+acceleration (a 100 mm straight used to land at ~245 mm):
+
+* The wheel/caster z-offset formulas buried the wheels 20 mm into
+  the floor — the robot rode on contact penetration-recovery forces
+  instead of rolling.
+* Motor power mapped linearly to torque with no back-EMF, so the
+  servo core's feed-forward (calibrated for real DC motors) applied
+  ~4x the traction limit as permanent torque, slipping the wheels
+  and limit-cycling the control loop. `SimMotor` now models a
+  linear DC motor (`torque = T_stall*(duty − ω/ω_rated)`, stall
+  bounded below the traction limit) whose equilibrium matches the
+  core's feed-forward exactly.
+
+After the fixes a 100 mm straight lands at 98.7 mm with <0.2 mm of
+wheel slip at both 720 and 1440 deg/s², and `turn(90)` lands at
+89.1°.
 
 ## 0.12.0 — `servo-id`: assign Feetech servo bus IDs from the host
 

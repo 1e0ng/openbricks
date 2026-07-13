@@ -294,7 +294,6 @@ class ShimST3215Motor:
         joint_id  = int(rt.model.sensor_objid[self._plumb._sensor_id])
         self._dof = int(rt.model.jnt_dofadr[joint_id])
         self._actuator_id = self._plumb._actuator_id
-        self._ctrl_scale  = self._plumb._ctrl_scale
 
         self._max_dps      = float(max_dps)
         self._angle_offset = 0.0
@@ -355,7 +354,9 @@ class ShimST3215Motor:
         power = self._KP_VEL * (v_cmd - self._vel_dps())
         if power >  100.0: power =  100.0
         if power < -100.0: power = -100.0
-        self._rt.data.ctrl[self._actuator_id] = power * self._ctrl_scale
+        # Through the shared DC-motor model — a serial servo's inner
+        # loop is still a DC motor behind a controller.
+        self._plumb.apply_power(power)
 
     def _clamp(self, dps):
         if dps >  self._max_dps: return  self._max_dps
