@@ -109,6 +109,7 @@ jobs:
             tests.test_motor_process_timer_id \
             tests.test_pcnt_encoder_irq_contract \
             tests.test_example_pins \
+            tests.test_line_follow \
             tests.test_pins \
             tests.test_timer_allocation \
             tests.test_estop \
