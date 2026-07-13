@@ -17,9 +17,11 @@ Usage:
 
 Then, after the PR merges, cut BOTH releases:
 
-    git tag v<version>       # firmware GitHub Release (.bin files)
-    git tag cli/v<version>   # PyPI publish (CLI + sim wheels)
+    git tag v<version> && git tag cli/v<version>
     git push origin v<version> cli/v<version>
+
+(v* cuts the firmware GitHub Release with the .bin files; cli/v*
+publishes the CLI + sim wheels to PyPI.)
 
 History: the two tracks were versioned independently through
 firmware 1.14.0 / openbricks 0.14.0 (the old ``--firmware`` /
@@ -74,7 +76,9 @@ def main(argv=None):
     for rel in _INIT_FILES:
         _update_init(root / rel, args.version)
     print("bumped firmware + openbricks to {}".format(args.version))
-    print("  tag with: git tag v{v} cli/v{v} && "
+    # NB: ``git tag`` takes ONE name (a second argument is parsed as
+    # a commit-ish) — two invocations, one push.
+    print("  tag with: git tag v{v} && git tag cli/v{v} && "
           "git push origin v{v} cli/v{v}".format(v=args.version))
     return 0
 

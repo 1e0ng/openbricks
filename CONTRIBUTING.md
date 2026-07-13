@@ -76,7 +76,7 @@ Cutting a release:
 
     scripts/bump-version.py 1.15.0
     # commit, push, merge PR, then:
-    git tag v1.15.0 cli/v1.15.0
+    git tag v1.15.0 && git tag cli/v1.15.0
     git push origin v1.15.0 cli/v1.15.0
 
 ## Licensing
