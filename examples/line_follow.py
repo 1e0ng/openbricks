@@ -74,13 +74,13 @@ right_sensor = TCS34725(mux[0], gain=16)
 # used for the INTERSECTION stop (both sensors dark at once) — the
 # steering itself is proportional and needs no threshold. Calibrate
 # between a matte black line (~5-10) and your mat (~30+).
-LINE_AMBIENT = 10
+LINE_AMBIENT = 20
 
-CRUISE_DPS = 100   # wheel speed when perfectly centred
+CRUISE_DPS = 200   # wheel speed when perfectly centred
 # Proportional gain: extra dps of steering per unit of ambient
 # difference between the sensors. Higher = snappier corrections but
 # closer to oscillation; lower = lazier, drifts wide on curves.
-GAIN = 1.5
+GAIN = 0.3
 
 
 def _clamp(dps):
@@ -106,6 +106,7 @@ def _wheel_speeds(left_ambient, right_ambient):
     """
     if left_ambient < LINE_AMBIENT and right_ambient < LINE_AMBIENT:
         return None
+    print('left', left_ambient, 'right', right_ambient)
     error = left_ambient - right_ambient
     return (_clamp(CRUISE_DPS + GAIN * error),
             _clamp(CRUISE_DPS - GAIN * error))

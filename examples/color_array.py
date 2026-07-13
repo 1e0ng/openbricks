@@ -76,7 +76,7 @@ def main():
 
     i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
     mux = TCA9548A(i2c)                                    # 0x70 default
-    sensors = [TCS34725(mux[ch]) for ch in range(2)]
+    sensors = [TCS34725(mux[ch], gain=16) for ch in range(2)]
 
     print("Hold surfaces under both sensors (Ctrl-C to stop)...")
     while True:
