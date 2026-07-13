@@ -54,8 +54,11 @@ class ReleaseTagNamespaceTests(unittest.TestCase):
         self.assertNotIn("'refs/tags/openbricks/'", self.ci)
 
     def test_bump_script_hints_both_tags_lockstep(self):
-        # One bump, two tags (lockstep since 1.15.0).
-        self.assertIn("git tag v{v} cli/v{v}", self.bump)
+        # One bump, two tags (lockstep since 1.15.0). The hint must
+        # be two ``git tag`` invocations: ``git tag A B`` parses B as
+        # a commit-ish, not a second tag (bit us cutting 1.15.0).
+        self.assertIn("git tag v{v} && git tag cli/v{v}", self.bump)
+        self.assertNotIn("git tag v{v} cli/v{v}", self.bump)
         self.assertNotIn("git tag openbricks/v{version}", self.bump)
 
     def test_firmware_and_cli_versions_match(self):
