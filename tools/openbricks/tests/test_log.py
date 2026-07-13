@@ -246,12 +246,54 @@ class RunDispatchTests(unittest.TestCase):
         self.assertIsInstance(args["out"], log_mod._StampRenderer)
         self.assertIs(args["out"]._out, sys.stdout)
 
+    def test_raising_idle_restore_is_swallowed(self):
+        # _restore_idle_loop failing during teardown must not turn a
+        # successful log dump into an error.
+        async def _bad_restore(link):
+            raise RuntimeError("hub hung up first")
+        with patch.object(log_mod.run_mod, "_restore_idle_loop",
+                          _bad_restore):
+            rc = log_mod.run(self._args(list=True))
+        self.assertEqual(rc, 0)
+
     def test_connect_failure_raises_log_error(self):
         async def _raise(name, scan_timeout=5.0):
             raise NUSError("not found")
         with patch.object(log_mod.NUSLink, "connect", side_effect=_raise):
             with self.assertRaises(log_mod.LogError):
                 log_mod.run(self._args(name="Ghost"))
+
+
+
+
+class LogInterruptAndRendererFlushTests(unittest.TestCase):
+    def test_ctrl_c_maps_to_130(self):
+        orig = log_mod._log_async
+
+        def _boom(*a, **k):
+            raise KeyboardInterrupt()
+        log_mod._log_async = _boom
+        try:
+            rc = log_mod.run(argparse.Namespace(
+                name="X", list=True, run=None, scan_timeout=1.0))
+        finally:
+            log_mod._log_async = orig
+        self.assertEqual(rc, 130)
+
+    def test_renderer_flush_passes_through(self):
+        class _Sink:
+            def __init__(self):
+                self.flushes = 0
+
+            def write(self, s):
+                pass
+
+            def flush(self):
+                self.flushes += 1
+        sink = _Sink()
+        r = log_mod._StampRenderer(sink)
+        r.flush()
+        self.assertEqual(sink.flushes, 1)
 
 
 if __name__ == "__main__":

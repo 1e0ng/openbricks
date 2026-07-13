@@ -110,5 +110,116 @@ class RunTests(unittest.TestCase):
                 scan.run(_args())
 
 
+
+
+class DiscoverTests(unittest.TestCase):
+    """_discover against an injected fake bleak: modern dict-shaped
+    results, legacy list results, scan failure, missing bleak."""
+
+    def setUp(self):
+        import sys
+        self._had = "bleak" in sys.modules
+        self._prev = sys.modules.get("bleak")
+        self._sys = sys
+
+    def tearDown(self):
+        if self._had:
+            self._sys.modules["bleak"] = self._prev
+        else:
+            self._sys.modules.pop("bleak", None)
+
+    def _inject(self, result=None, raises=None):
+        class _Scanner:
+            @staticmethod
+            async def discover(timeout=None, return_adv=True):
+                if raises:
+                    raise raises
+                return result
+
+        class _Bleak:
+            BleakScanner = _Scanner
+        self._sys.modules["bleak"] = _Bleak
+
+    def _drive(self):
+        import asyncio
+        return asyncio.run(scan._discover(1.0))
+
+    def test_dict_result_unpacks_device_adv_pairs(self):
+        dev, adv = _dev("aa:bb", "A", -40)
+        self._inject(result={"aa:bb": (dev, adv)})
+        self.assertEqual(self._drive(), [(dev, adv)])
+
+    def test_legacy_list_result_gets_none_adv(self):
+        dev, _ = _dev("aa:bb", "A", -40)
+        self._inject(result=[dev])
+        self.assertEqual(self._drive(), [(dev, None)])
+
+    def test_scan_failure_wraps_in_scan_error(self):
+        self._inject(raises=OSError("adapter off"))
+        try:
+            self._drive()
+        except scan.ScanError as e:
+            self.assertIn("BLE scan failed", str(e))
+        else:
+            self.fail("expected ScanError")
+
+    def test_missing_bleak_reports_install_hint(self):
+        self._sys.modules["bleak"] = None
+        try:
+            self._drive()
+        except scan.ScanError as e:
+            self.assertIn("pip install bleak", str(e))
+        else:
+            self.fail("expected ScanError")
+
+
+class RunRowSkipAndSortFallbackTests(unittest.TestCase):
+    def _run_with(self, entries, all_flag=False):
+        import argparse, io, sys
+        orig = scan._discover
+
+        async def _fake(timeout):
+            return entries
+        scan._discover = _fake
+        out = io.StringIO()
+        prev, sys.stdout = sys.stdout, out
+        try:
+            scan.run(argparse.Namespace(timeout=0.1, all=all_flag))
+        finally:
+            sys.stdout = prev
+            scan._discover = orig
+        return out.getvalue()
+
+    def test_unnamed_device_skipped_in_listing(self):
+        named = _dev("aa:01", "Hub", -40)
+        unnamed = _dev("aa:02", None, -30)
+        out = self._run_with([named, unnamed])
+        self.assertIn("Hub", out)
+        self.assertNotIn("aa:02", out)
+
+    def test_sort_falls_back_to_device_rssi(self):
+        # Legacy entries with adv=None must sort by the BLEDevice's
+        # own rssi attribute.
+        strong = _dev("aa:01", "Strong", -20)[0], None
+        weak = _dev("aa:02", "Weak", -80)[0], None
+        out = self._run_with([weak, strong])
+        self.assertTrue(out.index("Strong") < out.index("Weak"))
+
+
+class RunErrorWrapTests(unittest.TestCase):
+    def test_unexpected_exception_becomes_scan_error(self):
+        import argparse
+        orig = scan._discover
+
+        def _boom(timeout):
+            raise ValueError("weird")
+        scan._discover = _boom
+        try:
+            with self.assertRaises(scan.ScanError):
+                scan.run(argparse.Namespace(timeout=0.1, all=False))
+        finally:
+            scan._discover = orig
+
+
 if __name__ == "__main__":
     unittest.main()

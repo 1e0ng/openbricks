@@ -375,5 +375,215 @@ class InlineCommandTests(unittest.TestCase):
         self.assertIn("no hub named", str(ctx.exception))
 
 
+
+
+class _ProtocolLink(_ScriptedLink):
+    """ScriptedLink + the stats() surface _format_timeout needs."""
+
+    def stats(self):
+        return {"connected": True, "notify_count": 5, "byte_count": 99,
+                "last_byte_ago": 0.5, "uptime": 3.0}
+
+
+def _drive(coro):
+    import asyncio
+    return asyncio.run(coro)
+
+
+class RawPasteProtocolTests(unittest.TestCase):
+    """Flow-control branches of the raw-paste upload: window refills,
+    hub abort, junk bytes, and the end-of-upload handshake."""
+
+    def test_window_refill_chunks_and_completes(self):
+        link = _ProtocolLink([b"R\x01\x04\x00", b"\x01", b"\x01", b"\x04"])
+        blink = run_mod._BufferedLink(link)
+        _drive(run_mod._raw_paste_upload(blink, link, b"abcdef"))
+        self.assertEqual(link.writes, [
+            run_mod._RAW_PASTE_REQUEST, b"abcd", b"ef", run_mod._CTRL_D])
+
+    def test_hub_abort_sends_ctrl_d_and_raises(self):
+        link = _ProtocolLink([b"R\x01\x01\x00", b"\x04"])
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._raw_paste_upload(blink, link, b"ab"))
+        except run_mod.RunError as e:
+            self.assertIn("hub aborted", str(e))
+        else:
+            self.fail("expected RunError")
+        self.assertEqual(link.writes[-1], run_mod._CTRL_D)
+
+    def test_junk_during_upload_raises(self):
+        link = _ProtocolLink([b"R\x01\x01\x00", b"Z"])
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._raw_paste_upload(blink, link, b"ab"))
+        except run_mod.RunError as e:
+            self.assertIn("unexpected byte", str(e))
+        else:
+            self.fail("expected RunError")
+
+    def test_junk_after_end_raises(self):
+        link = _ProtocolLink([b"R\x01\x04\x00", b"Z"])
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._raw_paste_upload(blink, link, b"a"))
+        except run_mod.RunError as e:
+            self.assertIn("after raw-paste end", str(e))
+        else:
+            self.fail("expected RunError")
+
+    def test_missing_raw_paste_support_raises(self):
+        link = _ProtocolLink([b"XX"])
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._raw_paste_upload(blink, link, b"a"))
+        except run_mod.RunError as e:
+            self.assertIn("did not acknowledge raw-paste", str(e))
+        else:
+            self.fail("expected RunError")
+
+
+class StreamOutputTests(unittest.TestCase):
+    def test_buffered_stdout_and_stderr_sections(self):
+        import io
+        link = _ProtocolLink([])
+        blink = run_mod._BufferedLink(link)
+        blink._buf = bytearray(b"out\x04trace\x04")
+        out = io.StringIO()
+        _drive(run_mod._stream_output(blink, link, out))
+        self.assertIn("out", out.getvalue())
+        self.assertIn("trace", out.getvalue())
+
+    def test_live_then_silent_hub_raises_formatted_timeout(self):
+        import io
+        link = _ProtocolLink([b"live"])
+        blink = run_mod._BufferedLink(link)
+        out = io.StringIO()
+        try:
+            _drive(run_mod._stream_output(blink, link, out))
+        except run_mod.RunError as e:
+            self.assertIn("timed out reading from hub", str(e))
+        else:
+            self.fail("expected RunError")
+        self.assertEqual(out.getvalue(), "live")
+
+
+class FormatTimeoutHintTests(unittest.TestCase):
+    class _StatsLink:
+        def __init__(self, stats):
+            self._stats = stats
+
+        def stats(self):
+            return self._stats
+
+    def _msg(self, **overrides):
+        stats = {"connected": True, "notify_count": 3, "byte_count": 42,
+                 "last_byte_ago": 1.0, "uptime": 9.0}
+        stats.update(overrides)
+        return run_mod._format_timeout(
+            self._StatsLink(stats), "step-x", b"")
+
+    def test_went_quiet_hint(self):
+        msg = self._msg(last_byte_ago=6.5)
+        self.assertIn("went quiet for 6.5s", msg)
+
+    def test_still_talking_hint(self):
+        msg = self._msg(last_byte_ago=1.0)
+        self.assertIn("protocol diverged", msg)
+
+    def test_never_sent_hint(self):
+        msg = self._msg(notify_count=0, last_byte_ago=None)
+        self.assertIn("notify_count=0", msg)
+
+
+class BufferedLinkDrainTests(unittest.TestCase):
+    def test_drain_discards_pending_bytes(self):
+        link = _ProtocolLink([b"stale"])
+        blink = run_mod._BufferedLink(link)
+        _drive(blink.drain(timeout=0.05))
+        self.assertEqual(bytes(blink._buf), b"")
+
+    def test_drain_tolerates_silent_link(self):
+        import asyncio
+
+        class _Slow:
+            async def read(self, timeout=None):
+                await asyncio.sleep(1.0)
+                return b"late"
+        blink = run_mod._BufferedLink(_Slow())
+        _drive(blink.drain(timeout=0.05))   # must not raise
+        self.assertEqual(bytes(blink._buf), b"")
+
+
+class HostInterruptForwardingTests(unittest.TestCase):
+    """Host-side Ctrl-C mid-run: _run_async forwards a Ctrl-C to the
+    hub, drains the interrupt traceback, restores the idle loop, and
+    re-raises so the client exits."""
+
+    def test_cancelled_error_forwards_ctrl_c(self):
+        import asyncio
+        link = _ProtocolLink([])
+        restore_calls = []
+        stream_calls = []
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return link
+
+        async def _stub(blink, l):
+            return None
+
+        async def _stub_upload(blink, l, script_bytes):
+            return None
+
+        async def _stream(blink, l, out):
+            stream_calls.append(1)
+            if len(stream_calls) == 1:
+                raise asyncio.CancelledError()
+
+        async def _restore(l):
+            restore_calls.append(1)
+
+        patches = [
+            ("_enter_raw_repl", _stub),
+            ("_raw_paste_upload", _stub_upload),
+            ("_stream_output", _stream),
+            ("_restore_idle_loop", _restore),
+        ]
+        orig_connect = run_mod.NUSLink.connect
+        run_mod.NUSLink.connect = _fake_connect
+        origs = [(n, getattr(run_mod, n)) for n, _ in patches]
+        for n, fn in patches:
+            setattr(run_mod, n, fn)
+        try:
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(run_mod._run_async(
+                    "X", None, 1.0, command="print(1)"))
+        finally:
+            run_mod.NUSLink.connect = orig_connect
+            for n, fn in origs:
+                setattr(run_mod, n, fn)
+        # Ctrl-C forwarded to the hub, drain attempted, idle restored.
+        self.assertIn(run_mod._CTRL_C, link.writes)
+        self.assertEqual(len(stream_calls), 2)
+        self.assertEqual(restore_calls, [1])
+
+
+class RunKeyboardInterruptTests(unittest.TestCase):
+    def test_ctrl_c_maps_to_130(self):
+        import argparse
+        orig = run_mod._run_async
+
+        def _boom(*a, **k):
+            raise KeyboardInterrupt()
+        run_mod._run_async = _boom
+        try:
+            rc = run_mod.run(argparse.Namespace(
+                name="x", script="s.py", scan_timeout=1.0,
+                debug=False, inline_code=None))
+        finally:
+            run_mod._run_async = orig
+        self.assertEqual(rc, 130)
+
+
 if __name__ == "__main__":
     unittest.main()

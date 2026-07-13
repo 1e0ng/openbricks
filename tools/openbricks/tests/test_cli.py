@@ -197,5 +197,129 @@ class MainDispatchTests(unittest.TestCase):
         self.assertEqual(rc, 130)
 
 
+
+
+class DispatchTests(unittest.TestCase):
+    """main() routes each subcommand to its module's run(args) and
+    maps typed errors / Ctrl-C to exit codes."""
+
+    def _patch_run(self, module_name, fn):
+        import importlib
+        mod = importlib.import_module("openbricks_dev." + module_name)
+        orig = mod.run
+        mod.run = fn
+        self.addCleanup(setattr, mod, "run", orig)
+
+    def test_each_subcommand_dispatches(self):
+        from openbricks_dev import cli
+        seen = []
+        cases = [
+            ("flash", ["flash", "--name", "X", "--port", "/p",
+                       "--firmware", "f.bin"]),
+            ("scan", ["list"]),
+            ("run", ["run", "-n", "X", "s.py"]),
+            ("upload", ["upload", "-n", "X", "s.py"]),
+            ("stop", ["stop", "-n", "X"]),
+            ("log", ["log", "-n", "X"]),
+            ("servo_id", ["servo-id", "-p", "/p", "3"]),
+        ]
+        for mod_name, argv in cases:
+            seen.clear()
+            self._patch_run(mod_name, lambda args, m=mod_name:
+                            (seen.append(m), 0)[1])
+            rc = cli.main(argv)
+            self.assertEqual(rc, 0, argv)
+            self.assertEqual(seen, [mod_name])
+
+    def test_typed_error_prints_and_returns_1(self):
+        import io, sys
+        from openbricks_dev import cli
+        from openbricks_dev.scan import ScanError
+
+        def _boom(args):
+            raise ScanError("no adapter")
+        self._patch_run("scan", _boom)
+        err = io.StringIO()
+        orig, sys.stderr = sys.stderr, err
+        try:
+            rc = cli.main(["list"])
+        finally:
+            sys.stderr = orig
+        self.assertEqual(rc, 1)
+        self.assertIn("error: no adapter", err.getvalue())
+
+    def test_keyboard_interrupt_returns_130(self):
+        import io, sys
+        from openbricks_dev import cli
+
+        def _boom(args):
+            raise KeyboardInterrupt()
+        self._patch_run("stop", _boom)
+        err = io.StringIO()
+        orig, sys.stderr = sys.stderr, err
+        try:
+            rc = cli.main(["stop", "-n", "X"])
+        finally:
+            sys.stderr = orig
+        self.assertEqual(rc, 130)
+        self.assertIn("aborted", err.getvalue())
+
+
+class SimDispatchTests(unittest.TestCase):
+    def test_sim_forwards_remaining_argv(self):
+        import sys, types
+        from openbricks_dev import cli
+        calls = []
+        fake = types.ModuleType("openbricks_sim.cli")
+        fake.main = lambda argv: (calls.append(list(argv)), 7)[1]
+        had = "openbricks_sim.cli" in sys.modules
+        prev = sys.modules.get("openbricks_sim.cli")
+        sys.modules["openbricks_sim.cli"] = fake
+        try:
+            rc = cli.main(["sim", "preview", "--fast"])
+        finally:
+            if had:
+                sys.modules["openbricks_sim.cli"] = prev
+            else:
+                del sys.modules["openbricks_sim.cli"]
+        self.assertEqual(rc, 7)
+        self.assertEqual(calls, [["preview", "--fast"]])
+
+    def test_sim_missing_extra_prints_hint(self):
+        import io, sys
+        from openbricks_dev import cli
+        had = "openbricks_sim.cli" in sys.modules
+        prev = sys.modules.get("openbricks_sim.cli")
+        sys.modules["openbricks_sim.cli"] = None   # import -> ImportError
+        err = io.StringIO()
+        orig, sys.stderr = sys.stderr, err
+        try:
+            rc = cli.main(["sim", "run"])
+        finally:
+            sys.stderr = orig
+            if had:
+                sys.modules["openbricks_sim.cli"] = prev
+            else:
+                del sys.modules["openbricks_sim.cli"]
+        self.assertEqual(rc, 1)
+        self.assertIn("pip install openbricks[sim]", err.getvalue())
+
+
+class MainModuleTests(unittest.TestCase):
+    def test_python_dash_m_reaches_argparse(self):
+        # ``python -m openbricks_dev --help`` executes __main__.py ->
+        # cli.main() -> argparse --help (SystemExit 0).
+        import runpy, sys
+        argv = sys.argv
+        sys.argv = ["openbricks", "--help"]
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                runpy.run_module("openbricks_dev.__main__",
+                                 run_name="__main__")
+        finally:
+            sys.argv = argv
+        self.assertEqual(ctx.exception.code, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

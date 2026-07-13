@@ -192,5 +192,44 @@ class UploadFlowTests(unittest.TestCase):
                     "Ghost", self.tmp.name, "/program.py", 5.0))
 
 
+
+
+class UploadRestoreFailureTests(UploadFlowTests):
+    def test_raising_idle_restore_is_swallowed(self):
+        # _restore_idle_loop failing during teardown must not turn a
+        # successful upload into an error.
+        fake = _ScriptedLink(self._standard_responses(
+            b"uploaded 15 bytes to '/program.py'\r\n"))
+
+        async def _fake_connect(name, scan_timeout=5.0):
+            return fake
+
+        async def _bad_restore(link):
+            raise RuntimeError("hub hung up first")
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch.object(ul.run_mod, "_restore_idle_loop", _bad_restore), \
+             patch("sys.stdout", new_callable=io.StringIO):
+            rc = ul.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+
+
+class UploadInterruptTests(unittest.TestCase):
+    def test_ctrl_c_maps_to_130(self):
+        import argparse
+        orig = ul._upload_async
+
+        def _boom(*a, **k):
+            raise KeyboardInterrupt()
+        ul._upload_async = _boom
+        try:
+            rc = ul.run(argparse.Namespace(
+                name="X", script="s.py", path="/program.py",
+                scan_timeout=1.0))
+        finally:
+            ul._upload_async = orig
+        self.assertEqual(rc, 130)
+
+
 if __name__ == "__main__":
     unittest.main()
