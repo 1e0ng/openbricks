@@ -204,7 +204,7 @@ class SimMotor:
     def run_target(self,
                    delta_deg: float,
                    cruise_dps: float,
-                   accel: float = 720.0) -> None:
+                   accel: float = 1440.0) -> None:
         """Trapezoidal move ``delta_deg`` from the current angle at
         ``cruise_dps`` cruise speed and ``accel`` deg/s² shaping."""
         self.servo.run_target(self._read_count(), self.runtime.now_ms,

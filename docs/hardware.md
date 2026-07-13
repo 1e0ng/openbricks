@@ -204,7 +204,7 @@ stiffly than small DC motors — if the chassis pitches or lifts its rear
 when a move starts, soften the ramp:
 
 ```python
-db.settings(acceleration=180)   # wheel-deg/s²; default 720
+db.settings(acceleration=180)   # wheel-deg/s²; default 1440
 ```
 
 ## Alternative: DC gear motors with encoders
