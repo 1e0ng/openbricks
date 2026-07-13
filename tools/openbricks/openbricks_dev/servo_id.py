@@ -120,7 +120,12 @@ def set_servo_id(ser, new_id, old_id=None, out=None):
 def _open_serial(port, baudrate, timeout):
     """Open the adapter port. Separate function so tests can inject a
     scripted fake."""
-    import serial
+    try:
+        import serial
+    except ImportError as e:
+        raise ServoIdError(
+            "pyserial is required for servo-id "
+            "(pip install pyserial): %s" % e)
     try:
         return serial.Serial(port, baudrate, timeout=timeout)
     except Exception as e:
