@@ -204,9 +204,16 @@ class SimMotor:
     def run_target(self,
                    delta_deg: float,
                    cruise_dps: float,
-                   accel: float = 1440.0) -> None:
+                   accel: float = 720.0) -> None:
         """Trapezoidal move ``delta_deg`` from the current angle at
-        ``cruise_dps`` cruise speed and ``accel`` deg/s² shaping."""
+        ``cruise_dps`` cruise speed and ``accel`` deg/s² shaping.
+
+        Default 720, NOT the firmware's 1440: sim defaults are tuned
+        to the sim's contact physics — at 1440 the doubled launch
+        torque makes the simulated wheels slip badly (a 100 mm
+        straight briefly drives ~250 mm BACKWARD before recovering).
+        Tracked as the sim-fidelity issue; until the chassis model
+        tracks steep ramps, sim keeps the gentler default."""
         self.servo.run_target(self._read_count(), self.runtime.now_ms,
                                float(delta_deg), float(cruise_dps),
                                float(accel))
@@ -636,6 +643,14 @@ class SimDriveBase:
                                      wheel_diameter_mm=float(wheel_diameter_mm),
                                      axle_track_mm=float(axle_track_mm),
                                      **kwargs)
+        # The native core's compiled-in default accel is the
+        # firmware's 1440 deg/s², which the sim's contact physics
+        # can't track: the doubled launch torque slips the wheels
+        # and a 100 mm straight excursions ~250 mm BACKWARD before
+        # recovering (measured on the empty world). Sim defaults are
+        # tuned to sim physics — pin 720 here; set_accel() overrides
+        # as usual. Tracked by the sim-fidelity issue.
+        self.db.set_accel(720.0)
         self._attached = False
 
     # -------- lifecycle --------

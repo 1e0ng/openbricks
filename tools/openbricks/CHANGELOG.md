@@ -3,16 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
-## 0.13.0 — default acceleration 720 → 1440 deg/s²
+## 0.13.0 — firmware default acceleration 720 → 1440 deg/s²; sim stays 720
 
-The default acceleration used by `DriveBase` ramps, encoder-motor
-`run_target`, and the simulator doubles to 1440 wheel-deg/s² (four
-revolutions/s²) — the old 720 was conservative enough that most
-robots crawled through speed changes. Explicit
-`settings(acceleration=...)` / `accel` arguments are unaffected.
-Matches firmware 1.13.0, which changes the same default in the
-native C paths; a drift-guard test now pins all six definition
-sites to the same value.
+Firmware 1.13.0 doubles the default acceleration to 1440
+wheel-deg/s² across the Python-fallback `DriveBase`, the native C
+drivebase/servo paths, and the encoder-motor driver constructors.
+Explicit `settings(acceleration=...)` / `accel` arguments are
+unaffected.
+
+The SIMULATOR deliberately keeps 720: its contact physics can't
+track 1440-steep ramps (the doubled launch torque slips the wheels —
+a 100 mm straight excursions ~250 mm backward before recovering,
+measured on the empty world). Sim defaults are tuned to sim physics;
+a drift-guard test pins the firmware sites to 1440 and the sim's
+divergence to 720 so neither drifts silently. The underlying sim
+tracking fidelity is tracked as its own issue.
 
 ## 0.12.0 — `servo-id`: assign Feetech servo bus IDs from the host
 

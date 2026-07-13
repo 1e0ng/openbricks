@@ -216,10 +216,14 @@ class TestDriveBaseAcceleration(unittest.TestCase):
 
 
 class DefaultAccelValueTests(unittest.TestCase):
-    """The 1440 deg/s² default lives in SIX places (Python fallback,
-    native C drivebase, native C servo, two encoder-motor drivers,
-    and the simulator) — source-grep them all so they can't drift
-    apart when someone retunes one."""
+    """The firmware's 1440 deg/s² default lives in FIVE places —
+    source-grep them so they can't drift apart when someone retunes
+    one. The SIMULATOR deliberately stays at 720: its contact
+    physics can't track 1440-steep ramps (wheel slip drives a 100 mm
+    straight ~250 mm backward at launch; see the sim-fidelity
+    issue), and firmware-vs-sim defaults are separate definition
+    sites by convention. Pin the sim's divergence too, so it stays
+    deliberate rather than drifting silently."""
 
     _HOMES = [
         ("openbricks/robotics/drivebase.py", "self._accel_dps2 = 1440.0"),
@@ -229,8 +233,11 @@ class DefaultAccelValueTests(unittest.TestCase):
          "DEFAULT_ACCEL ((mp_float_t)1440.0)"),
         ("openbricks/drivers/mg370.py", "accel_dps2=1440.0"),
         ("openbricks/drivers/jgb37_520.py", "accel_dps2=1440.0"),
+        # Sim: deliberately 720 (physics-limited), pinned here.
         ("tools/openbricks/openbricks_sim/runtime.py",
-         "accel: float = 1440.0"),
+         "accel: float = 720.0"),
+        ("tools/openbricks/openbricks_sim/runtime.py",
+         "self.db.set_accel(720.0)"),
     ]
 
     def test_all_homes_agree(self):
