@@ -4,24 +4,24 @@ Demo: follow a dark line using two colour sensors.
 
 Mount the sensors at the front of the chassis, STRADDLING the line:
 the line runs between them and each sensor looks at the mat. The
-steering is PROPORTIONAL: the difference between the two ambient
-readings is the error, and each wheel's speed is corrected by
-``GAIN`` times that error — a gentle arc for a small drift, a pivot
-for a big one, and no correction at all when centred. That's what
-keeps it smooth on straights where a bang-bang follower fishtails.
+steering is PID on the difference between the two ambient readings:
+proportional for the correction itself (gentle arc for a small
+drift, pivot for a big one), derivative to damp the correction so
+higher gains don't oscillate, and an optional integral for drift on
+long arcs. That's what keeps it smooth on straights where a
+bang-bang follower fishtails.
 Branch lines peeling off the main line are IGNORED: a branch only
 darkens ONE sensor, and steering toward it would follow the branch —
 so a single dark sensor means "hold course straight until it
 passes". Only BOTH sensors dark at the same time (an intersection,
 or a stop bar square across the path) ends the run.
 
-Why proportional and not PID: the TCS34725 integrates light for
-~24 ms per reading, so the loop sees the world at ~25 Hz with a full
-sample of latency. At <=120 dps a P-controller is the right ceiling
-for that bandwidth — a derivative term mostly amplifies sensor
-noise, and an integral term adds windup risk for no visible gain.
-If you crank the speed up, shorten the sensor integration time
-first, then consider adding D.
+The controller is a full PID, and it's honest PID because the
+sensors run at their 2.4 ms minimum integration time (the driver's
+default is 24 ms — ten times the latency, at which a derivative
+term mostly amplifies stale-sample noise). D damps the wiggle so KP
+can be raised for sharper tracking; I (default 0, windup-clamped)
+trims persistent drift on long constant-curvature arcs.
 
 This is the mirror image of ``line_align.py``: align drives *at* a
 line with the sensors expecting to hit it; follow drives *along* a
@@ -35,10 +35,10 @@ put ``LINE_AMBIENT`` between the two readings.
 Tuning:
     * ``CRUISE_DPS`` — speed while centred. Higher = faster but
       corrections arrive a sensor-latency late; start slow.
-    * ``GAIN`` — steering dps per unit of ambient difference. Too
-      low drifts wide on curves; too high oscillates on straights.
-      Bump it in steps of ~0.5 until it just starts to wiggle, then
-      back off one step.
+    * ``KP`` — steering dps per unit of ambient difference. Raise
+      until the robot just wiggles on a straight, then raise ``KD``
+      until the wiggle dies; repeat for sharper tracking. ``KI``
+      stays 0 unless long arcs show one-sided drift.
     * Sensor spacing — wider than the line, but not much wider: with
       proportional control the sensors' inner edges do the work, so
       closer spacing means earlier, gentler corrections.
@@ -67,65 +67,98 @@ wheels = SyncServoGroup([left_motor, right_motor])
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux = TCA9548A(i2c)
-left_sensor = TCS34725(mux[1], gain=16)
-right_sensor = TCS34725(mux[0], gain=16)
+# integration_ms=2.4 (one cycle, the chip minimum) drops the sensor
+# latency from the 24 ms default to 2.4 ms — the enabler for the D
+# term below. The ambient() PERCENT scale is unchanged (full-scale
+# rescales with integration), so LINE_AMBIENT keeps its meaning;
+# each reading just averages 10x less light, so expect ~1 count of
+# extra noise. gain=16 keeps the signal budget healthy.
+left_sensor = TCS34725(mux[1], gain=16, integration_ms=2.4)
+right_sensor = TCS34725(mux[0], gain=16, integration_ms=2.4)
 
 
 # --- control law (pure logic, unit-tested in tests/test_line_follow.py) ---
 
 # Below this ambient (0..100) the surface counts as the line. Used
 # for the INTERSECTION stop and for branch detection — the steering
-# itself runs on the gradient above this threshold. Calibrate
-# between a matte black line and your mat.
+# itself runs on the gradient above this threshold.
 LINE_AMBIENT = 20
 
 CRUISE_DPS = 200   # wheel speed when perfectly centred
-# Proportional gain: extra dps of steering per unit of ambient
-# difference between the sensors. Higher = snappier corrections but
-# closer to oscillation; lower = lazier, drifts wide on curves.
-GAIN = 0.3
 
-# Never reverse; cap well above CRUISE_DPS + GAIN*100 so the clamp
-# bounds runaway values without eating the steering differential.
+# PID gains on the ambient-difference error (units: dps of steering
+# per ambient-unit; KI per ambient-unit-second; KD per
+# ambient-unit/second). PID is sound here BECAUSE the sensors run at
+# 2.4 ms integration — on the old 24 ms default the derivative
+# mostly amplified stale-sample noise.
+#   KP: the workhorse. Same value as the P-only version.
+#   KD: damping — lets you raise KP without oscillating. Tune by
+#       raising KP until the robot wiggles on a straight, then
+#       raising KD until the wiggle dies.
+#   KI: trims steady-state drift on long constant-curvature arcs.
+#       Leave 0 unless you see persistent one-sided offset; wind-up
+#       is clamped either way.
+KP = 0.3
+KI = 0.0
+KD = 0.02
+INTEGRAL_LIMIT = 50.0   # anti-windup: |integral| cap, ambient-units*s
+
+# Never reverse; cap well above CRUISE_DPS + max steering so the
+# clamp bounds runaway values without eating the differential.
 MAX_DPS = 400
 
-# Print both readings every tick — for calibrating LINE_AMBIENT /
-# GAIN on a new mat. Leave off for real runs: each print streams
-# over BLE and stretches the 10 ms control tick to many times that.
+# Print both readings every tick — for calibrating on a new mat.
+# Leave off for real runs: each print streams over BLE and stretches
+# the control tick.
 DEBUG = False
+
+# Initial PID state: (integral, previous-error-or-None). Thread the
+# state returned by each _pid_wheel_speeds call into the next.
+PID_STATE0 = (0.0, None)
 
 
 def _clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def _wheel_speeds(left_ambient, right_ambient):
-    """One control tick: ``(left_dps, right_dps)``, or ``None``
-    meaning "intersection reached — stop".
+def _pid_wheel_speeds(left_ambient, right_ambient, state, dt_s):
+    """One control tick: ``(decision, state)``.
 
-    Three cases:
-    * BOTH sensors dark — a line square across the path (an
-      intersection / stop bar): stop.
-    * ONE sensor dark — a branch line sweeping under that side.
-      Steering toward it would peel off onto the branch, so it is
-      IGNORED: hold course straight until it passes. The main line
-      is still between the sensors the whole time.
-    * Neither dark — normal proportional steering on the ambient
-      difference: gentle arc for a small drift, stronger for a big
-      one, zero correction when centred. Using the difference also
-      self-cancels room-light changes hitting both sensors together.
+    ``decision`` is ``None`` (both sensors dark: intersection — stop)
+    or ``(left_dps, right_dps)``. ``state`` carries the integral and
+    the previous error; pass each call's returned state into the
+    next call, starting from ``PID_STATE0``.
+
+    A single dark sensor is a BRANCH line sweeping under that side:
+    steering toward it would peel off onto the branch, so hold
+    course straight until it passes. The previous-error history is
+    reset for that tick so the derivative doesn't kick when normal
+    steering resumes (the line may have shifted during the blind
+    window).
     """
+    integral, prev_error = state
     left_dark = left_ambient < LINE_AMBIENT
     right_dark = right_ambient < LINE_AMBIENT
     if left_dark and right_dark:
-        return None
+        return None, state
     if left_dark or right_dark:
-        return (CRUISE_DPS, CRUISE_DPS)
+        return (CRUISE_DPS, CRUISE_DPS), (integral, None)
     if DEBUG:
         print('left', left_ambient, 'right', right_ambient)
+
     error = left_ambient - right_ambient
-    return (_clamp(CRUISE_DPS + GAIN * error),
-            _clamp(CRUISE_DPS - GAIN * error))
+    if dt_s > 0:
+        integral += error * dt_s
+        if integral > INTEGRAL_LIMIT:
+            integral = INTEGRAL_LIMIT
+        elif integral < -INTEGRAL_LIMIT:
+            integral = -INTEGRAL_LIMIT
+        derivative = 0.0 if prev_error is None else (error - prev_error) / dt_s
+    else:
+        derivative = 0.0
+    steer = KP * error + KI * integral + KD * derivative
+    return ((_clamp(CRUISE_DPS + steer), _clamp(CRUISE_DPS - steer)),
+            (integral, error))
 
 # --- end control law ---
 
@@ -136,15 +169,22 @@ def follow_line():
     # many times that, turning crisp corrections into wobble. The
     # bus is also only written when the decision CHANGES — re-sending
     # the same speeds every tick just steals ticks from sensing.
+    import time
     poll_ms = 10
     timeout_ms = 30000
 
     last = None
+    state = PID_STATE0
+    prev_ms = time.ticks_ms()
     try:
         for _ in range(max(1, timeout_ms // poll_ms)):
-            speeds = _wheel_speeds(
+            now_ms = time.ticks_ms()
+            dt_s = time.ticks_diff(now_ms, prev_ms) / 1000.0
+            prev_ms = now_ms
+            speeds, state = _pid_wheel_speeds(
                 left_sensor.ambient(),
                 right_sensor.ambient(),
+                state, dt_s,
             )
             if speeds is None:
                 print("intersection reached — stopping.")
