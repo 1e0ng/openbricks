@@ -83,6 +83,41 @@ class SimMotorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SimMotor(rt, "chassis_enc_l", "no_such_actuator")
 
+    def test_construct_rejects_ctrlrange_below_stall_torque(self):
+        # The DC model writes torque up to T_STALL_NM; an actuator
+        # whose ctrlrange can't carry it would silently truncate the
+        # motor model. Must refuse loudly at construction.
+        rt = _make_runtime()
+        rt.model.actuator_ctrlrange[:] = 0.01   # below T_STALL_NM
+        with self.assertRaises(ValueError):
+            SimMotor(rt, "chassis_enc_l", "chassis_motor_l")
+
+    def test_apply_power_clamps_at_stall_torque(self):
+        # Full duty against a hard-reverse-spinning wheel: the raw DC
+        # expression exceeds stall; the write must clamp to T_STALL.
+        rt = _make_runtime()
+        m = SimMotor(rt, "chassis_enc_l", "chassis_motor_l")
+        rt.data.qvel[m._dof_adr] = -100.0   # rad/s, wildly negative
+        m.apply_power(100.0)
+        self.assertAlmostEqual(
+            float(rt.data.ctrl[m._actuator_id]), m.T_STALL_NM)
+        rt.data.qvel[m._dof_adr] = 100.0
+        m.apply_power(-100.0)
+        self.assertAlmostEqual(
+            float(rt.data.ctrl[m._actuator_id]), -m.T_STALL_NM)
+
+    def test_apply_power_equilibrium_matches_feedforward(self):
+        # At the servo core's rated speed, full-scale-equivalent duty
+        # produces ~zero torque — the DC model's equilibrium is
+        # exactly where the core's feed-forward assumes it.
+        import math
+        rt = _make_runtime()
+        m = SimMotor(rt, "chassis_enc_l", "chassis_motor_l")
+        rt.data.qvel[m._dof_adr] = math.radians(m.RATED_DPS)
+        m.apply_power(100.0)
+        self.assertAlmostEqual(
+            float(rt.data.ctrl[m._actuator_id]), 0.0, places=6)
+
     def test_run_speed_drives_motor(self):
         # Drive both wheels at +180 dps; the chassis should translate
         # forward (+X) within a couple seconds.
