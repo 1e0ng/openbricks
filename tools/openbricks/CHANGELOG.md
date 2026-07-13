@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.12.0 — `servo-id`: assign Feetech servo bus IDs from the host
+
+New subcommand speaking the Feetech SCS/STS protocol directly
+through a USB half-duplex adapter (e.g. the URT-2 board):
+
+    openbricks servo-id -p /dev/cu.usbmodem123 3        # set ID -> 3
+    openbricks servo-id -p /dev/cu.usbmodem123 --scan   # who's there?
+
+Safer than the usual one-shot scripts: the whole bus is scanned
+first and, with more than one servo attached, the tool demands
+`--old-id` instead of re-ID'ing whichever servo answers first; the
+result is verified (new ID answers, old ID silent) or the command
+fails loudly. Declares pyserial as a direct dependency (it already
+arrived transitively via esptool).
+
 ## 0.11.0 — timestamped run logs + RTC sync on connect
 
 Every hub log line now carries a timestamp. The hub (firmware
