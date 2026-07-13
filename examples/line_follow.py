@@ -45,16 +45,16 @@ from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.drivers.tcs34725 import TCS34725
 
 
-left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
-right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6, invert=True)
+left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
 # One SYNC WRITE updates both wheels at the same packet boundary,
 # instead of two serialised bus writes.
 wheels = SyncServoGroup([left_motor, right_motor])
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux = TCA9548A(i2c)
-left_sensor = TCS34725(mux[1])
-right_sensor = TCS34725(mux[0])
+left_sensor = TCS34725(mux[1], gain=16)
+right_sensor = TCS34725(mux[0], gain=16)
 
 
 # --- control law (pure logic, unit-tested in tests/test_line_follow.py) ---
@@ -62,7 +62,7 @@ right_sensor = TCS34725(mux[0])
 # Below this ambient (0..100) the surface counts as the line. Between
 # a typical mat (~30+) and a matte black line (~5-10); calibrate on
 # your own surfaces.
-LINE_AMBIENT = 5
+LINE_AMBIENT = 10
 
 CRUISE_DPS = 100   # both sensors on the mat: full speed ahead
 TURN_DPS   = 25    # the wheel on the line's side slows to this
