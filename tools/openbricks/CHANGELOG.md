@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.15.0 — one version for firmware and host tooling
+
+Firmware and the `openbricks` PyPI package now share a single
+version number, bumped together by `scripts/bump-version.py X.Y.Z`
+and released as a pair (`v<version>` + `cli/v<version>`). PyPI jumps
+from 0.14.0 straight to 1.15.0 to align with the firmware line.
+No functional changes in this release — the version on your hub and
+the version of your CLI now mean the same thing, and a mismatch is
+worth noticing (tests pin the two source files equal).
+
 ## 0.14.0 — default acceleration retuned to 1000 deg/s²
 
 Bench verdict on 1440: too aggressive as a default. All six
