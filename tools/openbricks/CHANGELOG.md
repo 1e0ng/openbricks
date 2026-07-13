@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 0.14.0 — default acceleration retuned to 1000 deg/s²
+
+Bench verdict on 1440: too aggressive as a default. All six
+definition sites (firmware Python fallback, native C drivebase and
+servo, both encoder-motor drivers, and the simulator) move to 1000
+wheel-deg/s²; the drift-guard test keeps them pinned equal. Explicit
+`settings(acceleration=...)` / `accel` arguments unaffected. Matches
+firmware 1.14.0. Well within the sim's traction headroom (its DC
+motor model tracks up to ~12,000 deg/s² before slipping).
+
 ## 0.13.0 — default acceleration 720 → 1440 deg/s²; sim physics fixed
 
 The default acceleration doubles to 1440 wheel-deg/s² everywhere:
