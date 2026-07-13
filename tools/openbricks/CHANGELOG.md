@@ -3,6 +3,15 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.15.1 — TCS34725 accepts fractional integration times
+
+`TCS34725(integration_ms=2.4)` (the chip minimum, used by the
+line-follow example for low-latency PID) crashed at construction:
+the first-cycle settle called MicroPython's `time.sleep_ms` with a
+float. Fixed; the test fake's `sleep_ms` is now int-strict like the
+real MicroPython so this class of bug fails in CI instead of on the
+bench. No host-tooling changes (lockstep release).
+
 ## 1.15.0 — one version for firmware and host tooling
 
 Firmware and the `openbricks` PyPI package now share a single
