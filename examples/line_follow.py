@@ -3,12 +3,22 @@
 Demo: follow a dark line using two colour sensors.
 
 Mount the sensors at the front of the chassis, STRADDLING the line:
-the line runs between them and each sensor looks at the mat. While
-both see the mat the robot drives straight. When the robot drifts,
-one sensor crosses onto the line — that side slows down, steering
-the robot back until the line is centred between the sensors again.
+the line runs between them and each sensor looks at the mat. The
+steering is PROPORTIONAL: the difference between the two ambient
+readings is the error, and each wheel's speed is corrected by
+``GAIN`` times that error — a gentle arc for a small drift, a pivot
+for a big one, and no correction at all when centred. That's what
+keeps it smooth on straights where a bang-bang follower fishtails.
 A crossing where BOTH sensors go dark at the same time (an
 intersection, or a stop bar drawn across the line) ends the run.
+
+Why proportional and not PID: the TCS34725 integrates light for
+~24 ms per reading, so the loop sees the world at ~25 Hz with a full
+sample of latency. At <=120 dps a P-controller is the right ceiling
+for that bandwidth — a derivative term mostly amplifies sensor
+noise, and an integral term adds windup risk for no visible gain.
+If you crank the speed up, shorten the sensor integration time
+first, then consider adding D.
 
 This is the mirror image of ``line_align.py``: align drives *at* a
 line with the sensors expecting to hit it; follow drives *along* a
@@ -20,14 +30,15 @@ threshold. Print ``sensor.ambient()`` over your own mat and line and
 put ``LINE_AMBIENT`` between the two readings.
 
 Tuning:
-    * ``CRUISE_DPS`` — speed while centred. Higher = faster but the
-      robot overshoots corrections; start slow.
-    * ``TURN_DPS`` — inner-wheel speed during a correction. The
-      bigger the gap to ``CRUISE_DPS``, the sharper the correction;
-      too sharp and the robot fishtails on a straight line.
-    * Sensor spacing — wider than the line, but not much wider:
-      the gap between the sensors is the dead band where drift goes
-      uncorrected.
+    * ``CRUISE_DPS`` — speed while centred. Higher = faster but
+      corrections arrive a sensor-latency late; start slow.
+    * ``GAIN`` — steering dps per unit of ambient difference. Too
+      low drifts wide on curves; too high oscillates on straights.
+      Bump it in steps of ~0.5 until it just starts to wiggle, then
+      back off one step.
+    * Sensor spacing — wider than the line, but not much wider: with
+      proportional control the sensors' inner edges do the work, so
+      closer spacing means earlier, gentler corrections.
 
 Hardware (same bus layout as ``line_align.py`` / ``color_array.py``):
     * ESP32-S3 (I2C on 15/16; serial bus UART on 14/6)
@@ -59,31 +70,45 @@ right_sensor = TCS34725(mux[0], gain=16)
 
 # --- control law (pure logic, unit-tested in tests/test_line_follow.py) ---
 
-# Below this ambient (0..100) the surface counts as the line. Between
-# a typical mat (~30+) and a matte black line (~5-10); calibrate on
-# your own surfaces.
+# Below this ambient (0..100) the surface counts as the line. Only
+# used for the INTERSECTION stop (both sensors dark at once) — the
+# steering itself is proportional and needs no threshold. Calibrate
+# between a matte black line (~5-10) and your mat (~30+).
 LINE_AMBIENT = 10
 
-CRUISE_DPS = 100   # both sensors on the mat: full speed ahead
-TURN_DPS   = 25    # the wheel on the line's side slows to this
+CRUISE_DPS = 100   # wheel speed when perfectly centred
+# Proportional gain: extra dps of steering per unit of ambient
+# difference between the sensors. Higher = snappier corrections but
+# closer to oscillation; lower = lazier, drifts wide on curves.
+GAIN = 1.5
 
 
-def _wheel_speeds(left_on_line, right_on_line):
-    """One control tick: ``(left_dps, right_dps)`` for the wheels, or
-    ``None`` meaning "intersection reached — stop".
+def _clamp(dps):
+    # Keep every command inside the bench cap; never reverse — the
+    # sharpest correction is a pivot around a stopped wheel.
+    return max(0, min(120, int(dps)))
 
-    The line drifting under the LEFT sensor means the robot slid
-    right of centre: slow the left wheel so the robot arcs left,
-    back over the line. Mirror image for the right. Both dark at
-    once is a line crossing the path — the stop condition.
+
+def _wheel_speeds(left_ambient, right_ambient):
+    """One control tick: ``(left_dps, right_dps)``, or ``None``
+    meaning "intersection reached — stop".
+
+    Proportional steering: the error is the ambient DIFFERENCE
+    between the sensors. Perfectly centred, both see the same mat
+    and the error is ~0 -> drive straight. Drifting right slides the
+    line under the LEFT sensor, its reading drops, the error goes
+    negative, and the left wheel slows in proportion — a gentle arc
+    for a small drift, a pivot for a big one. Unlike the bang-bang
+    version this corrects continuously, so it doesn't fishtail on
+    straights or overshoot on curves. Using the difference (not the
+    absolute readings) also self-cancels room-light changes that
+    brighten or darken both sensors together.
     """
-    if left_on_line and right_on_line:
+    if left_ambient < LINE_AMBIENT and right_ambient < LINE_AMBIENT:
         return None
-    if left_on_line:
-        return (TURN_DPS, CRUISE_DPS)
-    if right_on_line:
-        return (CRUISE_DPS, TURN_DPS)
-    return (CRUISE_DPS, CRUISE_DPS)
+    error = left_ambient - right_ambient
+    return (_clamp(CRUISE_DPS + GAIN * error),
+            _clamp(CRUISE_DPS - GAIN * error))
 
 # --- end control law ---
 
@@ -101,8 +126,8 @@ def follow_line():
     try:
         for _ in range(max(1, timeout_ms // poll_ms)):
             speeds = _wheel_speeds(
-                left_sensor.ambient() < LINE_AMBIENT,
-                right_sensor.ambient() < LINE_AMBIENT,
+                left_sensor.ambient(),
+                right_sensor.ambient(),
             )
             if speeds is None:
                 print("intersection reached — stopping.")
