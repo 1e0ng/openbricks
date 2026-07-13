@@ -1,0 +1,308 @@
+# SPDX-License-Identifier: MIT
+"""Tests for ``openbricks_dev.servo_id`` — packet format, bus scan,
+and the re-ID sequence, against a scripted fake serial port."""
+
+import argparse
+import io
+import unittest
+
+from openbricks_dev import cli, servo_id as sid_mod
+from openbricks_dev.servo_id import ServoIdError
+
+
+class _FakeBus:
+    """Serial stand-in that emulates servos: answers PINGs for the IDs
+    in ``self.ids``, ACKs writes, and APPLIES an ID write so the
+    verify step sees the post-write bus state."""
+
+    def __init__(self, ids):
+        self.ids = set(ids)
+        self.writes = []          # decoded (sid, instr, params)
+        self._pending = b""
+
+    # -- serial surface --
+    def reset_input_buffer(self):
+        self._pending = b""
+
+    def write(self, raw):
+        assert raw[:2] == b"\xFF\xFF"
+        sid, length, instr = raw[2], raw[3], raw[4]
+        params = list(raw[5:5 + length - 2])
+        body = raw[2:-1]
+        assert raw[-1] == (~sum(body)) & 0xFF, "bad checksum on wire"
+        self.writes.append((sid, instr, params))
+        if instr == sid_mod._INSTR_PING:
+            if sid in self.ids:
+                reply_body = bytes([sid, 2, 0])
+                self._pending = (b"\xFF\xFF" + reply_body
+                                 + bytes([(~sum(reply_body)) & 0xFF]))
+        elif instr == sid_mod._INSTR_WRITE and sid in self.ids:
+            reg, data = params[0], params[1:]
+            if reg == sid_mod._REG_ID:
+                self.ids.discard(sid)
+                self.ids.add(data[0])
+            reply_body = bytes([sid, 2, 0])
+            self._pending = (b"\xFF\xFF" + reply_body
+                             + bytes([(~sum(reply_body)) & 0xFF]))
+
+    def read(self, n):
+        out, self._pending = self._pending[:n], self._pending[n:]
+        return out
+
+    def close(self):
+        pass
+
+
+class PacketTests(unittest.TestCase):
+    def test_ping_packet_shape_and_checksum(self):
+        pkt = sid_mod._packet(1, sid_mod._INSTR_PING, [])
+        self.assertEqual(pkt, b"\xFF\xFF\x01\x02\x01\xFB")
+
+    def test_write_packet_includes_reg_and_data(self):
+        pkt = sid_mod._packet(2, sid_mod._INSTR_WRITE,
+                              [sid_mod._REG_ID, 7])
+        body = pkt[2:-1]
+        self.assertEqual(body, bytes([2, 4, 3, 5, 7]))
+        self.assertEqual(pkt[-1], (~sum(body)) & 0xFF)
+
+
+class ScanTests(unittest.TestCase):
+    def test_scan_finds_all_ids_ascending(self):
+        bus = _FakeBus({7, 1, 42})
+        self.assertEqual(sid_mod.scan_bus(bus), [1, 7, 42])
+
+    def test_scan_empty_bus(self):
+        self.assertEqual(sid_mod.scan_bus(_FakeBus(set())), [])
+
+    def test_scan_never_pings_broadcast(self):
+        bus = _FakeBus(set())
+        sid_mod.scan_bus(bus)
+        pinged = {sid for sid, instr, _ in bus.writes
+                  if instr == sid_mod._INSTR_PING}
+        self.assertEqual(len(pinged), 254)
+        self.assertFalse(sid_mod._BROADCAST_ID in pinged)
+
+
+class SetServoIdTests(unittest.TestCase):
+    def _out(self):
+        return io.StringIO()
+
+    def test_single_servo_reid_sequence_and_verify(self):
+        bus = _FakeBus({1})
+        out = self._out()
+        sid_mod.set_servo_id(bus, 3, out=out)
+        writes = [(s, i, p) for s, i, p in bus.writes
+                  if i == sid_mod._INSTR_WRITE]
+        self.assertEqual(writes, [
+            (1, sid_mod._INSTR_WRITE, [sid_mod._REG_LOCK, 0]),
+            (1, sid_mod._INSTR_WRITE, [sid_mod._REG_ID, 3]),
+            (3, sid_mod._INSTR_WRITE, [sid_mod._REG_LOCK, 1]),
+        ])
+        self.assertEqual(bus.ids, {3})
+        self.assertIn("set servo ID 1 -> 3 (verified)", out.getvalue())
+
+    def test_no_servo_raises(self):
+        try:
+            sid_mod.set_servo_id(_FakeBus(set()), 3, out=self._out())
+        except ServoIdError as e:
+            self.assertIn("no servo answered", str(e))
+        else:
+            self.fail("expected ServoIdError")
+
+    def test_multiple_servos_demand_old_id(self):
+        bus = _FakeBus({1, 2})
+        try:
+            sid_mod.set_servo_id(bus, 3, out=self._out())
+        except ServoIdError as e:
+            self.assertIn("--old-id", str(e))
+        else:
+            self.fail("expected ServoIdError")
+        # And nothing on the bus was written to.
+        self.assertEqual(
+            [w for w in bus.writes if w[1] == sid_mod._INSTR_WRITE], [])
+
+    def test_multiple_servos_with_old_id_reids_the_right_one(self):
+        bus = _FakeBus({1, 2})
+        sid_mod.set_servo_id(bus, 3, old_id=2, out=self._out())
+        self.assertEqual(bus.ids, {1, 3})
+
+    def test_old_id_not_on_bus_raises(self):
+        try:
+            sid_mod.set_servo_id(_FakeBus({1}), 3, old_id=9,
+                                 out=self._out())
+        except ServoIdError as e:
+            self.assertIn("--old-id 9", str(e))
+        else:
+            self.fail("expected ServoIdError")
+
+    def test_new_id_already_taken_raises(self):
+        bus = _FakeBus({1, 3})
+        try:
+            sid_mod.set_servo_id(bus, 3, old_id=1, out=self._out())
+        except ServoIdError as e:
+            self.assertIn("already taken", str(e))
+        else:
+            self.fail("expected ServoIdError")
+
+    def test_same_id_is_a_noop(self):
+        bus = _FakeBus({3})
+        out = self._out()
+        sid_mod.set_servo_id(bus, 3, out=out)
+        self.assertIn("nothing to do", out.getvalue())
+        self.assertEqual(
+            [w for w in bus.writes if w[1] == sid_mod._INSTR_WRITE], [])
+
+    def test_ghost_old_id_after_write_raises(self):
+        # A bus where the old ID keeps answering after the rewrite
+        # (duplicate-ID servos): the verify must catch it.
+        class _Duplicated(_FakeBus):
+            def write(self, raw):
+                sid, instr = raw[2], raw[4]
+                params = list(raw[5:5 + raw[3] - 2])
+                self.writes.append((sid, instr, params))
+                if instr == sid_mod._INSTR_PING and sid in self.ids:
+                    body = bytes([sid, 2, 0])
+                    self._pending = (b"\xFF\xFF" + body
+                                     + bytes([(~sum(body)) & 0xFF]))
+                elif instr == sid_mod._INSTR_WRITE and sid in self.ids:
+                    reg, data = params[0], params[1:]
+                    if reg == sid_mod._REG_ID:
+                        self.ids.add(data[0])   # old ID stays too
+        try:
+            sid_mod.set_servo_id(_Duplicated({1}), 3, out=self._out())
+        except ServoIdError as e:
+            self.assertIn("still answers at old ID", str(e))
+        else:
+            self.fail("expected ServoIdError")
+
+    def test_failed_verify_raises(self):
+        # A bus that ACKs the write but never applies it (wedged
+        # EEPROM): the verify must catch it.
+        class _Stubborn(_FakeBus):
+            def write(self, raw):
+                sid, instr = raw[2], raw[4]
+                params = list(raw[5:5 + raw[3] - 2])
+                self.writes.append((sid, instr, params))
+                if instr == sid_mod._INSTR_PING and sid in self.ids:
+                    body = bytes([sid, 2, 0])
+                    self._pending = (b"\xFF\xFF" + body
+                                     + bytes([(~sum(body)) & 0xFF]))
+        try:
+            sid_mod.set_servo_id(_Stubborn({1}), 3, out=self._out())
+        except ServoIdError as e:
+            self.assertIn("does not answer at new ID", str(e))
+        else:
+            self.fail("expected ServoIdError")
+
+
+class RunDispatchTests(unittest.TestCase):
+    def _args(self, **kw):
+        d = dict(new_id=None, port="/dev/fake", scan=False,
+                 old_id=None, baudrate=1_000_000, timeout=0.02)
+        d.update(kw)
+        return argparse.Namespace(**d)
+
+    def _patch_serial(self, bus):
+        orig = sid_mod._open_serial
+        sid_mod._open_serial = lambda port, baud, timeout: bus
+        self.addCleanup(setattr, sid_mod, "_open_serial", orig)
+
+    def test_requires_new_id_or_scan(self):
+        with self.assertRaises(ServoIdError):
+            sid_mod.run(self._args())
+
+    def test_rejects_broadcast_id(self):
+        with self.assertRaises(ServoIdError):
+            sid_mod.run(self._args(new_id=254))
+
+    def test_scan_mode_changes_nothing(self):
+        bus = _FakeBus({5})
+        self._patch_serial(bus)
+        rc = sid_mod.run(self._args(scan=True))
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            [w for w in bus.writes if w[1] == sid_mod._INSTR_WRITE], [])
+        self.assertEqual(bus.ids, {5})
+
+    def test_scan_mode_reports_empty_bus(self):
+        import builtins
+        self._patch_serial(_FakeBus(set()))
+        printed = []
+        orig_print = builtins.print
+        builtins.print = lambda *a, **k: printed.append(
+            " ".join(str(x) for x in a))
+        try:
+            rc = sid_mod.run(self._args(scan=True))
+        finally:
+            builtins.print = orig_print
+        self.assertEqual(rc, 0)
+        self.assertTrue(
+            any("no servo answered" in s for s in printed), printed)
+
+    def test_unopenable_port_raises_servo_id_error(self):
+        # The real _open_serial path: a nonexistent device must come
+        # back as a typed ServoIdError, not a raw pyserial exception.
+        with self.assertRaises(ServoIdError):
+            sid_mod._open_serial("/dev/does-not-exist-xyz", 1_000_000,
+                                 0.02)
+
+    def test_missing_pyserial_raises_typed_error(self):
+        # sys.modules[name] = None makes ``import serial`` raise
+        # ImportError — the tool must surface its typed error with an
+        # install hint, not a raw traceback.
+        import sys
+        had = "serial" in sys.modules
+        prev = sys.modules.get("serial")
+        sys.modules["serial"] = None
+        try:
+            with self.assertRaises(ServoIdError):
+                sid_mod._open_serial("/dev/x", 1_000_000, 0.02)
+        finally:
+            if had:
+                sys.modules["serial"] = prev
+            else:
+                del sys.modules["serial"]
+
+    def test_close_failure_is_tolerated(self):
+        class _StickyClose(_FakeBus):
+            def close(self):
+                raise OSError("already gone")
+        self._patch_serial(_StickyClose({1}))
+        rc = sid_mod.run(self._args(new_id=3))   # must not raise
+        self.assertEqual(rc, 0)
+
+    def test_full_run_sets_id(self):
+        bus = _FakeBus({1})
+        self._patch_serial(bus)
+        rc = sid_mod.run(self._args(new_id=3))
+        self.assertEqual(rc, 0)
+        self.assertEqual(bus.ids, {3})
+
+
+class ParserTests(unittest.TestCase):
+    def setUp(self):
+        self.parser = cli._build_parser()
+
+    def test_servo_id_args(self):
+        args = self.parser.parse_args(
+            ["servo-id", "-p", "/dev/cu.usbmodem1", "3"])
+        self.assertEqual(args.command, "servo-id")
+        self.assertEqual(args.new_id, 3)
+        self.assertEqual(args.port, "/dev/cu.usbmodem1")
+        self.assertEqual(args.baudrate, 1_000_000)
+        self.assertFalse(args.scan)
+
+    def test_scan_flag_without_new_id(self):
+        args = self.parser.parse_args(
+            ["servo-id", "-p", "/dev/x", "--scan"])
+        self.assertTrue(args.scan)
+        self.assertIsNone(args.new_id)
+
+    def test_old_id_flag(self):
+        args = self.parser.parse_args(
+            ["servo-id", "-p", "/dev/x", "--old-id", "2", "3"])
+        self.assertEqual(args.old_id, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

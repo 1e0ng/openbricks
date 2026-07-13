@@ -218,6 +218,49 @@ def _build_parser():
         help="BLE scan timeout. Default: 5.0 s.",
     )
 
+    # ---- servo-id ----
+    p_servo = sub.add_parser(
+        "servo-id",
+        help="Assign a Feetech SCS/STS servo's bus ID over a USB "
+             "serial adapter.",
+        description="Scans the bus (IDs 0..253), rewrites the servo's "
+                    "EEPROM ID register, and verifies the result. "
+                    "With several servos attached, --old-id is "
+                    "required so the tool never guesses which one to "
+                    "re-ID. Wire the servo to a USB half-duplex "
+                    "adapter (e.g. the URT-2 board) — this talks "
+                    "directly to the adapter's serial port, no hub "
+                    "involved.",
+    )
+    p_servo.add_argument(
+        "new_id", type=int, nargs="?", default=None,
+        help="Bus ID to assign (0..253). Omit with --scan.",
+    )
+    p_servo.add_argument(
+        "-p", "--port", required=True,
+        help="Serial port of the USB adapter, e.g. "
+             "/dev/cu.usbmodem123 (ls /dev/cu.usb*).",
+    )
+    p_servo.add_argument(
+        "--scan", action="store_true",
+        help="Just list the IDs that answer on the bus; change "
+             "nothing.",
+    )
+    p_servo.add_argument(
+        "--old-id", type=int, default=None,
+        help="Current ID of the servo to re-ID. Required when more "
+             "than one servo is attached; otherwise auto-detected.",
+    )
+    p_servo.add_argument(
+        "--baudrate", type=int, default=1_000_000,
+        help="Bus baudrate. Default: 1000000 (Feetech factory).",
+    )
+    p_servo.add_argument(
+        "--timeout", type=float, default=0.02,
+        help="Per-ping serial read timeout in seconds. Default: 0.02 "
+             "(a full 254-ID scan takes ~5 s).",
+    )
+
     # ---- sim (passthrough to openbricks_sim.cli) ----
     #
     # Argparse-wise this is a stub: the real grammar lives in
@@ -289,6 +332,9 @@ def main(argv=None):
         if args.command == "log":
             from openbricks_dev import log as log_mod
             return log_mod.run(args)
+        if args.command == "servo-id":
+            from openbricks_dev import servo_id as servo_id_mod
+            return servo_id_mod.run(args)
     except KeyboardInterrupt:
         print("\naborted.", file=sys.stderr)
         return 130

@@ -54,6 +54,10 @@ classifiers = [
 dependencies = [
     # BLE scan + connect on macOS / Linux / Windows without vendor tools.
     "bleak >= 0.22",
+    # ``servo-id`` talks Feetech SCS to a USB adapter directly.
+    # esptool already pulls pyserial in transitively; declared
+    # explicitly because we import ``serial`` ourselves.
+    "pyserial >= 3.5",
     # Flashing ESP32 / ESP32-S3 images. esptool v5 (out for ~12
     # months) renamed the binary (``esptool.py`` → ``esptool``) and
     # switched commands to kebab-case (``write-flash`` etc.) — the
