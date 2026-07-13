@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Tests for DriveBase.settings(acceleration=...) — the tunable
-trajectory acceleration added because the hardcoded 720 wheel-deg/s²
+trajectory acceleration added because the hardcoded wheel-deg/s²
 launch was harsh enough to lift the rear of a real robot.
 
 Kept in its own module (like test_drivebase_native_2dof) so the
@@ -79,7 +79,7 @@ class _RecordingFallbackMotor:
 
 def _timed_straight_ms(acceleration):
     """Run a 100 mm straight at 200 dps cruise and return the virtual
-    elapsed ms. ``acceleration=None`` keeps the 720 deg/s² default."""
+    elapsed ms. ``acceleration=None`` keeps the 1440 deg/s² default."""
     _reset_all()
     left  = _make_motor(1, 2, 17, 7, 8)
     right = _make_motor(9, 10, 11, 12, 13)
@@ -175,8 +175,8 @@ class TestDriveBaseAcceleration(unittest.TestCase):
         first = abs(left.commands[0])
         self.assertLess(first, 180 * 0.2)
 
-    def test_fallback_default_launch_uses_720(self):
-        # No settings() call: the fallback ramps at the same 720
+    def test_fallback_default_launch_uses_default_accel(self):
+        # No settings() call: the fallback ramps at the same 1440
         # deg/s² default as the native path (not the old step).
         db, left, _right = self._fallback_db()
         db.straight(100)
@@ -184,9 +184,9 @@ class TestDriveBaseAcceleration(unittest.TestCase):
         self.assertLess(first, 200 * 0.2)
 
     def test_lower_acceleration_slows_the_launch(self):
-        # 100 mm at 200 dps: with the default 720 deg/s² the trapezoid
-        # completes in ~1.3 s; at 90 deg/s² the profile goes triangular
-        # and takes ~3.0 s. Virtual clock, so both are deterministic.
+        # 100 mm at 200 dps: with the default 1440 deg/s² the
+        # trapezoid completes in ~1.2 s; at 90 deg/s² the profile goes
+        # triangular and takes ~3.0 s. Virtual clock, deterministic.
         fast_ms = _timed_straight_ms(None)
         slow_ms = _timed_straight_ms(90)
         self.assertGreater(fast_ms, 0)
@@ -211,6 +211,39 @@ class TestDriveBaseAcceleration(unittest.TestCase):
         # and both far above the ~1.3 s the default profile would take.
         self.assertGreater(first_ms,  2000)
         self.assertGreater(second_ms, 2000)
+
+
+
+
+class DefaultAccelValueTests(unittest.TestCase):
+    """The 1440 deg/s² default lives in SIX places — the Python
+    fallback, native C drivebase, native C servo, two encoder-motor
+    drivers, and the simulator — source-grep them all so they can't
+    drift apart when someone retunes one. (The sim briefly diverged
+    to 720 while its physics couldn't track steep ramps; issue #234's
+    geometry + DC-motor-model fixes re-unified it.)"""
+
+    _HOMES = [
+        ("openbricks/robotics/drivebase.py", "self._accel_dps2 = 1440.0"),
+        ("native/user_c_modules/openbricks/drivebase_core.h",
+         "OB_DRIVEBASE_DEFAULT_ACCEL_DPS2  1440.0"),
+        ("native/user_c_modules/openbricks/servo.c",
+         "DEFAULT_ACCEL ((mp_float_t)1440.0)"),
+        ("openbricks/drivers/mg370.py", "accel_dps2=1440.0"),
+        ("openbricks/drivers/jgb37_520.py", "accel_dps2=1440.0"),
+        ("tools/openbricks/openbricks_sim/runtime.py",
+         "accel: float = 1440.0"),
+    ]
+
+    def test_all_homes_agree(self):
+        here = __file__
+        idx = here.rfind("/")
+        root = (here[:idx] if idx >= 0 else ".") + "/.."
+        for rel, needle in self._HOMES:
+            with open(root + "/" + rel) as f:
+                src = f.read()
+            self.assertTrue(needle in src,
+                            "%s: expected %r" % (rel, needle))
 
 
 if __name__ == "__main__":

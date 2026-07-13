@@ -90,7 +90,16 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
     wheel_x = 0.0                             # axle through body centre
     # Caster: behind (negative X) the chassis.
     caster_x = -spec.caster_offset
-    caster_z_local = -bz - spec.caster_radius + 0.001  # tangent with ground
+    # Local z offsets that put each support's BOTTOM exactly at the
+    # floor when the chassis root sits at chassis_z. The previous
+    # formulas (-bz - ...) measured from the body box's underside
+    # instead of the chassis origin and buried the wheels 20 mm and
+    # the caster 13 mm INTO the floor — the robot rode on contact
+    # penetration-recovery forces, wheels barely rolling while the
+    # solver shoved the chassis around (100 mm straights landed at
+    # ~245 mm, with launch kickbacks; see issue #234).
+    wheel_z_local = spec.wheel_radius - chassis_z    # = -clearance
+    caster_z_local = spec.caster_radius - chassis_z
 
     body = (
         '  <worldbody>\n'
@@ -156,7 +165,7 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         bm=spec.body_mass,
         bx=bx, by=by, bz=bz,
         wx=wheel_x, wy=wheel_y,
-        wz_offset=-bz - (spec.wheel_radius - bz - ground_clearance),
+        wz_offset=wheel_z_local,
         wm=spec.wheel_mass, wr=spec.wheel_radius, ww=spec.wheel_width / 2,
         cx=caster_x, cz_local=caster_z_local,
         cm=spec.caster_mass, cr=spec.caster_radius,

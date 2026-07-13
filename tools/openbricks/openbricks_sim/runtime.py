@@ -113,14 +113,40 @@ class SimMotor:
       2. Convert to encoder counts via ``counts_per_rev``.
       3. ``servo.tick(count, now_ms)`` returns a desired power in
          [-100, 100].
-      4. Map that onto the actuator's symmetric ``ctrlrange`` and
-         write the ``ctrl`` value.
+      4. Convert power to torque through a DC-MOTOR MODEL and write
+         the ``ctrl`` value.
+
+    The DC model is the fidelity linchpin (issue #234): the shared
+    servo core's feed-forward assumes ``power == voltage duty`` on a
+    motor whose speed self-limits through back-EMF at
+    ``OB_SERVO_DEFAULT_RATED_DPS`` (power 100 -> 300 dps free run).
+    Mapping power LINEARLY to torque (the old behaviour) applied
+    cruise-level feed-forward as a huge PERMANENT torque — ~4x the
+    wheel-ground traction limit — so the wheels broke loose, the
+    reaction torque wheelied the chassis, and the control loop
+    limit-cycled through the slip nonlinearity. The model here is
+    the classic linear DC motor::
+
+        torque = T_STALL * (power/100 - wheel_dps / RATED_DPS)
+
+    which puts the torque equilibrium exactly where the core's
+    feed-forward expects it, and bounds torque at ``T_STALL`` —
+    chosen just BELOW the traction limit (mu*Fn*r ~ 0.066 Nm on the
+    default chassis) so no command can break traction, while still
+    leaving >10x the acceleration headroom the 1440 deg/s^2 default
+    trajectory needs.
 
     User-facing methods (``run_speed`` / ``run_target`` / ``brake`` /
     ``coast`` / ``angle`` / ``reset_angle``) match the shape of the
     firmware's ``Servo`` so user code that targets the firmware
     interface works unchanged.
     """
+
+    # DC-motor model constants (see class docstring). RATED_DPS must
+    # match the servo core's OB_SERVO_DEFAULT_RATED_DPS so the
+    # feed-forward's equilibrium lands where the core expects.
+    T_STALL_NM = 0.05
+    RATED_DPS  = 300.0
 
     def __init__(self,
                  runtime: SimRuntime,
@@ -145,11 +171,18 @@ class SimMotor:
         if self._actuator_id < 0:
             raise ValueError("no actuator named " + repr(actuator_name) +
                              " in model")
-        # Use the larger half of the ctrlrange as the [-100, 100]
-        # power magnitude. Most chassis actuators are symmetric so
-        # this is just abs(min) == abs(max).
+        # The DC model writes torque directly; the actuator ctrlrange
+        # only acts as a hard safety bound. Verify T_STALL fits.
         lo, hi = runtime.model.actuator_ctrlrange[self._actuator_id]
-        self._ctrl_scale = max(abs(float(lo)), abs(float(hi))) / _POWER_FULL_SCALE
+        limit = max(abs(float(lo)), abs(float(hi)))
+        if self.T_STALL_NM > limit:
+            raise ValueError(
+                "actuator ctrlrange %.3f Nm below the DC model's "
+                "stall torque %.3f Nm" % (limit, self.T_STALL_NM))
+        # Joint dof address for the back-EMF term (physics-truth
+        # wheel velocity, rad/s).
+        jnt_id = int(runtime.model.actuator_trnid[self._actuator_id, 0])
+        self._dof_adr = int(runtime.model.jnt_dofadr[jnt_id])
 
         self.servo = _native.Servo(counts_per_rev=counts_per_rev,
                                     kp=kp, invert=invert)
@@ -191,7 +224,28 @@ class SimMotor:
         # the sign flip. (firmware does the same in ``servo.c``.)
         if self.invert:
             power = -power
-        self.runtime.data.ctrl[self._actuator_id] = power * self._ctrl_scale
+        self.apply_power(power)
+
+    def apply_power(self, power: float) -> None:
+        """Write ``power`` (±100, the firmware PWM-duty domain) to
+        the actuator through the DC-motor model:
+        ``torque = T_stall*(duty - w/w_rated)``. The back-EMF term
+        uses the PHYSICS wheel velocity (not the observer) — it
+        models the motor's electrical reality, not the controller's
+        estimate. Power and wheel velocity are both in the wheel
+        frame, so invert cancels out of the (odd) expression. Also
+        used by the serial-servo shim's velocity loop, so every
+        actuator write in the sim goes through the same motor
+        physics."""
+        wheel_dps = math.degrees(
+            float(self.runtime.data.qvel[self._dof_adr]))
+        torque = self.T_STALL_NM * (
+            power / _POWER_FULL_SCALE - wheel_dps / self.RATED_DPS)
+        if torque > self.T_STALL_NM:
+            torque = self.T_STALL_NM
+        elif torque < -self.T_STALL_NM:
+            torque = -self.T_STALL_NM
+        self.runtime.data.ctrl[self._actuator_id] = torque
 
     # -------- user-facing API (Motor interface) --------
 
@@ -204,9 +258,12 @@ class SimMotor:
     def run_target(self,
                    delta_deg: float,
                    cruise_dps: float,
-                   accel: float = 720.0) -> None:
+                   accel: float = 1440.0) -> None:
         """Trapezoidal move ``delta_deg`` from the current angle at
-        ``cruise_dps`` cruise speed and ``accel`` deg/s² shaping."""
+        ``cruise_dps`` cruise speed and ``accel`` deg/s² shaping.
+        Default matches the firmware's 1440 deg/s² (issue #234's
+        wheel-in-floor geometry + missing back-EMF fixes made the
+        sim track it faithfully)."""
         self.servo.run_target(self._read_count(), self.runtime.now_ms,
                                float(delta_deg), float(cruise_dps),
                                float(accel))
