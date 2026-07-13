@@ -51,32 +51,33 @@ in `.github/workflows/ci.yaml`.)
 Firmware and `openbricks` (the host CLI + sim package) are versioned
 and tagged independently so one can't hold the other hostage.
 
-| Component    | `__version__` lives in                         | Tag pattern          | Released                                |
-|--------------|------------------------------------------------|----------------------|-----------------------------------------|
-| Firmware     | `openbricks/__init__.py`                       | `v1.9.0`             | GitHub release (firmware `.bin` files)  |
-| `openbricks` | `tools/openbricks/openbricks_dev/__init__.py`  | `cli/v0.10.24`       | PyPI (via OIDC trusted publisher)       |
+| Component    | `__version__` lives in                         | Tag pattern     | Released                                |
+|--------------|------------------------------------------------|-----------------|------------------------------------------|
+| Firmware     | `openbricks/__init__.py`                       | `v1.15.0`       | GitHub release (firmware `.bin` files)  |
+| `openbricks` | `tools/openbricks/openbricks_dev/__init__.py`  | `cli/v1.15.0`   | PyPI (via OIDC trusted publisher)       |
 
-(The host package was previously published as `openbricks-dev`; the old
-`openbricks-dev/v*` tags are frozen and the PyPI name now redirects
-users via a final deprecation release.)
+Both components share ONE version number (lockstep since 1.15.0):
+`scripts/bump-version.py X.Y.Z` writes the same literal into both
+`__init__.py` files, and every release cuts BOTH tags. Tests pin the
+two files equal (`tests/test_version_lockstep.py` +
+`tools/openbricks/tests/test_release_tags.py`). Before 1.15.0 the
+tracks were independent (firmware reached 1.14.0 while PyPI was at
+0.14.0 — PyPI jumps straight to 1.15.0).
 
-Each package's `__init__.py::__version__` is the single source of truth;
-`pyproject.toml` reads it back via `attr = "<pkg>.__version__"`.
+(The host package was previously published as `openbricks-dev`; the
+old `openbricks-dev/v*` tags are frozen and the PyPI name now
+redirects users via a final deprecation release.)
+
+Each package's `__init__.py::__version__` is the single source of
+truth for its artifact; `pyproject.toml` reads it back via
+`attr = "<pkg>.__version__"`.
 
 Cutting a release:
 
-    # Firmware only
-    scripts/bump-version.py --firmware 1.9.0
+    scripts/bump-version.py 1.15.0
     # commit, push, merge PR, then:
-    git tag v1.9.0 && git push origin v1.9.0
-
-    # Host CLI + sim only
-    scripts/bump-version.py --openbricks 0.10.24
-    # commit, push, merge PR, then:
-    git tag cli/v0.10.24 && git push origin cli/v0.10.24
-
-    # Both at once (rare — firmware changes usually ship alone)
-    scripts/bump-version.py --firmware 1.9.0 --openbricks 0.10.24
+    git tag v1.15.0 cli/v1.15.0
+    git push origin v1.15.0 cli/v1.15.0
 
 ## Licensing
 

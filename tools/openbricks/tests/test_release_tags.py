@@ -53,9 +53,22 @@ class ReleaseTagNamespaceTests(unittest.TestCase):
         # (a comment mentioning history is fine, an expression isn't).
         self.assertNotIn("'refs/tags/openbricks/'", self.ci)
 
-    def test_bump_script_hints_cli_tag(self):
-        self.assertIn("git tag cli/v{version}", self.bump)
+    def test_bump_script_hints_both_tags_lockstep(self):
+        # One bump, two tags (lockstep since 1.15.0).
+        self.assertIn("git tag v{v} cli/v{v}", self.bump)
         self.assertNotIn("git tag openbricks/v{version}", self.bump)
+
+    def test_firmware_and_cli_versions_match(self):
+        # The lockstep pin, host-suite side (the firmware suite pins
+        # it too — whichever CI job runs first catches a desync).
+        def _ver(rel):
+            with open(str(_REPO_ROOT / rel)) as f:
+                for line in f:
+                    if line.startswith("__version__"):
+                        return line.split('"')[1]
+        fw = _ver("openbricks/__init__.py")
+        cli = _ver("tools/openbricks/openbricks_dev/__init__.py")
+        self.assertEqual(fw, cli)
 
 
 if __name__ == "__main__":

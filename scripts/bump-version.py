@@ -1,36 +1,32 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-Bump the firmware and/or host-tooling version.
+Bump THE version — firmware and host tooling share one number.
 
-Firmware and the host tooling (the unified ``openbricks`` package
-that ships both the CLI and the MuJoCo sim) are versioned
-independently — firmware changes are big and slow, host changes
-are small and fast, so coupling their version numbers held each
-hostage to the other. Each package's ``__init__.py`` carries its
-own ``__version__`` literal, which is the single source of truth —
-``pyproject.toml`` reads it back via ``attr = "<pkg>.__version__"``
-and the import-time constant is what users see at runtime.
+Since 1.15.0 the firmware and the host tooling (the unified
+``openbricks`` package shipping the CLI and the MuJoCo sim) are
+versioned in LOCKSTEP: one number, one bump, two tags. The wheel
+doesn't bundle the firmware package, so the sharing happens here —
+this script writes the same version literal into both packages'
+``__init__.py`` (each remains its artifact's single source of truth;
+``pyproject.toml`` reads it back via ``attr = "<pkg>.__version__"``).
 
 Usage:
 
-    scripts/bump-version.py --firmware 0.9.3
-    scripts/bump-version.py --openbricks 0.10.0
-    scripts/bump-version.py --firmware 0.9.3 --openbricks 0.10.0
+    scripts/bump-version.py 1.15.0
 
-Either flag may be omitted; a version is only bumped when its flag
-is present.
+Then, after the PR merges, cut BOTH releases:
 
-Tags use separate namespaces:
+    git tag v<version>       # firmware GitHub Release (.bin files)
+    git tag cli/v<version>   # PyPI publish (CLI + sim wheels)
+    git push origin v<version> cli/v<version>
 
-  * firmware:   ``git tag v<version>``
-  * openbricks: ``git tag cli/v<version>``
-
-The ``openbricks`` package was previously published as
-``openbricks-dev`` (host CLI) and ``openbricks-sim`` (sim) before the
-unification PR. Old tags ``openbricks-dev/v*`` are frozen, and
-``openbricks/v*`` (used up to 0.10.24) is retired — the namespace is
-``cli/v*``.
+History: the two tracks were versioned independently through
+firmware 1.14.0 / openbricks 0.14.0 (the old ``--firmware`` /
+``--openbricks`` flags), so PyPI versions jump from 0.14.0 straight
+to 1.15.0. Older still: the host package was published as
+``openbricks-dev`` (tags frozen), and ``openbricks/v*`` was the PyPI
+namespace up to 0.10.24 — the namespace is ``cli/v*``.
 """
 
 import argparse
@@ -42,17 +38,13 @@ from pathlib import Path
 _VERSION_RE   = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 _INIT_LINE_RE = re.compile(r'^__version__\s*=\s*"[^"]*"$', re.M)
 
-
-_FIRMWARE = {
-    "label":    "firmware",
-    "init":     "openbricks/__init__.py",
-    "tag_hint": "git tag v{version}",
-}
-_HOST = {
-    "label":    "openbricks",
-    "init":     "tools/openbricks/openbricks_dev/__init__.py",
-    "tag_hint": "git tag cli/v{version}",
-}
+# Both files carry the same number; tests/test_version_lockstep.py
+# (firmware suite) and tools/openbricks/tests/test_release_tags.py
+# pin them equal.
+_INIT_FILES = [
+    "openbricks/__init__.py",
+    "tools/openbricks/openbricks_dev/__init__.py",
+]
 
 
 def _update_init(path, new_version):
@@ -66,39 +58,24 @@ def _update_init(path, new_version):
         path.write_text(new_text)
 
 
-def _bump(root, component, new_version):
-    if not _VERSION_RE.match(new_version):
-        print("error: invalid version {!r} for {} (expected X.Y.Z)".format(
-            new_version, component["label"]), file=sys.stderr)
-        return 2
-    _update_init(root / component["init"], new_version)
-    print("bumped {} to {}".format(component["label"], new_version))
-    print("  tag with: " + component["tag_hint"].format(version=new_version))
-    return 0
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Bump firmware and/or openbricks (host) versions.")
-    ap.add_argument("--firmware", metavar="X.Y.Z",
-                    help="New firmware version (tag: v<version>).")
-    ap.add_argument("--openbricks", metavar="X.Y.Z",
-                    help="New openbricks (host) version "
-                         "(tag: cli/v<version>).")
+        description="Bump the shared firmware + openbricks version.")
+    ap.add_argument("version", metavar="X.Y.Z",
+                    help="New version, written to both packages.")
     args = ap.parse_args(argv)
 
-    if not args.firmware and not args.openbricks:
-        ap.error("pass --firmware and/or --openbricks")
+    if not _VERSION_RE.match(args.version):
+        print("error: invalid version {!r} (expected X.Y.Z)".format(
+            args.version), file=sys.stderr)
+        return 2
 
     root = Path(__file__).resolve().parent.parent
-    if args.firmware:
-        rc = _bump(root, _FIRMWARE, args.firmware)
-        if rc:
-            return rc
-    if args.openbricks:
-        rc = _bump(root, _HOST, args.openbricks)
-        if rc:
-            return rc
+    for rel in _INIT_FILES:
+        _update_init(root / rel, args.version)
+    print("bumped firmware + openbricks to {}".format(args.version))
+    print("  tag with: git tag v{v} cli/v{v} && "
+          "git push origin v{v} cli/v{v}".format(v=args.version))
     return 0
 
 
