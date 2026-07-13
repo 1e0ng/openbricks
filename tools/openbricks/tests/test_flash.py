@@ -287,5 +287,108 @@ class NameWriteSnippetTests(unittest.TestCase):
         self.assertIn("commit", snippet)
 
 
+
+
+class ToolDiscoveryTests(unittest.TestCase):
+    def test_require_tool_found(self):
+        with patch("shutil.which", return_value="/usr/bin/mpremote"):
+            self.assertEqual(flash._require_tool("mpremote"),
+                             "/usr/bin/mpremote")
+
+    def test_require_tool_missing_dies_with_hint(self):
+        with patch("shutil.which", return_value=None):
+            try:
+                flash._require_tool("mpremote")
+            except flash.FlashError as e:
+                self.assertIn("pip install esptool mpremote", str(e))
+            else:
+                self.fail("expected FlashError")
+
+    def test_esptool_v5_names_preferred(self):
+        with patch("shutil.which",
+                   side_effect=lambda n: "/x/esptool"
+                   if n == "esptool" else None):
+            path, wr, er = flash._esptool_paths_and_commands()
+        self.assertEqual((path, wr, er),
+                         ("/x/esptool", "write-flash", "erase-flash"))
+
+    def test_esptool_v4_fallback_names(self):
+        with patch("shutil.which",
+                   side_effect=lambda n: "/x/esptool.py"
+                   if n == "esptool.py" else None):
+            path, wr, er = flash._esptool_paths_and_commands()
+        self.assertEqual((path, wr, er),
+                         ("/x/esptool.py", "write_flash", "erase_flash"))
+
+    def test_no_esptool_dies(self):
+        with patch("shutil.which", return_value=None):
+            with self.assertRaises(flash.FlashError):
+                flash._esptool_paths_and_commands()
+
+
+class NvsRoundTripFailureTests(unittest.TestCase):
+    def _patch_exec(self, rc, out="", err=""):
+        orig = flash._mpremote_exec
+        flash._mpremote_exec = lambda m, p, s: (rc, out, err)
+        self.addCleanup(setattr, flash, "_mpremote_exec", orig)
+
+    def test_write_hub_name_failure_dies(self):
+        self._patch_exec(1, err="nvs write blew up")
+        try:
+            flash._write_hub_name("mpremote", "/p", "ls")
+        except flash.FlashError as e:
+            self.assertIn("failed to write hub name", str(e))
+            self.assertIn("nvs write blew up", str(e))
+        else:
+            self.fail("expected FlashError")
+
+    def test_read_hub_name_failure_dies(self):
+        self._patch_exec(1, err="nvs read blew up")
+        try:
+            flash._read_hub_name("mpremote", "/p")
+        except flash.FlashError as e:
+            self.assertIn("failed to read hub name back", str(e))
+        else:
+            self.fail("expected FlashError")
+
+    def test_wait_for_repl_retries_until_ok(self):
+        results = [(1, "", "busy"), (0, "ok", "")]
+        orig = flash._mpremote_exec
+        flash._mpremote_exec = lambda m, p, s: results.pop(0)
+        self.addCleanup(setattr, flash, "_mpremote_exec", orig)
+        with patch("time.sleep"):
+            flash._wait_for_repl("mpremote", "/p", timeout_s=30)
+        self.assertEqual(results, [])   # both polls consumed
+
+    def test_wait_for_repl_timeout_reports_last_output(self):
+        self._patch_exec(1, out="", err="port busy")
+        try:
+            flash._wait_for_repl("mpremote", "/p", timeout_s=0)
+        except flash.FlashError as e:
+            self.assertIn("timed out waiting for device REPL", str(e))
+        else:
+            self.fail("expected FlashError")
+
+
+class MainStandaloneTests(unittest.TestCase):
+    def test_flash_error_maps_to_rc_1(self):
+        import io, sys
+        orig_run = flash.run
+        flash.run = lambda args: flash._die("boom")
+        argv = sys.argv
+        sys.argv = ["flash.py", "--name", "X", "--port", "/p",
+                    "--firmware", "f.bin"]
+        err = io.StringIO()
+        orig_err, sys.stderr = sys.stderr, err
+        try:
+            rc = flash.main_standalone()
+        finally:
+            flash.run = orig_run
+            sys.argv = argv
+            sys.stderr = orig_err
+        self.assertEqual(rc, 1)
+        self.assertIn("error: boom", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
