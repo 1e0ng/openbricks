@@ -38,62 +38,68 @@ class ControlLawTests(unittest.TestCase):
         self.cruise = self.ns["CRUISE_DPS"]
         self.gain = self.ns["GAIN"]
         self.thr = self.ns["LINE_AMBIENT"]
+        self.max_dps = self.ns["MAX_DPS"]
 
     def test_centred_drives_straight(self):
-        # Equal readings (any brightness above the line threshold):
-        # zero error, both wheels at cruise.
         self.assertEqual(self.speeds(90, 90), (self.cruise, self.cruise))
-        self.assertEqual(self.speeds(40, 40), (self.cruise, self.cruise))
 
-    def test_drift_right_slows_left_wheel_proportionally(self):
-        # Line sliding under the LEFT sensor drops its reading. Error
-        # small enough that neither wheel hits the clamp, so the pure
-        # proportional math is visible.
-        left, right = self.speeds(80, 90)
-        self.assertEqual(left, int(self.cruise + self.gain * (80 - 90)))
-        self.assertEqual(right, int(self.cruise - self.gain * (80 - 90)))
-        self.assertTrue(left < self.cruise < right)
-
-    def test_drift_left_mirrors(self):
+    def test_drift_steers_proportionally_and_mirrored(self):
         l1, r1 = self.speeds(80, 90)
+        self.assertEqual(l1, int(self.cruise + self.gain * (80 - 90)))
+        self.assertEqual(r1, int(self.cruise - self.gain * (80 - 90)))
+        self.assertTrue(l1 < self.cruise < r1)
         l2, r2 = self.speeds(90, 80)
         self.assertEqual((l1, r1), (r2, l2))
 
     def test_small_error_gives_small_correction(self):
-        big = self.speeds(60, 90)
+        big = self.speeds(self.thr + 5, 90)
         small = self.speeds(85, 90)
         self.assertTrue(
             abs(small[0] - small[1]) < abs(big[0] - big[1]),
             "correction must scale with the error")
 
-    def test_large_error_clamps_to_pivot_not_reverse(self):
-        # Massive difference: inner wheel clamps at 0 (pivot), never
-        # negative, and the outer wheel never exceeds the bench cap.
-        left, right = self.speeds(2, 95)   # left nearly on the line
-        self.assertEqual(left, 0)
-        self.assertTrue(right <= 120)
-
-    def test_both_dark_means_intersection_stop(self):
+    def test_both_dark_stops(self):
         self.assertIsNone(self.speeds(self.thr - 1, self.thr - 1))
 
-    def test_one_dark_is_steering_not_stop(self):
-        # Only BOTH sensors below threshold is an intersection; one
-        # dark sensor is just a big steering error.
-        # assertTrue, not assertIsNotNone: MP's unittest formats the
-        # failure message with '%' and a tuple value splats into it.
-        self.assertTrue(self.speeds(self.thr - 1, 90) is not None)
+    def test_left_branch_is_ignored_not_followed(self):
+        # A branch sweeping under ONE sensor must NOT steer — hold
+        # course straight until it passes. (Steering toward it is how
+        # the robot peels off onto the branch.)
+        self.assertEqual(self.speeds(self.thr - 1, 90),
+                         (self.cruise, self.cruise))
 
-    def test_speeds_respect_bench_cap(self):
+    def test_right_branch_is_ignored_not_followed(self):
+        self.assertEqual(self.speeds(90, self.thr - 1),
+                         (self.cruise, self.cruise))
+
+    def test_branch_boundary_is_exactly_the_threshold(self):
+        # AT the threshold the reading is mat, not line: steering.
+        speeds = self.speeds(self.thr, 90)
+        self.assertTrue(speeds[0] != speeds[1],
+                        "threshold reading must steer, not ignore")
+
+    def test_clamp_never_reverses_never_exceeds_cap(self):
         for la in range(0, 101, 10):
             for ra in range(0, 101, 10):
                 speeds = self.speeds(la, ra)
                 if speeds is None:
                     continue
-                self.assertTrue(0 <= speeds[0] <= 120, speeds)
-                self.assertTrue(0 <= speeds[1] <= 120, speeds)
+                self.assertTrue(0 <= speeds[0] <= self.max_dps, speeds)
+                self.assertTrue(0 <= speeds[1] <= self.max_dps, speeds)
 
-    def test_line_ambient_threshold_is_sane(self):
-        self.assertTrue(0 < self.thr < 30, self.thr)
+    def test_clamp_cap_leaves_steering_headroom(self):
+        # The cap must sit above cruise + max correction, or big
+        # corrections pin both wheels at the cap and steering dies
+        # (the CRUISE_DPS=200 vs cap=120 incident).
+        self.assertTrue(
+            self.max_dps >= self.cruise + self.gain * 100,
+            "MAX_DPS=%s leaves no headroom over CRUISE_DPS=%s"
+            % (self.max_dps, self.cruise))
+
+    def test_debug_off_for_real_runs(self):
+        # The per-tick calibration print stretches the control tick;
+        # it must ship disabled.
+        self.assertFalse(self.ns["DEBUG"])
 
 
 if __name__ == "__main__":
