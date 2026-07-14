@@ -247,7 +247,17 @@ class SimDriveBaseTests(unittest.TestCase):
         # and that the motor target velocities respond. Algorithmic
         # correctness is covered in test_native_drivebase.py.
         rt, db, left, right, _ = self._setup()
+        # 1.15.2 contract: enabling the gyro path without a heading
+        # feed is a loud error, not a silently-stale override.
+        with self.assertRaises(RuntimeError):
+            db.set_use_gyro(True)
+
+        class _StillIMU:
+            def heading(self):
+                return 0.0
+        db.attach_imu(_StillIMU())
         db.set_use_gyro(True)
+        db._detach_imu_tick()   # manual overrides below drive the test
         db.straight(100.0, 100.0)
         for _ in range(50):
             rt.step()
@@ -258,6 +268,69 @@ class SimDriveBaseTests(unittest.TestCase):
         l1 = left.target_dps()
         # +5° body yaw should add a CW correction → left target ramps up.
         self.assertGreater(l1, l0 - 1.0)
+
+
+
+
+class SimDriveBaseGyroTests(unittest.TestCase):
+    """The gyro-guided drivebase path, end-to-end in physics.
+
+    REGRESSION (1.15.2): the native core used to snapshot a gyro
+    move's origin from the ENCODER diff while the tick read the
+    move-relative IMU override — any prior rotation became a
+    permanent phantom heading error and gyro turns ran away (a
+    turn(90) after one encoder turn rotated ~180 and never stopped).
+    """
+
+    def _robot(self):
+        from openbricks_sim.robot import SimRobot
+        from openbricks_sim.runtime import SimIMU
+        robot = SimRobot()
+        return robot, SimIMU(robot.runtime)
+
+    def _yaw(self, imu):
+        return imu.heading()
+
+    def test_set_use_gyro_without_imu_raises(self):
+        robot, _ = self._robot()
+        with self.assertRaises(RuntimeError):
+            robot.drivebase.set_use_gyro(True)
+
+    def test_gyro_turn_after_prior_encoder_turn_lands_and_stops(self):
+        robot, imu = self._robot()
+        db = robot.drivebase
+        # Prior encoder-mode rotation: accumulates encoder diff.
+        db.turn(90.0, 90.0)
+        robot.run_for(2.0)
+        h1 = self._yaw(imu)
+        # Gyro-guided turn: must land ~90 further and STOP.
+        db.attach_imu(imu)
+        db.set_use_gyro(True)
+        db.turn(90.0, 90.0)
+        robot.run_for(2.0)
+        h2 = self._yaw(imu)
+        robot.run_for(0.5)
+        h3 = self._yaw(imu)
+        turned = ((h2 - h1 + 180.0) % 360.0) - 180.0
+        creep = abs(((h3 - h2 + 180.0) % 360.0) - 180.0)
+        self.assertTrue(75.0 < turned < 105.0,
+                        "gyro turn landed at %.1f deg" % turned)
+        self.assertLess(creep, 3.0,
+                        "robot kept rotating after the gyro move "
+                        "finished (%.1f deg of creep)" % creep)
+
+    def test_gyro_straight_defends_heading(self):
+        robot, imu = self._robot()
+        db = robot.drivebase
+        db.attach_imu(imu)
+        db.set_use_gyro(True)
+        h0 = self._yaw(imu)
+        db.straight(150.0, 80.0)
+        robot.run_for(3.0)
+        drift = abs(((self._yaw(imu) - h0 + 180.0) % 360.0) - 180.0)
+        self.assertLess(drift, 5.0,
+                        "heading drifted %.1f deg on a gyro-guided "
+                        "straight" % drift)
 
 
 if __name__ == "__main__":

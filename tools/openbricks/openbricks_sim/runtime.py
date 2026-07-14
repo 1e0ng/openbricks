@@ -694,6 +694,11 @@ class SimDriveBase:
                                      axle_track_mm=float(axle_track_mm),
                                      **kwargs)
         self._attached = False
+        # Optional heading feed for the slip-immune gyro path (see
+        # attach_imu / set_use_gyro).
+        self._imu = None
+        self._heading_offset = 0.0
+        self._imu_tick_active = False
 
     # -------- lifecycle --------
 
@@ -727,11 +732,13 @@ class SimDriveBase:
     # -------- user-facing API --------
 
     def straight(self, distance_mm: float, speed_mm_s: float) -> None:
+        self._rebaseline_heading()
         self.db.straight(self.runtime.now_ms,
                           float(distance_mm), float(speed_mm_s))
         self._attach()
 
     def turn(self, angle_deg: float, rate_dps: float) -> None:
+        self._rebaseline_heading()
         self.db.turn(self.runtime.now_ms,
                       float(angle_deg), float(rate_dps))
         self._attach()
@@ -743,8 +750,71 @@ class SimDriveBase:
     def is_done(self) -> bool:
         return bool(self.db.is_done())
 
+    # ----- IMU heading feed (the slip-immune gyro path) -----------
+
+    def attach_imu(self, imu) -> None:
+        """Attach a heading source (anything with ``heading()`` in
+        degrees, [-180, 180) — ``SimIMU`` or the shim BNO055) for the
+        gyro-guided drivebase path."""
+        self._imu = imu
+
+    def _rebaseline_heading(self) -> None:
+        if self._imu_tick_active and self._imu is not None:
+            self._heading_offset = float(self._imu.heading())
+
+    def _imu_tick(self, now_ms) -> None:
+        body = float(self._imu.heading())
+        delta = body - self._heading_offset
+        # Wrap +/-180 so a move crossing the boundary doesn't see a
+        # spurious +/-360 jump.
+        if delta > 180.0:
+            delta -= 360.0
+        if delta < -180.0:
+            delta += 360.0
+        self.db.set_heading_override(delta)
+
+    def _attach_imu_tick(self) -> None:
+        """Insert the IMU tick BEFORE the drivebase tick so the
+        override is fresh by the time the controller reads it."""
+        if self._imu_tick_active:
+            return
+        rt = self.runtime
+        rt.remove_tick(self._tick)
+        rt.remove_tick(self.left._tick)
+        rt.remove_tick(self.right._tick)
+        rt.add_tick(self._imu_tick)
+        rt.add_tick(self._tick)
+        rt.add_tick(self.left._tick)
+        rt.add_tick(self.right._tick)
+        self._attached = True
+        self.left._attached = True
+        self.right._attached = True
+        self._imu_tick_active = True
+
+    def _detach_imu_tick(self) -> None:
+        if not self._imu_tick_active:
+            return
+        self.runtime.remove_tick(self._imu_tick)
+        self._imu_tick_active = False
+
     def set_use_gyro(self, enable: bool) -> None:
-        self.db.set_use_gyro(bool(enable))
+        """Steer moves by the IMU heading instead of the encoder
+        differential. Requires ``attach_imu()`` first — enabling the
+        native override slot without a feed steers on garbage (found
+        by the IMU verification probe: a gyro'd turn(90) wandered
+        ~192 degrees)."""
+        enable = bool(enable)
+        if enable:
+            if self._imu is None:
+                raise RuntimeError(
+                    "set_use_gyro(True) needs attach_imu(imu) first "
+                    "— without a heading feed the drivebase steers "
+                    "on a stale override")
+            self._attach_imu_tick()
+            self._heading_offset = float(self._imu.heading())
+        else:
+            self._detach_imu_tick()
+        self.db.set_use_gyro(enable)
 
     def set_heading_override(self, body_delta_deg: float) -> None:
         self.db.set_heading_override(float(body_delta_deg))
