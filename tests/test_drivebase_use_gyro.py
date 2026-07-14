@@ -145,6 +145,40 @@ class TestDriveBaseUseGyro(unittest.TestCase):
                         "error (l=%.1f r=%.1f)" % (l, r))
         ndb.stop()
 
+    def test_gyro_turn_also_starts_in_fresh_frame(self):
+        """Twin of the straight() regression for ob_drivebase_turn's
+        gyro branch: a gyro TURN after accumulated encoder diff must
+        profile from the override frame, not the encoder frame."""
+        imu = _FakeIMU(heading=0.0)
+
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
+        ndb = NativeDB(
+            left=left._servo, right=right._servo,
+            wheel_diameter_mm=56, axle_track_mm=114,
+            imu=imu,
+        )
+        left.run_speed(0)
+        right.run_speed(0)
+        left._enc.reset(500)
+        right._enc.reset(-500)
+        time.sleep_ms(100)
+
+        ndb.use_gyro(True)
+        ndb.turn(90.0, 90.0)
+        imu.heading_value = 0.0
+        time.sleep_ms(1)
+
+        # First tick of a 90-deg turn at 90 dps: the commanded split
+        # must be profile-sized (ramping from ~0), not the encoder
+        # frame's phantom hundreds of dps.
+        l = left._servo.target_dps()
+        r = right._servo.target_dps()
+        self.assertLess(abs(l) + abs(r), 120.0,
+                        "gyro turn launched with a phantom frame "
+                        "error (l=%.1f r=%.1f)" % (l, r))
+        ndb.stop()
+
     def test_use_gyro_false_reverts_to_encoder_feedback(self):
         """Toggling use_gyro off makes the controller ignore the IMU."""
         imu = _FakeIMU(heading=0.0)
