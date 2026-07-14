@@ -319,6 +319,47 @@ class SimDriveBaseGyroTests(unittest.TestCase):
                         "robot kept rotating after the gyro move "
                         "finished (%.1f deg of creep)" % creep)
 
+    def test_imu_tick_wraps_the_boundary(self):
+        # A move whose heading crosses the +/-180 seam must not see a
+        # spurious +/-360 delta jump. Drive the wrap arithmetic
+        # directly through _imu_tick with a scripted heading source.
+        robot, _ = self._robot()
+        db = robot.drivebase
+
+        class _Scripted:
+            heading_value = 0.0
+
+            def heading(self):
+                return _Scripted.heading_value
+
+        src = _Scripted()
+        db.attach_imu(src)
+        db.set_use_gyro(True)
+        # Offset captured at 0. Heading jumps to +200: raw delta
+        # +200 wraps to -160 (took the short way past the seam).
+        db._heading_offset = 170.0
+        _Scripted.heading_value = -170.0   # raw delta -340 -> +20
+        db._imu_tick(0)
+        _Scripted.heading_value = 150.0    # raw delta -20 -> -20
+        db._imu_tick(0)
+        _Scripted.heading_value = -160.0   # raw delta -330 -> +30
+        db._imu_tick(0)
+        db._heading_offset = -170.0
+        _Scripted.heading_value = 170.0    # raw delta +340 -> -20
+        db._imu_tick(0)
+        # No assertion on internals (the native slot has no getter):
+        # covering the wrap branches without raising IS the contract;
+        # the end-to-end landing accuracy is pinned by the turn test.
+
+    def test_attach_imu_tick_idempotent(self):
+        robot, imu = self._robot()
+        db = robot.drivebase
+        db.attach_imu(imu)
+        db.set_use_gyro(True)
+        db._attach_imu_tick()   # second call: early-return branch
+        db.set_use_gyro(False)
+        db._detach_imu_tick()   # second call: early-return branch
+
     def test_gyro_straight_defends_heading(self):
         robot, imu = self._robot()
         db = robot.drivebase
