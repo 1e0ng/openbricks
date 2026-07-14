@@ -111,5 +111,19 @@ class TestTCS34725(unittest.TestCase):
         self.assertEqual(s.ambient(), 49)
 
 
+
+
+class FractionalIntegrationTests(unittest.TestCase):
+    def test_chip_minimum_integration_constructs(self):
+        # integration_ms=2.4 (one cycle) is how the line-follow
+        # example gets low-latency reads for its D term. The float
+        # used to reach time.sleep_ms and crash on hardware (the
+        # test fake's sleep_ms is now int-strict, matching MP).
+        i2c = _make_i2c_with_id()
+        s = TCS34725(i2c, integration_ms=2.4, gain=16)
+        # One cycle -> full scale 1024.
+        self.assertEqual(s._full_scale, 1024)
+
+
 if __name__ == "__main__":
     unittest.main()

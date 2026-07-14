@@ -57,6 +57,13 @@ def _advance_virtual_clock(ms):
 
 
 def _sleep_ms(ms):
+    # As strict as the real MicroPython time.sleep_ms, which requires
+    # an int — a fake that accepted floats let a driver ship
+    # ``sleep_ms(2.4 + 5)`` that crashed on hardware (tcs34725
+    # integration_ms=2.4).
+    if not isinstance(ms, int):
+        raise TypeError("can't convert %s to int (sleep_ms wants int, "
+                        "matching MicroPython)" % type(ms).__name__)
     _advance_virtual_clock(ms)
 
 

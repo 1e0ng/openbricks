@@ -70,8 +70,11 @@ class TCS34725(ColorSensor):
         self._write_u8(_ENABLE, _ENABLE_PON)
         time.sleep_ms(3)
         self._write_u8(_ENABLE, _ENABLE_PON | _ENABLE_AEN)
-        # First integration cycle. 2.4 ms + integration time.
-        time.sleep_ms(integration_ms + 5)
+        # First integration cycle: integration time + margin. int():
+        # fractional integration_ms (2.4 is the chip minimum) made
+        # this a float, and MicroPython's sleep_ms requires an int
+        # (bit the bench the first time integration_ms=2.4 was used).
+        time.sleep_ms(int(integration_ms) + 5)
 
     def raw(self):
         """Return the raw (clear, red, green, blue) 16-bit readings."""
