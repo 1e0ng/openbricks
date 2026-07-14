@@ -577,58 +577,18 @@ class ShimDriveBase:
             axle_track_mm=float(axle_track_mm),
             kp_sum=kp_sum,
             kp_diff=kp_diff)
-        self._imu              = imu
-        self._use_gyro         = False
-        self._heading_offset   = 0.0
-        self._imu_tick_active  = False
-
-    # ----- IMU heading update tick ---------------------------------
-
-    def _imu_tick(self, now_ms):
-        body = float(self._imu.heading())
-        delta = body - self._heading_offset
-        # Wrap ±180 so a move that crosses the boundary doesn't see
-        # a spurious ±360 jump.
-        if delta >  180.0: delta -= 360.0
-        if delta < -180.0: delta += 360.0
-        self._db.set_heading_override(delta)
-
-    def _attach_imu_tick(self):
-        """Insert the IMU tick *before* the drivebase tick so the
-        override is fresh by the time the controller reads it."""
-        if self._imu_tick_active:
-            return
-        rt = self._db.runtime
-        rt.remove_tick(self._db._tick)
-        rt.remove_tick(self._db.left._tick)
-        rt.remove_tick(self._db.right._tick)
-        rt.add_tick(self._imu_tick)
-        rt.add_tick(self._db._tick)
-        rt.add_tick(self._db.left._tick)
-        rt.add_tick(self._db.right._tick)
-        # SimDriveBase + its motors all consider themselves attached
-        # after this dance — preserve that flag.
-        self._db._attached = True
-        self._db.left._attached  = True
-        self._db.right._attached = True
-        self._imu_tick_active = True
-
-    def _detach_imu_tick(self):
-        if not self._imu_tick_active:
-            return
-        self._db.runtime.remove_tick(self._imu_tick)
-        self._imu_tick_active = False
+        self._imu      = imu
+        self._use_gyro = False
+        if imu is not None:
+            self._db.attach_imu(imu)
 
     # ----- Move setup ----------------------------------------------
 
     def straight(self, distance_mm, speed_mm_s):
-        if self._use_gyro and self._imu is not None:
-            self._heading_offset = float(self._imu.heading())
+        # Heading re-baseline per move happens inside SimDriveBase.
         self._db.straight(float(distance_mm), float(speed_mm_s))
 
     def turn(self, angle_deg, rate_dps):
-        if self._use_gyro and self._imu is not None:
-            self._heading_offset = float(self._imu.heading())
         self._db.turn(float(angle_deg), float(rate_dps))
 
     def stop(self):
@@ -646,15 +606,11 @@ class ShimDriveBase:
         if enable and self._imu is None:
             raise RuntimeError(
                 "use_gyro requires imu= at construction")
-        # Toggling on captures the offset so "now" is heading 0.
-        if enable:
-            self._heading_offset = float(self._imu.heading())
-            self._db.set_use_gyro(True)
-            self._attach_imu_tick()
-        else:
-            self._db.set_use_gyro(False)
-            self._detach_imu_tick()
-        self._use_gyro = enable
+        # SimDriveBase owns the heading-feed tick (attach_imu was
+        # called at construction); one implementation for both the
+        # firmware-style shim path and the sim-native API.
+        self._db.set_use_gyro(bool(enable))
+        self._use_gyro = bool(enable)
 
 
 def _make_native_module():

@@ -82,7 +82,22 @@ void ob_drivebase_straight(ob_drivebase_t *db,
                               db->wheel_circumference_mm * (ob_float_t)360.0;
 
     ob_float_t sum_pos  = db_sum_pos(db);
-    ob_float_t diff_pos = db_diff_pos_encoder(db);
+    // Move-start heading frame must match what the tick will READ.
+    // In gyro mode the binding re-baselines its IMU offset at every
+    // move start, so incoming overrides are ~0-framed: reset the
+    // slot and snapshot 0. Snapshotting the ENCODER diff here (the
+    // old behaviour) mixed frames — the controller then chased the
+    // encoder's lifetime accumulated diff forever, so any gyro move
+    // after the robot's first-ever rotation ran away (caught by the
+    // sim IMU verification: a gyro'd turn(90) after one encoder
+    // turn rotated ~180 and never stopped).
+    ob_float_t diff_pos;
+    if (db->use_gyro) {
+        db->heading_override_wheel_deg = 0.0;
+        diff_pos = 0.0;
+    } else {
+        diff_pos = db_diff_pos_encoder(db);
+    }
 
     ob_trajectory_init(&db->fwd, sum_pos, sum_pos + distance_deg,
                        speed_dps, db->accel_dps2);
@@ -122,7 +137,14 @@ void ob_drivebase_turn(ob_drivebase_t *db,
                                 (ob_float_t)360.0;
 
     ob_float_t sum_pos  = db_sum_pos(db);
-    ob_float_t diff_pos = db_diff_pos_encoder(db);
+    // Same gyro-frame rule as ob_drivebase_straight above.
+    ob_float_t diff_pos;
+    if (db->use_gyro) {
+        db->heading_override_wheel_deg = 0.0;
+        diff_pos = 0.0;
+    } else {
+        diff_pos = db_diff_pos_encoder(db);
+    }
 
     ob_trajectory_init(&db->turn, diff_pos, diff_pos + signed_delta,
                        rate_wheel_dps,

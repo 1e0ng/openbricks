@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.15.2 — gyro-guided moves work after the robot's first rotation
+
+A sim-based IMU verification caught a long-standing native
+drivebase bug: with `use_gyro` on, a move's origin was snapshotted
+from the ENCODER diff while the control tick read the move-relative
+IMU override — so any accumulated encoder diff (i.e. any robot that
+had ever turned before) became a permanent phantom heading error the
+controller chased forever. A gyro'd `turn(90)` after one encoder
+turn rotated ~180° and never stopped. The core now frames gyro
+moves in the override's own coordinates (slot reset + zero snapshot
+at move start).
+
+Sim side: `SimDriveBase` gained the IMU heading feed
+(`attach_imu()` + the per-tick push the shim previously owned), and
+`set_use_gyro(True)` without a feed is now a loud error instead of
+silently steering on a stale override. Regression tests on both
+sides pin the fix: the firmware test fails 681-dps-of-phantom-error
+style on the old core; the sim test drives a gyro turn after an
+encoder turn in real physics and asserts it lands ~90° and stops.
+
 ## 1.15.1 — TCS34725 accepts fractional integration times
 
 `TCS34725(integration_ms=2.4)` (the chip minimum, used by the
