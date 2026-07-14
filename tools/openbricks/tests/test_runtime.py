@@ -360,6 +360,60 @@ class SimDriveBaseGyroTests(unittest.TestCase):
         db.set_use_gyro(False)
         db._detach_imu_tick()   # second call: early-return branch
 
+    @staticmethod
+    def _yaw_kick(robot, deg):
+        """Rotate the chassis in place WITHOUT turning the wheels —
+        the encoder-invisible disturbance class (wheel slip,
+        collision, being knocked while driving)."""
+        import mujoco
+        import numpy as np
+        m, d = robot.runtime.model, robot.runtime.data
+        jadr = int(m.joint("chassis_free").qposadr[0])
+        quat = d.qpos[jadr + 3:jadr + 7].copy()
+        half = math.radians(deg) / 2.0
+        kick = np.array([math.cos(half), 0.0, 0.0, math.sin(half)])
+        out = np.zeros(4)
+        mujoco.mju_mulQuat(out, kick, quat)
+        d.qpos[jadr + 3:jadr + 7] = out
+        mujoco.mj_forward(m, d)
+
+    def test_gyro_mode_rejects_encoder_invisible_shove(self):
+        """THE Pybricks gyro-drivebase behavior: shove the robot
+        mid-straight (a yaw the wheels never see) and it returns to
+        its original heading. Encoder mode, by construction, keeps
+        the full deflection — asserted too, so this test documents
+        WHY use_gyro exists."""
+        robot, imu = self._robot()
+        db = robot.drivebase
+
+        def drive_and_shove(use_gyro):
+            h0 = imu.heading()
+            if use_gyro:
+                db.attach_imu(imu)
+                db.set_use_gyro(True)
+            db.straight(400.0, 80.0)
+            robot.run_for(1.5)
+            self._yaw_kick(robot, 25.0)
+            robot.run_for(3.0)
+            err = ((imu.heading() - h0 + 180.0) % 360.0) - 180.0
+            db.stop()
+            if use_gyro:
+                db.set_use_gyro(False)
+            return err
+
+        enc_err = drive_and_shove(use_gyro=False)
+        self.assertGreater(abs(enc_err), 15.0,
+                           "encoder mode unexpectedly corrected an "
+                           "encoder-invisible shove (%.1f deg) — the "
+                           "kick is not bypassing the wheels" % enc_err)
+
+        robot, imu = self._robot()   # fresh world for the gyro case
+        db = robot.drivebase
+        gyro_err = drive_and_shove(use_gyro=True)
+        self.assertLess(abs(gyro_err), 3.0,
+                        "gyro mode failed to reject the shove "
+                        "(%.1f deg residual)" % gyro_err)
+
     def test_gyro_straight_defends_heading(self):
         robot, imu = self._robot()
         db = robot.drivebase
