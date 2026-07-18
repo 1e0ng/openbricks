@@ -104,6 +104,8 @@ class Launcher:
         self._press_pcnt     = None        # hardware falling-edge counter
         self._press_count_seen = 0         # counter value already consumed
         self._raw_last       = False       # last raw sample (debounce)
+        self._start_press_open_ms = None   # counter-start press in flight
+        self._press_consume_release = False  # eat this press's release
         self._raw_stable     = 0           # consecutive equal samples
         self._run_started_ms = None        # when _running went True
         self._pending        = None        # None | "start" | "stop"
@@ -186,6 +188,18 @@ class Launcher:
     #   the window regardless.
     DEBOUNCE_TICKS = 2
     RUN_START_GRACE_MS = 400
+
+    # Counter-driven START (1.15.4). The debounce above made fast
+    # taps unreliable: a press must span two 50 ms polls to be
+    # believed, so a crisp ~60 ms tap is a coin flip and a really
+    # fast one lands between polls entirely (bench: "press too fast
+    # -> doesn't start; a bit longer -> starts", with an EMPTY event
+    # ring). The PCNT counter already sees every tap's edge in
+    # silicon — so at idle the counter is now the START trigger
+    # (press-DOWN latency, no tap too fast), the level path demotes
+    # to state tracking, and edges within START_PRESS_OPEN_MS of a
+    # dispatch are the same press's chatter, consumed silently.
+    START_PRESS_OPEN_MS = 600
 
     def _fire_stop(self):
         """Everything a stop press triggers, in order of importance:
@@ -297,9 +311,36 @@ class Launcher:
                 _request_stop(self)
         else:
             self._stop_retry_ms = None
-            # Consume idle-time presses (BLE-toggle fumbles, handling
-            # bumps) so a stale count can't stop the NEXT run at birth.
-            self._sync_press_counter()
+            if self._press_pcnt is not None:
+                # Counter-driven START: a counted falling edge at idle
+                # IS a press, regardless of whether the 50 ms level
+                # sampling ever catches it.
+                try:
+                    n = self._press_pcnt.value()
+                except Exception:
+                    n = self._press_count_seen
+                if n != self._press_count_seen:
+                    self._press_count_seen = n
+                    in_lockout = (
+                        self._lockout_until_ms is not None
+                        and _ticks_diff(self._lockout_until_ms, now) > 0)
+                    if in_lockout:
+                        # Post-stop bounce / re-contact edges.
+                        _event("start-latch-swallowed", "lockout")
+                        print("openbricks: start press ignored "
+                              "(post-stop lockout)")
+                    elif self._start_press_open_ms is not None:
+                        # Chatter edges of the press that already
+                        # dispatched.
+                        _event("start-latch-consumed", "same-press")
+                    else:
+                        self._start_press_open_ms = now
+                        _event("start-latch")
+                        _request_start(self)
+            if (self._start_press_open_ms is not None
+                    and _ticks_diff(now, self._start_press_open_ms)
+                    > self.START_PRESS_OPEN_MS):
+                self._start_press_open_ms = None
         raw = self._btn.value() == 0
         if raw == self._raw_last:
             if self._raw_stable < self.DEBOUNCE_TICKS:
@@ -332,6 +373,12 @@ class Launcher:
                         self._fire_stop()
                 else:
                     self._press_stopped = False
+                    if self._start_press_open_ms is not None:
+                        # The counter already dispatched this press's
+                        # start — its release (which may arrive after
+                        # the program is running) must not dispatch
+                        # again or read as a mid-hold stop.
+                        self._press_consume_release = True
             return
         if not self._was_pressed:
             return
@@ -343,6 +390,15 @@ class Launcher:
             self._press_stopped = False
             self._lockout_until_ms = _now_ms() + self.START_LOCKOUT_MS
             _event("release", "stop-consumed")
+            return
+        if self._press_consume_release:
+            # Release of the press whose START the counter already
+            # dispatched. Without this, a long-held start press whose
+            # program is up by release time would hit the mid-hold
+            # branch below and STOP the run it started.
+            self._press_consume_release = False
+            self._start_press_open_ms = None
+            _event("release", "start-consumed")
             return
         if self._running:
             # Program came up between press-down and release (remote
@@ -615,6 +671,7 @@ def _scheduled_start(launcher_instance):
     """
     if launcher_instance._running:
         return  # already running; ignore (the raise path handles stop)
+    _event("scheduled-start-exec")
     print("openbricks: starting from REPL context — the stop button "
           "is unavailable for this run (use 'openbricks stop').")
     from openbricks import estop
@@ -650,7 +707,9 @@ def _request_start(launcher_instance):
     """
     if launcher_instance._idle_loop_alive():
         launcher_instance._pending = "start"
+        _event("start-dispatch", "pending")
         return
+    _event("start-dispatch", "degraded-schedule")
     _start_via_schedule(launcher_instance)
 
 
@@ -661,7 +720,12 @@ def _start_via_schedule(launcher_instance):
     try:
         import micropython
         micropython.schedule(_scheduled_start, launcher_instance)
-    except (ImportError, AttributeError, RuntimeError):
+    except RuntimeError:
+        # Scheduler queue full — the pending flag is a void if the
+        # idle loop is dead, but at least the ring SAYS so now.
+        _event("start-dispatch", "schedule-full")
+        launcher_instance._pending = "start"
+    except (ImportError, AttributeError):
         launcher_instance._pending = "start"
 
 
