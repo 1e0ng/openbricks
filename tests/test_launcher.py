@@ -970,6 +970,55 @@ class CounterStartTests(unittest.TestCase):
         tags = [e[1] for e in launcher._EVENTS]
         self.assertIn("start-latch", tags)
 
+    def test_counter_read_failure_is_survived_and_recovers(self):
+        # A PCNT read can raise (unit deinit race at soft-reset). The
+        # tick must neither crash nor phantom-start; once the counter
+        # answers again, a new edge still dispatches.
+        real_value = self.pcnt.value
+        state = {"broken": True}
+
+        def _maybe_boom():
+            if state["broken"]:
+                raise OSError("pcnt gone")
+            return real_value()
+        self.pcnt.value = _maybe_boom
+        self.launcher._tick()
+        self.assertEqual(self.starts, [])
+        state["broken"] = False
+        self.pcnt.count += 1
+        self.launcher._tick()
+        self.assertEqual(len(self.starts), 1)
+
+    def test_schedule_full_dispatch_records_event_and_pends(self):
+        # Degraded path with the 8-deep scheduler queue full:
+        # micropython.schedule raises RuntimeError. The dispatch must
+        # fall back to the pending flag AND leave a ring fingerprint
+        # (the flag is a void when the idle loop is dead — the ring
+        # is the only witness).
+        import sys as _sys
+
+        class _FullScheduler:
+            @staticmethod
+            def schedule(fn, arg):
+                raise RuntimeError("schedule queue full")
+
+        had = "micropython" in _sys.modules
+        orig = _sys.modules.get("micropython")
+        _sys.modules["micropython"] = _FullScheduler
+        try:
+            del launcher._EVENTS[:]
+            launcher._EVENTS_NEXT[0] = 0
+            self.launcher._pending = None
+            self._orig_start(self.launcher)  # real _request_start
+        finally:
+            if had:
+                _sys.modules["micropython"] = orig
+            else:
+                del _sys.modules["micropython"]
+        self.assertEqual(self.launcher._pending, "start")
+        details = [(e[1],) + tuple(e[2]) for e in launcher._EVENTS]
+        self.assertIn(("start-dispatch", "schedule-full"), details)
+
 
 class ChatterRegressionTests(unittest.TestCase):
     """Contact-chatter defences (1.15.3), pinned against the bench

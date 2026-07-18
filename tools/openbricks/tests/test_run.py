@@ -615,6 +615,66 @@ class VerifiedRestoreTests(unittest.TestCase):
         sends = [w for w in link.writes if run_mod._CTRL_D in w]
         self.assertEqual(len(sends), 2)
 
+    def test_write_failure_retries_without_reading(self):
+        # The disconnect race the verified restore exists for: every
+        # write dies. Each attempt must move on (no read on a dead
+        # link) and the warning must still be printed.
+        class _DeadLink(_ProtocolLink):
+            def __init__(self):
+                super().__init__([])
+                self.write_attempts = 0
+                self.read_attempts = 0
+
+            async def write(self, data):
+                self.write_attempts += 1
+                raise OSError("disconnected")
+
+            async def read(self, timeout=None):
+                self.read_attempts += 1
+                return await super().read(timeout=timeout)
+
+        import sys
+        link = _DeadLink()
+        err = io.StringIO()
+        orig, sys.stderr = sys.stderr, err
+        try:
+            _drive(run_mod._restore_idle_loop(link))
+        finally:
+            sys.stderr = orig
+        self.assertEqual(link.write_attempts, run_mod._RESTORE_ATTEMPTS)
+        self.assertEqual(link.read_attempts, 0)
+        self.assertIn("could not confirm", err.getvalue())
+
+    def test_read_failure_moves_to_next_attempt(self):
+        # Link dies mid-listen on attempt 1 (read raises), then
+        # attempt 2 delivers the banner: confirm, no warning.
+        class _ReadDiesOnce(_ProtocolLink):
+            def __init__(self):
+                super().__init__([])
+                self._attempt = 0
+
+            async def write(self, data):
+                await super().write(data)
+                if run_mod._CTRL_D in data:
+                    self._attempt += 1
+
+            async def read(self, timeout=None):
+                if self._attempt == 1:
+                    raise OSError("link reset")
+                return b"Press button to run /program.py\r\n"
+
+        import sys
+        link = _ReadDiesOnce()
+        err = io.StringIO()
+        orig, sys.stderr = sys.stderr, err
+        try:
+            _drive(run_mod._restore_idle_loop(link))
+        finally:
+            sys.stderr = orig
+        sends = [w for w in link.writes if run_mod._CTRL_D in w]
+        self.assertEqual(len(sends), 2)
+        self.assertEqual(err.getvalue(), "")
+
 
 class RunKeyboardInterruptTests(unittest.TestCase):
     def test_ctrl_c_maps_to_130(self):
