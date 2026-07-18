@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.15.3 — start-press chatter no longer kills the newborn run
+
+Bench event-ring capture of "pressed start 4 times, only the 4th
+worked": the start press's release chatter re-closed the contact and
+stopped the run it had just started — once as a phantom
+press-down 54 ms after start (level polling), twice as PCNT falling
+edges 100/180 ms after start (the hardware press latch doing its job
+on edges that weren't presses). Two defences, one per detector:
+
+* Debounce: a button level change must hold for two consecutive
+  50 ms polls before the launcher believes it. Chatter flickers are
+  ~10-20 ms; a real press costs one extra poll of latency.
+* Start grace: for 400 ms after a run starts, hardware-latch edges
+  are consumed as the start press's own chatter instead of fired as
+  stops. A real second press can't physically arrive that fast, and
+  the debounced level path covers the window regardless (test-pinned:
+  no stop-dead zone).
+
+Post-stop start lockout widened 400 → 500 ms to account for the
+debounce delaying a re-contact press's dispatch. Firmware-only
+change (lockstep release).
+
 ## 1.15.2 — gyro-guided moves work after the robot's first rotation
 
 A sim-based IMU verification caught a long-standing native
