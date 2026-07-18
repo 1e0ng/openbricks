@@ -3,6 +3,15 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.17.0 — default acceleration retuned 720 → 360 deg/s²
+
+Gentler launch/brake ramps by default. As before, acceleration only
+shapes the ramps — top speed still comes from ``straight_speed`` /
+``turn_rate`` alone (the short-move footnote grows: below ~v²/accel
+≈ 111 mm at the 200 dps default, a straight ends before touching
+cruise). All six value homes move together, pinned by the
+drift-guard tests.
+
 ## 1.16.1 — ST-3032 no longer speed-capped at 600 °/s by the driver
 
 "Top speed is capped" on the bench, and it was: ``ST3032Motor``
