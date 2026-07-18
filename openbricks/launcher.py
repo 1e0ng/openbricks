@@ -106,6 +106,9 @@ class Launcher:
         self._raw_last       = False       # last raw sample (debounce)
         self._start_press_open_ms = None   # counter-start press in flight
         self._press_consume_release = False  # eat this press's release
+        self._start_press_held = False     # counter-start press still down
+        self._held_up_ticks  = 0           # raw-high ticks while held
+        self._latch_ignore_until_ms = None  # release chatter: latch off
         self._raw_stable     = 0           # consecutive equal samples
         self._run_started_ms = None        # when _running went True
         self._pending        = None        # None | "start" | "stop"
@@ -201,6 +204,26 @@ class Launcher:
     # dispatch are the same press's chatter, consumed silently.
     START_PRESS_OPEN_MS = 600
 
+    # The start press's whole LIFECYCLE must be consumed (1.15.5).
+    # Starting at press-DOWN means the finger is still on the button
+    # when the program comes up (~1 tick later), so the same physical
+    # press keeps echoing into the run through both detectors:
+    # * its debounced level CONFIRMATION arrives with ``_running``
+    #   already True and read as a mid-run stop press — the newborn
+    #   run died at ~55 ms (bench ring: start-latch, then
+    #   press-down('running') + stop-fire one tick later);
+    # * its release chatter EDGES land after RUN_START_GRACE_MS when
+    #   the press is held long, and fired latch-stops.
+    # ``_start_press_held`` tracks "that press is still physically
+    # down" (cleared once raw reads released for DEBOUNCE_TICKS
+    # polls, so a mid-hold flicker can't clear it); while set, the
+    # level confirmation is consumed, and for RELEASE_CHATTER_MS
+    # after the consumed release the PCNT latch ignores edges. Stops
+    # stay covered throughout by the debounced level path: a NEW
+    # press necessarily begins with a confirmed release that ends
+    # these windows.
+    RELEASE_CHATTER_MS = 200
+
     def _fire_stop(self):
         """Everything a stop press triggers, in order of importance:
         latch the e-stop (motors die + motion commands raise, no
@@ -288,7 +311,19 @@ class Launcher:
                         self._run_started_ms is not None
                         and _ticks_diff(_now_ms(), self._run_started_ms)
                         < self.RUN_START_GRACE_MS)
-                    if in_grace:
+                    # The start press outliving the grace window: while
+                    # it is still physically down, and for
+                    # RELEASE_CHATTER_MS after its consumed release,
+                    # edges are its own chatter — a long-held start's
+                    # release must not latch-stop the run it started.
+                    # (Stops stay covered by the debounced level path.)
+                    same_press = (
+                        self._start_press_held
+                        or self._press_consume_release
+                        or (self._latch_ignore_until_ms is not None
+                            and _ticks_diff(self._latch_ignore_until_ms,
+                                            _now_ms()) > 0))
+                    if in_grace or same_press:
                         # The start press's own release chatter.
                         _event("latch-grace-consumed",
                                n - self._press_count_seen)
@@ -329,12 +364,27 @@ class Launcher:
                         _event("start-latch-swallowed", "lockout")
                         print("openbricks: start press ignored "
                               "(post-stop lockout)")
-                    elif self._start_press_open_ms is not None:
+                    elif (self._start_press_open_ms is not None
+                            or self._start_press_held
+                            or self._press_consume_release
+                            or (self._latch_ignore_until_ms is not None
+                                and _ticks_diff(
+                                    self._latch_ignore_until_ms,
+                                    now) > 0)):
                         # Chatter edges of the press that already
-                        # dispatched.
+                        # dispatched — including a press held clear
+                        # through a short run's whole lifetime (its
+                        # release chatter lands back at idle and must
+                        # not dispatch a phantom new start).
                         _event("start-latch-consumed", "same-press")
                     else:
                         self._start_press_open_ms = now
+                        # The press is physically DOWN right now (we
+                        # just counted its falling edge). Its later
+                        # echoes — level confirmation, release chatter
+                        # — belong to it, not to the run it starts.
+                        self._start_press_held = True
+                        self._held_up_ticks = 0
                         _event("start-latch")
                         _request_start(self)
             if (self._start_press_open_ms is not None
@@ -342,6 +392,16 @@ class Launcher:
                     > self.START_PRESS_OPEN_MS):
                 self._start_press_open_ms = None
         raw = self._btn.value() == 0
+        if self._start_press_held:
+            # "Still down" ends only after DEBOUNCE_TICKS consecutive
+            # released samples — a mid-hold chatter flicker (1 tick)
+            # must not detach the press from its later echoes.
+            if raw:
+                self._held_up_ticks = 0
+            else:
+                self._held_up_ticks += 1
+                if self._held_up_ticks >= self.DEBOUNCE_TICKS:
+                    self._start_press_held = False
         if raw == self._raw_last:
             if self._raw_stable < self.DEBOUNCE_TICKS:
                 self._raw_stable += 1
@@ -360,6 +420,20 @@ class Launcher:
         if pressed:
             if not self._was_pressed:
                 self._was_pressed = True
+                if self._start_press_held:
+                    # Delayed level confirmation of the press whose
+                    # START the counter already dispatched. The program
+                    # is usually running by now (the idle loop drains
+                    # within a tick), so without this it reads as a
+                    # mid-run stop press and kills the newborn run at
+                    # ~55 ms — the 1.15.4 bench ring: start-latch,
+                    # then press-down('running') + stop-fire one tick
+                    # later.
+                    self._start_press_held = False
+                    self._press_stopped = False
+                    self._press_consume_release = True
+                    _event("press-down", "start-press-consumed")
+                    return
                 _event("press-down", "running" if self._running else "idle")
                 if self._running:
                     self._press_stopped = True
@@ -395,9 +469,13 @@ class Launcher:
             # Release of the press whose START the counter already
             # dispatched. Without this, a long-held start press whose
             # program is up by release time would hit the mid-hold
-            # branch below and STOP the run it started.
+            # branch below and STOP the run it started. Bounce follows
+            # THIS moment: the PCNT latch ignores its falling edges
+            # for RELEASE_CHATTER_MS.
             self._press_consume_release = False
             self._start_press_open_ms = None
+            self._latch_ignore_until_ms = (
+                _now_ms() + self.RELEASE_CHATTER_MS)
             _event("release", "start-consumed")
             return
         if self._running:

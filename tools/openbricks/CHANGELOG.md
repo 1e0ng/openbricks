@@ -3,6 +3,31 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.15.5 — the start press's whole lifecycle is consumed
+
+1.15.4's press-DOWN starts left the finger on the button while the
+program came up, and the bench event ring caught the same physical
+press echoing into the run through both detectors:
+
+* its debounced level confirmation arrived one tick later with the
+  run already up and read as a mid-run stop press — the newborn run
+  died at ~55 ms (start-latch, then press-down('running') +
+  stop-fire, three times in one capture);
+* a long-held press's release chatter edges would land past the
+  400 ms grace window and fire latch-stops — the original "starts
+  on press, stops on release" bug, back for long holds.
+
+A counter-dispatched press is now tracked while physically down
+(a mid-hold flicker can't detach it; DEBOUNCE_TICKS of released
+samples end it): its level confirmation is consumed (ring:
+`press-down start-press-consumed`), its release chatter is ignored
+by the PCNT latch for 200 ms after the consumed release — including
+back at idle after a short run the press outlived, where the
+chatter used to dispatch a phantom restart. Stops stay covered
+throughout by the debounced level path: a new press necessarily
+begins after a confirmed release, which ends every one of these
+windows.
+
 ## 1.15.4 — no tap too fast: counter-driven starts + verified idle restore
 
 The 1.15.3 debounce traded the chatter bug for a fast-tap bug: a
