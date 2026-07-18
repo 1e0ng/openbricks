@@ -31,7 +31,7 @@
 #include "servo.h"
 
 #define DUTY_MAX 1023               // 10-bit PWM (ESP32 default; matches L298N driver)
-#define DEFAULT_ACCEL ((mp_float_t)1000.0)  // deg/s^2 if run_target omits accel
+#define DEFAULT_ACCEL ((mp_float_t)720.0)  // deg/s^2 if run_target omits accel
 
 extern const mp_obj_type_t openbricks_servo_type;
 

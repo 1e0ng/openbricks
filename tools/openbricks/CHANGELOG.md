@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.16.0 — default acceleration retuned 1000 → 720 deg/s²
+
+Back to the original pre-1.13.0 value after bench driving at 1000.
+The default only shapes the launch/brake ramps — it never caps top
+speed: the profile commands min(cruise, accel·t, √(2·accel·remaining)),
+so cruise still comes from ``straight_speed`` / ``turn_rate`` alone.
+(Physics footnote: a move shorter than ~v²/accel ends before the ramp
+reaches cruise; at 720 with the 200 dps default that's ~28 mm.)
+All six value homes move together (Python fallback, native C
+drivebase + servo, both encoder-motor drivers, simulator), pinned by
+the drift-guard tests.
+
 ## 1.15.5 — the start press's whole lifecycle is consumed
 
 1.15.4's press-DOWN starts left the finger on the button while the
