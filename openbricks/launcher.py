@@ -103,6 +103,9 @@ class Launcher:
         self._tick_gap_max   = 0           # worst inter-tick gap seen
         self._press_pcnt     = None        # hardware falling-edge counter
         self._press_count_seen = 0         # counter value already consumed
+        self._raw_last       = False       # last raw sample (debounce)
+        self._raw_stable     = 0           # consecutive equal samples
+        self._run_started_ms = None        # when _running went True
         self._pending        = None        # None | "start" | "stop"
         # Timers stay alive for hub uptime — we never ``.deinit()`` them.
         # Keeping the references here stops GC from collecting them.
@@ -148,10 +151,11 @@ class Launcher:
     # as a fallback for presses whose release was never observed. The
     # original 750 ms from stop-FIRE swallowed deliberate quick
     # restarts ("start press not detected" bench report); 400 ms from
-    # release still swallows bounce and finger re-contact (the
-    # regression test pins re-contact at release+200 ms dispatching
-    # at +300 ms) with margin.
-    START_LOCKOUT_MS = 400
+    # release still swallows bounce and finger re-contact with
+    # margin. 500 (was 400): the 1.15.3 debounce delays a re-contact
+    # press's DISPATCH by up to two polls, so the window covers
+    # re-contact at release+200 ms dispatching at ~release+400 ms.
+    START_LOCKOUT_MS = 500
 
     # While a stop is in flight but the program hasn't died yet, the
     # injection is re-requested at this cadence. The injected
@@ -163,6 +167,25 @@ class Launcher:
     # robot itself is already stopping either way: the e-stop latch
     # engaged at press-down, independent of injection delivery.
     STOP_RETRY_MS = 300
+
+    # Contact-chatter defences (1.15.3). Bench event-ring capture of
+    # "pressed start 4 times, only the 4th worked": the START press's
+    # release chatter re-closed the contact and KILLED the newborn
+    # run — once as a phantom press-down(running) 54 ms after start
+    # (level path), twice as PCNT falling edges 100-180 ms after
+    # start (hardware latch). Two defences, one per detector:
+    #
+    # * DEBOUNCE_TICKS — a level CHANGE must hold for this many
+    #   consecutive polls before it's believed. Chatter flickers are
+    #   ~10-20 ms; two 50 ms polls reject them while costing a real
+    #   press ~50 ms of latency.
+    # * RUN_START_GRACE_MS — for this long after a run starts, PCNT
+    #   edges are CONSUMED as the start press's own chatter instead
+    #   of fired as stops. A real second press physically can't
+    #   arrive that fast, and the debounced level path still covers
+    #   the window regardless.
+    DEBOUNCE_TICKS = 2
+    RUN_START_GRACE_MS = 400
 
     def _fire_stop(self):
         """Everything a stop press triggers, in order of importance:
@@ -247,11 +270,21 @@ class Launcher:
                 except Exception:
                     n = self._press_count_seen
                 if n != self._press_count_seen:
-                    self._press_count_seen = n
-                    self._press_stopped = True  # consume the release
-                    _event("latch-stop")
-                    _note("button press latched by hardware counter -> stop")
-                    self._fire_stop()
+                    in_grace = (
+                        self._run_started_ms is not None
+                        and _ticks_diff(_now_ms(), self._run_started_ms)
+                        < self.RUN_START_GRACE_MS)
+                    if in_grace:
+                        # The start press's own release chatter.
+                        _event("latch-grace-consumed",
+                               n - self._press_count_seen)
+                        self._press_count_seen = n
+                    else:
+                        self._press_count_seen = n
+                        self._press_stopped = True  # consume the release
+                        _event("latch-stop")
+                        _note("button press latched by hardware counter -> stop")
+                        self._fire_stop()
             if self._stop_retry_ms is not None and _ticks_diff(
                     _now_ms(), self._stop_retry_ms) >= self.STOP_RETRY_MS:
                 # A stop is in flight but the program is still alive —
@@ -267,7 +300,22 @@ class Launcher:
             # Consume idle-time presses (BLE-toggle fumbles, handling
             # bumps) so a stale count can't stop the NEXT run at birth.
             self._sync_press_counter()
-        pressed = self._btn.value() == 0
+        raw = self._btn.value() == 0
+        if raw == self._raw_last:
+            if self._raw_stable < self.DEBOUNCE_TICKS:
+                self._raw_stable += 1
+        else:
+            self._raw_stable = 1
+            self._raw_last = raw
+        if self._raw_stable >= self.DEBOUNCE_TICKS:
+            pressed = raw
+        else:
+            # Mid-flicker: hold the previous debounced state. A
+            # chatter blip spans one poll at most; a real press or
+            # release confirms on the next tick.
+            pressed = self._was_pressed
+            if raw != self._was_pressed:
+                _event("bounce-filtered", "press" if raw else "release")
         if pressed:
             if not self._was_pressed:
                 self._was_pressed = True
@@ -331,6 +379,7 @@ class Launcher:
             from openbricks import estop
             estop.clear()   # fresh run — stale latch must not kill it
             self._sync_press_counter()
+            self._run_started_ms = _now_ms()
             self._running = True
             try:
                 _exec_program(self._program_path, origin="button press")
@@ -571,6 +620,7 @@ def _scheduled_start(launcher_instance):
     from openbricks import estop
     estop.clear()
     launcher_instance._sync_press_counter()
+    launcher_instance._run_started_ms = _now_ms()
     launcher_instance._running = True
     try:
         _exec_program(launcher_instance._program_path,
@@ -777,6 +827,7 @@ def run_program(program_path=DEFAULT_PROGRAM_PATH):
     from openbricks import estop
     estop.clear()   # fresh run — a stale latch must not kill it at birth
     launcher._sync_press_counter()
+    launcher._run_started_ms = _now_ms()
     launcher._running = True
     try:
         _exec_program_raw(program_path, origin="remote (openbricks run)")

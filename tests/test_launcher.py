@@ -38,6 +38,15 @@ def _path_exists(p):
         return False
 
 
+def _tick_debounced(launcher_inst, ticks=None):
+    """Tick enough consecutive polls for the debounced level logic
+    to accept the current button state (1.15.3)."""
+    from openbricks.launcher import Launcher
+    for _ in range(ticks or Launcher.DEBOUNCE_TICKS):
+        launcher_inst._tick()
+        advance_ms(50)
+
+
 def _make_button(initial_value=1):
     """Fake Pin acting as an active-low button. Default 1 = released."""
     p = Pin(5, Pin.IN, Pin.PULL_UP)
@@ -47,19 +56,25 @@ def _make_button(initial_value=1):
 
 def _press(button, hold_ms, poll_ms=50, tick_fn=None):
     """Hold ``button`` for ``hold_ms``, then release. While held,
-    call ``tick_fn`` every ``poll_ms`` to mimic the Timer callback."""
+    call ``tick_fn`` every ``poll_ms`` to mimic the Timer callback.
+    Transitions tick DEBOUNCE_TICKS times so the debounced level
+    logic (1.15.3) accepts them, exactly as a real held press or
+    clean release would over consecutive polls."""
+    from openbricks.launcher import Launcher
     button._value = 0  # pressed (active-low)
     elapsed = 0
-    while elapsed < hold_ms:
+    ticks = 0
+    while elapsed < hold_ms or ticks < Launcher.DEBOUNCE_TICKS:
         if tick_fn is not None:
             tick_fn()
         advance_ms(poll_ms)
         elapsed += poll_ms
-    if tick_fn is not None:
-        tick_fn()
+        ticks += 1
     button._value = 1  # released
-    if tick_fn is not None:
-        tick_fn()
+    for _ in range(Launcher.DEBOUNCE_TICKS):
+        if tick_fn is not None:
+            tick_fn()
+        advance_ms(poll_ms)
 
 
 class PressClassificationTests(unittest.TestCase):
@@ -151,18 +166,18 @@ class StopRestartRegressionTests(unittest.TestCase):
     def test_stop_fires_on_press_down_not_release(self):
         self.launcher._running = True
         self.btn._value = 0          # pressed, not yet released
-        self.launcher._tick()
+        _tick_debounced(self.launcher)
         self.assertEqual(len(self.stops), 1,
                          "stop must fire the moment the press lands")
 
     def test_release_after_stop_does_not_start(self):
         self.launcher._running = True
         self.btn._value = 0
-        self.launcher._tick()        # stop fires; program unwinds...
+        _tick_debounced(self.launcher)        # stop fires; program unwinds...
         self.launcher._running = False
         advance_ms(100)
         self.btn._value = 1          # ...then the button is released
-        self.launcher._tick()
+        _tick_debounced(self.launcher)
         self.assertEqual(self.starts, [],
                          "the stop press's own release restarted the "
                          "program")
@@ -328,7 +343,7 @@ class StopRetryTests(unittest.TestCase):
     def test_stop_is_retried_while_program_survives(self):
         self.launcher._running = True
         self.btn._value = 0
-        self.launcher._tick()                 # press: first request
+        _tick_debounced(self.launcher)                 # press: first request
         self.assertEqual(len(self.stops), 1)
         self.btn._value = 1
         for _ in range(20):                   # program stays alive 1 s
@@ -343,9 +358,9 @@ class StopRetryTests(unittest.TestCase):
     def test_retries_cease_once_program_is_dead(self):
         self.launcher._running = True
         self.btn._value = 0
-        self.launcher._tick()
+        _tick_debounced(self.launcher)
         self.btn._value = 1
-        self.launcher._tick()
+        _tick_debounced(self.launcher)
         self.launcher._running = False        # program died
         n = len(self.stops)
         for _ in range(20):
@@ -358,7 +373,7 @@ class StopRetryTests(unittest.TestCase):
         from openbricks import estop
         self.launcher._running = True
         self.btn._value = 0
-        self.launcher._tick()
+        _tick_debounced(self.launcher)
         self.assertTrue(estop.is_engaged(),
                         "press-down must latch the e-stop immediately")
 
@@ -438,10 +453,13 @@ class EStopNoInjectionIntegrationTests(unittest.TestCase):
         self.launcher._pending = "start"
         self.launcher._drain_pending()
 
+        # i==3 presses; the debounce (1.15.3) confirms it on the
+        # NEXT tick, so the synchronous estop raise lands on i==4's
+        # motor command.
         self.assertEqual(
-            getattr(self.launcher, "_test_iterations", None), 3,
+            getattr(self.launcher, "_test_iterations", None), 4,
             "program must die on its first motor command after the "
-            "press — with zero interrupt deliveries")
+            "debounced press — with zero interrupt deliveries")
         self.assertFalse(self.launcher._running)
         self.assertFalse(
             estop.is_engaged(),
@@ -612,7 +630,7 @@ class ButtonPressLogEntryTests(unittest.TestCase):
         try:
             self.launcher._running = True
             self.btn._value = 0           # press-down
-            self.launcher._tick()
+            _tick_debounced(self.launcher)
         finally:
             log_mod.note = orig_note
             launcher._request_stop = orig_stop
@@ -634,7 +652,7 @@ class ButtonPressLogEntryTests(unittest.TestCase):
         try:
             self.launcher._running = True
             self.btn._value = 0
-            self.launcher._tick()        # must not raise
+            _tick_debounced(self.launcher)        # must not raise
         finally:
             log_mod.note = orig_note
             launcher._request_stop = orig_stop
@@ -731,7 +749,7 @@ class HardwarePressLatchTests(unittest.TestCase):
         self.launcher._tick()          # latch fires, stop in flight
         self.assertEqual(len(self.stops), 1)
         self.btn._value = 0            # still held
-        self.launcher._tick()
+        _tick_debounced(self.launcher)
         self.assertEqual(len(self.stops), 1)
         # Release of that press must not START anything (consumed).
         starts = []
@@ -740,7 +758,7 @@ class HardwarePressLatchTests(unittest.TestCase):
         try:
             self.launcher._running = False
             self.btn._value = 1
-            self.launcher._tick()
+            _tick_debounced(self.launcher)
         finally:
             launcher._request_start = orig_start
         self.assertEqual(starts, [])
@@ -768,10 +786,10 @@ class HardwarePressLatchTests(unittest.TestCase):
         # Press-down while idle, program starts remotely during the
         # hold, release -> the release is a stop request.
         self.btn._value = 0
-        self.launcher._tick()                 # press-down at idle
+        _tick_debounced(self.launcher)                 # press-down at idle
         self.launcher._running = True         # remote start mid-hold
         self.btn._value = 1
-        self.launcher._tick()                 # release
+        _tick_debounced(self.launcher)                 # release
         self.assertEqual(len(self.stops), 1)
         self.assertTrue(
             any(n == "button pressed -> stop" for n in self.notes),
@@ -781,14 +799,14 @@ class HardwarePressLatchTests(unittest.TestCase):
         self.launcher._running = True
         self.pcnt.raise_on_value = RuntimeError("pcnt wedged")
         self.btn._value = 0            # real press, level path
-        self.launcher._tick()          # must not raise
+        _tick_debounced(self.launcher)          # must not raise
         self.assertEqual(len(self.stops), 1)
 
     def test_no_counter_level_path_unchanged(self):
         self.launcher._press_pcnt = None
         self.launcher._running = True
         self.btn._value = 0
-        self.launcher._tick()
+        _tick_debounced(self.launcher)
         self.assertEqual(len(self.stops), 1)
 
 
@@ -855,6 +873,116 @@ class PressCounterInstallTests(unittest.TestCase):
         self.assertIsNone(pcnt)
         self.assertTrue(
             any("press latch unavailable" in s for s in printed), printed)
+
+
+class ChatterRegressionTests(unittest.TestCase):
+    """Contact-chatter defences (1.15.3), pinned against the bench
+    event-ring capture: the start press's release chatter killed the
+    newborn run three ways in one session — a phantom
+    press-down(running) 54 ms after start, and PCNT latch stops 100
+    and 180 ms after start."""
+
+    def setUp(self):
+        from openbricks import estop
+        estop.clear()
+        self.addCleanup(estop.clear)
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+        self.starts = []
+        self.stops = []
+        self._orig_start = launcher._request_start
+        self._orig_stop = launcher._request_stop
+        launcher._request_start = lambda inst: self.starts.append(inst)
+        launcher._request_stop = lambda inst: self.stops.append(inst)
+        self.addCleanup(
+            setattr, launcher, "_request_start", self._orig_start)
+        self.addCleanup(
+            setattr, launcher, "_request_stop", self._orig_stop)
+
+    def test_one_tick_release_flicker_does_not_dispatch_start(self):
+        # Press-down chatter: contact opens for a single poll mid-
+        # hold. The old code read it as a release and STARTED the
+        # program while the finger was still down.
+        self.btn._value = 0
+        _tick_debounced(self.launcher)      # press established
+        self.btn._value = 1                 # 1-tick flicker
+        self.launcher._tick()
+        advance_ms(50)
+        self.btn._value = 0                 # contact restored
+        _tick_debounced(self.launcher)
+        self.assertEqual(self.starts, [],
+                         "a one-poll flicker dispatched a start")
+
+    def test_one_tick_press_flicker_while_running_does_not_stop(self):
+        # Release chatter, level flavour (the 54 ms press-down
+        # (running) from the capture): a single-poll re-close while
+        # the program runs must not fire a stop.
+        self.launcher._running = True
+        self.btn._value = 0                 # 1-tick chatter re-close
+        self.launcher._tick()
+        advance_ms(50)
+        self.btn._value = 1
+        _tick_debounced(self.launcher)
+        self.assertEqual(self.stops, [],
+                         "one-poll chatter while running fired a stop")
+
+    def _with_counter(self):
+        pcnt = _FakePressCounter()
+        self.launcher._press_pcnt = pcnt
+        self.launcher._sync_press_counter()
+        return pcnt
+
+    def test_latch_edges_in_start_grace_are_consumed(self):
+        # Release chatter, PCNT flavour (the 100/180 ms latch-stops
+        # from the capture): falling edges landing just after the
+        # run starts are the start press's own chatter.
+        pcnt = self._with_counter()
+        self.launcher._run_started_ms = launcher._now_ms()
+        self.launcher._running = True
+        pcnt.count += 2                     # chatter edges
+        self.launcher._tick()
+        self.assertEqual(self.stops, [],
+                         "latch fired on start-press chatter")
+        # Consumed: the same edges never fire later either.
+        advance_ms(launcher.Launcher.RUN_START_GRACE_MS + 100)
+        self.launcher._tick()
+        self.assertEqual(self.stops, [])
+
+    def test_latch_edge_after_grace_still_stops(self):
+        pcnt = self._with_counter()
+        self.launcher._run_started_ms = launcher._now_ms()
+        self.launcher._running = True
+        advance_ms(launcher.Launcher.RUN_START_GRACE_MS + 100)
+        pcnt.count += 1                     # a real press edge
+        self.launcher._tick()
+        self.assertEqual(len(self.stops), 1,
+                         "post-grace latch press must stop")
+
+    def test_real_stop_press_during_grace_stops_via_level_path(self):
+        # The grace window must not create a stop-dead zone: a held
+        # (debounce-confirmed) press right after start still stops
+        # through the level path.
+        self._with_counter()
+        self.launcher._run_started_ms = launcher._now_ms()
+        self.launcher._running = True
+        self.btn._value = 0
+        _tick_debounced(self.launcher)
+        self.assertEqual(len(self.stops), 1,
+                         "grace window swallowed a real stop press")
+
+    def test_flicker_leaves_bounce_filtered_event(self):
+        del launcher._EVENTS[:]
+        launcher._EVENTS_NEXT[0] = 0
+        self.btn._value = 0
+        _tick_debounced(self.launcher)
+        self.btn._value = 1                 # 1-tick flicker
+        self.launcher._tick()
+        advance_ms(50)
+        self.btn._value = 0
+        _tick_debounced(self.launcher)
+        tags = [e[1] for e in launcher._EVENTS]
+        self.assertIn("bounce-filtered", tags)
 
 
 class TickStarvationTests(unittest.TestCase):
