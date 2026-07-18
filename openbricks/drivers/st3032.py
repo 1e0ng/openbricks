@@ -13,9 +13,10 @@ ST-3032-C062, Edition A/0 2025-11-30). Headline specs at typical
 
     Working voltage      9–14 V (typ 12 V)        ST-3215 typ 6–12.6 V
     No-load speed        0.067 s/60° = 148 RPM = 888 °/s
-                         (driver default ``max_dps=600`` is below
-                         this — instantiate with ``max_dps=900`` if
-                         you want to chase no-load top speed)
+                         (``ST3032Motor`` defaults ``max_dps`` to
+                         this — the ST-3215's protective 600 default
+                         capped the wire command well below what the
+                         servo can do)
     Stall torque         10 kg·cm (139 oz·in)     ST-3215 ~30 kg·cm
     Stall current        1.6 A
     Rated torque         3.3 kg·cm (1/3 of stall)
@@ -46,7 +47,18 @@ addressed by its 1-byte ID regardless of model.
 6 V bus with ST-3215s; budget a separate 12 V rail.
 """
 
-from openbricks.drivers.st3215 import ST3215, ST3215Motor
+from openbricks.drivers.st3215 import (
+    ST3215,
+    ST3215Motor,
+    _DEFAULT_STEPS_PER_DPS,
+)
+
+# Datasheet no-load speed at typical 12 V: 0.067 s/60° = 888 °/s.
+# Used as ``ST3032Motor``'s ``max_dps`` default so the driver-side
+# clamp sits AT the servo's ceiling instead of 288 °/s under it —
+# ``max_dps`` is a wire-command clamp, and the inherited ST-3215
+# default (600) silently capped top speed on the bench.
+ST3032_NO_LOAD_DPS = 888.0
 
 
 class ST3032(ST3215):
@@ -62,6 +74,18 @@ class ST3032Motor(ST3215Motor):
     """One ST-3032 in wheel/continuous-rotation mode (Motor interface).
 
     Behaves identically to ``ST3215Motor`` — see that class for
-    ``run_speed`` / ``angle`` / ``run_angle`` semantics. Subclassed
-    only to let user code spell the actual hardware in place.
+    ``run_speed`` / ``angle`` / ``run_angle`` semantics — except for
+    ONE specialised default: ``max_dps`` matches the ST-3032's
+    datasheet no-load speed (888 °/s) instead of the ST-3215's 600,
+    so the driver clamp can't cap the servo below its own spec.
     """
+
+    def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
+                 baud=1_000_000, dir_pin=None,
+                 invert=False,
+                 steps_per_dps=_DEFAULT_STEPS_PER_DPS,
+                 max_dps=ST3032_NO_LOAD_DPS):
+        super().__init__(
+            servo_id, uart_id=uart_id, tx=tx, rx=rx, baud=baud,
+            dir_pin=dir_pin, invert=invert,
+            steps_per_dps=steps_per_dps, max_dps=max_dps)
