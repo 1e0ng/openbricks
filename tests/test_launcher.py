@@ -875,6 +875,151 @@ class PressCounterInstallTests(unittest.TestCase):
             any("press latch unavailable" in s for s in printed), printed)
 
 
+class CounterStartTests(unittest.TestCase):
+    """Counter-driven START (1.15.4): at idle the PCNT edge count is
+    the start trigger, so no tap is too fast for the 50 ms level
+    sampling (bench: fast taps were coin flips after the 1.15.3
+    debounce; the crispest ones left an EMPTY event ring)."""
+
+    def setUp(self):
+        from openbricks import estop
+        estop.clear()
+        self.addCleanup(estop.clear)
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+        self.pcnt = _FakePressCounter()
+        self.launcher._press_pcnt = self.pcnt
+        self.launcher._sync_press_counter()
+        self.starts = []
+        self.stops = []
+        self._orig_start = launcher._request_start
+        self._orig_stop = launcher._request_stop
+        launcher._request_start = lambda inst: self.starts.append(inst)
+        launcher._request_stop = lambda inst: self.stops.append(inst)
+        self.addCleanup(
+            setattr, launcher, "_request_start", self._orig_start)
+        self.addCleanup(
+            setattr, launcher, "_request_stop", self._orig_stop)
+
+    def test_fast_tap_starts_without_any_level_change(self):
+        # The tap fell entirely between level polls: only the counter
+        # knows. One tick must dispatch the start.
+        self.pcnt.count += 1
+        self.launcher._tick()
+        self.assertEqual(len(self.starts), 1)
+
+    def test_tap_chatter_cluster_dispatches_once(self):
+        self.pcnt.count += 3           # press + chatter edges, one tick
+        self.launcher._tick()
+        advance_ms(50)
+        self.pcnt.count += 1           # late chatter, next tick
+        self.launcher._tick()
+        self.assertEqual(len(self.starts), 1,
+                         "chatter cluster must be one start")
+
+    def test_long_press_starts_once_and_release_is_consumed(self):
+        # Counter dispatches at press-down; the level path then sees
+        # the held press; the program comes up mid-hold; the release
+        # must neither re-dispatch nor read as a mid-hold stop.
+        self.pcnt.count += 1
+        self.btn._value = 0
+        _tick_debounced(self.launcher)     # counter start + level press
+        self.assertEqual(len(self.starts), 1)
+        self.launcher._running = True      # program came up mid-hold
+        self.btn._value = 1
+        _tick_debounced(self.launcher)     # release
+        self.assertEqual(len(self.starts), 1)
+        self.assertEqual(self.stops, [],
+                         "the start press's release stopped the run "
+                         "it started")
+
+    def test_counter_start_respects_lockout(self):
+        self.launcher._lockout_until_ms = (
+            launcher._now_ms() + launcher.Launcher.START_LOCKOUT_MS)
+        self.pcnt.count += 1
+        self.launcher._tick()
+        self.assertEqual(self.starts, [],
+                         "lockout must swallow counter starts")
+        # And the edge is consumed — it can't fire after the lockout.
+        self.launcher._lockout_until_ms = None
+        advance_ms(1000)
+        self.launcher._tick()
+        self.assertEqual(self.starts, [])
+
+    def test_open_window_expires_and_next_tap_starts(self):
+        self.pcnt.count += 1
+        self.launcher._tick()
+        self.assertEqual(len(self.starts), 1)
+        advance_ms(launcher.Launcher.START_PRESS_OPEN_MS + 100)
+        self.launcher._tick()              # window expires
+        self.pcnt.count += 1               # a genuinely new tap
+        self.launcher._tick()
+        self.assertEqual(len(self.starts), 2)
+
+    def test_no_counter_falls_back_to_level_release_dispatch(self):
+        self.launcher._press_pcnt = None
+        _press(self.btn, hold_ms=150, tick_fn=self.launcher._tick)
+        self.assertEqual(len(self.starts), 1)
+
+    def test_dispatch_branch_is_recorded(self):
+        del launcher._EVENTS[:]
+        launcher._EVENTS_NEXT[0] = 0
+        self.pcnt.count += 1
+        self.launcher._tick()
+        tags = [e[1] for e in launcher._EVENTS]
+        self.assertIn("start-latch", tags)
+
+    def test_counter_read_failure_is_survived_and_recovers(self):
+        # A PCNT read can raise (unit deinit race at soft-reset). The
+        # tick must neither crash nor phantom-start; once the counter
+        # answers again, a new edge still dispatches.
+        real_value = self.pcnt.value
+        state = {"broken": True}
+
+        def _maybe_boom():
+            if state["broken"]:
+                raise OSError("pcnt gone")
+            return real_value()
+        self.pcnt.value = _maybe_boom
+        self.launcher._tick()
+        self.assertEqual(self.starts, [])
+        state["broken"] = False
+        self.pcnt.count += 1
+        self.launcher._tick()
+        self.assertEqual(len(self.starts), 1)
+
+    def test_schedule_full_dispatch_records_event_and_pends(self):
+        # Degraded path with the 8-deep scheduler queue full:
+        # micropython.schedule raises RuntimeError. The dispatch must
+        # fall back to the pending flag AND leave a ring fingerprint
+        # (the flag is a void when the idle loop is dead — the ring
+        # is the only witness).
+        import sys as _sys
+
+        class _FullScheduler:
+            @staticmethod
+            def schedule(fn, arg):
+                raise RuntimeError("schedule queue full")
+
+        had = "micropython" in _sys.modules
+        orig = _sys.modules.get("micropython")
+        _sys.modules["micropython"] = _FullScheduler
+        try:
+            del launcher._EVENTS[:]
+            launcher._EVENTS_NEXT[0] = 0
+            self.launcher._pending = None
+            self._orig_start(self.launcher)  # real _request_start
+        finally:
+            if had:
+                _sys.modules["micropython"] = orig
+            else:
+                del _sys.modules["micropython"]
+        self.assertEqual(self.launcher._pending, "start")
+        details = [(e[1],) + tuple(e[2]) for e in launcher._EVENTS]
+        self.assertIn(("start-dispatch", "schedule-full"), details)
+
+
 class ChatterRegressionTests(unittest.TestCase):
     """Contact-chatter defences (1.15.3), pinned against the bench
     event-ring capture: the start press's release chatter killed the

@@ -3,6 +3,29 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.15.4 — no tap too fast: counter-driven starts + verified idle restore
+
+The 1.15.3 debounce traded the chatter bug for a fast-tap bug: a
+press had to span two 50 ms polls to be believed, so crisp taps
+were coin flips and the crispest fell between polls entirely
+(bench: "press too fast → doesn't start", with an empty event
+ring). Fixes on both ends of the pipeline:
+
+* Firmware: at idle, the PCNT hardware edge counter — which sees
+  every tap in silicon — is now the START trigger. Starts fire at
+  press-DOWN (faster than the old release dispatch), no tap is too
+  fast, chatter clusters dispatch once, the post-stop lockout still
+  applies, and the start press's own release is consumed even when
+  the program is already running by then. The level path demotes to
+  state tracking (and remains the fallback where PCNT is
+  unavailable). Every `_request_start` branch now records a ring
+  event — a dead press can never again vanish without a fingerprint.
+* CLI: the post-session idle-loop restore is verified instead of
+  fire-and-forget — the tools wait for the hub's "Press button to
+  run" banner and retry up to 3×; a restore lost in the disconnect
+  race used to park the hub with a dead idle loop and silently dead
+  button starts until a power-cycle.
+
 ## 1.15.3 — start-press chatter no longer kills the newborn run
 
 Bench event-ring capture of "pressed start 4 times, only the 4th

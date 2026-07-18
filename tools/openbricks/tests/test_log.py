@@ -296,5 +296,20 @@ class LogInterruptAndRendererFlushTests(unittest.TestCase):
         self.assertEqual(sink.flushes, 1)
 
 
+def setUpModule():
+    # The verified idle-restore waits real seconds for the hub banner;
+    # against scripted silent links that's pure sleep. Shrink for the
+    # whole module, restore after.
+    import openbricks_dev.run as _rm
+    global _ORIG_RESTORE_WAIT
+    _ORIG_RESTORE_WAIT = _rm._RESTORE_WAIT_S
+    _rm._RESTORE_WAIT_S = 0.02
+
+
+def tearDownModule():
+    import openbricks_dev.run as _rm
+    _rm._RESTORE_WAIT_S = _ORIG_RESTORE_WAIT
+
+
 if __name__ == "__main__":
     unittest.main()
