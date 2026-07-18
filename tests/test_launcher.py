@@ -1020,6 +1020,230 @@ class CounterStartTests(unittest.TestCase):
         self.assertIn(("start-dispatch", "schedule-full"), details)
 
 
+class StartPressLifecycleTests(unittest.TestCase):
+    """1.15.5: the start press's WHOLE lifecycle is consumed.
+
+    Counter-driven starts (1.15.4) dispatch at press-DOWN, so the
+    finger is still on the button when the program comes up ~1 tick
+    later. The bench ring showed the same physical press then echoing
+    into the run through both detectors: its debounced level
+    confirmation arrived with the run already up and fired a stop
+    (start-latch → press-down('running') + stop-fire 54 ms later,
+    three times in one capture), and a long-held press's release
+    chatter would land past RUN_START_GRACE_MS as latch-stops.
+    """
+
+    def setUp(self):
+        from openbricks import estop
+        estop.clear()
+        self.addCleanup(estop.clear)
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+        self.pcnt = _FakePressCounter()
+        self.launcher._press_pcnt = self.pcnt
+        self.launcher._sync_press_counter()
+        self.starts = []
+        self.stops = []
+        self._orig_start = launcher._request_start
+        self._orig_stop = launcher._request_stop
+        launcher._request_start = lambda inst: self.starts.append(inst)
+        launcher._request_stop = lambda inst: self.stops.append(inst)
+        self.addCleanup(
+            setattr, launcher, "_request_start", self._orig_start)
+        self.addCleanup(
+            setattr, launcher, "_request_stop", self._orig_stop)
+
+    # -- helpers ---------------------------------------------------
+
+    def _counter_press_down(self):
+        """The physical press lands: PCNT counts the falling edge and
+        the raw level goes low, both before the next tick."""
+        self.pcnt.count += 1
+        self.btn._value = 0
+
+    def _program_comes_up(self):
+        """The idle loop drained the pending start — program running.
+        Mirrors _drain_pending: counter re-synced at run start."""
+        self.launcher._sync_press_counter()
+        self.launcher._running = True
+        self.launcher._run_started_ms = launcher._now_ms()
+
+    def _tick(self, n=1):
+        for _ in range(n):
+            self.launcher._tick()
+            advance_ms(50)
+
+    # -- the bench regression --------------------------------------
+
+    def test_normal_press_level_confirmation_does_not_stop_newborn_run(self):
+        # The exact ring sequence: start-latch at tick N, program up
+        # before tick N+1, level confirms the SAME press at N+1 with
+        # _running already True. 1.15.4 fired a stop here.
+        self._counter_press_down()
+        self._tick()                       # start-latch + dispatch
+        self.assertEqual(len(self.starts), 1)
+        self._program_comes_up()
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)  # level confirms
+        self.assertEqual(self.stops, [],
+                         "start press's own confirmation stopped the "
+                         "newborn run (the 1.15.4 bench bug)")
+        self.assertTrue(self.launcher._running)
+
+    def test_consumed_confirmation_is_ring_visible(self):
+        del launcher._EVENTS[:]
+        launcher._EVENTS_NEXT[0] = 0
+        self._counter_press_down()
+        self._tick()
+        self._program_comes_up()
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        details = [(e[1],) + tuple(e[2]) for e in launcher._EVENTS]
+        self.assertIn(("press-down", "start-press-consumed"), details)
+
+    def test_normal_press_full_cycle_run_survives_release(self):
+        # Down (~150 ms), program up, confirm, release: the run must
+        # survive the whole press lifecycle.
+        self._counter_press_down()
+        self._tick()
+        self._program_comes_up()
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        self.btn._value = 1                # release
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS + 1)
+        self.assertEqual(self.stops, [])
+        self.assertEqual(len(self.starts), 1)
+
+    # -- long holds ------------------------------------------------
+
+    def test_long_hold_release_chatter_past_grace_does_not_stop(self):
+        # Held past RUN_START_GRACE_MS: release chatter edges land
+        # with the grace window closed. Without the same-press check
+        # they fired latch-stops — the original "starts on press,
+        # stops on release" bug, back for long holds.
+        self._counter_press_down()
+        self._tick()
+        self._program_comes_up()
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)   # confirm consumed
+        held_ticks = (launcher.Launcher.RUN_START_GRACE_MS // 50) + 4
+        self._tick(held_ticks)             # hold well past the grace
+        self.btn._value = 1                # release...
+        self.pcnt.count += 1               # ...with a chatter edge
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        self.assertEqual(self.stops, [],
+                         "long-held start press's release chatter "
+                         "latch-stopped the run")
+        self.assertTrue(self.launcher._running)
+
+    def test_chatter_shortly_after_release_is_consumed(self):
+        # Bounce is release-adjacent: an edge INSIDE RELEASE_CHATTER_MS
+        # of the consumed release is the same press's chatter.
+        self._counter_press_down()
+        self._tick()
+        self._program_comes_up()
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        self._tick((launcher.Launcher.RUN_START_GRACE_MS // 50) + 4)
+        self.btn._value = 1
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)   # release consumed
+        self.pcnt.count += 1               # chatter, 50 ms later
+        self._tick()
+        self.assertEqual(self.stops, [])
+
+    def test_edge_after_chatter_window_stops_the_run(self):
+        # The flip side — stop capability must return the moment the
+        # chatter window closes: a NEW press's edge latch-stops.
+        self._counter_press_down()
+        self._tick()
+        self._program_comes_up()
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        self._tick((launcher.Launcher.RUN_START_GRACE_MS // 50) + 4)
+        self.btn._value = 1
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)   # release consumed
+        advance_ms(launcher.Launcher.RELEASE_CHATTER_MS + 50)
+        self.pcnt.count += 1               # genuine second press
+        self._tick()
+        self.assertTrue(self.launcher._press_stopped,
+                        "second press after the chatter window must "
+                        "latch-stop")
+
+    # -- chatter robustness ----------------------------------------
+
+    def test_mid_hold_flicker_does_not_detach_the_press(self):
+        # A 1-tick raw-high flicker during the hold must not clear
+        # the held flag: the confirmation that follows is still the
+        # start press, not a stop.
+        self._counter_press_down()
+        self._tick()                       # dispatch, raw low
+        self._program_comes_up()
+        self.btn._value = 1                # chatter flicker...
+        self._tick()
+        self.btn._value = 0                # ...contact restored
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        self.assertEqual(self.stops, [],
+                         "flicker detached the start press; its "
+                         "confirmation stopped the run")
+
+    # -- fast taps keep working ------------------------------------
+
+    def test_fast_tap_then_genuine_stop_press_stops(self):
+        # A fast tap never confirms on the level path; the held flag
+        # must clear via raw-high ticks so the NEXT press (a stop)
+        # is not consumed. Pins the no-dead-zone property.
+        self.pcnt.count += 1               # tap between polls
+        self._tick()                       # dispatch (raw high already)
+        self.assertEqual(len(self.starts), 1)
+        self._program_comes_up()
+        self._tick(2)                      # raw high: flag clears
+        self.btn._value = 0                # genuine stop press
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        self.assertTrue(self.launcher._press_stopped,
+                        "stop press after a fast-tap start was "
+                        "consumed — dead zone")
+
+    def test_fast_tap_stop_within_grace_via_level_path(self):
+        # Part 10's pinned property, re-pinned on the new machinery:
+        # inside RUN_START_GRACE_MS the PCNT latch is off but the
+        # debounced LEVEL path must still deliver a stop.
+        self.pcnt.count += 1
+        self._tick()
+        self._program_comes_up()
+        self._tick(2)                      # flag clears (raw high)
+        self.btn._value = 0                # stop press at ~150 ms
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        self.assertTrue(self.launcher._press_stopped,
+                        "no way to stop inside the grace window")
+
+    # -- press held through a whole short run ----------------------
+
+    def test_hold_through_short_run_no_phantom_restart(self):
+        # The program exits on its own while the start press is still
+        # down. Its release (chatter included) lands back at IDLE and
+        # must not dispatch a phantom second start.
+        self._counter_press_down()
+        self._tick()
+        self._program_comes_up()
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)   # confirm consumed
+        self.launcher._running = False     # program finished (held!)
+        self.launcher._run_started_ms = None
+        self._tick(2)
+        self.btn._value = 1                # release at idle...
+        self.pcnt.count += 1               # ...with a chatter edge
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)
+        self.assertEqual(len(self.starts), 1,
+                         "release chatter after a hold-through run "
+                         "dispatched a phantom start")
+
+    def test_confirmation_before_program_up_is_also_consumed(self):
+        # Slow idle loop: the level confirmation lands while still
+        # IDLE (pending not yet drained). It must consume, not
+        # double-dispatch, and the release must not re-dispatch.
+        self._counter_press_down()
+        self._tick()                       # dispatch
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)   # confirm at idle
+        self.btn._value = 1
+        self._tick(launcher.Launcher.DEBOUNCE_TICKS)   # release
+        self.assertEqual(len(self.starts), 1)
+        self.assertEqual(self.stops, [])
+
+
 class ChatterRegressionTests(unittest.TestCase):
     """Contact-chatter defences (1.15.3), pinned against the bench
     event-ring capture: the start press's release chatter killed the
