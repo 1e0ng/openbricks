@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.16.1 — ST-3032 no longer speed-capped at 600 °/s by the driver
+
+"Top speed is capped" on the bench, and it was: ``ST3032Motor``
+inherited the ST-3215's protective ``max_dps=600`` default, and the
+driver clamps every goal-speed write to it — 288 °/s below the
+ST-3032's own datasheet no-load speed (888 °/s at 12 V). The
+subclass now defaults ``max_dps`` to 888, so speed requests up to
+spec reach the wire; an explicit ``max_dps=...`` still wins, and the
+ST-3215's default is unchanged. (Under load the servo tops out
+around 2/3 of no-load — that part is physics, not the driver.)
+
 ## 1.16.0 — default acceleration retuned 1000 → 720 deg/s²
 
 Back to the original pre-1.13.0 value after bench driving at 1000.
