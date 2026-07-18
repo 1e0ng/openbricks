@@ -82,7 +82,7 @@ right_sensor = TCS34725(mux[0], gain=16, integration_ms=2.4)
 # Below this ambient (0..100) the surface counts as the line. Used
 # for the INTERSECTION stop and for branch detection — the steering
 # itself runs on the gradient above this threshold.
-LINE_AMBIENT = 20
+LINE_AMBIENT = 12
 
 CRUISE_DPS = 200   # wheel speed when perfectly centred
 
