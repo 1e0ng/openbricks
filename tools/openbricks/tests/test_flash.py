@@ -91,13 +91,23 @@ class DetectChipTests(unittest.TestCase):
             got = flash._detect_chip(binary, "/dev/x")
         return got, run.call_args[0][0]
 
-    def test_parses_esp32s3(self):
-        got, cmd = self._detect("Detecting chip type... Chip is ESP32-S3 (QFN56)")
+    def test_parses_esptool_v5_column_format(self):
+        # REAL v5.3.1 output (bench-verified): column-padded
+        # "Chip type:" — the 1.22.0 parser only knew v4's "Chip is"
+        # and silently failed on every v5 install.
+        got, cmd = self._detect(
+            "esptool v5.3.1\nConnecting...\n"
+            "Chip type:          ESP32-S3 (QFN56) (revision v0.2)\n")
         self.assertEqual(got, "esp32s3")
         self.assertIn("chip-id", cmd)
 
+    def test_parses_esptool_v4_chip_is_format(self):
+        got, _ = self._detect("Detecting chip type... Chip is ESP32-S3 (QFN56)")
+        self.assertEqual(got, "esp32s3")
+
     def test_parses_classic_esp32(self):
-        got, _ = self._detect("Chip is ESP32-D0WD-V3 (revision v3.1)")
+        got, _ = self._detect(
+            "Chip type:          ESP32-D0WD-V3 (revision v3.1)")
         # Variant suffixes (D0WD, PICO...) are NOT chip families —
         # esptool --chip needs plain "esp32", not "esp32d0wd".
         self.assertEqual(got, "esp32")
@@ -105,6 +115,17 @@ class DetectChipTests(unittest.TestCase):
     def test_legacy_binary_uses_snake_case_command(self):
         _, cmd = self._detect("Chip is ESP32", binary="/usr/bin/esptool.py")
         self.assertIn("chip_id", cmd)
+
+    def test_unparseable_output_warns_with_last_line(self):
+        import io, sys
+        err = io.StringIO()
+        orig, sys.stderr = sys.stderr, err
+        try:
+            got, _ = self._detect("A fatal error occurred: no sync")
+        finally:
+            sys.stderr = orig
+        self.assertIsNone(got)
+        self.assertIn("no sync", err.getvalue())
 
     def test_unparseable_output_returns_none(self):
         got, _ = self._detect("garbage")
@@ -366,7 +387,8 @@ class ChipMismatchGuardTests(unittest.TestCase):
     def test_mismatch_dies_before_erase(self):
         calls = []
         fake_probe = subprocess.CompletedProcess(
-            [], 0, stdout="Chip is ESP32-D0WD", stderr="")
+            [], 0, stdout="Chip type:          ESP32-D0WD (revision v3.1)",
+            stderr="")
 
         def fake_call(cmd):
             calls.append(cmd)

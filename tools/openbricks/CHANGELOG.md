@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.22.1 — chip probe fixed for esptool v5
+
+1.22.0's chip identification silently failed on every esptool v5
+install (bench: "could not identify the connected chip"): v5 prints
+a column-padded ``Chip type:          ESP32-S3`` where v4 printed
+``Chip is ESP32-S3``, and the parser only knew the v4 phrasing. Both
+formats parse now, the test fakes carry the REAL v5.3.1 output, and
+an unparseable probe includes esptool's last output line in the
+warning so the next format change diagnoses itself.
+
 ## 1.22.0 — `openbricks flash` with no arguments but the name
 
 ``--port`` and ``--firmware`` are now optional:
