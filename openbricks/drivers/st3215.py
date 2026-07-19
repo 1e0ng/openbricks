@@ -403,9 +403,10 @@ class ST3215Motor(Motor):
         # default as the DriveBase profile instead of stepping
         # instantly. ``accel_dps2=0`` disables the ramp (register 0 =
         # unlimited, the servo's power-on default). The ramp governs
-        # MOTION commands only: ``brake()`` bypasses it (see there),
-        # ``coast()`` and the e-stop cut the torque register, which
-        # the ramp does not govern — all three stop instantly.
+        # every commanded speed transition, ``brake()`` included
+        # (uniform-rule revert of 1.18.1); ``coast()`` and the e-stop
+        # cut the torque register, which the ramp does not govern —
+        # those two stop instantly.
         self._bus.write(self._id, _REG_GOAL_ACC,
                         bytes([self._encode_goal_acc()]))
 
@@ -602,25 +603,21 @@ class ST3215Motor(Motor):
                         bytes([v & 0xFF, (v >> 8) & 0xFF]))
 
     def brake(self):
-        """Hold zero velocity (servo's internal loop actively brakes).
+        """Ramp to zero velocity and hold (servo's internal loop).
 
-        A stop, not a motion command — so it bypasses the goal-acc
-        ramp: with the ramp left on, "brake" would roll down at
-        ``accel_dps2`` (0.5+ s from cruise), inconsistent with the
-        encoder-motor drivers and Pybricks, whose ``brake()`` is
-        immediate. The ramp is disabled for the goal-speed write and
-        restored right after (the instant stop has already latched).
+        Deliberately RAMPED at ``accel_dps2`` like every other speed
+        change (user decision, reverting 1.18.1's instant bypass):
+        one uniform rule — the acceleration default governs all
+        commanded speed transitions, brake included. The SAFETY stop
+        is unaffected: the e-stop and ``coast()`` cut the torque
+        register, which the ramp does not govern, and remain instant.
+        A hard local stop without torque-off is ``accel_dps2=0`` at
+        construction.
         """
         self._abandon_pending()
         self._ensure_mode(_MODE_WHEEL)
         self._ensure_torque_on()
-        ramped = self._encode_goal_acc() != 0
-        if ramped:
-            self._bus.write(self._id, _REG_GOAL_ACC, bytes([0]))
         self._write_goal_speed_signed(0)
-        if ramped:
-            self._bus.write(self._id, _REG_GOAL_ACC,
-                            bytes([self._encode_goal_acc()]))
 
     def coast(self):
         """Disable torque — wheel free-wheels."""

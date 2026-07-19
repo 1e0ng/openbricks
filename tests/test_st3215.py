@@ -346,43 +346,31 @@ class TestGoalAccRamp(unittest.TestCase):
         accs = self._acc_writes(m._bus._uart._tx_log)
         self.assertEqual(accs[-1], (4, bytes([254])))
 
-    def test_brake_bypasses_the_ramp(self):
-        # brake() is a STOP, not a motion command: the goal-speed=0
-        # write must be bracketed by acc=0 (instant) and the ramp
-        # restored after — otherwise "brake" rolls down at accel_dps2,
-        # inconsistent with the encoder-motor drivers and Pybricks.
+    def test_brake_is_ramped_no_acc_bypass(self):
+        # Uniform rule (1.19.1, reverting 1.18.1): brake() is a speed
+        # transition like any other — the goal-acc ramp stays in
+        # force, no acc-register bracket around the zero-speed write.
         m = ST3215Motor(servo_id=6)
         m.run_speed(120)
         base = len(m._bus._uart._tx_log)
         m.brake()
         log = m._bus._uart._tx_log[base:]
-        accs = _writes_to(log, _REG_GOAL_ACC)
-        speeds = _writes_to(log, _REG_GOAL_SPEED)
-        self.assertEqual(accs, [(6, bytes([0])), (6, bytes([171]))])
-        self.assertEqual(speeds, [(6, bytes([0, 0]))])
-        # Order: acc-off BEFORE the zero-speed write, restore AFTER.
-        idx = [(_decode_write(p)[1], _decode_write(p)[2]) for p in log]
-        self.assertLess(idx.index((_REG_GOAL_ACC, bytes([0]))),
-                        idx.index((_REG_GOAL_SPEED, bytes([0, 0]))))
-        self.assertGreater(idx.index((_REG_GOAL_ACC, bytes([171]))),
-                           idx.index((_REG_GOAL_SPEED, bytes([0, 0]))))
+        self.assertEqual(_writes_to(log, _REG_GOAL_ACC), [])
+        self.assertEqual(_writes_to(log, _REG_GOAL_SPEED),
+                         [(6, bytes([0, 0]))])
 
-    def test_brake_with_ramp_disabled_adds_no_acc_writes(self):
-        m = ST3215Motor(servo_id=7, accel_dps2=0.0)
+    def test_estop_coast_path_is_a_torque_cut_not_a_speed_write(self):
+        # The safety stop must stay instant: coast() (the e-stop's
+        # per-motor action) cuts the torque register and never
+        # touches goal speed or goal acc — the ramp cannot slow it.
+        m = ST3215Motor(servo_id=7)
         m.run_speed(120)
         base = len(m._bus._uart._tx_log)
-        m.brake()
-        accs = _writes_to(m._bus._uart._tx_log[base:], _REG_GOAL_ACC)
-        self.assertEqual(accs, [])
-
-    def test_next_run_speed_after_brake_is_ramped_again(self):
-        # The restore write means the following launch slews at the
-        # default again — brake must not permanently strip the ramp.
-        m = ST3215Motor(servo_id=8)
-        m.run_speed(120)
-        m.brake()
-        accs = _writes_to(m._bus._uart._tx_log, _REG_GOAL_ACC)
-        self.assertEqual(accs[-1], (8, bytes([171])))
+        m.coast()
+        log = m._bus._uart._tx_log[base:]
+        self.assertEqual(_writes_to(log, _REG_TORQUE), [(7, bytes([0]))])
+        self.assertEqual(_writes_to(log, _REG_GOAL_ACC), [])
+        self.assertEqual(_writes_to(log, _REG_GOAL_SPEED), [])
 
     def test_run_speed_packets_unchanged_by_the_ramp(self):
         # The ramp lives in the servo: goal-speed writes are byte-for-
