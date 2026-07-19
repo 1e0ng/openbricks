@@ -641,12 +641,12 @@ class ST3215Motor(Motor):
         return mnm
 
     def stalled(self):
-        """``True`` when the servo is pushing hard (|load| >=
-        ``STALL_LOAD_PCT`` % of stall) but barely moving (|speed| <=
-        ``STALL_SPEED_DPS``) — the Pybricks ``Motor.stalled()``
-        contract, from the servo's own feedback registers. Raises
-        ``OSError`` if the bus is silent (a silent bus must not read
-        as "not stalled")."""
+        """``True`` when the servo is pushing hard (load magnitude at
+        least ``STALL_LOAD_PCT`` percent of stall) but barely moving
+        (speed magnitude at most ``STALL_SPEED_DPS``) — the Pybricks
+        ``Motor.stalled()`` contract, from the servo's own feedback
+        registers. Raises ``OSError`` if the bus is silent (a silent
+        bus must not read as "not stalled")."""
         data = self._bus.read(self._id, _REG_PRESENT_LOAD, 2)
         spd = self.speed()
         if data is None or spd is None:
