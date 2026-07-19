@@ -129,6 +129,19 @@ class ControlLawTests(unittest.TestCase):
         self.assertEqual(speeds, (int(self.cruise + self.kp * err),
                                   int(self.cruise - self.kp * err)))
 
+    def test_cap_leaves_steering_headroom_above_cruise(self):
+        # The 2026-07-19 retune set CRUISE_DPS == MAX_DPS: the outer
+        # wheel could never exceed cruise, so every correction was
+        # one-sided at half authority (and four exact-value tests
+        # failed with wheels pinned at the cap). The cap must clear
+        # cruise by at least the P correction of a full-scale error.
+        cruise = self.ns["CRUISE_DPS"]
+        cap = self.ns["MAX_DPS"]
+        self.assertTrue(
+            cap >= cruise + self.ns["KP"] * 100,
+            "MAX_DPS %s leaves no steering headroom over CRUISE_DPS %s"
+            % (cap, cruise))
+
     def test_clamp_never_reverses_never_exceeds_cap(self):
         for la in range(0, 101, 10):
             for ra in range(0, 101, 10):
@@ -144,7 +157,6 @@ class ControlLawTests(unittest.TestCase):
         # minimum integration (the whole point: D needs fresh data).
         self.assertEqual(self.ns["KI"], 0.0)
         self.assertTrue(0 < self.ns["KD"] <= 0.1)
-        self.assertFalse(self.ns["DEBUG"])
         # The low-latency sensor configuration (gain=16,
         # integration_ms=2.4) became the DRIVER default, so the
         # example uses bare constructors; the values themselves are

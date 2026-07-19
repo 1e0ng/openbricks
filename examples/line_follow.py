@@ -104,12 +104,10 @@ INTEGRAL_LIMIT = 50.0   # anti-windup: |integral| cap, ambient-units*s
 
 # Never reverse; cap well above CRUISE_DPS + max steering so the
 # clamp bounds runaway values without eating the differential.
-MAX_DPS = 400
-
-# Print both readings every tick — for calibrating on a new mat.
-# Leave off for real runs: each print streams over BLE and stretches
-# the control tick.
-DEBUG = False
+# (Retuned 400 -> 800 when CRUISE_DPS moved to 400: at cap == cruise
+# the outer wheel could never exceed cruise, halving the steering
+# authority. 800 stays under the ST-3032's 888 no-load ceiling.)
+MAX_DPS = 800
 
 # Initial PID state: (integral, previous-error-or-None). Thread the
 # state returned by each _pid_wheel_speeds call into the next.
@@ -183,8 +181,10 @@ def follow_line():
             break
         wheels.set_goal_speeds(list(speeds))
         wait(10) # ms
-    left_motor.stop()
-    right_motor.stop()
+    # Motor has no stop(): brake() is the ramped stop (one uniform
+    # acceleration rule since 1.19.1) and holds zero velocity.
+    left_motor.brake()
+    right_motor.brake()
 
 
 def main():
