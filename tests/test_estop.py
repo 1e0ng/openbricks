@@ -69,7 +69,7 @@ class DriverGatingTests(_GateCase):
     def test_l298n_run_gated_but_brake_coast_allowed(self):
         m = L298NMotor(in1=1, in2=2, pwm=17)
         estop.engage()
-        self._expect_ki(lambda: m.run(50))
+        self._expect_ki(lambda: m.dc(50))
         m.brake()   # must not raise
         m.coast()   # must not raise
 
@@ -77,7 +77,7 @@ class DriverGatingTests(_GateCase):
         m = ST3215Motor(servo_id=1, uart_id=1, tx=14, rx=6)
         estop.engage()
         self._expect_ki(lambda: m.run_speed(100))
-        self._expect_ki(lambda: m.run(50))
+        self._expect_ki(lambda: m.dc(50))
         m.brake()   # allowed
         m.coast()   # allowed
 
@@ -97,7 +97,7 @@ class DriverGatingTests(_GateCase):
         m = L298NMotor(in1=1, in2=2, pwm=17)
         estop.engage()
         estop.clear()
-        m.run(50)   # must not raise
+        m.dc(50)   # must not raise
 
 
 class _RecordingBus:

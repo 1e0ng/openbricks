@@ -67,9 +67,14 @@ class JGB37Motor(Motor):
         )
 
     # --- Open-loop passthroughs (native Servo detaches from scheduler) ---
-    def run(self, power):
+    def dc(self, duty):
         estop.check()
-        self._servo.run(float(power))
+        self._servo.run(float(duty))
+
+    def speed(self):
+        # Measured deg/s from the native servo core's α-β observer
+        # (already in output-shaft degrees; invert handled core-side).
+        return self._servo.measured_dps()
 
     def brake(self):
         self._servo.brake()

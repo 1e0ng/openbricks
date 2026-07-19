@@ -447,7 +447,7 @@ class EStopNoInjectionIntegrationTests(unittest.TestCase):
             "    if i == 3:\n"
             "        inst._btn._value = 0\n"   # the press lands
             "    inst._tick()\n"               # timer keeps polling
-            "    m.run(30)\n"
+            "    m.dc(30)\n"
         )
         self.launcher._program_path = path
         self.launcher._pending = "start"

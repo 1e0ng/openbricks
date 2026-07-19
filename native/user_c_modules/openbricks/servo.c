@@ -228,6 +228,18 @@ static mp_obj_t servo_coast(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_coast_obj, servo_coast);
 
+// Measured output-shaft speed in deg/s from the alpha-beta observer.
+// The observer tracks position in DEGREES (servo_core feeds it
+// count_to_angle_deg), so vel_hat is deg/s directly — in the SAME
+// frame as angle() (encoder frame; ``invert`` only flips the power
+// output, not the count path). Cold-path accessor (Pybricks
+// Motor.speed() parity).
+static mp_obj_t servo_measured_dps(mp_obj_t self_in) {
+    servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_float((mp_float_t)self->core.observer.vel_hat);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(servo_measured_dps_obj, servo_measured_dps);
+
 static mp_obj_t servo_angle(mp_obj_t self_in) {
     servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
     int64_t count = servo_read_count(self);
@@ -312,6 +324,7 @@ static const mp_rom_map_elem_t servo_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_brake),       MP_ROM_PTR(&servo_brake_obj) },
     { MP_ROM_QSTR(MP_QSTR_coast),       MP_ROM_PTR(&servo_coast_obj) },
     { MP_ROM_QSTR(MP_QSTR_angle),       MP_ROM_PTR(&servo_angle_obj) },
+    { MP_ROM_QSTR(MP_QSTR_measured_dps), MP_ROM_PTR(&servo_measured_dps_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset_angle), MP_ROM_PTR(&servo_reset_angle_obj) },
 };
 static MP_DEFINE_CONST_DICT(servo_locals_dict, servo_locals_dict_table);
