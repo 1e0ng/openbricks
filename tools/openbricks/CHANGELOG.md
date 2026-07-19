@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.20.2 — Motor.stop() (Pybricks semantics) + line_follow fixes
+
+``Motor.stop()`` joins the interface with Pybricks Prime semantics
+— stop and spin freely, coasting to rest by friction — as a
+concrete method delegating to ``coast()``, so every driver (ST,
+MG370, JGB37, L298N) and the sim's ``SimMotor`` get it uniformly;
+``examples/line_follow.py`` ends its run with ``stop()`` as
+written. Also alongside the example's simplification (endless
+follow loop, 400 dps cruise): ``MAX_DPS`` was left at 400 ==
+CRUISE_DPS, pinning the outer wheel at cruise and halving the
+steering authority — retuned to 800 (under the ST-3032's 888
+ceiling) with a headroom regression test so cap == cruise can't
+come back silently. The unused ``DEBUG`` flag is gone.
+
 ## 1.20.1 — TCS34725 defaults: gain=16, integration_ms=2.4
 
 The low-latency configuration the line follower proved out is now

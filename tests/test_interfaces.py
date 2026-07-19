@@ -24,6 +24,23 @@ class TestMotorInterface(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             Motor().brake()
 
+    def test_stop_is_concrete_and_delegates_to_coast(self):
+        # Pybricks Motor.stop() semantics: coast to rest by friction.
+        # Concrete on the base class so EVERY driver gets it —
+        # user code (line_follow's intersection stop) calls it.
+        calls = []
+
+        class _M(Motor):
+            def coast(self):
+                calls.append("coast")
+
+        _M().stop()
+        self.assertEqual(calls, ["coast"])
+
+    def test_stop_on_bare_interface_surfaces_coast_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            Motor().stop()
+
     def test_coast_raises_not_implemented(self):
         with self.assertRaises(NotImplementedError):
             Motor().coast()

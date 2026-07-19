@@ -359,6 +359,17 @@ class TestGoalAccRamp(unittest.TestCase):
         self.assertEqual(_writes_to(log, _REG_GOAL_SPEED),
                          [(6, bytes([0, 0]))])
 
+    def test_stop_coasts_via_torque_cut(self):
+        # Pybricks Motor.stop() = spin freely: inherited from the
+        # Motor base, lands on coast() -> torque register 0.
+        m = ST3215Motor(servo_id=9)
+        m.run_speed(120)
+        base = len(m._bus._uart._tx_log)
+        m.stop()
+        log = m._bus._uart._tx_log[base:]
+        self.assertEqual(_writes_to(log, _REG_TORQUE), [(9, bytes([0]))])
+        self.assertEqual(_writes_to(log, _REG_GOAL_SPEED), [])
+
     def test_estop_coast_path_is_a_torque_cut_not_a_speed_write(self):
         # The safety stop must stay instant: coast() (the e-stop's
         # per-motor action) cuts the torque register and never
