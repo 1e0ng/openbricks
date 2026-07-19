@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.18.1 — brake() is instant again: the ramp governs motion, not stops
+
+1.18.0's servo-side ramp also slewed ``brake()`` — a 0.5+ s
+roll-down from cruise, inconsistent with the encoder-motor drivers
+and Pybricks, where ``brake()`` is immediate. The rule is now
+uniform across every motor type: launches and speed changes ramp at
+``accel_dps2``; ``brake()``, ``coast()`` and the e-stop stop
+instantly. (``brake()`` brackets its zero-speed write with a
+ramp-off/ramp-restore pair, so the following launch still slews.)
+
 ## 1.18.0 — serial-bus motors honour the acceleration default too
 
 The acceleration retunes never touched direct ``run_speed()`` on
