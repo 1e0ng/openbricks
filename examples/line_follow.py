@@ -50,6 +50,8 @@ Hardware (same bus layout as ``line_align.py`` / ``color_array.py``):
       both facing the mat at the front of the chassis
 """
 
+import time
+
 from machine import I2C, Pin
 from openbricks.tools import wait
 
@@ -73,8 +75,8 @@ mux = TCA9548A(i2c)
 # rescales with integration), so LINE_AMBIENT keeps its meaning;
 # each reading just averages 10x less light, so expect ~1 count of
 # extra noise. gain=16 keeps the signal budget healthy.
-left_sensor = TCS34725(mux[1], gain=16, integration_ms=2.4)
-right_sensor = TCS34725(mux[0], gain=16, integration_ms=2.4)
+left_sensor = TCS34725(mux[1])
+right_sensor = TCS34725(mux[0])
 
 
 # --- control law (pure logic, unit-tested in tests/test_line_follow.py) ---
@@ -84,7 +86,7 @@ right_sensor = TCS34725(mux[0], gain=16, integration_ms=2.4)
 # itself runs on the gradient above this threshold.
 LINE_AMBIENT = 12
 
-CRUISE_DPS = 200   # wheel speed when perfectly centred
+CRUISE_DPS = 400   # wheel speed when perfectly centred
 
 # PID gains on the ambient-difference error (units: dps of steering
 # per ambient-unit; KI per ambient-unit-second; KD per
@@ -143,8 +145,6 @@ def _pid_wheel_speeds(left_ambient, right_ambient, state, dt_s):
         return None, state
     if left_dark or right_dark:
         return (CRUISE_DPS, CRUISE_DPS), (integral, None)
-    if DEBUG:
-        print('left', left_ambient, 'right', right_ambient)
 
     error = left_ambient - right_ambient
     if dt_s > 0:
@@ -169,46 +169,31 @@ def follow_line():
     # many times that, turning crisp corrections into wobble. The
     # bus is also only written when the decision CHANGES — re-sending
     # the same speeds every tick just steals ticks from sensing.
-    import time
-    poll_ms = 10
-    timeout_ms = 30000
 
-    last = None
     state = PID_STATE0
     prev_ms = time.ticks_ms()
-    try:
-        for _ in range(max(1, timeout_ms // poll_ms)):
-            now_ms = time.ticks_ms()
-            dt_s = time.ticks_diff(now_ms, prev_ms) / 1000.0
-            prev_ms = now_ms
-            speeds, state = _pid_wheel_speeds(
-                left_sensor.ambient(),
-                right_sensor.ambient(),
-                state, dt_s,
-            )
-            if speeds is None:
-                print("intersection reached — stopping.")
-                return
-            if speeds != last:
-                wheels.set_goal_speeds(list(speeds))
-                last = speeds
-            wait(poll_ms)
-    finally:
-        # Whatever ends the loop — intersection, timeout, Ctrl-C, the
-        # stop button — no wheel keeps creeping.
-        left_motor.brake()
-        right_motor.brake()
-    raise RuntimeError(
-        "no intersection within %d ms — lost the line, or is "
-        "LINE_AMBIENT calibrated for your mat?" % timeout_ms)
+    while True:
+        now_ms = time.ticks_ms()
+        dt_s = time.ticks_diff(now_ms, prev_ms) / 1000.0
+        prev_ms = now_ms
+        speeds, state = _pid_wheel_speeds(
+            left_sensor.ambient(),
+            right_sensor.ambient(),
+            state, dt_s,
+        )
+        if speeds is None:
+            print("intersection reached — stopping.")
+            break
+        wheels.set_goal_speeds(list(speeds))
+        wait(10) # ms
+    left_motor.stop()
+    right_motor.stop()
 
 
 def main():
     print("following the line until an intersection ...")
     follow_line()
-    wait(500)
-    left_motor.coast()
-    right_motor.coast()
+    print("stopped.")
 
 
 if __name__ == "__main__":
