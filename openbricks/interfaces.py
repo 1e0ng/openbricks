@@ -19,15 +19,36 @@ class Motor:
     Implementations range from an open-loop H-bridge driver (L298N) to a
     closed-loop geared motor with quadrature encoder (JGB37-520).
 
+    The method names and semantics follow the Pybricks Prime
+    ``Motor`` API (1.21.0): ``run(speed)`` is degrees per second,
+    closed loop; the raw-duty command is ``dc(duty)``. Additional
+    openbricks methods (``coast``, ``run_speed``) remain as aliases.
+
     Units
     -----
-    * ``power`` is -100..100 (percent duty cycle, sign = direction).
+    * ``duty`` is -100..100 (percent duty cycle, sign = direction).
     * ``speed`` is degrees per second at the output shaft (closed-loop only).
     * ``angle`` is degrees at the output shaft (closed-loop only).
     """
 
-    def run(self, power):
-        """Run at the given power (-100..100). Non-blocking."""
+    def run(self, speed):
+        """Run at ``speed`` degrees per second, closed loop —
+        Pybricks ``Motor.run()``. Non-blocking. Concrete: delegates
+        to ``run_speed()`` (the openbricks alias), so open-loop
+        drivers surface its ``NotImplementedError``.
+
+        BREAKING (1.21.0): before Pybricks parity this method took
+        percent power. That command is now ``dc(duty)`` — a script
+        still calling ``run(30)`` for power gets 30 deg/s instead
+        (slow, not dangerous) or ``NotImplementedError`` on
+        open-loop drivers.
+        """
+        self.run_speed(speed)
+
+    def dc(self, duty):
+        """Run at a fixed raw duty cycle (-100..100), open loop —
+        Pybricks ``Motor.dc()``. Non-blocking. This is the pre-1.21.0
+        ``run()``."""
         raise NotImplementedError
 
     def stop(self):
@@ -82,6 +103,88 @@ class Motor:
         return ``True`` (a wait=True call is finished before
         returning to the caller, by definition)."""
         return True
+
+    def speed(self):
+        """Measured shaft speed in degrees per second — Pybricks
+        ``Motor.speed()``. Closed-loop drivers implement it (encoder
+        observer / servo present-speed register)."""
+        raise NotImplementedError
+
+    def load(self):
+        """Measured torque at the shaft in mNm — Pybricks
+        ``Motor.load()``. Drivers with load feedback (serial servos)
+        implement it; the value is derived from the servo's load
+        register and its datasheet stall torque, so treat it as an
+        estimate."""
+        raise NotImplementedError
+
+    def stalled(self):
+        """``True`` when the motor is pushing as hard as it can but
+        cannot reach its commanded speed — Pybricks
+        ``Motor.stalled()``. Drivers with load feedback implement
+        it."""
+        raise NotImplementedError
+
+    # --- Pybricks composite maneuvers ---
+    # Concrete: built from the primitives above, so every closed-loop
+    # driver gets them. ``then`` is one of "hold" / "brake" /
+    # "coast" / "none" (Pybricks Stop.HOLD is the default).
+
+    def _apply_then(self, then):
+        if then == "hold":
+            self.hold()
+        elif then == "brake":
+            self.brake()
+        elif then == "coast":
+            self.coast()
+        elif then != "none":
+            raise ValueError(
+                "then must be 'hold', 'brake', 'coast' or 'none', "
+                "got %r" % (then,))
+
+    def run_time(self, speed, time_ms, then="hold", wait=True):
+        """Run at ``speed`` deg/s for ``time_ms`` ms, then stop with
+        the ``then`` flavour — Pybricks ``Motor.run_time()``.
+        ``wait=False`` is not supported (no background timer is
+        allocated for it); pass ``wait=True`` or sequence it
+        yourself."""
+        if not wait:
+            raise NotImplementedError(
+                "run_time(wait=False) is not supported")
+        import time
+        self.run_speed(speed)
+        time.sleep_ms(int(time_ms))
+        self._apply_then(then)
+
+    def run_target(self, speed, target_angle, then="hold", wait=True):
+        """Run to the ABSOLUTE ``target_angle`` (degrees, in the
+        ``reset_angle`` frame) at up to ``speed`` deg/s — Pybricks
+        ``Motor.run_target()``. Built on the relative ``run_angle``:
+        the delta is measured from ``angle()`` at call time."""
+        here = self.angle()
+        if here is None:
+            raise OSError("cannot read angle for run_target")
+        self.run_angle(speed, target_angle - here, wait=wait)
+        if wait:
+            self._apply_then(then)
+
+    def run_until_stalled(self, speed, then="coast", duty_limit=None):
+        """Run at ``speed`` deg/s until ``stalled()``, apply the
+        ``then`` flavour, and return the angle where it stalled —
+        Pybricks ``Motor.run_until_stalled()`` (its default ``then``
+        is Stop.COAST). ``duty_limit`` is not supported — the serial
+        servos' torque limiting is a per-servo register, not a
+        per-call parameter; pass ``None``."""
+        if duty_limit is not None:
+            raise NotImplementedError(
+                "duty_limit is not supported; configure the servo's "
+                "torque limit instead")
+        import time
+        self.run_speed(speed)
+        while not self.stalled():
+            time.sleep_ms(20)
+        self._apply_then(then)
+        return self.angle()
 
 
 class Servo:

@@ -371,7 +371,7 @@ class DriveBase:
                 pass
         # Open-loop fallback: assume ~300 dps rated.
         power = max(-100, min(100, dps / 300 * 100))
-        motor.run(power)
+        motor.dc(power)
 
     # ---- fallbacks for open-loop motor pairs ----
     #

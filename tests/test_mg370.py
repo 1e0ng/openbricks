@@ -32,6 +32,16 @@ class TestMG370Motor(unittest.TestCase):
 
     # --- encoder layer ---
 
+    def test_speed_reads_observer_dps(self):
+        # Pybricks Motor.speed(): measured deg/s from the native
+        # alpha-beta observer (same frame as angle()). A stationary
+        # motor reads 0.0 — and the accessor exists at all, which is
+        # the parity contract (it's a new C binding, so a stale unix
+        # build fails here loudly).
+        m = _make_motor()
+        v = m.speed()
+        self.assertEqual(v, 0.0)
+
     def test_uses_native_pcnt_encoder(self):
         m = _make_motor()
         self.assertIsInstance(m._enc, PCNTEncoder)
@@ -60,14 +70,14 @@ class TestMG370Motor(unittest.TestCase):
         # OB_SERVO_SAFETY_POWER_CAP), so the duty math is the
         # uncapped form: 8% × 1023 ≈ 81.
         m = _make_motor()
-        m.run(8)
+        m.dc(8)
         self.assertEqual(m._in1.value(), 1)
         self.assertEqual(m._in2.value(), 0)
         self.assertEqual(m._pwm.duty(), 81)
 
     def test_run_reverse(self):
         m = _make_motor()
-        m.run(-75)
+        m.dc(-75)
         self.assertEqual(m._in1.value(), 0)
         self.assertEqual(m._in2.value(), 1)
 
@@ -79,14 +89,14 @@ class TestMG370Motor(unittest.TestCase):
 
     def test_coast_floats_terminals(self):
         m = _make_motor()
-        m.run(100)
+        m.dc(100)
         m.coast()
         self.assertEqual(m._in1.value(), 0)
         self.assertEqual(m._in2.value(), 0)
 
     def test_invert_swaps_direction(self):
         m = _make_motor(invert=True)
-        m.run(50)
+        m.dc(50)
         self.assertEqual(m._in1.value(), 0)
         self.assertEqual(m._in2.value(), 1)
 
@@ -96,7 +106,7 @@ class TestMG370Motor(unittest.TestCase):
         """``encoder_invert=True`` does NOT touch motor commands —
         ``run(+N)`` still drives IN1=1, IN2=0 (forward) regardless."""
         m = _make_motor(encoder_invert=True)
-        m.run(8)   # 8 stays under the 10% firmware safety cap
+        m.dc(8)   # 8 stays under the 10% firmware safety cap
         self.assertEqual(m._in1.value(), 1)
         self.assertEqual(m._in2.value(), 0)
 

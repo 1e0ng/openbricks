@@ -80,6 +80,9 @@ class ST3032Motor(ST3215Motor):
     so the driver clamp can't cap the servo below its own spec.
     """
 
+    # ST-3032 @ 12 V: 10 kg·cm ~= 980 mNm (datasheet §5-3).
+    STALL_TORQUE_MNM = 980.0
+
     def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
                  baud=1_000_000, dir_pin=None,
                  invert=False,

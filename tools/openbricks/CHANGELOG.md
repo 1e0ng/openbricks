@@ -3,6 +3,40 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.21.0 — Pybricks Prime Motor API parity
+
+**BREAKING: ``motor.run()`` changed meaning.** It now follows
+Pybricks — ``run(speed)`` in degrees per second, closed loop. The
+old percent-power command is ``dc(duty)``, exactly Pybricks' split.
+A script still calling ``run(30)`` for power now gets 30 deg/s
+(slow, not dangerous) on closed-loop motors, or
+``NotImplementedError`` on open-loop drivers. Sweep your scripts:
+``run(power)`` → ``dc(power)``.
+
+New, per the Pybricks Motor API:
+
+* ``speed()`` — measured deg/s (serial servos: present-speed
+  register; encoder motors: the native α-β observer via a new
+  ``measured_dps`` C binding; sim: physics joint velocity).
+* ``load()`` — estimated shaft torque in mNm from the servo's load
+  register scaled by the model's datasheet stall torque (ST-3215
+  2940 mNm, ST-3032 980 mNm).
+* ``stalled()`` — loaded ≥ 80 % of stall and slower than 20 deg/s
+  (class-attr thresholds, bench-tunable).
+* ``run_time(speed, ms, then, wait)``, ``run_target(speed,
+  target_angle, then, wait)`` (absolute, ``reset_angle`` frame) and
+  ``run_until_stalled(speed, then)`` — concrete on the Motor base,
+  built from the primitives, ``then`` ∈ hold/brake/coast/none
+  (Pybricks defaults).
+* Sim: ``dc()`` (sustained duty through the DC-motor model),
+  ``run()``, ``speed()``; ``load``/``stalled`` raise (no load model).
+
+Additional openbricks methods remain as aliases: ``coast()``,
+``run_speed()``, ``run_angle`` (relative), non-blocking ``done()``.
+Not implemented (documented): ``track_target``, the ``control``
+settings object, ``duty_limit=`` on ``run_until_stalled``, and
+``wait=False`` on ``run_time``.
+
 ## 1.20.2 — Motor.stop() (Pybricks semantics) + line_follow fixes
 
 ``Motor.stop()`` joins the interface with Pybricks Prime semantics

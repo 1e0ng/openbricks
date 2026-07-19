@@ -53,8 +53,11 @@ class L298NMotor(Motor):
         self._pwm = PWM(Pin(pwm), freq=pwm_freq, duty=0)
         self._invert = invert
 
-    def run(self, power):
-        """Power is -100..100."""
+    def dc(self, duty):
+        """Duty is -100..100 — Pybricks ``Motor.dc()``. (Open-loop
+        H-bridge: there is no closed-loop ``run(speed)`` here; the
+        inherited ``run`` surfaces run_speed's NotImplementedError.)"""
+        power = duty
         estop.check()
         if power > 100:
             power = 100

@@ -152,6 +152,45 @@ class SimMotorTests(unittest.TestCase):
                         "run_speed(-180) should reverse the chassis; "
                         "x went %.3f → %.3f" % (x0, x1))
 
+    def test_dc_sustains_duty_through_the_motor_model(self):
+        # Pybricks Motor.dc(): sustained duty, reapplied per tick so
+        # back-EMF limits speed like hardware. The chassis must move
+        # and keep moving (a one-shot ctrl write would decay).
+        rt = _make_runtime()
+        left = SimMotor(rt, "chassis_enc_l", "chassis_motor_l")
+        right = SimMotor(rt, "chassis_enc_r", "chassis_motor_r")
+        _settle(rt)
+        left.dc(60)
+        right.dc(60)
+        for _ in range(200):
+            rt.step()
+        self.assertGreater(abs(left.speed()), 30.0,
+                           "dc(60) should spin the wheel")
+
+    def test_run_is_closed_loop_speed(self):
+        # Pybricks run(speed) == run_speed: wheel converges to the
+        # commanded deg/s, not to a duty fraction.
+        rt = _make_runtime()
+        left = SimMotor(rt, "chassis_enc_l", "chassis_motor_l")
+        _settle(rt)
+        left.run(120.0)
+        for _ in range(400):
+            rt.step()
+        self.assertAlmostEqual(left.speed(), 120.0, delta=25.0)
+
+    def test_run_speed_cancels_dc_mode(self):
+        rt = _make_runtime()
+        left = SimMotor(rt, "chassis_enc_l", "chassis_motor_l")
+        _settle(rt)
+        left.dc(100)
+        for _ in range(100):
+            rt.step()
+        left.run_speed(60.0)
+        for _ in range(400):
+            rt.step()
+        self.assertAlmostEqual(left.speed(), 60.0, delta=20.0,
+                               msg="dc mode kept overriding run_speed")
+
     def test_stop_matches_pybricks_coast_semantics(self):
         # Motor.stop() (Pybricks: spin freely) exists on SimMotor too
         # — mirrors the firmware interface so scripts using stop()

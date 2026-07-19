@@ -16,9 +16,24 @@ from openbricks.interfaces import Motor, Servo, IMU, ColorSensor
 
 
 class TestMotorInterface(unittest.TestCase):
-    def test_run_raises_not_implemented(self):
+    def test_run_is_closed_loop_delegate(self):
+        # Pybricks parity: run(speed) is deg/s and delegates to
+        # run_speed; on the bare interface that surfaces run_speed's
+        # NotImplementedError.
         with self.assertRaises(NotImplementedError):
             Motor().run(50)
+        calls = []
+
+        class _M(Motor):
+            def run_speed(self, deg_per_s):
+                calls.append(deg_per_s)
+
+        _M().run(123)
+        self.assertEqual(calls, [123])
+
+    def test_dc_raises_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            Motor().dc(50)
 
     def test_brake_raises_not_implemented(self):
         with self.assertRaises(NotImplementedError):
@@ -71,6 +86,99 @@ class TestMotorInterface(unittest.TestCase):
         # safely. A wait=True call is finished before returning to the
         # caller, by definition.
         self.assertTrue(Motor().done())
+
+
+class _ScriptedMotor(Motor):
+    """Records primitive calls; feeds scripted angle/stalled values."""
+
+    def __init__(self, angles=None, stalled_seq=None):
+        self.calls = []
+        self._angles = list(angles or [0.0])
+        self._stalled = list(stalled_seq or [])
+
+    def run_speed(self, deg_per_s):
+        self.calls.append(("run_speed", deg_per_s))
+
+    def run_angle(self, deg_per_s, target_angle, wait=True):
+        self.calls.append(("run_angle", deg_per_s, target_angle, wait))
+
+    def angle(self):
+        return self._angles.pop(0) if len(self._angles) > 1 \
+            else self._angles[0]
+
+    def stalled(self):
+        return self._stalled.pop(0) if len(self._stalled) > 1 \
+            else self._stalled[0]
+
+    def hold(self):
+        self.calls.append(("hold",))
+
+    def brake(self):
+        self.calls.append(("brake",))
+
+    def coast(self):
+        self.calls.append(("coast",))
+
+
+class TestCompositeManeuvers(unittest.TestCase):
+    """Pybricks composite methods, concrete on the Motor base:
+    run_time / run_target / run_until_stalled + the then dispatch."""
+
+    def test_run_time_runs_waits_then_holds(self):
+        m = _ScriptedMotor()
+        m.run_time(200, 500)
+        self.assertEqual(m.calls, [("run_speed", 200), ("hold",)])
+
+    def test_run_time_then_flavours(self):
+        for then, expect in (("brake", ("brake",)),
+                             ("coast", ("coast",))):
+            m = _ScriptedMotor()
+            m.run_time(100, 10, then=then)
+            self.assertEqual(m.calls[-1], expect)
+        m = _ScriptedMotor()
+        m.run_time(100, 10, then="none")
+        self.assertEqual(m.calls, [("run_speed", 100)])
+
+    def test_run_time_rejects_bad_then_and_nowait(self):
+        m = _ScriptedMotor()
+        with self.assertRaises(ValueError):
+            m.run_time(100, 10, then="drift")
+        with self.assertRaises(NotImplementedError):
+            m.run_time(100, 10, wait=False)
+
+    def test_run_target_is_absolute_via_relative_delta(self):
+        # At angle 100, target 250 -> run_angle(+150). Pybricks
+        # run_target semantics in the reset_angle frame.
+        m = _ScriptedMotor(angles=[100.0])
+        m.run_target(200, 250)
+        self.assertEqual(m.calls,
+                         [("run_angle", 200, 150.0, True), ("hold",)])
+
+    def test_run_target_unreadable_angle_raises(self):
+        class _NoAngle(_ScriptedMotor):
+            def angle(self):
+                return None
+        with self.assertRaises(OSError):
+            _NoAngle().run_target(200, 90)
+
+    def test_run_until_stalled_polls_then_coasts_returns_angle(self):
+        m = _ScriptedMotor(angles=[42.0],
+                           stalled_seq=[False, False, True])
+        got = m.run_until_stalled(150)
+        self.assertEqual(m.calls, [("run_speed", 150), ("coast",)])
+        self.assertEqual(got, 42.0)
+
+    def test_run_until_stalled_rejects_duty_limit(self):
+        m = _ScriptedMotor(stalled_seq=[True])
+        with self.assertRaises(NotImplementedError):
+            m.run_until_stalled(150, duty_limit=50)
+
+    def test_speed_load_stalled_default_not_implemented(self):
+        for call in (lambda: Motor().speed(),
+                     lambda: Motor().load(),
+                     lambda: Motor().stalled()):
+            with self.assertRaises(NotImplementedError):
+                call()
 
 
 class TestServoInterface(unittest.TestCase):

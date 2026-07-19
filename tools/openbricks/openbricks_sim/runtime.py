@@ -196,6 +196,7 @@ class SimMotor:
         # zero-target controllers fight passive wheel settling and
         # destabilise the chassis.
         self._attached = False
+        self._dc_duty = None   # sustained-duty (dc) mode when not None
 
     # -------- attach / detach lifecycle --------
 
@@ -217,6 +218,13 @@ class SimMotor:
         return int(deg * self.counts_per_rev / 360.0)
 
     def _tick(self, now_ms: int) -> None:
+        if self._dc_duty is not None:
+            # Sustained duty mode (Pybricks dc()): reapply every tick
+            # so the DC-motor model's back-EMF term keeps tracking
+            # the actual wheel speed.
+            power = -self._dc_duty if self.invert else self._dc_duty
+            self.apply_power(power)
+            return
         count = self._read_count()
         power = self.servo.tick(count, now_ms)
         # invert flag is a wiring concern; the core returns the raw
@@ -249,9 +257,41 @@ class SimMotor:
 
     # -------- user-facing API (Motor interface) --------
 
+    def run(self, speed: float) -> None:
+        """Pybricks ``Motor.run()``: closed-loop speed in deg/s.
+        Alias of ``run_speed`` (which remains)."""
+        self.run_speed(speed)
+
+    def dc(self, duty: float) -> None:
+        """Pybricks ``Motor.dc()``: sustained raw duty (-100..100).
+        Cancels closed-loop control; the duty is reapplied through
+        the DC-motor model every physics tick, so back-EMF still
+        limits the speed exactly as on hardware."""
+        if duty > 100.0:
+            duty = 100.0
+        elif duty < -100.0:
+            duty = -100.0
+        self._dc_duty = float(duty)
+        self._attach()
+
+    def speed(self) -> float:
+        """Pybricks ``Motor.speed()``: measured wheel speed in
+        deg/s straight from the physics joint velocity."""
+        return math.degrees(float(self.runtime.data.qvel[self._dof_adr]))
+
+    def load(self):
+        raise NotImplementedError(
+            "SimMotor.load(): the sim's DC-motor model has no load "
+            "register; read data.ctrl torque directly if needed")
+
+    def stalled(self):
+        raise NotImplementedError(
+            "SimMotor.stalled(): no load feedback in the sim model")
+
     def run_speed(self, dps: float) -> None:
         """Hold a target speed (deg/s) closed-loop. Cancels any
-        active trajectory."""
+        active trajectory (and dc mode)."""
+        self._dc_duty = None
         self.servo.set_speed(float(dps))
         self._attach()
 
@@ -264,6 +304,7 @@ class SimMotor:
         Default matches the firmware's 1500 deg/s² (issue #234's
         wheel-in-floor geometry + missing back-EMF fixes made the
         sim track it faithfully)."""
+        self._dc_duty = None
         self.servo.run_target(self._read_count(), self.runtime.now_ms,
                                float(delta_deg), float(cruise_dps),
                                float(accel))
@@ -275,6 +316,7 @@ class SimMotor:
         We approximate by detaching from the tick loop and zeroing
         ctrl; MuJoCo's ``damping`` + ``frictionloss`` on the joint
         does the rest."""
+        self._dc_duty = None
         self._detach()
         self.runtime.data.ctrl[self._actuator_id] = 0.0
 

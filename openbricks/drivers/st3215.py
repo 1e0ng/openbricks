@@ -82,6 +82,8 @@ _REG_GOAL_ACC      = 0x29
 _REG_GOAL_POSITION = 0x2A
 _REG_GOAL_SPEED    = 0x2E
 _REG_PRESENT_POS   = 0x38
+_REG_PRESENT_SPEED = 0x3A
+_REG_PRESENT_LOAD  = 0x3C
 
 _MODE_POSITION = 0   # single-turn absolute position (0..4095 = 0..360°)
 _MODE_WHEEL    = 1   # continuous velocity (wheel)
@@ -333,6 +335,13 @@ class ST3215Motor(Motor):
     @classmethod
     def _bus_for(cls, uart_id, tx, rx, baud, dir_pin):
         return ST3215._bus_for(uart_id, tx, rx, baud, dir_pin)
+
+    # Stall detection thresholds (bench-tunable class attributes) and
+    # the datasheet stall torque used to scale load() into mNm.
+    # ST-3215 @ 12 V: ~30 kg·cm ~= 2940 mNm. ST3032Motor overrides.
+    STALL_TORQUE_MNM = 2940.0
+    STALL_LOAD_PCT   = 80     # % of stall load to call it stalling
+    STALL_SPEED_DPS  = 20.0   # and slower than this
 
     def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
                  baud=1_000_000, dir_pin=None,
@@ -586,11 +595,65 @@ class ST3215Motor(Motor):
 
     # --- Motor interface --------------------------------------------------
 
-    def run(self, power):
-        """Open-loop wrapper: power -100..100 → run_speed scaled to max_dps."""
-        if power >  100: power =  100
-        if power < -100: power = -100
-        self.run_speed(self._max_dps * power / 100.0)
+    def dc(self, duty):
+        """Duty-style command, Pybricks ``Motor.dc()`` shape. The
+        serial servo has no raw-PWM wheel mode, so duty maps onto
+        ``run_speed`` scaled to ``max_dps`` — same behaviour as the
+        pre-1.21.0 ``run(power)``."""
+        if duty >  100: duty =  100
+        if duty < -100: duty = -100
+        self.run_speed(self._max_dps * duty / 100.0)
+
+    def speed(self):
+        """Measured shaft speed in deg/s from the present-speed
+        register (sign-magnitude, bit 15; steps/s scaled by
+        ``steps_per_dps``). Returns ``None`` if the bus is silent,
+        matching ``angle()``."""
+        data = self._bus.read(self._id, _REG_PRESENT_SPEED, 2)
+        if data is None:
+            return None
+        raw = data[0] | (data[1] << 8)
+        magnitude = raw & 0x7FFF
+        dps = magnitude / self._steps_per_dps
+        if raw & 0x8000:
+            dps = -dps
+        if self._invert:
+            dps = -dps
+        return dps
+
+    def load(self):
+        """Estimated shaft torque in mNm — Pybricks ``Motor.load()``
+        shape. The present-load register reports 0.1 %-of-stall units
+        (sign in bit 10, per the Feetech SCServo SDK); scaled by the
+        model's datasheet stall torque (``STALL_TORQUE_MNM``), so
+        treat it as an estimate, not a measurement. ``None`` if the
+        bus is silent."""
+        data = self._bus.read(self._id, _REG_PRESENT_LOAD, 2)
+        if data is None:
+            return None
+        raw = data[0] | (data[1] << 8)
+        magnitude = raw & 0x3FF          # 0..1000 = 0..100 % of stall
+        mnm = magnitude * self.STALL_TORQUE_MNM / 1000.0
+        if raw & 0x400:
+            mnm = -mnm
+        if self._invert:
+            mnm = -mnm
+        return mnm
+
+    def stalled(self):
+        """``True`` when the servo is pushing hard (|load| >=
+        ``STALL_LOAD_PCT`` % of stall) but barely moving (|speed| <=
+        ``STALL_SPEED_DPS``) — the Pybricks ``Motor.stalled()``
+        contract, from the servo's own feedback registers. Raises
+        ``OSError`` if the bus is silent (a silent bus must not read
+        as "not stalled")."""
+        data = self._bus.read(self._id, _REG_PRESENT_LOAD, 2)
+        spd = self.speed()
+        if data is None or spd is None:
+            raise OSError("bus silent while reading stall state")
+        load_magnitude = (data[0] | (data[1] << 8)) & 0x3FF
+        return (load_magnitude >= self.STALL_LOAD_PCT * 10
+                and abs(spd) <= self.STALL_SPEED_DPS)
 
     def run_speed(self, deg_per_s):
         """Set continuous wheel velocity in degrees per second."""

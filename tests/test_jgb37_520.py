@@ -41,14 +41,14 @@ class TestJGB37Motor(unittest.TestCase):
         # OB_SERVO_SAFETY_POWER_CAP), so the duty math is the
         # uncapped form: 8% × 1023 ≈ 81.
         m = _make_motor()
-        m.run(8)
+        m.dc(8)
         self.assertEqual(m._in1.value(), 1)
         self.assertEqual(m._in2.value(), 0)
         self.assertEqual(m._pwm.duty(), 81)
 
     def test_run_reverse(self):
         m = _make_motor()
-        m.run(-75)
+        m.dc(-75)
         self.assertEqual(m._in1.value(), 0)
         self.assertEqual(m._in2.value(), 1)
 
@@ -61,7 +61,7 @@ class TestJGB37Motor(unittest.TestCase):
 
     def test_coast_floats_terminals(self):
         m = _make_motor()
-        m.run(100)
+        m.dc(100)
         m.coast()
         self.assertEqual(m._in1.value(), 0)
         self.assertEqual(m._in2.value(), 0)
@@ -69,12 +69,12 @@ class TestJGB37Motor(unittest.TestCase):
 
     def test_power_clamped(self):
         m = _make_motor()
-        m.run(9999)
+        m.dc(9999)
         self.assertLessEqual(m._pwm.duty(), 1023)
 
     def test_invert_swaps_direction(self):
         m = _make_motor(invert=True)
-        m.run(50)
+        m.dc(50)
         self.assertEqual(m._in1.value(), 0)
         self.assertEqual(m._in2.value(), 1)
 

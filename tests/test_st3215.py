@@ -15,6 +15,8 @@ _REG_OP_MODE       = 0x21
 _REG_TORQUE        = 0x28
 _REG_GOAL_POSITION = 0x2A
 _REG_GOAL_ACC      = 0x29
+_REG_PRESENT_SPEED = 0x3A
+_REG_PRESENT_LOAD  = 0x3C
 _REG_GOAL_SPEED    = 0x2E
 _REG_PRESENT_POS   = 0x38
 _HEADER            = b"\xFF\xFF"
@@ -744,6 +746,93 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self.assertEqual(_decode_signed_step(steps[-1][1]), 0)
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
         self.assertFalse(bytes([_MODE_WHEEL]) in [w[1] for w in mode_writes])
+
+
+class TestPybricksParityFeedback(unittest.TestCase):
+    """speed()/load()/stalled()/dc() — the Pybricks Motor surface
+    served from the servo's own feedback registers (present-speed
+    0x3A, sign bit 15; present-load 0x3C, sign bit 10 per the
+    Feetech SCServo SDK)."""
+
+    def setUp(self):
+        ST3215._buses = {}
+
+    def _motor(self, reads=None, **kw):
+        kw.setdefault("steps_per_dps", 10.0)
+        m = ST3215Motor(servo_id=1, **kw)
+        reads = dict(reads or {})
+
+        def fake_read(servo_id, register, nbytes):
+            v = reads.get(register)
+            if v is None:
+                return None
+            return bytes([v & 0xFF, (v >> 8) & 0xFF])
+        m._bus.read = fake_read
+        return m
+
+    def test_speed_scales_and_signs(self):
+        m = self._motor({_REG_PRESENT_SPEED: 500})
+        self.assertEqual(m.speed(), 50.0)
+        m = self._motor({_REG_PRESENT_SPEED: 500 | 0x8000})
+        self.assertEqual(m.speed(), -50.0)
+
+    def test_speed_invert_flips(self):
+        m = self._motor({_REG_PRESENT_SPEED: 500}, invert=True)
+        self.assertEqual(m.speed(), -50.0)
+
+    def test_speed_silent_bus_returns_none(self):
+        m = self._motor({})
+        self.assertIsNone(m.speed())
+
+    def test_load_scales_by_model_stall_torque(self):
+        # 500/1000 of stall. ST-3215 stall = 2940 mNm -> 1470.
+        m = self._motor({_REG_PRESENT_LOAD: 500})
+        self.assertEqual(m.load(), 1470.0)
+        # Sign bit 10.
+        m = self._motor({_REG_PRESENT_LOAD: 500 | 0x400})
+        self.assertEqual(m.load(), -1470.0)
+
+    def test_load_st3032_uses_its_own_stall_torque(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=2, steps_per_dps=10.0)
+        m._bus.read = lambda sid, reg, n: bytes([0xF4, 0x01])  # 500
+        self.assertEqual(m.load(), 490.0)   # 500/1000 x 980
+
+    def test_stalled_true_when_loaded_and_slow(self):
+        m = self._motor({_REG_PRESENT_LOAD: 850,        # 85 % of stall
+                         _REG_PRESENT_SPEED: 50})       # 5 dps
+        self.assertTrue(m.stalled())
+
+    def test_not_stalled_when_moving_or_unloaded(self):
+        m = self._motor({_REG_PRESENT_LOAD: 850,
+                         _REG_PRESENT_SPEED: 3000})     # 300 dps
+        self.assertFalse(m.stalled())
+        m = self._motor({_REG_PRESENT_LOAD: 100,        # 10 %
+                         _REG_PRESENT_SPEED: 50})
+        self.assertFalse(m.stalled())
+
+    def test_stalled_silent_bus_raises(self):
+        # A silent bus must not read as "not stalled" — that would
+        # spin run_until_stalled forever.
+        m = self._motor({})
+        with self.assertRaises(OSError):
+            m.stalled()
+
+    def test_dc_maps_duty_onto_max_dps(self):
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0)
+        m.dc(50)
+        speeds = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
+        self.assertEqual(speeds[-1], (3, bytes([
+            3000 & 0xFF, 3000 >> 8])))   # 300 dps x 10 steps
+
+    def test_run_is_degrees_per_second_not_power(self):
+        # THE breaking change pin: run(300) must command 300 dps
+        # (Pybricks), not 300 %-clamped power.
+        m = ST3215Motor(servo_id=4, steps_per_dps=10.0, max_dps=600.0)
+        m.run(300)
+        speeds = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
+        self.assertEqual(speeds[-1], (4, bytes([
+            3000 & 0xFF, 3000 >> 8])))
 
 
 class TestSyncServoGroup(unittest.TestCase):
