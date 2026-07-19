@@ -285,6 +285,11 @@ class SimMotor:
         model. Kept as a separate method for API parity."""
         self.brake()
 
+    def stop(self) -> None:
+        """Pybricks ``Motor.stop()``: stop and spin freely (coast).
+        Mirrors the firmware Motor interface's concrete default."""
+        self.coast()
+
     def angle(self) -> float:
         """Current shaft angle in degrees, derived from the joint
         sensor (independent of the observer)."""

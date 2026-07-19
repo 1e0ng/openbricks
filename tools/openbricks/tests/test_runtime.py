@@ -152,6 +152,21 @@ class SimMotorTests(unittest.TestCase):
                         "run_speed(-180) should reverse the chassis; "
                         "x went %.3f → %.3f" % (x0, x1))
 
+    def test_stop_matches_pybricks_coast_semantics(self):
+        # Motor.stop() (Pybricks: spin freely) exists on SimMotor too
+        # — mirrors the firmware interface so scripts using stop()
+        # run unmodified in the sim.
+        rt = _make_runtime()
+        left = SimMotor(rt, "chassis_enc_l", "chassis_motor_l")
+        _settle(rt)
+        left.run_speed(180.0)
+        for _ in range(50):
+            rt.step()
+        left.stop()
+        act_id = mujoco.mj_name2id(rt.model, mujoco.mjtObj.mjOBJ_ACTUATOR,
+                                    "chassis_motor_l")
+        self.assertEqual(rt.data.ctrl[act_id], 0.0)
+
     def test_brake_zeros_actuator_ctrl(self):
         # Brake's contract is "controller stops driving the actuator"
         # — not "chassis instantly halts" (that's a physics

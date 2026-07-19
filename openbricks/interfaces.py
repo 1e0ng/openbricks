@@ -30,6 +30,15 @@ class Motor:
         """Run at the given power (-100..100). Non-blocking."""
         raise NotImplementedError
 
+    def stop(self):
+        """Stop and let the motor spin freely; it gradually stops
+        from friction. Pybricks ``Motor.stop()`` semantics — the
+        default of the three stop flavours (stop/brake/hold), and a
+        concrete method: it delegates to ``coast()``, so every driver
+        gets it for free.
+        """
+        self.coast()
+
     def brake(self):
         """Stop with active braking (both terminals shorted)."""
         raise NotImplementedError

@@ -181,10 +181,10 @@ def follow_line():
             break
         wheels.set_goal_speeds(list(speeds))
         wait(10) # ms
-    # Motor has no stop(): brake() is the ramped stop (one uniform
-    # acceleration rule since 1.19.1) and holds zero velocity.
-    left_motor.brake()
-    right_motor.brake()
+    # stop() = Pybricks semantics: coast and let friction settle it.
+    # (Use brake() instead for a firmer stop that holds zero speed.)
+    left_motor.stop()
+    right_motor.stop()
 
 
 def main():
