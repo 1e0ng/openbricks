@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.20.1 — TCS34725 defaults: gain=16, integration_ms=2.4
+
+The low-latency configuration the line follower proved out is now
+the driver default: 2.4 ms integration (one cycle, the chip
+minimum) with gain=16 to keep the signal budget healthy. A bare
+``TCS34725(i2c)`` now behaves like the explicitly configured
+line-follow sensors. Note for existing sketches using bare
+constructors: normalized ``ambient()`` reads ~4× higher than under
+the old 24 ms/gain-4 defaults (gain ×4, full-scale ÷10) — retune
+thresholds accordingly (``line_align.py``'s ``LINE_AMBIENT`` moved
+5 → 20 in the same change). Explicit arguments are unaffected.
+
 ## 1.20.0 — ESP32-S3: the 8 MB PSRAM is finally in the heap
 
 Through 1.19.x the S3 board config listed only
