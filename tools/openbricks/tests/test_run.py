@@ -129,25 +129,42 @@ _CTRL_D      = b"\x04"
 
 
 class ComposeTests(unittest.TestCase):
-    """Bootstrap composition — pure functions, no BLE."""
+    """Stage-chunk + runner composition — pure functions, no BLE."""
 
-    def test_bootstrap_writes_user_bytes_to_program_py(self):
-        boot = run_mod._compose_bootstrap(b"print('hi')\n")
-        self.assertIn(b"'/program.py'", boot)
-        self.assertIn(b"open(", boot)
-        self.assertIn(b"'wb'", boot)
-        self.assertIn(b"print('hi')", boot)
+    def test_stage_chunk_first_truncates_then_appends(self):
+        first = run_mod._compose_stage_chunk("/program.py", b"abc", True)
+        rest = run_mod._compose_stage_chunk("/program.py", b"def", False)
+        self.assertIn(b"'wb'", first)
+        self.assertIn(b"'ab'", rest)
+        self.assertIn(b"'/program.py'", first)
+        self.assertIn(b"abc", first)
+
+    def test_stage_chunk_is_bounded_even_for_binary(self):
+        # The whole point: each staged program must fit a fragmented
+        # heap. Worst-case repr expansion (pure binary) stays ~4x.
+        chunk = bytes(range(256)) * 2   # 512 binary bytes
+        prog = run_mod._compose_stage_chunk("/program.py", chunk, True)
+        self.assertLess(len(prog), 2600)
 
     def test_bootstrap_calls_launcher_run_program(self):
-        boot = run_mod._compose_bootstrap(b"x=1\n")
+        boot = run_mod._compose_runner()
         self.assertIn(b"from openbricks import launcher", boot)
         self.assertIn(b"launcher.run_program(", boot)
+        self.assertIn(b"'/program.py'", boot)
+
+    def test_runner_is_fixed_size_no_payload(self):
+        # The runner must not embed the script — it runs the staged
+        # file, so its paste size is constant regardless of script
+        # growth.
+        boot = run_mod._compose_runner()
+        self.assertLess(len(boot), 600)
+        self.assertNotIn(b"f.write", boot)
 
     def test_bootstrap_syncs_rtc_before_running(self):
         # The hub's run-log epoch stamps need a synced RTC; the sync
         # must come BEFORE the program starts so its prints get real
         # wall-clock time.
-        boot = run_mod._compose_bootstrap(b"x=1\n")
+        boot = run_mod._compose_runner()
         self.assertIn(b"machine.RTC().datetime(", boot)
         self.assertTrue(
             boot.index(b"machine.RTC().datetime(")
@@ -170,19 +187,19 @@ class ComposeTests(unittest.TestCase):
 
     def test_bootstrap_catches_keyboard_interrupt(self):
         """Button-press stop raises KeyboardInterrupt through
-        run_program; the bootstrap must catch it so the hub prints a
+        run_program; the runner must catch it so the hub prints a
         clean stop message instead of letting the raw-REPL surface an
         interrupt traceback."""
-        boot = run_mod._compose_bootstrap(b"")
+        boot = run_mod._compose_runner()
         self.assertIn(b"except KeyboardInterrupt", boot)
         self.assertIn(b"stopped by button press", boot)
 
-    def test_bootstrap_user_bytes_round_trip(self):
+    def test_stage_chunk_user_bytes_round_trip(self):
         # Any bytes the user script could contain — NULs, high bits,
         # quotes — must survive ``repr()`` wrapping.
         tricky = b"\x00\xff\r\n'\"\\"
-        boot = run_mod._compose_bootstrap(tricky)
-        self.assertIn(repr(tricky).encode(), boot)
+        prog = run_mod._compose_stage_chunk("/program.py", tricky, True)
+        self.assertIn(repr(tricky).encode(), prog)
 
 
 class RunFlowTests(unittest.TestCase):
@@ -193,11 +210,28 @@ class RunFlowTests(unittest.TestCase):
         self.tmp.close()
         self.addCleanup(os.unlink, self.tmp.name)
 
-    def _standard_responses(self, stdout_msg, stderr_msg=b""):
+    @staticmethod
+    def _stage_round(n=1):
+        """Scripted responses for ``n`` chunked staging execs: each is
+        a raw-paste handshake, end-of-paste ack, empty stdout/stderr
+        framing, and the raw-REPL prompt."""
+        out = []
+        for _ in range(n):
+            out += [
+                _R_SUPPORTED + _WINDOW_8K,    # staging paste ack + window
+                _CTRL_D,                      # end-of-paste ack
+                _CTRL_D,                      # empty stdout + EOT
+                _CTRL_D,                      # empty stderr + EOT
+                b">",                         # raw-REPL prompt
+            ]
+        return out
+
+    def _standard_responses(self, stdout_msg, stderr_msg=b"", stage_rounds=1):
         return [
             b"",                          # drain after Ctrl-C interrupt
             _BANNER,                      # raw-REPL banner
-            _R_SUPPORTED + _WINDOW_8K,    # raw-paste ack + window
+        ] + self._stage_round(stage_rounds) + [
+            _R_SUPPORTED + _WINDOW_8K,    # runner paste ack + window
             _CTRL_D,                      # end-of-paste ack
             stdout_msg + _CTRL_D,         # stdout + EOT
             stderr_msg + _CTRL_D,         # stderr + EOT
@@ -338,6 +372,13 @@ class InlineCommandTests(unittest.TestCase):
         responses = [
             b"",
             _BANNER,
+            # one staging round (inline code is < _STAGE_CHUNK_BYTES)
+            _R_SUPPORTED + _WINDOW_8K,
+            _CTRL_D,
+            _CTRL_D,
+            _CTRL_D,
+            b">",
+            # runner round
             _R_SUPPORTED + _WINDOW_8K,
             _CTRL_D,
             b"hello\r\n" + _CTRL_D,
@@ -543,8 +584,12 @@ class HostInterruptForwardingTests(unittest.TestCase):
         async def _restore(l):
             restore_calls.append(1)
 
+        async def _stub_stage(blink, l, target_path, payload):
+            return None
+
         patches = [
             ("_enter_raw_repl", _stub),
+            ("_stage_file", _stub_stage),
             ("_raw_paste_upload", _stub_upload),
             ("_stream_output", _stream),
             ("_restore_idle_loop", _restore),
@@ -674,6 +719,93 @@ class VerifiedRestoreTests(unittest.TestCase):
         sends = [w for w in link.writes if run_mod._CTRL_D in w]
         self.assertEqual(len(sends), 2)
         self.assertEqual(err.getvalue(), "")
+
+
+class ChunkedStagingTests(unittest.TestCase):
+    """_stage_file: bounded-memory staging (the fragmented-heap fix —
+    bench: 177 KB free / 5.2 KB max hole aborted a 9.4 KB one-shot
+    paste at ~6.4 KB received)."""
+
+    def _stage(self, payload, rounds):
+        responses = []
+        for _ in range(rounds):
+            responses += [_R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+                          _CTRL_D, _CTRL_D, b">"]
+        link = _ProtocolLink(responses)
+        blink = run_mod._BufferedLink(link)
+        _drive(run_mod._stage_file(blink, link, "/program.py", payload))
+        return link
+
+    def test_large_payload_splits_at_chunk_size(self):
+        payload = b"x" * (run_mod._STAGE_CHUNK_BYTES * 2 + 100)
+        link = self._stage(payload, rounds=3)
+        writes = b"".join(link.writes)
+        self.assertEqual(writes.count(b"'wb'"), 1)
+        self.assertEqual(writes.count(b"'ab'"), 2)
+
+    def test_every_staged_program_is_bounded(self):
+        # The invariant that makes staging fragmentation-proof: no
+        # single paste may exceed ~4x the chunk size.
+        payload = bytes(range(256)) * 8   # 2 KB of worst-case binary
+        link = self._stage(payload, rounds=4)
+        pastes = [w for w in link.writes if b"f.write" in w]
+        self.assertEqual(len(pastes), 4)
+        for pkt in pastes:
+            self.assertLess(len(pkt), run_mod._STAGE_CHUNK_BYTES * 5)
+
+    def test_payload_reassembles_in_order(self):
+        payload = bytes(range(256)) * 5   # 1280 bytes, 3 chunks
+        link = self._stage(payload, rounds=3)
+        chunks = []
+        for w in link.writes:
+            if b"f.write(" in w:
+                lit = w.split(b"f.write(", 1)[1].rsplit(b")", 1)[0]
+                chunks.append(eval(lit))
+        self.assertEqual(b"".join(chunks), payload)
+
+    def test_hub_stderr_during_staging_raises_runerror(self):
+        # e.g. OSError: 28 (filesystem full) while writing a chunk —
+        # must surface, not stage on.
+        responses = [
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            _CTRL_D,                                   # empty stdout
+            b"OSError: 28\r\n" + _CTRL_D,             # stderr
+            b">",
+        ]
+        link = _ProtocolLink(responses)
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._stage_file(
+                blink, link, "/program.py", b"data"))
+        except run_mod.RunError as e:
+            self.assertIn("OSError: 28", str(e))
+        else:
+            self.fail("expected RunError")
+
+    def test_junk_instead_of_prompt_raises(self):
+        # Framing desync (junk where the raw-REPL prompt should be)
+        # must fail loudly, not stage the next chunk into the void.
+        responses = [
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            _CTRL_D, _CTRL_D,
+            b"?",                                      # not the prompt
+        ]
+        link = _ProtocolLink(responses)
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._stage_file(
+                blink, link, "/program.py", b"data"))
+        except run_mod.RunError as e:
+            self.assertIn("unexpected byte", str(e))
+        else:
+            self.fail("expected RunError")
+
+    def test_empty_payload_still_truncates_the_file(self):
+        # Uploading an empty script must leave an empty /program.py,
+        # not yesterday's program.
+        link = self._stage(b"", rounds=1)
+        writes = b"".join(link.writes)
+        self.assertIn(b"'wb'", writes)
 
 
 class RunKeyboardInterruptTests(unittest.TestCase):

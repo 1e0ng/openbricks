@@ -47,18 +47,19 @@ DEFAULT_PROGRAM_PATH = "/program.py"
 _MAX_SCRIPT_BYTES = 64 * 1024
 
 
-def _compose_upload_program(target_path, payload):
-    """Return the one-shot Python program we upload to the hub.
-
-    Baking the payload into a ``repr()`` bytes literal lets any bytes
-    (NULs, high bits, quotes, newlines) round-trip verbatim. The hub
-    exec's this, writes the file, and prints a size confirmation that
-    streams back to our terminal.
-    """
+def _compose_confirm_program(target_path, expected_len):
+    """The small post-staging program: sync the RTC and print the
+    size confirmation the user sees. The payload itself is staged in
+    bounded chunks by ``run_mod._stage_file`` — a one-shot paste of
+    the whole file needs one contiguous hub-side buffer and dies on a
+    fragmented heap (bench: 177 KB free, 5.2 KB max hole, 9.4 KB
+    paste aborted)."""
     lines = run_mod.rtc_sync_lines() + [
-        "with open(%r, 'wb') as f:" % target_path,
-        "    f.write(%s)" % repr(payload),
-        "print('uploaded', %d, 'bytes to', %r)" % (len(payload), target_path),
+        "import os",
+        "print('uploaded', os.stat(%r)[6], 'bytes to', %r)" % (
+            target_path, target_path),
+        "assert os.stat(%r)[6] == %d, 'size mismatch after staging'" % (
+            target_path, expected_len),
     ]
     return "\n".join(lines).encode() + b"\n"
 
@@ -77,7 +78,7 @@ async def _upload_async(name, script_path, target_path, scan_timeout):
             "split the code or bump _MAX_SCRIPT_BYTES" % (
                 len(user_bytes), _MAX_SCRIPT_BYTES))
 
-    upload_program = _compose_upload_program(target_path, user_bytes)
+    confirm_program = _compose_confirm_program(target_path, len(user_bytes))
 
     print("connecting to %r ..." % name, file=sys.stderr)
     try:
@@ -89,7 +90,8 @@ async def _upload_async(name, script_path, target_path, scan_timeout):
         blink = run_mod._BufferedLink(link)
         await run_mod._enter_raw_repl(blink, link)
         try:
-            await run_mod._raw_paste_upload(blink, link, upload_program)
+            await run_mod._stage_file(blink, link, target_path, user_bytes)
+            await run_mod._raw_paste_upload(blink, link, confirm_program)
             await run_mod._stream_output(blink, link, sys.stdout)
         finally:
             try:
