@@ -135,7 +135,8 @@ def _detect_chip(esptool, port):
         name = ("esp32" + suffix).lower()
     else:
         name = "esp32"
-    print("detected chip: %s (%s)" % (m.group(0)[8:], name))
+    pretty = m.group(1) + ("-" + m.group(2) if m.group(2) else "")
+    print("detected chip: %s (%s)" % (pretty, name))
     return name
 
 
