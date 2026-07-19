@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.21.1 — wheels slimmed 17.3 MB → ~4 MB (PyPI storage limit)
+
+The ``cli/v1.21.0`` publish died mid-matrix on PyPI's 10 GB
+project-storage limit: 43 releases × ~277 MB, almost all of it
+three lossless WRO mat textures (16.9 MB) duplicated into every
+wheel. The mats are now 75 dpi (0.34 mm/px — the TCS34725 sampling
+spot still spans ~9 px, sim colour-sampling tests unchanged) and
+256-colour palette-quantized: 17 MB → 3.1 MB. The regen script
+bakes both steps in, and a wheel-size budget test fails any regen
+that reinflates them. Note: 1.21.0 is only partially on PyPI
+(cp310/cp311); 1.21.1 supersedes it.
+
 ## 1.21.0 — Pybricks Prime Motor API parity
 
 **BREAKING: ``motor.run()`` changed meaning.** It now follows

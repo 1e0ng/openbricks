@@ -175,5 +175,28 @@ class WheelBundlesWorldsTests(unittest.TestCase):
             "to flat material rgba without these." % missing)
 
 
+class MatTextureSizeBudgetTests(unittest.TestCase):
+    """The PyPI project hit its 10 GB storage limit (2026-07-19)
+    because every release duplicated ~17 MB of lossless mat textures
+    into 16 wheels. The mats are 75 dpi + 256-colour quantized now;
+    this guard fails a regen that silently reinflates them."""
+
+    _BUDGET_BYTES = 2_500_000   # per mat; current mats are 0.8-1.4 MB
+
+    def test_each_mat_is_within_budget(self):
+        import glob
+        mats = glob.glob(os.path.join(
+            os.path.dirname(__file__), "..",
+            "openbricks_sim", "worlds", "*", "mat.png"))
+        self.assertTrue(mats, "no mat.png found — path drift?")
+        for m in mats:
+            sz = os.path.getsize(m)
+            self.assertLessEqual(
+                sz, self._BUDGET_BYTES,
+                "%s is %.1f MB — regen without the quantize step? "
+                "See scripts/regen-wro-mat-textures.sh header"
+                % (m, sz / 1e6))
+
+
 if __name__ == "__main__":
     unittest.main()

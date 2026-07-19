@@ -10,15 +10,20 @@
 # texture sampling.
 #
 # DPI choice — see tools/openbricks/openbricks_sim/worlds/<name>/
-# README.md for current value. 150 dpi gives ~14000×6750 px for a
-# 2362×1143 mm mat (0.169 mm/pixel, well past the TCS34725's
-# physical sampling spot).
+# README.md for current value. 75 dpi gives ~7000×3375 px for a
+# 2362×1143 mm mat (0.34 mm/pixel; the TCS34725's physical sampling
+# spot is ~3 mm across, ~9 px — still comfortably oversampled).
+# The render is then 256-colour palette-quantized: the mats are flat
+# printed artwork, and the PyPI project hit its 10 GB storage limit
+# when every release shipped ~17 MB of lossless mats into 16 wheels
+# (2026-07-19). Do NOT raise DPI / drop the quantize step without
+# checking the wheel-size guard in tests/test_wheel_bundles_worlds.
 #
-# Requires: curl, pdftoppm (poppler).
+# Requires: curl, pdftoppm (poppler), Python PIL (quantize step).
 
 set -euo pipefail
 
-DPI=${DPI:-150}
+DPI=${DPI:-75}
 TMP=${TMP:-/tmp/wro2026-mat-regen}
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORLDS_ROOT="$REPO_ROOT/tools/openbricks/openbricks_sim/worlds"
@@ -43,6 +48,18 @@ for entry in "${CATEGORIES[@]}"; do
   pdftoppm -r "$DPI" -png "$pdf" "${short}-${DPI}dpi"
   out="$WORLDS_ROOT/$world_dir/mat.png"
   cp "${short}-${DPI}dpi-1.png" "$out"
+  # 256-colour palette quantize: near-lossless on flat printed
+  # artwork, ~5x smaller on the wire. See the header comment.
+  python3 - "$out" <<'PYEOF'
+import sys
+from PIL import Image
+p = sys.argv[1]
+Image.MAX_IMAGE_PIXELS = None
+im = Image.open(p)
+im = im.quantize(colors=256, method=Image.MEDIANCUT,
+                 dither=Image.FLOYDSTEINBERG)
+im.save(p, optimize=True)
+PYEOF
   ls -la "$out"
 done
 
