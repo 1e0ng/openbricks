@@ -50,7 +50,11 @@ right_sensor = TCS34725(mux[0])
 # Below this ambient (0..100) the surface counts as the line. Between
 # a typical mat (~30+) and a matte black line (~5-10); calibrate on
 # your own surfaces.
-LINE_AMBIENT = 5
+# Retuned 5 -> 20 when the driver defaults moved to gain=16 /
+# integration_ms=2.4: normalized ambient() reads ~4x higher
+# (gain x4, full scale /10). 20 matches line_follow.py's
+# threshold under the same configuration.
+LINE_AMBIENT = 20
 
 
 def align_on_line():

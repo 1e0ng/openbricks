@@ -145,9 +145,14 @@ class ControlLawTests(unittest.TestCase):
         self.assertEqual(self.ns["KI"], 0.0)
         self.assertTrue(0 < self.ns["KD"] <= 0.1)
         self.assertFalse(self.ns["DEBUG"])
+        # The low-latency sensor configuration (gain=16,
+        # integration_ms=2.4) became the DRIVER default, so the
+        # example uses bare constructors; the values themselves are
+        # pinned in test_tcs34725's default-configuration test.
         with open(_EXAMPLE) as f:
             src = f.read()
-        self.assertEqual(src.count("gain=16, integration_ms=2.4"), 2)
+        self.assertEqual(src.count("TCS34725(mux["), 2)
+        self.assertFalse("integration_ms=2.4)" in src)  # no explicit args
 
 
 if __name__ == "__main__":

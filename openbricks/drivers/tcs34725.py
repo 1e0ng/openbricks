@@ -33,11 +33,17 @@ _ENABLE_AEN = 0x02
 
 
 class TCS34725(ColorSensor):
-    def __init__(self, i2c, address=_ADDR, integration_ms=24, gain=4):
+    def __init__(self, i2c, address=_ADDR, integration_ms=2.4, gain=16):
         """
         Args:
-            integration_ms: integration time, 2.4..614.4 ms in 2.4 ms steps.
-            gain: 1, 4, 16, or 60.
+            integration_ms: integration time, 2.4..614.4 ms in 2.4 ms
+                steps. Default 2.4 (chip minimum): low-latency reads
+                for control loops — the line-follow PID reads both
+                sensors every cycle and its D term needs fresh
+                samples, not long averages.
+            gain: 1, 4, 16, or 60. Default 16 compensates the short
+                integration window (1 cycle -> full scale 1024, so
+                low gain floors dark readings to a handful of counts).
         """
         self._i2c = i2c
         self._addr = address
