@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.20.0 — ESP32-S3: the 8 MB PSRAM is finally in the heap
+
+Through 1.19.x the S3 board config listed only
+``sdkconfig.spiram_oct`` — which selects the octal PSRAM *mode* but
+never sets ``CONFIG_SPIRAM=y`` — so PSRAM was silently off and the
+GC heap was internal-RAM only (~234 KB; the fragmentation behind
+1.19.2's upload abort). The config now includes upstream's
+``spiram_sx`` enable fragment before the octal override, matching
+the ESP32_GENERIC_S3 SPIRAM_OCT variant: on an N16R8 the GC
+auto-split heap grows into the 8 MB on demand. Boards without
+working PSRAM still boot (``CONFIG_SPIRAM_IGNORE_NOTFOUND``), just
+without the extra memory. Drift-guarded by
+``tests/test_board_config.py``. After flashing, verify with
+``gc.mem_free()`` — expect megabytes.
+
 ## 1.19.2 — run/upload survive a fragmented hub heap (chunked staging)
 
 ``openbricks run examples/line_follow.py`` died with "hub aborted
