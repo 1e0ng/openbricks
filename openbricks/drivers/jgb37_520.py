@@ -90,7 +90,7 @@ class JGB37Motor(Motor):
         self._servo.run_speed(float(deg_per_s))
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
-                  accel_dps2=360.0):
+                  accel_dps2=1500.0):
         """Rotate by ``target_angle`` degrees, following a trapezoidal
         profile at up to ``deg_per_s``.
 

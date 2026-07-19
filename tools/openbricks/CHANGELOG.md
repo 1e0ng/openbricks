@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.19.0 — default acceleration retuned 360 → 1500 deg/s²
+
+Pybricks parity: 1500 deg/s² is what a Pybricks DriveBase runs on a
+SPIKE Prime hub (motors default 2000, DriveBase scales ×3/4). Now
+that the serial-bus motors ramp too (1.18.0) and stops stay instant
+(1.18.1), the snappier default applies uniformly: DriveBase moves,
+direct ``run_speed()``, everything. All EIGHT value homes move
+together (goal-acc register now encodes 171). Top speed untouched,
+as always; the short-move threshold shrinks back to ~v²/accel ≈
+27 mm at the 200 dps default.
+
 ## 1.18.1 — brake() is instant again: the ramp governs motion, not stops
 
 1.18.0's servo-side ramp also slewed ``brake()`` — a 0.5+ s

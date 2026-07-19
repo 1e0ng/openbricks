@@ -339,7 +339,7 @@ class ST3215Motor(Motor):
                  invert=False,
                  steps_per_dps=_DEFAULT_STEPS_PER_DPS,
                  max_dps=600.0,
-                 accel_dps2=360.0):
+                 accel_dps2=1500.0):
         self._id    = servo_id
         self._bus   = self._bus_for(uart_id, tx, rx, baud, dir_pin)
         self._invert = bool(invert)

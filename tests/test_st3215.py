@@ -312,7 +312,7 @@ class TestGoalAccRamp(unittest.TestCase):
     """The hardware acceleration ramp (goal-acc register 0x29, unit
     100 encoder steps/s²): the SERVO slews speed changes, so direct
     ``run_speed()`` — the line follower, user code — honours the same
-    360 deg/s² default as the DriveBase profile. Bench origin: the
+    1500 deg/s² default as the DriveBase profile. Bench origin: the
     default-acceleration retune didn't affect ``run_speed`` because
     the serial drivers had no acceleration home at all."""
 
@@ -323,12 +323,12 @@ class TestGoalAccRamp(unittest.TestCase):
         return _writes_to(log, _REG_GOAL_ACC)
 
     def test_constructor_writes_default_acc(self):
-        # 360 deg/s² × 11.378 steps/deg = 4096 steps/s² → 41 register
-        # units of 100 steps/s².
+        # 1500 deg/s² × 11.378 steps/deg = 17067 steps/s² → 171
+        # register units of 100 steps/s².
         m = ST3215Motor(servo_id=1)
         accs = self._acc_writes(m._bus._uart._tx_log)
         self.assertEqual(len(accs), 1)
-        self.assertEqual(accs[0], (1, bytes([41])))
+        self.assertEqual(accs[0], (1, bytes([171])))
 
     def test_custom_accel_encodes_in_register_units(self):
         m = ST3215Motor(servo_id=2, steps_per_dps=10.0, accel_dps2=500.0)
@@ -358,13 +358,13 @@ class TestGoalAccRamp(unittest.TestCase):
         log = m._bus._uart._tx_log[base:]
         accs = _writes_to(log, _REG_GOAL_ACC)
         speeds = _writes_to(log, _REG_GOAL_SPEED)
-        self.assertEqual(accs, [(6, bytes([0])), (6, bytes([41]))])
+        self.assertEqual(accs, [(6, bytes([0])), (6, bytes([171]))])
         self.assertEqual(speeds, [(6, bytes([0, 0]))])
         # Order: acc-off BEFORE the zero-speed write, restore AFTER.
         idx = [(_decode_write(p)[1], _decode_write(p)[2]) for p in log]
         self.assertLess(idx.index((_REG_GOAL_ACC, bytes([0]))),
                         idx.index((_REG_GOAL_SPEED, bytes([0, 0]))))
-        self.assertGreater(idx.index((_REG_GOAL_ACC, bytes([41]))),
+        self.assertGreater(idx.index((_REG_GOAL_ACC, bytes([171]))),
                            idx.index((_REG_GOAL_SPEED, bytes([0, 0]))))
 
     def test_brake_with_ramp_disabled_adds_no_acc_writes(self):
@@ -382,7 +382,7 @@ class TestGoalAccRamp(unittest.TestCase):
         m.run_speed(120)
         m.brake()
         accs = _writes_to(m._bus._uart._tx_log, _REG_GOAL_ACC)
-        self.assertEqual(accs[-1], (8, bytes([41])))
+        self.assertEqual(accs[-1], (8, bytes([171])))
 
     def test_run_speed_packets_unchanged_by_the_ramp(self):
         # The ramp lives in the servo: goal-speed writes are byte-for-
