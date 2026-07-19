@@ -115,11 +115,16 @@ def _detect_chip(esptool, port):
     except Exception as e:
         print("warning: chip probe failed (%s)" % e, file=sys.stderr)
         return None
-    m = re.search(r"Chip is (ESP32)(?:-([A-Z0-9]+))?", out)
+    # esptool v5 prints a column-padded "Chip type:          ESP32-S3
+    # (QFN56)"; v4 printed "Chip is ESP32-S3 ...". Accept both — the
+    # first ship only knew the v4 phrasing and the probe silently
+    # failed on every v5 install (bench, 1.22.0).
+    m = re.search(r"Chip (?:is|type:)\s+(ESP32)(?:-([A-Z0-9]+))?", out)
     if not m:
+        tail = [l for l in out.splitlines() if l.strip()][-1:] or ["<empty>"]
         print("warning: could not identify the connected chip from "
-              "esptool output — skipping the image/chip match check",
-              file=sys.stderr)
+              "esptool output (last line: %r) — skipping the "
+              "image/chip match check" % tail[0], file=sys.stderr)
         return None
     # Canonicalize to esptool --chip family names. The suffix is only
     # a family marker for S2/S3/C-/H-/P-series; classic ESP32 modules
