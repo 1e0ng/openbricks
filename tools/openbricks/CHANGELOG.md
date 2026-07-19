@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.22.0 — `openbricks flash` with no arguments but the name
+
+``--port`` and ``--firmware`` are now optional:
+
+* **Port auto-detection** — with exactly ONE ESP device connected
+  (Espressif native USB or a CP210x/CH340/FTDI bridge, matched by
+  USB vendor ID so a modem can't be grabbed), the port is found
+  automatically. Zero or several candidates refuse with a listing —
+  flashing is destructive, so we never guess.
+* **Chip identification** — the bootloader is probed (``chip-id``)
+  and variant names canonicalized (an ESP32-D0WD is an ``esp32``,
+  an ESP32-S3 is an ``esp32s3``); the result feeds esptool's
+  ``--chip`` and the new safety check below.
+* **Firmware auto-download** — ``--firmware`` omitted downloads the
+  newest GitHub release's image for the detected chip (cached in
+  ``~/.cache/openbricks/firmware``, size-verified).
+* **Image/chip mismatch guard** — the merged image's bootloader
+  header records the chip it was built for; flashing an esp32 image
+  onto an S3 (a silent no-boot brick) now dies BEFORE the erase.
+
+``openbricks flash --name ls`` is now the whole command.
+
 ## 1.21.1 — wheels slimmed 17.3 MB → ~4 MB (PyPI storage limit)
 
 The ``cli/v1.21.0`` publish died mid-matrix on PyPI's 10 GB

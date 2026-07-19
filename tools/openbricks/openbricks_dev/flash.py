@@ -15,6 +15,8 @@ readback after the write, so a quiet failure on the device can't be
 mistaken for success.
 """
 
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -39,6 +41,172 @@ _IMAGE_BASES     = (0x0, 0x1000)
 
 class FlashError(Exception):
     """Raised by ``run`` when any step of the flash / name-write fails."""
+
+
+# USB vendor IDs that identify an ESP dev board's serial interface:
+# Espressif's native USB-Serial-JTAG (the S3's usbmodem port) and the
+# common UART bridge chips soldered onto commodity dev boards.
+_ESP_USB_VIDS = {
+    0x303A: "Espressif native USB",
+    0x10C4: "CP210x bridge",
+    0x1A86: "CH340/CH910x bridge",
+    0x0403: "FTDI bridge",
+}
+
+# ESP image extended-header chip IDs (bytes 12-13 of the bootloader
+# image, little-endian) -> esptool --chip names. The merged
+# firmware.bin starts with the bootloader image, so the file's first
+# 16 bytes carry the chip the image was built for.
+_IMAGE_CHIP_IDS = {
+    0x0000: "esp32",
+    0x0002: "esp32s2",
+    0x0005: "esp32c3",
+    0x0009: "esp32s3",
+    0x000D: "esp32c6",
+    0x0010: "esp32h2",
+}
+_IMAGE_MAGIC = 0xE9
+
+
+def _autodetect_port():
+    """Return the single connected ESP serial port, or die usefully.
+
+    Filters ``serial.tools.list_ports`` down to known ESP-ish USB
+    vendor IDs so a modem or an Arduino on another port can't be
+    grabbed by mistake. Exactly one match is required — flashing is
+    destructive, so with two candidates we refuse to guess.
+    """
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        _die("--port not given and pyserial is unavailable for "
+             "auto-detection — pip install pyserial (or pass --port)")
+    candidates = []
+    for p in list_ports.comports():
+        if p.vid in _ESP_USB_VIDS:
+            candidates.append(p)
+    if not candidates:
+        _die("--port not given and no connected ESP device found "
+             "(looked for %s). Plug the hub in, or pass --port "
+             "explicitly." % ", ".join(sorted(_ESP_USB_VIDS.values())))
+    if len(candidates) > 1:
+        listing = "\n".join(
+            "  %s  (%s)" % (c.device, _ESP_USB_VIDS.get(c.vid, "?"))
+            for c in candidates)
+        _die("--port not given and %d ESP devices are connected — "
+             "flashing is destructive, refusing to guess:\n%s"
+             % (len(candidates), listing))
+    port = candidates[0].device
+    print("auto-detected port %s (%s)"
+          % (port, _ESP_USB_VIDS.get(candidates[0].vid, "?")))
+    return port
+
+
+def _detect_chip(esptool, port):
+    """Ask the bootloader which chip this is. Returns an esptool
+    ``--chip`` name (e.g. ``esp32``, ``esp32s3``) or ``None`` if the
+    probe failed (device wedged mid-boot etc.) — callers must treat
+    ``None`` as "unknown", not as any particular chip."""
+    chip_cmd = "chip-id" if esptool.endswith("esptool") else "chip_id"
+    try:
+        out = subprocess.run(
+            [esptool, "--port", port, chip_cmd],
+            capture_output=True, text=True, timeout=30).stdout
+    except Exception as e:
+        print("warning: chip probe failed (%s)" % e, file=sys.stderr)
+        return None
+    m = re.search(r"Chip is (ESP32)(?:-([A-Z0-9]+))?", out)
+    if not m:
+        print("warning: could not identify the connected chip from "
+              "esptool output — skipping the image/chip match check",
+              file=sys.stderr)
+        return None
+    # Canonicalize to esptool --chip family names. The suffix is only
+    # a family marker for S2/S3/C-/H-/P-series; classic ESP32 modules
+    # report variant suffixes (D0WD, D0WD-V3, PICO...) that must all
+    # map to plain "esp32", not a bogus chip name.
+    suffix = m.group(2) or ""
+    if suffix in ("S2", "S3", "C2", "C3", "C5", "C6", "H2", "P4"):
+        name = ("esp32" + suffix).lower()
+    else:
+        name = "esp32"
+    print("detected chip: %s (%s)" % (m.group(0)[8:], name))
+    return name
+
+
+def _image_chip_name(firmware_path):
+    """Read the chip the image was built for from the bootloader
+    header at the start of the merged image. ``None`` if the header
+    isn't recognizable (foreign image) — callers skip the check."""
+    try:
+        with open(firmware_path, "rb") as f:
+            hdr = f.read(16)
+    except OSError:
+        return None
+    if len(hdr) < 14 or hdr[0] != _IMAGE_MAGIC:
+        return None
+    chip_id = hdr[12] | (hdr[13] << 8)
+    return _IMAGE_CHIP_IDS.get(chip_id)
+
+
+_RELEASES_LATEST_URL = \
+    "https://api.github.com/repos/1e0ng/openbricks/releases/latest"
+_FIRMWARE_CACHE_DIR = os.path.expanduser("~/.cache/openbricks/firmware")
+
+
+def _http_get(url):
+    """GET ``url`` and return the response bytes. Split out as a seam
+    for tests; stdlib-only so flash has no new dependencies."""
+    import urllib.request
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "openbricks-flash"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return resp.read()
+
+
+def _latest_firmware_for(chip):
+    """Download (or reuse from cache) the newest release's merged
+    firmware image for ``chip`` ("esp32" / "esp32s3"). Returns the
+    local path. Dies with instructions on any failure — a flash must
+    never proceed on a guessed image."""
+    import json
+    try:
+        release = json.loads(_http_get(_RELEASES_LATEST_URL))
+    except Exception as e:
+        _die("--firmware not given and the latest-release lookup "
+             "failed (%s) — offline? Pass --firmware with a local "
+             ".bin from the Releases page." % e)
+    prefix = "openbricks-%s-firmware-" % chip
+    asset = None
+    for a in release.get("assets", []):
+        if a.get("name", "").startswith(prefix):
+            asset = a
+            break
+    if asset is None:
+        _die("release %s has no asset matching %s*.bin — pass "
+             "--firmware explicitly"
+             % (release.get("tag_name", "?"), prefix))
+    path = os.path.join(_FIRMWARE_CACHE_DIR, asset["name"])
+    if os.path.exists(path) and os.path.getsize(path) == asset.get("size", -1):
+        print("firmware: using cached %s" % path)
+        return path
+    print("firmware: downloading %s (%s) ..."
+          % (asset["name"], release.get("tag_name", "?")))
+    try:
+        data = _http_get(asset["browser_download_url"])
+    except Exception as e:
+        _die("firmware download failed (%s) — pass --firmware with a "
+             "local .bin" % e)
+    if asset.get("size") is not None and len(data) != asset["size"]:
+        _die("firmware download truncated (%d of %d bytes) — retry, "
+             "or pass --firmware" % (len(data), asset["size"]))
+    os.makedirs(_FIRMWARE_CACHE_DIR, exist_ok=True)
+    tmp = path + ".part"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+    print("firmware: saved to %s" % path)
+    return path
 
 
 def _die(msg):
@@ -224,12 +392,39 @@ def run(args):
     esptool, write_cmd, erase_cmd = _esptool_paths_and_commands()
     mpremote = _require_tool("mpremote")
 
+    if args.port is None:
+        args.port = _autodetect_port()
+
+    # Identify the connected chip up front: it gates the automatic
+    # firmware download and the image/chip mismatch guard.
+    detected_chip = _detect_chip(esptool, args.port)
+
+    if args.firmware is None:
+        if detected_chip is None:
+            _die("--firmware not given and the connected chip could "
+                 "not be identified — pass --firmware (and possibly "
+                 "--chip) explicitly")
+        args.firmware = _latest_firmware_for(detected_chip)
+
     # Resolve the write offset from the image before touching the chip,
     # so an unrecognizable image fails the flash *before* the erase.
     write_offset = _image_base_offset(args.firmware)
 
-    print("=== openbricks flash: name=%r port=%s offset=%s ==="
-          % (args.name, args.port, write_offset))
+    # Refuse a mismatched image — flashing an esp32 image onto an S3
+    # (or vice versa) bricks the boot silently. Both sides degrade to
+    # "unknown" rather than guessing: an unknown side skips the check
+    # with a warning.
+    image_chip = _image_chip_name(args.firmware)
+    if image_chip and detected_chip and image_chip != detected_chip:
+        _die("firmware image %s was built for %s but the connected "
+             "chip is %s — download the matching "
+             "openbricks-%s-firmware .bin from the Releases page"
+             % (args.firmware, image_chip, detected_chip, detected_chip))
+    if args.chip == "auto" and detected_chip:
+        args.chip = detected_chip
+
+    print("=== openbricks flash: name=%r port=%s offset=%s chip=%s ==="
+          % (args.name, args.port, write_offset, args.chip))
 
     if not args.skip_erase:
         _run([esptool, "--chip", args.chip, "--port", args.port, erase_cmd])

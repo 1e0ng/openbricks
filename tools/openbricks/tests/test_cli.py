@@ -32,17 +32,15 @@ class BuildParserTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 0)
         self.assertIn(__version__, out.getvalue())
 
-    def test_flash_requires_name_port_firmware(self):
-        # Each of the three required args, missing in turn, should exit.
-        base = ["flash", "--name", "A", "--port", "P", "--firmware", "F"]
-        for missing in ("--name", "--port", "--firmware"):
-            idx = base.index(missing)
-            truncated = base[:idx] + base[idx + 2:]
-            with self.assertRaises(SystemExit):
-                # Suppress argparse's error text so the test output stays
-                # clean — we only care that it exits non-zero.
-                with patch("sys.stderr", new_callable=io.StringIO):
-                    self._parse(truncated)
+    def test_flash_requires_only_name(self):
+        # 1.22.0: --port and --firmware are optional (auto-detected /
+        # auto-downloaded); --name remains the one required argument.
+        with self.assertRaises(SystemExit):
+            with patch("sys.stderr", new_callable=io.StringIO):
+                self._parse(["flash", "--port", "P", "--firmware", "F"])
+        args = self._parse(["flash", "--name", "A"])
+        self.assertIsNone(args.port)
+        self.assertIsNone(args.firmware)
 
     def test_flash_defaults(self):
         args = self._parse([

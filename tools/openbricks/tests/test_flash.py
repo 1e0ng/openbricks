@@ -8,6 +8,8 @@ the verification flow (write, read back, compare).
 
 import argparse
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
@@ -41,6 +43,344 @@ def _args(**overrides):
     )
     base.update(overrides)
     return argparse.Namespace(**base)
+
+
+class _FakePort:
+    def __init__(self, device, vid):
+        self.device = device
+        self.vid = vid
+
+
+class AutodetectPortTests(unittest.TestCase):
+    """--port omitted: exactly one connected ESP-ish device is used;
+    zero or several refuse (flashing is destructive — never guess)."""
+
+    def _detect(self, ports):
+        import serial.tools.list_ports as lp
+        with patch.object(lp, "comports", return_value=ports):
+            return flash._autodetect_port()
+
+    def test_single_esp_device_is_chosen(self):
+        got = self._detect([
+            _FakePort("/dev/cu.Bluetooth", None),
+            _FakePort("/dev/cu.usbmodem42", 0x303A),
+        ])
+        self.assertEqual(got, "/dev/cu.usbmodem42")
+
+    def test_bridge_chips_count_as_esp(self):
+        got = self._detect([_FakePort("/dev/ttyUSB0", 0x10C4)])
+        self.assertEqual(got, "/dev/ttyUSB0")
+
+    def test_no_device_dies_with_hint(self):
+        with self.assertRaises(flash.FlashError):
+            self._detect([_FakePort("/dev/cu.Bluetooth", None)])
+
+    def test_two_devices_refuse_to_guess(self):
+        with self.assertRaises(flash.FlashError):
+            self._detect([
+                _FakePort("/dev/cu.usbmodem42", 0x303A),
+                _FakePort("/dev/ttyUSB0", 0x1A86),
+            ])
+
+
+class DetectChipTests(unittest.TestCase):
+    def _detect(self, stdout, binary="/usr/local/bin/esptool"):
+        fake = subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+        with patch("openbricks_dev.flash.subprocess.run",
+                   return_value=fake) as run:
+            got = flash._detect_chip(binary, "/dev/x")
+        return got, run.call_args[0][0]
+
+    def test_parses_esp32s3(self):
+        got, cmd = self._detect("Detecting chip type... Chip is ESP32-S3 (QFN56)")
+        self.assertEqual(got, "esp32s3")
+        self.assertIn("chip-id", cmd)
+
+    def test_parses_classic_esp32(self):
+        got, _ = self._detect("Chip is ESP32-D0WD-V3 (revision v3.1)")
+        # Variant suffixes (D0WD, PICO...) are NOT chip families —
+        # esptool --chip needs plain "esp32", not "esp32d0wd".
+        self.assertEqual(got, "esp32")
+
+    def test_legacy_binary_uses_snake_case_command(self):
+        _, cmd = self._detect("Chip is ESP32", binary="/usr/bin/esptool.py")
+        self.assertIn("chip_id", cmd)
+
+    def test_unparseable_output_returns_none(self):
+        got, _ = self._detect("garbage")
+        self.assertIsNone(got)
+
+
+class ImageChipNameTests(unittest.TestCase):
+    def _image(self, chip_id, magic=0xE9):
+        hdr = bytearray(16)
+        hdr[0] = magic
+        hdr[12] = chip_id & 0xFF
+        hdr[13] = (chip_id >> 8) & 0xFF
+        fd, path = tempfile.mkstemp(suffix=".bin")
+        with os.fdopen(fd, "wb") as f:
+            f.write(bytes(hdr))
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_reads_s3_and_classic(self):
+        self.assertEqual(flash._image_chip_name(self._image(0x0009)), "esp32s3")
+        self.assertEqual(flash._image_chip_name(self._image(0x0000)), "esp32")
+
+    def test_unknown_id_and_bad_magic_return_none(self):
+        self.assertIsNone(flash._image_chip_name(self._image(0x4242)))
+        self.assertIsNone(flash._image_chip_name(self._image(0x0009, magic=0x00)))
+
+
+class LatestFirmwareDownloadTests(unittest.TestCase):
+    """--firmware omitted: pick the newest release's asset for the
+    detected chip, verify size, cache under ~/.cache/openbricks."""
+
+    def setUp(self):
+        self.cache = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cache, True)
+        self._cache_patch = patch.object(
+            flash, "_FIRMWARE_CACHE_DIR", self.cache)
+        self._cache_patch.start()
+        self.addCleanup(self._cache_patch.stop)
+
+    def _release_json(self):
+        import json
+        return json.dumps({
+            "tag_name": "v9.9.9",
+            "assets": [
+                {"name": "openbricks-esp32-firmware-v9.9.9.bin",
+                 "size": 4, "browser_download_url": "http://x/esp32"},
+                {"name": "openbricks-esp32s3-firmware-v9.9.9.bin",
+                 "size": 4, "browser_download_url": "http://x/s3"},
+            ],
+        }).encode()
+
+    def test_downloads_matching_chip_asset(self):
+        fetched = []
+
+        def fake_get(url):
+            fetched.append(url)
+            if "releases" in url:
+                return self._release_json()
+            return b"BINS"
+        with patch.object(flash, "_http_get", side_effect=fake_get):
+            path = flash._latest_firmware_for("esp32s3")
+        self.assertTrue(path.endswith("openbricks-esp32s3-firmware-v9.9.9.bin"))
+        self.assertEqual(open(path, "rb").read(), b"BINS")
+        self.assertIn("http://x/s3", fetched)
+
+    def test_esp32_prefix_does_not_match_s3_asset(self):
+        def fake_get(url):
+            if "releases" in url:
+                return self._release_json()
+            return b"BINS"
+        with patch.object(flash, "_http_get", side_effect=fake_get):
+            path = flash._latest_firmware_for("esp32")
+        self.assertTrue(path.endswith("openbricks-esp32-firmware-v9.9.9.bin"))
+
+    def test_cached_file_skips_download(self):
+        name = "openbricks-esp32s3-firmware-v9.9.9.bin"
+        with open(os.path.join(self.cache, name), "wb") as f:
+            f.write(b"OLDB")   # size 4 matches the asset
+        fetched = []
+
+        def fake_get(url):
+            fetched.append(url)
+            return self._release_json()
+        with patch.object(flash, "_http_get", side_effect=fake_get):
+            flash._latest_firmware_for("esp32s3")
+        self.assertEqual(len(fetched), 1)   # only the release lookup
+
+    def test_truncated_download_dies(self):
+        def fake_get(url):
+            if "releases" in url:
+                return self._release_json()
+            return b"X"   # 1 byte, asset says 4
+        with patch.object(flash, "_http_get", side_effect=fake_get):
+            with self.assertRaises(flash.FlashError):
+                flash._latest_firmware_for("esp32s3")
+
+    def test_offline_lookup_dies_with_instructions(self):
+        with patch.object(flash, "_http_get",
+                          side_effect=OSError("no route")):
+            with self.assertRaises(flash.FlashError):
+                flash._latest_firmware_for("esp32s3")
+
+
+class AutodetectErrorPathTests(unittest.TestCase):
+    """The loud-degradation branches: pyserial missing, probe raising,
+    unreadable image, missing asset, download-stage failure."""
+
+    def test_missing_pyserial_dies_with_instructions(self):
+        import sys
+        with patch.dict(sys.modules, {"serial": None,
+                                      "serial.tools": None,
+                                      "serial.tools.list_ports": None}):
+            with self.assertRaises(flash.FlashError):
+                flash._autodetect_port()
+
+    def test_probe_subprocess_exception_returns_none(self):
+        with patch("openbricks_dev.flash.subprocess.run",
+                   side_effect=OSError("no such port")):
+            self.assertIsNone(
+                flash._detect_chip("/usr/local/bin/esptool", "/dev/x"))
+
+    def test_unreadable_image_returns_none(self):
+        self.assertIsNone(
+            flash._image_chip_name("/nonexistent/firmware.bin"))
+
+    def test_http_get_uses_urllib_with_user_agent(self):
+        import urllib.request
+        resp = MagicMock()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = lambda s, *a: False
+        resp.read = lambda: b"BODY"
+        with patch.object(urllib.request, "urlopen",
+                          return_value=resp) as uo:
+            self.assertEqual(flash._http_get("http://x"), b"BODY")
+        req = uo.call_args[0][0]
+        self.assertEqual(req.get_header("User-agent"), "openbricks-flash")
+
+    def test_release_without_matching_asset_dies(self):
+        import json
+        release = json.dumps({"tag_name": "v1", "assets": [
+            {"name": "something-else.bin", "size": 1,
+             "browser_download_url": "http://x/other"}]}).encode()
+        with patch.object(flash, "_http_get", return_value=release):
+            with self.assertRaises(flash.FlashError):
+                flash._latest_firmware_for("esp32s3")
+
+    def test_download_stage_failure_dies(self):
+        import json
+        release = json.dumps({"tag_name": "v1", "assets": [
+            {"name": "openbricks-esp32s3-firmware-v1.bin", "size": 4,
+             "browser_download_url": "http://x/s3"}]}).encode()
+        with patch.object(flash, "_http_get",
+                          side_effect=[release, OSError("reset")]):
+            with self.assertRaises(flash.FlashError):
+                flash._latest_firmware_for("esp32s3")
+
+
+class RunAutodetectFlowTests(unittest.TestCase):
+    """run() dispatch: port=None triggers autodetect, firmware=None
+    triggers download (or dies on unknown chip), detected chip feeds
+    esptool --chip on the happy path."""
+
+    def setUp(self):
+        self._which = patch("shutil.which",
+                            side_effect=lambda name: "/usr/local/bin/" + name)
+        self._which.start()
+        self.addCleanup(self._which.stop)
+        self._sleep = patch("openbricks_dev.flash.time.sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+
+    def _s3_image(self):
+        buf = bytearray(b"\xff" * (flash._PT_FLASH_OFFSET + 2))
+        buf[0] = flash._IMAGE_MAGIC
+        buf[12] = 0x09
+        buf[13] = 0x00
+        buf[flash._PT_FLASH_OFFSET:flash._PT_FLASH_OFFSET + 2] = flash._PT_MAGIC
+        fd, path = tempfile.mkstemp(suffix=".bin")
+        with os.fdopen(fd, "wb") as f:
+            f.write(bytes(buf))
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_port_none_uses_autodetect(self):
+        with patch.object(flash, "_autodetect_port",
+                          return_value="/dev/cu.usbmodem42") as ad, \
+             patch.object(flash, "_detect_chip", return_value=None), \
+             patch("subprocess.call", return_value=1):
+            with self.assertRaises(flash.FlashError):
+                # erase failing (return 1) aborts right after — we only
+                # care that autodetect ran and its port was used.
+                flash.run(_args(port=None, firmware=self._s3_image()))
+        ad.assert_called_once()
+
+    def test_firmware_none_unknown_chip_dies(self):
+        with patch.object(flash, "_detect_chip", return_value=None):
+            with self.assertRaises(flash.FlashError):
+                flash.run(_args(firmware=None, port="/dev/x"))
+
+    def test_firmware_none_downloads_for_detected_chip(self):
+        img = self._s3_image()
+        with patch.object(flash, "_detect_chip", return_value="esp32s3"), \
+             patch.object(flash, "_latest_firmware_for",
+                          return_value=img) as dl, \
+             patch("subprocess.call", return_value=1):
+            with self.assertRaises(flash.FlashError):
+                flash.run(_args(firmware=None, port="/dev/x"))
+        dl.assert_called_once_with("esp32s3")
+
+    def test_detected_chip_feeds_esptool_chip_arg(self):
+        call_history = []
+
+        def _fake_call(cmd):
+            call_history.append(cmd)
+            return 0
+        run_responses = iter([
+            MagicMock(returncode=0, stdout="ok\n", stderr=""),
+            MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
+            MagicMock(returncode=0, stdout="RobotA\n", stderr=""),
+        ])
+        with patch.object(flash, "_detect_chip",
+                          return_value="esp32s3"), \
+             patch("subprocess.call", side_effect=_fake_call), \
+             patch("subprocess.run",
+                   side_effect=lambda *a, **k: next(run_responses)):
+            rc = flash.run(_args(firmware=self._s3_image(), port="/dev/x"))
+        self.assertEqual(rc, 0)
+        self.assertIn("esp32s3", call_history[0])   # erase --chip
+        self.assertIn("esp32s3", call_history[1])   # write --chip
+
+
+class ChipMismatchGuardTests(unittest.TestCase):
+    """An esp32 image on an S3 chip (or vice versa) must die BEFORE
+    the erase."""
+
+    def setUp(self):
+        self._which = patch("shutil.which",
+                            side_effect=lambda name: "/usr/local/bin/" + name)
+        self._which.start()
+        self.addCleanup(self._which.stop)
+        self._sleep = patch("openbricks_dev.flash.time.sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+
+    def _s3_image_with_header(self):
+        # PT magic for offset resolution + a bootloader header saying
+        # esp32s3 at the file start.
+        buf = bytearray(b"\xff" * (flash._PT_FLASH_OFFSET + 2))
+        buf[0] = flash._IMAGE_MAGIC
+        buf[12] = 0x09
+        buf[13] = 0x00   # chip_id high byte — 0xFF fill would make 0xFF09
+        buf[flash._PT_FLASH_OFFSET:flash._PT_FLASH_OFFSET + 2] = flash._PT_MAGIC
+        fd, path = tempfile.mkstemp(suffix=".bin")
+        with os.fdopen(fd, "wb") as f:
+            f.write(buf)
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_mismatch_dies_before_erase(self):
+        calls = []
+        fake_probe = subprocess.CompletedProcess(
+            [], 0, stdout="Chip is ESP32-D0WD", stderr="")
+
+        def fake_call(cmd):
+            calls.append(cmd)
+            return 0
+        with patch("openbricks_dev.flash.subprocess.run",
+                   return_value=fake_probe), \
+             patch("openbricks_dev.flash.subprocess.call",
+                   side_effect=fake_call):
+            with self.assertRaises(flash.FlashError):
+                flash.run(_args(firmware=self._s3_image_with_header(),
+                                port="/dev/x"))
+        for cmd in calls:
+            self.assertFalse(any("erase" in str(c) for c in cmd),
+                             "erase ran before the mismatch check")
 
 
 class ValidateNameTests(unittest.TestCase):
@@ -77,6 +417,13 @@ class RunHappyPathTests(unittest.TestCase):
         # Never actually sleep in tests.
         self._sleep = patch("openbricks_dev.flash.time.sleep")
         self._sleep.start()
+        # The chip probe (new in the autodetect feature) would invoke
+        # real esptool; these tests exercise the flash flow, not the
+        # probe — force the "unknown chip" path (chip stays 'auto',
+        # image check skipped, exactly the pre-autodetect behaviour).
+        self._probe = patch("openbricks_dev.flash._detect_chip",
+                            return_value=None)
+        self._probe.start()
         # A real (fake) image file on disk — flash.run reads it to
         # determine the write offset. S3 layout → offset 0x0.
         self.firmware = _fake_image(0x0)
@@ -84,6 +431,7 @@ class RunHappyPathTests(unittest.TestCase):
     def tearDown(self):
         self._which.stop()
         self._sleep.stop()
+        self._probe.stop()
         os.unlink(self.firmware)
 
     def _run_args(self, **overrides):

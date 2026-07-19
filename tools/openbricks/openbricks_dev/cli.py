@@ -54,12 +54,18 @@ def _build_parser():
         help="Hub identifier for BLE (required, <=20 chars recommended).",
     )
     p_flash.add_argument(
-        "--port", required=True,
-        help="Serial port (/dev/ttyUSB0, /dev/cu.usbserial-XXXX, COM5 ...).",
+        "--port", default=None,
+        help="Serial port (/dev/ttyUSB0, /dev/cu.usbserial-XXXX, COM5 "
+             "...). Omit to auto-detect — works when exactly ONE ESP "
+             "device is connected (Espressif native USB or a CP210x/"
+             "CH340/FTDI bridge).",
     )
     p_flash.add_argument(
-        "--firmware", required=True,
-        help="Path to firmware.bin produced by scripts/build_firmware.sh.",
+        "--firmware", default=None,
+        help="Path to firmware.bin produced by scripts/build_firmware.sh "
+             "or downloaded from the Releases page. Omit to download "
+             "the newest release automatically for the detected chip "
+             "(cached under ~/.cache/openbricks/firmware).",
     )
     p_flash.add_argument(
         "--chip", default="auto",
