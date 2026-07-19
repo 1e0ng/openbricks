@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.19.1 — brake() ramps again: one uniform acceleration rule
+
+Reverts 1.18.1's instant-brake bypass by user decision: the
+acceleration default now governs every commanded speed transition —
+launches, speed changes, and ``brake()`` alike (at 1500 deg/s² a
+brake from 200 dps settles in ~0.13 s). The safety story is
+unchanged: the stop button / e-stop and ``coast()`` cut the torque
+register, which the ramp does not govern, and remain instant.
+``accel_dps2=0`` at construction still gives hard local stops.
+
 ## 1.19.0 — default acceleration retuned 360 → 1500 deg/s²
 
 Pybricks parity: 1500 deg/s² is what a Pybricks DriveBase runs on a
