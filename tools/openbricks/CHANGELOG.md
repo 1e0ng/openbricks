@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.18.0 — serial-bus motors honour the acceleration default too
+
+The acceleration retunes never touched direct ``run_speed()`` on
+ST-3215/ST-3032 — the serial drivers had no acceleration home at
+all, so speed commands stepped instantly (bench: "I intend it to be
+affected"). The drivers now program the servo's own goal-acc
+register (0x29, hardware ramp inside the servo) from a new
+``accel_dps2`` parameter, default 360 — so the line follower and any
+direct motor code launch at the same default as DriveBase moves.
+``accel_dps2=0`` restores the old instant behaviour. The drift-guard
+test now pins EIGHT homes. Safety note: the ramp also gentles
+``brake()``, but the e-stop path cuts the torque register, which the
+ramp does not govern — stop-button kills stay instant.
+
 ## 1.17.0 — default acceleration retuned 720 → 360 deg/s²
 
 Gentler launch/brake ramps by default. As before, acceleration only

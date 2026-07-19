@@ -78,6 +78,7 @@ _REG_MAX_ANGLE     = 0x0B
 
 _REG_OP_MODE       = 0x21
 _REG_TORQUE        = 0x28
+_REG_GOAL_ACC      = 0x29
 _REG_GOAL_POSITION = 0x2A
 _REG_GOAL_SPEED    = 0x2E
 _REG_PRESENT_POS   = 0x38
@@ -337,12 +338,14 @@ class ST3215Motor(Motor):
                  baud=1_000_000, dir_pin=None,
                  invert=False,
                  steps_per_dps=_DEFAULT_STEPS_PER_DPS,
-                 max_dps=600.0):
+                 max_dps=600.0,
+                 accel_dps2=360.0):
         self._id    = servo_id
         self._bus   = self._bus_for(uart_id, tx, rx, baud, dir_pin)
         self._invert = bool(invert)
         self._steps_per_dps = float(steps_per_dps)
         self._max_dps       = float(max_dps)
+        self._accel_dps2    = float(accel_dps2)
 
         # Software multi-turn accumulator state. ``_accum_count`` is the
         # absolute shaft position in motor-frame encoder counts. In
@@ -393,6 +396,29 @@ class ST3215Motor(Motor):
         # program on the same power session.
         self._bus.write(self._id, _REG_OP_MODE, bytes([_MODE_WHEEL]))
         self._bus.write(self._id, _REG_TORQUE,  bytes([0]))
+        # Hardware acceleration ramp (goal-acc register, unit = 100
+        # encoder steps/s²): the SERVO slews every speed/position
+        # change at ``accel_dps2``, so direct ``run_speed()`` writes —
+        # the line follower, user code — honour the same acceleration
+        # default as the DriveBase profile instead of stepping
+        # instantly. ``accel_dps2=0`` disables the ramp (register 0 =
+        # unlimited, the servo's power-on default). Deliberate
+        # consequence: ``brake()`` (goal speed 0) ramps down too — the
+        # SAFETY stop is unaffected because the e-stop path cuts the
+        # torque register, which the ramp does not govern.
+        self._bus.write(self._id, _REG_GOAL_ACC,
+                        bytes([self._encode_goal_acc()]))
+
+    def _encode_goal_acc(self):
+        """Goal-acc register value for ``self._accel_dps2``: unit is
+        100 encoder steps/s², one byte, 0 = no ramp, capped at 254
+        (~2230 °/s² at the stock 4096-count encoder)."""
+        acc = int(round(self._accel_dps2 * self._steps_per_dps / 100.0))
+        if acc < 0:
+            acc = 0
+        if acc > 254:
+            acc = 254
+        return acc
 
     # --- internal helpers -------------------------------------------------
 
