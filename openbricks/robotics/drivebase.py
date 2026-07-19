@@ -79,7 +79,7 @@ class DriveBase:
         # core's default so both paths launch identically. The native
         # path stores its own copy (set via set_accel); this one drives
         # the fallback's trapezoid.
-        self._accel_dps2 = 1000.0
+        self._accel_dps2 = 1500.0
 
         # State for in-flight ``straight(wait=False)`` / ``turn(wait=False)``
         # moves. ``None`` means nothing pending; ``done()`` returns

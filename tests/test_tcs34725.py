@@ -15,6 +15,8 @@ _CMD  = 0x80
 _AUTO = 0x20
 _ID     = 0x12
 _CDATAL = 0x14
+_ATIME  = 0x01
+_CONTROL = 0x0F
 
 
 def _le16(value):
@@ -71,12 +73,12 @@ class TestTCS34725(unittest.TestCase):
         self.assertEqual(s.rgb(), (0, 0, 0))
 
     def test_ambient_scales_against_integration_full_scale(self):
-        # Datasheet MAX COUNT = 1024 x cycles. Default integration is
-        # 24 ms = 10 cycles -> the clear channel saturates at 10240,
-        # not 65535. The old 65535 divisor made ambient() top out
-        # around 15 and read 0 on every real surface.
+        # Datasheet MAX COUNT = 1024 x cycles. At 24 ms = 10 cycles
+        # the clear channel saturates at 10240, not 65535. The old
+        # 65535 divisor made ambient() top out around 15 and read 0
+        # on every real surface.
         i2c = _make_i2c_with_id()
-        s = TCS34725(i2c)   # default integration_ms=24
+        s = TCS34725(i2c, integration_ms=24)
         i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(10240, 0, 0, 0)
         self.assertEqual(s.ambient(), 100)
         i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(5120, 0, 0, 0)
@@ -85,12 +87,33 @@ class TestTCS34725(unittest.TestCase):
         self.assertEqual(s.ambient(), 0)
 
     def test_ambient_typical_mat_reading_is_not_zero(self):
-        # The hardware symptom that exposed the bug: a normal indoor
-        # reading (clear of a few hundred counts) must not floor to 0.
+        # The hardware symptom that exposed the 65535-divisor bug: a
+        # normal indoor reading (clear of a few hundred counts) must
+        # not floor to 0.
         i2c = _make_i2c_with_id()
-        s = TCS34725(i2c)
+        s = TCS34725(i2c, integration_ms=24)
         i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(2048, 0, 0, 0)
         self.assertEqual(s.ambient(), 20)
+
+    def test_default_configuration_is_low_latency_pid_tuned(self):
+        # The defaults ARE the line-follow configuration (user
+        # decision): gain=16 (CONTROL register 0x02), integration
+        # 2.4 ms = 1 cycle (ATIME 255, full scale 1024). A bare
+        # TCS34725(i2c) now behaves exactly like the explicitly
+        # configured sensors in examples/line_follow.py.
+        i2c = _make_i2c_with_id()
+        s = TCS34725(i2c)
+        self.assertEqual(s._full_scale, 1024)
+        self.assertEqual(i2c._regs[_ADDR][_CMD | _ATIME], bytes([255]))
+        self.assertEqual(i2c._regs[_ADDR][_CMD | _CONTROL], bytes([0x02]))
+
+    def test_default_ambient_scales_against_one_cycle(self):
+        i2c = _make_i2c_with_id()
+        s = TCS34725(i2c)
+        i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(1024, 0, 0, 0)
+        self.assertEqual(s.ambient(), 100)
+        i2c._regs[_ADDR][_CMD | _AUTO | _CDATAL] = _pack_rgbc(512, 0, 0, 0)
+        self.assertEqual(s.ambient(), 50)
 
     def test_ambient_clamps_at_100(self):
         # A count above the theoretical full scale (sensor quirk /

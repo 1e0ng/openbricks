@@ -133,8 +133,8 @@ class SimMotor:
     feed-forward expects it, and bounds torque at ``T_STALL`` —
     chosen just BELOW the traction limit (mu*Fn*r ~ 0.066 Nm on the
     default chassis) so no command can break traction, while still
-    leaving >10x the acceleration headroom the 1000 deg/s^2 default
-    trajectory needs.
+    leaving >2x the acceleration headroom the 1500 deg/s^2 default
+    trajectory needs (>10x at the older 360 default).
 
     User-facing methods (``run_speed`` / ``run_target`` / ``brake`` /
     ``coast`` / ``angle`` / ``reset_angle``) match the shape of the
@@ -258,10 +258,10 @@ class SimMotor:
     def run_target(self,
                    delta_deg: float,
                    cruise_dps: float,
-                   accel: float = 1000.0) -> None:
+                   accel: float = 1500.0) -> None:
         """Trapezoidal move ``delta_deg`` from the current angle at
         ``cruise_dps`` cruise speed and ``accel`` deg/s² shaping.
-        Default matches the firmware's 1000 deg/s² (issue #234's
+        Default matches the firmware's 1500 deg/s² (issue #234's
         wheel-in-floor geometry + missing back-EMF fixes made the
         sim track it faithfully)."""
         self.servo.run_target(self._read_count(), self.runtime.now_ms,

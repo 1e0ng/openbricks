@@ -14,6 +14,7 @@ _REG_MAX_ANGLE     = 0x0B
 _REG_OP_MODE       = 0x21
 _REG_TORQUE        = 0x28
 _REG_GOAL_POSITION = 0x2A
+_REG_GOAL_ACC      = 0x29
 _REG_GOAL_SPEED    = 0x2E
 _REG_PRESENT_POS   = 0x38
 _HEADER            = b"\xFF\xFF"
@@ -305,6 +306,88 @@ class TestST3215Motor(unittest.TestCase):
         m.reset_angle(0)
         after = m.angle()
         self.assertAlmostEqual(after, 0.0, places=2)
+
+
+class TestGoalAccRamp(unittest.TestCase):
+    """The hardware acceleration ramp (goal-acc register 0x29, unit
+    100 encoder steps/s²): the SERVO slews speed changes, so direct
+    ``run_speed()`` — the line follower, user code — honours the same
+    1500 deg/s² default as the DriveBase profile. Bench origin: the
+    default-acceleration retune didn't affect ``run_speed`` because
+    the serial drivers had no acceleration home at all."""
+
+    def setUp(self):
+        ST3215._buses = {}
+
+    def _acc_writes(self, log):
+        return _writes_to(log, _REG_GOAL_ACC)
+
+    def test_constructor_writes_default_acc(self):
+        # 1500 deg/s² × 11.378 steps/deg = 17067 steps/s² → 171
+        # register units of 100 steps/s².
+        m = ST3215Motor(servo_id=1)
+        accs = self._acc_writes(m._bus._uart._tx_log)
+        self.assertEqual(len(accs), 1)
+        self.assertEqual(accs[0], (1, bytes([171])))
+
+    def test_custom_accel_encodes_in_register_units(self):
+        m = ST3215Motor(servo_id=2, steps_per_dps=10.0, accel_dps2=500.0)
+        accs = self._acc_writes(m._bus._uart._tx_log)
+        self.assertEqual(accs[-1], (2, bytes([50])))   # 500×10/100
+
+    def test_zero_accel_disables_the_ramp(self):
+        # Register 0 = unlimited (the servo's power-on default).
+        m = ST3215Motor(servo_id=3, accel_dps2=0.0)
+        accs = self._acc_writes(m._bus._uart._tx_log)
+        self.assertEqual(accs[-1], (3, bytes([0])))
+
+    def test_huge_accel_clamps_to_one_byte(self):
+        m = ST3215Motor(servo_id=4, accel_dps2=100000.0)
+        accs = self._acc_writes(m._bus._uart._tx_log)
+        self.assertEqual(accs[-1], (4, bytes([254])))
+
+    def test_brake_is_ramped_no_acc_bypass(self):
+        # Uniform rule (1.19.1, reverting 1.18.1): brake() is a speed
+        # transition like any other — the goal-acc ramp stays in
+        # force, no acc-register bracket around the zero-speed write.
+        m = ST3215Motor(servo_id=6)
+        m.run_speed(120)
+        base = len(m._bus._uart._tx_log)
+        m.brake()
+        log = m._bus._uart._tx_log[base:]
+        self.assertEqual(_writes_to(log, _REG_GOAL_ACC), [])
+        self.assertEqual(_writes_to(log, _REG_GOAL_SPEED),
+                         [(6, bytes([0, 0]))])
+
+    def test_estop_coast_path_is_a_torque_cut_not_a_speed_write(self):
+        # The safety stop must stay instant: coast() (the e-stop's
+        # per-motor action) cuts the torque register and never
+        # touches goal speed or goal acc — the ramp cannot slow it.
+        m = ST3215Motor(servo_id=7)
+        m.run_speed(120)
+        base = len(m._bus._uart._tx_log)
+        m.coast()
+        log = m._bus._uart._tx_log[base:]
+        self.assertEqual(_writes_to(log, _REG_TORQUE), [(7, bytes([0]))])
+        self.assertEqual(_writes_to(log, _REG_GOAL_ACC), [])
+        self.assertEqual(_writes_to(log, _REG_GOAL_SPEED), [])
+
+    def test_run_speed_packets_unchanged_by_the_ramp(self):
+        # The ramp lives in the servo: goal-speed writes are byte-for-
+        # byte what they were (no host-side slewing crept in).
+        a = ST3215Motor(servo_id=5, steps_per_dps=10.0, max_dps=1000.0)
+        b = ST3215Motor(servo_id=5, steps_per_dps=10.0, max_dps=1000.0,
+                        accel_dps2=0.0)
+        base_a = len(a._bus._uart._tx_log)
+        a.run_speed(300)
+        pk_a = _writes_to(a._bus._uart._tx_log[base_a:], _REG_GOAL_SPEED)
+        ST3215._buses = {}
+        b2 = ST3215Motor(servo_id=5, steps_per_dps=10.0, max_dps=1000.0,
+                         accel_dps2=0.0)
+        base_b = len(b2._bus._uart._tx_log)
+        b2.run_speed(300)
+        pk_b = _writes_to(b2._bus._uart._tx_log[base_b:], _REG_GOAL_SPEED)
+        self.assertEqual(pk_a, pk_b)
 
 
 class TestST3215MotorRunAngle(unittest.TestCase):

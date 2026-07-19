@@ -79,7 +79,7 @@ class _RecordingFallbackMotor:
 
 def _timed_straight_ms(acceleration):
     """Run a 100 mm straight at 200 dps cruise and return the virtual
-    elapsed ms. ``acceleration=None`` keeps the 1000 deg/s² default."""
+    elapsed ms. ``acceleration=None`` keeps the 1500 deg/s² default."""
     _reset_all()
     left  = _make_motor(1, 2, 17, 7, 8)
     right = _make_motor(9, 10, 11, 12, 13)
@@ -176,7 +176,7 @@ class TestDriveBaseAcceleration(unittest.TestCase):
         self.assertLess(first, 180 * 0.2)
 
     def test_fallback_default_launch_uses_default_accel(self):
-        # No settings() call: the fallback ramps at the same 1000
+        # No settings() call: the fallback ramps at the same 1500
         # deg/s² default as the native path (not the old step).
         db, left, _right = self._fallback_db()
         db.straight(100)
@@ -184,7 +184,7 @@ class TestDriveBaseAcceleration(unittest.TestCase):
         self.assertLess(first, 200 * 0.2)
 
     def test_lower_acceleration_slows_the_launch(self):
-        # 100 mm at 200 dps: with the default 1000 deg/s² the
+        # 100 mm at 200 dps: with the default 1500 deg/s² the
         # trapezoid completes in ~1.2 s; at 90 deg/s² the profile goes
         # triangular and takes ~3.0 s. Virtual clock, deterministic.
         fast_ms = _timed_straight_ms(None)
@@ -216,23 +216,26 @@ class TestDriveBaseAcceleration(unittest.TestCase):
 
 
 class DefaultAccelValueTests(unittest.TestCase):
-    """The 1000 deg/s² default lives in SIX places — the Python
+    """The 1500 deg/s² default lives in EIGHT places — the Python
     fallback, native C drivebase, native C servo, two encoder-motor
-    drivers, and the simulator — source-grep them all so they can't
+    drivers, the two serial-bus drivers (goal-acc hardware ramp), and
+    the simulator — source-grep them all so they can't
     drift apart when someone retunes one. (The sim briefly diverged
     to 720 while its physics couldn't track steep ramps; issue #234's
     geometry + DC-motor-model fixes re-unified it.)"""
 
     _HOMES = [
-        ("openbricks/robotics/drivebase.py", "self._accel_dps2 = 1000.0"),
+        ("openbricks/robotics/drivebase.py", "self._accel_dps2 = 1500.0"),
         ("native/user_c_modules/openbricks/drivebase_core.h",
-         "OB_DRIVEBASE_DEFAULT_ACCEL_DPS2  1000.0"),
+         "OB_DRIVEBASE_DEFAULT_ACCEL_DPS2  1500.0"),
         ("native/user_c_modules/openbricks/servo.c",
-         "DEFAULT_ACCEL ((mp_float_t)1000.0)"),
-        ("openbricks/drivers/mg370.py", "accel_dps2=1000.0"),
-        ("openbricks/drivers/jgb37_520.py", "accel_dps2=1000.0"),
+         "DEFAULT_ACCEL ((mp_float_t)1500.0)"),
+        ("openbricks/drivers/mg370.py", "accel_dps2=1500.0"),
+        ("openbricks/drivers/jgb37_520.py", "accel_dps2=1500.0"),
         ("tools/openbricks/openbricks_sim/runtime.py",
-         "accel: float = 1000.0"),
+         "accel: float = 1500.0"),
+        ("openbricks/drivers/st3215.py", "accel_dps2=1500.0"),
+        ("openbricks/drivers/st3032.py", "accel_dps2=1500.0"),
     ]
 
     def test_all_homes_agree(self):

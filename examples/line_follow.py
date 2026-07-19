@@ -17,9 +17,9 @@ passes". Only BOTH sensors dark at the same time (an intersection,
 or a stop bar square across the path) ends the run.
 
 The controller is a full PID, and it's honest PID because the
-sensors run at their 2.4 ms minimum integration time (the driver's
-default is 24 ms — ten times the latency, at which a derivative
-term mostly amplifies stale-sample noise). D damps the wiggle so KP
+sensors run at their 2.4 ms minimum integration time (the driver
+default since 1.20.1; at the old 24 ms default a derivative term
+mostly amplified stale-sample noise). D damps the wiggle so KP
 can be raised for sharper tracking; I (default 0, windup-clamped)
 trims persistent drift on long constant-curvature arcs.
 
@@ -69,12 +69,10 @@ wheels = SyncServoGroup([left_motor, right_motor])
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux = TCA9548A(i2c)
-# integration_ms=2.4 (one cycle, the chip minimum) drops the sensor
-# latency from the 24 ms default to 2.4 ms — the enabler for the D
-# term below. The ambient() PERCENT scale is unchanged (full-scale
-# rescales with integration), so LINE_AMBIENT keeps its meaning;
-# each reading just averages 10x less light, so expect ~1 count of
-# extra noise. gain=16 keeps the signal budget healthy.
+# The driver defaults (gain=16, 2.4 ms integration — one cycle, the
+# chip minimum) ARE this loop's configuration: 2.4 ms sensor latency
+# is the enabler for the D term below, and gain=16 keeps the signal
+# budget healthy at that short window.
 left_sensor = TCS34725(mux[1])
 right_sensor = TCS34725(mux[0])
 
@@ -90,9 +88,8 @@ CRUISE_DPS = 400   # wheel speed when perfectly centred
 
 # PID gains on the ambient-difference error (units: dps of steering
 # per ambient-unit; KI per ambient-unit-second; KD per
-# ambient-unit/second). PID is sound here BECAUSE the sensors run at
-# 2.4 ms integration — on the old 24 ms default the derivative
-# mostly amplified stale-sample noise.
+# ambient-unit/second). PID is sound here BECAUSE the sensors run
+# at 2.4 ms integration (the driver default).
 #   KP: the workhorse. Same value as the P-only version.
 #   KD: damping — lets you raise KP without oscillating. Tune by
 #       raising KP until the robot wiggles on a straight, then

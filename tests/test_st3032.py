@@ -11,7 +11,10 @@ tests don't re-cover packet formatting (that's done in
 * The bus registry is shared with ``ST3215``, so an ST-3032 and an
   ST-3215 daisy-chained on the same UART reuse one ``_SCServoBus``.
 * The classes emit byte-identical packets to their ST-3215
-  counterparts — no silent overrides have crept in.
+  counterparts — no silent overrides have crept in. (The ONE
+  deliberate override is ``ST3032Motor``'s ``max_dps=888`` default,
+  pinned in ``TestST3032MaxDpsDefault``; packet-identity tests stay
+  below both clamps.)
 """
 
 import tests._fakes  # noqa: F401
@@ -74,6 +77,54 @@ class TestST3032Motor(unittest.TestCase):
             a._bus._uart._tx_log[baseline_a:],
             b._bus._uart._tx_log[baseline_b:],
         )
+
+
+class TestST3032MaxDpsDefault(unittest.TestCase):
+    """The ONE deliberate ST-3032 specialisation: ``max_dps`` defaults
+    to the datasheet no-load speed (888 °/s). The inherited ST-3215
+    default (600) silently clamped every wire command ~290 °/s below
+    the servo's spec — bench symptom: "top speed is capped"."""
+
+    def setUp(self):
+        ST3215._buses = {}
+
+    def test_default_max_dps_is_datasheet_no_load_speed(self):
+        from openbricks.drivers.st3032 import ST3032_NO_LOAD_DPS
+        m = ST3032Motor(servo_id=1)
+        self.assertEqual(m._max_dps, 888.0)
+        self.assertEqual(ST3032_NO_LOAD_DPS, 888.0)
+
+    def test_st3215_default_unchanged(self):
+        # The parent keeps its own protective default — only the
+        # ST-3032 subclass knows its servo is faster.
+        m = ST3215Motor(servo_id=2)
+        self.assertEqual(m._max_dps, 600.0)
+
+    def test_speed_between_600_and_888_reaches_the_wire_unclamped(self):
+        # The bench bug: 800 dps commanded, 600 written. The register
+        # value must encode the REQUESTED speed.
+        m = ST3032Motor(servo_id=3)
+        expected = int(800 * m._steps_per_dps)
+        self.assertEqual(m._encode_goal_speed(800) & 0x7FFF, expected)
+
+    def test_speed_above_no_load_clamps_at_888(self):
+        m = ST3032Motor(servo_id=4)
+        expected = int(888.0 * m._steps_per_dps)
+        self.assertEqual(m._encode_goal_speed(2000) & 0x7FFF, expected)
+
+    def test_explicit_max_dps_still_wins(self):
+        m = ST3032Motor(servo_id=5, max_dps=120.0)
+        expected = int(120.0 * m._steps_per_dps)
+        self.assertEqual(m._encode_goal_speed(500) & 0x7FFF, expected)
+
+    def test_all_other_constructor_defaults_match_st3215(self):
+        # The subclass re-states the parent signature to change one
+        # default; the rest must not drift.
+        a = ST3215Motor(servo_id=6, uart_id=1, tx=14, rx=6)
+        b = ST3032Motor(servo_id=7, uart_id=1, tx=14, rx=6)
+        self.assertIs(a._bus, b._bus)          # same uart/tx/rx/baud
+        self.assertEqual(a._steps_per_dps, b._steps_per_dps)
+        self.assertEqual(a._invert, b._invert)
 
 
 class TestMixedFamilySyncGroup(unittest.TestCase):

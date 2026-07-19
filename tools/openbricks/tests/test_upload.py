@@ -32,41 +32,43 @@ def _args(
 
 
 class ComposeTests(unittest.TestCase):
-    """Pure-function tests for the upload-program generator."""
+    """Pure-function tests for the post-staging confirm program.
+    (The payload itself is staged chunked by ``run_mod._stage_file``
+    — see test_run.py's ComposeTests for the chunk composer.)"""
 
-    def test_writes_payload_to_given_path(self):
-        prog = ul._compose_upload_program("/program.py", b"payload")
-        self.assertIn(b"'/program.py'", prog)
-        self.assertIn(b"open(", prog)
-        self.assertIn(b"'wb'", prog)
-        self.assertIn(b"f.write(", prog)
+    def test_confirm_prints_actual_on_hub_size(self):
+        prog = ul._compose_confirm_program("/program.py", 2)
+        self.assertIn(b"print('uploaded', os.stat('/program.py')[6]", prog)
 
-    def test_upload_program_syncs_rtc(self):
-        prog = ul._compose_upload_program("/program.py", b"payload")
+    def test_confirm_asserts_expected_size(self):
+        # A dropped staging chunk must not pass silently: the confirm
+        # program cross-checks the on-hub size against what we sent.
+        prog = ul._compose_confirm_program("/program.py", 1234)
+        self.assertIn(b"== 1234", prog)
+        self.assertIn(b"size mismatch", prog)
+
+    def test_confirm_syncs_rtc(self):
+        prog = ul._compose_confirm_program("/program.py", 1)
         self.assertIn(b"machine.RTC().datetime(", prog)
 
     def test_custom_path_surfaces_in_program(self):
-        prog = ul._compose_upload_program("/user/alt.py", b"X")
+        prog = ul._compose_confirm_program("/user/alt.py", 1)
         self.assertIn(b"'/user/alt.py'", prog)
 
-    def test_prints_byte_count(self):
-        prog = ul._compose_upload_program("/program.py", b"AB")
-        self.assertIn(b"print('uploaded', 2", prog)
+    def test_confirm_carries_no_payload(self):
+        # The confirm program is fixed-size: the payload must never be
+        # embedded (that was the one-shot design that died on a
+        # fragmented heap).
+        prog = ul._compose_confirm_program("/program.py", 10_000)
+        self.assertLess(len(prog), 600)
+        self.assertNotIn(b"f.write", prog)
 
     def test_does_not_issue_machine_reset(self):
         """Auto-reset would run user code immediately — the launcher
         workflow requires a manual button press to start, so the
         upload program MUST NOT call machine.reset()."""
-        prog = ul._compose_upload_program("/program.py", b"X")
+        prog = ul._compose_confirm_program("/program.py", 1)
         self.assertNotIn(b"machine.reset", prog)
-        self.assertNotIn(b"machine.reset", prog)
-
-    def test_payload_bytes_round_trip(self):
-        # Raw bytes with NULs / high bits / quotes / newlines must
-        # survive ``repr()`` wrapping and come through verbatim.
-        tricky = b"\x00\xff\r\n'\"\\x41"
-        prog = ul._compose_upload_program("/p", tricky)
-        self.assertIn(repr(tricky).encode(), prog)
 
 
 # --- end-to-end through a scripted NUS link ---
@@ -108,15 +110,26 @@ class UploadFlowTests(unittest.TestCase):
         self.tmp.close()
         self.addCleanup(os.unlink, self.tmp.name)
 
-    def _standard_responses(self, stdout_msg):
-        return [
+    def _standard_responses(self, stdout_msg, stage_rounds=1):
+        out = [
             b"",                          # drain after Ctrl-C interrupt
             _BANNER,                      # raw-REPL banner
-            _R_SUPPORTED + _WINDOW_8K,    # raw-paste ack + window
+        ]
+        for _ in range(stage_rounds):    # chunked staging execs
+            out += [
+                _R_SUPPORTED + _WINDOW_8K,
+                _CTRL_D,                  # end-of-paste ack
+                _CTRL_D,                  # empty stdout + EOT
+                _CTRL_D,                  # empty stderr + EOT
+                b">",                     # raw-REPL prompt
+            ]
+        out += [
+            _R_SUPPORTED + _WINDOW_8K,    # confirm-program paste ack
             _CTRL_D,                      # end-of-paste ack
             stdout_msg + _CTRL_D,         # stdout + EOT
             _CTRL_D,                      # stderr + EOT
         ]
+        return out
 
     def test_default_flow_stages_to_program_py_without_reset(self):
         fake = _ScriptedLink(self._standard_responses(
@@ -229,6 +242,21 @@ class UploadInterruptTests(unittest.TestCase):
         finally:
             ul._upload_async = orig
         self.assertEqual(rc, 130)
+
+
+def setUpModule():
+    # The verified idle-restore waits real seconds for the hub banner;
+    # against scripted silent links that's pure sleep. Shrink for the
+    # whole module, restore after.
+    import openbricks_dev.run as _rm
+    global _ORIG_RESTORE_WAIT
+    _ORIG_RESTORE_WAIT = _rm._RESTORE_WAIT_S
+    _rm._RESTORE_WAIT_S = 0.02
+
+
+def tearDownModule():
+    import openbricks_dev.run as _rm
+    _rm._RESTORE_WAIT_S = _ORIG_RESTORE_WAIT
 
 
 if __name__ == "__main__":

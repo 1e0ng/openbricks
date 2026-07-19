@@ -3,6 +3,173 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.20.1 — TCS34725 defaults: gain=16, integration_ms=2.4
+
+The low-latency configuration the line follower proved out is now
+the driver default: 2.4 ms integration (one cycle, the chip
+minimum) with gain=16 to keep the signal budget healthy. A bare
+``TCS34725(i2c)`` now behaves like the explicitly configured
+line-follow sensors. Note for existing sketches using bare
+constructors: normalized ``ambient()`` reads ~4× higher than under
+the old 24 ms/gain-4 defaults (gain ×4, full-scale ÷10) — retune
+thresholds accordingly (``line_align.py``'s ``LINE_AMBIENT`` moved
+5 → 20 in the same change). Explicit arguments are unaffected.
+
+## 1.20.0 — ESP32-S3: the 8 MB PSRAM is finally in the heap
+
+Through 1.19.x the S3 board config listed only
+``sdkconfig.spiram_oct`` — which selects the octal PSRAM *mode* but
+never sets ``CONFIG_SPIRAM=y`` — so PSRAM was silently off and the
+GC heap was internal-RAM only (~234 KB; the fragmentation behind
+1.19.2's upload abort). The config now includes upstream's
+``spiram_sx`` enable fragment before the octal override, matching
+the ESP32_GENERIC_S3 SPIRAM_OCT variant: on an N16R8 the GC
+auto-split heap grows into the 8 MB on demand. Boards without
+working PSRAM still boot (``CONFIG_SPIRAM_IGNORE_NOTFOUND``), just
+without the extra memory. Drift-guarded by
+``tests/test_board_config.py``. After flashing, verify with
+``gc.mem_free()`` — expect megabytes.
+
+## 1.19.2 — run/upload survive a fragmented hub heap (chunked staging)
+
+``openbricks run examples/line_follow.py`` died with "hub aborted
+the upload": the hub had 177 KB free but a max contiguous hole of
+5.2 KB, and the one-shot raw-paste of the 9.4 KB bootstrap needs
+one contiguous, doubling buffer. MicroPython's GC never compacts,
+so a long-lived heap will always fragment eventually — the upload
+path now stages ``/program.py`` in 512-byte chunks (each a ~1-2 KB
+paste, bounded even for worst-case binary) and then pastes a small
+fixed-size runner, so peak hub RAM no longer scales with script
+size. ``openbricks upload`` uses the same staging and cross-checks
+the on-hub file size after. Hub-side staging errors (e.g. a full
+filesystem) surface with their tracebacks instead of aborting
+silently.
+
+## 1.19.1 — brake() ramps again: one uniform acceleration rule
+
+Reverts 1.18.1's instant-brake bypass by user decision: the
+acceleration default now governs every commanded speed transition —
+launches, speed changes, and ``brake()`` alike (at 1500 deg/s² a
+brake from 200 dps settles in ~0.13 s). The safety story is
+unchanged: the stop button / e-stop and ``coast()`` cut the torque
+register, which the ramp does not govern, and remain instant.
+``accel_dps2=0`` at construction still gives hard local stops.
+
+## 1.19.0 — default acceleration retuned 360 → 1500 deg/s²
+
+Pybricks parity: 1500 deg/s² is what a Pybricks DriveBase runs on a
+SPIKE Prime hub (motors default 2000, DriveBase scales ×3/4). Now
+that the serial-bus motors ramp too (1.18.0) and stops stay instant
+(1.18.1), the snappier default applies uniformly: DriveBase moves,
+direct ``run_speed()``, everything. All EIGHT value homes move
+together (goal-acc register now encodes 171). Top speed untouched,
+as always; the short-move threshold shrinks back to ~v²/accel ≈
+27 mm at the 200 dps default.
+
+## 1.18.1 — brake() is instant again: the ramp governs motion, not stops
+
+1.18.0's servo-side ramp also slewed ``brake()`` — a 0.5+ s
+roll-down from cruise, inconsistent with the encoder-motor drivers
+and Pybricks, where ``brake()`` is immediate. The rule is now
+uniform across every motor type: launches and speed changes ramp at
+``accel_dps2``; ``brake()``, ``coast()`` and the e-stop stop
+instantly. (``brake()`` brackets its zero-speed write with a
+ramp-off/ramp-restore pair, so the following launch still slews.)
+
+## 1.18.0 — serial-bus motors honour the acceleration default too
+
+The acceleration retunes never touched direct ``run_speed()`` on
+ST-3215/ST-3032 — the serial drivers had no acceleration home at
+all, so speed commands stepped instantly (bench: "I intend it to be
+affected"). The drivers now program the servo's own goal-acc
+register (0x29, hardware ramp inside the servo) from a new
+``accel_dps2`` parameter, default 360 — so the line follower and any
+direct motor code launch at the same default as DriveBase moves.
+``accel_dps2=0`` restores the old instant behaviour. The drift-guard
+test now pins EIGHT homes. Safety note: the ramp also gentles
+``brake()``, but the e-stop path cuts the torque register, which the
+ramp does not govern — stop-button kills stay instant.
+
+## 1.17.0 — default acceleration retuned 720 → 360 deg/s²
+
+Gentler launch/brake ramps by default. As before, acceleration only
+shapes the ramps — top speed still comes from ``straight_speed`` /
+``turn_rate`` alone (the short-move footnote grows: below ~v²/accel
+≈ 111 mm at the 200 dps default, a straight ends before touching
+cruise). All six value homes move together, pinned by the
+drift-guard tests.
+
+## 1.16.1 — ST-3032 no longer speed-capped at 600 °/s by the driver
+
+"Top speed is capped" on the bench, and it was: ``ST3032Motor``
+inherited the ST-3215's protective ``max_dps=600`` default, and the
+driver clamps every goal-speed write to it — 288 °/s below the
+ST-3032's own datasheet no-load speed (888 °/s at 12 V). The
+subclass now defaults ``max_dps`` to 888, so speed requests up to
+spec reach the wire; an explicit ``max_dps=...`` still wins, and the
+ST-3215's default is unchanged. (Under load the servo tops out
+around 2/3 of no-load — that part is physics, not the driver.)
+
+## 1.16.0 — default acceleration retuned 1000 → 720 deg/s²
+
+Back to the original pre-1.13.0 value after bench driving at 1000.
+The default only shapes the launch/brake ramps — it never caps top
+speed: the profile commands min(cruise, accel·t, √(2·accel·remaining)),
+so cruise still comes from ``straight_speed`` / ``turn_rate`` alone.
+(Physics footnote: a move shorter than ~v²/accel ends before the ramp
+reaches cruise; at 720 with the 200 dps default that's ~28 mm.)
+All six value homes move together (Python fallback, native C
+drivebase + servo, both encoder-motor drivers, simulator), pinned by
+the drift-guard tests.
+
+## 1.15.5 — the start press's whole lifecycle is consumed
+
+1.15.4's press-DOWN starts left the finger on the button while the
+program came up, and the bench event ring caught the same physical
+press echoing into the run through both detectors:
+
+* its debounced level confirmation arrived one tick later with the
+  run already up and read as a mid-run stop press — the newborn run
+  died at ~55 ms (start-latch, then press-down('running') +
+  stop-fire, three times in one capture);
+* a long-held press's release chatter edges would land past the
+  400 ms grace window and fire latch-stops — the original "starts
+  on press, stops on release" bug, back for long holds.
+
+A counter-dispatched press is now tracked while physically down
+(a mid-hold flicker can't detach it; DEBOUNCE_TICKS of released
+samples end it): its level confirmation is consumed (ring:
+`press-down start-press-consumed`), its release chatter is ignored
+by the PCNT latch for 200 ms after the consumed release — including
+back at idle after a short run the press outlived, where the
+chatter used to dispatch a phantom restart. Stops stay covered
+throughout by the debounced level path: a new press necessarily
+begins after a confirmed release, which ends every one of these
+windows.
+
+## 1.15.4 — no tap too fast: counter-driven starts + verified idle restore
+
+The 1.15.3 debounce traded the chatter bug for a fast-tap bug: a
+press had to span two 50 ms polls to be believed, so crisp taps
+were coin flips and the crispest fell between polls entirely
+(bench: "press too fast → doesn't start", with an empty event
+ring). Fixes on both ends of the pipeline:
+
+* Firmware: at idle, the PCNT hardware edge counter — which sees
+  every tap in silicon — is now the START trigger. Starts fire at
+  press-DOWN (faster than the old release dispatch), no tap is too
+  fast, chatter clusters dispatch once, the post-stop lockout still
+  applies, and the start press's own release is consumed even when
+  the program is already running by then. The level path demotes to
+  state tracking (and remains the fallback where PCNT is
+  unavailable). Every `_request_start` branch now records a ring
+  event — a dead press can never again vanish without a fingerprint.
+* CLI: the post-session idle-loop restore is verified instead of
+  fire-and-forget — the tools wait for the hub's "Press button to
+  run" banner and retry up to 3×; a restore lost in the disconnect
+  race used to park the hub with a dead idle loop and silently dead
+  button starts until a power-cycle.
+
 ## 1.15.3 — start-press chatter no longer kills the newborn run
 
 Bench event-ring capture of "pressed start 4 times, only the 4th
