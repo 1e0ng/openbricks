@@ -216,9 +216,10 @@ class TestDriveBaseAcceleration(unittest.TestCase):
 
 
 class DefaultAccelValueTests(unittest.TestCase):
-    """The 360 deg/s² default lives in SIX places — the Python
+    """The 360 deg/s² default lives in EIGHT places — the Python
     fallback, native C drivebase, native C servo, two encoder-motor
-    drivers, and the simulator — source-grep them all so they can't
+    drivers, the two serial-bus drivers (goal-acc hardware ramp), and
+    the simulator — source-grep them all so they can't
     drift apart when someone retunes one. (The sim briefly diverged
     to 720 while its physics couldn't track steep ramps; issue #234's
     geometry + DC-motor-model fixes re-unified it.)"""
@@ -233,6 +234,8 @@ class DefaultAccelValueTests(unittest.TestCase):
         ("openbricks/drivers/jgb37_520.py", "accel_dps2=360.0"),
         ("tools/openbricks/openbricks_sim/runtime.py",
          "accel: float = 360.0"),
+        ("openbricks/drivers/st3215.py", "accel_dps2=360.0"),
+        ("openbricks/drivers/st3032.py", "accel_dps2=360.0"),
     ]
 
     def test_all_homes_agree(self):

@@ -84,8 +84,10 @@ class ST3032Motor(ST3215Motor):
                  baud=1_000_000, dir_pin=None,
                  invert=False,
                  steps_per_dps=_DEFAULT_STEPS_PER_DPS,
-                 max_dps=ST3032_NO_LOAD_DPS):
+                 max_dps=ST3032_NO_LOAD_DPS,
+                 accel_dps2=360.0):
         super().__init__(
             servo_id, uart_id=uart_id, tx=tx, rx=rx, baud=baud,
             dir_pin=dir_pin, invert=invert,
-            steps_per_dps=steps_per_dps, max_dps=max_dps)
+            steps_per_dps=steps_per_dps, max_dps=max_dps,
+            accel_dps2=accel_dps2)
