@@ -356,17 +356,33 @@ def rtc_sync_lines():
     ]
 
 
-def _compose_bootstrap(user_bytes):
-    """Build the raw-paste payload: sync the RTC, write /program.py,
-    then trigger the hub-side launcher. Wrapping the launcher call in
-    a try/except turns a ``KeyboardInterrupt`` (from a button-press
-    stop) into a clean print instead of a raw traceback — the client
-    is exiting anyway, and we'd rather not scare the user with the
-    message that comes with an uncaught interrupt.
+# Payload bytes staged per raw-paste exec. The hub buffers each paste
+# program in ONE contiguous, doubling allocation — and a long-lived
+# heap fragments: the bench capture that forced chunking showed 177 KB
+# free with a max contiguous hole of 5.2 KB, aborting a 9.4 KB
+# one-shot paste. 512 payload bytes repr-expand to ≤ ~2.1 KB of
+# program even for pure binary (4x worst case), keeping the paste
+# buffer's doubling peak ≤ ~4 KB — under the worst hole observed.
+_STAGE_CHUNK_BYTES = 512
+
+
+def _compose_stage_chunk(target_path, chunk, first):
+    """One staging step: append ``chunk`` to ``target_path`` (create
+    on the first). ``repr()`` framing round-trips any bytes."""
+    mode = "wb" if first else "ab"
+    return ("with open(%r, %r) as f:\n    f.write(%s)\n"
+            % (target_path, mode, repr(chunk))).encode()
+
+
+def _compose_runner():
+    """The fixed-size program that runs the staged /program.py: sync
+    the RTC, then trigger the hub-side launcher. Wrapping the launcher
+    call in a try/except turns a ``KeyboardInterrupt`` (from a
+    button-press stop) into a clean print instead of a raw traceback —
+    the client is exiting anyway, and we'd rather not scare the user
+    with the message that comes with an uncaught interrupt.
     """
     lines = rtc_sync_lines() + [
-        "with open(%r, 'wb') as f:" % _TARGET_PATH,
-        "    f.write(%s)" % repr(user_bytes),
         "from openbricks import launcher",
         "try:",
         "    launcher.run_program(%r)" % _TARGET_PATH,
@@ -374,6 +390,40 @@ def _compose_bootstrap(user_bytes):
         "    print('openbricks: stopped by button press.')",
     ]
     return ("\n".join(lines) + "\n").encode()
+
+
+async def _exec_step(blink, link, program, what):
+    """Raw-paste one SMALL program and consume its whole output
+    framing (stdout \x04 stderr \x04 prompt). Raises ``RunError``
+    carrying the hub's stderr if the step failed (e.g. OSError from a
+    full filesystem while staging)."""
+    await _raw_paste_upload(blink, link, program)
+    blink._step = "%s (reading step output)" % what
+    await blink.read_until(_CTRL_D)          # stdout (discarded)
+    err = await blink.read_until(_CTRL_D)    # stderr
+    prompt = await blink.read_exact(1, timeout=10.0)
+    if err.strip():
+        raise RunError("hub error during %s:\n%s"
+                       % (what, err.decode("utf-8", "replace")))
+    if prompt != b">":
+        raise RunError("unexpected byte %r after %s" % (prompt, what))
+
+
+async def _stage_file(blink, link, target_path, payload):
+    """Write ``payload`` to ``target_path`` in bounded chunks so peak
+    hub RAM is O(_STAGE_CHUNK_BYTES) regardless of script size."""
+    for i in range(0, len(payload), _STAGE_CHUNK_BYTES):
+        chunk = payload[i:i + _STAGE_CHUNK_BYTES]
+        program = _compose_stage_chunk(target_path, chunk, first=(i == 0))
+        await _exec_step(
+            blink, link, program,
+            "staging %s (%d/%d bytes)" % (
+                target_path, min(i + _STAGE_CHUNK_BYTES, len(payload)),
+                len(payload)))
+    if not payload:
+        await _exec_step(blink, link,
+                         _compose_stage_chunk(target_path, b"", first=True),
+                         "staging %s (empty)" % target_path)
 
 
 async def _run_async(name, script_path, scan_timeout, debug=False, command=None):
@@ -399,7 +449,7 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
             "script is %d bytes, exceeding the %d-byte soft limit" % (
                 len(user_bytes), _MAX_SCRIPT_BYTES))
 
-    bootstrap = _compose_bootstrap(user_bytes)
+    runner = _compose_runner()
 
     print("connecting to %r ..." % name, file=sys.stderr)
     try:
@@ -412,7 +462,8 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
         blink._step = "scan + connect"
         await _enter_raw_repl(blink, link)
         try:
-            await _raw_paste_upload(blink, link, bootstrap)
+            await _stage_file(blink, link, _TARGET_PATH, user_bytes)
+            await _raw_paste_upload(blink, link, runner)
             out = sys.stdout
             try:
                 await _stream_output(blink, link, out)

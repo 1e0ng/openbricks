@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.19.2 — run/upload survive a fragmented hub heap (chunked staging)
+
+``openbricks run examples/line_follow.py`` died with "hub aborted
+the upload": the hub had 177 KB free but a max contiguous hole of
+5.2 KB, and the one-shot raw-paste of the 9.4 KB bootstrap needs
+one contiguous, doubling buffer. MicroPython's GC never compacts,
+so a long-lived heap will always fragment eventually — the upload
+path now stages ``/program.py`` in 512-byte chunks (each a ~1-2 KB
+paste, bounded even for worst-case binary) and then pastes a small
+fixed-size runner, so peak hub RAM no longer scales with script
+size. ``openbricks upload`` uses the same staging and cross-checks
+the on-hub file size after. Hub-side staging errors (e.g. a full
+filesystem) surface with their tracebacks instead of aborting
+silently.
+
 ## 1.19.1 — brake() ramps again: one uniform acceleration rule
 
 Reverts 1.18.1's instant-brake bypass by user decision: the
