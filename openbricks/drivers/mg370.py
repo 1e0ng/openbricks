@@ -119,7 +119,7 @@ class MG370Motor(Motor):
         self._servo.run_speed(float(deg_per_s))
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
-                  accel_dps2=360.0):
+                  accel_dps2=1500.0):
         estop.check()
         self._servo.run_target(float(target_angle),
                                abs(float(deg_per_s)),
