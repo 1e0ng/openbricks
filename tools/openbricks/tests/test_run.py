@@ -126,6 +126,7 @@ _BANNER      = b"raw REPL; CTRL-B to exit\r\n>"
 _R_SUPPORTED = b"R\x01"
 _WINDOW_8K   = b"\x00\x20"  # 0x2000 LE window — upload fits without mid-stream ACKs
 _CTRL_D      = b"\x04"
+_FLOW_ACK    = b"\x01"  # raw-paste mid-transfer window-refill byte
 
 
 class ComposeTests(unittest.TestCase):
@@ -726,11 +727,35 @@ class ChunkedStagingTests(unittest.TestCase):
     bench: 177 KB free / 5.2 KB max hole aborted a 9.4 KB one-shot
     paste at ~6.4 KB received)."""
 
-    def _stage(self, payload, rounds):
+    def _stage(self, payload):
+        """Script the exact response sequence ``_stage_file`` needs
+        for THIS payload: one round per real chunk, each round
+        pre-loaded with enough raw-paste window refills (0x2000 =
+        8 KB per ``_WINDOW_8K``) for its actual ON-THE-WIRE length —
+        NOT the raw chunk length: ``_compose_stage_chunk`` wraps each
+        chunk in a ``with open(...) as f: f.write(<repr>)`` program,
+        so the paste is chunk bytes PLUS wrapper/repr overhead (~54
+        bytes for printable payloads, more for escaped/binary ones).
+        A chunk at or near one window (now the common case, since
+        1.22.2 raised the chunk size to _MAX_SCRIPT_BYTES) needs
+        mid-transfer ``_FLOW_ACK`` bytes or the real
+        ``_raw_paste_upload`` loop stalls waiting for one and reads
+        the next round's ack byte as a (mis-timed) abort instead —
+        the exact wrapper overhead is what pushed a 65536-byte chunk
+        just past an 8-window boundary and caught this the first
+        time (65536 raw vs. 65590 on the wire)."""
+        chunk_size = run_mod._STAGE_CHUNK_BYTES
+        window = 0x2000
+        offsets = list(range(0, len(payload), chunk_size)) or [0]
         responses = []
-        for _ in range(rounds):
-            responses += [_R_SUPPORTED + _WINDOW_8K, _CTRL_D,
-                          _CTRL_D, _CTRL_D, b">"]
+        for off in offsets:
+            chunk = payload[off:off + chunk_size]
+            program = run_mod._compose_stage_chunk(
+                "/program.py", chunk, first=(off == 0))
+            acks_needed = max(0, -(-len(program) // window) - 1)
+            responses += (
+                [_R_SUPPORTED + _WINDOW_8K] + [_FLOW_ACK] * acks_needed
+                + [_CTRL_D, _CTRL_D, _CTRL_D, b">"])
         link = _ProtocolLink(responses)
         blink = run_mod._BufferedLink(link)
         _drive(run_mod._stage_file(blink, link, "/program.py", payload))
@@ -738,24 +763,30 @@ class ChunkedStagingTests(unittest.TestCase):
 
     def test_large_payload_splits_at_chunk_size(self):
         payload = b"x" * (run_mod._STAGE_CHUNK_BYTES * 2 + 100)
-        link = self._stage(payload, rounds=3)
+        link = self._stage(payload)
         writes = b"".join(link.writes)
         self.assertEqual(writes.count(b"'wb'"), 1)
         self.assertEqual(writes.count(b"'ab'"), 2)
 
     def test_every_staged_program_is_bounded(self):
         # The invariant that makes staging fragmentation-proof: no
-        # single paste may exceed ~4x the chunk size.
-        payload = bytes(range(256)) * 8   # 2 KB of worst-case binary
-        link = self._stage(payload, rounds=4)
+        # single paste may exceed ~4x the chunk size. Force 4 chunks
+        # of worst-case binary regardless of the configured chunk
+        # size (currently == _MAX_SCRIPT_BYTES, one round trip for
+        # any in-limit script — see the chunk-size header comment).
+        length = run_mod._STAGE_CHUNK_BYTES * 3 + run_mod._STAGE_CHUNK_BYTES // 2
+        payload = (bytes(range(256)) * (length // 256 + 2))[:length]
+        link = self._stage(payload)
         pastes = [w for w in link.writes if b"f.write" in w]
         self.assertEqual(len(pastes), 4)
         for pkt in pastes:
             self.assertLess(len(pkt), run_mod._STAGE_CHUNK_BYTES * 5)
 
     def test_payload_reassembles_in_order(self):
-        payload = bytes(range(256)) * 5   # 1280 bytes, 3 chunks
-        link = self._stage(payload, rounds=3)
+        payload = bytes(range(256)) * 5   # 1280 bytes, 1 chunk (< current
+                                          # chunk size) — reassembly must
+                                          # still hold with a single round.
+        link = self._stage(payload)
         chunks = []
         for w in link.writes:
             if b"f.write(" in w:
@@ -803,7 +834,7 @@ class ChunkedStagingTests(unittest.TestCase):
     def test_empty_payload_still_truncates_the_file(self):
         # Uploading an empty script must leave an empty /program.py,
         # not yesterday's program.
-        link = self._stage(b"", rounds=1)
+        link = self._stage(b"")
         writes = b"".join(link.writes)
         self.assertIn(b"'wb'", writes)
 
