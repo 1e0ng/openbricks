@@ -357,13 +357,23 @@ def rtc_sync_lines():
 
 
 # Payload bytes staged per raw-paste exec. The hub buffers each paste
-# program in ONE contiguous, doubling allocation — and a long-lived
-# heap fragments: the bench capture that forced chunking showed 177 KB
-# free with a max contiguous hole of 5.2 KB, aborting a 9.4 KB
-# one-shot paste. 512 payload bytes repr-expand to ≤ ~2.1 KB of
-# program even for pure binary (4x worst case), keeping the paste
-# buffer's doubling peak ≤ ~4 KB — under the worst hole observed.
-_STAGE_CHUNK_BYTES = 512
+# program in ONE contiguous, doubling allocation — the bench capture
+# that originally forced chunking (1.19.2) showed 177 KB free with a
+# max contiguous hole of 5.2 KB, aborting a 9.4 KB one-shot paste; a
+# conservative 512-byte chunk kept the doubling peak (≤ ~4x repr
+# expansion for pure binary) well under that hole, at the cost of a
+# round trip per 512 bytes — 16 round trips for a typical 8 KB script,
+# each paying BLE's connection-interval latency, making run/upload
+# feel much slower.
+#
+# 1.20.0 enabled the S3's 8 MB PSRAM (GC heap ~234 KB -> megabytes),
+# which makes fragmentation holes of that size a non-issue on current
+# boards. Set equal to _MAX_SCRIPT_BYTES: any script within the
+# supported size limit now stages in exactly ONE round trip (matching
+# pre-1.19.2 speed), while the chunking loop stays in place as a
+# safety net if _MAX_SCRIPT_BYTES is ever raised past a single
+# comfortably-sized buffer.
+_STAGE_CHUNK_BYTES = _MAX_SCRIPT_BYTES
 
 
 def _compose_stage_chunk(target_path, chunk, first):

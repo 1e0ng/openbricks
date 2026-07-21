@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.22.2 — run/upload fast again: one round trip per script
+
+1.19.2's chunked staging (the fragmented-heap upload fix) traded
+speed for reliability: every 512-byte piece of the script was its
+own raw-paste round trip, each paying BLE's connection-interval
+latency — a typical 8 KB script took ~16 round trips where it used
+to take 1. Since 1.20.0 gave the S3 8 MB of PSRAM, the fragmentation
+that forced the small chunk size is no longer a practical concern
+on current boards: the chunk size now equals ``_MAX_SCRIPT_BYTES``
+(64 KB), so any script within the supported size limit stages in a
+single round trip again. The chunking loop stays in place as a
+safety net if the size limit is ever raised past a single
+comfortably-sized buffer.
+
 ## 1.22.1 — chip probe fixed for esptool v5
 
 1.22.0's chip identification silently failed on every esptool v5
