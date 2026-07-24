@@ -45,10 +45,14 @@ IMU_ADDRESS       = 0x29   # EDIT — 0x28 is the driver default
 WHEEL_DIAMETER_MM = 88     # EDIT to your wheels
 AXLE_TRACK_MM     = 136    # EDIT to your chassis
 
-# Capped conservatively for a bench test — bump once you've confirmed
-# the chassis handles it cleanly.
-STRAIGHT_SPEED_MM = 80
-TURN_RATE_DPS     = 80
+# Cruise speeds in WHEEL-deg/s (``DriveBase.settings`` units — on an
+# 88 mm wheel, 200 wheel-deg/s ~= 154 mm/s of ground speed). The
+# original 80 was very conservative; through the ST-3032's 1:205
+# gearbox that low a speed sits in the stick-slip-prone regime under
+# real chassis load and can feel non-continuous. 200/150 is still
+# gentle — drop back down if your chassis slips.
+STRAIGHT_SPEED_DPS = 200
+TURN_RATE_DPS      = 150
 
 SIDE_MM = 150
 
@@ -86,7 +90,7 @@ def main():
                    wheel_diameter_mm=WHEEL_DIAMETER_MM,
                    axle_track_mm=AXLE_TRACK_MM,
                    imu=imu)
-    db.settings(straight_speed=STRAIGHT_SPEED_MM, turn_rate=TURN_RATE_DPS)
+    db.settings(straight_speed=STRAIGHT_SPEED_DPS, turn_rate=TURN_RATE_DPS)
 
     line("--- pass 1: encoder-only (use_gyro off, the old behaviour) ---")
     drive_square(db, imu, "encoder")
