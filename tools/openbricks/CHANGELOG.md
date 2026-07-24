@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.23.2 — firmware: BNO055 heading sign fixed (CW → CCW-positive)
+
+Real-hardware testing of 1.23.0's fallback-path gyro support caught
+a sign bug in the BNO055 driver, live on the bench as tens of
+degrees of runaway heading drift per rep in a gyro'd square that
+should have closed to ~0: the chip's fused Euler heading is compass
+convention — Bosch datasheet Table 3-13, "turning clockwise
+increases values", regardless of the Windows/Android UNIT_SEL
+format bit — while everything that consumes ``heading()``
+(``DriveBase``'s native gyro tick and the serial-bus fallback
+alike) assumes openbricks' CCW-positive "positive = left"
+convention, same as the sim's ``SimIMU`` (which is why the gyro
+path closed fine in the sim and ran away only on hardware). The
+driver now negates once at the boundary; ``heading()`` and
+``euler()``'s heading component are CCW-positive in [-180, 180].
+Closed-loop heading correction was positive feedback before this —
+firmware reflash required.
+
+Also: the gyro examples now carry the reference chassis's real
+servo-side mapping (left wheel = ID 2 with ``invert=True``, right =
+ID 1).
+
 ## 1.23.1 — sim: ST-3032's real speed ceiling, gyro example updated
 
 `ShimST3032Motor` (the sim drop-in for the firmware's `ST3032Motor`)
