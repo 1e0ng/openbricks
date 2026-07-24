@@ -58,16 +58,13 @@ pipx install openbricks          # CLI only (flash / run / log)
 
 ### Flash the firmware
 
-Grab a prebuilt firmware image from [Releases](../../releases) — pick `openbricks-esp32-firmware-<version>.bin` or the `-esp32s3-` variant for your board — then flash and name the hub in one step:
+Connect the board over USB, then flash and name the hub in one step:
 
 ```
-openbricks flash \
-    --name RobotA \
-    --port /dev/cu.usbserial-0001 \
-    --firmware openbricks-esp32-firmware-latest.bin
+openbricks flash --name RobotA
 ```
 
-`--name` is the BLE advertising identifier you'll use later with `openbricks run -n …`; pick a unique one per hub. The `--port` value depends on your OS (`/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS, `COM5` on Windows). Add `--chip esp32s3` if auto-detection misses. Skip this step entirely if you only want to run code in the simulator.
+That's the whole command: the serial port is auto-detected (when exactly one ESP device is connected), the chip type is probed, and the newest matching firmware image is downloaded from [Releases](../../releases) automatically (cached under `~/.cache/openbricks/firmware`). `--name` is the BLE advertising identifier you'll use later with `openbricks run -n …`; pick a unique one per hub. With several serial devices connected pass `--port` explicitly (`/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS, `COM5` on Windows), and pass `--firmware path/to/firmware.bin` to flash a specific image instead of the newest release. Skip this step entirely if you only want to run code in the simulator.
 
 ### Drive a robot
 

@@ -39,17 +39,21 @@ Grab a prebuilt image from the
 Connect the board over USB, then flash and name the hub in one step:
 
 ```console
-$ openbricks flash \
-    --name RobotA \
-    --port /dev/cu.usbserial-0001 \
-    --firmware openbricks-esp32s3-firmware-latest.bin
+$ openbricks flash --name RobotA
 ```
+
+That's the whole command: the serial port is auto-detected (when
+exactly one ESP device is connected), the chip type is probed, and
+the newest matching firmware release is downloaded automatically
+(cached under `~/.cache/openbricks/firmware`).
 
 - `--name` is the BLE advertising identifier you'll use later with
   `openbricks run -n …`; pick a unique one per hub.
-- `--port` depends on your OS: `/dev/ttyUSB0` on Linux,
-  `/dev/cu.usbserial-*` on macOS, `COM5` on Windows.
-- Add `--chip esp32s3` if auto-detection misses.
+- With several serial devices connected, pass `--port` explicitly
+  (`/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS, `COM5`
+  on Windows).
+- To flash a specific/downloaded image instead of the newest
+  release, pass `--firmware path/to/firmware.bin`.
 
 Skip this step entirely if you only want to run code in the
 {doc}`simulator <simulator>`.

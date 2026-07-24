@@ -65,9 +65,14 @@ pipx install openbricks             # one-time; or `pip install openbricks`
 
 openbricks flash \
     --name RobotA \
-    --port /dev/tty.usbserial-XXXX \
     --firmware native/micropython/ports/esp32/build-openbricks_esp32s3/firmware.bin
 ```
+
+`--port` is auto-detected when exactly one ESP device is connected;
+pass it explicitly with several devices attached. (`--firmware` is
+optional too — omitted, the newest **released** image for the
+detected chip is downloaded — but when flashing a local build like
+here, point it at your build output.)
 
 The command erases flash, writes `firmware.bin` at the offset the image was built for — `0x0` on the S3, `0x1000` on the classic ESP32, detected from the partition-table position inside the image itself — waits for the device to boot, then pokes the name into `esp32.NVS("openbricks").hub_name` via `mpremote` and reads it back to verify. Cross-platform — works on macOS, Linux, Windows (use `COM5` etc. for `--port`).
 
