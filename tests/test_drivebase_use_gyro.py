@@ -94,13 +94,14 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         ndb.use_gyro(True)
         ndb.straight(0.0, 50.0)
 
-        # Now inject a +10° heading (robot rotated CCW). Correction is
-        # CW rotation → left wheel advances, right retreats → left_dps
-        # ends up above right_dps.
+        # Now inject a +10° heading (robot rotated CW/right — the
+        # 1.24.0 Pybricks convention). Correction is CCW rotation →
+        # right wheel advances, left retreats → right_dps ends up
+        # above left_dps.
         imu.heading_value = 10.0
         time.sleep_ms(1)   # one tick
 
-        self.assertGreater(left._servo.target_dps(), right._servo.target_dps())
+        self.assertGreater(right._servo.target_dps(), left._servo.target_dps())
 
         ndb.stop()
 
@@ -320,10 +321,11 @@ class TestDriveBaseFallbackUseGyro(unittest.TestCase):
 
         db.turn(90)   # no imu at all — must behave exactly as before
 
+        # Positive = right/CW: left advances, right reverses.
         arc_mm = math.radians(90) * (114 / 2)
         expected = arc_mm / (math.pi * 56) * 360
-        self.assertLessEqual(left.angle(), -expected + 5)
-        self.assertGreaterEqual(right.angle(), expected - 5)
+        self.assertGreaterEqual(left.angle(), expected - 5)
+        self.assertLessEqual(right.angle(), -expected + 5)
 
 
 if __name__ == "__main__":

@@ -41,6 +41,6 @@ db.settings(straight_speed=180, turn_rate=120)
 
 for _ in range(4):
     db.straight(150)   # mm
-    db.turn(90)        # body degrees, positive = left
+    db.turn(90)        # body degrees, positive = right (Pybricks convention)
 
 print("done. chassis pose (mm, mm, deg):", robot.chassis_pose())  # noqa: F821

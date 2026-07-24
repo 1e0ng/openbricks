@@ -146,7 +146,8 @@ class DriveBase:
         """Start driving at a given forward speed + body turn rate.
 
         Kinematic one-shot — no coupled feedback. Call again (or
-        ``stop()``) to change. Positive turn rate = left turn.
+        ``stop()``) to change. Positive turn rate = right turn
+        (clockwise viewed from above), Pybricks convention.
         """
         if self._native is not None:
             # Clear any in-flight straight/turn trajectory first.
@@ -157,8 +158,8 @@ class DriveBase:
         diff_mm_s      = turn_rad_s * (self._axle_track / 2)
         diff_wheel_dps = diff_mm_s / self._wheel_circumference * 360
 
-        self._run_at_dps(self._left,  fwd_wheel_dps - diff_wheel_dps)
-        self._run_at_dps(self._right, fwd_wheel_dps + diff_wheel_dps)
+        self._run_at_dps(self._left,  fwd_wheel_dps + diff_wheel_dps)
+        self._run_at_dps(self._right, fwd_wheel_dps - diff_wheel_dps)
 
     def stop(self, then="coast"):
         """Halt both wheels. Also clears any pending ``wait=False``
@@ -254,7 +255,8 @@ class DriveBase:
                 time.sleep_ms(10)
 
     def turn(self, angle_deg, then="coast", wait=True):
-        """Turn in place by ``angle_deg`` body heading (positive = left).
+        """Turn in place by ``angle_deg`` body heading (positive =
+        right/clockwise viewed from above, Pybricks convention).
 
         Same ``then`` / ``wait`` semantics as ``straight()`` — see
         its docstring."""
@@ -345,10 +347,12 @@ class DriveBase:
                                               self._turn_rate_dps),
         }
         # Kick off motion immediately — same reasoning as
-        # ``_arm_straight``. In-place turn means opposite wheel signs.
+        # ``_arm_straight``. In-place turn means opposite wheel
+        # signs; positive = right/CW (Pybricks convention) = left
+        # wheel forward.
         v0 = self._profile_speed(speed, 0.0, wheel_deg_each)
-        self._run_at_dps(self._left,  -v0 * direction)
-        self._run_at_dps(self._right,  v0 * direction)
+        self._run_at_dps(self._left,   v0 * direction)
+        self._run_at_dps(self._right, -v0 * direction)
 
     # ---- helpers ----
     # Minimum fallback speed command (dps). The decel curve approaches
@@ -395,10 +399,12 @@ class DriveBase:
         of the native core's ``ob_drivebase_body_to_wheel_diff``
         (drivebase_core.c), scaled by 2 since that function returns
         the halved ``diff_pos`` and this fallback's ``err`` is the raw
-        L-R differential."""
+        L-R differential. Positive heading delta = CW/right rotation
+        (Pybricks convention) = left wheel out-paced right = positive
+        L-R differential, so the sign passes straight through."""
         delta = self._heading_delta_deg(start_heading)
-        return -delta * (2.0 * self._axle_track * math.pi /
-                          self._wheel_circumference)
+        return delta * (2.0 * self._axle_track * math.pi /
+                        self._wheel_circumference)
 
     @staticmethod
     def _run_at_dps(motor, dps):
@@ -538,8 +544,8 @@ class DriveBase:
                 return True
             remaining = target - progressed
         else:
-            left  = (left_now  - state["start_left"])  * (-direction)
-            right = (right_now - state["start_right"]) * direction
+            left  = (left_now  - state["start_left"])  * direction
+            right = (right_now - state["start_right"]) * (-direction)
             if left >= state["wheel_deg_each"] and \
                right >= state["wheel_deg_each"]:
                 self.stop(then=state["then"])
@@ -550,8 +556,8 @@ class DriveBase:
 
         elapsed_s = time.ticks_diff(time.ticks_ms(), state["start_ms"]) / 1000.0
         speed = self._profile_speed(state["speed"], elapsed_s, remaining)
-        self._run_at_dps(self._left,  -speed * direction)
-        self._run_at_dps(self._right,  speed * direction)
+        self._run_at_dps(self._left,   speed * direction)
+        self._run_at_dps(self._right, -speed * direction)
         return False
 
     @staticmethod

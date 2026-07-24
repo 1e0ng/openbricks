@@ -406,11 +406,19 @@ class SimIMU:
         self._gyro_addr = int(runtime.model.sensor_adr[self._gyro_id])
 
     def heading(self) -> float:
-        """Yaw angle (degrees) in [-180, 180), CCW positive."""
+        """Yaw angle (degrees) in [-180, 180), CW positive.
+
+        Compass / Pybricks convention (1.24.0): turning right
+        increases the value — same sign the real BNO055 driver
+        reports. The negation converts MuJoCo's math-convention
+        (CCW-positive) world yaw; ``robot.chassis_pose()`` keeps the
+        un-negated world-frame yaw, so the two deliberately differ
+        in sign.
+        """
         R = self.runtime.data.xmat[self._body_id].reshape(3, 3)
         yaw_deg = math.degrees(math.atan2(float(R[1, 0]), float(R[0, 0])))
         # Wrap to [-180, 180) to match the BNO055 driver shape.
-        return ((yaw_deg + 180.0) % 360.0) - 180.0
+        return -(((yaw_deg + 180.0) % 360.0) - 180.0)
 
     def angular_velocity(self):
         """(wx, wy, wz) in deg/s, body frame."""

@@ -119,16 +119,16 @@ void ob_drivebase_turn(ob_drivebase_t *db,
     // Body-degrees θ → wheel-degree differential α:
     //   arc_mm    = radians(|θ|) * axle_track / 2
     //   α (deg)   = arc_mm / circumference * 360
-    // A positive body turn (CCW / left, openbricks' documented
-    // convention; Pybricks itself is CW-positive) drives
-    // the left wheel backward and the right wheel forward, so
-    // diff_pos = (L - R)/2 DECREASES — flip the sign.
+    // A positive body turn is CW / right (Pybricks convention,
+    // "positive means clockwise", adopted system-wide in 1.24.0):
+    // it drives the left wheel forward and the right wheel
+    // backward, so diff_pos = (L - R)/2 INCREASES with θ.
     ob_float_t arc_mm   = (ob_float_t)fabs((double)angle_deg) *
                           ((ob_float_t)M_PI / (ob_float_t)180.0) *
                           (db->axle_track_mm / (ob_float_t)2.0);
     ob_float_t wheel_deg = arc_mm / db->wheel_circumference_mm *
                            (ob_float_t)360.0;
-    ob_float_t signed_delta = (angle_deg >= 0.0 ? -wheel_deg : wheel_deg);
+    ob_float_t signed_delta = (angle_deg >= 0.0 ? wheel_deg : -wheel_deg);
 
     ob_float_t rate_arc_mm_s = (ob_float_t)fabs((double)rate_dps) *
                                ((ob_float_t)M_PI / (ob_float_t)180.0) *
@@ -246,9 +246,10 @@ bool ob_drivebase_is_done(const ob_drivebase_t *db) {
 // Body heading delta (degrees) → wheel-degree differential the
 // controller expects in ``heading_override_wheel_deg``. Inverse of
 // the body→wheel mapping used for turn-in-place: a positive body
-// heading delta (CCW) corresponds to a negative diff_pos.
+// heading delta (CW / right, Pybricks convention since 1.24.0)
+// corresponds to a positive diff_pos (left wheel out-paced right).
 ob_float_t ob_drivebase_body_to_wheel_diff(const ob_drivebase_t *db,
                                             ob_float_t body_heading_delta_deg) {
-    return -body_heading_delta_deg * db->axle_track_mm * (ob_float_t)M_PI /
+    return body_heading_delta_deg * db->axle_track_mm * (ob_float_t)M_PI /
            db->wheel_circumference_mm;
 }

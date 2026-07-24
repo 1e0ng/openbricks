@@ -315,13 +315,12 @@ class SimDriveBaseTests(unittest.TestCase):
         db.straight(100.0, 100.0)
         for _ in range(50):
             rt.step()
-        l0 = left.target_dps()
-        db.set_heading_override(5.0)   # robot has yawed +5° CCW
+        db.set_heading_override(5.0)   # robot has yawed +5° CW/right
         for _ in range(5):
             rt.step()
-        l1 = left.target_dps()
-        # +5° body yaw should add a CW correction → left target ramps up.
-        self.assertGreater(l1, l0 - 1.0)
+        # +5° CW body yaw (Pybricks convention) should add a CCW
+        # correction → right wheel commanded faster than left.
+        self.assertGreater(right.target_dps(), left.target_dps())
 
 
 

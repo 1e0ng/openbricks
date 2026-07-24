@@ -179,26 +179,25 @@ static mp_obj_t bno055_make_new(const mp_obj_type_t *type,
 
 // --- Python-facing methods ---
 
-// Bosch datasheet (BST-BNO055-DS000, Table 3-13 "Rotation angle
-// conventions"): Heading/Yaw is 0..360 and "turning clockwise
-// increases values" -- true regardless of the Windows/Android
-// UNIT_SEL format bit (only Pitch's sign differs between those two;
-// Heading does not). That's compass convention (CW-positive), the
-// opposite of the CCW-positive "turning left is positive" convention
-// used everywhere else in openbricks (DriveBase.turn() docs:
-// "positive = left"; note Pybricks itself is CW-positive, so this
-// is an openbricks convention, not parity). Negate here, once, at
-// the driver boundary, so every
-// consumer -- DriveBase's native gyro tick and the serial-bus
-// fallback's use_gyro path alike -- gets a heading whose sign already
-// matches what the rest of the system assumes. Getting this backwards
-// turns closed-loop heading correction into positive feedback: a
-// gyro'd DriveBase.turn() sequence that should return to ~0 drifted
-// tens of degrees per rep before this fix.
-static mp_float_t bno055_heading_ccw_deg(const uint8_t *buf) {
-    mp_float_t h = -(mp_float_t)sint16_le(buf) / (mp_float_t)16.0;
-    if (h < (mp_float_t)-180.0) {
-        h += (mp_float_t)360.0;
+// Sign convention (1.24.0, Pybricks parity): heading is CW-positive
+// -- turning right/clockwise (viewed from above) increases it, like
+// a compass and like Pybricks ("positive means clockwise"). The
+// chip already reports exactly that: Bosch datasheet
+// BST-BNO055-DS000 Table 3-13, Heading/Yaw is 0..360, "turning
+// clockwise increases values", independent of the Windows/Android
+// UNIT_SEL format bit. So the raw value passes through un-negated;
+// the only shaping is the wrap from the chip's 0..360 into signed
+// [-180, 180). HISTORY WARNING: through 1.23.1 the rest of the
+// system was CCW-positive while this driver passed the CW value
+// through -- that sign mismatch made DriveBase's gyro heading
+// correction positive feedback (~-60 deg runaway per gyro'd square
+// on the ST-3032 bench). 1.23.2 negated here; 1.24.0 flipped the
+// whole system to CW-positive instead and restored the passthrough.
+// If you change any turn/heading sign, change ALL of them.
+static mp_float_t bno055_heading_cw_deg(const uint8_t *buf) {
+    mp_float_t h = (mp_float_t)sint16_le(buf) / (mp_float_t)16.0;
+    if (h > (mp_float_t)180.0) {
+        h -= (mp_float_t)360.0;
     }
     return h;
 }
@@ -207,7 +206,7 @@ static mp_obj_t bno055_heading(mp_obj_t self_in) {
     bno055_obj_t *self = MP_OBJ_TO_PTR(self_in);
     uint8_t buf[6];
     read_block(self, REG_EULER_H_LSB, 6, buf);
-    return mp_obj_new_float(bno055_heading_ccw_deg(buf));
+    return mp_obj_new_float(bno055_heading_cw_deg(buf));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bno055_heading_obj, bno055_heading);
 
@@ -216,7 +215,7 @@ static mp_obj_t bno055_euler(mp_obj_t self_in) {
     uint8_t buf[6];
     read_block(self, REG_EULER_H_LSB, 6, buf);
     mp_obj_t tup[3] = {
-        mp_obj_new_float(bno055_heading_ccw_deg(buf)),
+        mp_obj_new_float(bno055_heading_cw_deg(buf)),
         mp_obj_new_float((mp_float_t)sint16_le(buf + 2) / (mp_float_t)16.0),
         mp_obj_new_float((mp_float_t)sint16_le(buf + 4) / (mp_float_t)16.0),
     };
