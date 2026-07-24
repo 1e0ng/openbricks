@@ -324,6 +324,28 @@ class ShimSerialMotorTests(_ShimTestBase):
         self.assertEqual(m._target_dps, 600.0)
         m.coast()
 
+    def test_st3032_default_max_dps_matches_firmware_not_st3215(self):
+        # Regression: ShimST3032Motor is a marker subclass of
+        # ShimST3215Motor and used to inherit its 600 dps default
+        # verbatim. The real firmware ST3032Motor raises its default
+        # to 888 (the servo's actual no-load speed; see
+        # ST3032_NO_LOAD_DPS in openbricks/drivers/st3032.py) because
+        # 600 silently capped the servo below its own spec. A
+        # default-constructed sim motor must clamp at the same 888,
+        # not the ST-3215's 600, or a script tuned against real
+        # hardware would quietly under-perform in the sim.
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.drivers.st3215 import ST3215Motor
+        st3032 = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        st3032.run_speed(5000)
+        self.assertEqual(st3032._target_dps, 888.0)
+        st3032.coast()
+
+        st3215 = ST3215Motor(servo_id=2, uart_id=1, tx=14, rx=6)
+        st3215.run_speed(5000)
+        self.assertEqual(st3215._target_dps, 600.0)   # unchanged
+        st3215.coast()
+
     def test_run_angle_blocking_reaches_target(self):
         from openbricks.drivers.st3032 import ST3032Motor
         m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)

@@ -430,7 +430,28 @@ class ShimST3215Motor:
 class ShimST3032Motor(ShimST3215Motor):
     """Drop-in for ``openbricks.drivers.st3032.ST3032Motor`` — the
     firmware class is a marker subclass of ``ST3215Motor``, and so is
-    the shim."""
+    the shim, except for one thing: the firmware class raises the
+    default ``max_dps`` from 600 (the ST-3215's clamp, wrong for this
+    smaller/faster servo) to the ST-3032's actual no-load speed. A
+    default-constructed shim motor must honour the same ceiling or a
+    script tuned against real ST-3032 hardware quietly wouldn't reach
+    its commanded speed in the sim.
+    """
+
+    # Must match ``ST3032_NO_LOAD_DPS`` in
+    # ``openbricks/drivers/st3032.py`` (datasheet no-load speed,
+    # 0.067 s/60° at 12 V). Not imported directly — that module
+    # chain reaches ``from machine import UART, Pin`` at import time,
+    # which only resolves once the shim's fake ``machine`` is
+    # installed, so a plain top-of-file import here would race it.
+    _ST3032_NO_LOAD_DPS = 888.0
+
+    def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
+                 baud=1_000_000, dir_pin=None, invert=False,
+                 max_dps=_ST3032_NO_LOAD_DPS, **_ignored):
+        super().__init__(servo_id, uart_id=uart_id, tx=tx, rx=rx,
+                         baud=baud, dir_pin=dir_pin, invert=invert,
+                         max_dps=max_dps, **_ignored)
 
 
 class ShimTCS34725:
