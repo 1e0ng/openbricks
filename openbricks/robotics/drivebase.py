@@ -48,12 +48,18 @@ class DriveBase:
                 the bundled ``BNO055`` qualifies). When provided, call
                 ``drivebase.use_gyro(True)`` to have the heading loop
                 read from the IMU instead of computing from the encoder
-                differential. Slip-immune.
+                differential. Slip-immune. Works on both paths: the
+                native controller reads it on the 1 kHz tick, and the
+                serial-bus fallback reads it once per ``done()`` poll.
         """
         self._left = left
         self._right = right
         self._wheel_circumference = math.pi * wheel_diameter_mm
         self._axle_track = axle_track_mm
+        self._imu = imu
+        # Fallback-path gyro toggle. Meaningless when ``_native`` is
+        # set — the native controller keeps its own flag internally.
+        self._use_gyro = False
 
         # The native drivebase is only usable if both motors are
         # closed-loop servos. Otherwise the wrapper falls through to a
@@ -123,11 +129,17 @@ class DriveBase:
         Requires an ``imu=`` argument to the constructor. With the gyro,
         heading is slip-immune — wheel slip or wildly asymmetric friction
         won't throw the robot off course, because the IMU sees actual body
-        rotation regardless of what the wheels did.
+        rotation regardless of what the wheels did. Works on both the
+        native (encoder-servo) path and the serial-bus fallback.
         """
-        if self._native is None:
-            raise RuntimeError("use_gyro requires closed-loop motors (native DriveBase)")
-        self._native.use_gyro(bool(enable))
+        enable = bool(enable)
+        if enable and self._imu is None:
+            raise ValueError(
+                "no imu attached; construct DriveBase(imu=...) first")
+        if self._native is not None:
+            self._native.use_gyro(enable)
+        else:
+            self._use_gyro = enable
 
     # ---- non-blocking open-loop ----
     def drive(self, speed_mm_s, turn_rate_dps):
@@ -282,6 +294,7 @@ class DriveBase:
             "direction": direction,
             "start_left":  start_left,
             "start_right": start_right,
+            "start_heading": self._imu.heading() if self._use_gyro else None,
             "speed": speed,
             "consecutive_none": 0,
             "then": then,
@@ -319,9 +332,11 @@ class DriveBase:
         self._pending = {
             "mode": "turn_fallback",
             "wheel_deg_each": wheel_deg_each,
+            "angle_deg": angle_deg,
             "direction": direction,
             "start_left":  start_left,
             "start_right": start_right,
+            "start_heading": self._imu.heading() if self._use_gyro else None,
             "speed": speed,
             "consecutive_none": 0,
             "then": then,
@@ -359,6 +374,31 @@ class DriveBase:
         if v < self._FALLBACK_MIN_DPS:
             v = self._FALLBACK_MIN_DPS
         return v
+
+    def _heading_delta_deg(self, start_heading):
+        """Body-heading rotation since ``start_heading``, wrapped into
+        [-180, 180) so a move that crosses the BNO055's ±180 wrap
+        point doesn't see a spurious ±360 jump. Mirrors the native
+        core's ``drivebase_read_body_delta`` (drivebase.c)."""
+        delta = self._imu.heading() - start_heading
+        if delta > 180.0:
+            delta -= 360.0
+        elif delta < -180.0:
+            delta += 360.0
+        return delta
+
+    def _gyro_diff_err_wheel_deg(self, start_heading):
+        """Convert accumulated body-heading rotation into the same
+        wheel-degree differential ``left_deg - right_deg`` would read
+        for the same physical rotation — so swapping the heading
+        source doesn't change the fallback's correction gain. Inverse
+        of the native core's ``ob_drivebase_body_to_wheel_diff``
+        (drivebase_core.c), scaled by 2 since that function returns
+        the halved ``diff_pos`` and this fallback's ``err`` is the raw
+        L-R differential."""
+        delta = self._heading_delta_deg(start_heading)
+        return -delta * (2.0 * self._axle_track * math.pi /
+                          self._wheel_circumference)
 
     @staticmethod
     def _run_at_dps(motor, dps):
@@ -450,7 +490,12 @@ class DriveBase:
            (direction < 0 and avg <= target):
             self.stop(then=state["then"])
             return True
-        err = left_deg - right_deg
+        # Forward progress always comes from the encoders — the gyro
+        # only replaces the heading-hold error term below.
+        if self._use_gyro:
+            err = self._gyro_diff_err_wheel_deg(state["start_heading"])
+        else:
+            err = left_deg - right_deg
         # Trapezoid-shaped speed magnitude for this tick: ramp from
         # move start, cruise, decelerate into the remaining distance.
         elapsed_s = time.ticks_diff(time.ticks_ms(), state["start_ms"]) / 1000.0
@@ -480,16 +525,30 @@ class DriveBase:
             return False
         state["consecutive_none"] = 0
         direction = state["direction"]
-        left  = (left_now  - state["start_left"])  * (-direction)
-        right = (right_now - state["start_right"]) * direction
-        if left >= state["wheel_deg_each"] and \
-           right >= state["wheel_deg_each"]:
-            self.stop(then=state["then"])
-            return True
-        # Same trapezoid shaping as the straight tick, on the average
-        # per-wheel progress toward this turn's arc length.
+
+        if self._use_gyro:
+            # Actual body rotation decides both when the turn is done
+            # and how much is left — slip-immune, unlike the encoder
+            # average below, which just reports what the wheels think
+            # they did.
+            progressed = abs(self._heading_delta_deg(state["start_heading"]))
+            target = abs(state["angle_deg"])
+            if progressed >= target:
+                self.stop(then=state["then"])
+                return True
+            remaining = target - progressed
+        else:
+            left  = (left_now  - state["start_left"])  * (-direction)
+            right = (right_now - state["start_right"]) * direction
+            if left >= state["wheel_deg_each"] and \
+               right >= state["wheel_deg_each"]:
+                self.stop(then=state["then"])
+                return True
+            # Same trapezoid shaping as the straight tick, on the
+            # average per-wheel progress toward this turn's arc length.
+            remaining = state["wheel_deg_each"] - (left + right) / 2
+
         elapsed_s = time.ticks_diff(time.ticks_ms(), state["start_ms"]) / 1000.0
-        remaining = state["wheel_deg_each"] - (left + right) / 2
         speed = self._profile_speed(state["speed"], elapsed_s, remaining)
         self._run_at_dps(self._left,  -speed * direction)
         self._run_at_dps(self._right,  speed * direction)
