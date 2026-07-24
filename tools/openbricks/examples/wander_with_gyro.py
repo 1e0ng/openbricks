@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 """
-Slip-immune wander — same firmware-style code as
-``wander_hardware_style.py`` but with ``DriveBase.use_gyro(True)``
-turned on so the heading feedback comes from the IMU instead of
-the encoder differential.
+Slip-immune wander — same "drive a square" shape as
+``wander_hardware_style.py`` (also firmware-style code, no shim
+awareness) but with ``DriveBase.use_gyro(True)`` turned on so the
+heading feedback comes from the IMU instead of the encoder
+differential.
 
 Run with::
 
@@ -14,10 +15,18 @@ The point: on hardware, gyro feedback bypasses wheel slip — a
 robot driving across a slippery patch with a Kp-only encoder loop
 will veer, but the gyro path snaps back. The same mechanism runs
 inside the sim against the chassis IMU site.
+
+Default motor here is ``ST3032Motor`` (serial-bus servo, wheel/
+continuous-rotation mode) — the project's reference motor. Since
+1.23.0 ``use_gyro`` works on this path too: ``DriveBase`` has no
+``._servo`` to hand to the native controller, so it runs its
+pure-Python fallback loop, and that loop now reads the IMU for both
+``straight()``'s heading-hold correction and ``turn()``'s
+completion check, exactly like the native path already did.
 """
 
 from openbricks.drivers.bno055 import BNO055
-from openbricks.drivers.jgb37_520 import JGB37Motor
+from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics.drivebase import DriveBase
 from machine import I2C
 
@@ -27,18 +36,16 @@ from machine import I2C
 # BNO055 stores. The shim's BNO055 binds straight to the chassis
 # IMU site regardless.
 i2c = I2C(0, sda=15, scl=16, freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
-imu = BNO055(i2c=i2c, address=0x28)
+imu = BNO055(i2c=i2c, address=0x28)   # some breakouts' ADR pin defaults
+                                       # high instead — try 0x29 if this
+                                       # raises "BNO055 not found"
 
-m_left  = JGB37Motor(in1=1, in2=2, pwm=17,
-                     encoder_a=7, encoder_b=8,
-                     counts_per_output_rev=1320)
-m_right = JGB37Motor(in1=9, in2=10, pwm=11,
-                     encoder_a=12, encoder_b=13,
-                     counts_per_output_rev=1320)
+m_left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+m_right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
 
 db = DriveBase(m_left, m_right,
-               wheel_diameter_mm=60,
-               axle_track_mm=150,
+               wheel_diameter_mm=88,
+               axle_track_mm=136,
                imu=imu)
 db.settings(straight_speed=180, turn_rate=120)
 db.use_gyro(True)   # heading feedback now comes from the IMU

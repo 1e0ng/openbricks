@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.23.1 — sim: ST-3032's real speed ceiling, gyro example updated
+
+`ShimST3032Motor` (the sim drop-in for the firmware's `ST3032Motor`)
+was a bare marker subclass of `ShimST3215Motor` and inherited its
+600 dps `max_dps` default verbatim — the same bug the firmware
+driver fixed in 1.16.1 (ST-3215's protective clamp is well under
+the ST-3032's actual 888 °/s no-load speed), just recurring on the
+sim side. A default-constructed `ST3032Motor` in a sim script now
+clamps at 888, matching real hardware.
+
+`examples/wander_with_gyro.py` now uses `ST3032Motor` (serial-bus,
+fallback DriveBase path) instead of `JGB37Motor` (encoder DC motor,
+native path) as its motor — demonstrating 1.23.0's new fallback-path
+gyro support specifically, since that's the path that couldn't do
+gyro feedback before this release.
+
 ## 1.23.0 — `DriveBase.use_gyro()` now works on serial-bus servos too
 
 `use_gyro(True)` previously required the native (encoder-servo)
