@@ -9,6 +9,7 @@ drivebase tests don't prevent these from running and contributing
 
 import tests._fakes  # noqa: F401
 
+import math
 import time
 import unittest
 
@@ -56,13 +57,14 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         with self.assertRaises(ValueError):
             db.use_gyro(True)
 
-    def test_use_gyro_toggle_without_native_raises(self):
-        # L298NMotor has no ``_servo`` — no native path, so use_gyro
-        # should error rather than silently do nothing.
+    def test_use_gyro_toggle_without_native_and_without_imu_raises(self):
+        # L298NMotor has no ``_servo`` — no native path — and no imu=
+        # was passed either. The missing-imu check fires regardless of
+        # which path the motors would otherwise take.
         left  = L298NMotor(in1=1, in2=2, pwm=17)
         right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             db.use_gyro(True)
 
     def test_gyro_heading_drives_diff_correction(self):
@@ -206,6 +208,122 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         )
 
         ndb.stop()
+
+
+class TestDriveBaseFallbackUseGyro(unittest.TestCase):
+    """``use_gyro`` on the pure-Python fallback path (serial-bus
+    servos, modeled here by ``_FakeClosedLoopMotor`` — it has no
+    ``_servo`` so ``DriveBase`` picks the fallback exactly like a real
+    ST-3215/ST-3032 pair does)."""
+
+    def setUp(self):
+        _reset_all()
+        from tests.test_drivebase import _FakeClosedLoopMotor, _FakeStalledMotor
+        self._FakeClosedLoopMotor = _FakeClosedLoopMotor
+        self._FakeStalledMotor = _FakeStalledMotor
+
+    def _patch_sleep_steps_motors(self, *motors):
+        original = time.sleep_ms
+
+        def stepped_sleep(ms):
+            original(ms)
+            for m in motors:
+                m.step(ms / 1000.0)
+
+        time.sleep_ms = stepped_sleep
+        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
+
+    def _patch_sleep_noop(self):
+        original = time.sleep_ms
+        time.sleep_ms = lambda ms: None
+        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
+
+    def test_fallback_use_gyro_toggle_succeeds_with_imu(self):
+        # This is the actual feature: fallback motors (no ``_servo``)
+        # used to hit the "requires closed-loop motors" error
+        # unconditionally. With an imu= attached it must now work.
+        left  = self._FakeClosedLoopMotor()
+        right = self._FakeClosedLoopMotor()
+        imu = _FakeIMU(heading=0.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114,
+                       imu=imu)
+        db.use_gyro(True)   # must not raise
+        self.assertTrue(db._use_gyro)
+        db.use_gyro(False)
+        self.assertFalse(db._use_gyro)
+
+    def test_fallback_straight_corrects_from_gyro_not_encoder(self):
+        """Slip-immunity, demonstrated directly: both wheels report
+        IDENTICAL encoder angles (zero differential — an encoder-only
+        loop would apply zero correction), but the IMU reports the
+        robot has actually rotated off heading. With use_gyro(True)
+        the correction must still fire, proving it's sourced from the
+        gyro and not the (perfectly-agreeing, and therefore useless
+        here) encoders."""
+        left  = self._FakeClosedLoopMotor()
+        right = self._FakeClosedLoopMotor()
+        imu = _FakeIMU(heading=0.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114,
+                       imu=imu)
+        db.use_gyro(True)
+
+        db.straight(100, wait=False)
+        self.assertEqual(left.angle(), right.angle())   # no encoder diff
+
+        imu.heading_value = 10.0   # robot has actually yawed off course
+        db.done()   # one fallback tick
+
+        self.assertNotEqual(left._target_dps, right._target_dps,
+                            "gyro heading error produced no correction")
+        db.stop()
+
+    def test_fallback_straight_use_gyro_false_ignores_heading(self):
+        left  = self._FakeClosedLoopMotor()
+        right = self._FakeClosedLoopMotor()
+        imu = _FakeIMU(heading=0.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114,
+                       imu=imu)
+        # use_gyro left at its default (False) — heading is ignored,
+        # matching pre-existing encoder-diff behaviour.
+        db.straight(100, wait=False)
+        imu.heading_value = 10.0
+        db.done()
+
+        self.assertEqual(left._target_dps, right._target_dps)
+        db.stop()
+
+    def test_fallback_turn_terminates_on_measured_heading_not_encoder(self):
+        """The other half of slip-immunity: the wheel encoders are
+        frozen (``_FakeStalledMotor`` — models a slipping/blocked
+        wheel that never advances), which would trip the stall
+        timeout under encoder-based termination. With use_gyro(True),
+        the IMU alone decides when the turn is done."""
+        left  = self._FakeStalledMotor()
+        right = self._FakeStalledMotor()
+        imu = _FakeIMU(heading=0.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114,
+                       imu=imu)
+        db.use_gyro(True)
+
+        db.turn(90, wait=False)
+        self.assertFalse(db.done())
+
+        imu.heading_value = 90.0   # IMU: the body has actually reached 90°
+        self.assertTrue(db.done(), "gyro-measured heading reached the "
+                        "target but the turn did not terminate")
+
+    def test_fallback_turn_without_gyro_still_uses_encoder(self):
+        left  = self._FakeClosedLoopMotor()
+        right = self._FakeClosedLoopMotor()
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+        self._patch_sleep_steps_motors(left, right)
+
+        db.turn(90)   # no imu at all — must behave exactly as before
+
+        arc_mm = math.radians(90) * (114 / 2)
+        expected = arc_mm / (math.pi * 56) * 360
+        self.assertLessEqual(left.angle(), -expected + 5)
+        self.assertGreaterEqual(right.angle(), expected - 5)
 
 
 if __name__ == "__main__":

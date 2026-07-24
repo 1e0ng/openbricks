@@ -3,6 +3,31 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.23.0 — `DriveBase.use_gyro()` now works on serial-bus servos too
+
+`use_gyro(True)` previously required the native (encoder-servo)
+controller and raised `RuntimeError` for anything else — including
+ST-3215/ST-3032 drivebases, which only ever run the pure-Python
+open-loop fallback since serial-bus servos don't subscribe to the
+1 kHz `motor_process` scheduler. The fallback now reads the IMU too:
+
+* `straight()`'s heading-hold correction is sourced from the gyro
+  instead of the encoder differential when `use_gyro(True)` — slip
+  on one wheel no longer fools the correction term, since the IMU
+  measures actual body rotation regardless of what the encoders say.
+* `turn()` now *terminates* on measured body rotation reaching the
+  target angle, not on encoder-estimated wheel travel — the more
+  consequential half of slip-immunity for turns specifically, where
+  wheel spin/skid on carpet is common.
+* `use_gyro(True)` without an attached `imu=` now raises `ValueError`
+  ("no imu attached...") on both paths — previously the fallback
+  path raised a different `RuntimeError` for a different reason
+  (no native controller at all), independent of whether an IMU was
+  even passed in.
+
+No behavior change when `imu=` isn't provided, or `use_gyro` is left
+at its default `False`.
+
 ## 1.22.2 — run/upload fast again: one round trip per script
 
 1.19.2's chunked staging (the fragmented-heap upload fix) traded
