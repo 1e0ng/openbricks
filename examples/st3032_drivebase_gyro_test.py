@@ -35,7 +35,7 @@ from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.robotics import DriveBase
 
 
-LEFT_ID, RIGHT_ID = 1, 2
+LEFT_ID, RIGHT_ID = 2, 1
 UART_ID, TX, RX   = 1, 14, 6
 
 I2C_SDA, I2C_SCL  = 15, 16
@@ -79,9 +79,8 @@ def main():
         i2c = TCA9548A(i2c)[IMU_MUX_CHANNEL]
     imu = BNO055(i2c=i2c, address=IMU_ADDRESS)
 
-    left  = ST3032Motor(servo_id=LEFT_ID,  uart_id=UART_ID, tx=TX, rx=RX)
-    right = ST3032Motor(servo_id=RIGHT_ID, uart_id=UART_ID, tx=TX, rx=RX,
-                        invert=True)
+    left  = ST3032Motor(servo_id=LEFT_ID,  uart_id=UART_ID, tx=TX, rx=RX, invert=True)
+    right = ST3032Motor(servo_id=RIGHT_ID, uart_id=UART_ID, tx=TX, rx=RX)
 
     db = DriveBase(left, right,
                    wheel_diameter_mm=WHEEL_DIAMETER_MM,
