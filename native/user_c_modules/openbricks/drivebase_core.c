@@ -119,7 +119,8 @@ void ob_drivebase_turn(ob_drivebase_t *db,
     // Body-degrees θ → wheel-degree differential α:
     //   arc_mm    = radians(|θ|) * axle_track / 2
     //   α (deg)   = arc_mm / circumference * 360
-    // A positive body turn (CCW / left in Pybricks convention) drives
+    // A positive body turn (CCW / left, openbricks' documented
+    // convention; Pybricks itself is CW-positive) drives
     // the left wheel backward and the right wheel forward, so
     // diff_pos = (L - R)/2 DECREASES — flip the sign.
     ob_float_t arc_mm   = (ob_float_t)fabs((double)angle_deg) *

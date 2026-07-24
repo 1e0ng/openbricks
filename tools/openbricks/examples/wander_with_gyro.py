@@ -40,8 +40,8 @@ imu = BNO055(i2c=i2c, address=0x28)   # some breakouts' ADR pin defaults
                                        # high instead — try 0x29 if this
                                        # raises "BNO055 not found"
 
-m_left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-m_right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+m_left  = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+m_right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
 
 db = DriveBase(m_left, m_right,
                wheel_diameter_mm=88,
