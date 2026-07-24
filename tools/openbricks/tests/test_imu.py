@@ -88,6 +88,15 @@ class SimIMUReadTests(unittest.TestCase):
         self.assertGreater(abs(h), 5.0,
                             "expected meaningful heading change after "
                             "spinning in place; got %.2f" % h)
+        # SIGN CONTRACT (1.24.0, Pybricks parity): left wheel forward
+        # + right wheel backward = the body turns right/clockwise
+        # (viewed from above) = heading INCREASES. Same convention as
+        # the real BNO055 driver (see tests/test_bno055.py's
+        # test_heading_is_cw_positive_matching_turn_convention) — if
+        # one flips, both must.
+        self.assertGreater(h, 0.0,
+                           "CW spin must read as positive heading "
+                           "(Pybricks convention); got %.2f" % h)
 
 
 if __name__ == "__main__":

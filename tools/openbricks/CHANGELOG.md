@@ -3,6 +3,35 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.24.0 — BREAKING: turn/heading sign now matches Pybricks (positive = right/clockwise)
+
+Through 1.23.2, openbricks used its own CCW-positive convention:
+``DriveBase.turn(90)`` meant turn LEFT. Pybricks documents the
+opposite — "Positive angles and turn rates mean turning right …
+positive means clockwise" — and per the project's Pybricks-parity
+contract the whole system now adopts it:
+
+* ``DriveBase.turn(angle)`` / ``drive(speed, turn_rate)`` — positive
+  now turns RIGHT (clockwise viewed from above), on both the native
+  C path and the serial-bus fallback. **Negate the angle in any
+  existing script that relied on positive-turns-left.**
+* ``BNO055.heading()`` / ``euler()[0]`` — CW-positive, which is what
+  the chip natively reports (compass convention), so 1.23.2's
+  driver-boundary negation is reverted; heading is once again the
+  raw fused value wrapped to [-180, 180].
+* ``SimIMU.heading()`` — negated (MuJoCo world yaw is math-convention
+  CCW) so the sim reports the same sign as real hardware.
+  ``robot.chassis_pose()`` deliberately keeps math-convention world
+  yaw — it's a world-frame pose API with no Pybricks counterpart.
+* The C core's turn mapping and body→wheel-diff conversion flipped
+  to match; every consumer routes through the shared core, so the
+  firmware, the CPython sim extension, and the shim all agree.
+
+Every sign site flipped in one coordinated change and the sign
+contract is now pinned by paired tests (``test_bno055`` on firmware,
+``test_imu`` in the sim) that reference each other. Verified in sim:
+a gyro'd 4×(straight+turn) square closes to ~0.1° drift.
+
 ## 1.23.2 — firmware: BNO055 heading sign fixed (CW → CCW-positive)
 
 Real-hardware testing of 1.23.0's fallback-path gyro support caught

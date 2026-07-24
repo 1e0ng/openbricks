@@ -123,13 +123,14 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
-        # Positive turn rate means turn left: left wheel reverses, right advances.
+        # Positive turn rate means turn right (CW, Pybricks
+        # convention): left wheel advances, right reverses.
         db.drive(0, 90)
 
-        self.assertEqual(left._in1.value(), 0)
-        self.assertEqual(left._in2.value(), 1)
-        self.assertEqual(right._in1.value(), 1)
-        self.assertEqual(right._in2.value(), 0)
+        self.assertEqual(left._in1.value(), 1)
+        self.assertEqual(left._in2.value(), 0)
+        self.assertEqual(right._in1.value(), 0)
+        self.assertEqual(right._in2.value(), 1)
 
     def test_stop_default_coasts(self):
         # New default: ``stop()`` (and the implicit stop at the end of
@@ -234,12 +235,13 @@ class TestDriveBaseClosedLoop(unittest.TestCase):
 
         db.turn(90)
 
-        # Both wheels should have swept through the expected arc, with opposite
-        # signs (left reverses, right advances).
+        # Both wheels should have swept through the expected arc,
+        # with opposite signs (positive = right/CW: left advances,
+        # right reverses).
         arc_mm = math.radians(90) * (114 / 2)
         expected = arc_mm / (math.pi * 56) * 360
-        self.assertLessEqual(left.angle(), -expected + 5)  # reversed
-        self.assertGreaterEqual(right.angle(), expected - 5)
+        self.assertGreaterEqual(left.angle(), expected - 5)
+        self.assertLessEqual(right.angle(), -expected + 5)  # reversed
 
     def test_settings_overrides_cruise_parameters(self):
         left = _FakeClosedLoopMotor()
@@ -422,8 +424,8 @@ class TestDriveBaseWaitFalse(unittest.TestCase):
 
         arc_mm = math.radians(90) * (114 / 2)
         expected = arc_mm / (math.pi * 56) * 360
-        self.assertLessEqual(left.angle(), -expected + 5)
-        self.assertGreaterEqual(right.angle(), expected - 5)
+        self.assertGreaterEqual(left.angle(), expected - 5)
+        self.assertLessEqual(right.angle(), -expected + 5)
         self.assertTrue(db.done())
 
     def test_new_move_supersedes_pending_wait_false(self):
@@ -494,10 +496,10 @@ class TestDriveBaseWaitFalse(unittest.TestCase):
 
         self.assertNotEqual(left._target_dps, 0.0)
         self.assertNotEqual(right._target_dps, 0.0)
-        # Positive turn rate (= turn left) means left reverses,
-        # right advances.
-        self.assertLess(left._target_dps, 0)
-        self.assertGreater(right._target_dps, 0)
+        # Positive turn (= turn right/CW, Pybricks convention) means
+        # left advances, right reverses.
+        self.assertGreater(left._target_dps, 0)
+        self.assertLess(right._target_dps, 0)
 
 
 class _FakeStalledMotor(_FakeClosedLoopMotor):

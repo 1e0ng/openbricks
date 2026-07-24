@@ -88,8 +88,10 @@ class TestDriveBaseNative2DOF(unittest.TestCase):
         db.settings(turn_rate=180)
         db.turn(90)
 
-        self.assertLess(left.angle(), 0)
-        self.assertGreater(right.angle(), 0)
+        # Positive = right/CW (Pybricks convention): left wheel
+        # advances, right reverses.
+        self.assertGreater(left.angle(), 0)
+        self.assertLess(right.angle(), 0)
 
         arc_mm = math.radians(90) * (114 / 2)
         expected_diff = arc_mm / (math.pi * 56) * 360

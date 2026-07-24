@@ -142,23 +142,23 @@ class DriveBaseParityTests(unittest.TestCase):
 
     # ------- turn: pure-turn sign convention -------
 
-    def test_turn_left_drives_wheels_opposite(self):
-        # Positive angle (CCW / left in Pybricks convention) →
-        # left wheel goes backward, right wheel goes forward.
+    def test_turn_positive_is_right_wheels_opposite(self):
+        # Positive angle = CW / right (Pybricks convention, adopted
+        # in 1.24.0) → left wheel goes forward, right wheel backward.
         sim = _SyntheticTwoWheel(self.db, self.left, self.right)
         self.db.turn(sim.now_ms, 90.0, 90.0)
         sim.step(20)
-        # diff_pos = (L-R)/2 must DECREASE for a +90° turn → left
-        # target < right target, and they're opposite signs.
-        self.assertLess(self.db.target_left_dps(), 0.0)
-        self.assertGreater(self.db.target_right_dps(), 0.0)
+        # diff_pos = (L-R)/2 must INCREASE for a +90° turn → left
+        # target > right target, and they're opposite signs.
+        self.assertGreater(self.db.target_left_dps(), 0.0)
+        self.assertLess(self.db.target_right_dps(), 0.0)
 
-    def test_turn_right_inverts_signs(self):
+    def test_turn_negative_is_left_inverts_signs(self):
         sim = _SyntheticTwoWheel(self.db, self.left, self.right)
         self.db.turn(sim.now_ms, -90.0, 90.0)
         sim.step(20)
-        self.assertGreater(self.db.target_left_dps(),  0.0)
-        self.assertLess   (self.db.target_right_dps(), 0.0)
+        self.assertLess   (self.db.target_left_dps(),  0.0)
+        self.assertGreater(self.db.target_right_dps(), 0.0)
 
     def test_turn_completes(self):
         sim = _SyntheticTwoWheel(self.db, self.left, self.right)
@@ -217,11 +217,12 @@ class DriveBaseParityTests(unittest.TestCase):
         l_on = self.db.target_left_dps()
         r_on = self.db.target_right_dps()
 
-        # The +5° body heading delta means the robot has yawed CCW —
-        # the controller must counter-steer CW: speed up the left
-        # wheel and slow the right wheel relative to the no-gyro tick.
-        self.assertGreater(l_on, l_off)
-        self.assertLess   (r_on, r_off)
+        # The +5° body heading delta means the robot has yawed
+        # CW/right (Pybricks convention, 1.24.0) — the controller
+        # must counter-steer CCW: speed up the right wheel and slow
+        # the left wheel relative to the no-gyro tick.
+        self.assertLess   (l_on, l_off)
+        self.assertGreater(r_on, r_off)
 
     def test_set_heading_override_zero_is_neutral(self):
         # With use_gyro on and override = 0, the diff-error is exactly
