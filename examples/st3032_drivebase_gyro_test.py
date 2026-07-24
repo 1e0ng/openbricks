@@ -10,18 +10,18 @@ square TWICE — once with the gyro off (encoder-only, the old
 behaviour), once with it on — so you can compare how close each
 pass returns to its starting heading.
 
-Hardware:
+Hardware (defaults below match the openbricks reference bench —
+EDIT all of this to your own wiring/dims if it differs):
     * 2x ST-3032 (wheel mode), daisy-chained on one URT-2. Left id=1,
       right id=2 (inverted). ESP32-S3 GPIO14 -> URT-2 TX,
       GPIO6 -> URT-2 RX, common GND. 12V into the URT-2 servo rail.
-    * BNO055 IMU on I2C0 (sda=15, scl=16). If you have other fixed-
-      address I2C devices sharing the bus, put it behind a TCA9548A
-      mux instead (``TCA9548A(i2c)[channel]`` in place of ``i2c``
-      below) to avoid an address collision.
-    * BNO055 answers at 0x28 by default, but many breakouts' ADR/COM3
-      pin defaults HIGH instead, putting it at 0x29 — if construction
-      raises "BNO055 not found at 0x28", scan the bus (or the mux
-      channel) and pass whichever address answers as ``address=``.
+    * BNO055 IMU behind a TCA9548A mux on I2C0 (sda=15, scl=16;
+      itself at 0x70) — channel 3, address 0x29 (this particular
+      breakout's ADR/COM3 pin defaults HIGH instead of the driver's
+      0x28 default — check your own board if construction raises
+      "BNO055 not found"). If you don't have another fixed-address
+      device sharing the bus, the mux isn't needed — set
+      ``IMU_MUX_CHANNEL = None`` below to talk to the IMU directly.
 
 Run with:
     openbricks run -n ls examples/st3032_drivebase_gyro_test.py
@@ -31,6 +31,7 @@ import machine
 
 from openbricks.drivers.bno055 import BNO055
 from openbricks.drivers.st3032 import ST3032Motor
+from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.robotics import DriveBase
 
 
@@ -38,7 +39,8 @@ LEFT_ID, RIGHT_ID = 1, 2
 UART_ID, TX, RX   = 1, 14, 6
 
 I2C_SDA, I2C_SCL  = 15, 16
-IMU_ADDRESS       = 0x28   # EDIT — 0x29 on breakouts with ADR/COM3 pulled high
+IMU_MUX_CHANNEL   = 3      # EDIT — set to None to skip the mux entirely
+IMU_ADDRESS       = 0x29   # EDIT — 0x28 is the driver default
 
 WHEEL_DIAMETER_MM = 88     # EDIT to your wheels
 AXLE_TRACK_MM     = 136    # EDIT to your chassis
@@ -73,6 +75,8 @@ def drive_square(db, imu, label):
 
 def main():
     i2c = machine.I2C(0, sda=I2C_SDA, scl=I2C_SCL, freq=400_000)
+    if IMU_MUX_CHANNEL is not None:
+        i2c = TCA9548A(i2c)[IMU_MUX_CHANNEL]
     imu = BNO055(i2c=i2c, address=IMU_ADDRESS)
 
     left  = ST3032Motor(servo_id=LEFT_ID,  uart_id=UART_ID, tx=TX, rx=RX)
