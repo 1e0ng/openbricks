@@ -12,6 +12,7 @@ from openbricks.drivers.bno055 import BNO055
 
 _CHIP_ID_REG      = 0x00
 _EXPECTED_CHIP_ID = 0xA0
+_OPR_MODE         = 0x3D
 _EULER_H_LSB      = 0x1A
 _GYR_X_LSB        = 0x14
 _ACC_X_LSB        = 0x08
@@ -33,6 +34,21 @@ class TestBNO055(unittest.TestCase):
         i2c = _make_i2c_with_chip_id(chip_id=0xBE)
         with self.assertRaises(OSError):
             BNO055(i2c)
+
+    def test_engages_imu_fusion_mode_not_ndof(self):
+        # The driver must end construction in IMU mode (0x08 — accel
+        # + gyro fusion, NO magnetometer), not NDOF (0x0C). NDOF's
+        # magnetometer blend drags heading toward the LOCAL magnetic
+        # field — motor magnets/currents and steel in floors bend it
+        # from place to place, so on the bench a gyro'd square
+        # REPORTED +1.8 deg drift while the body visibly ended much
+        # further off (the controller steered the corrupted reading
+        # to its target). Every consumer only needs RELATIVE heading;
+        # trading the compass zero for disturbance immunity is the
+        # Pybricks-class choice.
+        i2c = _make_i2c_with_chip_id()
+        BNO055(i2c)
+        self.assertEqual(i2c._regs[0x28][_OPR_MODE], b"\x08")
 
     def test_heading_reports_signed_degrees(self):
         i2c = _make_i2c_with_chip_id()
