@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.26.0 — BNO055 drops the magnetometer: IMU fusion mode
+
+Bench (2026-07-25): a gyro'd square REPORTED only +1.8° of heading
+drift while the robot's body visibly ended much further off — the
+controller faithfully steered a corrupted measurement to its
+target. Static tests were clean (heading rock-steady at one spot,
+motors on or off), which isolates the corruption to NDOF mode's
+magnetometer blend: fused heading follows the LOCAL magnetic
+field, and motor magnets/load currents plus steel in floors and
+furniture bend that field from place to place, silently eating
+real rotation as the robot translates.
+
+The driver now engages the chip's IMU fusion mode (accel + gyro,
+no magnetometer) instead of NDOF. Semantics change: ``heading()``
+zero is the orientation at driver construction, not magnetic
+north — which is all any consumer here ever needed (DriveBase's
+absolute frame baselines at ``use_gyro(True)`` regardless), and
+it's the same trade Pybricks-class drivebases make. Firmware
+reflash required.
+
 ## 1.25.0 — gyro mode holds an absolute heading target (Pybricks-style)
 
 Hardware verification of 1.24.0 measured ~+7° of drift over one

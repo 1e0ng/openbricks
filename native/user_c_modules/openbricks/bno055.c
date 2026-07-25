@@ -33,7 +33,8 @@
 #define REG_SYS_TRIGGER     0x3F
 
 #define MODE_CONFIG         0x00
-#define MODE_NDOF           0x0C
+#define MODE_NDOF           0x0C   // 9-DOF incl. magnetometer (unused, see below)
+#define MODE_IMU            0x08   // 6-DOF accel+gyro fusion, no magnetometer
 
 #define EXPECTED_CHIP_ID    0xA0
 
@@ -168,9 +169,22 @@ static mp_obj_t bno055_make_new(const mp_obj_type_t *type,
     // bit 7=0 Windows orientation, bit 2=0 °C, bit 1=0 deg, bit 0=0 m/s².
     write_u8(self, REG_UNIT_SEL, 0x00);
 
-    // Engage 9-DOF fusion.
+    // Engage 6-DOF fusion (accel + gyro, NO magnetometer). NDOF's
+    // magnetometer blend is a liability on a drive robot: heading
+    // gets dragged toward the LOCAL magnetic field, which motor
+    // magnets / load currents and steel in floors or furniture bend
+    // from place to place — bench 2026-07-25: a gyro'd square
+    // REPORTED +1.8 deg of drift while the body visibly ended much
+    // further off (the controller faithfully steered the corrupted
+    // number to its target), yet heading sat rock-steady in a
+    // single-spot static test. Every consumer here (DriveBase's
+    // absolute frame included) only needs RELATIVE heading, so we
+    // trade compass-referenced zero (IMU mode zeroes heading at
+    // fusion start instead of magnetic north) for immunity to the
+    // whole disturbance class — same choice Pybricks-class
+    // drivebases make.
     write_u8(self, REG_SYS_TRIGGER, 0x00);
-    write_u8(self, REG_OPR_MODE, MODE_NDOF);
+    write_u8(self, REG_OPR_MODE, MODE_IMU);
     sleep_ms(25);
 
     return MP_OBJ_FROM_PTR(self);
