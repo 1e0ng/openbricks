@@ -83,18 +83,19 @@ void ob_drivebase_straight(ob_drivebase_t *db,
 
     ob_float_t sum_pos  = db_sum_pos(db);
     // Move-start heading frame must match what the tick will READ.
-    // In gyro mode the binding re-baselines its IMU offset at every
-    // move start, so incoming overrides are ~0-framed: reset the
-    // slot and snapshot 0. Snapshotting the ENCODER diff here (the
-    // old behaviour) mixed frames — the controller then chased the
-    // encoder's lifetime accumulated diff forever, so any gyro move
-    // after the robot's first-ever rotation ran away (caught by the
-    // sim IMU verification: a gyro'd turn(90) after one encoder
-    // turn rotated ~180 and never stopped).
+    // In gyro mode the frame is ABSOLUTE (Pybricks-style, 1.25.0):
+    // the binding accumulates a continuous body delta since
+    // use_gyro-enable and the persistent target lives in
+    // ``turn_hold`` in the same frame — so a straight() holds the
+    // TARGET heading, and overshoot banked by a previous turn is
+    // pulled back here instead of forgiven (per-move re-baselining
+    // measured ~+7 deg of drift per gyro'd square on the ST-3032
+    // bench). Snapshotting the ENCODER diff here would mix frames —
+    // the controller then chases the encoder's lifetime accumulated
+    // diff forever (the pre-1.15.2 runaway).
     ob_float_t diff_pos;
     if (db->use_gyro) {
-        db->heading_override_wheel_deg = 0.0;
-        diff_pos = 0.0;
+        diff_pos = db->turn_hold;
     } else {
         diff_pos = db_diff_pos_encoder(db);
     }
@@ -138,11 +139,13 @@ void ob_drivebase_turn(ob_drivebase_t *db,
                                 (ob_float_t)360.0;
 
     ob_float_t sum_pos  = db_sum_pos(db);
-    // Same gyro-frame rule as ob_drivebase_straight above.
+    // Same gyro-frame rule as ob_drivebase_straight above: in gyro
+    // mode the turn trajectory runs from the PREVIOUS absolute
+    // target to target+delta — a turn arriving with overshoot
+    // banked simply has less real distance to cover.
     ob_float_t diff_pos;
     if (db->use_gyro) {
-        db->heading_override_wheel_deg = 0.0;
-        diff_pos = 0.0;
+        diff_pos = db->turn_hold;
     } else {
         diff_pos = db_diff_pos_encoder(db);
     }
@@ -252,4 +255,15 @@ ob_float_t ob_drivebase_body_to_wheel_diff(const ob_drivebase_t *db,
                                             ob_float_t body_heading_delta_deg) {
     return body_heading_delta_deg * db->axle_track_mm * (ob_float_t)M_PI /
            db->wheel_circumference_mm;
+}
+
+
+// Reset the gyro-mode absolute frame: called by the bindings on the
+// use_gyro ENABLE transition, so "here, now" becomes both the zero
+// of the continuous measured heading and the initial target. Clears
+// any encoder-frame residue from turn_hold (its value before enable
+// lives in the lifetime encoder-diff frame, meaningless here).
+void ob_drivebase_gyro_frame_reset(ob_drivebase_t *db) {
+    db->turn_hold                  = 0.0;
+    db->heading_override_wheel_deg = 0.0;
 }

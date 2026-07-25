@@ -28,7 +28,12 @@ typedef struct _drivebase_obj_t {
     // IMU and converts it to a wheel-degree differential for the core.
     mp_obj_t imu;
     mp_obj_t imu_heading_fn;
-    ob_float_t heading_offset_deg;   // body-degrees captured at move-start
+    // Continuous (un-wrapped) body heading since the use_gyro ENABLE
+    // transition — the absolute frame the gyro controller steers in.
+    // ``prev`` is the last wrapped imu.heading() reading, used to
+    // accumulate ``cont`` across the ±180 boundary.
+    ob_float_t heading_prev_deg;
+    ob_float_t heading_cont_deg;
 
     // Scheduler-registration tracking — separate from ``core.done`` so
     // unregistering an already-finished move doesn't double-unregister.

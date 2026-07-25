@@ -182,6 +182,40 @@ class TestDriveBaseUseGyro(unittest.TestCase):
                         "error (l=%.1f r=%.1f)" % (l, r))
         ndb.stop()
 
+    def test_gyro_turn_overshoot_corrected_by_next_move_native(self):
+        """ABSOLUTE FRAME (1.25.0), native path: after a completed
+        +90 gyro turn, a straight that starts with the IMU reading 95
+        (5 deg clockwise of the persistent target) must steer BACK —
+        right wheel commanded faster than left — instead of adopting
+        the overshoot as its new reference the way per-move
+        re-baselining did."""
+        imu = _FakeIMU(heading=0.0)
+
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
+        ndb = NativeDB(
+            left=left._servo, right=right._servo,
+            wheel_diameter_mm=56, axle_track_mm=114,
+            imu=imu,
+        )
+        left.run_speed(0)
+        right.run_speed(0)
+
+        ndb.use_gyro(True)
+        ndb.turn(90.0, 360.0)
+        time.sleep_ms(1000)   # run the turn trajectory to completion
+        self.assertTrue(ndb.is_done())
+
+        imu.heading_value = 95.0   # overshot the absolute target by 5
+        ndb.straight(0.0, 50.0)
+        time.sleep_ms(5)
+
+        self.assertGreater(right._servo.target_dps(),
+                           left._servo.target_dps(),
+                           "turn overshoot was adopted instead of "
+                           "corrected on the next move")
+        ndb.stop()
+
     def test_use_gyro_false_reverts_to_encoder_feedback(self):
         """Toggling use_gyro off makes the controller ignore the IMU."""
         imu = _FakeIMU(heading=0.0)
@@ -312,6 +346,87 @@ class TestDriveBaseFallbackUseGyro(unittest.TestCase):
         imu.heading_value = 90.0   # IMU: the body has actually reached 90°
         self.assertTrue(db.done(), "gyro-measured heading reached the "
                         "target but the turn did not terminate")
+
+    def test_fallback_turn_overshoot_is_corrected_by_next_straight(self):
+        """ABSOLUTE HEADING FRAME (Pybricks-style): bench 2026-07-25
+        showed +7 deg of accumulated drift over one gyro'd square —
+        each turn overshot ~1.5-2 deg past its target (poll latency +
+        coast momentum) and the old per-move re-baselining forgave
+        it. With the persistent target, a straight() that starts
+        while the robot points past the target must steer BACK."""
+        left  = self._FakeClosedLoopMotor()
+        right = self._FakeClosedLoopMotor()
+        imu = _FakeIMU(heading=0.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114,
+                       imu=imu)
+        db.use_gyro(True)
+
+        # turn(90): overshoot to 95 before the poll notices.
+        db.turn(90, wait=False)
+        imu.heading_value = 95.0
+        self.assertTrue(db.done())      # crossed the target → done
+
+        # The next straight starts 5 deg clockwise of target. The
+        # correction must slow the LEFT wheel (steer CCW, back
+        # toward the target) — under per-move re-baselining the
+        # commands would be equal and the error frozen in.
+        db.straight(100, wait=False)
+        db.done()   # one tick
+        self.assertLess(left._target_dps, right._target_dps,
+                        "banked turn overshoot was not corrected")
+        db.stop()
+
+    def test_fallback_second_turn_folds_in_first_turns_overshoot(self):
+        left  = self._FakeClosedLoopMotor()
+        right = self._FakeClosedLoopMotor()
+        imu = _FakeIMU(heading=0.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114,
+                       imu=imu)
+        db.use_gyro(True)
+
+        db.turn(90, wait=False)
+        imu.heading_value = 95.0    # overshoot
+        self.assertTrue(db.done())
+
+        # Second turn(90): absolute target is 180, robot is at 95 —
+        # 85 deg to go, not 90. At measured 178 the turn must still
+        # be running; crossing 180 ends it.
+        db.turn(90, wait=False)
+        imu.heading_value = 178.0
+        self.assertFalse(db.done())
+        imu.heading_value = 180.5
+        self.assertTrue(db.done())
+
+    def test_fallback_turn_already_past_target_terminates_immediately(self):
+        left  = self._FakeClosedLoopMotor()
+        right = self._FakeClosedLoopMotor()
+        imu = _FakeIMU(heading=0.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114,
+                       imu=imu)
+        db.use_gyro(True)
+
+        db.turn(90, wait=False)
+        imu.heading_value = 130.0   # shoved way past the target
+        self.assertTrue(db.done(),
+                        "turn already past its absolute target must "
+                        "end, not rotate another lap")
+
+    def test_fallback_gyro_survives_pm180_wrap(self):
+        """Enable near the BNO055's ±180 boundary and turn across
+        it: the continuous-heading accumulator must see a small
+        positive delta, not a spurious -360 jump."""
+        left  = self._FakeClosedLoopMotor()
+        right = self._FakeClosedLoopMotor()
+        imu = _FakeIMU(heading=170.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114,
+                       imu=imu)
+        db.use_gyro(True)   # reference = 170
+
+        db.turn(30, wait=False)     # absolute finish = 200 == -160 wrapped
+        imu.heading_value = -175.0  # 15 deg of CW progress, wrapped
+        self.assertFalse(db.done())
+        imu.heading_value = -160.0  # 30 deg of CW progress → target
+        self.assertTrue(db.done())
 
     def test_fallback_turn_without_gyro_still_uses_encoder(self):
         left  = self._FakeClosedLoopMotor()

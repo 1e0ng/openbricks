@@ -3,6 +3,35 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.25.0 — gyro mode holds an absolute heading target (Pybricks-style)
+
+Hardware verification of 1.24.0 measured ~+7° of drift over one
+gyro'd square where encoder mode drifted -4.3° — the gyro pass was
+WORSE than the thing it replaces. Cause: every move re-baselined its
+heading reference at its own start, so each turn's termination
+overshoot (~1.5-2° of poll latency + coast momentum) was forgiven
+and accumulated forever.
+
+`use_gyro(True)` now maintains a persistent ABSOLUTE heading
+target, like Pybricks: enabling it makes the current pose the
+reference, `turn(a)` advances the target by `a`, and every
+subsequent move steers the measured heading toward the target —
+so overshoot banked by one turn is pulled back by the next move,
+and a turn that arrives already past its target ends immediately
+instead of rotating another lap. The measured heading is
+accumulated continuously (per-tick deltas wrapped ±180), so
+multi-turn totals and the BNO055's ±180 boundary are handled.
+
+Applies uniformly to both paths — the serial-bus fallback loop and
+the native C controller (core keeps the target in `turn_hold`
+across moves; bindings baseline once at the enable transition, not
+per move). Also fixes a units bug in the fallback gyro-turn decel
+(body-degrees were fed to a wheel-degree profile).
+
+Sim verification: the gyro square example closes to +0.0° (was
++0.2°), and `wander_with_gyro` (native path) ends 0.0095° from its
+start after four squares (was 0.11°). Firmware reflash required.
+
 ## 1.24.0 — BREAKING: turn/heading sign now matches Pybricks (positive = right/clockwise)
 
 Through 1.23.2, openbricks used its own CCW-positive convention:

@@ -224,6 +224,30 @@ class DriveBaseParityTests(unittest.TestCase):
         self.assertLess   (l_on, l_off)
         self.assertGreater(r_on, r_off)
 
+    def test_gyro_turn_overshoot_corrected_by_next_move(self):
+        # ABSOLUTE FRAME (1.25.0): the gyro target persists across
+        # moves. Complete a +90 turn, then start a straight while the
+        # measured heading reports 95 — five degrees clockwise of the
+        # target. The controller must steer BACK (right wheel faster
+        # than left), not adopt the overshoot as the new reference
+        # the way per-move re-baselining did (bench: ~+7 deg of
+        # accumulated drift per gyro'd square).
+        sim = _SyntheticTwoWheel(self.db, self.left, self.right)
+        self.db.set_use_gyro(True)
+        self.db.set_heading_override(0.0)
+        self.db.turn(sim.now_ms, 90.0, 90.0)
+        sim.step(5000)   # run the turn trajectory to completion
+        self.assertTrue(self.db.is_done())
+
+        self.db.straight(sim.now_ms, 100.0, 100.0)
+        self.db.set_heading_override(95.0)   # measured: 5 deg past target
+        sim.now_ms += 1
+        self.db.tick(sim.now_ms)
+        self.assertGreater(self.db.target_right_dps(),
+                           self.db.target_left_dps(),
+                           "overshoot banked by the turn was adopted "
+                           "instead of corrected")
+
     def test_set_heading_override_zero_is_neutral(self):
         # With use_gyro on and override = 0, the diff-error is exactly
         # zero (the override path replaces the encoder differential
