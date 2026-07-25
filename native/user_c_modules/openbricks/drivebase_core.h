@@ -142,3 +142,8 @@ bool ob_drivebase_is_done(const ob_drivebase_t *db);
 // this to do the conversion before tick.
 ob_float_t ob_drivebase_body_to_wheel_diff(const ob_drivebase_t *db,
                                             ob_float_t body_heading_delta_deg);
+
+// Reset the gyro-mode absolute frame (turn_hold + override slot).
+// Bindings call this on the use_gyro ENABLE transition so the
+// current pose becomes both measured-zero and the initial target.
+void ob_drivebase_gyro_frame_reset(ob_drivebase_t *db);

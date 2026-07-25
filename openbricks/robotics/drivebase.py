@@ -60,6 +60,20 @@ class DriveBase:
         # Fallback-path gyro toggle. Meaningless when ``_native`` is
         # set — the native controller keeps its own flag internally.
         self._use_gyro = False
+        # Absolute heading frame for the fallback gyro path
+        # (Pybricks-style): ``_gyro_target`` is where the robot
+        # SHOULD point and ``_gyro_cont`` where it DOES point, both
+        # in continuous (un-wrapped) degrees since ``use_gyro(True)``
+        # was enabled. ``turn(a)`` advances the target; every move
+        # steers toward the target rather than re-baselining at its
+        # own start — so one turn's overshoot is pulled back by the
+        # next move instead of accumulating forever (bench: ~+7°
+        # after one gyro'd square under per-move re-baselining).
+        # ``_gyro_prev`` is the last wrapped ``imu.heading()`` used
+        # to accumulate ``_gyro_cont`` across the ±180 boundary.
+        self._gyro_target = 0.0
+        self._gyro_cont = 0.0
+        self._gyro_prev = None
 
         # The native drivebase is only usable if both motors are
         # closed-loop servos. Otherwise the wrapper falls through to a
@@ -139,6 +153,12 @@ class DriveBase:
         if self._native is not None:
             self._native.use_gyro(enable)
         else:
+            if enable and not self._use_gyro:
+                # Enable transition: the robot's CURRENT heading
+                # becomes the absolute reference (target = here).
+                self._gyro_prev = self._imu.heading()
+                self._gyro_cont = 0.0
+                self._gyro_target = 0.0
             self._use_gyro = enable
 
     # ---- non-blocking open-loop ----
@@ -296,7 +316,6 @@ class DriveBase:
             "direction": direction,
             "start_left":  start_left,
             "start_right": start_right,
-            "start_heading": self._imu.heading() if self._use_gyro else None,
             "speed": speed,
             "consecutive_none": 0,
             "then": then,
@@ -331,14 +350,21 @@ class DriveBase:
         wheel_deg_each = arc_mm / self._wheel_circumference * 360
         direction = 1 if angle_deg >= 0 else -1
         speed = self._turn_rate_dps
+        if self._use_gyro:
+            # Absolute frame: the commanded rotation advances the
+            # persistent target; the tick then drives the MEASURED
+            # heading to it, so any residual error from previous
+            # moves is folded into this turn instead of forgiven.
+            # Direction still follows the commanded sign (a +90 turn
+            # arriving with +5 of overshoot banked turns +85, not
+            # -275).
+            self._gyro_target += float(angle_deg)
         self._pending = {
             "mode": "turn_fallback",
             "wheel_deg_each": wheel_deg_each,
-            "angle_deg": angle_deg,
             "direction": direction,
             "start_left":  start_left,
             "start_right": start_right,
-            "start_heading": self._imu.heading() if self._use_gyro else None,
             "speed": speed,
             "consecutive_none": 0,
             "then": then,
@@ -379,32 +405,41 @@ class DriveBase:
             v = self._FALLBACK_MIN_DPS
         return v
 
-    def _heading_delta_deg(self, start_heading):
-        """Body-heading rotation since ``start_heading``, wrapped into
-        [-180, 180) so a move that crosses the BNO055's ±180 wrap
-        point doesn't see a spurious ±360 jump. Mirrors the native
-        core's ``drivebase_read_body_delta`` (drivebase.c)."""
-        delta = self._imu.heading() - start_heading
+    def _gyro_cont_heading(self):
+        """Advance and return the continuous (un-wrapped) measured
+        heading, in degrees since ``use_gyro(True)`` was enabled.
+        Each tick's raw ``imu.heading()`` delta is wrapped into
+        [-180, 180) — so crossing the BNO055's ±180 boundary doesn't
+        inject a spurious ±360 jump — and accumulated, which keeps
+        multi-turn totals (e.g. four +90 turns = +360) representable
+        where a wrapped absolute reading could not."""
+        h = self._imu.heading()
+        delta = h - self._gyro_prev
         if delta > 180.0:
             delta -= 360.0
         elif delta < -180.0:
             delta += 360.0
-        return delta
+        self._gyro_prev = h
+        self._gyro_cont += delta
+        return self._gyro_cont
 
-    def _gyro_diff_err_wheel_deg(self, start_heading):
-        """Convert accumulated body-heading rotation into the same
-        wheel-degree differential ``left_deg - right_deg`` would read
-        for the same physical rotation — so swapping the heading
-        source doesn't change the fallback's correction gain. Inverse
-        of the native core's ``ob_drivebase_body_to_wheel_diff``
-        (drivebase_core.c), scaled by 2 since that function returns
-        the halved ``diff_pos`` and this fallback's ``err`` is the raw
-        L-R differential. Positive heading delta = CW/right rotation
-        (Pybricks convention) = left wheel out-paced right = positive
-        L-R differential, so the sign passes straight through."""
-        delta = self._heading_delta_deg(start_heading)
-        return delta * (2.0 * self._axle_track * math.pi /
-                        self._wheel_circumference)
+    # Wheel-degrees of per-wheel travel per body-degree of in-place
+    # rotation: arc = radians(1) * axle/2, wheel_deg = arc/circ*360.
+    def _wheel_deg_per_body_deg(self):
+        return math.pi * self._axle_track / self._wheel_circumference
+
+    def _gyro_diff_err_wheel_deg(self):
+        """Signed heading error vs the ABSOLUTE target, converted to
+        the same wheel-degree differential ``left_deg - right_deg``
+        would read for that rotation — so swapping the heading source
+        doesn't change the fallback's correction gain. ×2 of the
+        native core's halved ``diff_pos`` convention
+        (``ob_drivebase_body_to_wheel_diff``). Positive = robot is
+        clockwise of where it should point = left wheel out-paced
+        right = positive L-R differential (sign passes straight
+        through, Pybricks CW-positive convention)."""
+        err_body = self._gyro_cont_heading() - self._gyro_target
+        return err_body * 2.0 * self._wheel_deg_per_body_deg()
 
     @staticmethod
     def _run_at_dps(motor, dps):
@@ -497,9 +532,11 @@ class DriveBase:
             self.stop(then=state["then"])
             return True
         # Forward progress always comes from the encoders — the gyro
-        # only replaces the heading-hold error term below.
+        # only replaces the heading-hold error term below, steering
+        # toward the ABSOLUTE target heading (so overshoot banked by
+        # a previous turn is corrected here, not preserved).
         if self._use_gyro:
-            err = self._gyro_diff_err_wheel_deg(state["start_heading"])
+            err = self._gyro_diff_err_wheel_deg()
         else:
             err = left_deg - right_deg
         # Trapezoid-shaped speed magnitude for this tick: ramp from
@@ -533,16 +570,22 @@ class DriveBase:
         direction = state["direction"]
 
         if self._use_gyro:
-            # Actual body rotation decides both when the turn is done
-            # and how much is left — slip-immune, unlike the encoder
-            # average below, which just reports what the wheels think
-            # they did.
-            progressed = abs(self._heading_delta_deg(state["start_heading"]))
-            target = abs(state["angle_deg"])
-            if progressed >= target:
+            # Actual body rotation vs the ABSOLUTE target decides
+            # both when the turn is done and how much is left —
+            # slip-immune, unlike the encoder average below, which
+            # just reports what the wheels think they did. Signed
+            # remaining + crossing check: a turn that arrives already
+            # past the target (overshoot banked earlier, or an
+            # external shove) terminates immediately rather than
+            # rotating another lap.
+            remaining_body = ((self._gyro_target - self._gyro_cont_heading())
+                              * direction)
+            if remaining_body <= 0:
                 self.stop(then=state["then"])
                 return True
-            remaining = target - progressed
+            # Body-degrees → wheel-degrees for the decel profile
+            # (its acceleration is in wheel-deg/s²).
+            remaining = remaining_body * self._wheel_deg_per_body_deg()
         else:
             left  = (left_now  - state["start_left"])  * direction
             right = (right_now - state["start_right"]) * (-direction)

@@ -568,6 +568,13 @@ static PyObject *DriveBase_set_use_gyro(DriveBaseObject *self, PyObject *arg) {
     if (enable < 0) {
         return NULL;
     }
+    /* Enable transition: reset the absolute gyro frame so "here,
+     * now" is both measured-zero and the initial target — mirrors
+     * the firmware binding. The caller (SimDriveBase) baselines its
+     * own continuous-heading accumulator at the same moment. */
+    if (enable && !self->core.use_gyro) {
+        ob_drivebase_gyro_frame_reset(&self->core);
+    }
     self->core.use_gyro = enable ? true : false;
     Py_RETURN_NONE;
 }

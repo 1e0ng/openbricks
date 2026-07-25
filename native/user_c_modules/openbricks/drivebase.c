@@ -27,28 +27,36 @@
 extern const mp_obj_type_t openbricks_drivebase_type;
 
 // ---------------------------------------------------------------------
-// IMU heading helpers — cache offset at move-start so the controller
-// treats "now" as heading 0 regardless of where the robot is pointing.
+// IMU heading helpers — ABSOLUTE frame (Pybricks-style, 1.25.0):
+// baselined ONCE at the use_gyro enable transition, then accumulated
+// continuously. Re-baselining per move (the old behaviour) forgave
+// each turn's termination overshoot, which accumulated ~+7 deg per
+// gyro'd square on the bench; in the absolute frame the persistent
+// target (core ``turn_hold``) pulls overshoot back in later moves.
 
-static void drivebase_rebaseline_heading(drivebase_obj_t *self) {
+static void drivebase_gyro_baseline(drivebase_obj_t *self) {
     if (self->imu_heading_fn == MP_OBJ_NULL) {
         return;
     }
-    self->heading_offset_deg =
+    self->heading_prev_deg =
         (ob_float_t)mp_obj_get_float(mp_call_function_0(self->imu_heading_fn));
+    self->heading_cont_deg = 0.0;
 }
 
 
+// Advance and return the continuous body heading (degrees since the
+// enable baseline). Per-tick deltas are wrapped into [-180, 180] so
+// crossing the BNO055's ±180 boundary doesn't inject a ±360 jump,
+// then accumulated — multi-turn totals stay representable.
 static ob_float_t drivebase_read_body_delta(drivebase_obj_t *self) {
     ob_float_t body = (ob_float_t)mp_obj_get_float(
         mp_call_function_0(self->imu_heading_fn));
-    ob_float_t delta = body - self->heading_offset_deg;
-    // BNO055 heading() wraps at ±180 — snap the delta into the same
-    // range so a move that crosses the boundary doesn't see a
-    // spurious ±360 jump.
+    ob_float_t delta = body - self->heading_prev_deg;
     if (delta >  (ob_float_t)180.0) delta -= (ob_float_t)360.0;
     if (delta < (ob_float_t)-180.0) delta += (ob_float_t)360.0;
-    return delta;
+    self->heading_prev_deg  = body;
+    self->heading_cont_deg += delta;
+    return self->heading_cont_deg;
 }
 
 
@@ -75,9 +83,8 @@ static void drivebase_register(drivebase_obj_t *self) {
     if (self->registered) {
         return;
     }
-    if (self->core.use_gyro) {
-        drivebase_rebaseline_heading(self);
-    }
+    // (No gyro re-baseline here — the absolute frame is seeded once
+    // at the use_gyro enable transition, deliberately NOT per move.)
     // Re-baseline each servo's observer so the first tick doesn't see
     // a phantom residual. The observer reads its measurement from the
     // bound encoder.count() — uniform across QuadratureEncoder /
@@ -168,7 +175,10 @@ static mp_obj_t db_use_gyro(mp_obj_t self_in, mp_obj_t enable_in) {
     bool transitioning_on = enable && !self->core.use_gyro;
     self->core.use_gyro = enable;
     if (transitioning_on) {
-        drivebase_rebaseline_heading(self);
+        // "Here, now" becomes both measured-zero and the initial
+        // target of the absolute frame.
+        drivebase_gyro_baseline(self);
+        ob_drivebase_gyro_frame_reset(&self->core);
     }
     return mp_const_none;
 }
@@ -248,7 +258,8 @@ static mp_obj_t db_make_new(const mp_obj_type_t *type,
                       kp_diff);
 
     self->registered         = false;
-    self->heading_offset_deg = 0.0;
+    self->heading_prev_deg = 0.0;
+    self->heading_cont_deg = 0.0;
 
     self->imu            = parsed[ARG_imu].u_obj;
     self->imu_heading_fn = MP_OBJ_NULL;

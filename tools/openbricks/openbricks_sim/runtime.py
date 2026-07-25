@@ -752,7 +752,12 @@ class SimDriveBase:
         # Optional heading feed for the slip-immune gyro path (see
         # attach_imu / set_use_gyro).
         self._imu = None
-        self._heading_offset = 0.0
+        # Continuous (un-wrapped) heading accumulator for the gyro
+        # path's ABSOLUTE frame — baselined once at set_use_gyro
+        # enable, NOT per move (per-move re-baselining forgave each
+        # turn's overshoot; measured ~+7 deg/square on hardware).
+        self._heading_prev = 0.0
+        self._heading_cont = 0.0
         self._imu_tick_active = False
 
     # -------- lifecycle --------
@@ -787,13 +792,11 @@ class SimDriveBase:
     # -------- user-facing API --------
 
     def straight(self, distance_mm: float, speed_mm_s: float) -> None:
-        self._rebaseline_heading()
         self.db.straight(self.runtime.now_ms,
                           float(distance_mm), float(speed_mm_s))
         self._attach()
 
     def turn(self, angle_deg: float, rate_dps: float) -> None:
-        self._rebaseline_heading()
         self.db.turn(self.runtime.now_ms,
                       float(angle_deg), float(rate_dps))
         self._attach()
@@ -813,20 +816,26 @@ class SimDriveBase:
         gyro-guided drivebase path."""
         self._imu = imu
 
-    def _rebaseline_heading(self) -> None:
-        if self._imu_tick_active and self._imu is not None:
-            self._heading_offset = float(self._imu.heading())
+    def _gyro_baseline(self) -> None:
+        """Seed the absolute frame — called on the set_use_gyro
+        ENABLE transition only, never per move."""
+        self._heading_prev = float(self._imu.heading())
+        self._heading_cont = 0.0
 
     def _imu_tick(self, now_ms) -> None:
         body = float(self._imu.heading())
-        delta = body - self._heading_offset
-        # Wrap +/-180 so a move crossing the boundary doesn't see a
-        # spurious +/-360 jump.
+        delta = body - self._heading_prev
+        # Wrap the per-tick delta into +/-180 so crossing the
+        # boundary doesn't inject a +/-360 jump, then accumulate —
+        # the continuous total is the absolute-frame measurement the
+        # core steers against.
         if delta > 180.0:
             delta -= 360.0
         if delta < -180.0:
             delta += 360.0
-        self.db.set_heading_override(delta)
+        self._heading_prev = body
+        self._heading_cont += delta
+        self.db.set_heading_override(self._heading_cont)
 
     def _attach_imu_tick(self) -> None:
         """Insert the IMU tick BEFORE the drivebase tick so the
@@ -865,8 +874,13 @@ class SimDriveBase:
                     "set_use_gyro(True) needs attach_imu(imu) first "
                     "— without a heading feed the drivebase steers "
                     "on a stale override")
-            self._attach_imu_tick()
-            self._heading_offset = float(self._imu.heading())
+            # Baseline only on the OFF->ON transition — the native
+            # side's frame reset fires on the same transition, and
+            # re-baselining the Python accumulator alone would desync
+            # the two frames.
+            if not self._imu_tick_active:
+                self._attach_imu_tick()
+                self._gyro_baseline()
         else:
             self._detach_imu_tick()
         self.db.set_use_gyro(enable)
