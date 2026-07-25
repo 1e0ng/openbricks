@@ -53,7 +53,11 @@ myst_heading_anchors = 3
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "micropython": ("https://docs.micropython.org/en/latest", None),
+    # NOTE: no "micropython" entry — nothing in docs/ referenced its
+    # inventory, and the fetch made every -W docs build hostage to
+    # docs.micropython.org's uptime (2026-07-25: the site 404'd and
+    # blocked CI on an unrelated examples-only PR). Re-add only
+    # together with an actual cross-reference that needs it.
 }
 
 exclude_patterns = ["_build", "datasheets"]
