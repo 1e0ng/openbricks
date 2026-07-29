@@ -104,3 +104,9 @@ latex_elements = {
     # book; blank verso pages between short chapters read as bloat.
     "extraclassoptions": "openany,oneside",
 }
+# Sphinx defaults to xindy for index processing under xelatex, but
+# xindy isn't in the CI texlive install (first PDF build failed with
+# latexmk's "makeindex ... gave return code -1", i.e. command not
+# found). Our index entries are ASCII API names, which classic
+# makeindex (already present via texlive-binaries) handles fine.
+latex_use_xindy = False
