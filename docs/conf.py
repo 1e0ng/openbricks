@@ -78,3 +78,29 @@ html_context = {
     "github_version": "main",
     "conf_py_path": "/docs/",
 }
+
+# ---- PDF (sphinx -M latexpdf, compiled in CI and published next to
+#      the HTML as /openbricks-docs.pdf — see website.yaml) ----
+#
+# xelatex rather than pdflatex: the docs lean on unicode (°, ², ³, →,
+# ±, em-dashes) that pdflatex trips over; xelatex with Sphinx's
+# default FreeSerif/FreeSans/FreeMono fonts (fonts-freefont-otf in
+# CI) renders them natively.
+latex_engine = "xelatex"
+latex_documents = [
+    (
+        "index",
+        "openbricks.tex",
+        "openbricks documentation",
+        author,
+        "manual",
+    ),
+]
+latex_elements = {
+    # A4 fits the international audience; 11pt for readability.
+    "papersize": "a4paper",
+    "pointsize": "11pt",
+    # Keep chapters opening on any page — the docs are guides, not a
+    # book; blank verso pages between short chapters read as bloat.
+    "extraclassoptions": "openany,oneside",
+}
