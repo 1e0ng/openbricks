@@ -51,8 +51,10 @@ jobs:
         # Same -W gate as the HTML build for the Sphinx stage; the
         # xelatex compile then fails the job on hard errors, so a
         # broken PDF pipeline can never deploy a dead download link.
+        # NOTE: -M must be sphinx-build's FIRST argument (make-mode);
+        # options go after the directories.
         run: |
-          sphinx-build -W --keep-going -M latexpdf docs docs/_build
+          sphinx-build -M latexpdf docs docs/_build -W --keep-going
           cp docs/_build/latex/openbricks.pdf docs/_build/html/openbricks-docs.pdf
       - uses: actions/upload-pages-artifact@v4
         with:
