@@ -40,6 +40,22 @@ jobs:
         run: pip install -r docs/requirements.txt
       - name: Build docs (warnings are errors)
         run: sphinx-build -W --keep-going -b html docs docs/_build/html
+      - name: Install LaTeX toolchain (for the PDF build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            latexmk texlive-xetex texlive-latex-recommended \
+            texlive-latex-extra texlive-fonts-recommended \
+            fonts-freefont-otf
+      - name: Build PDF and publish it next to the HTML
+        # Same -W gate as the HTML build for the Sphinx stage; the
+        # xelatex compile then fails the job on hard errors, so a
+        # broken PDF pipeline can never deploy a dead download link.
+        # NOTE: -M must be sphinx-build's FIRST argument (make-mode);
+        # options go after the directories.
+        run: |
+          sphinx-build -M latexpdf docs docs/_build -W --keep-going
+          cp docs/_build/latex/openbricks.pdf docs/_build/html/openbricks-docs.pdf
       - uses: actions/upload-pages-artifact@v4
         with:
           path: docs/_build/html

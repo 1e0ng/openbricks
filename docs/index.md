@@ -3,6 +3,10 @@
 **openbricks** is a Pybricks-style MicroPython firmware for **open
 hardware** — commodity MCUs, commodity motors, commodity sensors.
 
+*Prefer offline reading? This documentation is also available as a
+single* **[PDF download](https://docs.openbricks.dev/openbricks-docs.pdf)**,
+*rebuilt on every deploy.*
+
 Like Pybricks, openbricks is a *firmware you flash to an MCU*, not a
 library you `pip install` on top of stock MicroPython. The firmware owns
 the runtime: the 1 kHz motor scheduler, trajectory planner, state
