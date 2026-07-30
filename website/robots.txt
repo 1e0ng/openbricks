@@ -1,0 +1,5 @@
+# openbricks.dev — single-page landing site, everything public.
+User-agent: *
+Allow: /
+
+Sitemap: https://openbricks.dev/sitemap.xml

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- openbricks.dev is a single landing page; the docs subdomain has
+     its own generated sitemap at docs.openbricks.dev/sitemap.xml. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://openbricks.dev/</loc>
+  </url>
+</urlset>
