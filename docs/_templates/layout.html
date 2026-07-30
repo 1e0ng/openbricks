@@ -1,0 +1,13 @@
+{#- Extend sphinx_rtd_theme's layout: a "Download PDF" button pinned
+    under the sidebar search box, visible from EVERY docs page (the
+    inline index.md link was easy to miss — user feedback). The PDF
+    is built by the same CI job that builds this HTML and deployed
+    to the site root; absolute URL so the button also works on
+    localhost preview builds. -#}
+{% extends "!layout.html" %}
+{% block sidebartitle %}
+{{ super() }}
+<a class="obk-pdf-btn" href="https://docs.openbricks.dev/openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+{% endblock %}

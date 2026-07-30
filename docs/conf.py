@@ -73,6 +73,8 @@ html_baseurl = "https://docs.openbricks.dev/"
 sitemap_url_scheme = "{link}"
 # Files copied verbatim into the site root (robots.txt).
 html_extra_path = ["_extra"]
+# Theme overrides — layout.html adds the sidebar "Download PDF" button.
+templates_path = ["_templates"]
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 html_theme_options = {
