@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "How openbricks works: a custom MicroPython firmware with a 1 kHz native-C motor hot path and a three-layer Python API (drivers, interfaces, robotics)."
+---
+
 # Architecture
 
 A short tour of how `openbricks` is organized and why. If you've read Pybricks'

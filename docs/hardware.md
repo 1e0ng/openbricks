@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Supported hardware for openbricks: ESP32-S3 and ESP32 boards, ST-3032/ST-3215 serial bus servos, DC gear motors, IMUs, color and distance sensors, with wiring guides."
+---
+
 # Hardware guide
 
 A starter parts list and wiring notes. Everything here is commodity stuff you

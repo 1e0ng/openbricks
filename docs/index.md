@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "openbricks is a Pybricks-style MicroPython firmware for open hardware: commodity ESP32 boards, off-the-shelf motors and sensors, and a clean Python robotics API."
+---
+
 # openbricks documentation
 
 **openbricks** is a Pybricks-style MicroPython firmware for **open
