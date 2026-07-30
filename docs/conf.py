@@ -30,6 +30,10 @@ extensions = [
     "sphinx.ext.intersphinx",
     "myst_parser",
     "sphinxarg.ext",
+    # Generates sitemap.xml from html_baseurl — crawler discovery
+    # for a young site with few inbound links. robots.txt (in
+    # _extra/) points search engines at it.
+    "sphinx_sitemap",
 ]
 
 # MicroPython-only modules that don't exist on the doc-building CPython.
@@ -64,6 +68,11 @@ exclude_patterns = ["_build", "datasheets"]
 
 html_theme = "sphinx_rtd_theme"
 html_baseurl = "https://docs.openbricks.dev/"
+# Single-version site — drop sphinx-sitemap's default "en/" language
+# prefix so sitemap URLs match the real deployed paths.
+sitemap_url_scheme = "{link}"
+# Files copied verbatim into the site root (robots.txt).
+html_extra_path = ["_extra"]
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 html_theme_options = {
