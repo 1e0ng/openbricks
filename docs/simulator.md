@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Run the same openbricks robot code without hardware in a MuJoCo-backed simulator, including WRO competition worlds and a live 3D viewer."
+---
+
 # Simulator
 
 The `[sim]` extra ships a MuJoCo-backed physics simulator, so you can

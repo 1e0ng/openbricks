@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Example programs for openbricks robots: drivebase squares, gyro-corrected driving, line following, color sorting, and distance-based wall avoidance."
+---
+
 # Examples
 
 The repo ships runnable example programs in

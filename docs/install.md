@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Install the openbricks host tools with pipx, download prebuilt firmware, and flash your ESP32 hub with a single command: openbricks flash --name."
+---
+
 # Installation
 
 Two things get installed: the **host tooling** on your computer (a CLI

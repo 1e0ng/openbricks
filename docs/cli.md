@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "The openbricks command-line tool: flash firmware, list hubs over BLE, run and upload programs, stop them, and pull logs — with port and firmware auto-detection."
+---
+
 # Command-line tool
 
 `pipx install openbricks` installs one console script, `openbricks`,

@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Build the openbricks MicroPython firmware from source with ESP-IDF, flash it to ESP32/ESP32-S3, and run the test suite against the unix MicroPython port."
+---
+
 # Building the firmware
 
 openbricks is a custom MicroPython firmware. Users flash the resulting image to their MCU; the openbricks Python package is frozen into the image and the motor-control hot path (scheduler, trajectory, observer, servo, drivebase) lives in a compiled C extension.
