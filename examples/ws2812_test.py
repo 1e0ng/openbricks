@@ -9,6 +9,11 @@ data-line integrity, and that all 8 pixels answer.
 Hardware:
     * WS2812B x8 stick: DIN -> DATA_PIN below, 5V -> 5 V supply
       (or 3.3 V — fine for the small x8 boards), GND -> common GND.
+    * Default DATA_PIN 21: free on both chips, and on the ESP32-S3
+      COREBOARD it sits on the header right next to the 5V/GND
+      corner — a natural 3-wire landing spot for the stick. (The
+      adjacent GPIO 19/20 pins are the S3's native-USB pair and are
+      rejected by ``openbricks.pins`` — don't use those two.)
     * The ESP32's 3.3 V data level is out of spec for a 5 V-supplied
       strip but works with virtually every module; if colors glitch,
       power the stick from 3.3 V or add a level shifter.
@@ -22,7 +27,7 @@ import time
 from openbricks.drivers.ws2812 import WS2812
 
 
-DATA_PIN = 4      # EDIT to your wiring
+DATA_PIN = 21     # EDIT to your wiring
 NUM_LEDS = 8
 
 

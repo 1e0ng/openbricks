@@ -24,7 +24,7 @@ Usage::
 
     from openbricks.drivers.ws2812 import WS2812
 
-    strip = WS2812(pin=4, n=8)          # WS2812B x8 stick
+    strip = WS2812(pin=21, n=8)         # WS2812B x8 stick
     strip.fill((0, 60, 0))              # everything green (pushed)
     strip[0] = (255, 0, 0)              # buffer only...
     strip[7] = (0, 0, 255)

@@ -41,6 +41,21 @@ class ConstructionTests(unittest.TestCase):
         try:
             with self.assertRaises(pins.ReservedPinError):
                 _make(pin=26)   # flash/PSRAM region on the S3
+            with self.assertRaises(pins.ReservedPinError):
+                _make(pin=20)   # native USB D- on the S3
+        finally:
+            pins.set_chip(None)
+
+    def test_documented_default_pin_21_passes_s3_validation(self):
+        # The example/docs default is GPIO 21 — free on the S3 (the
+        # neighbouring 19/20 are the native-USB pair and reserved),
+        # and on the reference COREBOARD it sits next to the header's
+        # 5V/GND corner. Pin it here so a future pins.py change can't
+        # silently invalidate the documented wiring.
+        pins.set_chip("esp32s3")
+        try:
+            s = _make(pin=21)
+            self.assertEqual(len(s), 8)
         finally:
             pins.set_chip(None)
 
