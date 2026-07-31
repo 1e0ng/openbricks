@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.27.0 — WS2812 / WS2812B RGB LED strip driver
+
+New `openbricks.drivers.ws2812.WS2812` for addressable RGB LED
+modules — the common WS2812B ×8 stick, rings, and strips — on a
+single data GPIO, wrapping MicroPython's built-in `neopixel`
+protocol driver with the ergonomics user code wants: global
+`brightness` scaling applied at `show()` (colors read back
+unscaled; 0.2 indoor default, same convention as the hub status
+LED), buffered item assignment with one-transaction `show()` for
+flicker-free animation frames, and immediate `fill()` / `clear()`
+conveniences. Reserved-pin validation via `openbricks.pins` like
+every other driver. Ships with `examples/ws2812_test.py` (solid
+colors → running dot → brightness ramp). Firmware reflash required
+to get the new frozen module.
+
 ## 1.26.0 — BNO055 drops the magnetometer: IMU fusion mode
 
 Bench (2026-07-25): a gyro'd square REPORTED only +1.8° of heading

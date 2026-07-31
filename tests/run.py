@@ -51,6 +51,7 @@ _TEST_MODULES = [
     "tests.test_bno055",
     "tests.test_tcs34725",
     "tests.test_tca9548a",
+    "tests.test_ws2812",
     "tests.test_color_sorter",
     "tests.test_color_array",
     "tests.test_st3215",
