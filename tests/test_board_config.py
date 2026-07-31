@@ -127,3 +127,63 @@ class RawPasteWindowTests(unittest.TestCase):
         src = _read(_ROOT + "/scripts/build_firmware.sh")
         self.assertIn("PATCHES_DIR", src)
         self.assertIn("apply", src)
+
+
+class BleRxBufferTests(unittest.TestCase):
+    """THE 1.32.0 REGRESSION GUARD.
+
+    Raw-paste flow control lets the host keep two advertised windows
+    (= one ``MICROPY_REPL_STDIN_BUFFER_MAX``) in flight before it
+    waits for an ack. Every transport that carries a paste must be
+    able to absorb that much unread data:
+
+      * UART / USB → ``stdin_ringbuf`` (RawPasteWindowTests above).
+      * BLE        → the NUS RX characteristic's GATT buffer, set in
+                     ``openbricks/ble_repl.py`` (``_RX_BUFFER_BYTES``).
+
+    1.32.0 raised the window to 2048 (in-flight 4096) and left the
+    BLE buffer at 512 — NimBLE silently dropped the overflow, the
+    chip compiled a fragment of the staged receiver, and
+    ``openbricks run`` died with "hub did not confirm the staged
+    chunk" (empty stdout AND stderr — the tell-tale of a program
+    truncated to nothing). The UART-side invariant existed; the BLE
+    side had no guard. It does now."""
+
+    _BLE_REPL = _ROOT + "/openbricks/ble_repl.py"
+    _BOARDS = [
+        _ROOT + "/native/boards/openbricks_esp32s3/mpconfigboard.h",
+        _ROOT + "/native/boards/openbricks_esp32/mpconfigboard.h",
+    ]
+
+    def _ble_rx_bytes(self):
+        for line in _read(self._BLE_REPL).splitlines():
+            if line.startswith("_RX_BUFFER_BYTES"):
+                return int(line.split("=")[1].strip())
+        self.fail("_RX_BUFFER_BYTES not found in ble_repl.py")
+
+    def _buffer_max(self, path):
+        for line in _read(path).splitlines():
+            parts = line.split()
+            if (len(parts) >= 3 and parts[0] == "#define"
+                    and parts[1] == "MICROPY_REPL_STDIN_BUFFER_MAX"):
+                return int(parts[2].strip("()"))
+        self.fail("MICROPY_REPL_STDIN_BUFFER_MAX not found in " + path)
+
+    def test_ble_buffer_absorbs_max_in_flight_paste(self):
+        rx = self._ble_rx_bytes()
+        for path in self._BOARDS:
+            in_flight = self._buffer_max(path)   # 2 windows
+            self.assertGreaterEqual(
+                rx, 2 * in_flight,
+                "BLE rx buffer (%d) must hold >= 2x the raw-paste "
+                "in-flight bytes (%d) for %s — undersizing silently "
+                "truncates pasted programs (the 1.32.0 bug)"
+                % (rx, in_flight, path))
+
+    def test_ble_buffer_is_the_default_used_by_bleuart(self):
+        # The constant must actually be wired as the default — a
+        # stale literal in the signature would re-open the bug.
+        src = _read(self._BLE_REPL)
+        self.assertIn("def __init__(self, ble, name, rxbuf=_RX_BUFFER_BYTES)",
+                      src)
+        self.assertIn("gatts_set_buffer(self._rx_handle, rxbuf, True)", src)

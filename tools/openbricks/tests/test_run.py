@@ -761,9 +761,15 @@ class ChunkedStagingTests(unittest.TestCase):
                 # then the hub's stdout carries the digest of the
                 # plaintext chunk it decoded and wrote.
                 digest = hashlib.sha256(chunk).hexdigest().encode()
+                _n, b64len = 0, len(run_mod._seal_chunk(chunk, _HUB)[1])
+                n_chunks = -(-b64len // run_mod._STREAM_CHUNK_BYTES)
                 responses += [
                     _R_SUPPORTED + _WINDOW_8K,      # receiver paste ack
                     _CTRL_D,                        # end-of-paste ack
+                ]
+                # One ack per streamed chunk (bounded in-flight).
+                responses += [run_mod._STREAM_ACK] * n_chunks
+                responses += [
                     run_mod._STAGED_MARKER + digest + b"\r\n" + _CTRL_D,
                     _CTRL_D,                        # empty stderr
                     b">",
@@ -874,11 +880,14 @@ class ChunkedStagingTests(unittest.TestCase):
         # wrote; a corrupted transfer must abort the run, not launch
         # a half-written program.
         payload = b"x" * 2048
-        responses = [
-            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+        n_chunks = -(-len(run_mod._seal_chunk(payload, _HUB)[1])
+                     // run_mod._STREAM_CHUNK_BYTES)
+        responses = ([_R_SUPPORTED + _WINDOW_8K, _CTRL_D]
+                     + [run_mod._STREAM_ACK] * n_chunks
+                     + [
             run_mod._STAGED_MARKER + b"0" * 64 + b"\r\n" + _CTRL_D,
             _CTRL_D, b">",
-        ]
+        ])
         link = _ProtocolLink(responses)
         blink = run_mod._BufferedLink(link)
         try:
@@ -889,13 +898,59 @@ class ChunkedStagingTests(unittest.TestCase):
         else:
             self.fail("expected RunError on digest mismatch")
 
-    def test_missing_staged_marker_raises(self):
-        payload = b"x" * 2048
+    def test_payload_is_ack_paced_in_bounded_chunks(self):
+        # 1.32.1: unread bytes on the hub are bounded by ONE chunk,
+        # so the stream can't overflow the BLE rx buffer no matter
+        # how fast the link is (the 1.32.0 overflow class, closed by
+        # design rather than by buffer sizing alone).
+        payload = b"y" * 12000
+        link = self._stage(payload)
+        receiver = next(w for w in link.writes if b"readinto" in w)
+        n = int(receiver.split(b"_n = ", 1)[1].split(b"\n", 1)[0])
+        # Walk the writes AFTER the receiver paste (and its trailing
+        # Ctrl-D) until the receiver's declared length is accounted
+        # for — those are the payload chunks.
+        idx = next(i for i, w in enumerate(link.writes) if b"readinto" in w)
+        streamed, total = [], 0
+        for w in link.writes[idx + 1:]:
+            if total >= n:
+                break
+            if w == _CTRL_D:      # end-of-paste marker, not payload
+                continue
+            streamed.append(w)
+            total += len(w)
+        self.assertEqual(total, n)
+        for w in streamed:
+            self.assertLessEqual(len(w), run_mod._STREAM_CHUNK_BYTES)
+        self.assertIn(b"sys.stdout.write('\\x06')", receiver)
+        self.assertEqual(self._decode_staged_writes(link.writes), payload)
+
+    def test_missing_stream_ack_raises(self):
+        payload = b"z" * 6000
         responses = [
             _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            b"\x15",                       # NAK-ish: not the ack byte
+        ]
+        link = _ProtocolLink(responses)
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._stage_file(blink, link, "/program.py",
+                                       payload, _HUB))
+        except run_mod.RunError as e:
+            self.assertIn("did not ack streamed payload", str(e))
+        else:
+            self.fail("expected RunError on missing stream ack")
+
+    def test_missing_staged_marker_raises(self):
+        payload = b"x" * 2048
+        n_chunks = -(-len(run_mod._seal_chunk(payload, _HUB)[1])
+                     // run_mod._STREAM_CHUNK_BYTES)
+        responses = ([_R_SUPPORTED + _WINDOW_8K, _CTRL_D]
+                     + [run_mod._STREAM_ACK] * n_chunks
+                     + [
             b"something unexpected\r\n" + _CTRL_D,
             _CTRL_D, b">",
-        ]
+        ])
         link = _ProtocolLink(responses)
         blink = run_mod._BufferedLink(link)
         try:

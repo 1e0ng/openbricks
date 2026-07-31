@@ -204,8 +204,26 @@ def _advertising_payload(name, service_uuid_str):
 # IRQ handler — the stream wraps ``_on_rx`` and that's where the
 # ``os.dupterm_notify`` poke lives.
 
+# GATT rx buffer for the NUS RX characteristic. MUST be >= 2x the
+# firmware's ``MICROPY_REPL_STDIN_BUFFER_MAX`` (boards/*/mpconfigboard.h):
+# raw-paste flow control lets the host have TWO advertised windows
+# (= one buffer max) in flight before it waits for an ack, and NimBLE
+# silently drops writes once this buffer is full — the chip then
+# compiles a fragment of the pasted program.
+#
+# 1.32.0 shipped exactly that bug: the window went 128 -> 2048
+# (in-flight 4096) while this stayed at 512, sized for the OLD
+# window ("2 windows + headroom"). Bench symptom: the staged
+# receiver produced empty stdout AND empty stderr — a program
+# truncated to nothing — and ``openbricks run`` failed with "hub did
+# not confirm the staged chunk". ``tests/test_board_config.py``
+# ::BleRxBufferTests pins the relationship in both directions so the
+# two constants can never drift apart again.
+_RX_BUFFER_BYTES = 8192
+
+
 class _BLEUART:
-    def __init__(self, ble, name, rxbuf=512):
+    def __init__(self, ble, name, rxbuf=_RX_BUFFER_BYTES):
         self._ble = ble
         self._ble.irq(self._irq)
         ((self._tx_handle, self._rx_handle),) = self._ble.gatts_register_services(
@@ -228,14 +246,11 @@ class _BLEUART:
         # accumulate instead of overwriting. Without this, a quick
         # "Ctrl-C Ctrl-A" from openbricks run loses one of the two.
         #
-        # rxbuf=512 (was 100 in upstream BLEUART): MicroPython's
-        # raw-paste protocol uses a 128-byte window and after the
-        # initial header the host sends UP TO 256 bytes upfront
-        # (window_remaining = window_size + the first \x01 ACK that
-        # arrived bundled with the header). 100 bytes silently drops
-        # everything past the first ~third of the bootstrap, the chip
-        # never sees a complete script and never sends another ACK.
-        # 512 = 2 windows + headroom for ACKs / control bytes.
+        # Size: see ``_RX_BUFFER_BYTES`` above — it tracks the
+        # raw-paste window, and undersizing it silently truncates
+        # pasted programs (upstream BLEUART's 100 lost two thirds of
+        # the bootstrap; our own 512 lost everything once 1.32.0
+        # raised the window).
         self._ble.gatts_set_buffer(self._rx_handle, rxbuf, True)
         self._connections = set()
         self._rx_buffer = bytearray()
