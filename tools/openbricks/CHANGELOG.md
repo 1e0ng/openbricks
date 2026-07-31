@@ -35,6 +35,19 @@ nothing.
 Reads are now index-based with amortised compaction: O(1) per byte,
 no allocation per byte, buffer released outright when drained.
 
+**Second fix, same research:** `_nus.py`'s `write()` claimed *"bleak
+handles that internally"* about chunking large payloads. It does
+not — neither bleak backend splits a write, and its API documents
+the payload as bounded by `max_write_without_response_size`. We now
+chunk by the negotiated size ourselves. This path fails **silently**
+in both directions, which is why it went unnoticed: an ATT Write
+Command has no error response by spec (NimBLE discards the return
+for command opcodes), and MicroPython truncates a full
+characteristic buffer while still returning success (upstream TODO
+acknowledges it). At the stock window our bursts never exceeded one
+MTU, so this was latent — but 1.31.0's streaming wrote up to 16 KB
+in a single call straight into it.
+
 Also documented (see `native/boards/*/mpconfigboard.h`): upstream's
 window is not arbitrary. `MICROPY_REPL_STDIN_BUFFER_MAX` (256, so
 window 128) is sized so two in-flight windows fit the ESP32 port's
