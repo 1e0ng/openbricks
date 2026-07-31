@@ -267,6 +267,27 @@ def _build_parser():
              "(a full 254-ID scan takes ~5 s).",
     )
 
+    # ---- paste-probe (measure the hub's raw-paste burst limit) ----
+    p_probe = sub.add_parser(
+        "paste-probe",
+        help="Measure the largest raw-paste burst this hub survives.",
+        description="Pastes padded no-op programs of increasing size "
+                    "through the real raw-paste path and reports the "
+                    "largest that completes, plus how each failure "
+                    "presents (truncated vs hung). Use before changing "
+                    "the firmware's MICROPY_REPL_STDIN_BUFFER_MAX: two "
+                    "windows may be in flight at once, so that setting "
+                    "is only safe at or below the measured limit.",
+    )
+    p_probe.add_argument("-n", "--name", required=True,
+                         help="Hub BLE name.")
+    p_probe.add_argument("--scan-timeout", type=float, default=5.0,
+                         help="BLE scan timeout in seconds. Default: 5.")
+    p_probe.add_argument("--max", type=int, default=8192,
+                         help="Largest size to try, bytes. Default: 8192.")
+    p_probe.add_argument("--timeout", type=float, default=15.0,
+                         help="Per-size timeout in seconds. Default: 15.")
+
     # ---- docs (offline documentation reader) ----
     p_docs = sub.add_parser(
         "docs",
@@ -366,6 +387,9 @@ def main(argv=None):
         if args.command == "servo-id":
             from openbricks_dev import servo_id as servo_id_mod
             return servo_id_mod.run(args)
+        if args.command == "paste-probe":
+            from openbricks_dev import pasteprobe
+            return pasteprobe.run(args)
         if args.command in ("docs", "doc"):
             from openbricks_dev import docs as docs_mod
             return docs_mod.run(args)

@@ -12,10 +12,17 @@
 #define MICROPY_PY_NETWORK        (0)
 #define MICROPY_PY_NETWORK_WLAN   (0)
 
-// Raw-paste flow control: 1 KB advertised window — same rationale
-// and patch dependency as the ESP32-S3 board (see its
-// mpconfigboard.h); the classic ESP32 has ample internal DRAM for
-// the 8 KB static ring. Window 1024 (buffer max 2048) keeps
-// max in-flight at 4x margin inside the BLE rx buffer.
-#define MICROPY_HW_STDIN_RINGBUF_LEN   (8192)
-#define MICROPY_REPL_STDIN_BUFFER_MAX  (2048)
+// Raw-paste flow control: STOCK (MicroPython's 256-byte buffer max
+// => 128-byte window). 1.32.0 raised it to 2048 and 1.32.1 to 1024;
+// BOTH broke staging over BLE on real hardware — at 2048 the hub
+// compiled a truncated program (empty stdout AND stderr), at 1024 it
+// stopped consuming mid-paste and hung with no flow-control ack. The
+// cause is somewhere in the BLE input path's tolerance for multi-
+// packet bursts, and it is NOT the GATT rx buffer alone (raising
+// that to 8 KB did not fix 1024).
+//
+// Do NOT re-raise this without measuring first: run
+// ``openbricks paste-probe -n NAME`` against the real hub and set
+// the window from what actually survives. The
+// stdin-ring patch (native/patches/) stays available for when that
+// measurement exists.

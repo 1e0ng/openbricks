@@ -19,18 +19,17 @@
 // of one doesn't block the other.
 #define MICROPY_HW_ENABLE_UART_REPL  (1)
 
-// Raw-paste flow control: advertise a 1 KB window (buffer max / 2)
-// instead of MicroPython's default 128 (256 / 2). Over BLE the bench
-// measured ~0.5 KB/s effective staging throughput at the stock
-// window — one 128-byte grant per ack round trip. The enlarged
-// stdin ring (patched configurable via
-// native/patches/esp32-stdin-ringbuf-configurable.patch) keeps the
-// UART/USB paste path safe: in-flight bytes are bounded by the
-// buffer max (2 KB), well inside the 8 KB ring — and inside
-// the BLE GATT rx buffer too (openbricks/ble_repl.py's
-// _RX_BUFFER_BYTES, 8 KB): raw paste allows 2 windows
-// (= one buffer max) in flight, and BOTH transports must
-// absorb that. 1.32.0 advertised 2048 against a 512-byte
-// BLE buffer and silently truncated every pasted program.
-#define MICROPY_HW_STDIN_RINGBUF_LEN   (8192)
-#define MICROPY_REPL_STDIN_BUFFER_MAX  (2048)
+// Raw-paste flow control: STOCK (MicroPython's 256-byte buffer max
+// => 128-byte window). 1.32.0 raised it to 2048 and 1.32.1 to 1024;
+// BOTH broke staging over BLE on real hardware — at 2048 the hub
+// compiled a truncated program (empty stdout AND stderr), at 1024 it
+// stopped consuming mid-paste and hung with no flow-control ack. The
+// cause is somewhere in the BLE input path's tolerance for multi-
+// packet bursts, and it is NOT the GATT rx buffer alone (raising
+// that to 8 KB did not fix 1024).
+//
+// Do NOT re-raise this without measuring first: run
+// ``openbricks paste-probe -n NAME`` against the real hub and set
+// the window from what actually survives. The
+// stdin-ring patch (native/patches/) stays available for when that
+// measurement exists.

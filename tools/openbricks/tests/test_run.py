@@ -500,9 +500,16 @@ class HostBurstVsHubBufferTests(unittest.TestCase):
         return link.max_burst
 
     def test_shipped_window_burst_fits_shipped_ble_buffer(self):
-        buffer_max = _firmware_int(
-            "native/boards/openbricks_esp32s3/mpconfigboard.h",
-            "#define MICROPY_REPL_STDIN_BUFFER_MAX", "MAX")
+        try:
+            buffer_max = _firmware_int(
+                "native/boards/openbricks_esp32s3/mpconfigboard.h",
+                "#define MICROPY_REPL_STDIN_BUFFER_MAX", "MAX")
+        except AssertionError:
+            # Stock window (1.33.1 reverted the bump) — MicroPython's
+            # own default. The invariant still has to hold, and this
+            # test is what will catch a future raise that outruns the
+            # BLE buffer.
+            buffer_max = 256
         rx = _firmware_int("openbricks/ble_repl.py",
                            "_RX_BUFFER_BYTES", "=")
         burst = self._paste(buffer_max // 2)   # window = buf_max / 2
