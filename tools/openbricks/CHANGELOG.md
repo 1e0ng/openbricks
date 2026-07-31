@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.32.0 — firmware: raw-paste window 128 → 2048
+
+The last window-paced remnants — the ~0.9 KB stream receiver, the
+runner paste, every small `-c` snippet, and `mpremote`-based execs
+(`openbricks flash`'s name write) — now move 16× faster per round
+trip: both boards advertise a 2 KB raw-paste flow-control window
+(`MICROPY_REPL_STDIN_BUFFER_MAX 4096`) instead of MicroPython's
+stock 128. Safe because the ESP32 stdin ring grows to 8 KB via a
+3-line build-time patch (`native/patches/`, applied by
+`build_firmware.sh` — the submodule stays pinned upstream) that
+makes upstream's hardcoded 260-byte array `#ifndef`-overridable;
+a good upstreaming candidate since its default is upstream-
+identical. `tests/test_board_config.py::RawPasteWindowTests` pins
+the ring ≥ 2× buffer-max invariant that keeps UART/USB pastes from
+silently dropping bytes. Firmware reflash required; the CLI adapts
+automatically (it reads the advertised window).
+
 ## 1.31.0 — staging streams at full link speed (goodbye ack wall)
 
 1.30.0 cut the wire bytes; this cuts the pacing. The 128-byte

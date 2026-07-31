@@ -18,3 +18,14 @@
 // writes to BOTH transports when both are enabled — silent failure
 // of one doesn't block the other.
 #define MICROPY_HW_ENABLE_UART_REPL  (1)
+
+// Raw-paste flow control: advertise a 2 KB window (buffer max / 2)
+// instead of MicroPython's default 128 (256 / 2). Over BLE the bench
+// measured ~0.5 KB/s effective staging throughput at the stock
+// window — one 128-byte grant per ack round trip. The enlarged
+// stdin ring (patched configurable via
+// native/patches/esp32-stdin-ringbuf-configurable.patch) keeps the
+// UART/USB paste path safe: in-flight bytes are bounded by the
+// buffer max (4 KB), well inside the 8 KB ring.
+#define MICROPY_HW_STDIN_RINGBUF_LEN   (8192)
+#define MICROPY_REPL_STDIN_BUFFER_MAX  (4096)

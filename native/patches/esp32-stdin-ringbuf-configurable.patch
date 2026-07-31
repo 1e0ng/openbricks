@@ -1,0 +1,22 @@
+diff --git a/ports/esp32/mphalport.c b/ports/esp32/mphalport.c
+index a0a3860f4..224a10dfa 100644
+--- a/ports/esp32/mphalport.c
++++ b/ports/esp32/mphalport.c
+@@ -54,7 +54,16 @@
+ 
+ TaskHandle_t mp_main_task_handle;
+ 
+-static uint8_t stdin_ringbuf_array[260];
++// Boards may enlarge the stdin ring (default matches upstream's
++// fixed 260). A larger ring is what makes it safe to raise
++// MICROPY_REPL_STDIN_BUFFER_MAX (the base of the raw-paste
++// flow-control window) past the default 256: in-flight paste
++// bytes queue here on the UART/USB path, so the ring must hold
++// at least one full advertised buffer plus interactive slack.
++#ifndef MICROPY_HW_STDIN_RINGBUF_LEN
++#define MICROPY_HW_STDIN_RINGBUF_LEN (260)
++#endif
++static uint8_t stdin_ringbuf_array[MICROPY_HW_STDIN_RINGBUF_LEN];
+ ringbuf_t stdin_ringbuf = {stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0};
+ 
+ portMUX_TYPE mp_atomic_mux = portMUX_INITIALIZER_UNLOCKED;
