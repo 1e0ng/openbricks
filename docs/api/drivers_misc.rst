@@ -9,6 +9,14 @@ SSD1306 (OLED display)
    :undoc-members:
    :show-inheritance:
 
+WS2812 / WS2812B (RGB LED strip)
+--------------------------------
+
+.. automodule:: openbricks.drivers.ws2812
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 TCA9548A (I2C multiplexer)
 --------------------------
 

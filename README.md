@@ -37,6 +37,7 @@ Each platform ships as a separate firmware image.
 | VL53L0X | Laser ToF distance sensor (I2C, 30–2000 mm) | `drivers.vl53l0x` |
 | VL53L1X | Laser ToF distance sensor (I2C, longer range, up to 4000 mm; VL53L4CD pin-compatible) | `drivers.vl53l1x` |
 | SSD1306 | 128×64 / 128×32 monochrome OLED display over I2C | `drivers.ssd1306` |
+| WS2812 / WS2812B | Addressable RGB LED strip / stick (e.g. the ×8 module), single data GPIO | `drivers.ws2812` |
 | JGB37-520 | DC gear motor with quadrature Hall encoder (closed loop via native `QuadratureEncoder` — GPIO IRQ) | `drivers.jgb37_520` |
 | MG370 GMR | DC gear motor with 500-PPR GMR quadrature encoder (closed loop via native `PCNTEncoder` — ESP32 PCNT hardware counter) | `drivers.mg370` |
 | L298N H-bridge | DC motor driver (open loop) | `drivers.l298n` |
