@@ -376,10 +376,88 @@ def rtc_sync_lines():
 _STAGE_CHUNK_BYTES = _MAX_SCRIPT_BYTES
 
 
-def _compose_stage_chunk(target_path, chunk, first):
+# Chunks at or above this size go over the wire zlib-compressed,
+# keystream-XORed, and base64-framed; the hub inverts all three.
+# Rationale (bench, 2026-07-31, --debug capture): raw-paste flow
+# control grants a 128-byte window, so staging is paced at one window
+# per BLE ack round trip — a 7.9 KB script measured ~16.6 s. Python
+# source deflates 3-4x and base64 re-inflates by only 1.33x, while
+# the old ``repr()`` framing EXPANDED unicode-heavy source (every
+# em-dash became a 6-char escape). Net on-wire: ~0.6x of the raw
+# size → staging time drops proportionally. Tiny payloads
+# (interactive ``-c`` snippets) stay in plain repr framing — the
+# import + header overhead isn't worth it below this line. The
+# firmware requirements (``deflate``/``hashlib`` extmods, enabled on
+# every openbricks build and the unix test port; a flashed hub name)
+# fail LOUDLY via the staged program's own exception if ever absent —
+# no silent downgrade.
+_COMPRESS_MIN_BYTES = 512
+
+# The XOR layer's keystream: SHA-256 over key + nonce + the block's
+# byte offset, 32 bytes per block. The key is the HUB NAME — which is
+# broadcast in every BLE advertisement, so this is NOT confidentiality
+# against anyone sniffing the link (they see the name too). What it
+# provides: (a) the payload only decodes on the hub that actually
+# carries the addressed name in its NVS — a mis-targeted staging
+# fails loudly at decompress instead of silently landing on the wrong
+# robot — and (b) casual-observer obfuscation of the source on the
+# air. Real secrecy would need a per-hub SECRET (e.g. a future
+# ``flash --secret`` NVS blob) swapped in as the key; the pipeline
+# would not otherwise change. sha256 is C-backed on both sides and
+# adds no dependencies, which is also why it beats pulling in an AES
+# library for a public key.
+_XOR_BLOCK = 32
+
+
+def _keystream_xor(data, key, nonce):
+    """XOR ``data`` with the sha256(key+nonce+offset) keystream.
+    Symmetric — the staged hub-side program applies the identical
+    derivation (via big-int XOR there, byte loop here; same bytes)."""
+    import hashlib
+    out = bytearray(len(data))
+    for i in range(0, len(data), _XOR_BLOCK):
+        ks = hashlib.sha256(
+            key + nonce + i.to_bytes(4, "big")).digest()
+        blk = data[i:i + _XOR_BLOCK]
+        for j in range(len(blk)):
+            out[i + j] = blk[j] ^ ks[j]
+    return bytes(out)
+
+
+def _compose_stage_chunk(target_path, chunk, first, hub_name):
     """One staging step: append ``chunk`` to ``target_path`` (create
-    on the first). ``repr()`` framing round-trips any bytes."""
+    on the first). Large chunks ship deflate + hub-name-keyed XOR +
+    base64 and are inverted hub-side (see ``_COMPRESS_MIN_BYTES`` /
+    ``_XOR_BLOCK``); small ones use plain ``repr()`` framing. Both
+    round-trip any bytes."""
     mode = "wb" if first else "ab"
+    if len(chunk) >= _COMPRESS_MIN_BYTES:
+        import base64
+        import os
+        import zlib
+        nonce = os.urandom(8)
+        sealed = _keystream_xor(
+            zlib.compress(chunk, 9), hub_name.encode(), nonce)
+        b64 = base64.b64encode(sealed)
+        return (
+            "import deflate, io, binascii, hashlib, openbricks\n"
+            "_hn = openbricks.HUB_NAME\n"
+            "if _hn is None:\n"
+            "    raise OSError('hub name unset; cannot derive the "
+            "staging key')\n"
+            "_k = _hn.encode()\n"
+            "_sn = %s\n"
+            "_ct = binascii.a2b_base64(%s)\n"
+            "_ks = b''.join([hashlib.sha256("
+            "_k + _sn + (_i * %d).to_bytes(4, 'big')).digest() "
+            "for _i in range((len(_ct) + %d) // %d)])[:len(_ct)]\n"
+            "_pt = (int.from_bytes(_ct, 'big') ^ "
+            "int.from_bytes(_ks, 'big')).to_bytes(len(_ct), 'big')\n"
+            "_d = deflate.DeflateIO(io.BytesIO(_pt), deflate.ZLIB)\n"
+            "with open(%r, %r) as f:\n    f.write(_d.read())\n"
+            % (repr(nonce), repr(b64),
+               _XOR_BLOCK, _XOR_BLOCK - 1, _XOR_BLOCK,
+               target_path, mode)).encode()
     return ("with open(%r, %r) as f:\n    f.write(%s)\n"
             % (target_path, mode, repr(chunk))).encode()
 
@@ -419,21 +497,26 @@ async def _exec_step(blink, link, program, what):
         raise RunError("unexpected byte %r after %s" % (prompt, what))
 
 
-async def _stage_file(blink, link, target_path, payload):
+async def _stage_file(blink, link, target_path, payload, hub_name):
     """Write ``payload`` to ``target_path`` in bounded chunks so peak
-    hub RAM is O(_STAGE_CHUNK_BYTES) regardless of script size."""
+    hub RAM is O(_STAGE_CHUNK_BYTES) regardless of script size.
+    ``hub_name`` keys the wire framing of large chunks — see
+    ``_compose_stage_chunk``."""
     for i in range(0, len(payload), _STAGE_CHUNK_BYTES):
         chunk = payload[i:i + _STAGE_CHUNK_BYTES]
-        program = _compose_stage_chunk(target_path, chunk, first=(i == 0))
+        program = _compose_stage_chunk(target_path, chunk,
+                                       first=(i == 0), hub_name=hub_name)
         await _exec_step(
             blink, link, program,
             "staging %s (%d/%d bytes)" % (
                 target_path, min(i + _STAGE_CHUNK_BYTES, len(payload)),
                 len(payload)))
     if not payload:
-        await _exec_step(blink, link,
-                         _compose_stage_chunk(target_path, b"", first=True),
-                         "staging %s (empty)" % target_path)
+        await _exec_step(
+            blink, link,
+            _compose_stage_chunk(target_path, b"", first=True,
+                                 hub_name=hub_name),
+            "staging %s (empty)" % target_path)
 
 
 async def _run_async(name, script_path, scan_timeout, debug=False, command=None):
@@ -472,7 +555,7 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
         blink._step = "scan + connect"
         await _enter_raw_repl(blink, link)
         try:
-            await _stage_file(blink, link, _TARGET_PATH, user_bytes)
+            await _stage_file(blink, link, _TARGET_PATH, user_bytes, name)
             await _raw_paste_upload(blink, link, runner)
             out = sys.stdout
             try:
