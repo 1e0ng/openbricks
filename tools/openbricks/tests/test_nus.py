@@ -367,3 +367,25 @@ class MissingBleakTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NonBlockingReadTests(_BleakInjection):
+    def test_timeout_zero_returns_buffered_data_without_waiting(self):
+        # timeout=0 with data already notified must return it, not
+        # bail out early — the run loop's pushback path depends on it.
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        _FakeBleakModule.client.notify_cb(None, b"queued")
+        self.assertEqual(asyncio.run(link.read(timeout=0)), b"queued")
+
+    def test_timeout_zero_with_nothing_buffered_returns_empty(self):
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        self.assertEqual(asyncio.run(link.read(timeout=0)), b"")
+
+    def test_timeout_zero_with_event_set_but_no_bytes(self):
+        # The race the code comments describe: the event is set by a
+        # notification whose bytes have already been drained. A
+        # non-blocking read must fall through and return empty rather
+        # than block or mis-report.
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        link._rx_event.set()
+        self.assertEqual(asyncio.run(link.read(timeout=0)), b"")

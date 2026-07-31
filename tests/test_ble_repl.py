@@ -841,3 +841,15 @@ class RxDrainCostTests(unittest.TestCase):
     def test_oversized_request_is_clamped_to_available(self):
         u = self._uart(b"abc")
         self.assertEqual(u.read(999), b"abc")
+
+    def test_stale_index_with_empty_remainder_is_reset(self):
+        # Defensive path: the index is non-zero but nothing is left to
+        # read (a compaction landed exactly at the end). The next read
+        # must release the buffer and rewind rather than leave a stale
+        # index that makes any() go negative.
+        u = self._uart(b"abc")
+        u._rx_pos = 3
+        self.assertEqual(u.read(1), b"")
+        self.assertEqual(u._rx_pos, 0)
+        self.assertEqual(len(u._rx_buffer), 0)
+        self.assertEqual(u.any(), 0)
