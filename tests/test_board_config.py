@@ -62,3 +62,68 @@ class S3SpiramConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RawPasteWindowTests(unittest.TestCase):
+    """Pin the raw-paste window bump (1.32.0): both boards advertise a
+    2 KB flow-control window (MICROPY_REPL_STDIN_BUFFER_MAX / 2)
+    instead of MicroPython's stock 128, which capped BLE staging at
+    ~0.5 KB/s (one 128-byte grant per ack round trip — bench-measured
+    16.6 s for a 7.9 KB script). The enlarged advertised buffer is
+    ONLY safe together with the stdin-ring patch: on the UART/USB
+    paste path (mpremote — our own ``flash`` uses it) in-flight bytes
+    queue in ``stdin_ringbuf``, upstream a hardcoded 260-byte array;
+    overflow silently drops paste bytes."""
+
+    _BOARDS = [
+        _ROOT + "/native/boards/openbricks_esp32s3/mpconfigboard.h",
+        _ROOT + "/native/boards/openbricks_esp32/mpconfigboard.h",
+    ]
+    _PATCH = (_ROOT +
+              "/native/patches/esp32-stdin-ringbuf-configurable.patch")
+
+    def _defines(self, src):
+        vals = {}
+        for line in src.splitlines():
+            parts = line.split()
+            if (len(parts) >= 3 and parts[0] == "#define"
+                    and parts[1] in ("MICROPY_HW_STDIN_RINGBUF_LEN",
+                                     "MICROPY_REPL_STDIN_BUFFER_MAX")):
+                vals[parts[1]] = int(parts[2].strip("()"))
+        return vals
+
+    def test_both_boards_define_window_and_ring(self):
+        for path in self._BOARDS:
+            vals = self._defines(_read(path))
+            self.assertIn("MICROPY_REPL_STDIN_BUFFER_MAX", vals, path)
+            self.assertIn("MICROPY_HW_STDIN_RINGBUF_LEN", vals, path)
+            self.assertGreater(vals["MICROPY_REPL_STDIN_BUFFER_MAX"],
+                               256, path)
+
+    def test_ring_holds_at_least_two_advertised_buffers(self):
+        # The raw-paste host may have up to ~buffer-max bytes in
+        # flight (initial window + one refill); the ring must absorb
+        # that plus interactive slack, or the UART/USB path drops
+        # paste bytes silently. 2x is the safety invariant.
+        for path in self._BOARDS:
+            vals = self._defines(_read(path))
+            self.assertGreaterEqual(
+                vals["MICROPY_HW_STDIN_RINGBUF_LEN"],
+                2 * vals["MICROPY_REPL_STDIN_BUFFER_MAX"], path)
+
+    def test_ring_patch_exists_and_is_the_config_hook(self):
+        src = _read(self._PATCH)
+        self.assertIn("#ifndef MICROPY_HW_STDIN_RINGBUF_LEN", src)
+        self.assertIn(
+            "stdin_ringbuf_array[MICROPY_HW_STDIN_RINGBUF_LEN]", src)
+        self.assertIn("ports/esp32/mphalport.c", src)
+
+    def test_build_script_applies_patches(self):
+        # The ring size only becomes configurable because
+        # build_firmware.sh git-applies native/patches/ before every
+        # firmware build — if that loop disappears, the boards'
+        # RINGBUF_LEN define silently no-ops and the enlarged window
+        # overruns the stock 260-byte ring on UART/USB.
+        src = _read(_ROOT + "/scripts/build_firmware.sh")
+        self.assertIn("PATCHES_DIR", src)
+        self.assertIn("apply", src)
