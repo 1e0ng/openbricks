@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.28.0 — `openbricks docs`: read the guides offline
+
+New `openbricks docs [topic]` subcommand (alias: `doc`) prints the
+documentation guides in the terminal — no internet, browser, or
+repo checkout needed. The hand-written guide pages (install,
+hardware, cli, simulator, examples, architecture, build, index)
+are synced from `docs/` into the wheel at build time; MyST
+front-matter and inline roles are cleaned for terminal reading;
+output pages through `$PAGER`/`less` on a TTY and prints plainly
+when piped. With no topic, lists what's available. The generated
+API reference isn't bundled — its offline equivalent is Python's
+own `help()`, and the full manual (HTML + PDF) stays at
+docs.openbricks.dev. A wheel-bundling test guards the pages the
+same way the sim worlds are guarded.
+
 ## 1.27.0 — WS2812 / WS2812B RGB LED strip driver
 
 New `openbricks.drivers.ws2812.WS2812` for addressable RGB LED

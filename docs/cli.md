@@ -21,6 +21,7 @@ $ openbricks run -n RobotA main.py   # push + stream output
 $ openbricks upload -n RobotA main.py  # stage; start it with the hub button
 $ openbricks stop -n RobotA          # Ctrl-C a running program
 $ openbricks log -n RobotA           # dump the most recent run log
+$ openbricks docs hardware           # read this manual's guides offline
 ```
 
 ## Reference

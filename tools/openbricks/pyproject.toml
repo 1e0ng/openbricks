@@ -111,6 +111,12 @@ include = ["openbricks_dev*", "openbricks_sim*"]
 # wro-2026-elementary`` even though the alias map knows about it.
 # This bug shipped in 0.10.3-0.10.5; the fix lands in 0.10.6.
 [tool.setuptools.package-data]
+# Guide pages for ``openbricks docs`` — synced into _docs/ by
+# setup.py::_sync_docs at build time; without this stanza the wheel
+# would ship the command but not the pages it reads.
+openbricks_dev = [
+    "_docs/*.md",
+]
 openbricks_sim = [
     "worlds/*/world.xml",
     "worlds/*/mat.png",
