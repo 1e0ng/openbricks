@@ -100,21 +100,27 @@ class NUSLink:
         ``debug=True`` makes the link print every notify packet's
         timestamp + hex + ascii to stderr — useful when you need to
         see whether the hub is sending anything at all (vs. silently
-        dropping our writes)."""
+        dropping our writes) — plus a one-line per-stage timing
+        breakdown (scan / connect / subscribe), the phases that
+        dominate ``openbricks run``'s startup latency. The same
+        numbers live in ``link.timings`` for tools and tests."""
         try:
             from bleak import BleakClient
         except ImportError as e:
             raise NUSError("bleak is not installed — run: pip install bleak") from e
 
+        t0 = time.monotonic()
         device = await _find_by_name(name, scan_timeout)
+        t_scan = time.monotonic()
         client = BleakClient(device)
         try:
             await client.connect()
         except Exception as e:
             raise NUSError("failed to connect to %r: %s" % (name, e)) from e
+        t_conn = time.monotonic()
 
         link = cls(client, debug=debug)
-        link._connected_at = time.monotonic()
+        link._connected_at = t_conn
 
         def _on_notify(_char, data):
             link._notify_count += 1
@@ -137,9 +143,20 @@ class NUSLink:
                 "failed to subscribe to TX characteristic (is this an "
                 "openbricks hub with BLE REPL enabled?): %s" % e) from e
 
+        t_sub = time.monotonic()
+        link.timings = {
+            "scan":      t_scan - t0,
+            "connect":   t_conn - t_scan,
+            "subscribe": t_sub - t_conn,
+        }
         if debug:
             mtu = getattr(client, "mtu_size", None)
             print("[debug] connected, mtu=%s" % mtu, file=sys.stderr)
+            print("[debug] timing: scan %.2fs  connect %.2fs  "
+                  "subscribe %.2fs  (BLE total %.2fs)"
+                  % (link.timings["scan"], link.timings["connect"],
+                     link.timings["subscribe"], t_sub - t0),
+                  file=sys.stderr)
         return link
 
     def stats(self):

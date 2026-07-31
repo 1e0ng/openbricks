@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.29.1 — `--debug` reports BLE startup timings
+
+`openbricks run/upload/stop/log --debug` now prints a one-line
+per-stage breakdown of the connection setup — scan, connect,
+subscribe — the phases that dominate the command's startup latency
+(bench report: >8 s before a script starts). The same numbers are
+available programmatically as `link.timings`. Diagnostic only, no
+behavior change; the post-connect timeline was already visible via
+`--debug`'s per-packet timestamps.
+
 ## 1.29.0 — `openbricks docs` opens a styled page in your browser
 
 1.28.0's terminal Markdown was readable but not pleasant (user
