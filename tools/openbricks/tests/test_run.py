@@ -436,6 +436,97 @@ def _drive(coro):
     return asyncio.run(coro)
 
 
+class _BurstMeasuringLink(_ProtocolLink):
+    """Hub model that advertises ``window`` and records the LARGEST
+    burst the host writes before it stops to consume an ack.
+
+    That burst is exactly what the hub's BLE GATT rx buffer must
+    absorb: NimBLE drops writes into a full buffer silently, so a
+    burst bigger than the buffer truncates the pasted program with
+    no error anywhere (the 1.32.0 bug)."""
+
+    def __init__(self, window, acks=64):
+        super().__init__(
+            [bytes([0x52, 0x01, window & 0xFF, window >> 8, 0x01])]
+            + [b"\x01"] * acks + [b"\x04"])
+        self.max_burst = 0
+        self._burst = 0
+
+    async def write(self, data):
+        # Control bytes aren't program payload; the handshake request
+        # and the final Ctrl-D don't count toward a paste burst.
+        if data not in (run_mod._RAW_PASTE_REQUEST, run_mod._CTRL_D):
+            self._burst += len(data)
+            if self._burst > self.max_burst:
+                self.max_burst = self._burst
+        await super().write(data)
+
+    async def read(self, timeout=None):
+        chunk = await super().read(timeout=timeout)
+        if chunk:          # an ack means the hub drained a window
+            self._burst = 0
+        return chunk
+
+
+def _firmware_int(path, needle, sep):
+    """Pull a constant out of a firmware source file, or skip the
+    test when running outside a repo checkout (installed wheel)."""
+    import os
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "..", "..")
+    full = os.path.join(root, path)
+    if not os.path.isfile(full):
+        raise unittest.SkipTest("not a repo checkout: %s missing" % path)
+    with open(full) as f:
+        for line in f:
+            if line.strip().startswith(needle):
+                return int(line.split(sep)[1].strip().strip("()"))
+    raise AssertionError("%s not found in %s" % (needle, path))
+
+
+class HostBurstVsHubBufferTests(unittest.TestCase):
+    """REGRESSION (1.32.0 → 1.32.1), behavioural half.
+
+    ``BleRxBufferTests`` (firmware suite) pins the two constants
+    against each other arithmetically. This drives the REAL host
+    protocol against a hub model and measures what the host actually
+    bursts, then checks it against the rx buffer the firmware really
+    ships — so the guard holds even if the flow-control code changes
+    how it batches writes."""
+
+    def _paste(self, window):
+        link = _BurstMeasuringLink(window)
+        blink = run_mod._BufferedLink(link)
+        # A receiver-sized program: the exact thing that got
+        # truncated on the bench.
+        nonce, b64, _ = run_mod._seal_chunk(b"x" * 4096, _HUB)
+        program = run_mod._compose_stream_receiver(
+            "/program.py", True, nonce, len(b64))
+        _drive(run_mod._raw_paste_upload(blink, link, program))
+        return link.max_burst
+
+    def test_shipped_window_burst_fits_shipped_ble_buffer(self):
+        buffer_max = _firmware_int(
+            "native/boards/openbricks_esp32s3/mpconfigboard.h",
+            "#define MICROPY_REPL_STDIN_BUFFER_MAX", "MAX")
+        rx = _firmware_int("openbricks/ble_repl.py",
+                           "_RX_BUFFER_BYTES", "=")
+        burst = self._paste(buffer_max // 2)   # window = buf_max / 2
+        self.assertLessEqual(
+            burst, rx,
+            "host bursts %d bytes with the shipped window but the hub's "
+            "BLE rx buffer is only %d — NimBLE drops the excess and the "
+            "pasted program is silently truncated (the 1.32.0 bug)"
+            % (burst, rx))
+
+    def test_the_1_32_0_combination_would_overflow(self):
+        # Documents the shipped-broken pairing: window 2048 against
+        # the old 512-byte buffer. If this ever stops overflowing,
+        # the model no longer reflects the failure it guards.
+        burst = self._paste(2048)
+        self.assertGreater(burst, 512)
+
+
 class RawPasteProtocolTests(unittest.TestCase):
     """Flow-control branches of the raw-paste upload: window refills,
     hub abort, junk bytes, and the end-of-upload handshake."""
