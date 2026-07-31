@@ -271,19 +271,25 @@ def _build_parser():
     p_docs = sub.add_parser(
         "docs",
         aliases=["doc"],
-        help="Read the documentation guides offline, in the terminal.",
-        description="Prints a bundled documentation guide — no "
-                    "internet, browser, or repo checkout needed. With "
-                    "no topic, lists the available guides. Pages "
-                    "through $PAGER (or less) on a terminal; prints "
-                    "plainly when piped. The full manual including "
-                    "the generated API reference lives at "
+        help="Read the documentation offline (opens your browser).",
+        description="Renders the bundled documentation guides to a "
+                    "styled offline HTML page and opens it in your "
+                    "default browser, at the requested topic — no "
+                    "internet needed. With --text, prints the guide "
+                    "to the terminal instead (through $PAGER on a "
+                    "TTY, plainly when piped). The full manual "
+                    "including the generated API reference lives at "
                     "https://docs.openbricks.dev/ (HTML and PDF).",
     )
     p_docs.add_argument(
         "topic", nargs="?", default=None,
-        help="Guide to read (e.g. install, hardware, cli). "
-             "Omit to list all topics.",
+        help="Guide to open (e.g. install, hardware, cli). "
+             "Omit for the manual's start / the topic list.",
+    )
+    p_docs.add_argument(
+        "-t", "--text", action="store_true",
+        help="Print to the terminal instead of opening a browser "
+             "(for ssh sessions and piping to grep).",
     )
 
     # ---- sim (passthrough to openbricks_sim.cli) ----

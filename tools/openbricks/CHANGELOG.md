@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.29.0 — `openbricks docs` opens a styled page in your browser
+
+1.28.0's terminal Markdown was readable but not pleasant (user
+feedback). The default is now a proper reading experience that
+stays fully offline: all bundled guides render into ONE
+self-contained HTML file (real tables, code blocks, section nav,
+light + dark) written to the temp directory and opened in the
+system browser at the requested topic's section. `--text` keeps
+the previous terminal behavior for ssh sessions and piping. Also
+fixes a 1.28.0 wart: the Sphinx-only `{eval-rst}` blocks (the CLI
+argparse reference, example `literalinclude`s) used to show as raw
+RST offline — they now become useful pointers (`openbricks
+--help`; links to the example files). New dependency: `markdown`
+(pure-Python, no transitive deps). No browser available (headless)
+→ clean error pointing at `--text`.
+
 ## 1.28.0 — `openbricks docs`: read the guides offline
 
 New `openbricks docs [topic]` subcommand (alias: `doc`) prints the

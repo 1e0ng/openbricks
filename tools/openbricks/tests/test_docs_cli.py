@@ -150,31 +150,92 @@ class CleanupTests(unittest.TestCase):
 
 
 class CliWiringTests(unittest.TestCase):
-    def test_no_topic_lists_all_topics(self):
-        rc, out = _run_cli(["docs"])
+    def test_text_no_topic_lists_all_topics(self):
+        rc, out = _run_cli(["docs", "--text"])
         self.assertEqual(rc, 0)
         for topic in docs_mod.TOPICS:
             self.assertIn(topic, out)
         self.assertIn("docs.openbricks.dev", out)
 
-    def test_topic_prints_the_page(self):
-        rc, out = _run_cli(["docs", "install"])
+    def test_text_topic_prints_the_page(self):
+        rc, out = _run_cli(["docs", "--text", "install"])
         self.assertEqual(rc, 0)
         self.assertIn("# Installation", out)
         self.assertIn("openbricks flash --name", out)
 
     def test_doc_alias_works(self):
-        rc, out = _run_cli(["doc", "cli"])
+        rc, out = _run_cli(["doc", "-t", "cli"])
         self.assertEqual(rc, 0)
         self.assertIn("# Command-line tool", out)
 
     def test_unknown_topic_is_a_clean_cli_error(self):
         err = io.StringIO()
-        with mock.patch("sys.stderr", err):
+        with mock.patch("sys.stderr", err), \
+                mock.patch("webbrowser.open") as wb:
             rc, _ = _run_cli(["docs", "nope"])
         self.assertEqual(rc, 1)
         self.assertIn("error:", err.getvalue())
         self.assertIn("nope", err.getvalue())
+        wb.assert_not_called()   # validated before any side effects
+
+
+class BrowserModeTests(unittest.TestCase):
+    """The default mode: render one styled offline HTML, open it."""
+
+    def test_default_opens_browser_at_the_topic_anchor(self):
+        with mock.patch("webbrowser.open", return_value=True) as wb:
+            rc, out = _run_cli(["docs", "hardware"])
+        self.assertEqual(rc, 0)
+        (url,), _ = wb.call_args
+        self.assertTrue(url.startswith("file://"))
+        self.assertTrue(url.endswith("#hardware"))
+        self.assertIn("opened", out)
+
+    def test_no_topic_opens_at_the_top(self):
+        with mock.patch("webbrowser.open", return_value=True) as wb:
+            rc, _ = _run_cli(["docs"])
+        self.assertEqual(rc, 0)
+        (url,), _ = wb.call_args
+        self.assertFalse("#" in url)
+
+    def test_rendered_html_has_all_sections_tables_and_style(self):
+        html = docs_mod._render_html()
+        for topic in docs_mod.TOPICS:
+            self.assertIn('<section id="%s">' % topic, html)
+        self.assertIn("<table>", html)          # hardware parts list
+        self.assertIn("<h1>", html)
+        self.assertIn("prefers-color-scheme", html)   # dark mode
+        self.assertIn("docs.openbricks.dev", html)    # footer pointer
+        self.assertNotIn("{eval-rst}", html)
+
+    def test_no_browser_available_is_a_clean_error_pointing_at_text(self):
+        err = io.StringIO()
+        with mock.patch("webbrowser.open", return_value=False), \
+                mock.patch("sys.stderr", err):
+            rc, _ = _run_cli(["docs", "install"])
+        self.assertEqual(rc, 1)
+        self.assertIn("--text", err.getvalue())
+
+
+class EvalRstCleanupTests(unittest.TestCase):
+    """Sphinx-only blocks must become useful offline pointers."""
+
+    def test_argparse_block_points_at_help(self):
+        text = docs_mod._load("cli")
+        self.assertNotIn("{eval-rst}", text)
+        self.assertNotIn(".. argparse::", text)
+        self.assertIn("openbricks --help", text)
+
+    def test_literalinclude_blocks_point_at_the_example_files(self):
+        text = docs_mod._load("examples")
+        self.assertNotIn("literalinclude", text)
+        self.assertIn("examples/st3032_drivebase_square.py", text)
+        self.assertIn("github.com/1e0ng/openbricks", text)
+
+    def test_other_eval_rst_gets_generic_pointer(self):
+        cleaned = docs_mod._clean(
+            "```{eval-rst}\n.. some-directive::\n```")
+        self.assertIn("docs.openbricks.dev", cleaned)
 
 
 if __name__ == "__main__":
