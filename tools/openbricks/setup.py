@@ -93,6 +93,46 @@ def _sync_cores():
 _sync_cores()
 
 
+# Guide pages bundled for ``openbricks docs`` (offline reading).
+# Same two-mode shape as ``_sync_cores``: repo checkout → copy from
+# the repo-root ``docs/``; sdist build → the pages were pre-bundled
+# by MANIFEST.in, verify and leave them. Only the hand-written
+# top-level guides ship — the api/ reference is autodoc (offline
+# equivalent: Python's help()) and datasheets are PDFs.
+DOCS_SRC = HERE.parent.parent / "docs"
+DOCS_DST = HERE / "openbricks_dev" / "_docs"
+
+_DOC_PAGES = [
+    "index.md",
+    "install.md",
+    "hardware.md",
+    "cli.md",
+    "simulator.md",
+    "examples.md",
+    "architecture.md",
+    "build.md",
+]
+
+
+def _sync_docs():
+    DOCS_DST.mkdir(parents=True, exist_ok=True)
+    src_available = DOCS_SRC.is_dir()
+    for fname in _DOC_PAGES:
+        src = DOCS_SRC / fname
+        dst = DOCS_DST / fname
+        if src_available and src.is_file():
+            shutil.copyfile(src, dst)
+            continue
+        if not dst.is_file():
+            raise RuntimeError(
+                "missing guide page: cannot copy from " + str(src) +
+                " (repo docs/ unavailable) and " + str(dst) +
+                " is not bundled either — broken checkout?")
+
+
+_sync_docs()
+
+
 setup(
     ext_modules=[
         Extension(

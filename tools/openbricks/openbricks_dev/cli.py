@@ -267,6 +267,25 @@ def _build_parser():
              "(a full 254-ID scan takes ~5 s).",
     )
 
+    # ---- docs (offline documentation reader) ----
+    p_docs = sub.add_parser(
+        "docs",
+        aliases=["doc"],
+        help="Read the documentation guides offline, in the terminal.",
+        description="Prints a bundled documentation guide — no "
+                    "internet, browser, or repo checkout needed. With "
+                    "no topic, lists the available guides. Pages "
+                    "through $PAGER (or less) on a terminal; prints "
+                    "plainly when piped. The full manual including "
+                    "the generated API reference lives at "
+                    "https://docs.openbricks.dev/ (HTML and PDF).",
+    )
+    p_docs.add_argument(
+        "topic", nargs="?", default=None,
+        help="Guide to read (e.g. install, hardware, cli). "
+             "Omit to list all topics.",
+    )
+
     # ---- sim (passthrough to openbricks_sim.cli) ----
     #
     # Argparse-wise this is a stub: the real grammar lives in
@@ -341,6 +360,9 @@ def main(argv=None):
         if args.command == "servo-id":
             from openbricks_dev import servo_id as servo_id_mod
             return servo_id_mod.run(args)
+        if args.command in ("docs", "doc"):
+            from openbricks_dev import docs as docs_mod
+            return docs_mod.run(args)
     except KeyboardInterrupt:
         print("\naborted.", file=sys.stderr)
         return 130

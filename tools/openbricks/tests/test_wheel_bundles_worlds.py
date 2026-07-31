@@ -175,6 +175,28 @@ class WheelBundlesWorldsTests(unittest.TestCase):
             "to flat material rgba without these." % missing)
 
 
+    def test_wheel_contains_offline_docs_pages(self):
+        # ``openbricks docs`` reads guide pages bundled into
+        # openbricks_dev/_docs/ by setup.py::_sync_docs. Same
+        # ship-the-command-forget-the-data bug class as the missing
+        # worlds (0.10.3-0.10.5) and missing .ldr props
+        # (0.10.7-0.10.10): without the package-data stanza the
+        # command exists but every topic 404s on an installed wheel.
+        from openbricks_dev import docs as docs_mod
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = _build_wheel_into(tmp)
+            with zipfile.ZipFile(wheel) as zf:
+                names = zf.namelist()
+        missing = [
+            t for t in docs_mod.TOPICS
+            if ("openbricks_dev/_docs/" + t + ".md") not in names]
+        self.assertEqual(
+            missing, [],
+            "wheel is missing offline doc pages: %s — check "
+            "setup.py::_sync_docs, MANIFEST.in, and the "
+            "openbricks_dev package-data stanza." % missing)
+
+
 class MatTextureSizeBudgetTests(unittest.TestCase):
     """The PyPI project hit its 10 GB storage limit (2026-07-19)
     because every release duplicated ~17 MB of lossless mat textures

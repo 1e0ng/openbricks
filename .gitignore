@@ -38,3 +38,4 @@ robot.local.json
 *.so
 tools/openbricks/native/_shared/
 docs/_build/
+tools/openbricks/openbricks_dev/_docs/
