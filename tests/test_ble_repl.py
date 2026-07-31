@@ -732,3 +732,112 @@ class BluetoothIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RxDrainCostTests(unittest.TestCase):
+    """THE staging bottleneck, fixed in 1.34.0.
+
+    MicroPython pulls stdin ONE BYTE PER CALL: ``mp_os_dupterm_notify``
+    (extmod/modos.c) loops ``mp_os_dupterm_rx_chr()`` until dry, and
+    each of those does a 1-byte ``readinto`` on this stream
+    (extmod/os_dupterm.c). The original ``read`` did
+    ``self._rx_buffer = self._rx_buffer[sz:]`` — reallocating and
+    copying the WHOLE remaining buffer per byte, i.e. O(n^2) time and
+    one GC allocation per byte.
+
+    Why it mattered so much: on ESP32 that drain runs inside the BLE
+    IRQ handler, which MicroPython invokes ON THE NIMBLE HOST TASK
+    holding the GIL (ports/esp32/mpconfigport.h sets
+    MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS). A slow drain stalls ATT
+    processing while the controller keeps delivering, and the
+    24-buffer ACL pool drops packets that write-without-response
+    never retransmits. Bigger raw-paste window => more buffered bytes
+    => quadratically slower drain => more loss, which is exactly why
+    1.32.0/1.32.1 got WORSE when the window went up and why enlarging
+    the GATT buffer didn't help."""
+
+    class _Holder:
+        """Borrows the SHIPPED read/any implementations. MicroPython
+        has no ``__new__``, and ``_BLEUART.__init__`` needs a live BLE
+        stack — binding the unbound functions exercises the real code
+        under both interpreters."""
+        read = ble_repl._BLEUART.read
+        any = ble_repl._BLEUART.any
+
+        def __init__(self, data):
+            self._rx_buffer = bytearray(data)
+            self._rx_pos = 0
+
+    def _uart(self, data):
+        return self._Holder(data)
+
+    def test_single_byte_read_does_not_reallocate(self):
+        u = self._uart(b"x" * 4096)
+        buf_before = u._rx_buffer
+        self.assertEqual(u.read(1), b"x")
+        # Same object: no per-byte copy of the remaining 4095 bytes.
+        self.assertIs(u._rx_buffer, buf_before)
+        self.assertEqual(u._rx_pos, 1)
+
+    def test_byte_at_a_time_drain_returns_every_byte_in_order(self):
+        payload = bytes(range(256)) * 20        # 5120 bytes, spans compaction
+        u = self._uart(payload)
+        out = bytearray()
+        while True:
+            b = u.read(1)
+            if not b:
+                break
+            out += b
+        self.assertEqual(bytes(out), payload)
+
+    def test_any_reflects_unread_remainder(self):
+        u = self._uart(b"abcdef")
+        self.assertEqual(u.any(), 6)
+        u.read(2)
+        self.assertEqual(u.any(), 4)
+        u.read(4)
+        self.assertEqual(u.any(), 0)
+
+    def test_buffer_is_released_when_fully_drained(self):
+        u = self._uart(b"y" * 3000)
+        u.read(3000)
+        self.assertEqual(len(u._rx_buffer), 0)
+        self.assertEqual(u._rx_pos, 0)
+        self.assertEqual(u.read(1), b"")
+
+    def test_compaction_reclaims_the_consumed_prefix(self):
+        u = self._uart(b"z" * (ble_repl._RX_COMPACT_AT * 3))
+        for _ in range(ble_repl._RX_COMPACT_AT):
+            u.read(1)
+        # Threshold crossed: prefix reclaimed, index rewound, and the
+        # unread remainder is intact.
+        self.assertEqual(u._rx_pos, 0)
+        self.assertEqual(u.any(), ble_repl._RX_COMPACT_AT * 2)
+        self.assertEqual(u.read(5), b"zzzzz")
+
+    def test_reads_interleaved_with_arriving_writes(self):
+        # The real pattern: the IRQ appends while the reader drains.
+        u = self._uart(b"")
+        got = bytearray()
+        for round_ in range(6):
+            u._rx_buffer += bytes([round_]) * 700     # IRQ append
+            for _ in range(500):
+                b = u.read(1)
+                if b:
+                    got += b
+        while True:
+            b = u.read(1)
+            if not b:
+                break
+            got += b
+        expected = b"".join(bytes([r]) * 700 for r in range(6))
+        self.assertEqual(bytes(got), expected)
+
+    def test_read_all_when_size_omitted(self):
+        u = self._uart(b"hello")
+        self.assertEqual(u.read(), b"hello")
+        self.assertEqual(u.read(), b"")
+
+    def test_oversized_request_is_clamped_to_available(self):
+        u = self._uart(b"abc")
+        self.assertEqual(u.read(999), b"abc")
