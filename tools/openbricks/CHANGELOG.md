@@ -3,6 +3,34 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.33.1 — revert the window bump too; ship a probe to measure it
+
+**The window is back to stock. Flash this.** Both raised values
+broke real hardware, differently: 2048 (1.32.0) truncated pasted
+programs — the hub compiled a fragment, empty stdout AND stderr —
+and 1024 (1.32.1) hung mid-paste, the hub silently ceasing to
+consume with no flow-control ack. Enlarging the BLE GATT rx buffer
+to 8 KB did not fix 1024, so the limit is NOT that buffer alone,
+and three desk-reasoned attempts is two too many.
+
+So: stock window (MicroPython's 128), the configuration that has
+always worked, plus a new **`openbricks paste-probe -n NAME`** that
+measures the hub's real burst limit — pasting padded no-op programs
+of increasing size through the actual raw-paste path, reporting the
+largest that completes and naming each failure mode (truncated vs
+hung). Any future window change must be derived from its output:
+two windows can be in flight at once, so
+`MICROPY_REPL_STDIN_BUFFER_MAX` is safe only at or below the
+measured limit.
+
+Kept: compression + hub-name binding (1.30.0), the enlarged BLE rx
+buffer and its guards (1.32.1 — strictly safer, no downside), the
+stdin-ring patch (unused at stock, ready for a measured bump), and
+board comments recording why not to raise this again blind. Staging
+returns to the 1.30.0 timing (~11.8 s for a 7.9 KB script — still
+better than the 16.6 s it started at): correctness first, and the
+speed work resumes from measurement.
+
 ## 1.33.0 — revert streamed staging; the window bump carries it
 
 **1.31.0–1.32.1 could not stage a script over BLE. This restores

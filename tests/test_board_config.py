@@ -65,15 +65,16 @@ if __name__ == "__main__":
 
 
 class RawPasteWindowTests(unittest.TestCase):
-    """Pin the raw-paste window bump (1.32.0): both boards advertise a
-    2 KB flow-control window (MICROPY_REPL_STDIN_BUFFER_MAX / 2)
-    instead of MicroPython's stock 128, which capped BLE staging at
-    ~0.5 KB/s (one 128-byte grant per ack round trip — bench-measured
-    16.6 s for a 7.9 KB script). The enlarged advertised buffer is
-    ONLY safe together with the stdin-ring patch: on the UART/USB
-    paste path (mpremote — our own ``flash`` uses it) in-flight bytes
-    queue in ``stdin_ringbuf``, upstream a hardcoded 260-byte array;
-    overflow silently drops paste bytes."""
+    """The window is STOCK again (1.33.1) after two hardware failures
+    — 2048 truncated pasted programs, 1024 hung mid-paste — and the
+    boards must not silently re-acquire an override without the
+    safety machinery that a raised window needs.
+
+    If a board ever defines ``MICROPY_REPL_STDIN_BUFFER_MAX`` again,
+    the ring must cover it (``RINGBUF_LEN >= 2x``) AND the value must
+    be backed by a real measurement from ``openbricks paste-probe``
+    — the tests below enforce the mechanical half; the measurement is
+    on the human."""
 
     _BOARDS = [
         _ROOT + "/native/boards/openbricks_esp32s3/mpconfigboard.h",
@@ -92,38 +93,37 @@ class RawPasteWindowTests(unittest.TestCase):
                 vals[parts[1]] = int(parts[2].strip("()"))
         return vals
 
-    def test_both_boards_define_window_and_ring(self):
+    def test_window_override_is_absent_or_ring_backed(self):
         for path in self._BOARDS:
             vals = self._defines(_read(path))
-            self.assertIn("MICROPY_REPL_STDIN_BUFFER_MAX", vals, path)
-            self.assertIn("MICROPY_HW_STDIN_RINGBUF_LEN", vals, path)
-            self.assertGreater(vals["MICROPY_REPL_STDIN_BUFFER_MAX"],
-                               256, path)
-
-    def test_ring_holds_at_least_two_advertised_buffers(self):
-        # The raw-paste host may have up to ~buffer-max bytes in
-        # flight (initial window + one refill); the ring must absorb
-        # that plus interactive slack, or the UART/USB path drops
-        # paste bytes silently. 2x is the safety invariant.
-        for path in self._BOARDS:
-            vals = self._defines(_read(path))
+            if "MICROPY_REPL_STDIN_BUFFER_MAX" not in vals:
+                continue          # stock window — nothing to guard
+            self.assertIn(
+                "MICROPY_HW_STDIN_RINGBUF_LEN", vals,
+                "%s raises the paste window without enlarging the "
+                "stdin ring — UART/USB pastes will drop bytes" % path)
             self.assertGreaterEqual(
                 vals["MICROPY_HW_STDIN_RINGBUF_LEN"],
                 2 * vals["MICROPY_REPL_STDIN_BUFFER_MAX"], path)
 
+    def test_reverted_boards_carry_the_do_not_raise_warning(self):
+        # The comment is the institutional memory: two shipped
+        # releases broke here. Losing it invites a third attempt.
+        for path in self._BOARDS:
+            src = _read(path)
+            if "MICROPY_REPL_STDIN_BUFFER_MAX" in src:
+                continue
+            self.assertIn("paste-probe", src,
+                          "%s lost the measure-before-raising note" % path)
+
     def test_ring_patch_exists_and_is_the_config_hook(self):
+        # Kept available for a future, MEASURED bump.
         src = _read(self._PATCH)
         self.assertIn("#ifndef MICROPY_HW_STDIN_RINGBUF_LEN", src)
         self.assertIn(
             "stdin_ringbuf_array[MICROPY_HW_STDIN_RINGBUF_LEN]", src)
-        self.assertIn("ports/esp32/mphalport.c", src)
 
     def test_build_script_applies_patches(self):
-        # The ring size only becomes configurable because
-        # build_firmware.sh git-applies native/patches/ before every
-        # firmware build — if that loop disappears, the boards'
-        # RINGBUF_LEN define silently no-ops and the enlarged window
-        # overruns the stock 260-byte ring on UART/USB.
         src = _read(_ROOT + "/scripts/build_firmware.sh")
         self.assertIn("PATCHES_DIR", src)
         self.assertIn("apply", src)
@@ -167,7 +167,8 @@ class BleRxBufferTests(unittest.TestCase):
             if (len(parts) >= 3 and parts[0] == "#define"
                     and parts[1] == "MICROPY_REPL_STDIN_BUFFER_MAX"):
                 return int(parts[2].strip("()"))
-        self.fail("MICROPY_REPL_STDIN_BUFFER_MAX not found in " + path)
+        # Absent = stock: MicroPython's own default buffer max.
+        return 256
 
     def test_ble_buffer_absorbs_max_in_flight_paste(self):
         rx = self._ble_rx_bytes()
