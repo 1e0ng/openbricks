@@ -448,15 +448,26 @@ def _seal_chunk(chunk, hub_name):
 # host compares the hex that follows against its own plaintext digest.
 _STAGED_MARKER = b"OBK-STAGED:"
 
+# Byte the receiver prints after each ``_STREAM_CHUNK_BYTES`` of
+# payload it has consumed; the host waits for it before sending the
+# next chunk. This bounds unread bytes in flight to one chunk, so the
+# stream can never outrun the hub's BLE GATT rx buffer no matter how
+# fast the link is — the same class of overflow that the 1.32.0
+# window bump hit on the paste path, closed by design here instead of
+# by buffer sizing alone. Chunk << ble_repl._RX_BUFFER_BYTES (8 KB).
+_STREAM_ACK = b"\x06"
+_STREAM_CHUNK_BYTES = 2048
+
 
 def _compose_stream_receiver(target_path, first, nonce, b64_len):
-    """The hub-side receiver for one streamed chunk: read exactly
-    ``b64_len`` bytes from stdin (the BLE REPL's rx buffer is an
-    elastic bytearray, so the host can blast at full link speed —
-    no 128-byte raw-paste windowing), unseal with a key derived from
-    the hub's OWN NVS name, write the file, and print the plaintext
-    digest for the host to verify. Base64 keeps the stream free of
-    the 0x03 interrupt char that would kill this program mid-read."""
+    """The hub-side receiver for one streamed chunk: read
+    ``b64_len`` bytes from stdin in ``_STREAM_CHUNK_BYTES`` pieces,
+    printing ``_STREAM_ACK`` after each so the host never has more
+    than one chunk unread in flight (bounded by design — see the
+    constant), unseal with a key derived from the hub's OWN NVS name,
+    write the file, and print the plaintext digest for the host to
+    verify. Base64 keeps the stream free of the 0x03 interrupt char
+    that would kill this program mid-read."""
     mode = "wb" if first else "ab"
     return (
         "import sys, io, binascii, hashlib, deflate, openbricks\n"
@@ -470,12 +481,18 @@ def _compose_stream_receiver(target_path, first, nonce, b64_len):
         "_b = bytearray(_n)\n"
         "_mv = memoryview(_b)\n"
         "_i = 0\n"
+        "_c = %d\n"
         "_s = sys.stdin.buffer\n"
         "while _i < _n:\n"
-        "    _r = _s.readinto(_mv[_i:])\n"
-        "    if not _r:\n"
-        "        raise OSError('stdin EOF during staging stream')\n"
-        "    _i += _r\n"
+        "    _e = _i + _c\n"
+        "    if _e > _n:\n"
+        "        _e = _n\n"
+        "    while _i < _e:\n"
+        "        _r = _s.readinto(_mv[_i:_e])\n"
+        "        if not _r:\n"
+        "            raise OSError('stdin EOF during staging stream')\n"
+        "        _i += _r\n"
+        "    sys.stdout.write('\\x06')\n"
         "_ct = binascii.a2b_base64(bytes(_b))\n"
         "_ks = b''.join([hashlib.sha256("
         "_k + _sn + (_j * %d).to_bytes(4, 'big')).digest() "
@@ -487,7 +504,7 @@ def _compose_stream_receiver(target_path, first, nonce, b64_len):
         "with open(%r, %r) as f:\n    f.write(_data)\n"
         "print('%s' + binascii.hexlify("
         "hashlib.sha256(_data).digest()).decode())\n"
-        % (repr(nonce), b64_len,
+        % (repr(nonce), b64_len, _STREAM_CHUNK_BYTES,
            _XOR_BLOCK, _XOR_BLOCK - 1, _XOR_BLOCK,
            target_path, mode,
            _STAGED_MARKER.decode())).encode()
@@ -550,8 +567,20 @@ async def _stream_stage_step(blink, link, target_path, chunk, first,
     receiver = _compose_stream_receiver(target_path, first, nonce,
                                         len(b64))
     await _raw_paste_upload(blink, link, receiver)
-    blink._step = "%s (streaming %d payload bytes)" % (what, len(b64))
-    await link.write(b64)
+    # Ack-paced: never more than one chunk unread on the hub, so the
+    # stream cannot overflow its BLE rx buffer regardless of link
+    # speed (see _STREAM_CHUNK_BYTES).
+    for off in range(0, len(b64), _STREAM_CHUNK_BYTES):
+        blink._step = ("%s (streaming payload %d/%d bytes)"
+                       % (what, min(off + _STREAM_CHUNK_BYTES, len(b64)),
+                          len(b64)))
+        await link.write(b64[off:off + _STREAM_CHUNK_BYTES])
+        ack = await blink.read_exact(1, timeout=30.0)
+        if ack != _STREAM_ACK:
+            raise RunError(
+                "hub did not ack streamed payload during %s (got %r at "
+                "offset %d) — the receiver died mid-transfer"
+                % (what, ack, off))
     blink._step = "%s (waiting for the hub's staged digest)" % what
     out = await blink.read_until(_CTRL_D, timeout=60.0)
     err = await blink.read_until(_CTRL_D)

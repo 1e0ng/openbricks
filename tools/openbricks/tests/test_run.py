@@ -436,6 +436,97 @@ def _drive(coro):
     return asyncio.run(coro)
 
 
+class _BurstMeasuringLink(_ProtocolLink):
+    """Hub model that advertises ``window`` and records the LARGEST
+    burst the host writes before it stops to consume an ack.
+
+    That burst is exactly what the hub's BLE GATT rx buffer must
+    absorb: NimBLE drops writes into a full buffer silently, so a
+    burst bigger than the buffer truncates the pasted program with
+    no error anywhere (the 1.32.0 bug)."""
+
+    def __init__(self, window, acks=64):
+        super().__init__(
+            [bytes([0x52, 0x01, window & 0xFF, window >> 8, 0x01])]
+            + [b"\x01"] * acks + [b"\x04"])
+        self.max_burst = 0
+        self._burst = 0
+
+    async def write(self, data):
+        # Control bytes aren't program payload; the handshake request
+        # and the final Ctrl-D don't count toward a paste burst.
+        if data not in (run_mod._RAW_PASTE_REQUEST, run_mod._CTRL_D):
+            self._burst += len(data)
+            if self._burst > self.max_burst:
+                self.max_burst = self._burst
+        await super().write(data)
+
+    async def read(self, timeout=None):
+        chunk = await super().read(timeout=timeout)
+        if chunk:          # an ack means the hub drained a window
+            self._burst = 0
+        return chunk
+
+
+def _firmware_int(path, needle, sep):
+    """Pull a constant out of a firmware source file, or skip the
+    test when running outside a repo checkout (installed wheel)."""
+    import os
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "..", "..")
+    full = os.path.join(root, path)
+    if not os.path.isfile(full):
+        raise unittest.SkipTest("not a repo checkout: %s missing" % path)
+    with open(full) as f:
+        for line in f:
+            if line.strip().startswith(needle):
+                return int(line.split(sep)[1].strip().strip("()"))
+    raise AssertionError("%s not found in %s" % (needle, path))
+
+
+class HostBurstVsHubBufferTests(unittest.TestCase):
+    """REGRESSION (1.32.0 → 1.32.1), behavioural half.
+
+    ``BleRxBufferTests`` (firmware suite) pins the two constants
+    against each other arithmetically. This drives the REAL host
+    protocol against a hub model and measures what the host actually
+    bursts, then checks it against the rx buffer the firmware really
+    ships — so the guard holds even if the flow-control code changes
+    how it batches writes."""
+
+    def _paste(self, window):
+        link = _BurstMeasuringLink(window)
+        blink = run_mod._BufferedLink(link)
+        # A receiver-sized program: the exact thing that got
+        # truncated on the bench.
+        nonce, b64, _ = run_mod._seal_chunk(b"x" * 4096, _HUB)
+        program = run_mod._compose_stream_receiver(
+            "/program.py", True, nonce, len(b64))
+        _drive(run_mod._raw_paste_upload(blink, link, program))
+        return link.max_burst
+
+    def test_shipped_window_burst_fits_shipped_ble_buffer(self):
+        buffer_max = _firmware_int(
+            "native/boards/openbricks_esp32s3/mpconfigboard.h",
+            "#define MICROPY_REPL_STDIN_BUFFER_MAX", "MAX")
+        rx = _firmware_int("openbricks/ble_repl.py",
+                           "_RX_BUFFER_BYTES", "=")
+        burst = self._paste(buffer_max // 2)   # window = buf_max / 2
+        self.assertLessEqual(
+            burst, rx,
+            "host bursts %d bytes with the shipped window but the hub's "
+            "BLE rx buffer is only %d — NimBLE drops the excess and the "
+            "pasted program is silently truncated (the 1.32.0 bug)"
+            % (burst, rx))
+
+    def test_the_1_32_0_combination_would_overflow(self):
+        # Documents the shipped-broken pairing: window 2048 against
+        # the old 512-byte buffer. If this ever stops overflowing,
+        # the model no longer reflects the failure it guards.
+        burst = self._paste(2048)
+        self.assertGreater(burst, 512)
+
+
 class RawPasteProtocolTests(unittest.TestCase):
     """Flow-control branches of the raw-paste upload: window refills,
     hub abort, junk bytes, and the end-of-upload handshake."""
@@ -761,9 +852,15 @@ class ChunkedStagingTests(unittest.TestCase):
                 # then the hub's stdout carries the digest of the
                 # plaintext chunk it decoded and wrote.
                 digest = hashlib.sha256(chunk).hexdigest().encode()
+                _n, b64len = 0, len(run_mod._seal_chunk(chunk, _HUB)[1])
+                n_chunks = -(-b64len // run_mod._STREAM_CHUNK_BYTES)
                 responses += [
                     _R_SUPPORTED + _WINDOW_8K,      # receiver paste ack
                     _CTRL_D,                        # end-of-paste ack
+                ]
+                # One ack per streamed chunk (bounded in-flight).
+                responses += [run_mod._STREAM_ACK] * n_chunks
+                responses += [
                     run_mod._STAGED_MARKER + digest + b"\r\n" + _CTRL_D,
                     _CTRL_D,                        # empty stderr
                     b">",
@@ -874,11 +971,14 @@ class ChunkedStagingTests(unittest.TestCase):
         # wrote; a corrupted transfer must abort the run, not launch
         # a half-written program.
         payload = b"x" * 2048
-        responses = [
-            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+        n_chunks = -(-len(run_mod._seal_chunk(payload, _HUB)[1])
+                     // run_mod._STREAM_CHUNK_BYTES)
+        responses = ([_R_SUPPORTED + _WINDOW_8K, _CTRL_D]
+                     + [run_mod._STREAM_ACK] * n_chunks
+                     + [
             run_mod._STAGED_MARKER + b"0" * 64 + b"\r\n" + _CTRL_D,
             _CTRL_D, b">",
-        ]
+        ])
         link = _ProtocolLink(responses)
         blink = run_mod._BufferedLink(link)
         try:
@@ -889,13 +989,59 @@ class ChunkedStagingTests(unittest.TestCase):
         else:
             self.fail("expected RunError on digest mismatch")
 
-    def test_missing_staged_marker_raises(self):
-        payload = b"x" * 2048
+    def test_payload_is_ack_paced_in_bounded_chunks(self):
+        # 1.32.1: unread bytes on the hub are bounded by ONE chunk,
+        # so the stream can't overflow the BLE rx buffer no matter
+        # how fast the link is (the 1.32.0 overflow class, closed by
+        # design rather than by buffer sizing alone).
+        payload = b"y" * 12000
+        link = self._stage(payload)
+        receiver = next(w for w in link.writes if b"readinto" in w)
+        n = int(receiver.split(b"_n = ", 1)[1].split(b"\n", 1)[0])
+        # Walk the writes AFTER the receiver paste (and its trailing
+        # Ctrl-D) until the receiver's declared length is accounted
+        # for — those are the payload chunks.
+        idx = next(i for i, w in enumerate(link.writes) if b"readinto" in w)
+        streamed, total = [], 0
+        for w in link.writes[idx + 1:]:
+            if total >= n:
+                break
+            if w == _CTRL_D:      # end-of-paste marker, not payload
+                continue
+            streamed.append(w)
+            total += len(w)
+        self.assertEqual(total, n)
+        for w in streamed:
+            self.assertLessEqual(len(w), run_mod._STREAM_CHUNK_BYTES)
+        self.assertIn(b"sys.stdout.write('\\x06')", receiver)
+        self.assertEqual(self._decode_staged_writes(link.writes), payload)
+
+    def test_missing_stream_ack_raises(self):
+        payload = b"z" * 6000
         responses = [
             _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            b"\x15",                       # NAK-ish: not the ack byte
+        ]
+        link = _ProtocolLink(responses)
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._stage_file(blink, link, "/program.py",
+                                       payload, _HUB))
+        except run_mod.RunError as e:
+            self.assertIn("did not ack streamed payload", str(e))
+        else:
+            self.fail("expected RunError on missing stream ack")
+
+    def test_missing_staged_marker_raises(self):
+        payload = b"x" * 2048
+        n_chunks = -(-len(run_mod._seal_chunk(payload, _HUB)[1])
+                     // run_mod._STREAM_CHUNK_BYTES)
+        responses = ([_R_SUPPORTED + _WINDOW_8K, _CTRL_D]
+                     + [run_mod._STREAM_ACK] * n_chunks
+                     + [
             b"something unexpected\r\n" + _CTRL_D,
             _CTRL_D, b">",
-        ]
+        ])
         link = _ProtocolLink(responses)
         blink = run_mod._BufferedLink(link)
         try:

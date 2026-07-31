@@ -3,6 +3,35 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.32.1 — fix: 1.32.0 broke staging over BLE (undersized rx buffer)
+
+**1.32.0 firmware is broken — reflash to this.** Raising the
+raw-paste window to 2048 let the host keep 4096 bytes in flight,
+but `ble_repl.py`'s GATT rx buffer was still 512 — a value its own
+comment documents as "2 windows + headroom" *for the old 128
+window*. NimBLE silently dropped the overflow, the hub compiled a
+fragment of the staged receiver, and `openbricks run` failed with
+"hub did not confirm the staged chunk" (empty stdout **and** empty
+stderr — the signature of a program truncated to nothing). The
+1.32.0 ring-buffer test guarded the UART/USB path; BLE has its own
+buffer and had no guard.
+
+Three layers, so this class of bug is closed by design:
+
+* BLE GATT rx buffer 512 → **8192** (`_RX_BUFFER_BYTES`).
+* Advertised window 2048 → **1024** (`MICROPY_REPL_STDIN_BUFFER_MAX`
+  2048) — max in-flight 2048, a 4× margin inside the buffer, still
+  8× the stock window.
+* The streamed payload is now **ack-paced** in 2 KB chunks (the
+  receiver prints `\x06` per chunk), so unread bytes on the hub are
+  bounded by protocol rather than by buffer sizing — it cannot
+  overflow regardless of link speed.
+
+`BleRxBufferTests` pins rx-buffer ≥ 2× buffer-max in both
+directions and was verified to FAIL on the exact 1.32.0
+combination. Verified end to end on the MicroPython VM: three acks
+then the digest, byte-identical file.
+
 ## 1.32.0 — firmware: raw-paste window 128 → 2048
 
 The last window-paced remnants — the ~0.9 KB stream receiver, the
