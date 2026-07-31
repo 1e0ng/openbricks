@@ -3,6 +3,39 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.33.0 — revert streamed staging; the window bump carries it
+
+**1.31.0–1.32.1 could not stage a script over BLE. This restores
+the mechanism that provably can.**
+
+1.31.0 moved the payload out of the pasted program and into a
+`sys.stdin` read performed by a small receiver *after* the raw
+paste ends. On hardware that receiver executes instantly with
+empty stdout **and** empty stderr — as if nothing was compiled —
+so the host's first payload chunk gets answered by the
+end-of-execution `0x04` instead of an ack. It failed identically
+on two firmware builds, and 1.32.1's rx-buffer fix (a real bug,
+kept) did not change it. The design's "verification" was invalid:
+it fed the receiver from a FILE with the payload on a pipe, which
+is not the raw-paste path the code actually runs on.
+
+Staging returns to the **1.30.0 embedded form** — payload sealed
+(deflate → hub-name-keyed XOR → base64) *inside* the pasted
+program, one self-contained unit with no stdin dependency. That is
+the version that has completed a real staging on hardware.
+
+Speed comes from the window instead, which is what needed fixing
+all along: the same 7.9 KB script is a 5.2 KB program, and at the
+1024-byte window (1.32.x, with 1.32.1's buffer fix) that's **6
+round trips instead of 41**.
+
+Kept from the detour: the compression + hub-name binding (1.30.0),
+the BLE rx-buffer fix and its two regression guards (1.32.1), and
+the window bump (1.32.0). Dropped: the stream receiver, its ack
+protocol, and `_STAGED_MARKER`. The code now carries a comment
+saying not to re-attempt streaming without a way to verify it on
+the real BLE raw-paste path.
+
 ## 1.32.1 — fix: 1.32.0 broke staging over BLE (undersized rx buffer)
 
 **1.32.0 firmware is broken — reflash to this.** Raising the
