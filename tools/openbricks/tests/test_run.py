@@ -137,8 +137,8 @@ class ComposeTests(unittest.TestCase):
     """Stage-chunk + runner composition — pure functions, no BLE."""
 
     def test_stage_chunk_first_truncates_then_appends(self):
-        first = run_mod._compose_stage_chunk("/program.py", b"abc", True, _HUB)
-        rest = run_mod._compose_stage_chunk("/program.py", b"def", False, _HUB)
+        first = run_mod._compose_stage_chunk("/program.py", b"abc", True)
+        rest = run_mod._compose_stage_chunk("/program.py", b"def", False)
         self.assertIn(b"'wb'", first)
         self.assertIn(b"'ab'", rest)
         self.assertIn(b"'/program.py'", first)
@@ -148,7 +148,7 @@ class ComposeTests(unittest.TestCase):
         # The whole point: each staged program must fit a fragmented
         # heap. Worst-case repr expansion (pure binary) stays ~4x.
         chunk = bytes(range(256)) * 2   # 512 binary bytes
-        prog = run_mod._compose_stage_chunk("/program.py", chunk, True, _HUB)
+        prog = run_mod._compose_stage_chunk("/program.py", chunk, True)
         self.assertLess(len(prog), 2600)
 
     def test_bootstrap_calls_launcher_run_program(self):
@@ -203,7 +203,7 @@ class ComposeTests(unittest.TestCase):
         # Any bytes the user script could contain — NULs, high bits,
         # quotes — must survive ``repr()`` wrapping.
         tricky = b"\x00\xff\r\n'\"\\"
-        prog = run_mod._compose_stage_chunk("/program.py", tricky, True, _HUB)
+        prog = run_mod._compose_stage_chunk("/program.py", tricky, True)
         self.assertIn(repr(tricky).encode(), prog)
 
 
@@ -748,22 +748,33 @@ class ChunkedStagingTests(unittest.TestCase):
         the exact wrapper overhead is what pushed a 65536-byte chunk
         just past an 8-window boundary and caught this the first
         time (65536 raw vs. 65590 on the wire)."""
+        import hashlib
         chunk_size = run_mod._STAGE_CHUNK_BYTES
         window = 0x2000
         offsets = list(range(0, len(payload), chunk_size)) or [0]
         responses = []
         for off in offsets:
             chunk = payload[off:off + chunk_size]
-            # NOTE: the compressed framing embeds a random nonce, so
-            # this program is not byte-identical to the one
-            # _stage_file will build — but its LENGTH is (same chunk,
-            # same-size nonce/b64), which is all the ack math needs.
-            program = run_mod._compose_stage_chunk(
-                "/program.py", chunk, first=(off == 0), hub_name=_HUB)
-            acks_needed = max(0, -(-len(program) // window) - 1)
-            responses += (
-                [_R_SUPPORTED + _WINDOW_8K] + [_FLOW_ACK] * acks_needed
-                + [_CTRL_D, _CTRL_D, _CTRL_D, b">"])
+            if len(chunk) >= run_mod._COMPRESS_MIN_BYTES:
+                # STREAM framing: a small receiver program (always
+                # well under one 8 KB window — no mid-paste acks),
+                # then the hub's stdout carries the digest of the
+                # plaintext chunk it decoded and wrote.
+                digest = hashlib.sha256(chunk).hexdigest().encode()
+                responses += [
+                    _R_SUPPORTED + _WINDOW_8K,      # receiver paste ack
+                    _CTRL_D,                        # end-of-paste ack
+                    run_mod._STAGED_MARKER + digest + b"\r\n" + _CTRL_D,
+                    _CTRL_D,                        # empty stderr
+                    b">",
+                ]
+            else:
+                program = run_mod._compose_stage_chunk(
+                    "/program.py", chunk, first=(off == 0))
+                acks_needed = max(0, -(-len(program) // window) - 1)
+                responses += (
+                    [_R_SUPPORTED + _WINDOW_8K] + [_FLOW_ACK] * acks_needed
+                    + [_CTRL_D, _CTRL_D, _CTRL_D, b">"])
         link = _ProtocolLink(responses)
         blink = run_mod._BufferedLink(link)
         _drive(run_mod._stage_file(blink, link, "/program.py", payload,
@@ -793,23 +804,30 @@ class ChunkedStagingTests(unittest.TestCase):
 
     @staticmethod
     def _decode_staged_writes(writes, hub_name=None):
-        """Recover the payload bytes each staged program would write —
+        """Recover the payload bytes each staged step would write —
         the exact inverse a hub named ``hub_name`` applies. Handles
-        BOTH framings: plain ``f.write(<repr>)`` and the sealed
-        deflate + hub-name-keyed XOR + base64 form."""
+        BOTH framings: plain embedded ``f.write(<repr>)`` programs,
+        and the STREAM form where a receiver program (carrying the
+        nonce + expected length) is followed by a separate write
+        holding the sealed base64 payload."""
         import base64
         import zlib
         hub_name = _HUB if hub_name is None else hub_name
         chunks = []
+        pending = None   # (nonce, b64_len) from the last receiver
         for w in writes:
-            if b"a2b_base64(" in w:
+            if b"readinto" in w and b"_sn = " in w:
                 nonce = eval(w.split(b"_sn = ", 1)[1].split(b"\n", 1)[0])
-                lit = w.split(b"a2b_base64(", 1)[1].split(b")", 1)[0]
-                sealed = base64.b64decode(eval(lit))
+                n = int(w.split(b"_n = ", 1)[1].split(b"\n", 1)[0])
+                pending = (nonce, n)
+            elif pending is not None and len(w) == pending[1]:
+                nonce, _ = pending
+                pending = None
+                sealed = base64.b64decode(w)
                 comp = run_mod._keystream_xor(
                     sealed, hub_name.encode(), nonce)
                 chunks.append(zlib.decompress(comp))
-            elif b"f.write(" in w:
+            elif b"f.write(" in w and b"_data" not in w:
                 lit = w.split(b"f.write(", 1)[1].rsplit(b")", 1)[0]
                 chunks.append(eval(lit))
         return b"".join(chunks)
@@ -832,21 +850,61 @@ class ChunkedStagingTests(unittest.TestCase):
         self.assertNotIn(b"deflate", writes)
         self.assertEqual(self._decode_staged_writes(link.writes), payload)
 
-    def test_large_payload_stages_compressed_and_smaller(self):
-        # At/above the threshold the wire program must carry the
-        # sealed (deflate + keyed XOR + b64) form and actually BE
-        # smaller than the raw payload for realistic compressible
-        # source (the whole point: staging is paced by the 128-byte
-        # raw-paste window, so bytes on the wire ≈ time).
+    def test_large_payload_streams_sealed_after_a_small_receiver(self):
+        # At/above the threshold: a SMALL receiver program rides the
+        # windowed raw paste, and the sealed payload follows as its
+        # own full-link-speed write. Only the receiver is paced by
+        # the 128-byte window, so its size bounds the slow part.
         payload = (b"# a comment line that compresses well \xe2\x80\x94 yes\n"
                    * 200)   # ~9 KB, unicode em-dash included
         link = self._stage(payload)
-        program = next(w for w in link.writes if b"a2b_base64(" in w)
-        self.assertIn(b"deflate.DeflateIO", program)
-        self.assertIn(b"deflate.ZLIB", program)
-        self.assertIn(b"openbricks.HUB_NAME", program)
-        self.assertLess(len(program), len(payload) // 2)
+        receiver = next(w for w in link.writes if b"readinto" in w)
+        self.assertIn(b"deflate.DeflateIO", receiver)
+        self.assertIn(b"deflate.ZLIB", receiver)
+        self.assertIn(b"openbricks.HUB_NAME", receiver)
+        self.assertIn(run_mod._STAGED_MARKER, receiver)
+        self.assertLess(len(receiver), 1200)   # window-paced part stays tiny
+        n = int(receiver.split(b"_n = ", 1)[1].split(b"\n", 1)[0])
+        stream = next(w for w in link.writes if len(w) == n)
+        self.assertLess(len(stream), len(payload) // 2)   # compression won
         self.assertEqual(self._decode_staged_writes(link.writes), payload)
+
+    def test_digest_mismatch_raises(self):
+        # The hub echoes the sha256 of what it actually decoded and
+        # wrote; a corrupted transfer must abort the run, not launch
+        # a half-written program.
+        payload = b"x" * 2048
+        responses = [
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            run_mod._STAGED_MARKER + b"0" * 64 + b"\r\n" + _CTRL_D,
+            _CTRL_D, b">",
+        ]
+        link = _ProtocolLink(responses)
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._stage_file(blink, link, "/program.py",
+                                       payload, _HUB))
+        except run_mod.RunError as e:
+            self.assertIn("digest mismatch", str(e))
+        else:
+            self.fail("expected RunError on digest mismatch")
+
+    def test_missing_staged_marker_raises(self):
+        payload = b"x" * 2048
+        responses = [
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            b"something unexpected\r\n" + _CTRL_D,
+            _CTRL_D, b">",
+        ]
+        link = _ProtocolLink(responses)
+        blink = run_mod._BufferedLink(link)
+        try:
+            _drive(run_mod._stage_file(blink, link, "/program.py",
+                                       payload, _HUB))
+        except run_mod.RunError as e:
+            self.assertIn("did not confirm", str(e))
+        else:
+            self.fail("expected RunError on missing marker")
 
     def test_sealed_payload_only_decodes_with_the_addressed_name(self):
         # The binding property the hub-name key exists for: a hub
