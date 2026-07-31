@@ -221,6 +221,13 @@ def _advertising_payload(name, service_uuid_str):
 # two constants can never drift apart again.
 _RX_BUFFER_BYTES = 8192
 
+# Consumed-prefix threshold for ``_BLEUART.read``'s compaction. Reads
+# advance an index instead of re-slicing (see that method), and the
+# buffer is only rebuilt once this many bytes have been consumed —
+# so each byte is copied at most once per this many reads instead of
+# once per read.
+_RX_COMPACT_AT = 1024
+
 
 class _BLEUART:
     def __init__(self, ble, name, rxbuf=_RX_BUFFER_BYTES):
@@ -254,6 +261,7 @@ class _BLEUART:
         self._ble.gatts_set_buffer(self._rx_handle, rxbuf, True)
         self._connections = set()
         self._rx_buffer = bytearray()
+        self._rx_pos = 0
         self._handler = None
         self._payload = _advertising_payload(name=name, service_uuid_str=_UART_SERVICE_UUID)
         _log("init", self._tx_handle, self._rx_handle, name)
@@ -293,13 +301,54 @@ class _BLEUART:
                 _log("GATTS_WRITE_DROP", conn_handle, value_handle, in_set, self._rx_handle)
 
     def any(self):
-        return len(self._rx_buffer)
+        return len(self._rx_buffer) - self._rx_pos
 
     def read(self, sz=None):
-        if not sz:
-            sz = len(self._rx_buffer)
-        result = bytes(self._rx_buffer[0:sz])
-        self._rx_buffer = self._rx_buffer[sz:]
+        """Drain up to ``sz`` bytes. O(sz) with amortised compaction.
+
+        THE HOT PATH, and it is called ONCE PER BYTE: MicroPython's
+        dupterm pulls stdin a byte at a time
+        (``extmod/os_dupterm.c`` calls ``readinto`` with a 1-byte
+        buffer), and the raw-paste tokenizer pulls each pasted byte
+        through ``mp_hal_stdin_rx_chr``. The original implementation
+        did ``self._rx_buffer = self._rx_buffer[sz:]`` here, which
+        REALLOCATES AND COPIES the whole remaining buffer on every
+        single byte — O(n^2) time plus one GC allocation per byte,
+        on a heap that PSRAM made large (and therefore slow to
+        collect).
+
+        That is the real staging bottleneck, and it is why raising
+        the raw-paste window made things WORSE rather than faster
+        (1.32.0/1.32.1): a bigger window means more bytes buffered,
+        and the per-byte cost grows with the buffer. Bench maths at
+        the stock window put ~80% of each 269 ms window round trip
+        on-chip, not on the radio.
+
+        Reading via an index makes each byte O(1); the buffer is
+        compacted only when the consumed prefix is worth reclaiming,
+        and reset outright whenever it drains empty (the common
+        case between pastes).
+        """
+        avail = len(self._rx_buffer) - self._rx_pos
+        if avail <= 0:
+            if self._rx_pos:
+                self._rx_buffer = bytearray()
+                self._rx_pos = 0
+            return b""
+        if not sz or sz > avail:
+            sz = avail
+        start = self._rx_pos
+        self._rx_pos = start + sz
+        result = bytes(self._rx_buffer[start:self._rx_pos])
+        if self._rx_pos >= len(self._rx_buffer):
+            # Fully drained: drop the whole allocation.
+            self._rx_buffer = bytearray()
+            self._rx_pos = 0
+        elif self._rx_pos >= _RX_COMPACT_AT:
+            # Reclaim the consumed prefix. Amortised: each byte is
+            # copied at most once per _RX_COMPACT_AT bytes read.
+            self._rx_buffer = self._rx_buffer[self._rx_pos:]
+            self._rx_pos = 0
         return result
 
     def write(self, data):

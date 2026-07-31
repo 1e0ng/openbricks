@@ -187,13 +187,35 @@ class NUSLink:
     async def write(self, data):
         """Send ``data`` over the RX characteristic (client → hub).
 
-        WRITE_NO_RESPONSE = not awaiting an ACK per packet; fastest path
-        for streaming REPL input. For large payloads, chunk by MTU —
-        bleak handles that internally.
+        WRITE_NO_RESPONSE = no per-packet ACK; the fastest path for
+        streaming REPL input, and what the hub's NUS RX characteristic
+        advertises alongside WRITE.
+
+        We chunk by the negotiated write size OURSELVES. The previous
+        comment here claimed "bleak handles that internally" — it does
+        NOT: neither the CoreBluetooth nor the BlueZ backend splits a
+        write, and bleak's own API documents ``data`` as bounded by
+        ``max_write_without_response_size``. Anything larger is at the
+        mercy of the platform, and on this path failures are SILENT in
+        both directions: an ATT Write Command has no error response by
+        spec (NimBLE's ``ble_att_rx_extended`` discards the return for
+        command opcodes), and MicroPython truncates a full
+        characteristic buffer while still returning success
+        (``modbluetooth_nimble.c``, with an upstream TODO admitting
+        it). So an oversized write can vanish with no error at any
+        layer — exactly the failure class that cost 1.31.0-1.32.1.
         """
         try:
-            await self._client.write_gatt_char(
-                UART_RX_UUID, data, response=False)
+            limit = getattr(self._client, "mtu_size", 0) or 23
+            limit = max(20, limit - 3)          # ATT header
+            mwwr = getattr(self._client, "max_write_without_response_size",
+                           None)
+            if isinstance(mwwr, int) and mwwr > 0:
+                limit = min(limit, mwwr)
+            mv = memoryview(data)
+            for off in range(0, len(mv), limit):
+                await self._client.write_gatt_char(
+                    UART_RX_UUID, mv[off:off + limit], response=False)
         except Exception as e:
             raise NUSError("write failed: %s" % e) from e
 

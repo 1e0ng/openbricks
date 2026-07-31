@@ -3,6 +3,61 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.34.0 — fix the actual staging bottleneck: O(n^2) BLE reads
+
+Research (not guesswork this time — MicroPython + NimBLE sources,
+Pybricks' protocol, and BLE throughput measurements) found the real
+cost, and it was never the window.
+
+MicroPython pulls stdin **one byte per call**: `mp_os_dupterm_notify`
+(`extmod/modos.c`) loops `mp_os_dupterm_rx_chr()` until dry, each
+doing a 1-byte `readinto` on our stream (`extmod/os_dupterm.c`).
+Our `_BLEUART.read` answered every one of those with
+`self._rx_buffer = self._rx_buffer[sz:]` — reallocating and copying
+the entire remaining buffer **per byte**. Draining N bytes cost
+O(N^2) time and N GC allocations. Measured on the MicroPython VM:
+**15x slower at 8 KB, 19x at 16 KB** than the index-based version
+now shipped (and that is a desktop CPU with a small heap; the ESP32
+pays far more with an 8 MB PSRAM heap to collect).
+
+Why it mattered beyond speed: on ESP32 that drain runs inside the
+BLE IRQ handler, which MicroPython invokes **on the NimBLE host
+task while holding the GIL**
+(`MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS`). A slow drain stalls ATT
+processing while the controller keeps delivering, and the 24-buffer
+ACL pool starts dropping packets that write-without-response never
+retransmits. So a bigger raw-paste window meant more buffered bytes,
+quadratically slower drain, and *more* loss — which is precisely why
+1.32.0 (window 2048) truncated programs, why 1.32.1 (1024) hung
+mid-paste, and why enlarging the GATT rx buffer to 8 KB changed
+nothing.
+
+Reads are now index-based with amortised compaction: O(1) per byte,
+no allocation per byte, buffer released outright when drained.
+
+**Second fix, same research:** `_nus.py`'s `write()` claimed *"bleak
+handles that internally"* about chunking large payloads. It does
+not — neither bleak backend splits a write, and its API documents
+the payload as bounded by `max_write_without_response_size`. We now
+chunk by the negotiated size ourselves. This path fails **silently**
+in both directions, which is why it went unnoticed: an ATT Write
+Command has no error response by spec (NimBLE discards the return
+for command opcodes), and MicroPython truncates a full
+characteristic buffer while still returning success (upstream TODO
+acknowledges it). At the stock window our bursts never exceeded one
+MTU, so this was latent — but 1.31.0's streaming wrote up to 16 KB
+in a single call straight into it.
+
+Also documented (see `native/boards/*/mpconfigboard.h`): upstream's
+window is not arbitrary. `MICROPY_REPL_STDIN_BUFFER_MAX` (256, so
+window 128) is sized so two in-flight windows fit the ESP32 port's
+**260-byte `stdin_ringbuf`** — and `mp_os_dupterm_notify` funnels
+BLE input straight into that ring, **silently discarding whatever
+doesn't fit** (it ignores `ringbuf_put`'s return). No board in
+upstream MicroPython raises this value; two nRF boards *lower* it.
+Raising it requires the ring, the GATT buffer, AND the drain cost to
+move together — which is what `openbricks paste-probe` now measures.
+
 ## 1.33.1 — revert the window bump too; ship a probe to measure it
 
 **The window is back to stock. Flash this.** Both raised values

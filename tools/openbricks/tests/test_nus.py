@@ -20,6 +20,7 @@ class _FakeBleakClient:
         self.device = device
         self.calls = []
         self.notify_cb = None
+        self.writes = []
         self.is_connected = True
         self.mtu_size = 256
         self.fail_connect = None
@@ -45,6 +46,9 @@ class _FakeBleakClient:
 
     async def write_gatt_char(self, uuid, data, response=True):
         self.calls.append(("write", uuid, bytes(data), response))
+        # Per-packet record: the chunking tests assert on the actual
+        # split, which is what the platform really sees.
+        self.writes.append(bytes(data))
         if self.fail_write:
             raise self.fail_write
 
@@ -97,6 +101,55 @@ class PrintPacketTests(unittest.TestCase):
         self.assertIn("rx 2 bytes", line)
         self.assertIn("41 01", line)
         self.assertIn("'A.'", line)   # non-printable rendered as dot
+
+
+class WriteChunkingTests(_BleakInjection):
+    """Writes must be split by the negotiated size, BY US.
+
+    Bleak does not chunk (verified in both the CoreBluetooth and
+    BlueZ backends), and on this path an oversized write fails
+    SILENTLY: an ATT Write Command has no error response by spec, and
+    MicroPython truncates a full characteristic buffer while still
+    returning success. So the split has to happen here or bytes
+    vanish with nothing raised anywhere."""
+
+    def test_large_write_is_split_by_mtu(self):
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        client = _FakeBleakModule.client
+        client.writes = []
+        asyncio.run(link.write(b"x" * 1000))
+        # mtu_size 256 on the fake -> 253-byte payloads.
+        self.assertEqual([len(w) for w in client.writes],
+                         [253, 253, 253, 241])
+        self.assertEqual(b"".join(client.writes), b"x" * 1000)
+
+    def test_small_write_is_a_single_packet(self):
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        client = _FakeBleakModule.client
+        client.writes = []
+        asyncio.run(link.write(b"\r\x03\x03"))
+        self.assertEqual(len(client.writes), 1)
+
+    def test_max_write_without_response_size_wins_when_smaller(self):
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        client = _FakeBleakModule.client
+        client.max_write_without_response_size = 100
+        client.writes = []
+        try:
+            asyncio.run(link.write(b"y" * 250))
+            self.assertEqual([len(w) for w in client.writes], [100, 100, 50])
+        finally:
+            del client.max_write_without_response_size
+
+    def test_write_failure_still_raises_nuserror(self):
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        client = _FakeBleakModule.client
+
+        async def _boom(*a, **k):
+            raise RuntimeError("gatt down")
+        client.write_gatt_char = _boom
+        with self.assertRaises(NUSError):
+            asyncio.run(link.write(b"z" * 500))
 
 
 class ConnectTests(_BleakInjection):
@@ -314,3 +367,25 @@ class MissingBleakTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NonBlockingReadTests(_BleakInjection):
+    def test_timeout_zero_returns_buffered_data_without_waiting(self):
+        # timeout=0 with data already notified must return it, not
+        # bail out early — the run loop's pushback path depends on it.
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        _FakeBleakModule.client.notify_cb(None, b"queued")
+        self.assertEqual(asyncio.run(link.read(timeout=0)), b"queued")
+
+    def test_timeout_zero_with_nothing_buffered_returns_empty(self):
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        self.assertEqual(asyncio.run(link.read(timeout=0)), b"")
+
+    def test_timeout_zero_with_event_set_but_no_bytes(self):
+        # The race the code comments describe: the event is set by a
+        # notification whose bytes have already been drained. A
+        # non-blocking read must fall through and return empty rather
+        # than block or mis-report.
+        link = asyncio.run(NUSLink.connect("RobotA"))
+        link._rx_event.set()
+        self.assertEqual(asyncio.run(link.read(timeout=0)), b"")
