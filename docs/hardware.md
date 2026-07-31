@@ -59,6 +59,7 @@ The serial-bus build needs very few pins — that's most of its charm:
 |-------------------|---------|----------------------|
 | I2C0 (SDA, SCL)   | 15, 16  | TCA9548A mux (0x70) + colour sensors behind it, IMU (BNO055, 0x28), shared bus |
 | UART1 (TX, RX)    | 14, 6   | URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained |
+| WS2812 data       | 21      | Addressable RGB LED strip / ×8 stick DIN ({mod}`openbricks.drivers.ws2812`) — on boards that break out the header corner next to 5 V/GND, this is the free pin beside the reserved 19/20 USB pair |
 
 Pin gotchas on the ESP32-S3:
 
