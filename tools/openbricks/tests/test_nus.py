@@ -106,6 +106,11 @@ class ConnectTests(_BleakInjection):
         self.assertEqual(_FakeBleakModule.last_scan, ("RobotA", 2.0))
         self.assertIn("connect", client.calls)
         self.assertIn(("start_notify", _nus.UART_TX_UUID), client.calls)
+        # Per-stage startup timings are captured for diagnostics.
+        self.assertEqual(sorted(link.timings),
+                         ["connect", "scan", "subscribe"])
+        for stage, seconds in link.timings.items():
+            self.assertGreaterEqual(seconds, 0.0, stage)
         # Hub sends a packet: counters bump and read() returns it.
         client.notify_cb(None, b"hello")
         self.assertEqual(asyncio.run(link.read(timeout=0.1)), b"hello")
@@ -185,6 +190,8 @@ class ConnectTests(_BleakInjection):
             sys.stderr = orig
         out = err.getvalue()
         self.assertIn("[debug] connected, mtu=256", out)
+        self.assertIn("[debug] timing: scan", out)
+        self.assertIn("BLE total", out)
         self.assertIn("rx 1 bytes", out)
         self.assertEqual(asyncio.run(link.read(timeout=0)), b"\x04")
 
