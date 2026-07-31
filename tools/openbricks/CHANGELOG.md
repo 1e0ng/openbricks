@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.31.0 — staging streams at full link speed (goodbye ack wall)
+
+1.30.0 cut the wire bytes; this cuts the pacing. The 128-byte
+raw-paste window (fixed in MicroPython core — the ESP32 stdin ring
+is a hardcoded 260-byte array shared with USB, so raising it would
+mean forking upstream) capped staging at ~0.5 KB/s regardless of
+payload size. Large chunks now stage in two phases: a small
+(~0.9 KB) RECEIVER program rides the windowed raw paste, then the
+sealed zlib+XOR+base64 payload is written straight into the
+receiver's `sys.stdin` read at full BLE speed — the hub-side BLE
+REPL buffers rx in an elastic bytearray, so nothing windows the
+bulk. The receiver unseals with its own NVS name (same 1.30.0
+binding), writes the file, and echoes the sha256 of the plaintext
+it wrote; the host verifies the digest before proceeding — a
+corrupted or mis-keyed transfer aborts loudly instead of launching
+a half-written program. Bench math: only ~0.9 KB of a 7.9 KB
+script's transfer is still window-paced (was all 5.2 KB in 1.30.0,
+all 8.3 KB in 1.29.x) — staging should drop from ~11.8 s to ~3 s.
+Tiny `-c` snippets keep the single-paste plain framing. No firmware
+change — the receiver travels with every transfer.
+
 ## 1.30.0 — staging is compressed and bound to the addressed hub
 
 Bench (`--debug` capture, 2026-07-31): staging a 7.9 KB script took
