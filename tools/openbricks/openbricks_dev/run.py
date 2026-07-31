@@ -376,25 +376,37 @@ def rtc_sync_lines():
 _STAGE_CHUNK_BYTES = _MAX_SCRIPT_BYTES
 
 
-# Chunks at or above this size take the sealed STREAM path: a small
-# receiver program is pasted through the (128-byte-windowed) raw
-# paste, then the zlib+XOR+base64 payload is written at FULL link
-# speed straight into the receiver's stdin read — the BLE REPL's rx
-# buffer is an elastic bytearray, so no windowing paces the bulk.
-# Rationale (bench, 2026-07-31/08-01, --debug captures): raw-paste
-# flow control caps ~0.5 KB/s over BLE — a 7.9 KB script measured
-# ~16.6 s fully windowed, ~11.8 s windowed-but-compressed; only the
-# ~0.8 KB receiver stays window-paced here, the payload rides at
-# link speed. The window itself can't be raised without patching
-# MicroPython core (the ESP32 stdin ring is a hardcoded 260-byte
-# array shared with USB raw-paste). Tiny payloads (interactive
-# ``-c`` snippets) stay in plain repr framing — receiver overhead
-# isn't worth it below this line. The requirements — ``deflate`` /
-# ``hashlib`` extmods (on every openbricks build and the unix test
-# port), ``sys.stdin.buffer.readinto``, a flashed hub name — fail
-# LOUDLY via the staged program's own exception if ever absent; no
-# silent downgrade.
+# Chunks at or above this size go over the wire zlib-compressed,
+# keystream-XORed, and base64-framed; the hub inverts all three.
+# Rationale (bench, 2026-07-31, --debug capture): raw-paste flow
+# control grants a 128-byte window, so staging is paced at one window
+# per BLE ack round trip — a 7.9 KB script measured ~16.6 s. Python
+# source deflates 3-4x and base64 re-inflates by only 1.33x, while
+# the old ``repr()`` framing EXPANDED unicode-heavy source (every
+# em-dash became a 6-char escape). Net on-wire: ~0.6x of the raw
+# size → staging time drops proportionally. Tiny payloads
+# (interactive ``-c`` snippets) stay in plain repr framing — the
+# import + header overhead isn't worth it below this line. The
+# firmware requirements (``deflate``/``hashlib`` extmods, enabled on
+# every openbricks build and the unix test port; a flashed hub name)
+# fail LOUDLY via the staged program's own exception if ever absent —
+# no silent downgrade.
 _COMPRESS_MIN_BYTES = 512
+
+# WHY NOT STREAMED (1.31.0 tried, 1.33.0 reverted): staging the
+# payload through the receiver's ``sys.stdin`` after the raw paste
+# ends does NOT work on the hub — the pasted program executes
+# instantly with empty stdout AND empty stderr, i.e. as if nothing
+# was compiled, so the host's first payload chunk is answered by the
+# end-of-execution 0x04 instead of an ack. It reproduced on two
+# different firmware builds (1.32.0 and 1.32.1) and its host-side
+# "verification" was bogus: the check fed the program from a FILE
+# with the payload on a pipe, which is not the raw-paste path at
+# all. The embedded form below is the version that has actually
+# completed a staging on hardware (11.8 s for a 7.9 KB script at the
+# old 128-byte window; the 1.32.x window bump is what makes it fast).
+# Don't re-attempt streaming without a way to verify it on the real
+# BLE raw-paste path first.
 
 # The XOR layer's keystream: SHA-256 over key + nonce + the block's
 # byte offset, 32 bytes per block. The key is the HUB NAME — which is
@@ -427,95 +439,40 @@ def _keystream_xor(data, key, nonce):
     return bytes(out)
 
 
-def _seal_chunk(chunk, hub_name):
-    """Seal one chunk for the wire: zlib(9) → hub-name-keyed
-    keystream XOR (fresh nonce) → base64. Returns ``(nonce, b64,
-    digest_hex)`` where ``digest_hex`` is sha256 of the PLAINTEXT
-    chunk — the hub echoes it back after decode+write, closing the
-    integrity loop end to end."""
-    import base64
-    import hashlib
-    import os
-    import zlib
-    nonce = os.urandom(8)
-    sealed = _keystream_xor(
-        zlib.compress(chunk, 9), hub_name.encode(), nonce)
-    return (nonce, base64.b64encode(sealed),
-            hashlib.sha256(chunk).hexdigest())
-
-
-# Marker line the receiver prints after a verified decode+write; the
-# host compares the hex that follows against its own plaintext digest.
-_STAGED_MARKER = b"OBK-STAGED:"
-
-# Byte the receiver prints after each ``_STREAM_CHUNK_BYTES`` of
-# payload it has consumed; the host waits for it before sending the
-# next chunk. This bounds unread bytes in flight to one chunk, so the
-# stream can never outrun the hub's BLE GATT rx buffer no matter how
-# fast the link is — the same class of overflow that the 1.32.0
-# window bump hit on the paste path, closed by design here instead of
-# by buffer sizing alone. Chunk << ble_repl._RX_BUFFER_BYTES (8 KB).
-_STREAM_ACK = b"\x06"
-_STREAM_CHUNK_BYTES = 2048
-
-
-def _compose_stream_receiver(target_path, first, nonce, b64_len):
-    """The hub-side receiver for one streamed chunk: read
-    ``b64_len`` bytes from stdin in ``_STREAM_CHUNK_BYTES`` pieces,
-    printing ``_STREAM_ACK`` after each so the host never has more
-    than one chunk unread in flight (bounded by design — see the
-    constant), unseal with a key derived from the hub's OWN NVS name,
-    write the file, and print the plaintext digest for the host to
-    verify. Base64 keeps the stream free of the 0x03 interrupt char
-    that would kill this program mid-read."""
+def _compose_stage_chunk(target_path, chunk, first, hub_name):
+    """One staging step: append ``chunk`` to ``target_path`` (create
+    on the first). Large chunks ship deflate + hub-name-keyed XOR +
+    base64 and are inverted hub-side (see ``_COMPRESS_MIN_BYTES`` /
+    ``_XOR_BLOCK``); small ones use plain ``repr()`` framing. Both
+    round-trip any bytes."""
     mode = "wb" if first else "ab"
-    return (
-        "import sys, io, binascii, hashlib, deflate, openbricks\n"
-        "_hn = openbricks.HUB_NAME\n"
-        "if _hn is None:\n"
-        "    raise OSError('hub name unset; cannot derive the "
-        "staging key')\n"
-        "_k = _hn.encode()\n"
-        "_sn = %s\n"
-        "_n = %d\n"
-        "_b = bytearray(_n)\n"
-        "_mv = memoryview(_b)\n"
-        "_i = 0\n"
-        "_c = %d\n"
-        "_s = sys.stdin.buffer\n"
-        "while _i < _n:\n"
-        "    _e = _i + _c\n"
-        "    if _e > _n:\n"
-        "        _e = _n\n"
-        "    while _i < _e:\n"
-        "        _r = _s.readinto(_mv[_i:_e])\n"
-        "        if not _r:\n"
-        "            raise OSError('stdin EOF during staging stream')\n"
-        "        _i += _r\n"
-        "    sys.stdout.write('\\x06')\n"
-        "_ct = binascii.a2b_base64(bytes(_b))\n"
-        "_ks = b''.join([hashlib.sha256("
-        "_k + _sn + (_j * %d).to_bytes(4, 'big')).digest() "
-        "for _j in range((len(_ct) + %d) // %d)])[:len(_ct)]\n"
-        "_pt = (int.from_bytes(_ct, 'big') ^ "
-        "int.from_bytes(_ks, 'big')).to_bytes(len(_ct), 'big')\n"
-        "_data = deflate.DeflateIO(io.BytesIO(_pt), deflate.ZLIB)"
-        ".read()\n"
-        "with open(%r, %r) as f:\n    f.write(_data)\n"
-        "print('%s' + binascii.hexlify("
-        "hashlib.sha256(_data).digest()).decode())\n"
-        % (repr(nonce), b64_len, _STREAM_CHUNK_BYTES,
-           _XOR_BLOCK, _XOR_BLOCK - 1, _XOR_BLOCK,
-           target_path, mode,
-           _STAGED_MARKER.decode())).encode()
-
-
-def _compose_stage_chunk(target_path, chunk, first):
-    """Plain embedded staging step for SMALL chunks (< the streaming
-    threshold): append ``chunk`` to ``target_path`` (create on the
-    first). ``repr()`` framing round-trips any bytes. Large chunks
-    take the streamed path — see ``_compose_stream_receiver``."""
-    mode = "wb" if first else "ab"
+    if len(chunk) >= _COMPRESS_MIN_BYTES:
+        import base64
+        import os
+        import zlib
+        nonce = os.urandom(8)
+        sealed = _keystream_xor(
+            zlib.compress(chunk, 9), hub_name.encode(), nonce)
+        b64 = base64.b64encode(sealed)
+        return (
+            "import deflate, io, binascii, hashlib, openbricks\n"
+            "_hn = openbricks.HUB_NAME\n"
+            "if _hn is None:\n"
+            "    raise OSError('hub name unset; cannot derive the "
+            "staging key')\n"
+            "_k = _hn.encode()\n"
+            "_sn = %s\n"
+            "_ct = binascii.a2b_base64(%s)\n"
+            "_ks = b''.join([hashlib.sha256("
+            "_k + _sn + (_i * %d).to_bytes(4, 'big')).digest() "
+            "for _i in range((len(_ct) + %d) // %d)])[:len(_ct)]\n"
+            "_pt = (int.from_bytes(_ct, 'big') ^ "
+            "int.from_bytes(_ks, 'big')).to_bytes(len(_ct), 'big')\n"
+            "_d = deflate.DeflateIO(io.BytesIO(_pt), deflate.ZLIB)\n"
+            "with open(%r, %r) as f:\n    f.write(_d.read())\n"
+            % (repr(nonce), repr(b64),
+               _XOR_BLOCK, _XOR_BLOCK - 1, _XOR_BLOCK,
+               target_path, mode)).encode()
     return ("with open(%r, %r) as f:\n    f.write(%s)\n"
             % (target_path, mode, repr(chunk))).encode()
 
@@ -555,82 +512,26 @@ async def _exec_step(blink, link, program, what):
         raise RunError("unexpected byte %r after %s" % (prompt, what))
 
 
-async def _stream_stage_step(blink, link, target_path, chunk, first,
-                             hub_name, what):
-    """Stage one sealed chunk via the stream receiver: paste the
-    (small, windowed) receiver program, then blast the base64 payload
-    at full link speed, then verify the hub's echoed plaintext digest.
-    Any mismatch or missing marker raises — a chunk is either proven
-    on the hub or the run dies loudly."""
-    import hashlib  # noqa: F401  (host digest computed in _seal_chunk)
-    nonce, b64, want_digest = _seal_chunk(chunk, hub_name)
-    receiver = _compose_stream_receiver(target_path, first, nonce,
-                                        len(b64))
-    await _raw_paste_upload(blink, link, receiver)
-    # Ack-paced: never more than one chunk unread on the hub, so the
-    # stream cannot overflow its BLE rx buffer regardless of link
-    # speed (see _STREAM_CHUNK_BYTES).
-    for off in range(0, len(b64), _STREAM_CHUNK_BYTES):
-        blink._step = ("%s (streaming payload %d/%d bytes)"
-                       % (what, min(off + _STREAM_CHUNK_BYTES, len(b64)),
-                          len(b64)))
-        await link.write(b64[off:off + _STREAM_CHUNK_BYTES])
-        ack = await blink.read_exact(1, timeout=30.0)
-        if ack != _STREAM_ACK:
-            raise RunError(
-                "hub did not ack streamed payload during %s (got %r at "
-                "offset %d) — the receiver died mid-transfer"
-                % (what, ack, off))
-    blink._step = "%s (waiting for the hub's staged digest)" % what
-    out = await blink.read_until(_CTRL_D, timeout=60.0)
-    err = await blink.read_until(_CTRL_D)
-    prompt = await blink.read_exact(1, timeout=10.0)
-    if err.strip():
-        raise RunError("hub error during %s:\n%s"
-                       % (what, err.decode("utf-8", "replace")))
-    if prompt != b">":
-        raise RunError("unexpected byte %r after %s" % (prompt, what))
-    idx = out.find(_STAGED_MARKER)
-    if idx < 0:
-        raise RunError(
-            "hub did not confirm the staged chunk during %s "
-            "(no %s line in output: %r)"
-            % (what, _STAGED_MARKER.decode(), out[:120]))
-    got_digest = (out[idx + len(_STAGED_MARKER):]
-                  .split(b"\r", 1)[0].split(b"\n", 1)[0]
-                  .strip().decode("ascii", "replace"))
-    if got_digest != want_digest:
-        raise RunError(
-            "staged-chunk digest mismatch during %s: hub wrote %s, "
-            "host sent %s — transfer corrupted, aborting"
-            % (what, got_digest, want_digest))
-
-
 async def _stage_file(blink, link, target_path, payload, hub_name):
     """Write ``payload`` to ``target_path`` in bounded chunks so peak
     hub RAM is O(_STAGE_CHUNK_BYTES) regardless of script size.
-
-    Chunks at/above ``_COMPRESS_MIN_BYTES`` go via the sealed STREAM
-    path (full-link-speed payload after a small windowed receiver
-    paste, hub-name-keyed, digest-verified); smaller ones embed
-    plainly in a single windowed paste."""
+    ``hub_name`` keys the wire framing of large chunks — see
+    ``_compose_stage_chunk``."""
     for i in range(0, len(payload), _STAGE_CHUNK_BYTES):
         chunk = payload[i:i + _STAGE_CHUNK_BYTES]
-        what = "staging %s (%d/%d bytes)" % (
-            target_path, min(i + _STAGE_CHUNK_BYTES, len(payload)),
-            len(payload))
-        if len(chunk) >= _COMPRESS_MIN_BYTES:
-            await _stream_stage_step(blink, link, target_path, chunk,
-                                     i == 0, hub_name, what)
-        else:
-            await _exec_step(
-                blink, link,
-                _compose_stage_chunk(target_path, chunk, first=(i == 0)),
-                what)
+        program = _compose_stage_chunk(target_path, chunk,
+                                       first=(i == 0), hub_name=hub_name)
+        await _exec_step(
+            blink, link, program,
+            "staging %s (%d/%d bytes)" % (
+                target_path, min(i + _STAGE_CHUNK_BYTES, len(payload)),
+                len(payload)))
     if not payload:
-        await _exec_step(blink, link,
-                         _compose_stage_chunk(target_path, b"", first=True),
-                         "staging %s (empty)" % target_path)
+        await _exec_step(
+            blink, link,
+            _compose_stage_chunk(target_path, b"", first=True,
+                                 hub_name=hub_name),
+            "staging %s (empty)" % target_path)
 
 
 async def _run_async(name, script_path, scan_timeout, debug=False, command=None):

@@ -137,8 +137,8 @@ class ComposeTests(unittest.TestCase):
     """Stage-chunk + runner composition — pure functions, no BLE."""
 
     def test_stage_chunk_first_truncates_then_appends(self):
-        first = run_mod._compose_stage_chunk("/program.py", b"abc", True)
-        rest = run_mod._compose_stage_chunk("/program.py", b"def", False)
+        first = run_mod._compose_stage_chunk("/program.py", b"abc", True, _HUB)
+        rest = run_mod._compose_stage_chunk("/program.py", b"def", False, _HUB)
         self.assertIn(b"'wb'", first)
         self.assertIn(b"'ab'", rest)
         self.assertIn(b"'/program.py'", first)
@@ -148,7 +148,7 @@ class ComposeTests(unittest.TestCase):
         # The whole point: each staged program must fit a fragmented
         # heap. Worst-case repr expansion (pure binary) stays ~4x.
         chunk = bytes(range(256)) * 2   # 512 binary bytes
-        prog = run_mod._compose_stage_chunk("/program.py", chunk, True)
+        prog = run_mod._compose_stage_chunk("/program.py", chunk, True, _HUB)
         self.assertLess(len(prog), 2600)
 
     def test_bootstrap_calls_launcher_run_program(self):
@@ -203,7 +203,7 @@ class ComposeTests(unittest.TestCase):
         # Any bytes the user script could contain — NULs, high bits,
         # quotes — must survive ``repr()`` wrapping.
         tricky = b"\x00\xff\r\n'\"\\"
-        prog = run_mod._compose_stage_chunk("/program.py", tricky, True)
+        prog = run_mod._compose_stage_chunk("/program.py", tricky, True, _HUB)
         self.assertIn(repr(tricky).encode(), prog)
 
 
@@ -453,8 +453,6 @@ class _BurstMeasuringLink(_ProtocolLink):
         self._burst = 0
 
     async def write(self, data):
-        # Control bytes aren't program payload; the handshake request
-        # and the final Ctrl-D don't count toward a paste burst.
         if data not in (run_mod._RAW_PASTE_REQUEST, run_mod._CTRL_D):
             self._burst += len(data)
             if self._burst > self.max_burst:
@@ -485,23 +483,19 @@ def _firmware_int(path, needle, sep):
 
 
 class HostBurstVsHubBufferTests(unittest.TestCase):
-    """REGRESSION (1.32.0 → 1.32.1), behavioural half.
+    """REGRESSION (1.32.0 -> 1.32.1), behavioural half.
 
     ``BleRxBufferTests`` (firmware suite) pins the two constants
     against each other arithmetically. This drives the REAL host
-    protocol against a hub model and measures what the host actually
-    bursts, then checks it against the rx buffer the firmware really
-    ships — so the guard holds even if the flow-control code changes
-    how it batches writes."""
+    protocol against a hub model advertising the shipped window and
+    measures what the host actually bursts, so the guard holds even
+    if the flow-control code changes how it batches writes."""
 
     def _paste(self, window):
         link = _BurstMeasuringLink(window)
         blink = run_mod._BufferedLink(link)
-        # A receiver-sized program: the exact thing that got
-        # truncated on the bench.
-        nonce, b64, _ = run_mod._seal_chunk(b"x" * 4096, _HUB)
-        program = run_mod._compose_stream_receiver(
-            "/program.py", True, nonce, len(b64))
+        program = run_mod._compose_stage_chunk(
+            "/program.py", b"x" * 4096, True, "ls")
         _drive(run_mod._raw_paste_upload(blink, link, program))
         return link.max_burst
 
@@ -515,16 +509,14 @@ class HostBurstVsHubBufferTests(unittest.TestCase):
         self.assertLessEqual(
             burst, rx,
             "host bursts %d bytes with the shipped window but the hub's "
-            "BLE rx buffer is only %d — NimBLE drops the excess and the "
+            "BLE rx buffer is only %d - NimBLE drops the excess and the "
             "pasted program is silently truncated (the 1.32.0 bug)"
             % (burst, rx))
 
     def test_the_1_32_0_combination_would_overflow(self):
         # Documents the shipped-broken pairing: window 2048 against
-        # the old 512-byte buffer. If this ever stops overflowing,
-        # the model no longer reflects the failure it guards.
-        burst = self._paste(2048)
-        self.assertGreater(burst, 512)
+        # the old 512-byte buffer.
+        self.assertGreater(self._paste(2048), 512)
 
 
 class RawPasteProtocolTests(unittest.TestCase):
@@ -839,39 +831,22 @@ class ChunkedStagingTests(unittest.TestCase):
         the exact wrapper overhead is what pushed a 65536-byte chunk
         just past an 8-window boundary and caught this the first
         time (65536 raw vs. 65590 on the wire)."""
-        import hashlib
         chunk_size = run_mod._STAGE_CHUNK_BYTES
         window = 0x2000
         offsets = list(range(0, len(payload), chunk_size)) or [0]
         responses = []
         for off in offsets:
             chunk = payload[off:off + chunk_size]
-            if len(chunk) >= run_mod._COMPRESS_MIN_BYTES:
-                # STREAM framing: a small receiver program (always
-                # well under one 8 KB window — no mid-paste acks),
-                # then the hub's stdout carries the digest of the
-                # plaintext chunk it decoded and wrote.
-                digest = hashlib.sha256(chunk).hexdigest().encode()
-                _n, b64len = 0, len(run_mod._seal_chunk(chunk, _HUB)[1])
-                n_chunks = -(-b64len // run_mod._STREAM_CHUNK_BYTES)
-                responses += [
-                    _R_SUPPORTED + _WINDOW_8K,      # receiver paste ack
-                    _CTRL_D,                        # end-of-paste ack
-                ]
-                # One ack per streamed chunk (bounded in-flight).
-                responses += [run_mod._STREAM_ACK] * n_chunks
-                responses += [
-                    run_mod._STAGED_MARKER + digest + b"\r\n" + _CTRL_D,
-                    _CTRL_D,                        # empty stderr
-                    b">",
-                ]
-            else:
-                program = run_mod._compose_stage_chunk(
-                    "/program.py", chunk, first=(off == 0))
-                acks_needed = max(0, -(-len(program) // window) - 1)
-                responses += (
-                    [_R_SUPPORTED + _WINDOW_8K] + [_FLOW_ACK] * acks_needed
-                    + [_CTRL_D, _CTRL_D, _CTRL_D, b">"])
+            # NOTE: the compressed framing embeds a random nonce, so
+            # this program is not byte-identical to the one
+            # _stage_file will build — but its LENGTH is (same chunk,
+            # same-size nonce/b64), which is all the ack math needs.
+            program = run_mod._compose_stage_chunk(
+                "/program.py", chunk, first=(off == 0), hub_name=_HUB)
+            acks_needed = max(0, -(-len(program) // window) - 1)
+            responses += (
+                [_R_SUPPORTED + _WINDOW_8K] + [_FLOW_ACK] * acks_needed
+                + [_CTRL_D, _CTRL_D, _CTRL_D, b">"])
         link = _ProtocolLink(responses)
         blink = run_mod._BufferedLink(link)
         _drive(run_mod._stage_file(blink, link, "/program.py", payload,
@@ -901,30 +876,23 @@ class ChunkedStagingTests(unittest.TestCase):
 
     @staticmethod
     def _decode_staged_writes(writes, hub_name=None):
-        """Recover the payload bytes each staged step would write —
+        """Recover the payload bytes each staged program would write —
         the exact inverse a hub named ``hub_name`` applies. Handles
-        BOTH framings: plain embedded ``f.write(<repr>)`` programs,
-        and the STREAM form where a receiver program (carrying the
-        nonce + expected length) is followed by a separate write
-        holding the sealed base64 payload."""
+        BOTH framings: plain ``f.write(<repr>)`` and the sealed
+        deflate + hub-name-keyed XOR + base64 form."""
         import base64
         import zlib
         hub_name = _HUB if hub_name is None else hub_name
         chunks = []
-        pending = None   # (nonce, b64_len) from the last receiver
         for w in writes:
-            if b"readinto" in w and b"_sn = " in w:
+            if b"a2b_base64(" in w:
                 nonce = eval(w.split(b"_sn = ", 1)[1].split(b"\n", 1)[0])
-                n = int(w.split(b"_n = ", 1)[1].split(b"\n", 1)[0])
-                pending = (nonce, n)
-            elif pending is not None and len(w) == pending[1]:
-                nonce, _ = pending
-                pending = None
-                sealed = base64.b64decode(w)
+                lit = w.split(b"a2b_base64(", 1)[1].split(b")", 1)[0]
+                sealed = base64.b64decode(eval(lit))
                 comp = run_mod._keystream_xor(
                     sealed, hub_name.encode(), nonce)
                 chunks.append(zlib.decompress(comp))
-            elif b"f.write(" in w and b"_data" not in w:
+            elif b"f.write(" in w:
                 lit = w.split(b"f.write(", 1)[1].rsplit(b")", 1)[0]
                 chunks.append(eval(lit))
         return b"".join(chunks)
@@ -947,110 +915,21 @@ class ChunkedStagingTests(unittest.TestCase):
         self.assertNotIn(b"deflate", writes)
         self.assertEqual(self._decode_staged_writes(link.writes), payload)
 
-    def test_large_payload_streams_sealed_after_a_small_receiver(self):
-        # At/above the threshold: a SMALL receiver program rides the
-        # windowed raw paste, and the sealed payload follows as its
-        # own full-link-speed write. Only the receiver is paced by
-        # the 128-byte window, so its size bounds the slow part.
+    def test_large_payload_stages_compressed_and_smaller(self):
+        # At/above the threshold the wire program must carry the
+        # sealed (deflate + keyed XOR + b64) form and actually BE
+        # smaller than the raw payload for realistic compressible
+        # source (the whole point: staging is paced by the 128-byte
+        # raw-paste window, so bytes on the wire ≈ time).
         payload = (b"# a comment line that compresses well \xe2\x80\x94 yes\n"
                    * 200)   # ~9 KB, unicode em-dash included
         link = self._stage(payload)
-        receiver = next(w for w in link.writes if b"readinto" in w)
-        self.assertIn(b"deflate.DeflateIO", receiver)
-        self.assertIn(b"deflate.ZLIB", receiver)
-        self.assertIn(b"openbricks.HUB_NAME", receiver)
-        self.assertIn(run_mod._STAGED_MARKER, receiver)
-        self.assertLess(len(receiver), 1200)   # window-paced part stays tiny
-        n = int(receiver.split(b"_n = ", 1)[1].split(b"\n", 1)[0])
-        stream = next(w for w in link.writes if len(w) == n)
-        self.assertLess(len(stream), len(payload) // 2)   # compression won
+        program = next(w for w in link.writes if b"a2b_base64(" in w)
+        self.assertIn(b"deflate.DeflateIO", program)
+        self.assertIn(b"deflate.ZLIB", program)
+        self.assertIn(b"openbricks.HUB_NAME", program)
+        self.assertLess(len(program), len(payload) // 2)
         self.assertEqual(self._decode_staged_writes(link.writes), payload)
-
-    def test_digest_mismatch_raises(self):
-        # The hub echoes the sha256 of what it actually decoded and
-        # wrote; a corrupted transfer must abort the run, not launch
-        # a half-written program.
-        payload = b"x" * 2048
-        n_chunks = -(-len(run_mod._seal_chunk(payload, _HUB)[1])
-                     // run_mod._STREAM_CHUNK_BYTES)
-        responses = ([_R_SUPPORTED + _WINDOW_8K, _CTRL_D]
-                     + [run_mod._STREAM_ACK] * n_chunks
-                     + [
-            run_mod._STAGED_MARKER + b"0" * 64 + b"\r\n" + _CTRL_D,
-            _CTRL_D, b">",
-        ])
-        link = _ProtocolLink(responses)
-        blink = run_mod._BufferedLink(link)
-        try:
-            _drive(run_mod._stage_file(blink, link, "/program.py",
-                                       payload, _HUB))
-        except run_mod.RunError as e:
-            self.assertIn("digest mismatch", str(e))
-        else:
-            self.fail("expected RunError on digest mismatch")
-
-    def test_payload_is_ack_paced_in_bounded_chunks(self):
-        # 1.32.1: unread bytes on the hub are bounded by ONE chunk,
-        # so the stream can't overflow the BLE rx buffer no matter
-        # how fast the link is (the 1.32.0 overflow class, closed by
-        # design rather than by buffer sizing alone).
-        payload = b"y" * 12000
-        link = self._stage(payload)
-        receiver = next(w for w in link.writes if b"readinto" in w)
-        n = int(receiver.split(b"_n = ", 1)[1].split(b"\n", 1)[0])
-        # Walk the writes AFTER the receiver paste (and its trailing
-        # Ctrl-D) until the receiver's declared length is accounted
-        # for — those are the payload chunks.
-        idx = next(i for i, w in enumerate(link.writes) if b"readinto" in w)
-        streamed, total = [], 0
-        for w in link.writes[idx + 1:]:
-            if total >= n:
-                break
-            if w == _CTRL_D:      # end-of-paste marker, not payload
-                continue
-            streamed.append(w)
-            total += len(w)
-        self.assertEqual(total, n)
-        for w in streamed:
-            self.assertLessEqual(len(w), run_mod._STREAM_CHUNK_BYTES)
-        self.assertIn(b"sys.stdout.write('\\x06')", receiver)
-        self.assertEqual(self._decode_staged_writes(link.writes), payload)
-
-    def test_missing_stream_ack_raises(self):
-        payload = b"z" * 6000
-        responses = [
-            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
-            b"\x15",                       # NAK-ish: not the ack byte
-        ]
-        link = _ProtocolLink(responses)
-        blink = run_mod._BufferedLink(link)
-        try:
-            _drive(run_mod._stage_file(blink, link, "/program.py",
-                                       payload, _HUB))
-        except run_mod.RunError as e:
-            self.assertIn("did not ack streamed payload", str(e))
-        else:
-            self.fail("expected RunError on missing stream ack")
-
-    def test_missing_staged_marker_raises(self):
-        payload = b"x" * 2048
-        n_chunks = -(-len(run_mod._seal_chunk(payload, _HUB)[1])
-                     // run_mod._STREAM_CHUNK_BYTES)
-        responses = ([_R_SUPPORTED + _WINDOW_8K, _CTRL_D]
-                     + [run_mod._STREAM_ACK] * n_chunks
-                     + [
-            b"something unexpected\r\n" + _CTRL_D,
-            _CTRL_D, b">",
-        ])
-        link = _ProtocolLink(responses)
-        blink = run_mod._BufferedLink(link)
-        try:
-            _drive(run_mod._stage_file(blink, link, "/program.py",
-                                       payload, _HUB))
-        except run_mod.RunError as e:
-            self.assertIn("did not confirm", str(e))
-        else:
-            self.fail("expected RunError on missing marker")
 
     def test_sealed_payload_only_decodes_with_the_addressed_name(self):
         # The binding property the hub-name key exists for: a hub
