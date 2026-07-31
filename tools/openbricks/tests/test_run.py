@@ -129,12 +129,16 @@ _CTRL_D      = b"\x04"
 _FLOW_ACK    = b"\x01"  # raw-paste mid-transfer window-refill byte
 
 
+# Hub name used by staging fixtures — keys the sealed framing.
+_HUB = "ls"
+
+
 class ComposeTests(unittest.TestCase):
     """Stage-chunk + runner composition — pure functions, no BLE."""
 
     def test_stage_chunk_first_truncates_then_appends(self):
-        first = run_mod._compose_stage_chunk("/program.py", b"abc", True)
-        rest = run_mod._compose_stage_chunk("/program.py", b"def", False)
+        first = run_mod._compose_stage_chunk("/program.py", b"abc", True, _HUB)
+        rest = run_mod._compose_stage_chunk("/program.py", b"def", False, _HUB)
         self.assertIn(b"'wb'", first)
         self.assertIn(b"'ab'", rest)
         self.assertIn(b"'/program.py'", first)
@@ -144,7 +148,7 @@ class ComposeTests(unittest.TestCase):
         # The whole point: each staged program must fit a fragmented
         # heap. Worst-case repr expansion (pure binary) stays ~4x.
         chunk = bytes(range(256)) * 2   # 512 binary bytes
-        prog = run_mod._compose_stage_chunk("/program.py", chunk, True)
+        prog = run_mod._compose_stage_chunk("/program.py", chunk, True, _HUB)
         self.assertLess(len(prog), 2600)
 
     def test_bootstrap_calls_launcher_run_program(self):
@@ -199,7 +203,7 @@ class ComposeTests(unittest.TestCase):
         # Any bytes the user script could contain — NULs, high bits,
         # quotes — must survive ``repr()`` wrapping.
         tricky = b"\x00\xff\r\n'\"\\"
-        prog = run_mod._compose_stage_chunk("/program.py", tricky, True)
+        prog = run_mod._compose_stage_chunk("/program.py", tricky, True, _HUB)
         self.assertIn(repr(tricky).encode(), prog)
 
 
@@ -585,7 +589,7 @@ class HostInterruptForwardingTests(unittest.TestCase):
         async def _restore(l):
             restore_calls.append(1)
 
-        async def _stub_stage(blink, l, target_path, payload):
+        async def _stub_stage(blink, l, target_path, payload, hub_name):
             return None
 
         patches = [
@@ -750,15 +754,20 @@ class ChunkedStagingTests(unittest.TestCase):
         responses = []
         for off in offsets:
             chunk = payload[off:off + chunk_size]
+            # NOTE: the compressed framing embeds a random nonce, so
+            # this program is not byte-identical to the one
+            # _stage_file will build — but its LENGTH is (same chunk,
+            # same-size nonce/b64), which is all the ack math needs.
             program = run_mod._compose_stage_chunk(
-                "/program.py", chunk, first=(off == 0))
+                "/program.py", chunk, first=(off == 0), hub_name=_HUB)
             acks_needed = max(0, -(-len(program) // window) - 1)
             responses += (
                 [_R_SUPPORTED + _WINDOW_8K] + [_FLOW_ACK] * acks_needed
                 + [_CTRL_D, _CTRL_D, _CTRL_D, b">"])
         link = _ProtocolLink(responses)
         blink = run_mod._BufferedLink(link)
-        _drive(run_mod._stage_file(blink, link, "/program.py", payload))
+        _drive(run_mod._stage_file(blink, link, "/program.py", payload,
+                                   _HUB))
         return link
 
     def test_large_payload_splits_at_chunk_size(self):
@@ -782,17 +791,94 @@ class ChunkedStagingTests(unittest.TestCase):
         for pkt in pastes:
             self.assertLess(len(pkt), run_mod._STAGE_CHUNK_BYTES * 5)
 
+    @staticmethod
+    def _decode_staged_writes(writes, hub_name=None):
+        """Recover the payload bytes each staged program would write —
+        the exact inverse a hub named ``hub_name`` applies. Handles
+        BOTH framings: plain ``f.write(<repr>)`` and the sealed
+        deflate + hub-name-keyed XOR + base64 form."""
+        import base64
+        import zlib
+        hub_name = _HUB if hub_name is None else hub_name
+        chunks = []
+        for w in writes:
+            if b"a2b_base64(" in w:
+                nonce = eval(w.split(b"_sn = ", 1)[1].split(b"\n", 1)[0])
+                lit = w.split(b"a2b_base64(", 1)[1].split(b")", 1)[0]
+                sealed = base64.b64decode(eval(lit))
+                comp = run_mod._keystream_xor(
+                    sealed, hub_name.encode(), nonce)
+                chunks.append(zlib.decompress(comp))
+            elif b"f.write(" in w:
+                lit = w.split(b"f.write(", 1)[1].rsplit(b")", 1)[0]
+                chunks.append(eval(lit))
+        return b"".join(chunks)
+
     def test_payload_reassembles_in_order(self):
         payload = bytes(range(256)) * 5   # 1280 bytes, 1 chunk (< current
                                           # chunk size) — reassembly must
                                           # still hold with a single round.
         link = self._stage(payload)
-        chunks = []
-        for w in link.writes:
-            if b"f.write(" in w:
-                lit = w.split(b"f.write(", 1)[1].rsplit(b")", 1)[0]
-                chunks.append(eval(lit))
-        self.assertEqual(b"".join(chunks), payload)
+        self.assertEqual(self._decode_staged_writes(link.writes), payload)
+
+    def test_small_payload_stages_plain(self):
+        # Below _COMPRESS_MIN_BYTES (interactive -c snippets) the
+        # import + b64/zlib overhead isn't worth it: plain repr framing,
+        # no hub-side deflate dependency exercised.
+        payload = b"print(1)\n" * 10   # 90 bytes
+        self.assertLess(len(payload), run_mod._COMPRESS_MIN_BYTES)
+        link = self._stage(payload)
+        writes = b"".join(link.writes)
+        self.assertNotIn(b"deflate", writes)
+        self.assertEqual(self._decode_staged_writes(link.writes), payload)
+
+    def test_large_payload_stages_compressed_and_smaller(self):
+        # At/above the threshold the wire program must carry the
+        # sealed (deflate + keyed XOR + b64) form and actually BE
+        # smaller than the raw payload for realistic compressible
+        # source (the whole point: staging is paced by the 128-byte
+        # raw-paste window, so bytes on the wire ≈ time).
+        payload = (b"# a comment line that compresses well \xe2\x80\x94 yes\n"
+                   * 200)   # ~9 KB, unicode em-dash included
+        link = self._stage(payload)
+        program = next(w for w in link.writes if b"a2b_base64(" in w)
+        self.assertIn(b"deflate.DeflateIO", program)
+        self.assertIn(b"deflate.ZLIB", program)
+        self.assertIn(b"openbricks.HUB_NAME", program)
+        self.assertLess(len(program), len(payload) // 2)
+        self.assertEqual(self._decode_staged_writes(link.writes), payload)
+
+    def test_sealed_payload_only_decodes_with_the_addressed_name(self):
+        # The binding property the hub-name key exists for: a hub
+        # carrying a DIFFERENT name derives a different keystream and
+        # the deflate step blows up — a mis-targeted staging fails
+        # loudly instead of silently landing on the wrong robot.
+        # (NOT confidentiality: the name is public in every BLE
+        # advertisement — see the _XOR_BLOCK comment.)
+        import zlib
+        payload = b"print('hello')\n" * 100
+        link = self._stage(payload)
+        self.assertEqual(
+            self._decode_staged_writes(link.writes, hub_name=_HUB),
+            payload)
+        with self.assertRaises(zlib.error):
+            self._decode_staged_writes(link.writes, hub_name="intruder")
+
+    def test_nonce_varies_between_stagings(self):
+        payload = b"x" * 2048
+        w1 = next(w for w in self._stage(payload).writes
+                  if b"_sn = " in w)
+        w2 = next(w for w in self._stage(payload).writes
+                  if b"_sn = " in w)
+        n1 = w1.split(b"_sn = ", 1)[1].split(b"\n", 1)[0]
+        n2 = w2.split(b"_sn = ", 1)[1].split(b"\n", 1)[0]
+        self.assertNotEqual(n1, n2)
+
+    def test_compression_threshold_boundary(self):
+        at = self._stage(b"x" * run_mod._COMPRESS_MIN_BYTES)
+        below = self._stage(b"x" * (run_mod._COMPRESS_MIN_BYTES - 1))
+        self.assertIn(b"deflate", b"".join(at.writes))
+        self.assertNotIn(b"deflate", b"".join(below.writes))
 
     def test_hub_stderr_during_staging_raises_runerror(self):
         # e.g. OSError: 28 (filesystem full) while writing a chunk —
@@ -807,7 +893,7 @@ class ChunkedStagingTests(unittest.TestCase):
         blink = run_mod._BufferedLink(link)
         try:
             _drive(run_mod._stage_file(
-                blink, link, "/program.py", b"data"))
+                blink, link, "/program.py", b"data", _HUB))
         except run_mod.RunError as e:
             self.assertIn("OSError: 28", str(e))
         else:
@@ -825,7 +911,7 @@ class ChunkedStagingTests(unittest.TestCase):
         blink = run_mod._BufferedLink(link)
         try:
             _drive(run_mod._stage_file(
-                blink, link, "/program.py", b"data"))
+                blink, link, "/program.py", b"data", _HUB))
         except run_mod.RunError as e:
             self.assertIn("unexpected byte", str(e))
         else:

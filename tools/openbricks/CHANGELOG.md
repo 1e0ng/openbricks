@@ -3,6 +3,33 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.30.0 — staging is compressed and bound to the addressed hub
+
+Bench (`--debug` capture, 2026-07-31): staging a 7.9 KB script took
+~16.6 s of the run's ~20 s overhead — raw-paste flow control grants
+a 128-byte window, so wire bytes ≈ time, and the old `repr()`
+framing even inflated unicode-heavy source. Scripts ≥ 512 bytes now
+ship zlib-compressed, XORed with a SHA-256 keystream keyed on the
+**hub name + per-transfer nonce**, and base64-framed; the hub
+inverts all three using its own NVS name (`openbricks.HUB_NAME`)
+before writing `/program.py`. Measured on-wire size for that same
+script: 63% of raw (5.2 KB vs the old 8.3 KB) — staging time drops
+proportionally.
+
+Security honesty: the hub name is broadcast in every BLE
+advertisement, so the keyed layer is NOT confidentiality against
+link sniffing. What it provides: a mis-targeted staging fails
+loudly at decode instead of silently landing on a wrong robot, and
+casual on-air obfuscation of source. Real secrecy would need a
+per-hub secret as the key (possible future `flash --secret`).
+
+Tiny payloads (interactive `-c` snippets, < 512 B) keep the plain
+framing. Requirements — the `deflate`/`hashlib` extmods (on every
+openbricks firmware and the unix test port) and a flashed hub
+name — fail loudly via the staged program's own exception; there
+is no silent downgrade. Verified end-to-end on the MicroPython VM:
+correct name round-trips byte-identically, wrong name raises.
+
 ## 1.29.1 — `--debug` reports BLE startup timings
 
 `openbricks run/upload/stop/log --debug` now prints a one-line
