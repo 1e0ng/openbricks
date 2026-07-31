@@ -61,6 +61,69 @@ class TopicResolutionTests(unittest.TestCase):
             sorted(pages), sorted(t + ".md" for t in docs_mod.TOPICS))
 
 
+class DirResolutionBranchTests(unittest.TestCase):
+    """Pin BOTH lookup branches + the broken-install error — which
+    branch runs organically depends on whether a build has synced
+    ``_docs/`` locally, so each is forced via mocks."""
+
+    def test_bundled_dir_wins_when_present(self):
+        with mock.patch("os.path.isdir", side_effect=lambda p: True):
+            self.assertTrue(docs_mod._docs_dir().endswith("_docs"))
+
+    def test_checkout_dir_used_when_no_bundle(self):
+        with mock.patch("os.path.isdir",
+                        side_effect=lambda p: not p.endswith("_docs")):
+            self.assertTrue(docs_mod._docs_dir().endswith("docs"))
+
+    def test_neither_location_is_a_clean_error(self):
+        with mock.patch("os.path.isdir", side_effect=lambda p: False):
+            with self.assertRaises(docs_mod.DocsError) as ctx:
+                docs_mod._docs_dir()
+        self.assertIn("broken installation", str(ctx.exception))
+
+
+class EmitTests(unittest.TestCase):
+    """The TTY/pager paths — never taken under a captured test
+    stdout, so forced via mocks."""
+
+    def _tty_stdout(self):
+        out = io.StringIO()
+        out.isatty = lambda: True
+        return out
+
+    def test_tty_uses_pager_with_the_text_as_input(self):
+        out = self._tty_stdout()
+        with mock.patch("sys.stdout", out), \
+                mock.patch.dict("os.environ", {"PAGER": "mypager -x"}), \
+                mock.patch("subprocess.run") as run:
+            docs_mod._emit("hello page\n")
+        run.assert_called_once_with(["mypager", "-x"],
+                                    input=b"hello page\n")
+        self.assertEqual(out.getvalue(), "")   # pager owned the output
+
+    def test_missing_pager_binary_falls_through_to_plain_print(self):
+        out = self._tty_stdout()
+        with mock.patch("sys.stdout", out), \
+                mock.patch("subprocess.run",
+                           side_effect=FileNotFoundError):
+            docs_mod._emit("hello page\n")
+        self.assertEqual(out.getvalue(), "hello page\n")
+
+    def test_text_without_trailing_newline_gets_one(self):
+        out = io.StringIO()
+        out.isatty = lambda: False
+        with mock.patch("sys.stdout", out):
+            docs_mod._emit("no newline")
+        self.assertEqual(out.getvalue(), "no newline\n")
+
+
+class TitleFallbackTests(unittest.TestCase):
+    def test_page_without_heading_lists_under_its_stem(self):
+        with mock.patch.object(docs_mod, "_load",
+                               return_value="just prose, no heading"):
+            self.assertEqual(docs_mod._title("mystery"), "mystery")
+
+
 class CleanupTests(unittest.TestCase):
     def test_front_matter_is_stripped(self):
         # hardware.md carries a myst front-matter block for SEO meta;
