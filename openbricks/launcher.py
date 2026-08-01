@@ -809,6 +809,55 @@ def _start_via_schedule(launcher_instance):
 
 # ---- program exec helpers ----
 
+def _exception_printer():
+    """The traceback renderer this build provides, or ``None``.
+
+    Firmware MicroPython ships ``sys.print_exception``; CPython does
+    not and falls back to the ``traceback`` module. Only one of those
+    branches is reachable per interpreter, so this lookup is a
+    module-level seam — otherwise whichever branch the test host
+    doesn't take can never be exercised.
+    """
+    return getattr(sys, "print_exception", None)
+
+
+def _render_exception(exc, buf):
+    """Write ``exc``'s traceback into ``buf``.
+
+    A module-level seam so tests can force the render-failure path.
+    Patching ``sys.print_exception`` would be the obvious way, but
+    MicroPython's built-in modules are immutable — storing to one
+    raises ``AttributeError: 'module' object has no attribute
+    'print_exception'`` — so the swappable thing has to live here.
+    """
+    pe = _exception_printer()
+    if pe is not None:
+        pe(exc, buf)
+    else:
+        import traceback
+        traceback.print_exception(
+            type(exc), exc, exc.__traceback__, file=buf)
+
+
+def _traceback_text(exc):
+    """Render ``exc``'s traceback to a string, or ``None`` where this
+    build can't.
+
+    MicroPython's ``sys.print_exception`` takes an optional file
+    argument; CPython's has no such builtin, so tests take the
+    ``traceback`` module branch. Every failure path returns None so the
+    caller falls back to the old one-line repr — a logging helper must
+    never be the reason an exception goes unrecorded.
+    """
+    try:
+        import io
+        buf = io.StringIO()
+        _render_exception(exc, buf)
+    except Exception:
+        return None
+    return buf.getvalue() or None
+
+
 def _exec_program_raw(program_path, origin=None):
     """Load and run ``program_path`` in a fresh namespace. Propagates
     ``KeyboardInterrupt``; prints other exceptions and returns.
@@ -853,17 +902,23 @@ def _exec_program_raw(program_path, origin=None):
                     "stopped: KeyboardInterrupt (%s)\n" % _stop_debrief())
                 raise
             except Exception as e:
-                pe = getattr(sys, "print_exception", None)
+                pe = _exception_printer()
                 if pe is not None:
                     pe(e)
                 else:
                     import traceback
                     traceback.print_exception(type(e), e, e.__traceback__)
                 # Tracebacks above go to the live console only — print()
-                # is the only stream we tee. Mirror a short summary into
-                # the log file so it shows up in ``openbricks log``
-                # too.
-                sess.write_text("Exception: %r\n" % (e,))
+                # is the only stream we tee. Mirror the FULL traceback
+                # into the log file, because on an untethered run that
+                # file is the ONLY record and a bare repr doesn't say
+                # which call failed: a bench ENODEV reduced to
+                # "Exception: OSError(19,)" left the mux write and the
+                # sensor's chip-ID read indistinguishable, which is a
+                # whole debugging session spent re-deriving a line
+                # number the hub already knew.
+                text = _traceback_text(e)
+                sess.write_text(text if text else "Exception: %r\n" % (e,))
     finally:
         _arm_stop_button(False)
 
