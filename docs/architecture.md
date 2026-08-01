@@ -84,8 +84,15 @@ are direct where they can be.
    to that: on real hardware the tick advances `now_ms` by measured
    `mp_hal_ticks_ms` deltas (wall time, enabled by the frozen
    `boot.py`), so dropped ticks cost control updates but no longer
-   dilate trajectory time. Making the tick itself starvation-proof
-   is the planned next step of the native-control work.
+   dilate trajectory time. Since 1.38.0 the firmware also carries a
+   **hard tick** (`native/patches/esp32-openbricks-hard-tick.patch`):
+   a periodic C hook on the esp_timer service task, below the Python
+   scheduler entirely — verified on hardware via
+   `motor_process.hard_tick_selftest()` /
+   `hard_tick_count()`. Existing controllers still dispatch through
+   the scheduler (their encoder reads call into Python objects,
+   which the hard context must never do); the native serial-bus
+   motor path is being built directly on the hard tick.
 4. **Drivebase coupling** (pbio `drivebase.c`) — our `drivebase.c`
    runs two coupled controllers in (sum, diff) coordinates with
    position feedback on both. Exit criterion: asymmetric-friction

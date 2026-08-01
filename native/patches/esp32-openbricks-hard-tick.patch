@@ -1,0 +1,128 @@
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index b71fc2437..50f9fb3c6 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -111,6 +111,7 @@ list(APPEND MICROPY_SOURCE_PORT
+     panichandler.c
+     adc.c
+     main.c
++    openbricks_hard_tick.c
+     ppp_set_auth.c
+     uart.c
+     usb.c
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index 938f26e27..1a617ed67 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -10,6 +10,13 @@
+ #include "esp_system.h"
+ #include "freertos/FreeRTOS.h"
+ 
++// openbricks build-time patch: this port ships the hard-tick hook
++// (openbricks_hard_tick.c) — a periodic C callback on the esp_timer
++// service task, below the Python scheduler. User C modules key their
++// consumers off this macro; it is absent on ports without the patch
++// (unix, sim), where they fall back to the scheduler-dispatched tick.
++#define MICROPY_OPENBRICKS_HARD_TICK        (1)
++
+ #ifndef MICROPY_CONFIG_ROM_LEVEL
+ #define MICROPY_CONFIG_ROM_LEVEL            (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
+ #endif
+diff --git a/ports/esp32/openbricks_hard_tick.c b/ports/esp32/openbricks_hard_tick.c
+new file mode 100644
+index 000000000..b825ff4c7
+--- /dev/null
++++ b/ports/esp32/openbricks_hard_tick.c
+@@ -0,0 +1,92 @@
++// SPDX-License-Identifier: MIT
++//
++// openbricks hard tick — a periodic C callback BELOW the Python
++// scheduler. (Applied to the MicroPython submodule as a build-time
++// patch from native/patches/; see that directory's README.)
++//
++// Why this exists: machine.Timer callbacks on this port are
++// dispatched via mp_sched_schedule (machine_timer.c), i.e. they run
++// between main-thread bytecodes and are silently DROPPED while the
++// bounded scheduler queue is full. Closed-loop motor control that
++// must keep ticking while user Python blocks in a long C call cannot
++// live there. This file provides the alternative: an esp_timer
++// periodic callback, which the IDF runs on the high-priority
++// esp_timer service task — unaffected by what the MicroPython main
++// task is doing.
++//
++// CONTRACT for the installed hook (enforced by review, not by code):
++// it runs OUTSIDE the MicroPython VM. It must not touch Python
++// objects, allocate from the GC heap, raise, or call any mp_*
++// function that reads VM state. Pure C state and non-blocking driver
++// calls only. Keep it short — the esp_timer task serves other system
++// callbacks after ours.
++//
++// The consumer is the _openbricks_native user C module, which cannot
++// include ESP-IDF headers itself (it builds with ESP_PLATFORM
++// undefined — see the repo's user-module rules) and therefore
++// declares these three symbols extern, guarded by the
++// MICROPY_OPENBRICKS_HARD_TICK config macro this patch defines.
++
++#include <stdint.h>
++#include <stddef.h>
++
++#include "esp_timer.h"
++
++static esp_timer_handle_t ob_hard_timer;
++static void (*ob_hard_fn)(void *);
++static void *ob_hard_ctx;
++
++static void ob_hard_dispatch(void *arg) {
++    (void)arg;
++    void (*fn)(void *) = ob_hard_fn;
++    if (fn != NULL) {
++        fn(ob_hard_ctx);
++    }
++}
++
++// Install ``fn(ctx)`` to run every ``period_us`` microseconds.
++// Returns 0 on success, -1 if a hook is already installed or the
++// timer could not be created/started. One hook slot on purpose:
++// the consumer (motor_process) multiplexes its own subscribers.
++int ob_hard_tick_install(void (*fn)(void *), void *ctx, uint32_t period_us) {
++    if (ob_hard_timer != NULL) {
++        return -1;
++    }
++    ob_hard_fn = fn;
++    ob_hard_ctx = ctx;
++    const esp_timer_create_args_t args = {
++        .callback = ob_hard_dispatch,
++        .arg = NULL,
++        .dispatch_method = ESP_TIMER_TASK,
++        .name = "ob_hard_tick",
++    };
++    if (esp_timer_create(&args, &ob_hard_timer) != ESP_OK) {
++        ob_hard_fn = NULL;
++        ob_hard_timer = NULL;
++        return -1;
++    }
++    if (esp_timer_start_periodic(ob_hard_timer, (uint64_t)period_us) != ESP_OK) {
++        esp_timer_delete(ob_hard_timer);
++        ob_hard_timer = NULL;
++        ob_hard_fn = NULL;
++        return -1;
++    }
++    return 0;
++}
++
++void ob_hard_tick_uninstall(void) {
++    if (ob_hard_timer == NULL) {
++        return;
++    }
++    esp_timer_stop(ob_hard_timer);
++    esp_timer_delete(ob_hard_timer);
++    ob_hard_timer = NULL;
++    ob_hard_fn = NULL;
++}
++
++// Monotonic milliseconds from the same clock esp_timer schedules by.
++// Safe from any task, wraps at 2^32 ms — pair with unsigned
++// subtraction (ob_motor_process_fire_c_at already does).
++uint32_t ob_hard_ticks_ms(void) {
++    return (uint32_t)(esp_timer_get_time() / 1000);
++}
