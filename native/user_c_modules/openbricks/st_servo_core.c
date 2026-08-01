@@ -63,8 +63,14 @@ int ob_sservo_set_speed(ob_sservo_t *s, int slot, int32_t steps_per_s) {
     sl->target_steps = steps_per_s;
     sl->target_dirty = 1;
     // A speed command implies torque on (the Python driver's
-    // _ensure_torque_on on every motion path).
-    sl->torque_cmd = 1;
+    // _ensure_torque_on on every motion path) — but only when the
+    // wire doesn't already have it: the native drivebase calls
+    // set_speed EVERY tick, and unconditionally re-staging torque
+    // starved the sync-writes behind an endless stream of priority-1
+    // torque packets (caught by the first drivebase sim run).
+    if (!sl->torque_on) {
+        sl->torque_cmd = 1;
+    }
     return 0;
 }
 
@@ -157,11 +163,12 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
             n++;
         }
     }
-    if (n > 0) {
+    if (n > 0 && !s->last_was_sync) {
         op->kind = OB_SOP_SYNC_SPEED;
         op->sync_n = n;
         return;
     }
+    op->sync_n = 0;   // sync deferred for fairness (or none dirty)
 
     // 4. Feedback: round-robin present-position reads.
     for (int k = 0; k < OB_SSERVO_SLOTS; k++) {
@@ -183,12 +190,17 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
             ob_sservo_slot_t *sl = &s->slots[op->slot];
             if (sl->config_step < 3) {
                 sl->config_step++;
+                if (op->reg == OB_SREG_TORQUE) {
+                    sl->torque_on = 0;     // config writes torque 0
+                }
             } else if (op->reg == OB_SREG_TORQUE) {
                 sl->torque_cmd = -1;
+                sl->torque_on = (op->data[0] != 0);
             }
             break;
         }
         case OB_SOP_SYNC_SPEED:
+            s->last_was_sync = 1;
             for (uint8_t k = 0; k < op->sync_n; k++) {
                 for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
                     if (s->slots[i].in_use
@@ -199,6 +211,7 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
             }
             break;
         case OB_SOP_READ_POS:
+            s->last_was_sync = 0;    // fairness satisfied
             s->read_in_flight = op->slot;
             s->rr_next = (op->slot + 1) % OB_SSERVO_SLOTS;
             break;

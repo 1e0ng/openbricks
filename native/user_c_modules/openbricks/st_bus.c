@@ -19,6 +19,7 @@
 
 #include "st_bus_core.h"
 #include "st_servo_core.h"
+#include "drivebase_core.h"
 
 #include <string.h>
 
@@ -112,7 +113,48 @@ static ob_sservo_t *sservo_get(void) {
     return &sservo;
 }
 
+// ---- native 2-DOF drivebase on serial-bus slots ----
+//
+// The existing, hardware-proven drivebase_core controller drives
+// serial-bus wheels through two BRIDGE servo structs: the controller
+// only ever touches observer.pos_hat (read) and target_dps (write)
+// — verified against drivebase_core.c — so the pump syncs slot
+// odometry into pos_hat before the tick and slot speed targets out
+// of target_dps after it. Zero churn to the controller; the same
+// math that passed the encoder path's asymmetric-friction gate runs
+// here, at the ~490 Hz feedback rate the wire test measured.
+#define ST_DB_DEG_PER_COUNT (360.0 / 4096.0)
+#define ST_DB_STEPS_PER_DEG (4096.0 / 360.0)
+
+static ob_servo_t st_db_bridge_l, st_db_bridge_r;
+static ob_drivebase_t st_db;
+static bool st_db_active;
+static int st_db_slot_l = -1, st_db_slot_r = -1;
+static uint32_t st_db_now_ms;      // clock fed by the pump caller
+
+static void st_db_tick_locked(void) {
+    if (!st_db_active) {
+        return;
+    }
+    ob_sservo_t *sv = sservo_get();
+    // Slot counts -> wheel degrees. ob_sservo_counts applies the
+    // slot's invert, so both bridges live in the same wheel frame the
+    // encoder path uses (frame-consistency tests pin this).
+    st_db_bridge_l.observer.pos_hat =
+        (ob_float_t)(ob_sservo_counts(sv, st_db_slot_l) * ST_DB_DEG_PER_COUNT);
+    st_db_bridge_r.observer.pos_hat =
+        (ob_float_t)(ob_sservo_counts(sv, st_db_slot_r) * ST_DB_DEG_PER_COUNT);
+    ob_drivebase_tick(&st_db, (long)st_db_now_ms);
+    // Wheel-degree targets -> slot steps/s. set_speed re-applies the
+    // slot invert, mirroring how counts un-applied it above.
+    ob_sservo_set_speed(sv, st_db_slot_l,
+        (int32_t)(st_db_bridge_l.target_dps * ST_DB_STEPS_PER_DEG));
+    ob_sservo_set_speed(sv, st_db_slot_r,
+        (int32_t)(st_db_bridge_r.target_dps * ST_DB_STEPS_PER_DEG));
+}
+
 static void servo_pump_locked(ob_bus_t *b) {
+    st_db_tick_locked();
     ob_bus_poll(b);
     if (tick_txn
         && (b->state == OB_BUS_DONE || b->state == OB_BUS_TIMEOUT
@@ -194,6 +236,7 @@ void ob_st_bus_hard_poll(void) {
         return;
     }
     bus_take();
+    st_db_now_ms = ob_hard_ticks_ms();
     servo_pump_locked(&test_bus);
     bus_release();
 }
@@ -224,6 +267,9 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     sservo_inited = false;
     tick_txn = 0;
     tick_txn_is_read = 0;
+    st_db_active = false;
+    st_db_slot_l = st_db_slot_r = -1;
+    st_db_now_ms = 0;
     bus_get();
     sservo_get();
     return mp_const_none;
@@ -468,18 +514,24 @@ static mp_obj_t sb_servo_stats(mp_obj_t self_in, mp_obj_t slot_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_stats_obj, sb_servo_stats);
 
-static mp_obj_t sb_servo_pump(mp_obj_t self_in) {
+static mp_obj_t sb_servo_pump(size_t n_args, const mp_obj_t *args) {
     // One pump iteration — the hard tick's exact code path, callable
     // from Python. On firmware with the tick running this is a
     // harmless extra iteration; on unix it IS the drive loop, which
-    // is how the scheduler is tested off-hardware.
-    (void)self_in;
+    // is how the scheduler is tested off-hardware. The optional
+    // ``now_ms`` argument is the unix suite's drivebase clock (the
+    // firmware path feeds ob_hard_ticks_ms instead — NOT the
+    // motor_process clock, which advances on the starvable scheduler
+    // path).
     bus_take();
+    if (n_args == 2) {
+        st_db_now_ms = (uint32_t)mp_obj_get_int_truncated(args[1]);
+    }
     servo_pump_locked(bus_get());
     bus_release();
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(sb_servo_pump_obj, sb_servo_pump);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_pump_obj, 1, 2, sb_servo_pump);
 
 static mp_obj_t sb_servo_encode(mp_obj_t self_in, mp_obj_t steps_in) {
     (void)self_in;
@@ -514,12 +566,130 @@ static mp_obj_t sb_torque_off_all(mp_obj_t self_in) {
         if (sv->slots[i].in_use) {
             sv->slots[i].target_dirty = 0;
             sv->slots[i].torque_cmd = -1;
+            sv->slots[i].torque_on = 0;   // next run re-arms torque
         }
     }
     bus_release();
     return mp_obj_new_bool(r == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_torque_off_all_obj, sb_torque_off_all);
+
+// ---- native drivebase bindings ----
+
+static mp_obj_t sb_db_config(size_t n_args, const mp_obj_t *args) {
+    // (self, slot_l, slot_r, wheel_diameter_mm, axle_track_mm,
+    //  accel_dps2)
+    (void)n_args;
+    bus_take();
+    st_db_slot_l = mp_obj_get_int(args[1]);
+    st_db_slot_r = mp_obj_get_int(args[2]);
+    memset(&st_db_bridge_l, 0, sizeof(st_db_bridge_l));
+    memset(&st_db_bridge_r, 0, sizeof(st_db_bridge_r));
+    ob_drivebase_init(&st_db, &st_db_bridge_l, &st_db_bridge_r,
+                      (ob_float_t)mp_obj_get_float(args[3]),
+                      (ob_float_t)mp_obj_get_float(args[4]),
+                      OB_DRIVEBASE_DEFAULT_KP_SUM,
+                      OB_DRIVEBASE_DEFAULT_KP_DIFF);
+    st_db.accel_dps2 = (ob_float_t)mp_obj_get_float(args[5]);
+    st_db_active = true;
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_db_config_obj, 6, 6, sb_db_config);
+
+static mp_obj_t sb_db_disable(mp_obj_t self_in) {
+    (void)self_in;
+    bus_take();
+    st_db_active = false;
+    st_db_slot_l = st_db_slot_r = -1;
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_disable_obj, sb_db_disable);
+
+static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
+                               mp_obj_t mm_s_in) {
+    (void)self_in;
+    bus_take();
+    ob_drivebase_straight(&st_db, (long)st_db_now_ms,
+                          (ob_float_t)mp_obj_get_float(mm_in),
+                          (ob_float_t)mp_obj_get_float(mm_s_in));
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_straight_obj, sb_db_straight);
+
+static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
+                           mp_obj_t dps_in) {
+    (void)self_in;
+    bus_take();
+    ob_drivebase_turn(&st_db, (long)st_db_now_ms,
+                      (ob_float_t)mp_obj_get_float(deg_in),
+                      (ob_float_t)mp_obj_get_float(dps_in));
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_turn_obj, sb_db_turn);
+
+static mp_obj_t sb_db_stop(mp_obj_t self_in) {
+    (void)self_in;
+    bus_take();
+    // Capture the CURRENT pose as the hold before deactivating —
+    // ob_drivebase_stop alone leaves the holds stale (move-start
+    // values), and the next tick would drive the wheels BACK to that
+    // stale pose: a physical lurch on every stop. With fresh holds
+    // the controller holds position here, feedback-corrected.
+    st_db.fwd_hold = (st_db_bridge_l.observer.pos_hat
+                      + st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
+    st_db.turn_hold = st_db.use_gyro
+        ? st_db.heading_override_wheel_deg
+        : (st_db_bridge_l.observer.pos_hat
+           - st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
+    ob_drivebase_stop(&st_db);
+    if (st_db_slot_l >= 0) {
+        ob_sservo_set_speed(sservo_get(), st_db_slot_l, 0);
+        ob_sservo_set_speed(sservo_get(), st_db_slot_r, 0);
+    }
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_stop_obj, sb_db_stop);
+
+static mp_obj_t sb_db_done(mp_obj_t self_in) {
+    (void)self_in;
+    bus_take();
+    bool d = ob_drivebase_is_done(&st_db);
+    bus_release();
+    return mp_obj_new_bool(d);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_done_obj, sb_db_done);
+
+static mp_obj_t sb_db_use_gyro(mp_obj_t self_in, mp_obj_t on_in) {
+    (void)self_in;
+    bus_take();
+    bool on = mp_obj_is_true(on_in);
+    if (on && !st_db.use_gyro) {
+        ob_drivebase_gyro_frame_reset(&st_db);
+    }
+    st_db.use_gyro = on;
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_db_use_gyro_obj, sb_db_use_gyro);
+
+static mp_obj_t sb_db_set_heading(mp_obj_t self_in, mp_obj_t body_deg_in) {
+    // The Python outer gyro loop: body-degree heading delta from the
+    // IMU, converted to the wheel-degree differential the controller
+    // expects. Called at ~50 Hz from a soft timer — a float store
+    // under the lock, nothing more.
+    (void)self_in;
+    bus_take();
+    st_db.heading_override_wheel_deg = ob_drivebase_body_to_wheel_diff(
+        &st_db, (ob_float_t)mp_obj_get_float(body_deg_in));
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_db_set_heading_obj, sb_db_set_heading);
 
 static mp_obj_t sb_stats(mp_obj_t self_in) {
     (void)self_in;
@@ -561,6 +731,14 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_pump),       MP_ROM_PTR(&sb_servo_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_encode),     MP_ROM_PTR(&sb_servo_encode_obj) },
     { MP_ROM_QSTR(MP_QSTR_torque_off_all),   MP_ROM_PTR(&sb_torque_off_all_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_config),        MP_ROM_PTR(&sb_db_config_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_disable),       MP_ROM_PTR(&sb_db_disable_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_straight),      MP_ROM_PTR(&sb_db_straight_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_turn),          MP_ROM_PTR(&sb_db_turn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_stop),          MP_ROM_PTR(&sb_db_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_done),          MP_ROM_PTR(&sb_db_done_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_set_heading),   MP_ROM_PTR(&sb_db_set_heading_obj) },
     #if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
     { MP_ROM_QSTR(MP_QSTR_attach_uart),      MP_ROM_PTR(&sb_attach_uart_obj) },
     #endif

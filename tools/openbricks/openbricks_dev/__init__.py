@@ -1,4 +1,4 @@
 # SPDX-License-Identifier: MIT
 """openbricks — host-side CLI for flashing and running code on hubs."""
 
-__version__ = "1.41.0"
+__version__ = "1.42.0"

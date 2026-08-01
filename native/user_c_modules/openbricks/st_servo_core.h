@@ -78,6 +78,7 @@ typedef struct {
     int32_t  target_steps;  // signed steps/s
     uint8_t  target_dirty;
     int8_t   torque_cmd;    // -1 none pending, 0 = coast, 1 = on
+    uint8_t  torque_on;     // last torque value WRITTEN to the wire
     // Feedback.
     uint16_t last_raw;      // last 12-bit reading
     uint8_t  have_raw;
@@ -91,6 +92,13 @@ typedef struct {
     ob_sservo_slot_t slots[OB_SSERVO_SLOTS];
     int      rr_next;       // round-robin cursor for feedback reads
     int      read_in_flight; // slot whose POS read is on the bus, or -1
+    uint8_t  last_was_sync;  // fairness: a sync must be followed by a
+                             // read before the next sync — a
+                             // drivebase re-staging speeds every tick
+                             // otherwise starves feedback entirely
+                             // and the control loop runs on frozen
+                             // odometry (caught by the first
+                             // drivebase sim run)
 } ob_sservo_t;
 
 void ob_sservo_init(ob_sservo_t *s);
