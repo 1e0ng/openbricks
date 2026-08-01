@@ -4,8 +4,8 @@
 
 Every program executed via :mod:`openbricks.launcher` (button-press OR
 ``openbricks run``) gets its ``stdout`` + ``stderr`` tee'd to a
-file under ``/openbricks_logs/`` on the hub. Three rotating slots —
-``run_0.log`` through ``run_2.log``. ``log`` reads any of them back.
+file under ``/openbricks_logs/`` on the hub. Ten rotating slots (the
+firmware's ``openbricks.log.MAX_RUNS``). ``log`` reads any back.
 
 Without arguments, prints the most-recent run's content. ``--list``
 shows the file index. ``--run N`` selects a specific slot.

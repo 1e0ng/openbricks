@@ -51,7 +51,14 @@ import time
 
 
 LOG_DIR    = "/openbricks_logs"
-MAX_RUNS   = 3
+# 10, was 3. Three slots twice destroyed the evidence they existed to
+# keep: an intermittent won't-start is diagnosed by comparing the
+# FAILING run's log against a working one, but every diagnostic
+# session (``openbricks run -c`` state dumps, bus scans) is itself a
+# run that takes a slot — by the time the bench report arrived, the
+# failing runs had been rotated out by the tools investigating them.
+# Worst case 10 x 64 KB = 640 KB of a 16 MB flash.
+MAX_RUNS   = 10
 MAX_BYTES  = 64 * 1024
 
 # Writes are ASYNCHRONOUS. ``print`` only appends to a RAM buffer; the
