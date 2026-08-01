@@ -20,6 +20,23 @@
 
 #include <string.h>
 
+// Hard-tick pump entry, called from motor_process's dispatcher.
+// Prototype here (not a header) because it's the single cross-file
+// symbol of this module and the coverage build runs with
+// -Werror=missing-prototypes.
+void ob_st_bus_hard_poll(void);
+
+#if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
+#include <stdatomic.h>
+
+// IDF UART shims from the esp32-openbricks-bus-uart patch (port
+// land; this module cannot include IDF headers).
+extern int ob_bus_uart_open(int uart_num, int baud, int tx_pin, int rx_pin);
+extern int ob_bus_uart_tx(int uart_num, const uint8_t *buf, size_t len);
+extern int ob_bus_uart_rx(int uart_num, uint8_t *buf, size_t maxlen);
+extern void ob_bus_uart_flush_rx(int uart_num);
+#endif
+
 // ---- test I/O backend: static rings fed/drained from Python ----
 
 #define TEST_TX_CAP 256
@@ -69,6 +86,51 @@ static void test_rx_flush(void *ctx) {
 // ---- Python-facing methods (module-singleton style, like
 //      motor_process: self argument ignored) ----
 
+#if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
+// ---- firmware I/O backend: the real UART via the patch shims ----
+//
+// The bus state machine is touched from TWO contexts once attached:
+// Python bindings (main task) start transactions and take results;
+// the hard tick (esp_timer task) polls. A C11 spinlock serializes
+// them — every critical section is microseconds (memcpy + ring ops,
+// no waiting inside), so spinning is cheaper than any handoff.
+static atomic_flag bus_lock = ATOMIC_FLAG_INIT;
+static int  fw_uart_num = -1;
+
+static void bus_take(void)    { while (atomic_flag_test_and_set(&bus_lock)) { } }
+static void bus_release(void) { atomic_flag_clear(&bus_lock); }
+
+static int fw_tx(void *ctx, const uint8_t *buf, size_t len) {
+    (void)ctx;
+    return ob_bus_uart_tx(fw_uart_num, buf, len);
+}
+static int fw_rx(void *ctx, uint8_t *buf, size_t maxlen) {
+    (void)ctx;
+    return ob_bus_uart_rx(fw_uart_num, buf, maxlen);
+}
+static void fw_rx_flush(void *ctx) {
+    (void)ctx;
+    ob_bus_uart_flush_rx(fw_uart_num);
+}
+
+// Called from motor_process's hard-tick dispatcher, esp_timer task
+// context: poll the in-flight transaction. Pure C throughout.
+void ob_st_bus_hard_poll(void) {
+    if (fw_uart_num < 0) {
+        return;
+    }
+    bus_take();
+    ob_bus_poll(&test_bus);
+    bus_release();
+}
+#else
+// No firmware UART on this build: the pump entry still exists so
+// motor_process's dispatcher links everywhere, but does nothing.
+static void bus_take(void)    { }
+static void bus_release(void) { }
+void ob_st_bus_hard_poll(void) { }
+#endif
+
 static ob_bus_t *bus_get(void) {
     if (!test_inited) {
         ob_bus_io_t io = {
@@ -92,11 +154,13 @@ static MP_DEFINE_CONST_FUN_OBJ_1(sb_test_reset_obj, sb_test_reset);
 
 static mp_obj_t sb_start_read(size_t n_args, const mp_obj_t *args) {
     (void)n_args;
+    bus_take();
     int r = ob_bus_start_read(bus_get(),
                               (uint8_t)mp_obj_get_int(args[1]),
                               (uint8_t)mp_obj_get_int(args[2]),
                               (uint8_t)mp_obj_get_int(args[3]),
                               mp_obj_get_int(args[4]));
+    bus_release();
     return mp_obj_new_bool(r == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_start_read_obj, 5, 5, sb_start_read);
@@ -105,18 +169,22 @@ static mp_obj_t sb_start_write(size_t n_args, const mp_obj_t *args) {
     (void)n_args;
     mp_buffer_info_t data;
     mp_get_buffer_raise(args[3], &data, MP_BUFFER_READ);
+    bus_take();
     int r = ob_bus_start_write(bus_get(),
                                (uint8_t)mp_obj_get_int(args[1]),
                                (uint8_t)mp_obj_get_int(args[2]),
                                data.buf, (uint8_t)data.len);
+    bus_release();
     return mp_obj_new_bool(r == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_start_write_obj, 4, 4, sb_start_write);
 
 static mp_obj_t sb_start_ping(mp_obj_t self_in, mp_obj_t id_in, mp_obj_t t_in) {
     (void)self_in;
+    bus_take();
     int r = ob_bus_start_ping(bus_get(), (uint8_t)mp_obj_get_int(id_in),
                               mp_obj_get_int(t_in));
+    bus_release();
     return mp_obj_new_bool(r == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(sb_start_ping_obj, sb_start_ping);
@@ -149,22 +217,29 @@ static mp_obj_t sb_start_sync_write(size_t n_args, const mp_obj_t *args) {
         }
         memcpy(&data[i * dlen], d.buf, dlen);
     }
+    bus_take();
     int r = ob_bus_start_sync_write(bus_get(), reg, dlen, ids, data,
                                     (uint8_t)n);
+    bus_release();
     return mp_obj_new_bool(r == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_start_sync_write_obj, 4, 4, sb_start_sync_write);
 
 static mp_obj_t sb_poll(mp_obj_t self_in) {
     (void)self_in;
+    bus_take();
     ob_bus_poll(bus_get());
+    bus_release();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_poll_obj, sb_poll);
 
 static mp_obj_t sb_state(mp_obj_t self_in) {
     (void)self_in;
-    return MP_OBJ_NEW_SMALL_INT((int)bus_get()->state);
+    bus_take();
+    int st = (int)bus_get()->state;
+    bus_release();
+    return MP_OBJ_NEW_SMALL_INT(st);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_state_obj, sb_state);
 
@@ -172,7 +247,9 @@ static mp_obj_t sb_take_result(mp_obj_t self_in) {
     (void)self_in;
     uint8_t payload[OB_BUS_MAX_READ];
     uint8_t plen = 0;
+    bus_take();
     ob_bus_state_t s = ob_bus_take_result(bus_get(), payload, &plen);
+    bus_release();
     mp_obj_t tuple[2] = {
         MP_OBJ_NEW_SMALL_INT((int)s),
         mp_obj_new_bytes(payload, plen),
@@ -203,6 +280,31 @@ static mp_obj_t sb_feed_rx(mp_obj_t self_in, mp_obj_t data_in) {
     return mp_obj_new_bool(true);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_feed_rx_obj, sb_feed_rx);
+
+#if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
+static mp_obj_t sb_attach_uart(size_t n_args, const mp_obj_t *args) {
+    // (self, uart_id, baud, tx, rx) — open the real UART through the
+    // patch shims and point the bus at it. From here the hard tick
+    // polls; Python starts transactions and takes results.
+    (void)n_args;
+    int uart_num = mp_obj_get_int(args[1]);
+    if (ob_bus_uart_open(uart_num, mp_obj_get_int(args[2]),
+                         mp_obj_get_int(args[3]),
+                         mp_obj_get_int(args[4])) != 0) {
+        return mp_obj_new_bool(false);
+    }
+    ob_bus_io_t io = {
+        .tx = fw_tx, .rx = fw_rx, .rx_flush = fw_rx_flush, .ctx = NULL,
+    };
+    bus_take();
+    ob_bus_init(&test_bus, io);
+    test_inited = true;      // bus_get() must not re-init to test io
+    fw_uart_num = uart_num;  // set LAST: hard poll keys off it
+    bus_release();
+    return mp_obj_new_bool(true);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_attach_uart_obj, 5, 5, sb_attach_uart);
+#endif
 
 static mp_obj_t sb_stats(mp_obj_t self_in) {
     (void)self_in;
@@ -235,6 +337,9 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_take_tx),          MP_ROM_PTR(&sb_take_tx_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_rx),          MP_ROM_PTR(&sb_feed_rx_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),            MP_ROM_PTR(&sb_stats_obj) },
+    #if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
+    { MP_ROM_QSTR(MP_QSTR_attach_uart),      MP_ROM_PTR(&sb_attach_uart_obj) },
+    #endif
     // States as constants so tests read like the header enum.
     { MP_ROM_QSTR(MP_QSTR_IDLE),        MP_ROM_INT(OB_BUS_IDLE) },
     { MP_ROM_QSTR(MP_QSTR_AWAIT_REPLY), MP_ROM_INT(OB_BUS_AWAIT_REPLY) },

@@ -1,0 +1,125 @@
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index b71fc2437..35d232268 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -145,6 +145,7 @@ list(APPEND MICROPY_SOURCE_PORT
+     machine_rtc.c
+     machine_sdcard.c
+     modespnow.c
++    openbricks_bus_uart.c
+ )
+ list(TRANSFORM MICROPY_SOURCE_PORT PREPEND ${MICROPY_PORT_DIR}/)
+ list(APPEND MICROPY_SOURCE_PORT ${CMAKE_BINARY_DIR}/pins.c)
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index 938f26e27..95e3b8c09 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -162,6 +162,10 @@
+ #define MICROPY_PY_MACHINE_UART             (1)
+ #define MICROPY_PY_MACHINE_UART_INCLUDEFILE "ports/esp32/machine_uart.c"
+ #define MICROPY_PY_MACHINE_UART_SENDBREAK   (1)
++// openbricks build-time patch: non-blocking UART shims for the
++// native serial-bus motor path (openbricks_bus_uart.c). Consumer
++// rules match MICROPY_OPENBRICKS_HARD_TICK (separate patch).
++#define MICROPY_OPENBRICKS_BUS_UART         (1)
+ #define MICROPY_PY_MACHINE_UART_IRQ         (1)
+ #define MICROPY_PY_MACHINE_WDT              (1)
+ #define MICROPY_PY_MACHINE_WDT_INCLUDEFILE  "ports/esp32/machine_wdt.c"
+diff --git a/ports/esp32/openbricks_bus_uart.c b/ports/esp32/openbricks_bus_uart.c
+new file mode 100644
+index 000000000..600037dff
+--- /dev/null
++++ b/ports/esp32/openbricks_bus_uart.c
+@@ -0,0 +1,92 @@
++// SPDX-License-Identifier: MIT
++//
++// openbricks bus UART shims — non-blocking UART access for the
++// native serial-bus motor path. (Applied to the MicroPython
++// submodule as a build-time patch from native/patches/.)
++//
++// Why this exists: the SCS bus core (st_bus_core in the user C
++// module) runs on the hard tick — the esp_timer service task — where
++// blocking is forbidden and MicroPython objects are unreachable. It
++// needs raw byte I/O with hard non-blocking semantics. The user C
++// module cannot include ESP-IDF headers (it builds with ESP_PLATFORM
++// undefined), so the IDF uart_driver calls live here in port land,
++// exported as plain-int/byte-pointer symbols.
++//
++// Non-blocking guarantees:
++//   tx  — uart_write_bytes into the driver's TX ring, guarded by a
++//         free-space check first: a full ring REFUSES (returns 0)
++//         rather than blocking, and the bus core fails that
++//         transaction visibly (its refused-TX contract, pinned by
++//         tests). With a 256 B ring and <=64 B SCS packets, refusal
++//         is a fault indicator, not a normal path.
++//   rx  — uart_read_bytes with timeout 0: returns what the driver
++//         ring already holds, never waits for the wire.
++//
++// Ownership: a UART opened here belongs to the native bus. Opening
++// the same UART from Python (machine.UART) while attached is a
++// conflict this layer cannot detect — the openbricks driver
++// selection logic is responsible for never constructing machine.UART
++// on an attached bus.
++
++#include <stdint.h>
++#include <stddef.h>
++
++#include "driver/uart.h"
++
++#define OB_BUS_UART_RING (256)
++
++int ob_bus_uart_open(int uart_num, int baud, int tx_pin, int rx_pin) {
++    if (uart_num < 0 || uart_num >= UART_NUM_MAX) {
++        return -1;
++    }
++    if (uart_is_driver_installed(uart_num)) {
++        // Already installed (previous open surviving a soft reset,
++        // or machine.UART's) — reconfigure params/pins below rather
++        // than failing; the ownership rule above makes the
++        // machine.UART case a caller bug, not ours to referee.
++    } else if (uart_driver_install(uart_num, OB_BUS_UART_RING,
++                                   OB_BUS_UART_RING, 0, NULL, 0) != ESP_OK) {
++        return -1;
++    }
++    uart_config_t cfg = {
++        .baud_rate = baud,
++        .data_bits = UART_DATA_8_BITS,
++        .parity    = UART_PARITY_DISABLE,
++        .stop_bits = UART_STOP_BITS_1,
++        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
++        .source_clk = UART_SCLK_DEFAULT,
++    };
++    if (uart_param_config(uart_num, &cfg) != ESP_OK) {
++        return -1;
++    }
++    if (uart_set_pin(uart_num, tx_pin, rx_pin,
++                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK) {
++        return -1;
++    }
++    return 0;
++}
++
++int ob_bus_uart_tx(int uart_num, const uint8_t *buf, size_t len) {
++    size_t free_len = 0;
++    if (uart_get_tx_buffer_free_size(uart_num, &free_len) != ESP_OK
++        || free_len < len) {
++        return 0;
++    }
++    int n = uart_write_bytes(uart_num, (const char *)buf, len);
++    return (n < 0) ? 0 : n;
++}
++
++int ob_bus_uart_rx(int uart_num, uint8_t *buf, size_t maxlen) {
++    int n = uart_read_bytes(uart_num, buf, maxlen, 0);
++    return (n < 0) ? 0 : n;
++}
++
++void ob_bus_uart_flush_rx(int uart_num) {
++    uart_flush_input(uart_num);
++}
++
++void ob_bus_uart_close(int uart_num) {
++    if (uart_is_driver_installed(uart_num)) {
++        uart_driver_delete(uart_num);
++    }
++}

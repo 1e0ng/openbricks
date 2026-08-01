@@ -282,3 +282,27 @@ class HardTickPatchTests(unittest.TestCase):
         # comment loses the review.
         src = _read(self._PATCH)
         self.assertIn("must not touch Python", src)
+
+
+class BusUartPatchTests(unittest.TestCase):
+    """The serial-bus UART shims (arc PR 3b): non-blocking IDF UART
+    access for the hard-tick bus pump. Host tests pin the patch shape;
+    the firmware CI job is the compile gate and the bench ping is the
+    functional gate."""
+
+    _PATCH = _ROOT + "/native/patches/esp32-openbricks-bus-uart.patch"
+
+    def test_patch_adds_shims_macro_and_build_entry(self):
+        src = _read(self._PATCH)
+        self.assertIn("openbricks_bus_uart.c", src)
+        self.assertIn("MICROPY_OPENBRICKS_BUS_UART", src)
+        self.assertIn("esp32_common.cmake", src)
+        # The non-blocking guarantees are the whole point.
+        self.assertIn("uart_get_tx_buffer_free_size", src)
+
+    def test_user_module_gates_on_the_macro(self):
+        src = _read(_ROOT + "/native/user_c_modules/openbricks/st_bus.c")
+        self.assertIn("MICROPY_OPENBRICKS_BUS_UART", src)
+        self.assertIn("ob_bus_uart_open", src)
+        # Two-context safety: the spinlock must exist.
+        self.assertIn("atomic_flag", src)

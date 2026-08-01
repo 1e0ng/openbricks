@@ -189,6 +189,12 @@ class GuardTests(_Base):
     def test_sync_write_wrong_data_len_rejected(self):
         self.assertFalse(sb.start_sync_write(0x2A, 2, [(1, b"\x10")]))
 
+    def test_attach_uart_absent_off_firmware(self):
+        # The real-UART backend needs the bus-uart patch (esp32 only);
+        # unix/sim must not expose it — Python driver selection keys
+        # off its presence.
+        self.assertFalse(hasattr(sb, "attach_uart"))
+
     def test_zero_length_read_and_write_rejected(self):
         self.assertFalse(sb.start_read(1, 0x38, 0, 5))
         self.assertFalse(sb.start_write(1, 0x2A, b""))
