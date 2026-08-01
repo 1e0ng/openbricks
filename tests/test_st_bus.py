@@ -189,6 +189,21 @@ class GuardTests(_Base):
     def test_sync_write_wrong_data_len_rejected(self):
         self.assertFalse(sb.start_sync_write(0x2A, 2, [(1, b"\x10")]))
 
+    def test_public_reexport_includes_st_bus(self):
+        # First bench contact failed on this: the firmware HAD st_bus
+        # but openbricks._native's explicit re-export list didn't —
+        # ImportError on the documented public path.
+        from openbricks._native import st_bus as via_public
+        self.assertIs(via_public, sb)
+
+    def test_attach_uart_settles_before_first_packet(self):
+        # Source pin: the 20 ms post-open settle. Dropping it bricks
+        # the URT-2 until power-cycle (bench, 1.40.0 first contact;
+        # same lesson as st3215.py's sleep).
+        with open("native/user_c_modules/openbricks/st_bus.c") as f:
+            src = f.read()
+        self.assertIn("mp_hal_delay_ms(20)", src)
+
     def test_attach_uart_absent_off_firmware(self):
         # The real-UART backend needs the bus-uart patch (esp32 only);
         # unix/sim must not expose it — Python driver selection keys

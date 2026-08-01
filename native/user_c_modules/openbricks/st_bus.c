@@ -15,6 +15,7 @@
 
 #include "py/runtime.h"
 #include "py/objstr.h"
+#include "py/mphal.h"
 
 #include "st_bus_core.h"
 
@@ -293,6 +294,15 @@ static mp_obj_t sb_attach_uart(size_t n_args, const mp_obj_t *args) {
                          mp_obj_get_int(args[4])) != 0) {
         return mp_obj_new_bool(false);
     }
+    // Post-open settle, learned twice now: the ESP32-S3 UART takes
+    // ~10 ms to produce clean TX after (re)configuration, and the
+    // first packets otherwise leave as malformed bits — the servo
+    // stays silent and the URT-2 adapter SULKS until its rail is
+    // power-cycled (bench-confirmed on first native-bus contact,
+    // 1.40.0; st3215.py:122-131 documents the identical failure and
+    // carries the identical sleep). Main-thread context here, so a
+    // blocking delay is legal — this is setup, not the hot path.
+    mp_hal_delay_ms(20);
     ob_bus_io_t io = {
         .tx = fw_tx, .rx = fw_rx, .rx_flush = fw_rx_flush, .ctx = NULL,
     };
