@@ -309,7 +309,15 @@ class Launcher:
             if gap > self._tick_gap_max:
                 self._tick_gap_max = gap
             if gap >= self._poll_ms * 4:
-                _note("tick starved %d ms (scheduler saturated?)" % gap)
+                # Include the slowest log-write so the starvation
+                # note carries its own prime suspect: littlefs block
+                # erases (under the pump's file.write) suspend the
+                # CPU cache, and a repeated ~100 ms-class block is
+                # enough to fill the 8-deep scheduler queue and drop
+                # ticks. Same order as the gap -> flash owns it;
+                # small while gaps are large -> blocker is elsewhere.
+                _note("tick starved %d ms (worst log write %d ms)"
+                      % (gap, _worst_log_write_ms()))
         self._tick_last_ms = now
         if self._running:
             # Hardware press latch: the PCNT peripheral counted every
@@ -696,6 +704,16 @@ def _note(text):
         _log.note(text)
     except Exception:
         pass
+
+
+def _worst_log_write_ms():
+    """The run log's slowest filesystem call so far (0 off-log).
+    Guarded like every log touch from the tick."""
+    try:
+        from openbricks import log as _log
+        return _log.worst_write_ms()
+    except Exception:
+        return 0
 
 
 def _flush_log():

@@ -106,6 +106,27 @@ def _epoch_ms():
         return int(time.time()) * 1000 + _EPOCH_OFFSET_MS
 
 
+# Resolved once at import; module-level so tests can patch either the
+# function or these lookups (the fallback branch is otherwise dead on
+# every test runtime — both MP and the CPython fakes provide ticks_*).
+_TICKS_FN = getattr(time, "ticks_ms", None)
+_DIFF_FN = getattr(time, "ticks_diff", None)
+
+
+def _ticks_ms():
+    """Monotonic ms — ``time.ticks_ms`` where available, wall-clock
+    fallback otherwise."""
+    if _TICKS_FN is not None:
+        return _TICKS_FN()
+    return int(time.time() * 1000)
+
+
+def _ticks_diff(a, b):
+    if _DIFF_FN is not None:
+        return _DIFF_FN(a, b)
+    return a - b
+
+
 # ---- internal helpers ------------------------------------------------
 
 
@@ -194,6 +215,15 @@ class _LogSession:
         # quadratic, and this buffer is appended to once per print.
         self._pending       = []
         self._pending_len   = 0
+        # Instrumentation for the tick-starvation hunt: the slowest
+        # single filesystem call this session, in ms. littlefs writes
+        # occasionally trigger block erases/relocation, and a flash
+        # erase suspends the CPU cache — a repeated ~100 ms-class
+        # main-thread block is exactly what silently drops scheduler
+        # ticks. The launcher's starvation note prints this so a
+        # bench log can convict or exonerate the flash path without
+        # another instrumented build.
+        self._worst_write_ms = 0
 
     def pump(self, force=False):
         """Drain the RAM buffer to the file. Called off the print hot
@@ -211,6 +241,7 @@ class _LogSession:
         if self._file is None:
             return False
         try:
+            t0 = _ticks_ms()
             if self._pending:
                 text = "".join(self._pending)
                 self._pending = []
@@ -220,6 +251,9 @@ class _LogSession:
                 return False
             if force:
                 self._file.flush()
+            dt = _ticks_diff(_ticks_ms(), t0)
+            if dt > self._worst_write_ms:
+                self._worst_write_ms = dt
             return True
         except Exception:
             # Flash error — drop the bytes rather than wedge the tick.
@@ -339,6 +373,19 @@ class _LogSession:
             self._append(s, force=True)
         except Exception:
             pass
+
+
+def worst_write_ms():
+    """Slowest single filesystem call of the active session, in ms.
+    0 when nothing has been written or no session is active. The
+    launcher includes this in its tick-starvation note: if the two
+    numbers are of the same order, littlefs (block erase under a
+    write) owns the starvation; if this stays small while the gaps
+    are large, the blocker is elsewhere."""
+    sess = _ACTIVE
+    if sess is None:
+        return 0
+    return sess._worst_write_ms
 
 
 def pump():
