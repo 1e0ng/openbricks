@@ -13,6 +13,7 @@ target_sources(usermod_openbricks INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/motor_process_core.c
     ${CMAKE_CURRENT_LIST_DIR}/st_bus.c
     ${CMAKE_CURRENT_LIST_DIR}/st_bus_core.c
+    ${CMAKE_CURRENT_LIST_DIR}/st_servo_core.c
     ${CMAKE_CURRENT_LIST_DIR}/trajectory.c
     ${CMAKE_CURRENT_LIST_DIR}/trajectory_core.c
     ${CMAKE_CURRENT_LIST_DIR}/observer.c

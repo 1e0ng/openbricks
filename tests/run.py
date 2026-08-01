@@ -57,6 +57,7 @@ _TEST_MODULES = [
     "tests.test_st3215",
     "tests.test_st3032",
     "tests.test_st_bus",
+    "tests.test_st_servo",
     "tests.test_trajectory",
     "tests.test_observer",
     "tests.test_scheduler",
