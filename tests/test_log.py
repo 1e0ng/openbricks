@@ -228,12 +228,31 @@ class RotationTests(_LogPathPatch):
         names = [p.split("/")[-1] for p in paths]
         self.assertEqual(names, ["run_0.log", "run_1.log", "run_2.log"])
 
-    def test_fourth_run_evicts_oldest(self):
-        for _ in range(4):
+    def test_run_past_capacity_evicts_oldest(self):
+        # Derived from MAX_RUNS, not a literal: the eviction contract
+        # must hold at whatever capacity ships.
+        for _ in range(log.MAX_RUNS + 1):
             with log.session():
                 pass
-        existing = sorted(os.listdir(_TEST_LOG_DIR))
-        self.assertEqual(existing, ["run_1.log", "run_2.log", "run_3.log"])
+        existing = sorted(os.listdir(_TEST_LOG_DIR),
+                          key=lambda n: int(n[4:-4]))
+        self.assertEqual(len(existing), log.MAX_RUNS)
+        self.assertEqual(existing[0], "run_1.log")   # run_0 evicted
+        self.assertEqual(existing[-1], "run_%d.log" % log.MAX_RUNS)
+
+    def test_capacity_survives_a_diagnostic_session(self):
+        # The bench failure this bump answers: an intermittent
+        # won't-start is diagnosed by READING the failing run's log,
+        # but every diagnostic (state dump, bus scan) is itself a run
+        # taking a slot. Twice the failing run was rotated out by the
+        # tools investigating it. Capacity must fit a realistic
+        # forensic session: several failing button presses plus a
+        # handful of diagnostics, with the oldest failure still
+        # readable.
+        self.assertGreaterEqual(
+            log.MAX_RUNS, 10,
+            "MAX_RUNS shrank — diagnostics will again evict the "
+            "failing runs they exist to explain")
 
     def test_max_bytes_truncates_runaway_logs(self):
         log.MAX_BYTES = 32
