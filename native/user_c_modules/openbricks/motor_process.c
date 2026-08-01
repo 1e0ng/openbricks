@@ -170,6 +170,62 @@ static mp_obj_t tick_dispatch(int use_wall, uint32_t wall_ms) {
 }
 
 
+// ---- hard tick (below-the-scheduler C callback) ----
+//
+// Provided by the esp32-port build-time patch (native/patches/
+// esp32-openbricks-hard-tick.patch): a periodic C callback on the
+// esp_timer service task, unaffected by the Python scheduler. The
+// symbols are declared extern (this module cannot include ESP-IDF
+// headers — ESP_PLATFORM is undefined here) and gated on the config
+// macro the patch defines; ports without the patch (unix, sim) fall
+// back to the scheduler-dispatched tick below.
+//
+// Current consumer: a probe counter proving on real hardware that
+// the hook fires and keeps firing while Python blocks — the
+// foundation gate for moving serial-bus motor control down here.
+// CONTRACT for anything running in that context: no Python objects,
+// no GC allocation, no mp_* VM calls. Pure C state only.
+#if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK
+extern int ob_hard_tick_install(void (*fn)(void *), void *ctx, uint32_t period_us);
+extern void ob_hard_tick_uninstall(void);
+extern uint32_t ob_hard_ticks_ms(void);
+
+static volatile uint32_t hard_tick_probe_count;
+
+static void hard_tick_probe(void *ctx) {
+    (void)ctx;
+    // Aligned 32-bit increment; read side is a single aligned load.
+    hard_tick_probe_count = hard_tick_probe_count + 1;
+}
+#endif
+
+static mp_obj_t mp_hard_tick_available(mp_obj_t self_in) {
+    (void)self_in;
+    #if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK
+    return mp_const_true;
+    #else
+    return mp_const_false;
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_tick_available_obj, mp_hard_tick_available);
+
+#if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK
+static mp_obj_t mp_hard_tick_selftest(mp_obj_t self_in) {
+    // Install the probe at 1 kHz. Idempotent by way of the single
+    // hook slot: a second call reports the already-running state.
+    (void)self_in;
+    int r = ob_hard_tick_install(hard_tick_probe, NULL, 1000);
+    return mp_obj_new_bool(r == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_tick_selftest_obj, mp_hard_tick_selftest);
+
+static mp_obj_t mp_hard_tick_count(mp_obj_t self_in) {
+    (void)self_in;
+    return mp_obj_new_int_from_uint(hard_tick_probe_count);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_tick_count_obj, mp_hard_tick_count);
+#endif
+
 // Whether the Timer path advances the clock by real elapsed time
 // (mp_hal_ticks_ms) instead of one period per fire. OFF by default
 // and enabled by the frozen boot.py ONLY on real hardware
@@ -419,6 +475,11 @@ static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_now_ms),        MP_ROM_PTR(&mp_now_ms_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_wall_clock), MP_ROM_PTR(&mp_set_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_wall_clock),    MP_ROM_PTR(&mp_wall_clock_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_tick_available), MP_ROM_PTR(&mp_hard_tick_available_obj) },
+    #if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK
+    { MP_ROM_QSTR(MP_QSTR_hard_tick_selftest), MP_ROM_PTR(&mp_hard_tick_selftest_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_tick_count), MP_ROM_PTR(&mp_hard_tick_count_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_configure),     MP_ROM_PTR(&mp_configure_obj) },
     { MP_ROM_QSTR(MP_QSTR_period_ms),     MP_ROM_PTR(&mp_period_ms_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_registered), MP_ROM_PTR(&mp_is_registered_obj) },

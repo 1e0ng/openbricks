@@ -251,3 +251,34 @@ class UartTxRingTests(unittest.TestCase):
         self.assertIn("uart_hal_write_txfifo", src)
         self.assertIn("uart_hal_disable_intr_mask", src)
         self.assertIn("UART_INTR_TXFIFO_EMPTY", src)
+
+
+class HardTickPatchTests(unittest.TestCase):
+    """The below-the-scheduler tick (arc PR 2). The C behaviour needs
+    hardware (esp_timer) — what host tests pin is the patch's shape:
+    it must add the source to the build, define the config macro the
+    user module keys off, and keep the ISR-context contract visible.
+    """
+
+    _PATCH = (_ROOT +
+              "/native/patches/esp32-openbricks-hard-tick.patch")
+
+    def test_patch_adds_source_macro_and_build_entry(self):
+        src = _read(self._PATCH)
+        self.assertIn("openbricks_hard_tick.c", src)
+        self.assertIn("MICROPY_OPENBRICKS_HARD_TICK", src)
+        self.assertIn("esp_timer_start_periodic", src)
+        # cmake registration — without it the symbol never links.
+        self.assertIn("esp32_common.cmake", src)
+
+    def test_user_module_gates_on_the_macro(self):
+        src = _read(_ROOT +
+                    "/native/user_c_modules/openbricks/motor_process.c")
+        self.assertIn("MICROPY_OPENBRICKS_HARD_TICK", src)
+        self.assertIn("ob_hard_tick_install", src)
+
+    def test_hook_contract_is_documented_in_the_patch(self):
+        # The no-VM-calls contract is enforced by review; losing the
+        # comment loses the review.
+        src = _read(self._PATCH)
+        self.assertIn("must not touch Python", src)

@@ -227,6 +227,14 @@ class WallClockTests(unittest.TestCase):
         finally:
             motor_process.set_wall_clock(False)
 
+    def test_hard_tick_unavailable_off_hardware(self):
+        # The hard tick is an esp32-port patch; unix and sim builds
+        # must report it absent and must NOT expose the probe API —
+        # code probing for it decides which dispatch world it's in.
+        self.assertFalse(motor_process.hard_tick_available())
+        self.assertFalse(hasattr(motor_process, "hard_tick_selftest"))
+        self.assertFalse(hasattr(motor_process, "hard_tick_count"))
+
     def test_boot_py_enables_wall_clock_on_esp32_only(self):
         # The enable site is frozen boot.py, gated on sys.platform.
         with open("native/frozen/boot.py") as f:
