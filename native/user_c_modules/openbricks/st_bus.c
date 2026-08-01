@@ -20,6 +20,12 @@
 
 #include <string.h>
 
+// Hard-tick pump entry, called from motor_process's dispatcher.
+// Prototype here (not a header) because it's the single cross-file
+// symbol of this module and the coverage build runs with
+// -Werror=missing-prototypes.
+void ob_st_bus_hard_poll(void);
+
 #if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
 #include <stdatomic.h>
 
