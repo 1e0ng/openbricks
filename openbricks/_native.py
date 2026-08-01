@@ -13,6 +13,7 @@ implementation detail.
 
 from _openbricks_native import (  # noqa: F401
     motor_process,
+    st_bus,
     Servo,
     TrapezoidalProfile,
     Observer,
