@@ -188,3 +188,66 @@ class BleRxBufferTests(unittest.TestCase):
         self.assertIn("def __init__(self, ble, name, rxbuf=_RX_BUFFER_BYTES)",
                       src)
         self.assertIn("gatts_set_buffer(self._rx_handle, rxbuf, True)", src)
+
+
+class UartTxRingTests(unittest.TestCase):
+    """Non-blocking UART stdout (the 90-ms-per-print fix, final leg).
+
+    The C behaviour itself is exercised by CI's qemu-smoke job — the
+    banner arriving over UART0 IS the patched TX path working. What
+    host tests can pin is the configuration contract: the patch stays
+    inert at stock config, both boards opt in, and the build script
+    still applies patches at all. Drift in any of these silently
+    reverts print() to paying ~5.1 ms of wire time per line.
+    """
+
+    _BOARDS = [
+        _ROOT + "/native/boards/openbricks_esp32s3/mpconfigboard.h",
+        _ROOT + "/native/boards/openbricks_esp32/mpconfigboard.h",
+    ]
+    _PATCH = (_ROOT +
+              "/native/patches/esp32-uart-repl-tx-nonblocking.patch")
+
+    def _ring_define(self, src):
+        for line in src.splitlines():
+            parts = line.split()
+            if (len(parts) >= 3 and parts[0] == "#define"
+                    and parts[1] == "MICROPY_HW_UART_REPL_TX_RING"):
+                return int(parts[2].strip("()"))
+        return None
+
+    def test_patch_is_inert_at_stock_config(self):
+        # Upstream-identical default: the hook must be #ifndef-guarded
+        # and default to 0 (blocking), same convention as the stdin
+        # ring patch. A non-zero default would change behaviour for
+        # any config that doesn't opt in.
+        src = _read(self._PATCH)
+        self.assertIn("#ifndef MICROPY_HW_UART_REPL_TX_RING", src)
+        self.assertIn("#define MICROPY_HW_UART_REPL_TX_RING (0)", src)
+
+    def test_patch_keeps_the_blocking_fallback(self):
+        # The #else branch must retain upstream's blocking loop so a
+        # board at 0 builds the original code, not a stub.
+        src = _read(self._PATCH)
+        self.assertIn("ulTaskNotifyTake", src)
+
+    def test_both_boards_opt_in(self):
+        for path in self._BOARDS:
+            ring = self._ring_define(_read(path))
+            self.assertIsNotNone(
+                ring, "%s does not define MICROPY_HW_UART_REPL_TX_RING "
+                "— print() pays blocking UART wire time again" % path)
+            self.assertGreaterEqual(
+                ring, 512,
+                "%s ring (%d) is smaller than a burst of a few long "
+                "lines — drops would start during ordinary output"
+                % (path, ring))
+
+    def test_ring_drains_and_disarms_in_the_isr(self):
+        # The two ISR-side obligations: drain ring -> FIFO, and
+        # disable the interrupt when the ring is empty (else an idle
+        # line re-fires TXFIFO_EMPTY forever).
+        src = _read(self._PATCH)
+        self.assertIn("uart_hal_write_txfifo", src)
+        self.assertIn("uart_hal_disable_intr_mask", src)
+        self.assertIn("UART_INTR_TXFIFO_EMPTY", src)

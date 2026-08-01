@@ -1,0 +1,118 @@
+diff --git a/ports/esp32/uart.c b/ports/esp32/uart.c
+index 6e00fa3aa..02ade0e19 100644
+--- a/ports/esp32/uart.c
++++ b/ports/esp32/uart.c
+@@ -53,6 +53,29 @@ static uint8_t __DECLARE_RCC_ATOMIC_ENV __attribute__ ((unused));
+ // RXFIFO RX timeout threshold. This is in bit periods, so 10==one byte. Same as ESP-IDF UART driver.
+ #define RXFIFO_RX_TIMEOUT (10)
+ 
++// Size of the TX ring buffer for non-blocking stdout writes. At the
++// default 0 this file is byte-for-byte upstream behaviour: tx_strn
++// busy-waits until every byte has left the wire, i.e. a print() pays
++// wire time (~87 us/byte at 115200) on the calling thread. Boards may
++// define a power-of-two size to make TX asynchronous instead: tx_strn
++// then only copies into the ring and returns, and the UART ISR drains
++// ring -> FIFO from the TXFIFO_EMPTY interrupt. When the ring is full
++// the remainder of the write is DROPPED (same contract as the
++// USB-Serial-JTAG path, which gives up after 200 ms when nobody
++// drains) — the wired console is a debug surface, and stalling the
++// program to preserve its bytes is the wrong trade.
++#ifndef MICROPY_HW_UART_REPL_TX_RING
++#define MICROPY_HW_UART_REPL_TX_RING (0)
++#endif
++
++#if MICROPY_HW_UART_REPL_TX_RING
++// Refill when the TX FIFO drains below this many bytes.
++#define TXFIFO_EMPTY_THR (8)
++static uint8_t uart_tx_ring_array[MICROPY_HW_UART_REPL_TX_RING];
++static ringbuf_t uart_tx_ring = {uart_tx_ring_array, sizeof(uart_tx_ring_array), 0, 0};
++static portMUX_TYPE uart_tx_mux = portMUX_INITIALIZER_UNLOCKED;
++#endif
++
+ void uart_stdout_init(void) {
+     uart_hal_context_t repl_hal = REPL_HAL_DEFN();
+     soc_module_clk_t sclk;
+@@ -79,10 +102,33 @@ void uart_stdout_init(void) {
+     uart_hal_set_rxfifo_full_thr(&repl_hal, RXFIFO_FULL_THR);
+     uart_hal_set_rx_timeout(&repl_hal, RXFIFO_RX_TIMEOUT);
+     uart_hal_ena_intr_mask(&repl_hal, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
++
++    #if MICROPY_HW_UART_REPL_TX_RING
++    // TXFIFO_EMPTY itself is enabled lazily by tx_strn (there is
++    // nothing to drain until the first write).
++    uart_hal_set_txfifo_empty_thr(&repl_hal, TXFIFO_EMPTY_THR);
++    #endif
+ }
+ 
+ int uart_stdout_tx_strn(const char *str, size_t len) {
+     uart_hal_context_t repl_hal = REPL_HAL_DEFN();
++    #if MICROPY_HW_UART_REPL_TX_RING
++    // Non-blocking: copy into the ring and arm the drain interrupt.
++    // The critical section pairs with the ISR's — the enable below
++    // must not race a concurrent drain's disable, or bytes sit in
++    // the ring until the next write re-arms it.
++    portENTER_CRITICAL(&uart_tx_mux);
++    for (size_t i = 0; i < len; i++) {
++        if (ringbuf_put(&uart_tx_ring, (uint8_t)str[i]) < 0) {
++            // Ring full — drop the remainder (see the contract at
++            // MICROPY_HW_UART_REPL_TX_RING above).
++            break;
++        }
++    }
++    uart_hal_ena_intr_mask(&repl_hal, UART_INTR_TXFIFO_EMPTY);
++    portEXIT_CRITICAL(&uart_tx_mux);
++    return len;
++    #else
+     size_t remaining = len;
+     uint32_t written = 0;
+     // TODO add a timeout
+@@ -97,6 +143,7 @@ int uart_stdout_tx_strn(const char *str, size_t len) {
+         ulTaskNotifyTake(pdFALSE, 1);
+     }
+     return len;
++    #endif
+ }
+ 
+ // all code executed in ISR must be in IRAM, and any const data must be in DRAM
+@@ -119,6 +166,41 @@ static void IRAM_ATTR uart_irq_handler(void *arg) {
+             ringbuf_put(&stdin_ringbuf, rbuf[i]);
+         }
+     }
++
++    #if MICROPY_HW_UART_REPL_TX_RING
++    // TX drain: move ring bytes into the hardware FIFO. Every
++    // uart_hal_* call here is either from IDF's uart_hal_iram.c
++    // (write_txfifo, clr/get_intsts_mask — the same family the RX
++    // path above already relies on from this IRAM ISR) or an inline
++    // LL register access.
++    if (uart_hal_get_intsts_mask(&repl_hal) & UART_INTR_TXFIFO_EMPTY) {
++        portENTER_CRITICAL_ISR(&uart_tx_mux);
++        uint8_t tbuf[SOC_UART_FIFO_LEN];
++        uint32_t space = uart_hal_get_txfifo_len(&repl_hal);
++        uint32_t n = 0;
++        while (n < space && n < sizeof(tbuf)) {
++            int c = ringbuf_get(&uart_tx_ring);
++            if (c < 0) {
++                break;
++            }
++            tbuf[n++] = (uint8_t)c;
++        }
++        if (n > 0) {
++            uint32_t written;
++            uart_hal_write_txfifo(&repl_hal, tbuf, n, &written);
++        }
++        if (ringbuf_avail(&uart_tx_ring) == 0) {
++            // Nothing left — stop the interrupt from re-firing on an
++            // idle line. tx_strn re-arms it on the next write.
++            uart_hal_disable_intr_mask(&repl_hal, UART_INTR_TXFIFO_EMPTY);
++        }
++        // Clear AFTER the refill: the raw bit re-latches only when
++        // the FIFO next drops below the threshold, which is exactly
++        // the next time we want to run.
++        uart_hal_clr_intsts_mask(&repl_hal, UART_INTR_TXFIFO_EMPTY);
++        portEXIT_CRITICAL_ISR(&uart_tx_mux);
++    }
++    #endif
+ }
+ 
+ #endif // MICROPY_HW_ENABLE_UART_REPL

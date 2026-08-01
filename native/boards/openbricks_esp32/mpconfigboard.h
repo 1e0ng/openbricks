@@ -12,6 +12,18 @@
 #define MICROPY_PY_NETWORK        (0)
 #define MICROPY_PY_NETWORK_WLAN   (0)
 
+// Non-blocking UART stdout (native/patches/
+// esp32-uart-repl-tx-nonblocking.patch). Same rationale as the S3
+// board: upstream's blocking tx_strn made every print() pay UART
+// wire time (~5.1 ms for a typical line at 115200) on the calling
+// thread. NOTE the trade is sharper here than on the S3: classic
+// ESP32 has no native USB, so UART0 IS the wired console — under a
+// print storm deeper than the ring (~178 ms of line time) the wired
+// console drops the remainder while BLE and the run log keep
+// everything. An attached terminal still sees normal output at
+// normal rates; only storm backlogs are lossy.
+#define MICROPY_HW_UART_REPL_TX_RING (2048)
+
 // Raw-paste flow control: STOCK (MicroPython's 256-byte buffer max
 // => 128-byte window). 1.32.0 raised it to 2048 and 1.32.1 to 1024;
 // BOTH broke staging over BLE on real hardware — at 2048 the hub

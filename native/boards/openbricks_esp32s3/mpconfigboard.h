@@ -19,6 +19,21 @@
 // of one doesn't block the other.
 #define MICROPY_HW_ENABLE_UART_REPL  (1)
 
+// Non-blocking UART stdout (native/patches/
+// esp32-uart-repl-tx-nonblocking.patch). Upstream's tx_strn
+// busy-waits until every byte has left the wire — ~87 us/byte at
+// 115200, so a 60-byte print() line stalled the calling thread
+// ~5.1 ms even with NOTHING attached to the UART pins (a bare UART
+// can't tell nobody is listening; on this board the bench console is
+// the native USB port and UART0 usually talks to no one). Measured
+// end-to-end with examples/log_write_benchmark.py: 6.4 ms/line, of
+// which ~5.1 ms was this wire wait. With the ring, tx_strn copies
+// and returns; the UART ISR drains ring -> FIFO. A print storm
+// deeper than the ring DROPS the remainder on the wired console only
+// — BLE and the run log keep full fidelity (both were already
+// async). 2048 B = ~178 ms of line time at 115200.
+#define MICROPY_HW_UART_REPL_TX_RING (2048)
+
 // Raw-paste flow control: STOCK (MicroPython's 256-byte buffer max
 // => 128-byte window). 1.32.0 raised it to 2048 and 1.32.1 to 1024;
 // BOTH broke staging over BLE on real hardware — at 2048 the hub
