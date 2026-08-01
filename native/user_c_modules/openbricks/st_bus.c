@@ -34,6 +34,7 @@ void ob_st_bus_hard_poll(void);
 
 // IDF UART shims from the esp32-openbricks-bus-uart patch (port
 // land; this module cannot include IDF headers).
+extern uint32_t ob_hard_ticks_ms(void);   // hard-tick patch clock
 extern int ob_bus_uart_open(int uart_num, int baud, int tx_pin, int rx_pin);
 extern int ob_bus_uart_tx(int uart_num, const uint8_t *buf, size_t len);
 extern int ob_bus_uart_rx(int uart_num, uint8_t *buf, size_t maxlen);
