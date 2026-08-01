@@ -237,6 +237,14 @@ class DriveBaseParityTests(unittest.TestCase):
         self.db.set_heading_override(0.0)
         self.db.turn(sim.now_ms, 90.0, 90.0)
         sim.step(5000)   # run the turn trajectory to completion
+        # ARRIVAL semantics (1.43.1): the override is still frozen at
+        # zero, so the robot demonstrably hasn't turned — done must
+        # be False. (Time-based done here is the exact hole that let
+        # a real robot's final gyro turn keep its +4.5-deg overshoot
+        # uncorrected on the bench.)
+        self.assertFalse(self.db.is_done())
+        self.db.set_heading_override(90.0)   # NOW it has arrived
+        sim.step(50)
         self.assertTrue(self.db.is_done())
 
         self.db.straight(sim.now_ms, 100.0, 100.0)

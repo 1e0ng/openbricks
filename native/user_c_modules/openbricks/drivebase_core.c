@@ -215,20 +215,30 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
         turn_target = db->turn_hold;
     }
 
-    // 3. Both profiles done → move complete.
-    if (!db->fwd_active && !db->turn_active) {
-        db->done = true;
-    }
-
-    // 4. Actual sum / diff positions.
+    // 3. Actual sum / diff positions.
     ob_float_t sum_pos  = db_sum_pos(db);
     ob_float_t diff_pos = db->use_gyro
                           ? db->heading_override_wheel_deg
                           : db_diff_pos_encoder(db);
 
-    // 5. Coupled P + feedforward.
+    // 4. Coupled P + feedforward.
     ob_float_t sum_err  = fwd_target  - sum_pos;
     ob_float_t diff_err = turn_target - diff_pos;
+
+    // 5. Move complete = profiles expired AND the robot has ARRIVED.
+    //    Time-based done alone left the final move's settling error
+    //    permanently uncorrected (bench: +4.5 body-deg banked at
+    //    every gyro'd turn end; only non-final turns were rescued by
+    //    the next move). Matches the classic fallback's
+    //    reach-the-target semantics; callers own the stall timeout.
+    if (!db->fwd_active && !db->turn_active) {
+        ob_float_t se = (sum_err  < 0) ? -sum_err  : sum_err;
+        ob_float_t de = (diff_err < 0) ? -diff_err : diff_err;
+        if (se < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+            && de < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG) {
+            db->done = true;
+        }
+    }
     ob_float_t fwd_cmd  = fwd_ff_vel  + db->kp_sum  * sum_err;
     ob_float_t diff_cmd = turn_ff_vel + db->kp_diff * diff_err;
 

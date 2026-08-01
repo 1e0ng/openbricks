@@ -31,9 +31,17 @@ TURN_RATE_DPS      = 150
 def drive_square(db, imu, label):
     start = imu.heading()
     print("[%s] starting heading: %.1f" % (label, start))
-    for _ in range(4):
+    for i in range(4):
         db.straight(SIDE_MM)
         db.turn(90)
+        # Instrumentation for the +5.6-deg systematic (2026-08-02):
+        # the continuous frame the controller steers by vs the
+        # physical heading. Diverging -> the Python unwrap loses
+        # degrees; agreeing -> the controller knowingly parks
+        # off-target and the bug is C-side.
+        if db._use_gyro:
+            print("  [dbg] after turn %d: frame=%+.1f  physical=%+.1f"
+                  % (i + 1, db._gyro_cont, imu.heading()))
     end = imu.heading()
     delta = end - start
     if delta > 180.0:

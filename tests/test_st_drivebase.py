@@ -181,6 +181,26 @@ class StopAndGyroTests(_Base):
         self.assertTrue(self._mm(1) > self._mm(0),
                         (self._mm(0), self._mm(1)))
 
+    def test_done_requires_arrival_not_just_profile_expiry(self):
+        # The +4.5-deg bench bug: db_done flipped true at trajectory
+        # expiry while the final turn's overshoot stood uncorrected.
+        # Simulate a lagging heading source: freeze the override 6
+        # wheel-deg short of the target past profile expiry — done
+        # must stay False, and flip True once the reading arrives.
+        sb.db_use_gyro(True)
+        sb.db_turn(90.0, 60.0)
+        # Run well past the profile duration with the override frozen
+        # at zero (robot "hasn't turned" as far as the gyro knows).
+        for _ in range(3000):
+            self.w.pump()
+            sb.db_set_heading(0.0)
+        self.assertFalse(sb.db_done())
+        # Arrive: feed the target heading (90 body-deg).
+        for _ in range(50):
+            self.w.pump()
+            sb.db_set_heading(90.0)
+        self.assertTrue(sb.db_done())
+
     def test_torque_starvation_regression(self):
         # The OTHER planner regression: set_speed re-staging torque
         # every tick starved the sync-writes (98 torque packets per
