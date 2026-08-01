@@ -132,6 +132,17 @@ ships:
   and button notes). So a hard reset can lose recent `print` output —
   never the run's framing. Measure it on your own hub with
   `openbricks run -n NAME examples/log_write_benchmark.py`.
+- The **wired UART console is asynchronous too** (a build-time patch,
+  `native/patches/esp32-uart-repl-tx-nonblocking.patch`). Upstream's
+  UART stdout busy-waits until every byte has left the wire — ~5.1 ms
+  for a typical line at 115200, paid by `print()` on the calling
+  thread even with nothing attached to the UART pins. With the patch,
+  `print` copies into a 2 KB ring and the UART interrupt drains it in
+  the background; a print storm deeper than the ring drops the
+  remainder **on the wired console only** — BLE and the run log
+  (both already asynchronous) keep every line. Net effect: a `print`
+  costs string formatting plus three RAM buffer appends, ~1 ms,
+  regardless of what is or isn't listening on any transport.
 
 The Python module names on the host are deliberately split
 (`openbricks_dev` for the CLI, `openbricks_sim` for the sim) so they
