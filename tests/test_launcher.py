@@ -2001,6 +2001,115 @@ class StartPathSelectionTests(unittest.TestCase):
         self.assertTrue(self.launch._idle_loop_alive())
 
 
+class TracebackInLogTests(unittest.TestCase):
+    """A bench ENODEV landed in the run log as bare
+    ``Exception: OSError(19,)`` — no line, no call, so the mux write
+    and the sensor's chip-ID read were indistinguishable. An untethered
+    run has no console to catch the printed traceback, so the log file
+    must carry it or the failure is unlocatable after the fact.
+    """
+
+    _LOG_DIR = "/tmp/_obtest_launcher_logs"
+
+    def setUp(self):
+        from openbricks import log
+        self._log = log
+        self._wipe()
+        self._prev_dir = log.LOG_DIR
+        log.LOG_DIR = self._LOG_DIR
+        self.addCleanup(self._restore)
+        self.addCleanup(_cleanup_program)
+
+    def _wipe(self):
+        try:
+            for name in os.listdir(self._LOG_DIR):
+                os.remove(self._LOG_DIR + "/" + name)
+        except OSError:
+            pass
+
+    def _restore(self):
+        self._log.LOG_DIR = self._prev_dir
+        self._wipe()
+
+    def test_log_records_the_failing_line_not_just_the_repr(self):
+        # Line 3 is the raise — the number is the whole point.
+        path = _write_program("import os\n\nraise OSError(19)\n")
+        launcher._exec_program_raw(path)
+        text = self._log.read_run(0)
+        self.assertIn("Traceback", text)
+        self.assertIn("line 3", text)
+        self.assertIn("19", text)
+
+    def test_falls_back_to_the_repr_when_traceback_render_fails(self):
+        # A logging helper must never be why an exception goes
+        # unrecorded: if rendering fails, the old one-liner still lands.
+        orig = launcher._traceback_text
+        launcher._traceback_text = lambda exc: None
+        self.addCleanup(setattr, launcher, "_traceback_text", orig)
+        path = _write_program("raise OSError(19)\n")
+        launcher._exec_program_raw(path)
+        text = self._log.read_run(0)
+        self.assertIn("Exception:", text)
+        self.assertIn("19", text)
+
+    def test_traceback_text_renders_the_exception_type(self):
+        try:
+            raise OSError(19)
+        except OSError as e:
+            rendered = launcher._traceback_text(e)
+        self.assertTrue(rendered)
+        self.assertIn("19", rendered)
+
+    def test_micropython_printer_branch_is_used_when_present(self):
+        # ``sys.print_exception`` exists on firmware MicroPython but
+        # not CPython, so this branch is otherwise dead on the test
+        # host — and it is the branch the hub actually runs.
+        calls = []
+        orig = launcher._exception_printer
+        launcher._exception_printer = lambda: (
+            lambda exc, buf: (calls.append(exc), buf.write("rendered 19")))
+        self.addCleanup(setattr, launcher, "_exception_printer", orig)
+        text = launcher._traceback_text(OSError(19))
+        self.assertEqual(len(calls), 1)
+        self.assertIn("rendered 19", text)
+
+    def test_console_print_uses_the_micropython_printer_when_present(self):
+        # The live-console print inside _exec_program_raw shares the
+        # same seam; on the hub it takes the sys.print_exception branch.
+        printed = []
+        orig = launcher._exception_printer
+        launcher._exception_printer = lambda: (
+            lambda exc, buf=None: printed.append(exc))
+        self.addCleanup(setattr, launcher, "_exception_printer", orig)
+        path = _write_program("raise OSError(19)\n")
+        launcher._exec_program_raw(path)
+        self.assertEqual(len(printed), 2)   # console + log render
+
+    def test_traceback_text_returns_none_when_rendering_raises(self):
+        orig = launcher._render_exception
+
+        def _boom(exc, buf):
+            raise RuntimeError("render failed")
+
+        launcher._render_exception = _boom
+        self.addCleanup(setattr, launcher, "_render_exception", orig)
+        self.assertIsNone(launcher._traceback_text(OSError(19)))
+
+    def test_render_failure_still_logs_the_exception(self):
+        # End-to-end of the same guarantee: even with rendering dead,
+        # the run log must not lose the failure entirely.
+        orig = launcher._render_exception
+
+        def _boom(exc, buf):
+            raise RuntimeError("render failed")
+
+        launcher._render_exception = _boom
+        self.addCleanup(setattr, launcher, "_render_exception", orig)
+        path = _write_program("raise OSError(19)\n")
+        launcher._exec_program_raw(path)
+        self.assertIn("19", self._log.read_run(0))
+
+
 def tearDownModule():
     # CPython 3.11/3.12 quirk: a KeyboardInterrupt that escapes an
     # ``exec()`` marks the interpreter as interrupt-killed (process
