@@ -68,6 +68,17 @@ def engage():
                 pass
     except Exception:
         pass
+    # NATIVE serial bus (st_bus, 1.41.0+): when the hard-tick pump
+    # owns the UART, the Python bus objects above can't reach those
+    # motors — the native broadcast can, jumps any in-flight
+    # transaction, and voids every staged speed so the pump can't
+    # re-drive. Harmless no-op when nothing is attached; absent
+    # entirely off-firmware (guarded import).
+    try:
+        from _openbricks_native import st_bus
+        st_bus.torque_off_all()
+    except Exception:
+        pass
 
 
 def clear():

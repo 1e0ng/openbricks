@@ -18,6 +18,7 @@
 #include "py/mphal.h"
 
 #include "st_bus_core.h"
+#include "st_servo_core.h"
 
 #include <string.h>
 
@@ -84,6 +85,78 @@ static void test_rx_flush(void *ctx) {
     io->n_flush++;
 }
 
+// ---- servo slots + the shared bus pump ----
+//
+// One iteration of the drive loop: poll the in-flight transaction,
+// route a finished result to whoever started it, and — when the bus
+// is idle — start the planner's next op. The SAME function runs from
+// the firmware hard tick (1 kHz, esp_timer task) and from the Python
+// ``servo_pump()`` binding (unix tests drive it against the test
+// rings), so the whole scheduler is provable off-hardware.
+//
+// Ownership rule: the pump only consumes results of transactions IT
+// started (``tick_txn``); results of manually started transactions
+// (start_ping & co) are left for Python's take_result. Manual
+// traffic and attached servos share the bus politely, but mixing
+// them mid-drive is a probe-mode-vs-drive-mode smell.
+static ob_sservo_t sservo;
+static bool sservo_inited;
+static uint8_t tick_txn;        // pump-started transaction in flight
+static uint8_t tick_txn_is_read;
+
+static ob_sservo_t *sservo_get(void) {
+    if (!sservo_inited) {
+        ob_sservo_init(&sservo);
+        sservo_inited = true;
+    }
+    return &sservo;
+}
+
+static void servo_pump_locked(ob_bus_t *b) {
+    ob_bus_poll(b);
+    if (tick_txn
+        && (b->state == OB_BUS_DONE || b->state == OB_BUS_TIMEOUT
+            || b->state == OB_BUS_BAD_REPLY)) {
+        uint8_t payload[OB_BUS_MAX_READ];
+        uint8_t plen = 0;
+        ob_bus_state_t st = ob_bus_take_result(b, payload, &plen);
+        if (tick_txn_is_read) {
+            ob_sservo_read_result(sservo_get(), st == OB_BUS_DONE,
+                                  payload, plen);
+        }
+        tick_txn = 0;
+        tick_txn_is_read = 0;
+    }
+    if (b->state != OB_BUS_IDLE) {
+        return;
+    }
+    ob_sservo_op_t op;
+    ob_sservo_next_op(sservo_get(), &op);
+    int started = 0;
+    switch (op.kind) {
+        case OB_SOP_WRITE:
+            started = (ob_bus_start_write(b, op.id, op.reg,
+                                          op.data, op.data_len) == 0);
+            break;
+        case OB_SOP_SYNC_SPEED:
+            started = (ob_bus_start_sync_write(b, OB_SREG_GOAL_SPEED, 2,
+                                               op.sync_ids, op.sync_data,
+                                               op.sync_n) == 0);
+            break;
+        case OB_SOP_READ_POS:
+            started = (ob_bus_start_read(b, op.id, OB_SREG_PRESENT_POS, 2,
+                                         OB_SSERVO_READ_TICKS) == 0);
+            break;
+        default:
+            return;
+    }
+    if (started) {
+        tick_txn = 1;
+        tick_txn_is_read = (op.kind == OB_SOP_READ_POS);
+        ob_sservo_op_started(sservo_get(), &op);
+    }
+}
+
 // ---- Python-facing methods (module-singleton style, like
 //      motor_process: self argument ignored) ----
 
@@ -121,7 +194,7 @@ void ob_st_bus_hard_poll(void) {
         return;
     }
     bus_take();
-    ob_bus_poll(&test_bus);
+    servo_pump_locked(&test_bus);
     bus_release();
 }
 #else
@@ -148,7 +221,11 @@ static ob_bus_t *bus_get(void) {
 static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     (void)self_in;
     test_inited = false;
+    sservo_inited = false;
+    tick_txn = 0;
+    tick_txn_is_read = 0;
     bus_get();
+    sservo_get();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_test_reset_obj, sb_test_reset);
@@ -316,6 +393,134 @@ static mp_obj_t sb_attach_uart(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_attach_uart_obj, 5, 5, sb_attach_uart);
 #endif
 
+// ---- servo-slot bindings ----
+
+static mp_obj_t sb_servo_attach(size_t n_args, const mp_obj_t *args) {
+    // (self, slot, id, invert, goal_acc)
+    (void)n_args;
+    bus_take();
+    int r = ob_sservo_attach(sservo_get(), mp_obj_get_int(args[1]),
+                             (uint8_t)mp_obj_get_int(args[2]),
+                             mp_obj_is_true(args[3]) ? 1 : 0,
+                             (uint8_t)mp_obj_get_int(args[4]));
+    bus_release();
+    return mp_obj_new_bool(r == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_attach_obj, 5, 5, sb_servo_attach);
+
+static mp_obj_t sb_servo_detach(mp_obj_t self_in, mp_obj_t slot_in) {
+    (void)self_in;
+    bus_take();
+    ob_sservo_detach(sservo_get(), mp_obj_get_int(slot_in));
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_detach_obj, sb_servo_detach);
+
+static mp_obj_t sb_servo_run(mp_obj_t self_in, mp_obj_t slot_in,
+                             mp_obj_t steps_in) {
+    // Signed encoder steps/s (Python converts dps; core is int-only).
+    (void)self_in;
+    bus_take();
+    int r = ob_sservo_set_speed(sservo_get(), mp_obj_get_int(slot_in),
+                                (int32_t)mp_obj_get_int(steps_in));
+    bus_release();
+    return mp_obj_new_bool(r == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(sb_servo_run_obj, sb_servo_run);
+
+static mp_obj_t sb_servo_coast(mp_obj_t self_in, mp_obj_t slot_in) {
+    (void)self_in;
+    bus_take();
+    int r = ob_sservo_coast(sservo_get(), mp_obj_get_int(slot_in));
+    bus_release();
+    return mp_obj_new_bool(r == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_coast_obj, sb_servo_coast);
+
+static mp_obj_t sb_servo_counts(mp_obj_t self_in, mp_obj_t slot_in) {
+    (void)self_in;
+    bus_take();
+    int32_t c = ob_sservo_counts(sservo_get(), mp_obj_get_int(slot_in));
+    bus_release();
+    return mp_obj_new_int(c);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_counts_obj, sb_servo_counts);
+
+static mp_obj_t sb_servo_stats(mp_obj_t self_in, mp_obj_t slot_in) {
+    (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
+    bus_take();
+    ob_sservo_t *sv = sservo_get();
+    uint32_t ok = 0, failed = 0, stale = 0;
+    if (slot >= 0 && slot < OB_SSERVO_SLOTS) {
+        ok     = sv->slots[slot].reads_ok;
+        failed = sv->slots[slot].reads_failed;
+        stale  = sv->slots[slot].stale;
+    }
+    bus_release();
+    mp_obj_t t[3] = {
+        mp_obj_new_int_from_uint(ok),
+        mp_obj_new_int_from_uint(failed),
+        mp_obj_new_int_from_uint(stale),
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_stats_obj, sb_servo_stats);
+
+static mp_obj_t sb_servo_pump(mp_obj_t self_in) {
+    // One pump iteration — the hard tick's exact code path, callable
+    // from Python. On firmware with the tick running this is a
+    // harmless extra iteration; on unix it IS the drive loop, which
+    // is how the scheduler is tested off-hardware.
+    (void)self_in;
+    bus_take();
+    servo_pump_locked(bus_get());
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_servo_pump_obj, sb_servo_pump);
+
+static mp_obj_t sb_servo_encode(mp_obj_t self_in, mp_obj_t steps_in) {
+    (void)self_in;
+    return mp_obj_new_int(
+        ob_sservo_encode_speed((int32_t)mp_obj_get_int(steps_in)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_encode_obj, sb_servo_encode);
+
+static mp_obj_t sb_torque_off_all(mp_obj_t self_in) {
+    // E-stop path: broadcast torque-off NOW, jumping any in-flight
+    // transaction (an emergency stop must not queue behind feedback
+    // reads). Consuming whatever was in flight is acceptable damage:
+    // the pump's next iteration recovers, and the stale-RX flush
+    // before TX (st3215.py's drain rule) re-frames the bus.
+    (void)self_in;
+    uint8_t off = 0;
+    bus_take();
+    ob_bus_t *b = bus_get();
+    if (b->state == OB_BUS_AWAIT_REPLY) {
+        b->state = OB_BUS_IDLE;   // abandon; flush-before-TX re-frames
+        tick_txn = 0;
+        tick_txn_is_read = 0;
+    }
+    int r = ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1);
+    // Broadcast completes immediately; consume so the pump can go on.
+    if (r == 0) {
+        ob_bus_take_result(b, NULL, NULL);
+    }
+    // Void every staged command so nothing re-drives the motors.
+    ob_sservo_t *sv = sservo_get();
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        if (sv->slots[i].in_use) {
+            sv->slots[i].target_dirty = 0;
+            sv->slots[i].torque_cmd = -1;
+        }
+    }
+    bus_release();
+    return mp_obj_new_bool(r == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_torque_off_all_obj, sb_torque_off_all);
+
 static mp_obj_t sb_stats(mp_obj_t self_in) {
     (void)self_in;
     ob_bus_t *b = bus_get();
@@ -347,6 +552,15 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_take_tx),          MP_ROM_PTR(&sb_take_tx_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_rx),          MP_ROM_PTR(&sb_feed_rx_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),            MP_ROM_PTR(&sb_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_attach),     MP_ROM_PTR(&sb_servo_attach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_detach),     MP_ROM_PTR(&sb_servo_detach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_run),        MP_ROM_PTR(&sb_servo_run_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_coast),      MP_ROM_PTR(&sb_servo_coast_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_counts),     MP_ROM_PTR(&sb_servo_counts_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_stats),      MP_ROM_PTR(&sb_servo_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_pump),       MP_ROM_PTR(&sb_servo_pump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_encode),     MP_ROM_PTR(&sb_servo_encode_obj) },
+    { MP_ROM_QSTR(MP_QSTR_torque_off_all),   MP_ROM_PTR(&sb_torque_off_all_obj) },
     #if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
     { MP_ROM_QSTR(MP_QSTR_attach_uart),      MP_ROM_PTR(&sb_attach_uart_obj) },
     #endif
