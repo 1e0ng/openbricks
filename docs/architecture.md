@@ -92,7 +92,15 @@ are direct where they can be.
    `hard_tick_count()`. Existing controllers still dispatch through
    the scheduler (their encoder reads call into Python objects,
    which the hard context must never do); the native serial-bus
-   motor path is being built directly on the hard tick.
+   motor path lives there: `NativeDriveBase` (`openbricks.robotics`)
+   runs the 2-DOF controller inside the hard tick on serial-bus servo
+   slots (~220 Hz odometry per wheel, floor-verified 0.3% odometry
+   closure on a square), with `use_gyro(True)` fed by a Python outer
+   loop at ~50-100 Hz. It owns its UART end-to-end — construct it
+   with servo ids and pins, not Motor objects, and don't build
+   serial-bus Motor objects on the same UART in the same boot
+   (peripheral double-ownership). Motor-layer nativization (classic
+   `DriveBase` routing there transparently) is planned follow-up.
 4. **Drivebase coupling** (pbio `drivebase.c`) — our `drivebase.c`
    runs two coupled controllers in (sum, diff) coordinates with
    position feedback on both. Exit criterion: asymmetric-friction
