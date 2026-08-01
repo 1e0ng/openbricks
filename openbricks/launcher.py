@@ -244,6 +244,13 @@ class Launcher:
         except Exception as e:
             # The latch itself must never fail the stop request.
             _note("estop engage FAILED: %r" % (e,))
+        # Commit the run log while it is still safe to write. Print
+        # output is buffered in RAM (see openbricks.log), and the
+        # program is about to be torn down — anything unflushed would
+        # die with it. This MUST stay above _request_stop: after that
+        # an injected KeyboardInterrupt can land mid-write, which is
+        # the same ordering rule the _note calls above follow.
+        _flush_log()
         _request_stop(self)
 
     def _tick(self, _timer=None):
@@ -275,6 +282,19 @@ class Launcher:
         try:
             from openbricks import ble_repl
             ble_repl.pump_tx()
+        except Exception:
+            pass
+        # Run-log liveness, same contract as the TX pump above: the
+        # tee'd ``print`` only buffers (a littlefs commit costs ~60-90
+        # ms and used to run inline with every print, stalling the
+        # program between its own bytecodes), so the bytes reach flash
+        # here instead — off the hot path. Unforced: this pump writes,
+        # while the real commit is paid at program end and on the stop
+        # press. Wrapped, because a logging failure must never kill the
+        # tick that owns the stop button.
+        try:
+            from openbricks import log as _log
+            _log.pump()
         except Exception:
             pass
         # Starvation self-detection: Timer callbacks dispatch through
@@ -674,6 +694,20 @@ def _note(text):
     try:
         from openbricks import log as _log
         _log.note(text)
+    except Exception:
+        pass
+
+
+def _flush_log():
+    """Commit the run log's buffered output to flash.
+
+    Separate from ``_note`` so the stop path's durability doesn't
+    depend on a note having been written: ``note`` swallows its own
+    failures, and "the stop press commits the log" is a guarantee in
+    its own right. Guarded for the same reason as ``_note``."""
+    try:
+        from openbricks import log as _log
+        _log.flush()
     except Exception:
         pass
 
