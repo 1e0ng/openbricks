@@ -1398,6 +1398,40 @@ class TickStarvationTests(unittest.TestCase):
                         notes[0])
         self.assertEqual(self.launcher._tick_gap_max, 400)
 
+    def test_starvation_note_names_the_worst_log_write(self):
+        # The note must carry its own prime suspect: if littlefs
+        # spent 300 ms in one write, the starvation and the write are
+        # the same event and the log says so directly.
+        notes, log_mod, orig = self._capture_notes()
+        orig_worst = launcher._worst_log_write_ms
+        launcher._worst_log_write_ms = lambda: 300
+        try:
+            self.launcher._tick()
+            advance_ms(50)
+            self.launcher._tick()
+            advance_ms(400)
+            self.launcher._tick()
+        finally:
+            log_mod.note = orig
+            launcher._worst_log_write_ms = orig_worst
+        self.assertEqual(len(notes), 1)
+        self.assertIn("worst log write 300 ms", notes[0])
+
+    def test_worst_log_write_helper_survives_a_broken_log_module(self):
+        orig = launcher._worst_log_write_ms
+        try:
+            from openbricks import log as log_mod
+            orig_fn = log_mod.worst_write_ms
+
+            def _boom():
+                raise OSError(5)
+
+            log_mod.worst_write_ms = _boom
+            self.addCleanup(setattr, log_mod, "worst_write_ms", orig_fn)
+            self.assertEqual(launcher._worst_log_write_ms(), 0)
+        finally:
+            launcher._worst_log_write_ms = orig
+
     def test_debrief_reports_worst_tick_gap(self):
         orig_singleton = launcher._singleton
         launcher._singleton = self.launcher

@@ -430,6 +430,68 @@ class AsyncWriteTests(_LogPathPatch):
         self.assertEqual(sess._pending_len, 0)
 
 
+class WorstWriteTrackingTests(_LogPathPatch):
+    """The tick-starvation instrumentation: pump() times each
+    filesystem call and keeps the session's worst, so a starvation
+    note can convict or exonerate littlefs without a special build."""
+
+    def _session_with_clock(self, durations_ms):
+        """A real session whose file 'write' advances a fake clock by
+        the next duration in ``durations_ms``."""
+        sess = log.session()
+        sess.__enter__()
+        self.addCleanup(sess.__exit__, None, None, None)
+        clock = [0]
+        queue = list(durations_ms)
+        orig_ticks = log._ticks_ms
+        log._ticks_ms = lambda: clock[0]
+        self.addCleanup(setattr, log, "_ticks_ms", orig_ticks)
+        inner = sess._file
+
+        class _SlowFile:
+            def write(self, s):
+                clock[0] += queue.pop(0) if queue else 0
+                return inner.write(s)
+
+            def flush(self):
+                return inner.flush()
+
+            def close(self):
+                return inner.close()
+
+        sess._file = _SlowFile()
+        return sess
+
+    def test_worst_write_is_the_max_not_the_last(self):
+        sess = self._session_with_clock([30, 250, 40])
+        for _ in range(3):
+            print("line")
+            sess.pump()
+        self.assertEqual(sess._worst_write_ms, 250)
+        self.assertEqual(log.worst_write_ms(), 250)
+
+    def test_fast_writes_report_small_numbers(self):
+        sess = self._session_with_clock([2, 1])
+        print("line")
+        sess.pump()
+        self.assertLessEqual(sess._worst_write_ms, 2)
+
+    def test_no_session_reports_zero(self):
+        self.assertEqual(log.worst_write_ms(), 0)
+
+    def test_clock_fallbacks_without_ticks_functions(self):
+        # The no-ticks_* branch is dead on every test runtime (MP and
+        # the CPython fakes both provide them) — patch the resolved
+        # lookups to cover the wall-clock fallback.
+        orig_t, orig_d = log._TICKS_FN, log._DIFF_FN
+        log._TICKS_FN, log._DIFF_FN = None, None
+        try:
+            self.assertTrue(isinstance(log._ticks_ms(), int))
+            self.assertEqual(log._ticks_diff(7, 3), 4)
+        finally:
+            log._TICKS_FN, log._DIFF_FN = orig_t, orig_d
+
+
 class BufferedOutputStillLandsTests(_LogPathPatch):
     """Speed must not cost content: everything printed still reaches
     the file by the time the run is over."""
