@@ -72,10 +72,20 @@ are direct where they can be.
    with explicit accel / cruise / decel phases. `servo.run_target()`
    and `DriveBase.straight()` / `.turn()` sample it each tick.
 3. **Cooperative multitasking** (pbio `motor_process.c` + `os.c`) —
-   our `motor_process.c`. Always-on 1 kHz tick off a `machine.Timer`
-   ISR. Native subscribers (`Servo`, `DriveBase`) register via a fast
+   our `motor_process.c`. Always-on 1 kHz tick off a `machine.Timer`.
+   Native subscribers (`Servo`, `DriveBase`) register via a fast
    C-function-pointer path (~1 µs/tick); Python callables are still
    accepted on a slower dispatch path for user extensibility.
+   Honesty note: on esp32, `machine.Timer` callbacks are dispatched
+   through `micropython.schedule`'s bounded queue — a main thread
+   blocked in one long C call delays or silently drops ticks, so
+   1 kHz is nominal, not guaranteed (unlike pbio, whose loop runs
+   under the VM). Since 1.37.0 the controllers' **clock** is immune
+   to that: on real hardware the tick advances `now_ms` by measured
+   `mp_hal_ticks_ms` deltas (wall time, enabled by the frozen
+   `boot.py`), so dropped ticks cost control updates but no longer
+   dilate trajectory time. Making the tick itself starvation-proof
+   is the planned next step of the native-control work.
 4. **Drivebase coupling** (pbio `drivebase.c`) — our `drivebase.c`
    runs two coupled controllers in (sum, diff) coordinates with
    position feedback on both. Exit criterion: asymmetric-friction

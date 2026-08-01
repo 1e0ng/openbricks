@@ -35,6 +35,23 @@ the VFS file, but by then our boot.py path has already started it.)
 import sys
 
 
+# Wall-clock the native motor scheduler — REAL HARDWARE ONLY.
+# machine.Timer callbacks ride micropython.schedule's droppable
+# queue, so counting fires dilates the controllers' clock under
+# scheduler starvation (a bench 981 ms gap advanced it single-digit
+# ms). On esp32 the tick advances by mp_hal_ticks_ms deltas instead.
+# Gated on sys.platform because the unix test env drives a fake
+# Timer against a fake clock — wall-clocking there mixes real host
+# time into a virtual world. Runs from boot.py so every boot AND
+# soft reset re-enables it before any program can start motors.
+if sys.platform == "esp32":
+    try:
+        from _openbricks_native import motor_process as _mp
+        _mp.set_wall_clock(True)
+    except (ImportError, AttributeError):
+        pass
+
+
 def _run_user_main():
     """If the user uploaded ``/main.py`` to VFS, run it and return True.
     Returns False when no user file is present."""
