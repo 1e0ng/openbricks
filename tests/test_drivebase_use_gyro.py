@@ -204,6 +204,14 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         ndb.use_gyro(True)
         ndb.turn(90.0, 360.0)
         time.sleep_ms(1000)   # run the turn trajectory to completion
+        # ARRIVAL semantics (the +4.5-deg banked-overshoot fix): the
+        # trajectory has expired but this fake IMU never rotated, so
+        # the robot demonstrably hasn't arrived — done must be False.
+        # (Time-based done here is exactly what let a real robot's
+        # final turn keep its overshoot uncorrected.)
+        self.assertFalse(ndb.is_done())
+        imu.heading_value = 90.0   # NOW it has physically arrived
+        time.sleep_ms(50)
         self.assertTrue(ndb.is_done())
 
         imu.heading_value = 95.0   # overshot the absolute target by 5

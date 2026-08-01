@@ -167,9 +167,22 @@ class NativeDriveBase:
         self._gyro_prev = h
         self._sb.db_set_heading(self._gyro_cont)
 
+    _SETTLE_TIMEOUT_MS = 8000
+
     def _wait(self):
+        deadline = time.ticks_ms() + self._SETTLE_TIMEOUT_MS
         while not self._sb.db_done():
             estop.check()
             if self._use_gyro:
                 self._gyro_pump()
+            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                # done now requires ARRIVAL, not just profile expiry
+                # (the +4.5-deg banked-overshoot fix) — so a wheel
+                # that physically can't reach the target must raise,
+                # same contract as the classic fallback.
+                self._sb.db_stop()
+                raise RuntimeError(
+                    "NativeDriveBase move did not reach target within "
+                    "%d ms — wheel stalled, blocked, or gyro frame "
+                    "diverged" % self._SETTLE_TIMEOUT_MS)
             time.sleep_ms(10)

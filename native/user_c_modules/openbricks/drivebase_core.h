@@ -46,6 +46,17 @@
 #define OB_DRIVEBASE_DEFAULT_KP_DIFF   5.0
 #define OB_DRIVEBASE_DEFAULT_ACCEL_DPS2  1500.0
 
+// Arrival tolerances for ``done`` (wheel degrees). ``done`` used to
+// be trajectory-TIME-based: the profile expiring declared the move
+// complete while the robot was still settling — bench-measured as a
+// repeatable +4.5 body-deg of uncorrected overshoot on every gyro'd
+// turn's END (mid-square turns were silently corrected by the next
+// move's absolute-frame feedback; the LAST one never was). The
+// classic fallback always required measured arrival; this matches
+// it. 3 wheel-deg ~= 0.8 mm of travel / ~2 body-deg of heading on
+// the 88/136 bench geometry.
+#define OB_DRIVEBASE_DONE_TOL_WHEEL_DEG  3.0
+
 
 typedef struct {
     // Servo handles — raw pointers into the bindings' ``ob_servo_t``
