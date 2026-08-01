@@ -11,6 +11,8 @@ void ob_motor_process_init(ob_motor_process_t *m) {
     m->n_c_callbacks  = 0;
     m->period_ms      = 1;
     m->virtual_now_ms = 0;
+    m->last_wall_ms   = 0;
+    m->wall_inited    = 0;
 }
 
 
@@ -50,12 +52,37 @@ void ob_motor_process_unregister_c(ob_motor_process_t *m,
 }
 
 
-void ob_motor_process_fire_c(ob_motor_process_t *m) {
-    // Advance the clock first so subscribers see a consistent "now".
-    m->virtual_now_ms += m->period_ms;
+static void fire_slots(ob_motor_process_t *m) {
     for (size_t i = 0; i < m->n_c_callbacks; i++) {
         m->c_callbacks[i].fn(m->c_callbacks[i].ctx);
     }
+}
+
+
+void ob_motor_process_fire_c(ob_motor_process_t *m) {
+    // Advance the clock first so subscribers see a consistent "now".
+    m->virtual_now_ms += m->period_ms;
+    fire_slots(m);
+}
+
+
+void ob_motor_process_fire_c_at(ob_motor_process_t *m, uint32_t wall_now_ms) {
+    if (!m->wall_inited) {
+        // No previous timestamp to diff against — advance one nominal
+        // period and prime the tracker.
+        m->wall_inited = 1;
+        m->virtual_now_ms += m->period_ms;
+    } else {
+        // Unsigned subtraction is wrap-correct across the 2^32 ms
+        // rollover of mp_hal_ticks_ms-style counters.
+        uint32_t dt = wall_now_ms - m->last_wall_ms;
+        if (dt > OB_TICK_MAX_CATCHUP_MS) {
+            dt = OB_TICK_MAX_CATCHUP_MS;
+        }
+        m->virtual_now_ms += (long)dt;
+    }
+    m->last_wall_ms = wall_now_ms;
+    fire_slots(m);
 }
 
 

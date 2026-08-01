@@ -135,13 +135,21 @@ static motor_process_obj_t *mp_get(void) {
 // (via the shared core's ``fire_c``) fire first; Python callbacks
 // second via a stack snapshot so self-unregistration mid-tick is safe.
 
-static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
-    (void)timer_arg;
+static mp_obj_t tick_dispatch(int use_wall, uint32_t wall_ms) {
     motor_process_obj_t *self = mp_get();
     (void)self;
 
-    // Fast path — also advances the tick clock.
-    ob_motor_process_fire_c(core_get());
+    // Fast path — also advances the tick clock. The wall-clocked
+    // variant advances by REAL elapsed time: machine.Timer callbacks
+    // ride micropython.schedule's droppable queue, so counting fires
+    // (the old behaviour) dilated the controllers' clock under
+    // scheduler starvation — a bench 981 ms gap advanced it by
+    // single-digit ms, slowing every trajectory mid-run.
+    if (use_wall) {
+        ob_motor_process_fire_c_at(core_get(), wall_ms);
+    } else {
+        ob_motor_process_fire_c(core_get());
+    }
 
     // Slow path: Python callbacks.
     size_t n;
@@ -159,6 +167,26 @@ static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
     }
     m_del(mp_obj_t, snap, n);
     return mp_const_none;
+}
+
+
+// Whether the Timer path advances the clock by real elapsed time
+// (mp_hal_ticks_ms) instead of one period per fire. OFF by default
+// and enabled by the frozen boot.py ONLY on real hardware
+// (sys.platform == "esp32"): the unix test environment drives a fake
+// machine.Timer against a fake virtual clock, and wall-clocking
+// there reads the REAL host clock — two clocks for one world, which
+// sent trajectory tests 1000x past their targets when this was
+// unconditional. A plain C static (not MP state) so it needs no GC
+// root; boot.py re-runs on every soft reset and re-enables it.
+static bool wall_clock_mode = false;
+
+static mp_obj_t mp_on_tick(mp_obj_t timer_arg) {
+    (void)timer_arg;
+    if (wall_clock_mode) {
+        return tick_dispatch(1, (uint32_t)mp_hal_ticks_ms());
+    }
+    return tick_dispatch(0, 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_on_tick_obj, mp_on_tick);
 
@@ -274,11 +302,40 @@ static mp_obj_t mp_stop(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_stop_obj, mp_stop);
 
-static mp_obj_t mp_tick(mp_obj_t self_in) {
-    (void)self_in;
-    return mp_on_tick(mp_const_none);
+static mp_obj_t mp_tick(size_t n_args, const mp_obj_t *args) {
+    // tick()   -> deterministic: clock += period_ms (tests, sim)
+    // tick(N)  -> wall-clocked with N as the monotonic-ms timestamp —
+    //             exactly the firmware Timer path; the seam that lets
+    //             the unix suite pin wall-dt/clamp/wrap semantics
+    //             without sleeping.
+    (void)args;
+    if (n_args == 2) {
+        return tick_dispatch(1, (uint32_t)mp_obj_get_int_truncated(args[1]));
+    }
+    return tick_dispatch(0, 0);
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mp_tick_obj, mp_tick);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_tick_obj, 1, 2, mp_tick);
+
+static mp_obj_t mp_set_wall_clock(mp_obj_t self_in, mp_obj_t enable) {
+    (void)self_in;
+    (void)mp_get();   // lazy init
+    wall_clock_mode = mp_obj_is_true(enable);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_set_wall_clock_obj, mp_set_wall_clock);
+
+static mp_obj_t mp_wall_clock(mp_obj_t self_in) {
+    (void)self_in;
+    return mp_obj_new_bool(wall_clock_mode);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_wall_clock_obj, mp_wall_clock);
+
+static mp_obj_t mp_now_ms(mp_obj_t self_in) {
+    (void)self_in;
+    (void)mp_get();   // lazy init
+    return mp_obj_new_int(openbricks_motor_process_now_ms());
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_now_ms_obj, mp_now_ms);
 
 static mp_obj_t mp_is_running(mp_obj_t self_in) {
     (void)self_in;
@@ -359,6 +416,9 @@ static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stop),          MP_ROM_PTR(&mp_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),          MP_ROM_PTR(&mp_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_running),    MP_ROM_PTR(&mp_is_running_obj) },
+    { MP_ROM_QSTR(MP_QSTR_now_ms),        MP_ROM_PTR(&mp_now_ms_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_wall_clock), MP_ROM_PTR(&mp_set_wall_clock_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wall_clock),    MP_ROM_PTR(&mp_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_configure),     MP_ROM_PTR(&mp_configure_obj) },
     { MP_ROM_QSTR(MP_QSTR_period_ms),     MP_ROM_PTR(&mp_period_ms_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_registered), MP_ROM_PTR(&mp_is_registered_obj) },
