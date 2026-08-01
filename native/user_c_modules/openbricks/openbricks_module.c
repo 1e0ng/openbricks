@@ -13,6 +13,7 @@
 
 // Types defined in sibling files.
 extern const mp_obj_type_t openbricks_motor_process_type;
+extern const mp_obj_base_t st_bus_singleton;
 extern const mp_obj_type_t openbricks_servo_type;
 extern const mp_obj_type_t openbricks_trajectory_type;
 extern const mp_obj_type_t openbricks_observer_type;
@@ -127,6 +128,7 @@ static const mp_rom_map_elem_t openbricks_native_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stop_button_debug),
       MP_ROM_PTR(&openbricks_stop_button_debug_obj) },
     { MP_ROM_QSTR(MP_QSTR_motor_process),      MP_ROM_PTR(&motor_process_singleton) },
+    { MP_ROM_QSTR(MP_QSTR_st_bus),             MP_ROM_PTR(&st_bus_singleton) },
     { MP_ROM_QSTR(MP_QSTR_Servo),              MP_ROM_PTR(&openbricks_servo_type) },
     { MP_ROM_QSTR(MP_QSTR_TrapezoidalProfile), MP_ROM_PTR(&openbricks_trajectory_type) },
     { MP_ROM_QSTR(MP_QSTR_Observer),           MP_ROM_PTR(&openbricks_observer_type) },
