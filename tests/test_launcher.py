@@ -2001,6 +2001,73 @@ class StartPathSelectionTests(unittest.TestCase):
         self.assertTrue(self.launch._idle_loop_alive())
 
 
+class LogPumpWiringTests(unittest.TestCase):
+    """Logging is asynchronous: ``print`` only buffers, so something
+    has to move the bytes to flash. The launcher tick is that
+    something, and the stop press is what commits them — if either
+    wire comes loose, output silently never lands."""
+
+    def setUp(self):
+        from openbricks import log
+        self._log = log
+        self.launch = launcher.Launcher(
+            _make_button(), program_path="/nonexistent.py", poll_ms=50)
+
+    def test_tick_pumps_the_run_log(self):
+        calls = []
+        orig = self._log.pump
+        self._log.pump = lambda: calls.append(1)
+        self.addCleanup(setattr, self._log, "pump", orig)
+        self.launch._tick()
+        self.assertEqual(len(calls), 1)
+
+    def test_tick_survives_a_pump_that_raises(self):
+        # The tick owns the stop button; a logging failure must not
+        # take it down.
+        orig = self._log.pump
+
+        def _boom():
+            raise OSError(5)
+
+        self._log.pump = _boom
+        self.addCleanup(setattr, self._log, "pump", orig)
+        self.launch._tick()          # must not raise
+        self.assertIsNotNone(self.launch._tick_last_ms)
+
+    def test_stop_press_commits_the_log(self):
+        calls = []
+        orig = self._log.flush
+        self._log.flush = lambda: calls.append(1)
+        self.addCleanup(setattr, self._log, "flush", orig)
+        self.launch._fire_stop()
+        self.assertEqual(len(calls), 1)
+
+    def test_log_commit_precedes_the_interrupt_request(self):
+        # After the injection is requested, a KeyboardInterrupt can
+        # land mid-write — so the commit has to happen first.
+        order = []
+        orig_flush = self._log.flush
+        orig_request = launcher._request_stop
+        self._log.flush = lambda: order.append("flush")
+        launcher._request_stop = lambda inst: order.append("request")
+        self.addCleanup(setattr, self._log, "flush", orig_flush)
+        self.addCleanup(
+            setattr, launcher, "_request_stop", orig_request)
+        self.launch._fire_stop()
+        self.assertEqual(order, ["flush", "request"])
+
+    def test_stop_commit_survives_a_flush_that_raises(self):
+        orig = self._log.flush
+
+        def _boom():
+            raise OSError(5)
+
+        self._log.flush = _boom
+        self.addCleanup(setattr, self._log, "flush", orig)
+        self.launch._fire_stop()     # must not raise
+        self.assertIsNotNone(self.launch._last_stop_ms)
+
+
 class TracebackInLogTests(unittest.TestCase):
     """A bench ENODEV landed in the run log as bare
     ``Exception: OSError(19,)`` — no line, no call, so the mux write

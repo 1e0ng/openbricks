@@ -290,5 +290,161 @@ class FilesystemErrorIsResilient(_LogPathPatch):
                 pass
 
 
+class _CountingFile:
+    """Wraps the real file object so a test can see exactly how many
+    filesystem calls a print costs. Swapped in after ``__enter__`` so
+    the session is otherwise completely real."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.writes = 0
+        self.flushes = 0
+
+    def write(self, s):
+        self.writes += 1
+        return self._inner.write(s)
+
+    def flush(self):
+        self.flushes += 1
+        return self._inner.flush()
+
+    def close(self):
+        return self._inner.close()
+
+
+class AsyncWriteTests(_LogPathPatch):
+    """``print`` must not touch flash.
+
+    A littlefs commit measured ~60-90 ms on the ESP32 bench, and it ran
+    inline with every ``print()`` — on the main thread, between the
+    user program's own bytecodes. Logging cost more than the work it
+    logged and distorted the timing of whatever the robot was doing.
+    """
+
+    def _instrumented(self):
+        sess = log.session()
+        sess.__enter__()
+        self.addCleanup(sess.__exit__, None, None, None)
+        counter = _CountingFile(sess._file)
+        sess._file = counter
+        return sess, counter
+
+    def test_print_touches_the_filesystem_zero_times(self):
+        sess, counter = self._instrumented()
+        for i in range(20):
+            print("line %d" % i)
+        self.assertEqual(counter.writes, 0)
+        self.assertEqual(counter.flushes, 0)
+
+    def test_pump_moves_buffered_output_to_the_file_without_committing(self):
+        sess, counter = self._instrumented()
+        print("buffered")
+        self.assertTrue(sess.pump())
+        self.assertEqual(counter.writes, 1)
+        self.assertEqual(counter.flushes, 0)
+
+    def test_pump_batches_a_print_storm_into_one_write(self):
+        sess, counter = self._instrumented()
+        for i in range(20):
+            print("line %d" % i)
+        sess.pump()
+        self.assertEqual(counter.writes, 1)
+
+    def test_forced_pump_commits(self):
+        sess, counter = self._instrumented()
+        print("buffered")
+        sess.pump(force=True)
+        self.assertEqual(counter.flushes, 1)
+
+    def test_pump_without_a_file_is_a_no_op(self):
+        # A session whose file never opened (flash full, bad path)
+        # still gets pumped every tick — it must just say no.
+        sess = log._LogSession()
+        self.assertIsNone(sess._file)
+        self.assertFalse(sess.pump())
+        self.assertFalse(sess.pump(force=True))
+
+    def test_forced_pump_with_empty_buffer_still_commits(self):
+        sess, counter = self._instrumented()
+        self.assertTrue(sess.pump(force=True))
+        self.assertEqual(counter.writes, 0)
+        self.assertEqual(counter.flushes, 1)
+
+    def test_pump_with_nothing_buffered_is_a_no_op(self):
+        sess, counter = self._instrumented()
+        self.assertFalse(sess.pump())
+        self.assertEqual(counter.writes, 0)
+
+    def test_write_text_commits_immediately(self):
+        # Crash-adjacent lines must not wait for a pump.
+        sess, counter = self._instrumented()
+        sess.write_text("Exception: OSError(19,)\n")
+        self.assertEqual(counter.writes, 1)
+        self.assertEqual(counter.flushes, 1)
+
+    def test_pending_cap_writes_through_rather_than_growing(self):
+        # Enough to cross PENDING_MAX several times over. The buffer
+        # must drain itself rather than grow without bound, and no
+        # line may be dropped to achieve that.
+        sess, counter = self._instrumented()
+        chunk = "x" * 200
+        lines = (log.PENDING_MAX // len(chunk)) * 3
+        for _ in range(lines):
+            print(chunk)
+        self.assertTrue(counter.writes >= 1)
+        self.assertTrue(sess._pending_len < log.PENDING_MAX)
+        sess.pump(force=True)
+        with open(sess.path) as f:
+            self.assertEqual(f.read().count(chunk), lines)
+
+    def test_pump_survives_a_dead_file_and_drops_the_backlog(self):
+        # A flash error must not wedge the tick that owns the stop
+        # button, and must not leave bytes queued forever.
+        sess, counter = self._instrumented()
+        print("doomed")
+
+        def _boom(_s):
+            raise OSError(5)
+
+        counter.write = _boom
+        self.assertFalse(sess.pump())
+        self.assertEqual(sess._pending_len, 0)
+
+
+class BufferedOutputStillLandsTests(_LogPathPatch):
+    """Speed must not cost content: everything printed still reaches
+    the file by the time the run is over."""
+
+    def test_program_end_commits_buffered_prints(self):
+        with log.session() as sess:
+            for i in range(50):
+                print("line %d" % i)
+        with open(sess.path) as f:
+            data = f.read()
+        self.assertIn("line 0", data)
+        self.assertIn("line 49", data)
+
+    def test_module_pump_and_flush_target_the_active_session(self):
+        # pump() drains the RAM buffer into the file object; only
+        # flush() guarantees another reader can see it (CPython buffers
+        # at the file object, littlefs commits on sync). Assert each
+        # against its own contract rather than conflating them.
+        with log.session() as sess:
+            print("via module pump")
+            self.assertTrue(sess._pending_len > 0)
+            self.assertTrue(log.pump())
+            self.assertEqual(sess._pending_len, 0)
+            print("via module flush")
+            self.assertTrue(log.flush())
+            with open(sess.path) as f:
+                data = f.read()
+            self.assertIn("via module pump", data)
+            self.assertIn("via module flush", data)
+
+    def test_module_pump_and_flush_are_no_ops_with_no_session(self):
+        self.assertFalse(log.pump())
+        self.assertFalse(log.flush())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -117,7 +117,21 @@ ships:
   -> stop` the moment it lands, followed by `estop engaged` and a
   final `stopped: KeyboardInterrupt (N ms after press, M retries)`
   debrief, so a misbehaving stop chain is diagnosable from the log
-  alone.
+  alone. An uncaught exception writes its **full traceback**, not just
+  the exception's repr — on an untethered run the file is the only
+  record, and a bare `OSError(19,)` doesn't say which call failed.
+- Log writes are **asynchronous**. `print` only appends to a RAM
+  buffer; the bytes reach flash from the launcher's Timer tick
+  (`log.pump()`). A `flush()` on littlefs forces a metadata commit
+  measured at ~60-90 ms on the ESP32 bench, and doing that per line
+  ran synchronously on the main thread between the user program's own
+  bytecodes — logging cost more than the work it logged and distorted
+  the timing of whatever the robot was controlling. Real commits are
+  paid where durability matters: program end, the stop button, and
+  every `write_text` (the `started:` / `stopped:` / `Exception:` lines
+  and button notes). So a hard reset can lose recent `print` output —
+  never the run's framing. Measure it on your own hub with
+  `openbricks run -n NAME examples/log_write_benchmark.py`.
 
 The Python module names on the host are deliberately split
 (`openbricks_dev` for the CLI, `openbricks_sim` for the sim) so they

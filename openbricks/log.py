@@ -54,6 +54,36 @@ LOG_DIR    = "/openbricks_logs"
 MAX_RUNS   = 3
 MAX_BYTES  = 64 * 1024
 
+# Writes are ASYNCHRONOUS. ``print`` only appends to a RAM buffer; the
+# file write and its flush happen off the hot path, driven by the
+# launcher's Timer tick calling ``log.pump()`` (the same shape
+# ``ble_repl`` uses for TX: buffer on write, drain on a scheduled
+# callback, with the launcher tick as the liveness backstop).
+#
+# Why: ``flush()`` on littlefs forces a metadata commit, measured at
+# ~60-90 ms on the ESP32 bench — PER LINE. The tee runs synchronously
+# on the main thread between the user program's own bytecodes, so
+# every ``print()`` stalled the robot for a tenth of a second (a
+# 29-line ``dump_events`` took 1.9 s). Logging cost more than the work
+# it was logging, and it distorted the timing of whatever the program
+# was controlling.
+#
+# Durability is preserved where it matters. The buffer is committed:
+#   * when the program ends (``__exit__``),
+#   * when the stop button fires (launcher ``_fire_stop``),
+#   * on every ``write_text`` — "started:", "stopped:", "Exception:"
+#     and the launcher's button notes. Those are the crash-adjacent
+#     lines a post-mortem needs, and they are rare enough that paying
+#     a commit for each costs nothing measurable.
+# So a hard reset (brownout, WDT, panic) can lose only ordinary
+# ``print`` output since the last pump — never the run's framing.
+#
+# PENDING_MAX bounds the RAM buffer: past it, ``_append`` writes
+# through synchronously rather than growing without limit. The pump
+# runs every launcher tick, so reaching it takes a genuine print
+# storm — and hitting it costs a write, never a dropped line.
+PENDING_MAX = 4096
+
 # MicroPython embedded ports count time from 2000-01-01 UTC; the unix
 # port and CPython from 1970-01-01. Detect once so stored stamps are
 # true Unix epoch regardless of runtime.
@@ -152,8 +182,45 @@ class _LogSession:
         self._prev_print    = None
         self._budget        = [0]
         self._at_line_start = True
+        # Stamped text not yet handed to the filesystem. A list of
+        # str, joined at pump time — repeated ``+=`` on a str is
+        # quadratic, and this buffer is appended to once per print.
+        self._pending       = []
+        self._pending_len   = 0
 
-    def _append(self, payload):
+    def pump(self, force=False):
+        """Drain the RAM buffer to the file. Called off the print hot
+        path — from the launcher's Timer tick — so ``print`` itself
+        never touches flash.
+
+        ``force`` additionally commits (``flush``), which is the
+        expensive part on littlefs; the tick pumps without it and lets
+        the filesystem cache batch, while program-end / stop-press /
+        ``write_text`` force a real commit.
+
+        Returns True if anything reached the file. Never raises: a
+        logging failure must not propagate into the tick that owns the
+        stop button, nor into the program being logged."""
+        if self._file is None:
+            return False
+        try:
+            if self._pending:
+                text = "".join(self._pending)
+                self._pending = []
+                self._pending_len = 0
+                self._file.write(text)
+            elif not force:
+                return False
+            if force:
+                self._file.flush()
+            return True
+        except Exception:
+            # Flash error — drop the bytes rather than wedge the tick.
+            self._pending = []
+            self._pending_len = 0
+            return False
+
+    def _append(self, payload, force=False):
         """Stamp, budget-check, and write ``payload`` to the file.
 
         Every new file line is prefixed with ``"<epoch_ms> "`` — a raw
@@ -184,9 +251,12 @@ class _LogSession:
         remaining = MAX_BYTES - self._budget[0]
         if len(text) > remaining:
             text = text[:remaining]
-        self._file.write(text)
-        self._file.flush()
         self._budget[0] += len(text)
+        # The hot path ends here: buffer only, no filesystem call.
+        self._pending.append(text)
+        self._pending_len += len(text)
+        if force or self._pending_len >= PENDING_MAX:
+            self.pump(force=force)
 
     def _make_tee_print(self, original_print):
         """Build the replacement ``print`` function."""
@@ -231,6 +301,9 @@ class _LogSession:
             builtins.print = self._prev_print
             self._prev_print = None
         if self._file is not None:
+            # Program ended — commit whatever print output is still
+            # buffered before the file goes away.
+            self.pump(force=True)
             try:
                 self._file.close()
             except Exception:
@@ -249,11 +322,42 @@ class _LogSession:
         (lines still get the epoch-ms stamp). Used by the launcher's
         exception handler so the traceback (which goes through
         ``sys.print_exception``, not ``print``) lands in the file
-        too."""
+        too.
+
+        Committed immediately, unlike ``print``: every caller of this
+        is crash-adjacent ("started:", "stopped:", "Exception:", the
+        launcher's button notes), so these lines must survive a reset
+        that the buffered print output legitimately may not."""
         try:
-            self._append(s)
+            self._append(s, force=True)
         except Exception:
             pass
+
+
+def pump():
+    """Drain the active session's buffered output to its file.
+
+    Called from the launcher's Timer tick, which is what makes logging
+    asynchronous: ``print`` appends to RAM and returns, this moves the
+    bytes to flash off the program's hot path. No-op when no program
+    is running. Never raises — the tick that calls this also owns the
+    stop button."""
+    sess = _ACTIVE
+    if sess is None:
+        return False
+    return sess.pump()
+
+
+def flush():
+    """Commit the active session's buffered output NOW.
+
+    For the moments durability beats speed: the stop button firing, or
+    any other point where the next thing that happens might be a reset.
+    No-op when no program is running."""
+    sess = _ACTIVE
+    if sess is None:
+        return False
+    return sess.pump(force=True)
 
 
 def session():
