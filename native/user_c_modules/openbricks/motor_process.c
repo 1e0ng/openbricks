@@ -192,10 +192,15 @@ extern uint32_t ob_hard_ticks_ms(void);
 
 static volatile uint32_t hard_tick_probe_count;
 
-static void hard_tick_probe(void *ctx) {
+// The serial-bus pump (st_bus.c). One hook slot, one dispatcher:
+// every hard-context consumer hangs off this function, in order.
+extern void ob_st_bus_hard_poll(void);
+
+static void hard_tick_dispatch(void *ctx) {
     (void)ctx;
     // Aligned 32-bit increment; read side is a single aligned load.
     hard_tick_probe_count = hard_tick_probe_count + 1;
+    ob_st_bus_hard_poll();
 }
 #endif
 
@@ -214,7 +219,7 @@ static mp_obj_t mp_hard_tick_selftest(mp_obj_t self_in) {
     // Install the probe at 1 kHz. Idempotent by way of the single
     // hook slot: a second call reports the already-running state.
     (void)self_in;
-    int r = ob_hard_tick_install(hard_tick_probe, NULL, 1000);
+    int r = ob_hard_tick_install(hard_tick_dispatch, NULL, 1000);
     return mp_obj_new_bool(r == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_tick_selftest_obj, mp_hard_tick_selftest);
