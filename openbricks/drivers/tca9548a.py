@@ -47,6 +47,13 @@ class TCA9548A:
         """Enable exactly ``channel`` (0..7), disabling the rest."""
         mask = 1 << _check_channel(channel)
         if mask != self._selected:
+            # Unknown until the write SUCCEEDS. If it raises, the
+            # mux's real register state is anybody's guess (the write
+            # may have half-happened, or the mux may have reset) — a
+            # cache still claiming the old channel would make the next
+            # select skip its write and silently talk to the wrong
+            # channel.
+            self._selected = None
             self._i2c.writeto(self._addr, bytes([mask]))
             self._selected = mask
 
@@ -81,23 +88,56 @@ class _MuxChannel:
         self._channel = channel
 
     def _select(self):
-        self._mux.select(self._channel)
+        try:
+            self._mux.select(self._channel)
+        except OSError as e:
+            # The MUX itself didn't ACK — a different failure from the
+            # device behind it not answering, and the message must say
+            # so (a bare ENODEV made the two indistinguishable on the
+            # bench; a whole session went to telling them apart).
+            raise OSError(
+                e.args[0] if e.args else 19,
+                "mux at 0x%02x did not ACK selecting channel %d"
+                % (self._mux._addr, self._channel))
+
+    def _no_ack(self, e, addr):
+        """Re-raise a device-side OSError with the channel + address
+        that failed. Same errno; the extra text is what turns
+        ``[Errno 19] ENODEV`` into a named sensor."""
+        raise OSError(
+            e.args[0] if e.args else 19,
+            "no ACK from device 0x%02x on mux channel %d"
+            % (addr, self._channel))
 
     def readfrom_mem(self, addr, reg, nbytes, *args, **kwargs):
         self._select()
-        return self._mux._i2c.readfrom_mem(addr, reg, nbytes, *args, **kwargs)
+        try:
+            return self._mux._i2c.readfrom_mem(
+                addr, reg, nbytes, *args, **kwargs)
+        except OSError as e:
+            self._no_ack(e, addr)
 
     def writeto_mem(self, addr, reg, data, *args, **kwargs):
         self._select()
-        return self._mux._i2c.writeto_mem(addr, reg, data, *args, **kwargs)
+        try:
+            return self._mux._i2c.writeto_mem(
+                addr, reg, data, *args, **kwargs)
+        except OSError as e:
+            self._no_ack(e, addr)
 
     def readfrom(self, addr, nbytes, *args, **kwargs):
         self._select()
-        return self._mux._i2c.readfrom(addr, nbytes, *args, **kwargs)
+        try:
+            return self._mux._i2c.readfrom(addr, nbytes, *args, **kwargs)
+        except OSError as e:
+            self._no_ack(e, addr)
 
     def writeto(self, addr, buf, *args, **kwargs):
         self._select()
-        return self._mux._i2c.writeto(addr, buf, *args, **kwargs)
+        try:
+            return self._mux._i2c.writeto(addr, buf, *args, **kwargs)
+        except OSError as e:
+            self._no_ack(e, addr)
 
     def scan(self):
         self._select()
