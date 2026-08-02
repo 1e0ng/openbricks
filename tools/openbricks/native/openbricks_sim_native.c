@@ -751,15 +751,21 @@ static PyObject *RawDriveBase_turn(RawDriveBaseObject *self, PyObject *args) {
 
 static PyObject *RawDriveBase_stop(RawDriveBaseObject *self,
                                    PyObject *Py_UNUSED(ignored)) {
-    /* Same stale-hold rule as the firmware binding: capture the pose
-     * BEFORE deactivating or the next tick lurches back. */
-    self->core.fwd_hold = (self->bridge_l.observer.pos_hat
-                           + self->bridge_r.observer.pos_hat)
-                          / (ob_float_t)2.0;
-    self->core.turn_hold = self->core.use_gyro
-        ? self->core.heading_override_wheel_deg
-        : (self->bridge_l.observer.pos_hat
-           - self->bridge_r.observer.pos_hat) / (ob_float_t)2.0;
+    /* Same rule as the firmware binding: capture measured pose ONLY
+     * on a mid-move abort (the holds still carry move-start values
+     * there — the lurch bug). After ARRIVAL the holds are end-locked
+     * to the absolute targets; re-capturing measured re-baselined
+     * the gyro frame at every per-move stop and banked each turn's
+     * residual (bench: +7.6 deg/square). */
+    if (!ob_drivebase_is_done(&self->core)) {
+        self->core.fwd_hold = (self->bridge_l.observer.pos_hat
+                               + self->bridge_r.observer.pos_hat)
+                              / (ob_float_t)2.0;
+        self->core.turn_hold = self->core.use_gyro
+            ? self->core.heading_override_wheel_deg
+            : (self->bridge_l.observer.pos_hat
+               - self->bridge_r.observer.pos_hat) / (ob_float_t)2.0;
+    }
     ob_drivebase_stop(&self->core);
     self->bridge_l.target_dps = 0.0;
     self->bridge_r.target_dps = 0.0;
