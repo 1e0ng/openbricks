@@ -113,27 +113,22 @@ class DriveBase:
         # True. ``stop()`` clears this. See ``done`` for the layout.
         self._pending = None
 
-    @staticmethod
-    def _is_serial_bus_motor(m):
-        return (getattr(m, "_bus", None) is not None
-                and hasattr(m, "_adopt_native"))
-
     def _try_adopt_serial(self, left, right, imu):
-        if not (self._is_serial_bus_motor(left)
-                and self._is_serial_bus_motor(right)):
+        # Polymorphic: each serial-motor family implements its own
+        # adoption (firmware ST3215Motor -> real st_bus + UART
+        # handover; the sim's shim motors -> the emulated bus over
+        # MuJoCo wheels). Motors without the hook (encoder/open-loop
+        # families) simply don't adopt.
+        if not (hasattr(left, "_adopt_into_drivebase")
+                and hasattr(right, "_adopt_into_drivebase")):
             return None
-        try:
-            from openbricks import _native
-            if not hasattr(getattr(_native, "st_bus", None) or object(),
-                           "attach_uart"):
-                return None
-        except ImportError:
-            return None
-        from openbricks.robotics.native_drivebase import _SerialNativeEngine
-        return _SerialNativeEngine.adopt_motors(
-            left, right,
+        return left._adopt_into_drivebase(
+            right,
             wheel_diameter_mm=self._wheel_circumference / math.pi,
-            axle_track_mm=self._axle_track, imu=imu)
+            axle_track_mm=self._axle_track, imu=imu,
+            accel_dps2=400.0)   # serial-tuned default (the bench
+        # value every native square shipped with); settings(
+        # acceleration=...) retunes it afterwards via db_set_accel.
 
     def settings(self, straight_speed=None, turn_rate=None,
                  acceleration=None):

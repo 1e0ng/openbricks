@@ -721,6 +721,21 @@ class ST3215Motor(Motor):
     _native_sb = None
     _native_angle_offset = 0.0
 
+    def _adopt_into_drivebase(self, right, wheel_diameter_mm,
+                              axle_track_mm, imu=None, accel_dps2=400.0):
+        """DriveBase's adoption hook (polymorphic — the sim's shim
+        motors implement their own). Returns the serial-native engine,
+        or None when the firmware native bus is absent (then there is
+        NO fallback: serial drivebases are native-only by design)."""
+        from openbricks import _native
+        sbmod = getattr(_native, "st_bus", None)
+        if sbmod is None or not hasattr(sbmod, "attach_uart"):
+            return None
+        from openbricks.robotics.native_drivebase import _SerialNativeEngine
+        return _SerialNativeEngine.adopt_motors(
+            self, right, wheel_diameter_mm=wheel_diameter_mm,
+            axle_track_mm=axle_track_mm, imu=imu, accel_dps2=accel_dps2)
+
     def _adopt_native(self, sb, slot):
         self._native_sb = sb
         self._native_slot = slot

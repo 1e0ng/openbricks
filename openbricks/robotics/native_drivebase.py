@@ -111,8 +111,11 @@ class _SerialNativeEngine:
                  axle_track_mm, imu=None,
                  invert_left=False, invert_right=False,
                  uart_id=1, tx=14, rx=6, baud=1_000_000,
-                 accel_dps2=400.0):
-        self._sb = _bus()
+                 accel_dps2=400.0, sb=None):
+        # ``sb`` is the bus-surface seam: firmware injects the real
+        # st_bus (default), the sim injects its emulation — the ONE
+        # engine code path serves both worlds.
+        self._sb = sb if sb is not None else _bus()
         self._wheel_circumference = math.pi * wheel_diameter_mm
         self._axle_track = float(axle_track_mm)
         self._imu = imu
@@ -126,8 +129,11 @@ class _SerialNativeEngine:
         self._straight_speed_dps = 200
         self._turn_rate_dps = 150
 
-        from openbricks._native import motor_process
-        motor_process.hard_tick_selftest()      # dispatcher on (idempotent)
+        try:
+            from openbricks._native import motor_process
+            motor_process.hard_tick_selftest()  # dispatcher on (idempotent)
+        except (ImportError, AttributeError):
+            pass    # sim / stub worlds have no hard tick to arm
         # Same-boot re-construction: a previous run's slots and
         # drivebase survive in the C singletons (openbricks run keeps
         # the interpreter alive between scripts), and servo_attach
