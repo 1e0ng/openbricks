@@ -605,6 +605,8 @@ class ST3215Motor(Motor):
         self.run_speed(self._max_dps * duty / 100.0)
 
     def speed(self):
+        if self._native_slot is not None:
+            self._native_only_error("speed")
         """Measured shaft speed in deg/s from the present-speed
         register (sign-magnitude, bit 15; steps/s scaled by
         ``steps_per_dps``). Returns ``None`` if the bus is silent,
@@ -622,6 +624,8 @@ class ST3215Motor(Motor):
         return dps
 
     def load(self):
+        if self._native_slot is not None:
+            self._native_only_error("load")
         """Estimated shaft torque in mNm — Pybricks ``Motor.load()``
         shape. The present-load register reports 0.1 %-of-stall units
         (sign in bit 10, per the Feetech SCServo SDK); scaled by the
@@ -641,6 +645,8 @@ class ST3215Motor(Motor):
         return mnm
 
     def stalled(self):
+        if self._native_slot is not None:
+            self._native_only_error("stalled")
         """``True`` when the servo is pushing hard (load magnitude at
         least ``STALL_LOAD_PCT`` percent of stall) but barely moving
         (speed magnitude at most ``STALL_SPEED_DPS``) — the Pybricks
@@ -728,6 +734,8 @@ class ST3215Motor(Motor):
             "DriveBase to use it" % method)
 
     def hold(self):
+        if self._native_slot is not None:
+            self._native_only_error("hold")
         """Actively hold the current shaft angle so the position PID
         resists rotation. Subsequent ``run_speed`` / ``brake`` /
         ``coast`` calls transparently restore wheel mode.
@@ -832,6 +840,13 @@ class ST3215Motor(Motor):
         parks. In wheel/position mode, rebuild the accumulator from the
         encoder via the wrap heuristic.
         """
+        if self._native_slot is not None:
+            # Slot odometry is already multi-turn and already in this
+            # motor's frame (the slot carries the invert flag).
+            counts = self._native_sb.servo_counts(self._native_slot)
+            return counts * 360.0 / _COUNTS_PER_REV \
+                - self._native_angle_offset
+
         if self._op_mode == _MODE_STEP:
             if not self._accum_initialized:
                 return None
@@ -878,6 +893,11 @@ class ST3215Motor(Motor):
 
     def reset_angle(self, angle=0):
         """Set the current shaft angle to ``angle`` (degrees)."""
+        if self._native_slot is not None:
+            counts = self._native_sb.servo_counts(self._native_slot)
+            self._native_angle_offset = (
+                counts * 360.0 / _COUNTS_PER_REV - float(angle))
+            return
         # Drain any pending wrap correction so the offset is taken
         # against an up-to-date accumulator.
         current = self.angle()
@@ -895,6 +915,8 @@ class ST3215Motor(Motor):
     def run_angle(self, deg_per_s, target_angle, wait=True,
                   tolerance_deg=0.5, kp=None, poll_ms=None,
                   debug=False, then="coast"):
+        if self._native_slot is not None:
+            self._native_only_error("run_angle")
         """Rotate by ``target_angle`` degrees at up to ``deg_per_s``,
         ending within ``tolerance_deg`` of the target.
 
