@@ -590,6 +590,30 @@ class SimStBusEngineTests(_ShimTestBase):
         time.sleep_ms(400)
         self.assertGreater(sb.servo_counts(0) - c0, 60)
 
+    def test_db_and_runtime_verbs_cancel_armed_moves(self):
+        # New-command-wins in every direction: each db/runtime verb
+        # must cancel an ARMED per-slot move, not just tolerate an
+        # empty move table.
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.db_straight(50.0, 60.0)
+        self.assertFalse(sb._moves[0].is_active())
+        sb.db_stop()
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.db_turn(30.0, 60.0)
+        self.assertFalse(sb._moves[0].is_active())
+        sb.db_stop()
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.torque_off_all()
+        self.assertFalse(sb._moves[0].is_active())
+        self.assertTrue(sb.servo_move(1, 40960.0, 2000.0, 8000.0))
+        sb.reset_runtime()
+        self.assertFalse(sb._moves[1].is_active())
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.db_config(0, 1, 65.0, 120.0, 400.0)
+        self.assertFalse(sb._moves[0].is_active())
+
     def test_adopted_motor_run_angle_via_the_engine_surface(self):
         # End-to-end for the user-visible path: the ADOPTED firmware
         # driver routes run_angle through servo_move — in the sim the
