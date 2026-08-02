@@ -29,18 +29,25 @@ class SSD1306:
         self.height = height
 
     def text(self, s, x, y, c=1):
+        """Draw string ``s`` with the 8x8 font at pixel (x, y);
+        ``c=1`` lit, ``c=0`` dark. Buffered — call ``show()``."""
         self._impl.text(s, x, y, c)
 
     def pixel(self, x, y, c=None):
+        """Set pixel (x, y) to ``c`` (1 lit / 0 dark), or return its
+        current value when ``c`` is None."""
         self._impl.pixel(x, y, c)
 
     def fill(self, c):
+        """Fill the whole buffer with ``c`` (1 lit / 0 dark)."""
         self._impl.fill(c)
 
     def show(self):
+        """Push the buffer to the panel (nothing appears until this)."""
         self._impl.show()
 
     def clear(self):
+        """Blank the display immediately (fill 0 + show)."""
         self._impl.fill(0)
         self._impl.show()
 

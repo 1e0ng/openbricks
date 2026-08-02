@@ -64,9 +64,11 @@ class StatusLED:
     """
 
     def on(self):
+        """Turn the LED on (RGB LEDs restore their last colour)."""
         raise NotImplementedError
 
     def off(self):
+        """Turn the LED off."""
         raise NotImplementedError
 
     def rgb(self, r, g, b):

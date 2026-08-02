@@ -49,6 +49,7 @@ hardware
 cli
 simulator
 examples
+measuring
 ```
 
 ```{toctree}

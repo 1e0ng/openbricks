@@ -33,6 +33,15 @@ _ENABLE_AEN = 0x02
 
 
 class TCS34725(ColorSensor):
+    """RGB + clear color sensor, fixed at I2C address 0x29.
+
+    Implements the ``ColorSensor`` contract: ``rgbc()`` raw 16-bit
+    channels, ``reflection()`` and the calibrated helpers built on
+    it. Two or more on one robot need a
+    :class:`~openbricks.drivers.tca9548a.TCA9548A` mux (the address
+    is not configurable).
+    """
+
     def __init__(self, i2c, address=_ADDR, integration_ms=2.4, gain=16):
         """
         Args:

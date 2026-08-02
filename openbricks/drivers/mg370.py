@@ -62,6 +62,28 @@ class _InvertedEncoder:
 
 
 class MG370Motor(Motor):
+    """MG370 DC gear motor with high-resolution GMR encoder, closed-loop.
+
+    Same ``Motor`` contract and native 1 kHz servo core as
+    :class:`~openbricks.drivers.jgb37_520.JGB37Motor`; the difference
+    is the encoder path — the 500-PPR GMR encoder is counted by the
+    ESP32 PCNT hardware peripheral (``pcnt_unit``), not GPIO
+    interrupts, because its edge rate exceeds what ``Pin.irq`` can
+    service.
+
+    Args:
+        in1, in2, pwm: H-bridge pins.
+        encoder_a, encoder_b: encoder channel pins (into PCNT).
+        pcnt_unit: PCNT peripheral unit, unique per motor (ESP32 has
+            8, ESP32-S3 has 4 — first motor 0, second 1, ...).
+        pcnt_filter: PCNT glitch filter in APB cycles (default 1023
+            ≈ 12.8 µs; lower it only for encoders faster than ~35 kHz
+            edge rate).
+        counts_per_output_rev: encoder edges per output-shaft
+            revolution (default matches the 1:34 GMR variant).
+        invert / encoder_invert / kp: as in ``JGB37Motor``.
+    """
+
     def __init__(
         self,
         in1, in2, pwm,
