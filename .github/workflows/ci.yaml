@@ -67,6 +67,20 @@ jobs:
       - name: Run test suite under unix MicroPython
         run: ./native/micropython/ports/unix/build-standard/micropython tests/run.py
 
+  c-unit:
+    # Native C unit tests for the user_c_modules pure cores, under
+    # ASan + UBSan. The layer BELOW the binding-driven suite: the
+    # cores are MicroPython-free POD C, so they compile as host
+    # executables where memory errors abort loudly (under MP they
+    # corrupt the heap silently) and struct-level edge states (exact
+    # unwrap boundaries, 2^32 clock wraps) are set directly. No
+    # submodule needed — the cores live in this repo.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build + run C core tests (sanitized)
+        run: scripts/run_c_tests.sh
+
   cpython-tests:
     # Run every CPython-compatible firmware test under stock CPython 3.
     #
