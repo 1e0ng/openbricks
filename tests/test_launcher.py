@@ -2159,6 +2159,73 @@ class ResetMotorProcessBridgeTests(unittest.TestCase):
         self.assertEqual(calls, ["mp.reset"])
 
 
+class HardButtonBridgeTests(unittest.TestCase):
+    """The launcher's three hard-button touchpoints, against a
+    sys.modules stub (the real bindings are firmware-only): config at
+    ensure-time is covered implicitly by hardware; here we pin the
+    arming bridge (single arming site drives BOTH native stop paths)
+    and the idle-loop start consumption."""
+
+    def _install(self, start_pending=False):
+        import sys as _sys
+        calls = []
+
+        class _MP:
+            @staticmethod
+            def reset():
+                calls.append("reset")
+
+            @staticmethod
+            def hard_button_arm(on):
+                calls.append(("arm", bool(on)))
+
+            _pending = [start_pending]
+
+            @classmethod
+            def hard_button_take_start(cls):
+                p, cls._pending[0] = cls._pending[0], False
+                return p
+
+        class _Mod:
+            pass
+
+        mod = _Mod()
+        mod.motor_process = _MP()
+
+        def _boom_set_stop_armed(_):
+            calls.append("classic_arm")
+        mod.set_stop_armed = _boom_set_stop_armed
+        prev = _sys.modules.get("_openbricks_native")
+        _sys.modules["_openbricks_native"] = mod
+
+        def _restore():
+            if prev is None:
+                _sys.modules.pop("_openbricks_native", None)
+            else:
+                _sys.modules["_openbricks_native"] = prev
+        self.addCleanup(_restore)
+        return calls
+
+    def test_arming_site_drives_both_stop_paths(self):
+        calls = self._install()
+        launcher._arm_stop_button(True)
+        self.assertIn("classic_arm", calls)
+        self.assertIn(("arm", True), calls)
+        launcher._arm_stop_button(False)
+        self.assertIn(("arm", False), calls)
+
+    def test_idle_tick_consumes_hard_start(self):
+        self._install(start_pending=True)
+        starts = []
+        orig = launcher._request_start
+        launcher._request_start = lambda inst: starts.append(1)
+        self.addCleanup(setattr, launcher, "_request_start", orig)
+        launch = launcher.Launcher(
+            _make_button(), program_path="/nonexistent.py", poll_ms=50)
+        launch._tick()
+        self.assertEqual(len(starts), 1)
+
+
 class TracebackInLogTests(unittest.TestCase):
     """A bench ENODEV landed in the run log as bare
     ``Exception: OSError(19,)`` — no line, no call, so the mux write

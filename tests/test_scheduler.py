@@ -235,6 +235,14 @@ class WallClockTests(unittest.TestCase):
         self.assertFalse(hasattr(motor_process, "hard_tick_selftest"))
         self.assertFalse(hasattr(motor_process, "hard_tick_count"))
 
+    def test_hard_button_absent_off_hardware(self):
+        # Needs BOTH firmware patches (hard tick + gpio shim); unix
+        # and sim builds must not expose it — the launcher probes by
+        # hasattr and falls back to the scheduler-path watcher alone.
+        self.assertFalse(hasattr(motor_process, "hard_button_config"))
+        self.assertFalse(hasattr(motor_process, "hard_button_arm"))
+        self.assertFalse(hasattr(motor_process, "hard_button_take_start"))
+
     def test_boot_py_enables_wall_clock_on_esp32_only(self):
         # The enable site is frozen boot.py, gated on sys.platform.
         with open("native/frozen/boot.py") as f:

@@ -192,6 +192,52 @@ extern uint32_t ob_hard_ticks_ms(void);
 
 static volatile uint32_t hard_tick_probe_count;
 
+#if defined(MICROPY_OPENBRICKS_GPIO_SHIM) && MICROPY_OPENBRICKS_GPIO_SHIM
+// Hard-button sampling (st_button_core): the program button handled
+// on the hard tick — core 0, un-starvable. STOP (armed + press):
+// interrupt injection + native-bus torque-off fire from C within
+// ~2 ms of the debounced edge, bounded regardless of Python's state
+// (the scheduler path measured gaps to 981 ms). START stays a flag
+// the launcher's main-thread idle loop consumes — only the main
+// thread can exec a program, and start is not latency-critical.
+#include "st_button_core.h"
+extern int ob_gpio_input_pullup(int pin);
+extern int ob_gpio_read(int pin);
+extern void ob_st_bus_estop_from_tick(void);
+
+static ob_button_t hard_button;
+static volatile int      hard_button_pin = -1;
+static volatile uint8_t  hard_button_armed;
+static volatile uint8_t  hard_button_start_pending;
+static volatile uint32_t hard_button_stops;
+
+static int hb_read(void *ctx) {
+    (void)ctx;
+    return ob_gpio_read(hard_button_pin) == 0;   // active-low
+}
+
+static void hard_button_tick(void) {
+    if (hard_button_pin < 0) {
+        return;
+    }
+    ob_button_event_t e = ob_button_tick(&hard_button);
+    if (e != OB_BUTTON_PRESSED) {
+        return;
+    }
+    if (hard_button_armed) {
+        hard_button_stops++;
+        ob_st_bus_estop_from_tick();
+        // ISR-safe by design (the UART RX ISR calls it); sets the
+        // pending KeyboardInterrupt the running program unwinds on.
+        mp_sched_keyboard_interrupt();
+    } else {
+        hard_button_start_pending = 1;
+    }
+}
+#else
+static void hard_button_tick(void) { }
+#endif
+
 // The serial-bus pump (st_bus.c). One hook slot, one dispatcher:
 // every hard-context consumer hangs off this function, in order.
 extern void ob_st_bus_hard_poll(void);
@@ -200,6 +246,7 @@ static void hard_tick_dispatch(void *ctx) {
     (void)ctx;
     // Aligned 32-bit increment; read side is a single aligned load.
     hard_tick_probe_count = hard_tick_probe_count + 1;
+    hard_button_tick();          // BEFORE the pump: stop jumps the queue
     ob_st_bus_hard_poll();
 }
 #endif
@@ -391,6 +438,52 @@ static mp_obj_t mp_wall_clock(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_wall_clock_obj, mp_wall_clock);
 
+#if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK \
+    && defined(MICROPY_OPENBRICKS_GPIO_SHIM) && MICROPY_OPENBRICKS_GPIO_SHIM
+static mp_obj_t mp_hard_button_config(mp_obj_t self_in, mp_obj_t pin_in) {
+    (void)self_in;
+    int pin = mp_obj_get_int(pin_in);
+    if (ob_gpio_input_pullup(pin) != 0) {
+        return mp_const_false;
+    }
+    ob_button_init(&hard_button, hb_read, NULL);
+    hard_button_pin = pin;   // set LAST: the tick keys off it
+    // Ensure the dispatcher is installed (idempotent single slot).
+    (void)ob_hard_tick_install(hard_tick_dispatch, NULL, 1000);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_button_config_obj, mp_hard_button_config);
+
+static mp_obj_t mp_hard_button_arm(mp_obj_t self_in, mp_obj_t on_in) {
+    (void)self_in;
+    hard_button_armed = mp_obj_is_true(on_in) ? 1 : 0;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_button_arm_obj, mp_hard_button_arm);
+
+static mp_obj_t mp_hard_button_take_start(mp_obj_t self_in) {
+    (void)self_in;
+    if (hard_button_start_pending) {
+        hard_button_start_pending = 0;
+        return mp_const_true;
+    }
+    return mp_const_false;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_button_take_start_obj, mp_hard_button_take_start);
+
+static mp_obj_t mp_hard_button_stats(mp_obj_t self_in) {
+    (void)self_in;
+    mp_obj_t t[4] = {
+        mp_obj_new_int_from_uint(hard_button.n_presses),
+        mp_obj_new_int_from_uint(hard_button.n_releases),
+        mp_obj_new_int_from_uint(hard_button_stops),
+        mp_obj_new_bool(hard_button_armed),
+    };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_button_stats_obj, mp_hard_button_stats);
+#endif
+
 static mp_obj_t mp_now_ms(mp_obj_t self_in) {
     (void)self_in;
     (void)mp_get();   // lazy init
@@ -481,6 +574,13 @@ static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_wall_clock), MP_ROM_PTR(&mp_set_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_wall_clock),    MP_ROM_PTR(&mp_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_tick_available), MP_ROM_PTR(&mp_hard_tick_available_obj) },
+    #if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK \
+        && defined(MICROPY_OPENBRICKS_GPIO_SHIM) && MICROPY_OPENBRICKS_GPIO_SHIM
+    { MP_ROM_QSTR(MP_QSTR_hard_button_config), MP_ROM_PTR(&mp_hard_button_config_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_button_arm), MP_ROM_PTR(&mp_hard_button_arm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_button_take_start), MP_ROM_PTR(&mp_hard_button_take_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_button_stats), MP_ROM_PTR(&mp_hard_button_stats_obj) },
+    #endif
     #if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK
     { MP_ROM_QSTR(MP_QSTR_hard_tick_selftest), MP_ROM_PTR(&mp_hard_tick_selftest_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_tick_count), MP_ROM_PTR(&mp_hard_tick_count_obj) },

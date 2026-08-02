@@ -47,6 +47,10 @@ run_one test_st_servo_core \
     "${TESTS}/test_st_servo_core.c" \
     "${CORES}/st_servo_core.c"
 
+run_one test_st_button_core \
+    "${TESTS}/test_st_button_core.c" \
+    "${CORES}/st_button_core.c"
+
 if [ "${fail}" -ne 0 ]; then
     echo "C unit tests: FAILED"
     exit 1
