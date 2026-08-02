@@ -25,7 +25,7 @@ LEFT_SLOT, LEFT_ID   = 0, 2      # bench mapping
 RIGHT_SLOT, RIGHT_ID = 1, 1
 UART_ID, BAUD, TX, RX = 1, 1_000_000, 14, 6
 
-WHEEL_MM, AXLE_MM = 88.0, 136.0
+WHEEL_MM, AXLE_MM = 88.0, 138.5
 SIDE_MM      = 150.0
 SPEED_MM_S   = 60.0              # <= bench cap
 TURN_DPS     = 45.0
