@@ -491,6 +491,18 @@ def _compose_runner():
         "    launcher.run_program(%r)" % _TARGET_PATH,
         "except KeyboardInterrupt:",
         "    print('openbricks: stopped by button press.')",
+        # Evidence in the stream, read BEFORE anything can reboot or
+        # re-init the counters: which path delivered the stop. The
+        # third field (hard_stops) > 0 proves the hard-tick path
+        # fired; 0 with presses > 0 means the Python watcher (defence
+        # in depth) delivered it instead. Guarded: the bindings are
+        # firmware-only.
+        "    try:",
+        "        from _openbricks_native import motor_process as _hb",
+        "        print('openbricks: hard button (presses, releases, "
+        "hard_stops, armed):', _hb.hard_button_stats())",
+        "    except (ImportError, AttributeError):",
+        "        pass",
     ]
     return ("\n".join(lines) + "\n").encode()
 

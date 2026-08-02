@@ -443,6 +443,16 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mp_wall_clock_obj, mp_wall_clock);
 static mp_obj_t mp_hard_button_config(mp_obj_t self_in, mp_obj_t pin_in) {
     (void)self_in;
     int pin = mp_obj_get_int(pin_in);
+    if (pin == hard_button_pin) {
+        // Already sampling this pin: keep the debounce state AND the
+        // press/stop counters. The launcher re-runs its setup on
+        // idle-loop restarts (and BLE session recovery can reboot
+        // it); re-initing here zeroed the counters and destroyed the
+        // evidence of whether the HARD path delivered a stop — bench
+        // 2026-08-03: stats read (0, 0, 0, True) right after a
+        // successful button stop.
+        return mp_const_true;
+    }
     if (ob_gpio_input_pullup(pin) != 0) {
         return mp_const_false;
     }
