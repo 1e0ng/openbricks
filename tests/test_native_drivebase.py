@@ -332,11 +332,14 @@ class AdoptionTests(_Base):
         db.settings(acceleration=800)
         self.assertIn(("db_set_accel", 800.0), self.bus.calls)
 
-    def test_no_native_bus_means_no_adoption(self):
-        import sys as _sys
+    def test_no_native_bus_raises_no_silent_fallback(self):
+        # 1.45.0 contract: a runtime with serial-bus motors but no
+        # st_bus behind them can't drive them closed-loop, and the
+        # Python fallback loop is gone — construction must raise, not
+        # quietly degrade.
         del _native.st_bus
-        db, _, _ = self._drivebase()
-        self.assertIsNone(db._serial_engine)
+        with self.assertRaises(RuntimeError):
+            self._drivebase()
 
 
 class EStopGateTests(_Base):

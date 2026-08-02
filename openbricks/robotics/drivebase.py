@@ -18,6 +18,13 @@ don't need to change:
     db.turn(90)          # deg body heading, blocking
     db.drive(100, 0)     # non-blocking kinematic mapping
 
+Serial-bus motors (ST-3215 / ST-3032) are adopted transparently onto
+the hard-tick engine (firmware) or the emulated bus (sim) — same class,
+same code, one controller. There is no Python control loop: motor
+pairs with neither a native servo nor a serial-bus adoption path get
+open-loop ``drive()``/``stop()`` only, and ``straight()``/``turn()``
+raise.
+
 Open-loop ``drive()`` bypasses the coupled controller; it just maps
 (speed_mm_s, turn_rate_dps) → (left_dps, right_dps) and hands them to
 each servo's ``run_speed``. Useful for interactive control where
@@ -39,8 +46,8 @@ class DriveBase:
                 ``.servo`` (for JGB37Motor) when constructing the native
                 drivebase, since the C layer operates on the servo struct
                 directly. Motors without a native servo (e.g. plain
-                ``L298NMotor`` with no encoder) fall back to an open-loop
-                path.
+                ``L298NMotor`` with no encoder) get open-loop
+                ``drive()`` only.
             wheel_diameter_mm: wheel diameter in millimeters.
             axle_track_mm: distance between the two wheel contact points.
             imu: optional ``IMU``-conformant object (any driver with a
@@ -48,43 +55,28 @@ class DriveBase:
                 the bundled ``BNO055`` qualifies). When provided, call
                 ``drivebase.use_gyro(True)`` to have the heading loop
                 read from the IMU instead of computing from the encoder
-                differential. Slip-immune. Works on both paths: the
-                native controller reads it on the 1 kHz tick, and the
-                serial-bus fallback reads it once per ``done()`` poll.
+                differential. Slip-immune. Works on both closed-loop
+                paths: the native controller reads it on the 1 kHz
+                tick, and the serial-bus engine pumps it into the
+                hard-tick heading hold once per ``done()`` poll.
         """
         self._left = left
         self._right = right
         self._wheel_circumference = math.pi * wheel_diameter_mm
         self._axle_track = axle_track_mm
         self._imu = imu
-        # Fallback-path gyro toggle. Meaningless when ``_native`` is
-        # set — the native controller keeps its own flag internally.
-        self._use_gyro = False
-        # Absolute heading frame for the fallback gyro path
-        # (Pybricks-style): ``_gyro_target`` is where the robot
-        # SHOULD point and ``_gyro_cont`` where it DOES point, both
-        # in continuous (un-wrapped) degrees since ``use_gyro(True)``
-        # was enabled. ``turn(a)`` advances the target; every move
-        # steers toward the target rather than re-baselining at its
-        # own start — so one turn's overshoot is pulled back by the
-        # next move instead of accumulating forever (bench: ~+7°
-        # after one gyro'd square under per-move re-baselining).
-        # ``_gyro_prev`` is the last wrapped ``imu.heading()`` used
-        # to accumulate ``_gyro_cont`` across the ±180 boundary.
-        self._gyro_target = 0.0
-        self._gyro_cont = 0.0
-        self._gyro_prev = None
 
-        # Serial-bus motors + firmware native bus: adopt the motors
-        # onto the hard-tick engine transparently (1.45.0 — ONE
-        # drivebase class, user decision). Off-firmware (sim, older
-        # builds) this quietly stays None and the classic fallback
-        # below serves, so the same user code runs everywhere.
+        # Serial-bus motors: adopt them onto the hard-tick engine
+        # transparently (1.45.0 — ONE drivebase class, user decision).
+        # On firmware that's the real st_bus + UART handover; in the
+        # sim it's the emulated bus over MuJoCo wheels. Same user code
+        # everywhere. Raises if the runtime has no bus — there is no
+        # Python fallback loop.
         self._serial_engine = self._try_adopt_serial(left, right, imu)
 
         # The native drivebase is only usable if both motors are
-        # closed-loop servos. Otherwise the wrapper falls through to a
-        # pure-Python open-loop implementation.
+        # closed-loop servos. Motor pairs with neither engine get
+        # open-loop ``drive()`` only.
         left_servo  = getattr(left,  "_servo", None)
         right_servo = getattr(right, "_servo", None)
         if left_servo is not None and right_servo is not None:
@@ -102,11 +94,6 @@ class DriveBase:
         # ``settings()``.
         self._straight_speed_dps = 200
         self._turn_rate_dps      = 180
-        # Trajectory acceleration (wheel-deg/s²). Mirrors the native
-        # core's default so both paths launch identically. The native
-        # path stores its own copy (set via set_accel); this one drives
-        # the fallback's trapezoid.
-        self._accel_dps2 = 1500.0
 
         # State for in-flight ``straight(wait=False)`` / ``turn(wait=False)``
         # moves. ``None`` means nothing pending; ``done()`` returns
@@ -122,13 +109,22 @@ class DriveBase:
         if not (hasattr(left, "_adopt_into_drivebase")
                 and hasattr(right, "_adopt_into_drivebase")):
             return None
-        return left._adopt_into_drivebase(
+        engine = left._adopt_into_drivebase(
             right,
             wheel_diameter_mm=self._wheel_circumference / math.pi,
             axle_track_mm=self._axle_track, imu=imu,
             accel_dps2=400.0)   # serial-tuned default (the bench
         # value every native square shipped with); settings(
         # acceleration=...) retunes it afterwards via db_set_accel.
+        if engine is None:
+            # Serial-bus motors with no bus behind them: this runtime
+            # can't drive them closed-loop, and the Python fallback
+            # loop was removed in 1.45.0. No silent degradation.
+            raise RuntimeError(
+                "serial-bus drivebase requires the native st_bus "
+                "(firmware >= 1.45.0) or the sim's emulated bus; "
+                "this runtime has neither")
+        return engine
 
     def settings(self, straight_speed=None, turn_rate=None,
                  acceleration=None):
@@ -144,8 +140,7 @@ class DriveBase:
                 ``acceleration * wheel_circumference / 360``. Applies
                 on both paths: the native (encoder-servo) controller
                 arms its C trajectory with it, and the serial-bus
-                fallback shapes its per-tick speed command with the
-                same trapezoid.
+                engine forwards it to the hard-tick controller.
         """
         if straight_speed is not None:
             self._straight_speed_dps = straight_speed
@@ -159,7 +154,6 @@ class DriveBase:
                 raise ValueError(
                     "acceleration must be > 0 deg/s^2 (got %r)"
                     % (acceleration,))
-            self._accel_dps2 = float(acceleration)
             if self._native is not None:
                 self._native.set_accel(float(acceleration))
             if self._serial_engine is not None:
@@ -173,7 +167,7 @@ class DriveBase:
         heading is slip-immune — wheel slip or wildly asymmetric friction
         won't throw the robot off course, because the IMU sees actual body
         rotation regardless of what the wheels did. Works on both the
-        native (encoder-servo) path and the serial-bus fallback.
+        native (encoder-servo) path and the serial-bus engine.
         """
         enable = bool(enable)
         if enable and self._imu is None:
@@ -184,13 +178,10 @@ class DriveBase:
         elif self._native is not None:
             self._native.use_gyro(enable)
         else:
-            if enable and not self._use_gyro:
-                # Enable transition: the robot's CURRENT heading
-                # becomes the absolute reference (target = here).
-                self._gyro_prev = self._imu.heading()
-                self._gyro_cont = 0.0
-                self._gyro_target = 0.0
-            self._use_gyro = enable
+            raise RuntimeError(
+                "use_gyro needs a closed-loop drivebase (encoder "
+                "servos or serial-bus motors); open-loop pairs have "
+                "no heading-hold loop")
 
     # ---- non-blocking open-loop ----
     def drive(self, speed_mm_s, turn_rate_dps):
@@ -248,18 +239,12 @@ class DriveBase:
         reached its target (and ``stop(then=…)`` has run). Returns
         ``False`` while the move is still progressing.
 
-        On the fallback path (serial-bus servo drivebases), motors
-        start moving on the ``straight()`` / ``turn()`` call itself;
-        each ``done()`` invocation then runs ONE tick of the
-        heading-hold loop — read both angles, apply differential
-        correction, check the target. **You must keep polling until
-        ``done()`` returns True** or the motors will continue running
-        at the open-loop profile speed past the target. The natural
-        cadence is ``time.sleep_ms(10)`` between polls.
-
-        On the native path, the C scheduler runs the trajectory
-        independently at 1 kHz; ``done()`` just checks a flag and
-        motors stop automatically when the trajectory completes.
+        The controller runs the trajectory independently on the hard
+        tick (native path: 1 kHz C scheduler; serial path: the
+        st_bus pump); ``done()`` checks a flag — plus, on the serial
+        path with the gyro enabled, feeds the IMU heading into the
+        hard-tick heading hold. The natural polling cadence is
+        ``time.sleep_ms(10)``.
         """
         if self._pending is None:
             return True
@@ -274,10 +259,6 @@ class DriveBase:
                 self.stop(then=self._pending["then"])
                 return True
             return False
-        if mode == "straight_fallback":
-            return self._straight_fallback_tick()
-        if mode == "turn_fallback":
-            return self._turn_fallback_tick()
         # Unknown mode — treat as done to avoid wedging the caller.
         self._pending = None
         return True
@@ -291,9 +272,8 @@ class DriveBase:
 
         ``wait=True`` (default) blocks until the move completes.
         ``wait=False`` returns immediately after arming the move;
-        the caller polls ``done()`` to advance the state machine
-        (fallback path) or just check completion (native path), and
-        the ``then=`` dispatch is deferred until ``done()`` reports
+        the caller polls ``done()`` to check completion, and the
+        ``then=`` dispatch is deferred until ``done()`` reports
         the target was reached. Concurrent use with another
         wait=False move on a separate ``DriveBase`` (or with motor
         ``run_angle(wait=False)`` calls) is the intended pattern.
@@ -301,9 +281,8 @@ class DriveBase:
         Any subsequent move command supersedes the previous pending
         wait=False move (pybricks "new command wins").
 
-        Falls back to a pure-Python heading-hold loop for motors
-        without a native servo (i.e. serial-bus ST-3215/ST-3032
-        drivebases)."""
+        Raises ``RuntimeError`` for open-loop motor pairs — moves by
+        distance need feedback; use ``drive()``/``stop()``."""
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
@@ -342,39 +321,9 @@ class DriveBase:
             self._native.straight(float(distance_mm), float(speed_mm_s))
             self._pending = {"mode": "straight_native", "then": then}
             return
-        # Fallback: snapshot anchors, stash state, motors start on
-        # first done() tick.
-        start_left  = self._read_angle_or_bail(self._left)
-        start_right = self._read_angle_or_bail(self._right)
-        if start_left is None or start_right is None:
-            self.stop(then=then)
-            return
-        target_wheel_deg = distance_mm / self._wheel_circumference * 360
-        direction = 1 if distance_mm >= 0 else -1
-        speed = self._straight_speed_dps * direction
-        self._pending = {
-            "mode": "straight_fallback",
-            "target_wheel_deg": target_wheel_deg,
-            "direction": direction,
-            "start_left":  start_left,
-            "start_right": start_right,
-            "speed": speed,
-            "consecutive_none": 0,
-            "then": then,
-            "start_ms":  time.ticks_ms(),
-            "budget_ms": self._move_budget_ms(target_wheel_deg,
-                                              self._straight_speed_dps),
-        }
-        # Kick off motion immediately so ``wait=False`` looks like
-        # pybricks — motors start on the call, not on first ``done()``.
-        # The launch is profile-shaped: at t=0 the trapezoid commands
-        # the crawl floor, not cruise — a serial-bus drivebase used to
-        # step straight to cruise speed here, an effectively infinite
-        # acceleration that pitched real chassis on launch. Subsequent
-        # ``done()`` ticks ramp up and apply heading-hold corrections.
-        v0 = self._profile_speed(speed, 0.0, abs(target_wheel_deg))
-        self._run_at_dps(self._left,  v0 * direction)
-        self._run_at_dps(self._right, v0 * direction)
+        raise RuntimeError(
+            "straight() needs closed-loop motors (encoder servos or "
+            "serial-bus motors); open-loop pairs use drive()/stop()")
 
     def _arm_turn(self, angle_deg, then):
         if self._serial_engine is not None:
@@ -387,106 +336,11 @@ class DriveBase:
             self._native.turn(float(angle_deg), float(self._turn_rate_dps))
             self._pending = {"mode": "turn_native", "then": then}
             return
-        start_left  = self._read_angle_or_bail(self._left)
-        start_right = self._read_angle_or_bail(self._right)
-        if start_left is None or start_right is None:
-            self.stop(then=then)
-            return
-        arc_mm = math.radians(abs(angle_deg)) * (self._axle_track / 2)
-        wheel_deg_each = arc_mm / self._wheel_circumference * 360
-        direction = 1 if angle_deg >= 0 else -1
-        speed = self._turn_rate_dps
-        if self._use_gyro:
-            # Absolute frame: the commanded rotation advances the
-            # persistent target; the tick then drives the MEASURED
-            # heading to it, so any residual error from previous
-            # moves is folded into this turn instead of forgiven.
-            # Direction still follows the commanded sign (a +90 turn
-            # arriving with +5 of overshoot banked turns +85, not
-            # -275).
-            self._gyro_target += float(angle_deg)
-        self._pending = {
-            "mode": "turn_fallback",
-            "wheel_deg_each": wheel_deg_each,
-            "direction": direction,
-            "start_left":  start_left,
-            "start_right": start_right,
-            "speed": speed,
-            "consecutive_none": 0,
-            "then": then,
-            "start_ms":  time.ticks_ms(),
-            "budget_ms": self._move_budget_ms(wheel_deg_each,
-                                              self._turn_rate_dps),
-        }
-        # Kick off motion immediately — same reasoning as
-        # ``_arm_straight``. In-place turn means opposite wheel
-        # signs; positive = right/CW (Pybricks convention) = left
-        # wheel forward.
-        v0 = self._profile_speed(speed, 0.0, wheel_deg_each)
-        self._run_at_dps(self._left,   v0 * direction)
-        self._run_at_dps(self._right, -v0 * direction)
+        raise RuntimeError(
+            "turn() needs closed-loop motors (encoder servos or "
+            "serial-bus motors); open-loop pairs use drive()/stop()")
 
     # ---- helpers ----
-    # Minimum fallback speed command (dps). The decel curve approaches
-    # zero speed exactly at the target; real serial-bus servos stall on
-    # friction below a crawl speed and would time out just short of the
-    # goal. The floor keeps the final approach moving — the target
-    # check, not the profile, ends the move.
-    _FALLBACK_MIN_DPS = 15.0
-
-    def _profile_speed(self, cruise_dps, elapsed_s, remaining_deg):
-        """Trapezoidal speed command for the fallback loop: ramp up at
-        ``self._accel_dps2`` from move start, cruise, and ramp down so
-        v² = 2·a·remaining reaches ~0 at the target. Returns a positive
-        magnitude, floored at ``_FALLBACK_MIN_DPS``."""
-        v = abs(cruise_dps)
-        v_ramp = self._accel_dps2 * elapsed_s
-        if v_ramp < v:
-            v = v_ramp
-        if remaining_deg > 0:
-            v_decel = math.sqrt(2.0 * self._accel_dps2 * remaining_deg)
-            if v_decel < v:
-                v = v_decel
-        if v < self._FALLBACK_MIN_DPS:
-            v = self._FALLBACK_MIN_DPS
-        return v
-
-    def _gyro_cont_heading(self):
-        """Advance and return the continuous (un-wrapped) measured
-        heading, in degrees since ``use_gyro(True)`` was enabled.
-        Each tick's raw ``imu.heading()`` delta is wrapped into
-        [-180, 180) — so crossing the BNO055's ±180 boundary doesn't
-        inject a spurious ±360 jump — and accumulated, which keeps
-        multi-turn totals (e.g. four +90 turns = +360) representable
-        where a wrapped absolute reading could not."""
-        h = self._imu.heading()
-        delta = h - self._gyro_prev
-        if delta > 180.0:
-            delta -= 360.0
-        elif delta < -180.0:
-            delta += 360.0
-        self._gyro_prev = h
-        self._gyro_cont += delta
-        return self._gyro_cont
-
-    # Wheel-degrees of per-wheel travel per body-degree of in-place
-    # rotation: arc = radians(1) * axle/2, wheel_deg = arc/circ*360.
-    def _wheel_deg_per_body_deg(self):
-        return math.pi * self._axle_track / self._wheel_circumference
-
-    def _gyro_diff_err_wheel_deg(self):
-        """Signed heading error vs the ABSOLUTE target, converted to
-        the same wheel-degree differential ``left_deg - right_deg``
-        would read for that rotation — so swapping the heading source
-        doesn't change the fallback's correction gain. ×2 of the
-        native core's halved ``diff_pos`` convention
-        (``ob_drivebase_body_to_wheel_diff``). Positive = robot is
-        clockwise of where it should point = left wheel out-paced
-        right = positive L-R differential (sign passes straight
-        through, Pybricks CW-positive convention)."""
-        err_body = self._gyro_cont_heading() - self._gyro_target
-        return err_body * 2.0 * self._wheel_deg_per_body_deg()
-
     @staticmethod
     def _run_at_dps(motor, dps):
         run_speed = getattr(motor, "run_speed", None)
@@ -496,170 +350,6 @@ class DriveBase:
                 return
             except NotImplementedError:
                 pass
-        # Open-loop fallback: assume ~300 dps rated.
+        # Open-loop mapping: assume ~300 dps rated.
         power = max(-100, min(100, dps / 300 * 100))
         motor.dc(power)
-
-    # ---- fallbacks for open-loop motor pairs ----
-    #
-    # Serial-bus servos (ST-3215, ST-3032) hit this path too, since
-    # they don't subscribe to the native motor_process scheduler.
-    # Their ``angle()`` returns ``None`` on a present-position read
-    # timeout — one EMI burst or one half-duplex collision is enough.
-    # We mirror ``ST3215Motor.run_angle``'s inner-loop pattern:
-    # tolerate a None tick (re-use the last good readings, hold the
-    # last commanded drive, sleep, retry), and only bail out after
-    # ``_MAX_CONSECUTIVE_NONE`` ticks in a row — ≈500 ms at the
-    # 10 ms loop period — when the bus is genuinely dead rather than
-    # just glitchy.
-
-    # Capacity for transient bus drops before _straight_fallback /
-    # _turn_fallback give up and stop. 50 × 10 ms = 500 ms.
-    _MAX_CONSECUTIVE_NONE = 50
-
-    def _move_budget_ms(self, travel_deg, rate_dps):
-        """Wall-clock budget for a fallback move to reach its target.
-
-        The fallback watches ``angle()`` climb toward the target. If a
-        wheel stalls (mechanically blocked, in the servo's overload
-        protection, or slipping) while the bus still answers, that
-        climb stops and the target is never met — without this budget
-        the move's ``done()`` would return ``False`` forever.
-
-        The ideal time is the trapezoid duration at the configured
-        acceleration (triangular profile when the move is too short to
-        reach cruise); ×4 leaves headroom for friction and heading-hold
-        slowdown, and a 1 s floor covers tiny moves. Only a genuine
-        stall overruns it."""
-        travel = abs(travel_deg)
-        rate = abs(rate_dps)
-        if rate < 1:
-            rate = 1
-        accel = self._accel_dps2
-        if travel * accel >= rate * rate:
-            # Trapezoid: cruise phase exists.
-            ideal_s = travel / rate + rate / accel
-        else:
-            # Triangular: never reaches cruise.
-            ideal_s = 2.0 * math.sqrt(travel / accel)
-        return int(ideal_s * 1000.0 * 4 + 1000)
-
-    def _straight_fallback_tick(self):
-        """One iteration of the fallback heading-hold loop.
-
-        Returns ``True`` when the target wheel angle has been reached
-        (and ``stop(then=…)`` has been run, clearing ``_pending``);
-        ``False`` while the move is still progressing or while we're
-        waiting for the bus to come back from a glitch. Snapshot
-        anchors live in ``self._pending`` from ``_arm_straight``."""
-        state = self._pending
-        if time.ticks_diff(time.ticks_ms(), state["start_ms"]) > state["budget_ms"]:
-            self.stop(then=state["then"])
-            raise RuntimeError(
-                "DriveBase.straight did not reach target within %d ms — "
-                "wheel stalled, in overload protection, or blocked"
-                % state["budget_ms"])
-        left_now  = self._left.angle()
-        right_now = self._right.angle()
-        if left_now is None or right_now is None:
-            state["consecutive_none"] += 1
-            if state["consecutive_none"] >= self._MAX_CONSECUTIVE_NONE:
-                self.stop(then=state["then"])
-                return True
-            return False
-        state["consecutive_none"] = 0
-        left_deg  = left_now  - state["start_left"]
-        right_deg = right_now - state["start_right"]
-        avg = (left_deg + right_deg) / 2
-        direction = state["direction"]
-        target = state["target_wheel_deg"]
-        if (direction > 0 and avg >= target) or \
-           (direction < 0 and avg <= target):
-            self.stop(then=state["then"])
-            return True
-        # Forward progress always comes from the encoders — the gyro
-        # only replaces the heading-hold error term below, steering
-        # toward the ABSOLUTE target heading (so overshoot banked by
-        # a previous turn is corrected here, not preserved).
-        if self._use_gyro:
-            err = self._gyro_diff_err_wheel_deg()
-        else:
-            err = left_deg - right_deg
-        # Trapezoid-shaped speed magnitude for this tick: ramp from
-        # move start, cruise, decelerate into the remaining distance.
-        elapsed_s = time.ticks_diff(time.ticks_ms(), state["start_ms"]) / 1000.0
-        remaining = (target - avg) * direction
-        speed = self._profile_speed(state["speed"], elapsed_s, remaining) * direction
-        self._run_at_dps(self._left,  speed - err)
-        self._run_at_dps(self._right, speed + err)
-        return False
-
-    def _turn_fallback_tick(self):
-        """One iteration of the fallback in-place-turn loop. Same
-        return semantics as ``_straight_fallback_tick``."""
-        state = self._pending
-        if time.ticks_diff(time.ticks_ms(), state["start_ms"]) > state["budget_ms"]:
-            self.stop(then=state["then"])
-            raise RuntimeError(
-                "DriveBase.turn did not reach target within %d ms — "
-                "wheel stalled, in overload protection, or blocked"
-                % state["budget_ms"])
-        left_now  = self._left.angle()
-        right_now = self._right.angle()
-        if left_now is None or right_now is None:
-            state["consecutive_none"] += 1
-            if state["consecutive_none"] >= self._MAX_CONSECUTIVE_NONE:
-                self.stop(then=state["then"])
-                return True
-            return False
-        state["consecutive_none"] = 0
-        direction = state["direction"]
-
-        if self._use_gyro:
-            # Actual body rotation vs the ABSOLUTE target decides
-            # both when the turn is done and how much is left —
-            # slip-immune, unlike the encoder average below, which
-            # just reports what the wheels think they did. Signed
-            # remaining + crossing check: a turn that arrives already
-            # past the target (overshoot banked earlier, or an
-            # external shove) terminates immediately rather than
-            # rotating another lap.
-            remaining_body = ((self._gyro_target - self._gyro_cont_heading())
-                              * direction)
-            if remaining_body <= 0:
-                self.stop(then=state["then"])
-                return True
-            # Body-degrees → wheel-degrees for the decel profile
-            # (its acceleration is in wheel-deg/s²).
-            remaining = remaining_body * self._wheel_deg_per_body_deg()
-        else:
-            left  = (left_now  - state["start_left"])  * direction
-            right = (right_now - state["start_right"]) * (-direction)
-            if left >= state["wheel_deg_each"] and \
-               right >= state["wheel_deg_each"]:
-                self.stop(then=state["then"])
-                return True
-            # Same trapezoid shaping as the straight tick, on the
-            # average per-wheel progress toward this turn's arc length.
-            remaining = state["wheel_deg_each"] - (left + right) / 2
-
-        elapsed_s = time.ticks_diff(time.ticks_ms(), state["start_ms"]) / 1000.0
-        speed = self._profile_speed(state["speed"], elapsed_s, remaining)
-        self._run_at_dps(self._left,   speed * direction)
-        self._run_at_dps(self._right, -speed * direction)
-        return False
-
-    @staticmethod
-    def _read_angle_or_bail(motor, retries=5):
-        """Read ``motor.angle()``, retrying up to ``retries`` times if
-        the bus drops the reply. Returns the float on success or
-        ``None`` if every retry timed out. Used to seed the loop's
-        starting anchor — if we can't get a baseline, the whole
-        fallback bails cleanly rather than entering the loop with a
-        bogus reference."""
-        for _ in range(retries):
-            a = motor.angle()
-            if a is not None:
-                return a
-            time.sleep_ms(10)
-        return None
