@@ -198,6 +198,16 @@ class ComposeTests(unittest.TestCase):
         boot = run_mod._compose_runner()
         self.assertIn(b"except KeyboardInterrupt", boot)
         self.assertIn(b"stopped by button press", boot)
+        # And the stop-path evidence rides in the same stream: the
+        # hard-button counters are printed from INSIDE the run, before
+        # any reboot/re-init can zero them (bench 2026-08-03: a
+        # post-hoc stats read came back all-zero after a BLE session
+        # recovery). Guarded for non-firmware runtimes.
+        self.assertIn(b"hard_button_stats", boot)
+        self.assertIn(b"except (ImportError, AttributeError)", boot)
+        # The runner must still be valid Python.
+        import ast
+        ast.parse(boot.decode())
 
     def test_stage_chunk_user_bytes_round_trip(self):
         # Any bytes the user script could contain — NULs, high bits,

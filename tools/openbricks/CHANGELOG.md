@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.47.1 — hard-button evidence must survive to be read
+
+Bench 2026-08-03: the stop button cut a blocking-I2C program cleanly
+("stopped by button press"), but `hard_button_stats()` read
+`(0, 0, 0, True)` afterwards — so it was impossible to tell whether
+the HARD path (core 0) or the retained Python watcher delivered the
+stop. Two causes, two fixes:
+
+* `hard_button_config` re-inits zeroed the counters, and the
+  launcher's setup re-runs on idle-loop restarts / BLE session
+  recovery. Now idempotent: re-configuring the same pin keeps the
+  debounce state and counters.
+* Post-hoc reads race reboots anyway, so the CLI's composed runner
+  now prints the stats tuple in the stop message itself — read
+  inside the interrupted run, before anything can zero it.
+  `hard_stops > 0` in the stream = the hard path fired.
+
 ## 1.47.0 — fix: per-move stops were re-baselining the gyro frame
 
 First bench run of a gyro square on the one-class flow measured
