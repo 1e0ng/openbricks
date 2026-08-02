@@ -43,7 +43,7 @@ IMU_MUX_CHANNEL   = 3      # EDIT — set to None to skip the mux entirely
 IMU_ADDRESS       = 0x29   # EDIT — 0x28 is the driver default
 
 WHEEL_DIAMETER_MM = 88     # EDIT to your wheels
-AXLE_TRACK_MM     = 136    # EDIT to your chassis
+AXLE_TRACK_MM     = 138.5  # EDIT to your chassis
 
 # Cruise speeds in WHEEL-deg/s (``DriveBase.settings`` units — on an
 # 88 mm wheel, 200 wheel-deg/s ~= 154 mm/s of ground speed). The

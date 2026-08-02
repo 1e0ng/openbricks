@@ -57,7 +57,7 @@ def main():
     imu = BNO055(i2c=TCA9548A(i2c)[3], address=0x29)
 
     db = NativeDriveBase(left_id=2, right_id=1, invert_left=True,
-                         wheel_diameter_mm=88, axle_track_mm=136,
+                         wheel_diameter_mm=88, axle_track_mm=138.5,
                          imu=imu)
     db.settings(straight_speed=STRAIGHT_SPEED_DPS,
                 turn_rate=TURN_RATE_DPS)
