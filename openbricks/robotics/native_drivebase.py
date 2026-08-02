@@ -14,35 +14,34 @@ stall that freezes the classic DriveBase's control loop does not
 perturb this one. Floor-verified: closed square with 0.3 % odometry
 closure at bench speeds.
 
-Why a separate class instead of routing ``DriveBase`` transparently:
-``ST3032Motor`` objects open ``machine.UART`` in their constructor,
-and the native path's IDF driver on the same pins would double-own
-the peripheral (a documented conflict). This class owns the bus
-end-to-end — construct it with ids and pins, NOT motor objects, and
-do not construct serial-bus Motor objects for the same UART in the
-same boot. Motor-layer nativization (making ``ST3032Motor`` itself
-slot-backed so classic ``DriveBase`` routes transparently) is a
-planned follow-up.
+UART double-ownership is solved by ADOPTION, not by a second public
+class: ``ST3032Motor`` objects open ``machine.UART`` in their
+constructor, so ``adopt_motors`` releases that UART (``deinit`` +
+registry removal) before the native IDF driver claims the pins. The
+adopted Motor objects stay usable — their wheel-mode API is rerouted
+through the engine's servo slots.
 
-Gyro: pass an ``imu`` and call ``use_gyro(True)`` — the wait loop
-inside ``straight()`` / ``turn()`` reads the IMU at ~50-100 Hz and
-feeds the heading to the C controller (``db_set_heading``). The
-outer loop lives in the wait loop on purpose: correction matters
-exactly while a move is in flight, and this avoids burning a
-hardware timer (all four are spoken for).
+Gyro: pass an ``imu`` and call ``use_gyro(True)`` on the DriveBase —
+the wait loop inside ``straight()`` / ``turn()`` reads the IMU at
+~50-100 Hz and feeds the heading to the C controller
+(``db_set_heading``). The outer loop lives in the wait loop on
+purpose: correction matters exactly while a move is in flight, and
+this avoids burning a hardware timer (all four are spoken for).
 
-Example::
+Example (the engine is invisible — this is just DriveBase)::
 
     from openbricks.drivers.bno055 import BNO055
+    from openbricks.drivers.st3032 import ST3032Motor
     from openbricks.drivers.tca9548a import TCA9548A
-    from openbricks.robotics import NativeDriveBase
+    from openbricks.robotics import DriveBase
     from machine import I2C, Pin
 
     mux = TCA9548A(I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000))
     imu = BNO055(i2c=mux[3], address=0x29)
-    db = NativeDriveBase(left_id=2, right_id=1, invert_left=True,
-                         wheel_diameter_mm=88, axle_track_mm=138,
-                         imu=imu)
+    left  = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+    right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+    db = DriveBase(left, right, wheel_diameter_mm=88,
+                   axle_track_mm=138, imu=imu)
     db.use_gyro(True)
     db.straight(300)
     db.turn(90)
@@ -66,9 +65,8 @@ def _bus():
     sb = getattr(_native, "st_bus", None)
     if sb is None or not hasattr(sb, "attach_uart"):
         raise RuntimeError(
-            "NativeDriveBase needs the firmware native bus (st_bus with "
-            "attach_uart) — it is not available on this build. Use "
-            "DriveBase with ST3032Motor objects instead.")
+            "the serial drivebase engine needs the firmware native bus "
+            "(st_bus with attach_uart) — not available on this build")
     return sb
 
 
@@ -120,9 +118,9 @@ class _SerialNativeEngine:
         self._axle_track = float(axle_track_mm)
         self._imu = imu
         self._use_gyro = False
-        # Continuous-heading frame, identical contract to the classic
-        # fallback path (absolute target frame, Pybricks-style —
-        # overshoot is corrected by the NEXT move, not accumulated).
+        # Continuous-heading frame (absolute target frame,
+        # Pybricks-style — overshoot is corrected by the NEXT move,
+        # not accumulated).
         self._gyro_cont = 0.0
         self._gyro_prev = None
         self._deadline = 0
@@ -266,11 +264,11 @@ class _SerialNativeEngine:
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
                 # done now requires ARRIVAL, not just profile expiry
                 # (the +4.5-deg banked-overshoot fix) — so a wheel
-                # that physically can't reach the target must raise,
-                # same contract as the classic fallback.
+                # that physically can't reach the target must raise
+                # (classic stall-timeout contract).
                 self._sb.db_stop()
                 raise RuntimeError(
-                    "NativeDriveBase move did not reach target within "
+                    "DriveBase move did not reach target within "
                     "%d ms — wheel stalled, blocked, or gyro frame "
                     "diverged" % self._SETTLE_TIMEOUT_MS)
             time.sleep_ms(10)

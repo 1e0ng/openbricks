@@ -2,12 +2,12 @@
 """
 Native-drivebase square — the arc's floor test.
 
-Drives a 150 mm square through ``st_bus.db_*``: the proven 2-DOF
-controller running INSIDE the hard tick, consuming ~250 Hz odometry
-per wheel, immune to anything Python does. Compare the return-to-
-start error against the Python-fallback drivebase's numbers on the
-same floor — that comparison is the gate for making the native path
-the ST-3032 default.
+Drives a 150 mm square through the RAW ``st_bus.db_*`` bindings — the
+same 2-DOF controller ``DriveBase`` runs, but with no Python class in
+between: useful for isolating a bug below the robotics layer. For
+normal use construct ``DriveBase`` with ST3032Motor objects instead
+(see ``st3032_drivebase_gyro_test.py``); it adopts the motors onto
+this controller automatically.
 
 Speeds honour the bench cap (straight 60 mm/s ~= 78 wheel-dps,
 turn 45 body-dps). The stop button works throughout (e-stop

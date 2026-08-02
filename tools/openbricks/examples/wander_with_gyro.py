@@ -17,12 +17,12 @@ will veer, but the gyro path snaps back. The same mechanism runs
 inside the sim against the chassis IMU site.
 
 Default motor here is ``ST3032Motor`` (serial-bus servo, wheel/
-continuous-rotation mode) — the project's reference motor. Since
-1.23.0 ``use_gyro`` works on this path too: ``DriveBase`` has no
-``._servo`` to hand to the native controller, so it runs its
-pure-Python fallback loop, and that loop now reads the IMU for both
-``straight()``'s heading-hold correction and ``turn()``'s
-completion check, exactly like the native path already did.
+continuous-rotation mode) — the project's reference motor.
+``DriveBase`` adopts serial-bus motors onto the hard-tick native
+engine (1.45.0) — in the sim, onto the emulated ``st_bus`` over
+MuJoCo wheels — and ``use_gyro(True)`` feeds the IMU heading into
+that controller's absolute heading-hold frame for both
+``straight()``'s correction and ``turn()``'s completion check.
 """
 
 from openbricks.drivers.bno055 import BNO055

@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: MIT
 """
-ST-3032 drivebase with gyro heading feedback (fallback-path use_gyro).
+ST-3032 drivebase with gyro heading feedback.
 
-Since 1.23.0, ``DriveBase.use_gyro(True)`` works on serial-bus
-servos too: the pure-Python fallback loop reads the IMU instead of
-the (encoder-less) servo bus for ``straight()``'s heading-hold
-correction and ``turn()``'s completion check. This script drives a
-square TWICE — once with the gyro off (encoder-only, the old
-behaviour), once with it on — so you can compare how close each
-pass returns to its starting heading.
+``DriveBase`` adopts serial-bus motors onto the hard-tick native
+controller transparently (1.45.0): the 2-DOF loop runs in C at
+~220 Hz per wheel, immune to Python stalls, and ``use_gyro(True)``
+feeds the IMU heading into its absolute heading-hold frame. This
+script drives a square TWICE — once with the gyro off (encoder-only),
+once with it on — so you can compare how close each pass returns to
+its starting heading (bench 2026-08-02: encoder-only ±1.6°, gyro
++0.5..+1.8° over a two-pass square).
 
 Hardware (defaults below match the openbricks reference bench —
 EDIT all of this to your own wiring/dims if it differs):

@@ -35,9 +35,11 @@ MuJoCo:
 
   * Serial-bus wheel servos — ``ST3215Motor`` / ``ST3032Motor`` are
     replaced at the class level (they talk UART directly, like the
-    I2C drivers). The openbricks ``DriveBase`` wrapper sees no
-    ``._servo`` on them and runs its serial-bus fallback loop —
-    the same code path as hardware — against MuJoCo.
+    I2C drivers). The openbricks ``DriveBase`` adopts them through
+    ``_adopt_into_drivebase`` onto an EMULATED ``st_bus``
+    (``_SimStBus`` + the native extension's ``RawDriveBase``) — the
+    same engine and controller code path as firmware — against
+    MuJoCo wheels.
 
 Slot allocation is sequential: the first motor constructed —
 ``Servo(...)`` or a serial ``ST3215Motor(...)`` / ``ST3032Motor(...)``
@@ -331,12 +333,13 @@ class ShimST3215Motor:
     """Drop-in for ``openbricks.drivers.st3215.ST3215Motor`` (and the
     ``ST3032Motor`` marker subclass).
 
-    On firmware these are serial-bus wheel servos: no ``._servo``
-    attribute, so the openbricks ``DriveBase`` wrapper drives them
-    through its pure-Python *fallback* loop (``run_speed`` + ``angle``
-    polling). Under the sim the same code path runs — each shim motor
-    binds the next chassis wheel slot and answers those calls from
-    MuJoCo, so a serial-bus ``main.py`` runs unchanged.
+    On firmware these are serial-bus wheel servos: ``DriveBase``
+    adopts them onto the hard-tick native engine. Under the sim the
+    same engine runs — ``_adopt_into_drivebase`` hands it a
+    ``_SimStBus`` emulating the ``st_bus`` surface — so a serial-bus
+    ``main.py`` runs unchanged. Outside a drivebase, each shim motor
+    binds the next chassis wheel slot and answers the wheel-mode
+    Motor API (``run_speed`` + ``angle``) from MuJoCo.
 
     A real STS32xx runs its own internal wheel-mode velocity loop, so
     the shim implements one too: a per-tick P controller on the exact
@@ -345,7 +348,7 @@ class ShimST3215Motor:
     encoder-count quantisation at 1 kHz makes that observer's velocity
     estimate swing thousands of dps around a ~250 dps wheel, and the
     resulting bang-bang torque never accumulates the wheel rotation
-    the fallback loop's position check waits for. ``qvel`` is exact,
+    the drivebase's position check waits for. ``qvel`` is exact,
     and a plain P loop on it is flat at every gain we tested.
 
     Two firmware arguments are deliberately ignored as wiring
@@ -886,8 +889,8 @@ def _patch_pure_python_drivers(state: "_ShimState") -> None:
         # Serial-bus wheel servos: the firmware classes drive UART
         # directly (no ``_openbricks_native`` involvement), so like
         # the I2C drivers they're replaced at the class level. The
-        # openbricks DriveBase wrapper then runs its serial-bus
-        # fallback loop against the shim motors — the same code path
+        # openbricks DriveBase then adopts the shim motors onto the
+        # emulated st_bus (_SimStBus) — the same engine code path
         # as hardware.
         ("openbricks.drivers.st3215",   "ST3215Motor", ShimST3215Motor),
         ("openbricks.drivers.st3032",   "ST3032Motor", ShimST3032Motor),
