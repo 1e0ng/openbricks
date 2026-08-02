@@ -19,7 +19,11 @@ class: ``ST3032Motor`` objects open ``machine.UART`` in their
 constructor, so ``adopt_motors`` releases that UART (``deinit`` +
 registry removal) before the native IDF driver claims the pins. The
 adopted Motor objects stay usable — their wheel-mode API is rerouted
-through the engine's servo slots.
+through the engine's servo slots, and since 1.46.0 ``run_angle`` /
+``hold`` run as per-slot position moves on the hard tick
+(st_move_core). The drivebase and per-slot moves arbitrate by
+yielding: the db owns its wheels only while one of ITS moves is in
+flight.
 
 Gyro: pass an ``imu`` and call ``use_gyro(True)`` on the DriveBase —
 the wait loop inside ``straight()`` / ``turn()`` reads the IMU at

@@ -3,6 +3,40 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.46.0 — step mode in C: run_angle/hold on adopted serial motors
+
+The roadmap item the 1.45.0 `NotImplementedError` gates named. Adopted
+ST-3215/ST-3032 motors now execute `run_angle`, `hold`, and
+`done()`-polled `wait=False` moves on the hard tick:
+
+* **`st_move_core`** — a per-slot position move, drivebase-core
+  architecture on one axis: trapezoid trajectory + position-P with
+  velocity feedforward, output as wheel-mode speed commands. The
+  servo's own STEP-mode registers are deliberately unused (their
+  present-position register reads remaining-to-target, which would
+  break multi-turn odometry). `done` = profile expired AND |err| <
+  34 counts (~3 wheel-deg), latched; after arrival the move keeps
+  holding position against disturbance. Runs in the firmware pump,
+  in the sim (`RawServoMove` in the CPython extension — same C
+  file), and under the ASan/UBSan c-unit suite.
+* **Arbitration: the drivebase yields when idle.** The db writes its
+  slots' speed targets only from `db_straight`/`db_turn` until
+  `db_stop`/`db_disable`; yielded, it keeps syncing odometry but
+  stays silent. Consequences: a freshly constructed `DriveBase` no
+  longer torques the wheels into a pose-zero hold; after `stop()` the
+  motor layer (coast/brake/hold/run_angle/run_speed) genuinely owns
+  the wheels. `servo_move`/`servo_hold` are refused while a db move
+  is in flight (`RuntimeError` at the driver) and before the slot's
+  first feedback read (an early move would anchor to counts=0 and
+  slam the shaft).
+* **Driver:** `run_angle(deg_per_s, target_angle, wait=, then=)` with
+  the classic trapezoid stall budget (ideal ×4 + 1 s → RuntimeError),
+  `then="coast"/"brake"/"hold"` end-state dispatch (deferred to
+  `done()` for `wait=False`), and `hold()` as a hard-tick position
+  lock. `speed`/`load`/`stalled` stay gated (per-slot register reads
+  are the tracked follow-up). `stop(then="hold")` on a serial
+  `DriveBase` now works — it routes through the motors' new `hold()`.
+
 ## 1.45.0 — ONE DriveBase class; the Python serial fallback loop is gone
 
 Three user decisions, shipped together:

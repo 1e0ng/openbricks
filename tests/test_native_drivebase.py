@@ -125,6 +125,24 @@ class _FakeBus:
         self.calls.append(("servo_counts", slot))
         return 0
 
+    def servo_move(self, slot, delta_counts, speed_cps, accel_cps2):
+        self.calls.append(("servo_move", slot, delta_counts,
+                           speed_cps, accel_cps2))
+        self.move_refuse = getattr(self, "move_refuse", False)
+        if self.move_refuse:
+            return False
+        self._move_left = self.done_after
+        return True
+
+    def servo_hold(self, slot):
+        self.calls.append(("servo_hold", slot))
+        return not getattr(self, "move_refuse", False)
+
+    def servo_move_done(self, slot):
+        left = getattr(self, "_move_left", 0)
+        self._move_left = left - 1
+        return left <= 0
+
     def reset_runtime(self):
         self.calls.append(("reset_runtime",))
 
@@ -320,12 +338,64 @@ class AdoptionTests(_Base):
         # angle() reads slot odometry.
         self.assertEqual(left.angle(), 0.0)
 
-    def test_adopted_step_mode_raises_with_roadmap(self):
+    def test_adopted_run_angle_routes_through_servo_move(self):
+        # 1.46.0: step mode runs in C. run_angle(dps, deg) becomes a
+        # per-slot position move in counts: delta = deg*4096/360,
+        # speed/accel scaled by steps_per_dps.
         db, left, _ = self._drivebase()
-        with self.assertRaises(NotImplementedError):
+        left.run_angle(100, 90)
+        moves = [c for c in self.bus.calls if c[0] == "servo_move"]
+        self.assertEqual(len(moves), 1)
+        _, slot, delta, speed, accel = moves[0]
+        self.assertEqual(slot, 0)
+        self.assertAlmostEqual(delta, 90 * 4096 / 360.0, places=3)
+        self.assertAlmostEqual(speed, 100 * 4096 / 360.0, places=3)
+        self.assertGreater(accel, 0)
+        # Default then="coast": end-of-move dispatch coasts the slot.
+        self.assertIn(("servo_coast", 0), self.bus.calls)
+
+    def test_adopted_run_angle_then_hold_leaves_the_c_hold(self):
+        db, left, _ = self._drivebase()
+        left.run_angle(100, 90, then="hold")
+        # No coast, no zero-speed write after the move: the C move's
+        # own position hold is the end state. (assertFalse/in — MP's
+        # unittest has no assertNotIn.)
+        self.assertFalse(("servo_coast", 0) in self.bus.calls)
+        self.assertFalse(("servo_run", 0, 0) in self.bus.calls)
+
+    def test_adopted_run_angle_wait_false_defers_then_to_done(self):
+        db, left, _ = self._drivebase()
+        left.run_angle(100, 90, wait=False)
+        self.assertFalse(("servo_coast", 0) in self.bus.calls)
+        while not left.done():
+            pass
+        self.assertIn(("servo_coast", 0), self.bus.calls)
+        self.assertTrue(left.done())    # idempotent after dispatch
+
+    def test_adopted_run_angle_refused_raises(self):
+        # The C layer refuses a move while the DriveBase owns the
+        # slot (or before odometry is live) — surfaced as a loud
+        # RuntimeError, not a silent no-op.
+        db, left, _ = self._drivebase()
+        self.bus.move_refuse = True
+        try:
             left.run_angle(100, 90)
-        with self.assertRaises(NotImplementedError):
-            left.hold()
+            self.fail("expected RuntimeError")
+        except RuntimeError:
+            pass
+
+    def test_adopted_hold_routes_through_servo_hold(self):
+        db, left, _ = self._drivebase()
+        left.hold()
+        self.assertIn(("servo_hold", 0), self.bus.calls)
+
+    def test_adopted_feedback_registers_still_raise(self):
+        # speed/load/stalled need per-slot register reads the pump
+        # doesn't do yet — still loudly gated.
+        db, left, _ = self._drivebase()
+        for method in (left.speed, left.load, left.stalled):
+            with self.assertRaises(NotImplementedError):
+                method()
 
     def test_settings_acceleration_reaches_the_engine(self):
         db, _, _ = self._drivebase()

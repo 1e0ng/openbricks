@@ -613,12 +613,12 @@ class ST3215Motor(Motor):
         self.run_speed(self._max_dps * duty / 100.0)
 
     def speed(self):
-        if self._native_slot is not None:
-            self._native_only_error("speed")
         """Measured shaft speed in deg/s from the present-speed
         register (sign-magnitude, bit 15; steps/s scaled by
         ``steps_per_dps``). Returns ``None`` if the bus is silent,
         matching ``angle()``."""
+        if self._native_slot is not None:
+            self._native_only_error("speed")
         data = self._bus.read(self._id, _REG_PRESENT_SPEED, 2)
         if data is None:
             return None
@@ -632,14 +632,14 @@ class ST3215Motor(Motor):
         return dps
 
     def load(self):
-        if self._native_slot is not None:
-            self._native_only_error("load")
         """Estimated shaft torque in mNm — Pybricks ``Motor.load()``
         shape. The present-load register reports 0.1 %-of-stall units
         (sign in bit 10, per the Feetech SCServo SDK); scaled by the
         model's datasheet stall torque (``STALL_TORQUE_MNM``), so
         treat it as an estimate, not a measurement. ``None`` if the
         bus is silent."""
+        if self._native_slot is not None:
+            self._native_only_error("load")
         data = self._bus.read(self._id, _REG_PRESENT_LOAD, 2)
         if data is None:
             return None
@@ -653,14 +653,14 @@ class ST3215Motor(Motor):
         return mnm
 
     def stalled(self):
-        if self._native_slot is not None:
-            self._native_only_error("stalled")
         """``True`` when the servo is pushing hard (load magnitude at
         least ``STALL_LOAD_PCT`` percent of stall) but barely moving
         (speed magnitude at most ``STALL_SPEED_DPS``) — the Pybricks
         ``Motor.stalled()`` contract, from the servo's own feedback
         registers. Raises ``OSError`` if the bus is silent (a silent
         bus must not read as "not stalled")."""
+        if self._native_slot is not None:
+            self._native_only_error("stalled")
         data = self._bus.read(self._id, _REG_PRESENT_LOAD, 2)
         spd = self.speed()
         if data is None or spd is None:
@@ -675,6 +675,7 @@ class ST3215Motor(Motor):
         if self._native_slot is not None:
             # The slot was attached WITH this motor's invert flag, so
             # pass the user-frame value; the slot applies the sign.
+            self._native_pending = None      # new command wins
             self._native_sb.servo_run(
                 self._native_slot,
                 int(float(deg_per_s) * self._steps_per_dps))
@@ -699,6 +700,7 @@ class ST3215Motor(Motor):
         construction.
         """
         if self._native_slot is not None:
+            self._native_pending = None      # new command wins
             self._native_sb.servo_run(self._native_slot, 0)
             return
         self._abandon_pending()
@@ -709,25 +711,29 @@ class ST3215Motor(Motor):
     def coast(self):
         """Disable torque — wheel free-wheels."""
         if self._native_slot is not None:
+            self._native_pending = None      # new command wins
             self._native_sb.servo_coast(self._native_slot)
             return
         self._abandon_pending()
         self._bus.write(self._id, _REG_TORQUE, bytes([0]))
         self._torque_on = False
 
-    # ---- native adoption (1.45.0) -------------------------------------
+    # ---- native adoption (1.45.0; step mode 1.46.0) -------------------
     #
     # When a DriveBase adopts this motor onto the hard-tick native
-    # bus, the machine.UART is released and the wheel-mode subset of
-    # the Motor API routes through the C servo slots instead: run /
-    # run_speed / dc / brake / stop / coast / angle / reset_angle.
-    # Step-mode and feedback-register methods (run_angle, run_target,
-    # hold, speed, load, stalled) raise with the roadmap item named —
-    # loudly incomplete beats silently wrong.
+    # bus, the machine.UART is released and the Motor API routes
+    # through the C servo slots instead: run / run_speed / dc / brake
+    # / stop / coast / angle / reset_angle (1.45.0), plus run_angle /
+    # hold / done via the per-slot position moves in st_move_core
+    # (1.46.0). Feedback-register methods (speed, load, stalled)
+    # still raise — the pump reads position only; adding per-slot
+    # register reads is the tracked follow-up. Loudly incomplete
+    # beats silently wrong.
 
     _native_slot = None       # class default; instance attr when adopted
     _native_sb = None
     _native_angle_offset = 0.0
+    _native_pending = None    # then= of an in-flight wait=False move
 
     def _adopt_into_drivebase(self, right, wheel_diameter_mm,
                               axle_track_mm, imu=None, accel_dps2=400.0):
@@ -748,20 +754,81 @@ class ST3215Motor(Motor):
         self._native_sb = sb
         self._native_slot = slot
         self._native_angle_offset = 0.0
+        self._native_pending = None
 
     def _native_only_error(self, method):
         raise NotImplementedError(
             "%s is not yet available while this motor is adopted by "
-            "the native drivebase (step-mode-in-C is the tracked "
-            "follow-up); construct the motor without a native "
-            "DriveBase to use it" % method)
+            "the native drivebase (per-slot feedback-register reads "
+            "are the tracked follow-up); construct the motor without "
+            "a native DriveBase to use it" % method)
+
+    @staticmethod
+    def _native_move_budget_ms(travel_deg, rate_dps, accel_dps2):
+        """Wall-clock stall budget for an adopted run_angle: the
+        trapezoid's ideal duration x4 + 1 s (the proven fallback-era
+        formula) — only a genuine stall overruns it, because the C
+        move's ``done`` requires ARRIVAL, not just profile expiry."""
+        travel = abs(float(travel_deg))
+        rate = abs(float(rate_dps))
+        if rate < 1.0:
+            rate = 1.0
+        if travel * accel_dps2 >= rate * rate:
+            ideal_s = travel / rate + rate / accel_dps2
+        else:
+            ideal_s = 2.0 * (travel / accel_dps2) ** 0.5
+        return int(ideal_s * 4000.0 + 1000.0)
+
+    def _native_dispatch_then(self, then):
+        if then == "coast":
+            self._native_sb.servo_coast(self._native_slot)
+        elif then == "brake":
+            self._native_sb.servo_run(self._native_slot, 0)
+        # "hold": the C move already parks in a position hold.
+
+    def _native_run_angle(self, deg_per_s, target_angle, wait, then):
+        max_dps = abs(float(deg_per_s))
+        if target_angle == 0 or max_dps <= 0:
+            return
+        capped = max_dps if max_dps < self._max_dps else self._max_dps
+        accel = self._accel_dps2 if self._accel_dps2 > 0 else 1500.0
+        # User-frame delta; the slot carries this motor's invert, same
+        # convention as servo_run.
+        ok = self._native_sb.servo_move(
+            self._native_slot,
+            float(target_angle) * _COUNTS_PER_REV / 360.0,
+            capped * self._steps_per_dps,
+            accel * self._steps_per_dps)
+        if not ok:
+            raise RuntimeError(
+                "run_angle refused: wheel is owned by an in-flight "
+                "DriveBase move (stop it first), or slot odometry is "
+                "not live yet")
+        if not wait:
+            self._native_pending = then
+            return
+        budget_ms = self._native_move_budget_ms(target_angle, capped,
+                                                accel)
+        t0 = time.ticks_ms()
+        while not self._native_sb.servo_move_done(self._native_slot):
+            estop.check()
+            if time.ticks_diff(time.ticks_ms(), t0) > budget_ms:
+                self._native_sb.servo_run(self._native_slot, 0)
+                raise RuntimeError(
+                    "run_angle did not reach target within %d ms — "
+                    "wheel stalled, blocked, or in overload "
+                    "protection" % budget_ms)
+            time.sleep_ms(10)
+        self._native_dispatch_then(then)
 
     def hold(self):
-        if self._native_slot is not None:
-            self._native_only_error("hold")
         """Actively hold the current shaft angle so the position PID
         resists rotation. Subsequent ``run_speed`` / ``brake`` /
         ``coast`` calls transparently restore wheel mode.
+
+        On an adopted motor (native DriveBase) the hold is a per-slot
+        position lock on the hard tick (st_move_core) — it corrects
+        disturbances continuously at the bus feedback rate.
 
         Holding never crosses a turn boundary (the shaft is meant to
         stay put), so the mechanism is chosen to avoid disturbing the
@@ -776,6 +843,15 @@ class ST3215Motor(Motor):
           registers, so a wheel motor keeps its stock single-turn
           present-position reads and its odometry stays intact.
         """
+        estop.check()
+        if self._native_slot is not None:
+            self._native_pending = None
+            if not self._native_sb.servo_hold(self._native_slot):
+                raise RuntimeError(
+                    "hold refused: wheel is owned by an in-flight "
+                    "DriveBase move (stop it first), or slot odometry "
+                    "is not live yet")
+            return
         self._abandon_pending()
         if self._step_limits_zeroed:
             self._ensure_mode(_MODE_STEP)
@@ -809,7 +885,20 @@ class ST3215Motor(Motor):
         at each step boundary until the next ``done()`` advances it.
         With a typical ``time.sleep_ms(10)`` poll that's a single-tick
         gap; if you never poll, a multi-step move stalls after the
-        first step."""
+        first step.
+
+        On an adopted motor the C controller advances the move on the
+        hard tick; ``done()`` just checks the arrival flag and runs
+        the deferred ``then=`` dispatch."""
+        if self._native_slot is not None:
+            if self._native_pending is None:
+                return True
+            if not self._native_sb.servo_move_done(self._native_slot):
+                return False
+            then = self._native_pending
+            self._native_pending = None
+            self._native_dispatch_then(then)
+            return True
         if self._pending is None:
             return True
         return self._poll_pending()
@@ -938,10 +1027,14 @@ class ST3215Motor(Motor):
     def run_angle(self, deg_per_s, target_angle, wait=True,
                   tolerance_deg=0.5, kp=None, poll_ms=None,
                   debug=False, then="coast"):
-        if self._native_slot is not None:
-            self._native_only_error("run_angle")
         """Rotate by ``target_angle`` degrees at up to ``deg_per_s``,
         ending within ``tolerance_deg`` of the target.
+
+        On an adopted motor (native DriveBase) the move runs as a
+        per-slot trapezoid position move on the hard tick
+        (st_move_core) — same trajectory + arrival semantics as the
+        drivebase's own moves; ``tolerance_deg`` is fixed at the
+        C core's arrival tolerance there.
 
         ``target_angle`` is RELATIVE and UNBOUNDED — ``run_angle(200,
         360)`` rotates one full turn forward, ``run_angle(200, 1080)``
@@ -1009,6 +1102,10 @@ class ST3215Motor(Motor):
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        if self._native_slot is not None:
+            self._native_pending = None
+            self._native_run_angle(deg_per_s, target_angle, wait, then)
+            return
         if target_angle == 0:
             return
         max_dps = abs(float(deg_per_s))

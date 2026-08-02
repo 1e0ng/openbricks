@@ -53,6 +53,8 @@ _CORE_FILES = [
     "servo_core.h",
     "drivebase_core.c",
     "drivebase_core.h",
+    "st_move_core.c",
+    "st_move_core.h",
 ]
 
 
@@ -111,6 +113,7 @@ _DOC_PAGES = [
     "examples.md",
     "architecture.md",
     "build.md",
+    "measuring.md",
 ]
 
 
@@ -147,6 +150,7 @@ setup(
                 "native/_shared/motor_process_core.c",
                 "native/_shared/servo_core.c",
                 "native/_shared/drivebase_core.c",
+                "native/_shared/st_move_core.c",
             ],
             include_dirs=[
                 "native/_shared",

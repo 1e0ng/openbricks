@@ -41,6 +41,7 @@ TOPICS = [
     "cli",
     "simulator",
     "examples",
+    "measuring",
     "architecture",
     "build",
 ]
