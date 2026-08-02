@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
-"""Tests for ``openbricks.robotics.NativeDriveBase`` — the Python
-face of the hard-tick serial-bus drivebase.
+"""Tests for the ONE-CLASS serial-native path: ``DriveBase`` with
+serial-bus Motor objects adopts them onto the hard-tick engine
+transparently (user decision, 1.45.0 — no separate class, no user
+burden).
 
 The class is exercised against a RECORDING FAKE bus injected through
 ``openbricks._native`` (the ``_bus()`` seam): every unit conversion,
@@ -51,7 +53,7 @@ except ImportError:
     sys.modules["_openbricks_native"] = _stub_mod
 
 from openbricks import _native, estop
-from openbricks.robotics.native_drivebase import NativeDriveBase
+from openbricks.robotics.native_drivebase import _SerialNativeEngine
 
 
 class _FakeBus:
@@ -108,6 +110,24 @@ class _FakeBus:
     def db_set_heading(self, deg):
         self.headings.append(deg)
 
+    def db_set_accel(self, dps2):
+        self.calls.append(("db_set_accel", dps2))
+
+    def servo_run(self, slot, steps):
+        self.calls.append(("servo_run", slot, steps))
+        return True
+
+    def servo_coast(self, slot):
+        self.calls.append(("servo_coast", slot))
+        return True
+
+    def servo_counts(self, slot):
+        self.calls.append(("servo_counts", slot))
+        return 0
+
+    def reset_runtime(self):
+        self.calls.append(("reset_runtime",))
+
 
 class _FakeMP:
     @staticmethod
@@ -147,7 +167,7 @@ class _Base(unittest.TestCase):
         args = dict(left_id=2, right_id=1, wheel_diameter_mm=88,
                     axle_track_mm=136, invert_left=True)
         args.update(kw)
-        return NativeDriveBase(**args)
+        return _SerialNativeEngine(**args)
 
 
 class ConstructionTests(_Base):
@@ -247,6 +267,76 @@ class GyroOuterLoopTests(_Base):
         self.bus.done_after = 3
         db.straight(100)
         self.assertEqual(self.bus.headings, [])
+
+
+class AdoptionTests(_Base):
+    """The one-class contract end to end: real ST3032Motor objects
+    (fake machine.UART), real registry, real adopt_motors — DriveBase
+    detects, releases the UART, adopts, and every drivebase + motor
+    call routes through the stub bus."""
+
+    def _motors(self):
+        from openbricks.drivers.st3215 import ST3215
+        from openbricks.drivers.st3032 import ST3032Motor
+        ST3215._buses.clear()
+        left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                           invert=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        return left, right
+
+    def _drivebase(self, **kw):
+        from openbricks.robotics import DriveBase
+        left, right = self._motors()
+        db = DriveBase(left, right, wheel_diameter_mm=88,
+                       axle_track_mm=138, **kw)
+        return db, left, right
+
+    def test_drivebase_adopts_and_releases_the_uart(self):
+        from openbricks.drivers.st3215 import ST3215
+        db, left, right = self._drivebase()
+        self.assertIsNotNone(db._serial_engine)
+        # UART handed over: MP driver released, registry emptied.
+        self.assertEqual(len(ST3215._buses), 0)
+        # Slots attached with the motors' ids + inverts.
+        att = [c for c in self.bus.calls if c[0] == "servo_attach"]
+        self.assertEqual(att[0][1:4], (0, 2, True))
+        self.assertEqual(att[1][1:4], (1, 1, False))
+
+    def test_straight_routes_through_the_engine(self):
+        db, _, _ = self._drivebase()
+        db.settings(straight_speed=200)
+        self.bus.done_after = 2
+        db.straight(150)
+        call = [c for c in self.bus.calls if c[0] == "db_straight"][0]
+        self.assertEqual(call[1], 150.0)
+
+    def test_adopted_motor_wheel_api_routes_via_slots(self):
+        db, left, right = self._drivebase()
+        left.run_speed(90)      # -> servo_run on slot 0
+        right.coast()           # -> servo_coast on slot 1
+        names = [c[0] for c in self.bus.calls]
+        self.assertIn("servo_run", names)
+        self.assertIn("servo_coast", names)
+        # angle() reads slot odometry.
+        self.assertEqual(left.angle(), 0.0)
+
+    def test_adopted_step_mode_raises_with_roadmap(self):
+        db, left, _ = self._drivebase()
+        with self.assertRaises(NotImplementedError):
+            left.run_angle(100, 90)
+        with self.assertRaises(NotImplementedError):
+            left.hold()
+
+    def test_settings_acceleration_reaches_the_engine(self):
+        db, _, _ = self._drivebase()
+        db.settings(acceleration=800)
+        self.assertIn(("db_set_accel", 800.0), self.bus.calls)
+
+    def test_no_native_bus_means_no_adoption(self):
+        import sys as _sys
+        del _native.st_bus
+        db, _, _ = self._drivebase()
+        self.assertIsNone(db._serial_engine)
 
 
 class EStopGateTests(_Base):

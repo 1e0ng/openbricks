@@ -75,6 +75,13 @@ class DriveBase:
         self._gyro_cont = 0.0
         self._gyro_prev = None
 
+        # Serial-bus motors + firmware native bus: adopt the motors
+        # onto the hard-tick engine transparently (1.45.0 — ONE
+        # drivebase class, user decision). Off-firmware (sim, older
+        # builds) this quietly stays None and the classic fallback
+        # below serves, so the same user code runs everywhere.
+        self._serial_engine = self._try_adopt_serial(left, right, imu)
+
         # The native drivebase is only usable if both motors are
         # closed-loop servos. Otherwise the wrapper falls through to a
         # pure-Python open-loop implementation.
@@ -106,6 +113,28 @@ class DriveBase:
         # True. ``stop()`` clears this. See ``done`` for the layout.
         self._pending = None
 
+    @staticmethod
+    def _is_serial_bus_motor(m):
+        return (getattr(m, "_bus", None) is not None
+                and hasattr(m, "_adopt_native"))
+
+    def _try_adopt_serial(self, left, right, imu):
+        if not (self._is_serial_bus_motor(left)
+                and self._is_serial_bus_motor(right)):
+            return None
+        try:
+            from openbricks import _native
+            if not hasattr(getattr(_native, "st_bus", None) or object(),
+                           "attach_uart"):
+                return None
+        except ImportError:
+            return None
+        from openbricks.robotics.native_drivebase import _SerialNativeEngine
+        return _SerialNativeEngine.adopt_motors(
+            left, right,
+            wheel_diameter_mm=self._wheel_circumference / math.pi,
+            axle_track_mm=self._axle_track, imu=imu)
+
     def settings(self, straight_speed=None, turn_rate=None,
                  acceleration=None):
         """Tune cruise + ramp parameters for subsequent moves.
@@ -127,6 +156,9 @@ class DriveBase:
             self._straight_speed_dps = straight_speed
         if turn_rate is not None:
             self._turn_rate_dps = turn_rate
+        if self._serial_engine is not None:
+            self._serial_engine.settings(straight_speed=straight_speed,
+                                         turn_rate=turn_rate)
         if acceleration is not None:
             if not acceleration > 0:
                 raise ValueError(
@@ -135,6 +167,8 @@ class DriveBase:
             self._accel_dps2 = float(acceleration)
             if self._native is not None:
                 self._native.set_accel(float(acceleration))
+            if self._serial_engine is not None:
+                self._serial_engine.set_accel(float(acceleration))
 
     def use_gyro(self, enable):
         """Switch the heading feedback source between encoder-diff (default)
@@ -150,7 +184,9 @@ class DriveBase:
         if enable and self._imu is None:
             raise ValueError(
                 "no imu attached; construct DriveBase(imu=...) first")
-        if self._native is not None:
+        if self._serial_engine is not None:
+            self._serial_engine.use_gyro(enable)
+        elif self._native is not None:
             self._native.use_gyro(enable)
         else:
             if enable and not self._use_gyro:
@@ -196,6 +232,8 @@ class DriveBase:
             raise ValueError(
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
         self._pending = None
+        if self._serial_engine is not None:
+            self._serial_engine.stop()
         if self._native is not None:
             self._native.stop()
         if then == "coast":
@@ -233,6 +271,11 @@ class DriveBase:
         mode = self._pending["mode"]
         if mode == "straight_native" or mode == "turn_native":
             if self._native.is_done():
+                self.stop(then=self._pending["then"])
+                return True
+            return False
+        if mode == "straight_serial" or mode == "turn_serial":
+            if self._serial_engine.tick_done():
                 self.stop(then=self._pending["then"])
                 return True
             return False
@@ -290,6 +333,10 @@ class DriveBase:
 
     # ---- arm: stash pending state, kick off motion ----
     def _arm_straight(self, distance_mm, then):
+        if self._serial_engine is not None:
+            self._serial_engine.arm_straight(float(distance_mm))
+            self._pending = {"mode": "straight_serial", "then": then}
+            return
         if self._native is not None:
             # Ensure both servos are attached to motor_process; the
             # native drivebase writes directly to their target_dps
@@ -335,6 +382,10 @@ class DriveBase:
         self._run_at_dps(self._right, v0 * direction)
 
     def _arm_turn(self, angle_deg, then):
+        if self._serial_engine is not None:
+            self._serial_engine.arm_turn(float(angle_deg))
+            self._pending = {"mode": "turn_serial", "then": then}
+            return
         if self._native is not None:
             self._left.run_speed(0)
             self._right.run_speed(0)

@@ -230,6 +230,11 @@ class I2C:
 
 
 class UART:
+    def deinit(self):
+        # Release the (fake) driver — the native adoption path calls
+        # this to hand the pins to the IDF driver.
+        self._deinited = True
+
     def __init__(self, bus_id, baudrate=9600, tx=None, rx=None, timeout=0):
         self.bus_id = bus_id
         self.baudrate = baudrate

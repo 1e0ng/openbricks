@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: MIT
 """
-NativeDriveBase — the serial-bus drivebase on the hard-tick controller.
+_SerialNativeEngine — the serial-bus drivebase engine on the
+hard-tick controller. PRIVATE: users construct ``DriveBase`` with
+Motor objects and it adopts them onto this engine automatically when
+the firmware native bus exists — there is exactly one drivebase
+class (user decision, 1.45.0; the short-lived public NativeDriveBase
+of 1.43.x is gone).
 
 The 2-DOF coupled controller runs entirely in C on the esp_timer hard
 tick (see ``st_bus``): ~220 Hz odometry per wheel, speed setpoints in
@@ -67,7 +72,41 @@ def _bus():
     return sb
 
 
-class NativeDriveBase:
+class _SerialNativeEngine:
+    @classmethod
+    def adopt_motors(cls, left, right, wheel_diameter_mm,
+                     axle_track_mm, imu=None, accel_dps2=400.0):
+        """Adopt two constructed serial-bus Motor objects: recover the
+        bus params from the driver registry, RELEASE their
+        machine.UART (explicit ownership handover — the double-claim
+        trap is why a separate public class briefly existed), then
+        run this engine and re-point the motors' wheel-mode API at
+        the slots."""
+        from openbricks.drivers.st3215 import ST3215
+        bus = left._bus
+        if right._bus is not bus:
+            raise ValueError("left and right motors must share one bus")
+        params = None
+        for key, val in ST3215._buses.items():
+            if val is bus:
+                params = key
+                break
+        if params is None:
+            raise RuntimeError("motor bus not found in the registry")
+        uart_id, tx, rx, baud = params
+        # Hand the UART over: MicroPython driver out, IDF driver in.
+        bus._uart.deinit()
+        del ST3215._buses[params]
+        eng = cls(left_id=left._id, right_id=right._id,
+                  wheel_diameter_mm=wheel_diameter_mm,
+                  axle_track_mm=axle_track_mm, imu=imu,
+                  invert_left=left._invert, invert_right=right._invert,
+                  uart_id=uart_id, tx=tx, rx=rx, baud=baud,
+                  accel_dps2=accel_dps2)
+        left._adopt_native(eng._sb, 0)
+        right._adopt_native(eng._sb, 1)
+        return eng
+
     def __init__(self, left_id, right_id, wheel_diameter_mm,
                  axle_track_mm, imu=None,
                  invert_left=False, invert_right=False,
@@ -83,6 +122,7 @@ class NativeDriveBase:
         # overshoot is corrected by the NEXT move, not accumulated).
         self._gyro_cont = 0.0
         self._gyro_prev = None
+        self._deadline = 0
         self._straight_speed_dps = 200
         self._turn_rate_dps = 150
 
@@ -137,13 +177,20 @@ class NativeDriveBase:
 
     # -- moves -----------------------------------------------------------
 
-    def straight(self, distance_mm):
+    def set_accel(self, accel_dps2):
+        self._sb.db_set_accel(float(accel_dps2))
+
+    def arm_straight(self, distance_mm):
         estop.check()
         mm_s = self._straight_speed_dps * self._wheel_circumference / 360.0
         self._sb.db_straight(float(distance_mm), float(mm_s))
+        self._arm_deadline()
+
+    def straight(self, distance_mm):
+        self.arm_straight(distance_mm)
         self._wait()
 
-    def turn(self, angle_deg):
+    def arm_turn(self, angle_deg):
         """Body degrees, CW-positive (Pybricks convention)."""
         estop.check()
         # turn_rate is WHEEL-deg/s (settings parity with the classic
@@ -153,6 +200,10 @@ class NativeDriveBase:
         body_dps = (self._turn_rate_dps * self._wheel_circumference
                     / (math.pi * self._axle_track))
         self._sb.db_turn(float(angle_deg), float(body_dps))
+        self._arm_deadline()
+
+    def turn(self, angle_deg):
+        self.arm_turn(angle_deg)
         self._wait()
 
     def stop(self):
@@ -179,8 +230,29 @@ class NativeDriveBase:
 
     _SETTLE_TIMEOUT_MS = 8000
 
+    def _arm_deadline(self):
+        self._deadline = time.ticks_ms() + self._SETTLE_TIMEOUT_MS
+
+    def tick_done(self):
+        """One non-blocking iteration of the drive loop: gyro pump,
+        settle-timeout check, completion check. DriveBase's done()
+        polls this for wait=False moves; _wait() below is the
+        blocking form of the same loop."""
+        estop.check()
+        if self._use_gyro:
+            self._gyro_pump()
+        if self._sb.db_done():
+            return True
+        if time.ticks_diff(self._deadline, time.ticks_ms()) <= 0:
+            self._sb.db_stop()
+            raise RuntimeError(
+                "DriveBase move did not reach target within "
+                "%d ms — wheel stalled, blocked, or gyro frame "
+                "diverged" % self._SETTLE_TIMEOUT_MS)
+        return False
+
     def _wait(self):
-        deadline = time.ticks_ms() + self._SETTLE_TIMEOUT_MS
+        deadline = self._deadline
         while not self._sb.db_done():
             estop.check()
             if self._use_gyro:

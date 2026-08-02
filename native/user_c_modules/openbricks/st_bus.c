@@ -698,6 +698,18 @@ static mp_obj_t sb_db_done(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_done_obj, sb_db_done);
 
+static mp_obj_t sb_db_set_accel(mp_obj_t self_in, mp_obj_t dps2_in) {
+    // settings(acceleration=...) parity for the serial-native path:
+    // retune the trajectory accel without re-running db_config (which
+    // would reset the pose holds).
+    (void)self_in;
+    bus_take();
+    st_db.accel_dps2 = (ob_float_t)mp_obj_get_float(dps2_in);
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_db_set_accel_obj, sb_db_set_accel);
+
 static mp_obj_t sb_db_use_gyro(mp_obj_t self_in, mp_obj_t on_in) {
     (void)self_in;
     bus_take();
@@ -793,6 +805,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_stop),          MP_ROM_PTR(&sb_db_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_done),          MP_ROM_PTR(&sb_db_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_set_accel),     MP_ROM_PTR(&sb_db_set_accel_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_heading),   MP_ROM_PTR(&sb_db_set_heading_obj) },
     #if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
     { MP_ROM_QSTR(MP_QSTR_attach_uart),      MP_ROM_PTR(&sb_attach_uart_obj) },
