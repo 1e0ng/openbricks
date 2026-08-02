@@ -88,6 +88,16 @@ class NativeDriveBase:
 
         from openbricks._native import motor_process
         motor_process.hard_tick_selftest()      # dispatcher on (idempotent)
+        # Same-boot re-construction: a previous run's slots and
+        # drivebase survive in the C singletons (openbricks run keeps
+        # the interpreter alive between scripts), and servo_attach
+        # rejects an in-use slot — so a second run of the same script
+        # failed with "slot attach failed" until a power-cycle. Tear
+        # down our own claims first; detach of an unclaimed slot is
+        # silent, so a fresh boot pays nothing.
+        self._sb.db_disable()
+        self._sb.servo_detach(_LEFT_SLOT)
+        self._sb.servo_detach(_RIGHT_SLOT)
         if not self._sb.attach_uart(uart_id, baud, tx, rx):
             raise RuntimeError("attach_uart(%d) failed" % uart_id)
         acc = int(accel_dps2 * _STEPS_PER_DEG / 100.0)
