@@ -590,6 +590,26 @@ class SimStBusEngineTests(_ShimTestBase):
         time.sleep_ms(400)
         self.assertGreater(sb.servo_counts(0) - c0, 60)
 
+    def test_gyro_square_drift_stays_bounded_across_stops(self):
+        # THE +7.6-deg bench regression: RawDriveBase.stop() (like the
+        # firmware binding) re-captured turn_hold from measured
+        # heading, re-baselining the absolute gyro frame at every
+        # per-move stop — the one-class flow stops after EVERY move,
+        # so each turn banked its arrival residual. A full gyro square
+        # in physics must return near the start heading.
+        from openbricks_sim.shim import ShimBNO055
+        imu = ShimBNO055(i2c=None, address=0x29)
+        db, _, _ = self._serial_db(imu=imu)
+        db.settings(straight_speed=150, turn_rate=120, acceleration=360)
+        db.use_gyro(True)
+        h0 = self._heading()
+        for _ in range(4):
+            db.straight(120)
+            db.turn(90)
+        drift = ((self._heading() - h0 + 180.0) % 360.0) - 180.0
+        self.assertTrue(abs(drift) < 5.0,
+                        "gyro square drifted %+.1f deg" % drift)
+
     def test_db_and_runtime_verbs_cancel_armed_moves(self):
         # New-command-wins in every direction: each db/runtime verb
         # must cancel an ARMED per-slot move, not just tolerate an

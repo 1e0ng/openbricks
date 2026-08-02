@@ -804,17 +804,30 @@ static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_turn_obj, sb_db_turn);
 static mp_obj_t sb_db_stop(mp_obj_t self_in) {
     (void)self_in;
     bus_take();
-    // Capture the CURRENT pose as the hold before deactivating —
-    // ob_drivebase_stop alone leaves the holds stale (move-start
-    // values), and the next tick would drive the wheels BACK to that
-    // stale pose: a physical lurch on every stop. With fresh holds
-    // the controller holds position here, feedback-corrected.
-    st_db.fwd_hold = (st_db_bridge_l.observer.pos_hat
-                      + st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
-    st_db.turn_hold = st_db.use_gyro
-        ? st_db.heading_override_wheel_deg
-        : (st_db_bridge_l.observer.pos_hat
-           - st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
+    // Hold capture is ABORT-ONLY. Two cases:
+    //
+    // * Move NOT done (mid-move abort): the holds still carry
+    //   move-START values (they only update at profile expiry), so
+    //   without a fresh capture the next arm would baseline from a
+    //   stale pose — the original lurch bug. Capture measured.
+    //
+    // * Move done (the normal per-move stop in DriveBase's flow):
+    //   the holds are already end-locked to the ABSOLUTE targets.
+    //   Re-capturing MEASURED here re-baselines the gyro frame at
+    //   every segment boundary, banking each turn's arrival residual
+    //   instead of letting the next move correct it — bench
+    //   2026-08-02: +7.6 deg after one gyro square (~+1.9/turn), the
+    //   exact pre-1.25.0 per-move-re-baselining failure mode. The
+    //   1.45.0 one-class flow stops after EVERY move, which is what
+    //   armed this. Keep the absolute holds.
+    if (!ob_drivebase_is_done(&st_db)) {
+        st_db.fwd_hold = (st_db_bridge_l.observer.pos_hat
+                          + st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
+        st_db.turn_hold = st_db.use_gyro
+            ? st_db.heading_override_wheel_deg
+            : (st_db_bridge_l.observer.pos_hat
+               - st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
+    }
     ob_drivebase_stop(&st_db);
     // Yield: from here the motor layer owns the wheels (coast /
     // brake / hold / run_angle per the caller's ``then=``), so the

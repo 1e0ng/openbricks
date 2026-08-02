@@ -41,6 +41,8 @@ def _reply(servo_id, err, payload=b""):
 class _PerfectWheels:
     """Servos that follow commanded speed exactly; 1 ms per pump."""
 
+    track = 1.0     # fraction of commanded speed actually achieved
+
     def __init__(self):
         self.pos = {1: 0.0, 2: 0.0}
         self.spd = {1: 0, 2: 0}
@@ -51,7 +53,7 @@ class _PerfectWheels:
     def pump(self):
         self.now += 1
         for i in (1, 2):
-            self.pos[i] += self.spd[i] / 1000.0
+            self.pos[i] += self.spd[i] * self.track / 1000.0
         sb.servo_pump(self.now)
         tx = sb.take_tx()
         i = 0
@@ -84,6 +86,14 @@ class _PerfectWheels:
     def advance(self, ms):
         for _ in range(ms):
             self.pump()
+
+
+class _LaggyWheels(_PerfectWheels):
+    """Wheels that achieve only 60% of the commanded speed — a crude
+    stand-in for real settle dynamics, so moves arrive at the done
+    latch with a genuine residual instead of ~zero."""
+
+    track = 0.6
 
 
 class _Base(unittest.TestCase):
@@ -200,6 +210,78 @@ class StopAndGyroTests(_Base):
             self.w.pump()
             sb.db_set_heading(90.0)
         self.assertTrue(sb.db_done())
+
+    # Wheel-degrees of diff per body-degree on the 88/136 geometry
+    # (matches ob_drivebase_body_to_wheel_diff): 136/88.
+    _WHEEL_PER_BODY = 136.0 / 88.0
+
+    def _feed_heading_from_wheels(self):
+        """One pump with an HONEST heading feed: body heading derived
+        from the wheels' actual differential, like a perfect IMU on a
+        non-slipping chassis."""
+        self.w.pump()
+        # User-frame counts (slot0 carries the invert), same frame
+        # the controller's bridges read.
+        diff_wheel_deg = ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+                          * 360.0 / 4096.0)
+        sb.db_set_heading(diff_wheel_deg / self._WHEEL_PER_BODY)
+
+    def test_gyro_frame_survives_per_move_stops(self):
+        # THE +7.6-deg bench regression (2026-08-02, first gyro square
+        # on the one-class flow): db_stop re-captured turn_hold from
+        # MEASURED heading, re-baselining the absolute frame at every
+        # per-move stop — each turn banked its arrival residual
+        # (~+1.9 body-deg) instead of the next move correcting it.
+        # Six 20-deg gyro turns, each followed by the stop the
+        # DriveBase flow performs, must land on the ABSOLUTE 120.
+        #
+        # The plant must SETTLE SLOWLY for this to discriminate: a
+        # perfect wheel arrives with ~zero residual and there is
+        # nothing to bank (the unfixed code passed with perfect
+        # wheels — verified). 60% speed tracking gives every turn a
+        # real ~3-wheel-deg residual at the done latch, like the
+        # bench chassis.
+        self.w = _LaggyWheels()
+        sb.db_use_gyro(True)
+        for _ in range(6):
+            sb.db_turn(20.0, 60.0)
+            for _ in range(6000):
+                self._feed_heading_from_wheels()
+                if sb.db_done():
+                    break
+            self.assertTrue(sb.db_done())
+            sb.db_stop()
+        diff_wheel_deg = ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+                          * 360.0 / 4096.0)
+        body = diff_wheel_deg / self._WHEEL_PER_BODY
+        # Fixed: only the LAST turn's residual remains (~1.9 body-deg
+        # at the done latch). Bug: all six bank, ~11 body-deg short.
+        self.assertTrue(abs(body - 120.0) < 3.0,
+                        "6 x turn(20) landed at %.1f body-deg "
+                        "(banked residuals?)" % body)
+
+    def test_aborted_turn_does_not_haunt_the_next_straight(self):
+        # The flip side — the capture must STAY for mid-move aborts:
+        # after stopping a 90-deg turn a third of the way in, the
+        # following straight must hold the heading WHERE THE ABORT
+        # LEFT IT, not keep steering toward the abandoned 90.
+        sb.db_use_gyro(True)
+        sb.db_turn(90.0, 60.0)
+        for _ in range(600):                   # well short of done
+            self._feed_heading_from_wheels()
+        self.assertFalse(sb.db_done())
+        sb.db_stop()
+        diff_at_stop = (sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+        sb.db_straight(80.0, 60.0)
+        for _ in range(4000):
+            self._feed_heading_from_wheels()
+            if sb.db_done():
+                break
+        diff_now = (sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+        drift_wheel_deg = abs(diff_now - diff_at_stop) * 360.0 / 4096.0
+        self.assertTrue(drift_wheel_deg < 6.0,
+                        "straight after an aborted turn moved the "
+                        "diff axis %.1f wheel-deg" % drift_wheel_deg)
 
     def test_torque_starvation_regression(self):
         # The OTHER planner regression: set_speed re-staging torque

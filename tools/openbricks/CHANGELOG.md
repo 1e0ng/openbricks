@@ -3,6 +3,34 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.47.0 — fix: per-move stops were re-baselining the gyro frame
+
+First bench run of a gyro square on the one-class flow measured
+**+7.6°** of drift (vs +0.5..+1.8 on 1.43.2) while the encoder pass
+was clean (+0.1°). Root cause: `db_stop` re-captured `turn_hold`
+from MEASURED heading — the stale-hold lurch fix — but the 1.45.0
+one-class `DriveBase` stops after EVERY move, so the absolute gyro
+frame was re-baselined at every segment boundary and each turn
+banked its ~+1.9° arrival residual instead of the next move
+correcting it (the exact pre-1.25.0 per-move-re-baselining failure
+mode; `NativeDriveBase` never stopped between moves, which is why
+1.43.x benches never saw it).
+
+Fix (firmware `sb_db_stop` + sim `RawDriveBase.stop`, same rule):
+hold capture is now **abort-only** — a mid-move stop still captures
+the measured pose (the case the lurch fix was built for; the holds
+otherwise carry move-START values there), but after ARRIVAL the
+holds keep their end-locked ABSOLUTE targets, preserving the frame
+across the per-move stops.
+
+Regression pins: unix-MP `test_st_drivebase` drives six gyro turns
+each followed by a stop on a 60%-tracking plant (a perfect plant
+arrives with ~zero residual and cannot discriminate — verified: the
+unfixed build passes with perfect wheels, lands 108.5/120 with laggy
+ones) and asserts the absolute landing; a second test pins that an
+ABORTED turn does not haunt the following straight. Sim: a full gyro
+square through the shim in MuJoCo must return within 5°.
+
 ## 1.46.0 — step mode in C: run_angle/hold on adopted serial motors
 
 The roadmap item the 1.45.0 `NotImplementedError` gates named. Adopted
