@@ -605,6 +605,8 @@ class ST3215Motor(Motor):
         self.run_speed(self._max_dps * duty / 100.0)
 
     def speed(self):
+        if self._native_slot is not None:
+            self._native_only_error("speed")
         """Measured shaft speed in deg/s from the present-speed
         register (sign-magnitude, bit 15; steps/s scaled by
         ``steps_per_dps``). Returns ``None`` if the bus is silent,
@@ -622,6 +624,8 @@ class ST3215Motor(Motor):
         return dps
 
     def load(self):
+        if self._native_slot is not None:
+            self._native_only_error("load")
         """Estimated shaft torque in mNm — Pybricks ``Motor.load()``
         shape. The present-load register reports 0.1 %-of-stall units
         (sign in bit 10, per the Feetech SCServo SDK); scaled by the
@@ -641,6 +645,8 @@ class ST3215Motor(Motor):
         return mnm
 
     def stalled(self):
+        if self._native_slot is not None:
+            self._native_only_error("stalled")
         """``True`` when the servo is pushing hard (load magnitude at
         least ``STALL_LOAD_PCT`` percent of stall) but barely moving
         (speed magnitude at most ``STALL_SPEED_DPS``) — the Pybricks
@@ -658,6 +664,13 @@ class ST3215Motor(Motor):
     def run_speed(self, deg_per_s):
         """Set continuous wheel velocity in degrees per second."""
         estop.check()
+        if self._native_slot is not None:
+            # The slot was attached WITH this motor's invert flag, so
+            # pass the user-frame value; the slot applies the sign.
+            self._native_sb.servo_run(
+                self._native_slot,
+                int(float(deg_per_s) * self._steps_per_dps))
+            return
         self._abandon_pending()
         self._ensure_mode(_MODE_WHEEL)
         self._ensure_torque_on()
@@ -677,6 +690,9 @@ class ST3215Motor(Motor):
         A hard local stop without torque-off is ``accel_dps2=0`` at
         construction.
         """
+        if self._native_slot is not None:
+            self._native_sb.servo_run(self._native_slot, 0)
+            return
         self._abandon_pending()
         self._ensure_mode(_MODE_WHEEL)
         self._ensure_torque_on()
@@ -684,11 +700,57 @@ class ST3215Motor(Motor):
 
     def coast(self):
         """Disable torque — wheel free-wheels."""
+        if self._native_slot is not None:
+            self._native_sb.servo_coast(self._native_slot)
+            return
         self._abandon_pending()
         self._bus.write(self._id, _REG_TORQUE, bytes([0]))
         self._torque_on = False
 
+    # ---- native adoption (1.45.0) -------------------------------------
+    #
+    # When a DriveBase adopts this motor onto the hard-tick native
+    # bus, the machine.UART is released and the wheel-mode subset of
+    # the Motor API routes through the C servo slots instead: run /
+    # run_speed / dc / brake / stop / coast / angle / reset_angle.
+    # Step-mode and feedback-register methods (run_angle, run_target,
+    # hold, speed, load, stalled) raise with the roadmap item named —
+    # loudly incomplete beats silently wrong.
+
+    _native_slot = None       # class default; instance attr when adopted
+    _native_sb = None
+    _native_angle_offset = 0.0
+
+    def _adopt_into_drivebase(self, right, wheel_diameter_mm,
+                              axle_track_mm, imu=None, accel_dps2=400.0):
+        """DriveBase's adoption hook (polymorphic — the sim's shim
+        motors implement their own). Returns the serial-native engine,
+        or None when the firmware native bus is absent (then there is
+        NO fallback: serial drivebases are native-only by design)."""
+        from openbricks import _native
+        sbmod = getattr(_native, "st_bus", None)
+        if sbmod is None or not hasattr(sbmod, "attach_uart"):
+            return None
+        from openbricks.robotics.native_drivebase import _SerialNativeEngine
+        return _SerialNativeEngine.adopt_motors(
+            self, right, wheel_diameter_mm=wheel_diameter_mm,
+            axle_track_mm=axle_track_mm, imu=imu, accel_dps2=accel_dps2)
+
+    def _adopt_native(self, sb, slot):
+        self._native_sb = sb
+        self._native_slot = slot
+        self._native_angle_offset = 0.0
+
+    def _native_only_error(self, method):
+        raise NotImplementedError(
+            "%s is not yet available while this motor is adopted by "
+            "the native drivebase (step-mode-in-C is the tracked "
+            "follow-up); construct the motor without a native "
+            "DriveBase to use it" % method)
+
     def hold(self):
+        if self._native_slot is not None:
+            self._native_only_error("hold")
         """Actively hold the current shaft angle so the position PID
         resists rotation. Subsequent ``run_speed`` / ``brake`` /
         ``coast`` calls transparently restore wheel mode.
@@ -793,6 +855,13 @@ class ST3215Motor(Motor):
         parks. In wheel/position mode, rebuild the accumulator from the
         encoder via the wrap heuristic.
         """
+        if self._native_slot is not None:
+            # Slot odometry is already multi-turn and already in this
+            # motor's frame (the slot carries the invert flag).
+            counts = self._native_sb.servo_counts(self._native_slot)
+            return counts * 360.0 / _COUNTS_PER_REV \
+                - self._native_angle_offset
+
         if self._op_mode == _MODE_STEP:
             if not self._accum_initialized:
                 return None
@@ -839,6 +908,11 @@ class ST3215Motor(Motor):
 
     def reset_angle(self, angle=0):
         """Set the current shaft angle to ``angle`` (degrees)."""
+        if self._native_slot is not None:
+            counts = self._native_sb.servo_counts(self._native_slot)
+            self._native_angle_offset = (
+                counts * 360.0 / _COUNTS_PER_REV - float(angle))
+            return
         # Drain any pending wrap correction so the offset is taken
         # against an up-to-date accumulator.
         current = self.angle()
@@ -856,6 +930,8 @@ class ST3215Motor(Motor):
     def run_angle(self, deg_per_s, target_angle, wait=True,
                   tolerance_deg=0.5, kp=None, poll_ms=None,
                   debug=False, then="coast"):
+        if self._native_slot is not None:
+            self._native_only_error("run_angle")
         """Rotate by ``target_angle`` degrees at up to ``deg_per_s``,
         ending within ``tolerance_deg`` of the target.
 

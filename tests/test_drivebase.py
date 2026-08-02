@@ -1,21 +1,21 @@
 # SPDX-License-Identifier: MIT
 """Tests for the DriveBase robotics layer.
 
-Covers both paths through ``_run_at_dps``:
-    * Open-loop (L298N): ``run_speed`` raises NotImplementedError, fallback to
-      ``run(power)`` with a rated-speed assumption.
-    * Closed-loop: a fake encoder motor that accepts ``run_speed`` and whose
-      angle is driven forward by the scheduler stand-in (``time.sleep_ms``).
+Covers the open-loop ``drive()``/``stop()`` path (L298N via
+``_run_at_dps``'s rated-speed mapping) and the no-Python-loop
+contract (1.45.0): motor pairs with neither a native servo nor a
+serial-bus engine get NO ``straight()``/``turn()`` — the old
+pure-Python heading-hold fallback was deleted, so those now raise
+instead of silently degrading. Closed-loop behavior is covered by
+``test_drivebase_native_2dof`` (encoder path), ``test_native_drivebase``
+(serial engine over a fake bus), and the sim suite.
 """
 
 import tests._fakes  # noqa: F401
 
-import math
-import time
 import unittest
 
 from openbricks._native import motor_process
-from openbricks.drivers.jgb37_520 import JGB37Motor
 from openbricks.drivers.l298n import L298NMotor
 from openbricks.robotics.drivebase import DriveBase
 from openbricks.interfaces import Motor
@@ -56,40 +56,6 @@ class _FakeClosedLoopMotor(Motor):
 
     def step(self, seconds):
         self._angle_deg += self._target_dps * self._scale * seconds
-
-
-class _FakeFlappyMotor(_FakeClosedLoopMotor):
-    """``_FakeClosedLoopMotor`` with a controllable read-drop pattern,
-    for exercising the serial-bus-style ``angle() -> None`` case that
-    triggers the None-tolerance path in ``_straight_fallback`` /
-    ``_turn_fallback``.
-    """
-
-    def __init__(self, scale=1.0):
-        super().__init__(scale=scale)
-        self._silent = False
-        self._drop_indices = set()
-        self._call_count = 0
-
-    def go_silent(self):
-        """All subsequent ``angle()`` calls return ``None``."""
-        self._silent = True
-
-    def drop_calls(self, indices):
-        """0-indexed ``angle()`` call numbers that should return ``None``.
-        Everything else returns the real angle."""
-        self._drop_indices = set(indices)
-
-    def angle(self):
-        idx = self._call_count
-        self._call_count += 1
-        if self._silent or idx in self._drop_indices:
-            return None
-        return super().angle()
-
-
-def _wheel_deg_for_distance(distance_mm, wheel_diameter_mm):
-    return distance_mm / (math.pi * wheel_diameter_mm) * 360
 
 
 def _reset_all():
@@ -184,418 +150,74 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
             db.stop(then="freewheel")
 
 
-class TestDriveBaseClosedLoop(unittest.TestCase):
-    """Closed-loop path: straight() and turn() converge on target angles."""
+class _FakeIMU:
+    def __init__(self, heading=0.0):
+        self.heading_value = heading
+
+    def heading(self):
+        return self.heading_value
+
+
+class TestDriveBaseNoPythonLoop(unittest.TestCase):
+    """1.45.0 contract: there is NO pure-Python control loop. A motor
+    pair with neither a native servo (``._servo``) nor a serial-bus
+    adoption hook (``._adopt_into_drivebase``) — the shape the old
+    fallback served — gets open-loop ``drive()`` only; moves by
+    distance raise instead of silently running a degraded loop."""
 
     def setUp(self):
         _reset_all()
 
-    def _patch_sleep_steps_motors(self, *motors):
-        original = time.sleep_ms
-
-        def stepped_sleep(ms):
-            original(ms)
-            for m in motors:
-                m.step(ms / 1000.0)
-
-        time.sleep_ms = stepped_sleep
-        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
-
-    def test_straight_converges_on_target_wheel_angle(self):
-        left = _FakeClosedLoopMotor()
+    def _db(self, imu=None):
+        left  = _FakeClosedLoopMotor()
         right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
+        return DriveBase(left, right, wheel_diameter_mm=56,
+                         axle_track_mm=114, imu=imu), left, right
 
-        db.straight(100)
-
-        target = _wheel_deg_for_distance(100, wheel_diameter_mm=56)
-        # The loop exits when the *average* wheel angle crosses the target,
-        # which is a loose bound but the right one for straight-line travel.
-        avg = (left.angle() + right.angle()) / 2
-        self.assertGreaterEqual(avg, target)
-
-    def test_straight_reverse_converges_on_negative_target(self):
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.straight(-100)
-
-        target = _wheel_deg_for_distance(-100, wheel_diameter_mm=56)
-        avg = (left.angle() + right.angle()) / 2
-        self.assertLessEqual(avg, target)
-
-    def test_turn_converges(self):
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.turn(90)
-
-        # Both wheels should have swept through the expected arc,
-        # with opposite signs (positive = right/CW: left advances,
-        # right reverses).
-        arc_mm = math.radians(90) * (114 / 2)
-        expected = arc_mm / (math.pi * 56) * 360
-        self.assertGreaterEqual(left.angle(), expected - 5)
-        self.assertLessEqual(right.angle(), -expected + 5)  # reversed
-
-    def test_settings_overrides_cruise_parameters(self):
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-
-        db.settings(straight_speed=400, turn_rate=360)
-        self.assertEqual(db._straight_speed_dps, 400)
-        self.assertEqual(db._turn_rate_dps, 360)
-
-
-class TestDriveBaseFallbackBusGlitchTolerance(unittest.TestCase):
-    """Pre-1.6.8 regression: ``_straight_fallback`` / ``_turn_fallback``
-    crashed with ``TypeError: unsupported types for __sub__: 'NoneType',
-    'float'`` whenever ``motor.angle()`` returned ``None`` mid-loop —
-    a routine occurrence for serial-bus servos (ST-3215, ST-3032)
-    whose present-position read can time out under EMI or half-duplex
-    collisions. The fix mirrors ``run_angle``'s inner-loop pattern:
-    skip ``None`` ticks and only bail after ``_MAX_CONSECUTIVE_NONE``
-    ticks in a row."""
-
-    def setUp(self):
-        _reset_all()
-
-    def _patch_sleep_steps_motors(self, *motors):
-        original = time.sleep_ms
-
-        def stepped_sleep(ms):
-            original(ms)
-            for m in motors:
-                m.step(ms / 1000.0)
-
-        time.sleep_ms = stepped_sleep
-        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
-
-    def _patch_sleep_noop(self):
-        """Use when we don't want the test to spend real wall-clock
-        time waiting for the 500 ms bail window."""
-        original = time.sleep_ms
-        time.sleep_ms = lambda ms: None
-        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
-
-    def test_straight_survives_single_dropped_angle_read(self):
-        # Pre-fix: this would raise TypeError on the very first inner
-        # loop iteration. Post-fix: the None tick is skipped and the
-        # move completes normally.
-        left = _FakeFlappyMotor()
-        right = _FakeFlappyMotor()
-        # Anchor read = call 0; drop the first inner-loop read = call 1.
-        left.drop_calls([1])
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.straight(100)
-
-        target = _wheel_deg_for_distance(100, wheel_diameter_mm=56)
-        avg = (left.angle() + right.angle()) / 2
-        self.assertGreaterEqual(avg, target)
-
-    def test_turn_survives_single_dropped_angle_read(self):
-        left = _FakeFlappyMotor()
-        right = _FakeFlappyMotor()
-        right.drop_calls([1])
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.turn(90)  # would crash pre-fix; completes post-fix.
-
-    def test_straight_bails_cleanly_on_permanent_bus_silence(self):
-        # Anchor reads succeed, then both motors go silent. After
-        # ``_MAX_CONSECUTIVE_NONE`` ticks the loop should exit cleanly
-        # via ``stop()`` — no TypeError, no infinite loop.
-        left = _FakeFlappyMotor()
-        right = _FakeFlappyMotor()
-        # Anchor reads consume call 0; drop everything from call 1 on.
-        left.drop_calls(range(1, 1000))
-        right.drop_calls(range(1, 1000))
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_noop()
-
-        db.straight(100)   # must not raise.
-
-    def test_turn_bails_cleanly_on_permanent_bus_silence(self):
-        left = _FakeFlappyMotor()
-        right = _FakeFlappyMotor()
-        left.drop_calls(range(1, 1000))
-        right.drop_calls(range(1, 1000))
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_noop()
-
-        db.turn(90)        # must not raise.
-
-    def test_straight_bails_cleanly_when_anchor_read_keeps_failing(self):
-        # Bus is dead from the very first call. ``_read_angle_or_bail``
-        # retries 5 times, all None, then returns None. The fallback
-        # short-circuits via ``stop()`` rather than entering the inner
-        # loop with a bogus reference.
-        left = _FakeFlappyMotor()
-        right = _FakeFlappyMotor()
-        left.go_silent()
-        right.go_silent()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_noop()
-
-        db.straight(100)   # must not raise; must stop cleanly.
-
-    def test_turn_bails_cleanly_when_anchor_read_keeps_failing(self):
-        left = _FakeFlappyMotor()
-        right = _FakeFlappyMotor()
-        left.go_silent()
-        right.go_silent()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_noop()
-
-        db.turn(90)        # must not raise; must stop cleanly.
-
-
-class TestDriveBaseWaitFalse(unittest.TestCase):
-    """Pybricks-style ``wait=False`` + ``done()`` for concurrent
-    drivebase use. Each ``done()`` call runs one tick of the
-    fallback state machine — so polling cadence drives progress."""
-
-    def setUp(self):
-        _reset_all()
-
-    def _patch_sleep_steps_motors(self, *motors):
-        original = time.sleep_ms
-
-        def stepped_sleep(ms):
-            original(ms)
-            for m in motors:
-                m.step(ms / 1000.0)
-
-        time.sleep_ms = stepped_sleep
-        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
-
-    def test_done_returns_true_when_no_move_pending(self):
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self.assertTrue(db.done())
-
-    def test_straight_wait_false_returns_immediately_then_converges_via_done(self):
-        # ``straight(wait=False)`` should arm state and return without
-        # blocking. The caller drives the move by polling ``done()``
-        # until it returns True. Convergence behaviour should match
-        # ``wait=True``.
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.straight(100, wait=False)
-        # Just-armed: motors haven't moved yet.
-        self.assertFalse(db.done())
-        # Poll done() in a tight loop (with sleep to advance the
-        # patched motor angle). Same cadence as the implicit
-        # wait=True loop.
-        for _ in range(5000):
-            if db.done():
-                break
-            time.sleep_ms(10)
-
-        target = _wheel_deg_for_distance(100, wheel_diameter_mm=56)
-        avg = (left.angle() + right.angle()) / 2
-        self.assertGreaterEqual(avg, target)
-        self.assertTrue(db.done())   # remains True after completion
-
-    def test_turn_wait_false_converges_via_done(self):
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.turn(90, wait=False)
-        for _ in range(5000):
-            if db.done():
-                break
-            time.sleep_ms(10)
-
-        arc_mm = math.radians(90) * (114 / 2)
-        expected = arc_mm / (math.pi * 56) * 360
-        self.assertGreaterEqual(left.angle(), expected - 5)
-        self.assertLessEqual(right.angle(), -expected + 5)
-        self.assertTrue(db.done())
-
-    def test_new_move_supersedes_pending_wait_false(self):
-        # Pybricks "new command wins": calling straight() while a
-        # wait=False turn is in flight abandons the turn and arms
-        # the straight. ``done()`` reflects the new move's state.
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-
-        db.turn(90, wait=False)
-        self.assertFalse(db.done())
-        db.straight(100, wait=False)
-        # Still not done (now a fresh straight is pending).
-        self.assertFalse(db.done())
-        for _ in range(5000):
-            if db.done():
-                break
-            time.sleep_ms(10)
-        self.assertTrue(db.done())
-
-    def test_stop_clears_pending_wait_false_move(self):
-        # Explicit ``stop()`` aborts the pending move and ``done()``
-        # then reports completion immediately.
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-
-        db.straight(1000, wait=False)
-        self.assertFalse(db.done())
-        db.stop()
-        self.assertTrue(db.done())
-
-    def test_straight_wait_false_kicks_off_motors_immediately(self):
-        # Regression for 1.6.9 hub-yt symptom "the whole function is
-        # skipped": pre-1.6.10 the fallback ``_arm_straight`` only
-        # snapshotted anchors and stashed _pending, leaving motors
-        # idle until the first ``done()`` poll. From the caller's
-        # perspective, ``straight(wait=False)`` did nothing visible.
-        # Post-fix the motors are commanded to cruise speed on the
-        # call itself; subsequent ``done()`` ticks apply heading-hold
-        # corrections and check the target.
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-
-        db.settings(straight_speed=200, turn_rate=180)
-        db.straight(100, wait=False)
-
-        # No done() polled yet — but both motors should already have
-        # received a non-zero speed command.
-        self.assertNotEqual(left._target_dps, 0.0)
-        self.assertNotEqual(right._target_dps, 0.0)
-        # Forward straight = both wheels same sign.
-        self.assertGreater(left._target_dps, 0)
-        self.assertGreater(right._target_dps, 0)
-
-    def test_turn_wait_false_kicks_off_motors_immediately(self):
-        # Same regression as test_straight_wait_false_kicks_off, but
-        # for turn(). Turn in place = wheels run opposite signs.
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-
-        db.settings(straight_speed=200, turn_rate=180)
-        db.turn(90, wait=False)
-
-        self.assertNotEqual(left._target_dps, 0.0)
-        self.assertNotEqual(right._target_dps, 0.0)
-        # Positive turn (= turn right/CW, Pybricks convention) means
-        # left advances, right reverses.
-        self.assertGreater(left._target_dps, 0)
-        self.assertLess(right._target_dps, 0)
-
-
-class _FakeStalledMotor(_FakeClosedLoopMotor):
-    """Closed-loop motor whose shaft never moves despite a commanded
-    speed — models a mechanically blocked wheel or one that has entered
-    the servo's overload protection. The bus still answers (``angle()``
-    returns a real number), it just never climbs toward the target."""
-
-    def step(self, seconds):
-        pass  # shaft frozen
-
-
-class TestDriveBaseStallTimeout(unittest.TestCase):
-    """A fallback straight/turn whose wheels can't reach the target must
-    not loop forever (``done()`` returning ``False`` indefinitely). After
-    a generous wall-clock budget it stops the motors and raises."""
-
-    def setUp(self):
-        _reset_all()
-
-    def _patch_sleep_steps_motors(self, *motors):
-        original = time.sleep_ms
-
-        def stepped_sleep(ms):
-            original(ms)   # advances the virtual clock (deadline relies on it)
-            for m in motors:
-                m.step(ms / 1000.0)
-
-        time.sleep_ms = stepped_sleep
-        self.addCleanup(lambda: setattr(time, "sleep_ms", original))
-
-    def test_straight_raises_when_wheels_stall(self):
-        left = _FakeStalledMotor()
-        right = _FakeStalledMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
+    def test_straight_raises(self):
+        db, _, _ = self._db()
         with self.assertRaises(RuntimeError):
             db.straight(100)
 
-    def test_turn_raises_when_wheels_stall(self):
-        left = _FakeStalledMotor()
-        right = _FakeStalledMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
+    def test_turn_raises(self):
+        db, _, _ = self._db()
         with self.assertRaises(RuntimeError):
             db.turn(90)
 
-    def test_turn_wait_false_raises_on_stall_via_done(self):
-        # The user-reported shape: a wait=False poll loop must terminate
-        # (here, by raising) instead of spinning forever.
-        left = _FakeStalledMotor()
-        right = _FakeStalledMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-        db.turn(90, wait=False)
+    def test_straight_wait_false_raises_too(self):
+        # The raise sits at the arm site, so wait=False can't sneak a
+        # move past the contract either.
+        db, _, _ = self._db()
         with self.assertRaises(RuntimeError):
-            for _ in range(100000):   # bounded so a non-raising bug fails fast
-                if db.done():
-                    break
-                time.sleep_ms(10)
+            db.straight(100, wait=False)
+        # Nothing armed: done() reports idle.
+        self.assertTrue(db.done())
 
-    def test_stall_timeout_stops_motors_before_raising(self):
-        left = _FakeStalledMotor()
-        right = _FakeStalledMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-        try:
-            db.straight(100)
-        except RuntimeError:
-            pass
-        # stop(then="coast") drove both targets to zero before the raise.
+    def test_use_gyro_raises_even_with_imu(self):
+        # No engine = no heading-hold loop for the gyro to feed.
+        db, _, _ = self._db(imu=_FakeIMU())
+        with self.assertRaises(RuntimeError):
+            db.use_gyro(True)
+
+    def test_use_gyro_without_imu_still_raises_value_error(self):
+        # The missing-imu diagnosis outranks the missing-engine one.
+        db, _, _ = self._db()
+        with self.assertRaises(ValueError):
+            db.use_gyro(True)
+
+    def test_drive_still_works_open_loop(self):
+        # drive() is kinematic and loop-free — it must keep working on
+        # any pair that accepts run_speed.
+        db, left, right = self._db()
+        db.drive(100, 0)
+        self.assertGreater(left._target_dps, 0)
+        self.assertEqual(left._target_dps, right._target_dps)
+        db.stop()
         self.assertEqual(left._target_dps, 0.0)
-        self.assertEqual(right._target_dps, 0.0)
 
-    def test_move_budget_guards_against_zero_rate(self):
-        # A configured speed of 0 must not divide-by-zero — the rate is
-        # floored to 1 so the budget is finite (and the move just times
-        # out, since zero-speed wheels never reach the target).
-        # _move_budget_ms became an instance method when the budget
-        # grew accel-awareness (it reads self._accel_dps2).
-        db = DriveBase(_FakeClosedLoopMotor(), _FakeClosedLoopMotor(),
-                       wheel_diameter_mm=56, axle_track_mm=114)
-        self.assertEqual(db._move_budget_ms(0, 0), 1000)     # floor only
-        self.assertEqual(db._move_budget_ms(100, 0),
-                         db._move_budget_ms(100, 1))         # rate floored to 1
-
-    def test_healthy_move_completes_well_within_budget(self):
-        # Guard against an over-tight budget: a move whose wheels actually
-        # turn must complete normally, not trip the timeout.
-        left = _FakeClosedLoopMotor()
-        right = _FakeClosedLoopMotor()
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-        self._patch_sleep_steps_motors(left, right)
-        db.straight(100)   # must NOT raise
-        target = _wheel_deg_for_distance(100, wheel_diameter_mm=56)
-        self.assertGreaterEqual((left.angle() + right.angle()) / 2, target)
+    def test_done_true_when_nothing_pending(self):
+        db, _, _ = self._db()
+        self.assertTrue(db.done())
 
 
 if __name__ == "__main__":

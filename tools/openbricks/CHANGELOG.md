@@ -3,6 +3,35 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.45.0 — ONE DriveBase class; the Python serial fallback loop is gone
+
+Three user decisions, shipped together:
+
+* **One drivebase class.** `NativeDriveBase` (public for one release
+  window, 1.43.x) is removed. `DriveBase` takes Motor objects and
+  transparently *adopts* serial-bus pairs onto the hard-tick native
+  engine: `adopt_motors` releases the driver's `machine.UART`
+  (explicit ownership handover — no peripheral double-claim) and
+  reroutes the motors' wheel-mode API (`run_speed`/`brake`/`coast`/
+  `angle`/`reset_angle`) through the engine's servo slots. Step-mode
+  methods (`run_angle`, `hold`, …) raise `NotImplementedError` naming
+  the step-mode-in-C roadmap.
+* **No Python fallback loop.** The pure-Python heading-hold loop
+  (the pre-1.42 serial drivebase) is deleted — 310 lines. A runtime
+  with serial-bus motors but no native bus raises `RuntimeError` at
+  construction instead of silently degrading to a starvable ~100 Hz
+  loop. Open-loop motor pairs keep kinematic `drive()`/`stop()`;
+  `straight()`/`turn()`/`use_gyro()` raise.
+* **The sim emulates the bus, not the class.** `_SimStBus` implements
+  the `st_bus` surface over MuJoCo wheels and the sim native
+  extension gained `RawDriveBase` (the same C `drivebase_core`
+  embedded in the CPython module), so sim, firmware, and unit tests
+  all run the SAME engine and controller code path. Sim serial
+  squares converge within ~1% of commanded geometry.
+
+Examples updated to the one-class form; two obsolete
+fallback-diagnostic examples removed.
+
 ## 1.34.0 — fix the actual staging bottleneck: O(n^2) BLE reads
 
 Research (not guesswork this time — MicroPython + NimBLE sources,

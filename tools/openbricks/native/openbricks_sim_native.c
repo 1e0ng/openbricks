@@ -668,6 +668,190 @@ static PyTypeObject DriveBaseType = {
 
 
 /* -------------------------------------------------------------------
+ * RawDriveBase — the SAME 2-DOF controller with BRIDGE servos.
+ *
+ * Purpose: the ONE-code-path serial-native drivebase (user decision,
+ * 1.45.0). On firmware the hard tick syncs slot odometry into two
+ * bridge ob_servo_t and speed targets out; the sim mirrors that
+ * exactly: the shim feeds MuJoCo wheel angles into tick() and
+ * applies the returned per-wheel dps setpoints to its wheel loops.
+ * The controller never knows which world it is in — drivebase_core
+ * only ever touches observer.pos_hat (read) and target_dps (write),
+ * the same contract the firmware bridges rely on.
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    PyObject_HEAD
+    ob_drivebase_t core;
+    ob_servo_t     bridge_l;
+    ob_servo_t     bridge_r;
+} RawDriveBaseObject;
+
+
+static int RawDriveBase_init(RawDriveBaseObject *self, PyObject *args,
+                             PyObject *kwargs) {
+    static char *kwlist[] = {"wheel_diameter_mm", "axle_track_mm",
+                             "kp_sum", "kp_diff", NULL};
+    double wheel_d, axle;
+    double kp_sum  = OB_DRIVEBASE_DEFAULT_KP_SUM;
+    double kp_diff = OB_DRIVEBASE_DEFAULT_KP_DIFF;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "dd|dd", kwlist,
+                                     &wheel_d, &axle,
+                                     &kp_sum, &kp_diff)) {
+        return -1;
+    }
+    memset(&self->bridge_l, 0, sizeof(self->bridge_l));
+    memset(&self->bridge_r, 0, sizeof(self->bridge_r));
+    ob_drivebase_init(&self->core, &self->bridge_l, &self->bridge_r,
+                      (ob_float_t)wheel_d, (ob_float_t)axle,
+                      (ob_float_t)kp_sum, (ob_float_t)kp_diff);
+    return 0;
+}
+
+
+static PyObject *RawDriveBase_tick(RawDriveBaseObject *self, PyObject *args) {
+    long   now_ms;
+    double l_deg, r_deg;
+    if (!PyArg_ParseTuple(args, "ldd", &now_ms, &l_deg, &r_deg)) {
+        return NULL;
+    }
+    self->bridge_l.observer.pos_hat = (ob_float_t)l_deg;
+    self->bridge_r.observer.pos_hat = (ob_float_t)r_deg;
+    ob_drivebase_tick(&self->core, now_ms);
+    return Py_BuildValue("dd",
+                         (double)self->bridge_l.target_dps,
+                         (double)self->bridge_r.target_dps);
+}
+
+
+static PyObject *RawDriveBase_straight(RawDriveBaseObject *self, PyObject *args) {
+    long now_ms;
+    double mm, mm_s;
+    if (!PyArg_ParseTuple(args, "ldd", &now_ms, &mm, &mm_s)) {
+        return NULL;
+    }
+    ob_drivebase_straight(&self->core, now_ms,
+                          (ob_float_t)mm, (ob_float_t)mm_s);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawDriveBase_turn(RawDriveBaseObject *self, PyObject *args) {
+    long now_ms;
+    double deg, dps;
+    if (!PyArg_ParseTuple(args, "ldd", &now_ms, &deg, &dps)) {
+        return NULL;
+    }
+    ob_drivebase_turn(&self->core, now_ms,
+                      (ob_float_t)deg, (ob_float_t)dps);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawDriveBase_stop(RawDriveBaseObject *self,
+                                   PyObject *Py_UNUSED(ignored)) {
+    /* Same stale-hold rule as the firmware binding: capture the pose
+     * BEFORE deactivating or the next tick lurches back. */
+    self->core.fwd_hold = (self->bridge_l.observer.pos_hat
+                           + self->bridge_r.observer.pos_hat)
+                          / (ob_float_t)2.0;
+    self->core.turn_hold = self->core.use_gyro
+        ? self->core.heading_override_wheel_deg
+        : (self->bridge_l.observer.pos_hat
+           - self->bridge_r.observer.pos_hat) / (ob_float_t)2.0;
+    ob_drivebase_stop(&self->core);
+    self->bridge_l.target_dps = 0.0;
+    self->bridge_r.target_dps = 0.0;
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawDriveBase_is_done(RawDriveBaseObject *self,
+                                      PyObject *Py_UNUSED(ignored)) {
+    if (ob_drivebase_is_done(&self->core)) {
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+
+
+static PyObject *RawDriveBase_set_use_gyro(RawDriveBaseObject *self, PyObject *arg) {
+    int enable = PyObject_IsTrue(arg);
+    if (enable < 0) {
+        return NULL;
+    }
+    if (enable && !self->core.use_gyro) {
+        ob_drivebase_gyro_frame_reset(&self->core);
+    }
+    self->core.use_gyro = enable ? true : false;
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawDriveBase_set_heading_override(RawDriveBaseObject *self, PyObject *arg) {
+    double body_delta = PyFloat_AsDouble(arg);
+    if (body_delta == -1.0 && PyErr_Occurred()) {
+        return NULL;
+    }
+    self->core.heading_override_wheel_deg =
+        ob_drivebase_body_to_wheel_diff(&self->core, (ob_float_t)body_delta);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawDriveBase_set_accel(RawDriveBaseObject *self, PyObject *arg) {
+    double accel = PyFloat_AsDouble(arg);
+    if (accel == -1.0 && PyErr_Occurred()) {
+        return NULL;
+    }
+    if (accel <= 0.0) {
+        PyErr_SetString(PyExc_ValueError, "accel_dps2 must be > 0");
+        return NULL;
+    }
+    self->core.accel_dps2 = (ob_float_t)accel;
+    Py_RETURN_NONE;
+}
+
+
+static PyMethodDef RawDriveBase_methods[] = {
+    {"tick",                 (PyCFunction)RawDriveBase_tick,                 METH_VARARGS,
+     "tick(now_ms, left_pos_deg, right_pos_deg) -> (left_dps, right_dps)."},
+    {"straight",             (PyCFunction)RawDriveBase_straight,             METH_VARARGS,
+     "straight(now_ms, distance_mm, speed_mm_s)."},
+    {"turn",                 (PyCFunction)RawDriveBase_turn,                 METH_VARARGS,
+     "turn(now_ms, angle_deg, rate_dps)."},
+    {"stop",                 (PyCFunction)RawDriveBase_stop,                 METH_NOARGS,
+     "Capture pose holds + cancel any active move."},
+    {"is_done",              (PyCFunction)RawDriveBase_is_done,              METH_NOARGS,
+     "True iff arrived (profiles expired AND errors inside tolerance)."},
+    {"set_use_gyro",         (PyCFunction)RawDriveBase_set_use_gyro,         METH_O,
+     "Toggle gyro heading feedback (resets the absolute frame on enable)."},
+    {"set_heading_override", (PyCFunction)RawDriveBase_set_heading_override, METH_O,
+     "Push the body-heading delta (degrees, continuous frame)."},
+    {"set_accel",            (PyCFunction)RawDriveBase_set_accel,            METH_O,
+     "Trajectory acceleration (wheel-deg/s^2)."},
+    {NULL, NULL, 0, NULL},
+};
+
+
+static PyTypeObject RawDriveBaseType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name      = "openbricks_sim._native.RawDriveBase",
+    .tp_basicsize = sizeof(RawDriveBaseObject),
+    .tp_itemsize  = 0,
+    .tp_flags     = Py_TPFLAGS_DEFAULT,
+    .tp_doc       = PyDoc_STR(
+        "The 2-DOF drivebase controller over BRIDGE servos — position "
+        "in, per-wheel dps setpoints out, no Servo objects. The sim's "
+        "serial-native emulation runs the same core the firmware hard "
+        "tick runs."),
+    .tp_new       = PyType_GenericNew,
+    .tp_init      = (initproc)RawDriveBase_init,
+    .tp_methods   = RawDriveBase_methods,
+};
+
+
+/* -------------------------------------------------------------------
  * Module init
  * ------------------------------------------------------------------- */
 
@@ -689,6 +873,9 @@ PyMODINIT_FUNC PyInit__native(void) {
     }
     PyObject *m = PyModule_Create(&openbricks_sim_native_module);
     if (m == NULL) {
+        return NULL;
+    }
+    if (PyType_Ready(&RawDriveBaseType) < 0) {
         return NULL;
     }
     Py_INCREF(&TrajectoryType);
@@ -737,6 +924,13 @@ PyMODINIT_FUNC PyInit__native(void) {
     Py_INCREF(&DriveBaseType);
     if (PyModule_AddObject(m, "DriveBase", (PyObject *)&DriveBaseType) < 0) {
         Py_DECREF(&DriveBaseType);
+        Py_DECREF(m);
+        return NULL;
+    }
+    Py_INCREF(&RawDriveBaseType);
+    if (PyModule_AddObject(m, "RawDriveBase",
+                           (PyObject *)&RawDriveBaseType) < 0) {
+        Py_DECREF(&RawDriveBaseType);
         Py_DECREF(m);
         return NULL;
     }

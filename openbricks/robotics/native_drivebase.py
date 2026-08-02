@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: MIT
 """
-NativeDriveBase — the serial-bus drivebase on the hard-tick controller.
+_SerialNativeEngine — the serial-bus drivebase engine on the
+hard-tick controller. PRIVATE: users construct ``DriveBase`` with
+Motor objects and it adopts them onto this engine automatically when
+the firmware native bus exists — there is exactly one drivebase
+class (user decision, 1.45.0; the short-lived public NativeDriveBase
+of 1.43.x is gone).
 
 The 2-DOF coupled controller runs entirely in C on the esp_timer hard
 tick (see ``st_bus``): ~220 Hz odometry per wheel, speed setpoints in
@@ -9,35 +14,34 @@ stall that freezes the classic DriveBase's control loop does not
 perturb this one. Floor-verified: closed square with 0.3 % odometry
 closure at bench speeds.
 
-Why a separate class instead of routing ``DriveBase`` transparently:
-``ST3032Motor`` objects open ``machine.UART`` in their constructor,
-and the native path's IDF driver on the same pins would double-own
-the peripheral (a documented conflict). This class owns the bus
-end-to-end — construct it with ids and pins, NOT motor objects, and
-do not construct serial-bus Motor objects for the same UART in the
-same boot. Motor-layer nativization (making ``ST3032Motor`` itself
-slot-backed so classic ``DriveBase`` routes transparently) is a
-planned follow-up.
+UART double-ownership is solved by ADOPTION, not by a second public
+class: ``ST3032Motor`` objects open ``machine.UART`` in their
+constructor, so ``adopt_motors`` releases that UART (``deinit`` +
+registry removal) before the native IDF driver claims the pins. The
+adopted Motor objects stay usable — their wheel-mode API is rerouted
+through the engine's servo slots.
 
-Gyro: pass an ``imu`` and call ``use_gyro(True)`` — the wait loop
-inside ``straight()`` / ``turn()`` reads the IMU at ~50-100 Hz and
-feeds the heading to the C controller (``db_set_heading``). The
-outer loop lives in the wait loop on purpose: correction matters
-exactly while a move is in flight, and this avoids burning a
-hardware timer (all four are spoken for).
+Gyro: pass an ``imu`` and call ``use_gyro(True)`` on the DriveBase —
+the wait loop inside ``straight()`` / ``turn()`` reads the IMU at
+~50-100 Hz and feeds the heading to the C controller
+(``db_set_heading``). The outer loop lives in the wait loop on
+purpose: correction matters exactly while a move is in flight, and
+this avoids burning a hardware timer (all four are spoken for).
 
-Example::
+Example (the engine is invisible — this is just DriveBase)::
 
     from openbricks.drivers.bno055 import BNO055
+    from openbricks.drivers.st3032 import ST3032Motor
     from openbricks.drivers.tca9548a import TCA9548A
-    from openbricks.robotics import NativeDriveBase
+    from openbricks.robotics import DriveBase
     from machine import I2C, Pin
 
     mux = TCA9548A(I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000))
     imu = BNO055(i2c=mux[3], address=0x29)
-    db = NativeDriveBase(left_id=2, right_id=1, invert_left=True,
-                         wheel_diameter_mm=88, axle_track_mm=138,
-                         imu=imu)
+    left  = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+    right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+    db = DriveBase(left, right, wheel_diameter_mm=88,
+                   axle_track_mm=138, imu=imu)
     db.use_gyro(True)
     db.straight(300)
     db.turn(90)
@@ -61,33 +65,73 @@ def _bus():
     sb = getattr(_native, "st_bus", None)
     if sb is None or not hasattr(sb, "attach_uart"):
         raise RuntimeError(
-            "NativeDriveBase needs the firmware native bus (st_bus with "
-            "attach_uart) — it is not available on this build. Use "
-            "DriveBase with ST3032Motor objects instead.")
+            "the serial drivebase engine needs the firmware native bus "
+            "(st_bus with attach_uart) — not available on this build")
     return sb
 
 
-class NativeDriveBase:
+class _SerialNativeEngine:
+    @classmethod
+    def adopt_motors(cls, left, right, wheel_diameter_mm,
+                     axle_track_mm, imu=None, accel_dps2=400.0):
+        """Adopt two constructed serial-bus Motor objects: recover the
+        bus params from the driver registry, RELEASE their
+        machine.UART (explicit ownership handover — the double-claim
+        trap is why a separate public class briefly existed), then
+        run this engine and re-point the motors' wheel-mode API at
+        the slots."""
+        from openbricks.drivers.st3215 import ST3215
+        bus = left._bus
+        if right._bus is not bus:
+            raise ValueError("left and right motors must share one bus")
+        params = None
+        for key, val in ST3215._buses.items():
+            if val is bus:
+                params = key
+                break
+        if params is None:
+            raise RuntimeError("motor bus not found in the registry")
+        uart_id, tx, rx, baud = params
+        # Hand the UART over: MicroPython driver out, IDF driver in.
+        bus._uart.deinit()
+        del ST3215._buses[params]
+        eng = cls(left_id=left._id, right_id=right._id,
+                  wheel_diameter_mm=wheel_diameter_mm,
+                  axle_track_mm=axle_track_mm, imu=imu,
+                  invert_left=left._invert, invert_right=right._invert,
+                  uart_id=uart_id, tx=tx, rx=rx, baud=baud,
+                  accel_dps2=accel_dps2)
+        left._adopt_native(eng._sb, 0)
+        right._adopt_native(eng._sb, 1)
+        return eng
+
     def __init__(self, left_id, right_id, wheel_diameter_mm,
                  axle_track_mm, imu=None,
                  invert_left=False, invert_right=False,
                  uart_id=1, tx=14, rx=6, baud=1_000_000,
-                 accel_dps2=400.0):
-        self._sb = _bus()
+                 accel_dps2=400.0, sb=None):
+        # ``sb`` is the bus-surface seam: firmware injects the real
+        # st_bus (default), the sim injects its emulation — the ONE
+        # engine code path serves both worlds.
+        self._sb = sb if sb is not None else _bus()
         self._wheel_circumference = math.pi * wheel_diameter_mm
         self._axle_track = float(axle_track_mm)
         self._imu = imu
         self._use_gyro = False
-        # Continuous-heading frame, identical contract to the classic
-        # fallback path (absolute target frame, Pybricks-style —
-        # overshoot is corrected by the NEXT move, not accumulated).
+        # Continuous-heading frame (absolute target frame,
+        # Pybricks-style — overshoot is corrected by the NEXT move,
+        # not accumulated).
         self._gyro_cont = 0.0
         self._gyro_prev = None
+        self._deadline = 0
         self._straight_speed_dps = 200
         self._turn_rate_dps = 150
 
-        from openbricks._native import motor_process
-        motor_process.hard_tick_selftest()      # dispatcher on (idempotent)
+        try:
+            from openbricks._native import motor_process
+            motor_process.hard_tick_selftest()  # dispatcher on (idempotent)
+        except (ImportError, AttributeError):
+            pass    # sim / stub worlds have no hard tick to arm
         # Same-boot re-construction: a previous run's slots and
         # drivebase survive in the C singletons (openbricks run keeps
         # the interpreter alive between scripts), and servo_attach
@@ -137,13 +181,20 @@ class NativeDriveBase:
 
     # -- moves -----------------------------------------------------------
 
-    def straight(self, distance_mm):
+    def set_accel(self, accel_dps2):
+        self._sb.db_set_accel(float(accel_dps2))
+
+    def arm_straight(self, distance_mm):
         estop.check()
         mm_s = self._straight_speed_dps * self._wheel_circumference / 360.0
         self._sb.db_straight(float(distance_mm), float(mm_s))
+        self._arm_deadline()
+
+    def straight(self, distance_mm):
+        self.arm_straight(distance_mm)
         self._wait()
 
-    def turn(self, angle_deg):
+    def arm_turn(self, angle_deg):
         """Body degrees, CW-positive (Pybricks convention)."""
         estop.check()
         # turn_rate is WHEEL-deg/s (settings parity with the classic
@@ -153,6 +204,10 @@ class NativeDriveBase:
         body_dps = (self._turn_rate_dps * self._wheel_circumference
                     / (math.pi * self._axle_track))
         self._sb.db_turn(float(angle_deg), float(body_dps))
+        self._arm_deadline()
+
+    def turn(self, angle_deg):
+        self.arm_turn(angle_deg)
         self._wait()
 
     def stop(self):
@@ -179,8 +234,29 @@ class NativeDriveBase:
 
     _SETTLE_TIMEOUT_MS = 8000
 
+    def _arm_deadline(self):
+        self._deadline = time.ticks_ms() + self._SETTLE_TIMEOUT_MS
+
+    def tick_done(self):
+        """One non-blocking iteration of the drive loop: gyro pump,
+        settle-timeout check, completion check. DriveBase's done()
+        polls this for wait=False moves; _wait() below is the
+        blocking form of the same loop."""
+        estop.check()
+        if self._use_gyro:
+            self._gyro_pump()
+        if self._sb.db_done():
+            return True
+        if time.ticks_diff(self._deadline, time.ticks_ms()) <= 0:
+            self._sb.db_stop()
+            raise RuntimeError(
+                "DriveBase move did not reach target within "
+                "%d ms — wheel stalled, blocked, or gyro frame "
+                "diverged" % self._SETTLE_TIMEOUT_MS)
+        return False
+
     def _wait(self):
-        deadline = time.ticks_ms() + self._SETTLE_TIMEOUT_MS
+        deadline = self._deadline
         while not self._sb.db_done():
             estop.check()
             if self._use_gyro:
@@ -188,11 +264,11 @@ class NativeDriveBase:
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
                 # done now requires ARRIVAL, not just profile expiry
                 # (the +4.5-deg banked-overshoot fix) — so a wheel
-                # that physically can't reach the target must raise,
-                # same contract as the classic fallback.
+                # that physically can't reach the target must raise
+                # (classic stall-timeout contract).
                 self._sb.db_stop()
                 raise RuntimeError(
-                    "NativeDriveBase move did not reach target within "
+                    "DriveBase move did not reach target within "
                     "%d ms — wheel stalled, blocked, or gyro frame "
                     "diverged" % self._SETTLE_TIMEOUT_MS)
             time.sleep_ms(10)

@@ -36,6 +36,21 @@ class _ShimTestBase(unittest.TestCase):
     def tearDown(self):
         shim.uninstall()
 
+    def _serial_db(self, imu=None):
+        """The user's actual robot shape: two ST-3032 serial servos
+        through the one-class DriveBase; adoption hands them to the
+        serial engine over the emulated st_bus."""
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics.drivebase import DriveBase
+
+        left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                            invert=True)
+        db = DriveBase(left, right,
+                       wheel_diameter_mm=65, axle_track_mm=120,
+                       imu=imu)
+        return db, left, right
+
 
 class InstallLifecycleTests(unittest.TestCase):
 
@@ -388,19 +403,12 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
 
     def test_st3032_drivebase_straight(self):
         # The user's actual robot: two ST-3032 serial servos through
-        # the openbricks DriveBase wrapper. No ._servo on the shim
-        # motors → the wrapper's serial-bus FALLBACK loop runs (with
-        # its trapezoid ramp), polling angle() and commanding
-        # run_speed() against MuJoCo. The bench script's invert=True
-        # on the right motor rides along as an ignored wiring concern.
-        from openbricks.drivers.st3032 import ST3032Motor
-        from openbricks.robotics.drivebase import DriveBase
-
-        left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
-                            invert=True)
-        db = DriveBase(left, right,
-                       wheel_diameter_mm=65, axle_track_mm=120)
+        # the openbricks DriveBase wrapper. Adoption hands them to the
+        # ONE serial engine over the emulated st_bus (_SimStBus) — the
+        # same code path as firmware — driving MuJoCo wheels. The
+        # bench script's invert=True on the right motor rides along as
+        # an ignored wiring concern.
+        db, _, _ = self._serial_db()
         db.settings(straight_speed=150, acceleration=360)
         db.straight(50)
         x_mm, _, _ = self.robot.chassis_pose()
@@ -487,6 +495,92 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
         # Within ±20% of the requested 50 mm.
         self.assertGreaterEqual(x_mm, 40.0)
         self.assertLessEqual(x_mm, 60.0)
+
+
+class SimStBusEngineTests(_ShimTestBase):
+    """The emulated st_bus surface (``_SimStBus``) under the ONE
+    serial engine — turn, gyro feed, the driver-facing servo verbs,
+    and the runtime-reset/estop hooks. Mirrors what the firmware
+    st_bus answers to the same calls."""
+
+    def _heading(self):
+        from openbricks_sim.runtime import SimIMU
+        return SimIMU(self.robot.runtime).heading()
+
+    def test_turn_rotates_chassis_cw_and_completes(self):
+        db, _, _ = self._serial_db()
+        db.settings(turn_rate=120, acceleration=360)
+        h0 = self._heading()
+        db.turn(90)
+        turned = ((self._heading() - h0 + 180.0) % 360.0) - 180.0
+        # Pybricks CW-positive; the sim IMU heading uses the same
+        # convention (see test_runtime's gyro turn tests).
+        self.assertTrue(60.0 < turned < 120.0,
+                        "turn(90) rotated %+.1f deg" % turned)
+        self.assertTrue(db.done())
+
+    def test_use_gyro_turn_feeds_heading_and_lands(self):
+        # use_gyro(True) makes the engine's wait loop pump the IMU
+        # heading into db_set_heading; the C controller then ends the
+        # turn on MEASURED rotation. Covers db_use_gyro +
+        # db_set_heading end-to-end in physics.
+        from openbricks_sim.shim import ShimBNO055
+        imu = ShimBNO055(i2c=None, address=0x29)
+        db, _, _ = self._serial_db(imu=imu)
+        db.settings(turn_rate=120, acceleration=360)
+        db.use_gyro(True)
+        h0 = self._heading()
+        db.turn(90)
+        turned = ((self._heading() - h0 + 180.0) % 360.0) - 180.0
+        self.assertTrue(60.0 < turned < 120.0,
+                        "gyro turn(90) rotated %+.1f deg" % turned)
+        db.use_gyro(False)
+
+    def test_servo_verbs_proxy_to_mujoco_wheels(self):
+        # servo_run / servo_counts / servo_coast are the st_bus verbs
+        # the FIRMWARE driver's adopted wheel-mode API calls (the shim
+        # motors answer those from MuJoCo directly, so exercise the
+        # bus surface itself — same contract as the C module). While
+        # the drivebase controller is active its per-tick targets own
+        # the wheels, so disable it first — direct servo verbs are the
+        # outside-a-move surface.
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        sb.db_disable()
+        c0 = sb.servo_counts(0)
+        self.assertTrue(sb.servo_run(0, 120 * sb._STEPS_PER_DEG))
+        time.sleep_ms(300)
+        self.assertGreater(sb.servo_counts(0), c0 + 10)
+        self.assertTrue(sb.servo_coast(0))
+
+    def test_torque_off_all_stops_ticking_the_controller(self):
+        # The estop broadcast surface: after torque_off_all the bus
+        # deactivates and _tick's guard skips the controller, so a
+        # pending move stops advancing the chassis.
+        db, _, _ = self._serial_db()
+        db.settings(straight_speed=150, acceleration=360)
+        db.straight(500, wait=False)
+        time.sleep_ms(200)
+        sb = db._serial_engine._sb
+        self.assertTrue(sb.torque_off_all())
+        x0, _, _ = self.robot.chassis_pose()
+        time.sleep_ms(300)   # sim keeps stepping; controller must not
+        x1, _, _ = self.robot.chassis_pose()
+        self.assertLess(abs(x1 - x0), 3.0,
+                        "chassis kept driving after torque_off_all "
+                        "(%.1f -> %.1f mm)" % (x0, x1))
+
+    def test_reset_runtime_clears_the_drivebase_config(self):
+        # launcher._reset_motor_process parity: reset_runtime drops
+        # the controller so the NEXT program's db_config starts clean.
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        self.assertIsNotNone(sb._raw)
+        sb.reset_runtime()
+        self.assertIsNone(sb._raw)
+        self.assertFalse(sb._active)
+        # Ticking in the unconfigured state is a no-op, not a crash.
+        time.sleep_ms(50)
 
 
 if __name__ == "__main__":
