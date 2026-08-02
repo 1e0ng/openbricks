@@ -374,6 +374,18 @@ class Launcher:
                 _request_stop(self)
         else:
             self._stop_retry_ms = None
+            # Hard-button START backup: a press the hard tick saw
+            # while idle. The PCNT latch usually sees the same edge
+            # and dispatches below; _pending is level-triggered so a
+            # double request collapses into one run. This path is the
+            # one that survives if the PCNT latch ever regresses.
+            try:
+                from _openbricks_native import motor_process as _mpn
+                if _mpn.hard_button_take_start():
+                    _event("hard-start-latch")
+                    _request_start(self)
+            except (ImportError, AttributeError):
+                pass
             if self._press_pcnt is not None:
                 # Counter-driven START: a counted falling edge at idle
                 # IS a press, regardless of whether the 50 ms level
@@ -770,12 +782,22 @@ def _request_stop(launcher_instance):
 
 
 def _arm_stop_button(armed):
-    """Arm/disarm the native stop-button ISR. Armed only while a user
+    """Arm/disarm the native stop paths. Armed only while a user
     program is executing, so a press while idle doesn't tear down the
-    boot/idle loop. No-op where the native module is absent."""
+    boot/idle loop. No-op where the native module is absent.
+
+    Two independent paths share this single arming site: the classic
+    stop_tick injector, and (since 1.44.0) the hard-button sampler on
+    the hard tick, whose stop actions are bounded at ~2 ms regardless
+    of scheduler state."""
     try:
         from _openbricks_native import set_stop_armed
         set_stop_armed(bool(armed))
+    except (ImportError, AttributeError):
+        pass
+    try:
+        from _openbricks_native import motor_process
+        motor_process.hard_button_arm(bool(armed))
     except (ImportError, AttributeError):
         pass
 
@@ -1013,6 +1035,18 @@ def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
     btn = Pin(button_pin, Pin.IN, Pin.PULL_UP)
     _singleton = Launcher(btn, poll_ms=poll_ms)
     _singleton._press_pcnt = _install_press_counter(button_pin)
+    # Hard-button path (1.44.0): sample the same pin from the hard
+    # tick (esp_timer task, core 0) — press DETECTION and the STOP
+    # actions (interrupt injection + native-bus torque-off) become
+    # immune to the scheduler blackouts this Python watcher rides
+    # through (bench: gaps to 981 ms). This watcher stays as defence
+    # in depth and as the classic-bus e-stop. Guarded: needs the
+    # gpio-shim + hard-tick firmware patches.
+    try:
+        from _openbricks_native import motor_process as _mp_native
+        _mp_native.hard_button_config(button_pin)
+    except (ImportError, AttributeError):
+        pass
     _singleton._sync_press_counter()
     _singleton._timer = Timer(timer_id)
     _singleton._timer.init(

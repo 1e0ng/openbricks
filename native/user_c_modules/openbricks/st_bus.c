@@ -28,6 +28,7 @@
 // symbol of this module and the coverage build runs with
 // -Werror=missing-prototypes.
 void ob_st_bus_hard_poll(void);
+void ob_st_bus_estop_from_tick(void);
 
 #if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
 #include <stdatomic.h>
@@ -232,6 +233,37 @@ static void fw_rx_flush(void *ctx) {
 
 // Called from motor_process's hard-tick dispatcher, esp_timer task
 // context: poll the in-flight transaction. Pure C throughout.
+// E-stop from the hard tick itself (the hard button's stop path):
+// abandon any in-flight transaction, broadcast torque-off, void all
+// staged speeds. Pure C, same task as the pump (dispatcher calls
+// this BEFORE the pump), so the spinlock nests sequentially.
+void ob_st_bus_estop_from_tick(void) {
+    if (fw_uart_num < 0) {
+        return;
+    }
+    bus_take();
+    ob_bus_t *b = &test_bus;
+    if (b->state == OB_BUS_AWAIT_REPLY) {
+        b->state = OB_BUS_IDLE;
+        tick_txn = 0;
+        tick_txn_is_read = 0;
+    }
+    uint8_t off = 0;
+    if (ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1) == 0) {
+        ob_bus_take_result(b, NULL, NULL);
+    }
+    st_db_active = false;
+    ob_sservo_t *sv = sservo_get();
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        if (sv->slots[i].in_use) {
+            sv->slots[i].target_dirty = 0;
+            sv->slots[i].torque_cmd = -1;
+            sv->slots[i].torque_on = 0;
+        }
+    }
+    bus_release();
+}
+
 void ob_st_bus_hard_poll(void) {
     if (fw_uart_num < 0) {
         return;
@@ -247,6 +279,7 @@ void ob_st_bus_hard_poll(void) {
 static void bus_take(void)    { }
 static void bus_release(void) { }
 void ob_st_bus_hard_poll(void) { }
+void ob_st_bus_estop_from_tick(void) { }
 #endif
 
 static ob_bus_t *bus_get(void) {

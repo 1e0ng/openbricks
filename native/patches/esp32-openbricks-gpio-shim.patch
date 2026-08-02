@@ -1,0 +1,61 @@
+diff --git a/ports/esp32/esp32_common.cmake b/ports/esp32/esp32_common.cmake
+index b71fc2437..02d43c530 100644
+--- a/ports/esp32/esp32_common.cmake
++++ b/ports/esp32/esp32_common.cmake
+@@ -137,6 +137,7 @@ list(APPEND MICROPY_SOURCE_PORT
+     esp32_partition.c
+     esp32_pcnt.c
+     esp32_rmt.c
++    openbricks_gpio_shim.c
+     esp32_ulp.c
+     esp32_ldo.c
+     modesp32.c
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index 938f26e27..ffdabc584 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -138,6 +138,10 @@
+ #define MICROPY_PY_MACHINE_PWM              (1)
+ #define MICROPY_PY_MACHINE_PWM_DUTY         (1)
+ #define MICROPY_PY_MACHINE_PWM_INCLUDEFILE  "ports/esp32/machine_pwm.c"
++// openbricks build-time patch: GPIO input shims for hard-tick
++// consumers (openbricks_gpio_shim.c). Same consumer rules as
++// MICROPY_OPENBRICKS_HARD_TICK.
++#define MICROPY_OPENBRICKS_GPIO_SHIM        (1)
+ #define MICROPY_PY_MACHINE_I2C              (1)
+ #define MICROPY_PY_MACHINE_I2C_TRANSFER_WRITE1 (1)
+ #ifndef MICROPY_PY_MACHINE_I2C_TARGET
+diff --git a/ports/esp32/openbricks_gpio_shim.c b/ports/esp32/openbricks_gpio_shim.c
+new file mode 100644
+index 000000000..70ca7673f
+--- /dev/null
++++ b/ports/esp32/openbricks_gpio_shim.c
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: MIT
++//
++// openbricks GPIO shims — input reads for hard-tick consumers.
++// (Applied to the MicroPython submodule as a build-time patch from
++// native/patches/; see that directory's README.)
++//
++// The hard-tick button sampler (st_button_core in the user C module)
++// needs a GPIO level read from the esp_timer task, and the user C
++// module cannot include ESP-IDF headers. Two tiny wrappers in port
++// land, exported as plain-int symbols. gpio_get_level is a register
++// read — safe from any task at any rate.
++
++#include "driver/gpio.h"
++
++int ob_gpio_input_pullup(int pin) {
++    gpio_config_t cfg = {
++        .pin_bit_mask = 1ULL << pin,
++        .mode = GPIO_MODE_INPUT,
++        .pull_up_en = GPIO_PULLUP_ENABLE,
++        .pull_down_en = GPIO_PULLDOWN_DISABLE,
++        .intr_type = GPIO_INTR_DISABLE,
++    };
++    return (gpio_config(&cfg) == ESP_OK) ? 0 : -1;
++}
++
++int ob_gpio_read(int pin) {
++    return gpio_get_level((gpio_num_t)pin);
++}

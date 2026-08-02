@@ -144,7 +144,13 @@ ships:
   -> stop` the moment it lands, followed by `estop engaged` and a
   final `stopped: KeyboardInterrupt (N ms after press, M retries)`
   debrief, so a misbehaving stop chain is diagnosable from the log
-  alone. An uncaught exception writes its **full traceback**, not just
+  alone. Since 1.44.0 the stop chain is also **bounded**: the
+  program button is sampled on the hard tick (core 0) — a debounced
+  press while a program runs fires the `KeyboardInterrupt` injection
+  and the native-bus torque-off from C within ~2 ms, regardless of
+  scheduler state (the Python watcher, which stays as defence in
+  depth and as the classic-bus e-stop, measured gaps to 981 ms under
+  load). An uncaught exception writes its **full traceback**, not just
   the exception's repr — on an untethered run the file is the only
   record, and a bare `OSError(19,)` doesn't say which call failed.
 - Log writes are **asynchronous**. `print` only appends to a RAM
