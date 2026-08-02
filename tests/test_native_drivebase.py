@@ -61,13 +61,26 @@ class _FakeBus:
         self.calls = []
         self.done_after = 2
         self.headings = []
+        self.attached = set()
 
     def attach_uart(self, *a):
         self.calls.append(("attach_uart",) + a)
         return True
 
+    def db_disable(self):
+        self.calls.append(("db_disable",))
+
+    def servo_detach(self, slot):
+        self.calls.append(("servo_detach", slot))
+        self.attached.discard(slot)
+
     def servo_attach(self, *a):
+        # Slot-claim model: attach fails on an in-use slot, exactly
+        # like the C layer — what the re-construction test rides on.
         self.calls.append(("servo_attach",) + a)
+        if a[0] in self.attached:
+            return False
+        self.attached.add(a[0])
         return True
 
     def db_config(self, *a):
@@ -142,22 +155,39 @@ class ConstructionTests(_Base):
         self._db()
         names = [c[0] for c in self.bus.calls]
         self.assertEqual(
-            names, ["attach_uart", "servo_attach", "servo_attach",
+            names, ["db_disable", "servo_detach", "servo_detach",
+                    "attach_uart", "servo_attach", "servo_attach",
                     "db_config"])
         # Bench defaults: UART1 @1M on 14/6; left slot0 id2 inverted.
-        self.assertEqual(self.bus.calls[0],
+        by = {}
+        for c in self.bus.calls:
+            by.setdefault(c[0], []).append(c)
+        self.assertEqual(by["attach_uart"][0],
                          ("attach_uart", 1, 1_000_000, 14, 6))
-        self.assertEqual(self.bus.calls[1][1:4], (0, 2, True))
-        self.assertEqual(self.bus.calls[2][1:4], (1, 1, False))
+        self.assertEqual(by["servo_attach"][0][1:4], (0, 2, True))
+        self.assertEqual(by["servo_attach"][1][1:4], (1, 1, False))
 
     def test_goal_acc_encoding_matches_the_driver_formula(self):
         # st3215.py::_encode_goal_acc — steps/100 units, clamped 254.
         self._db(accel_dps2=400.0)
-        acc = self.bus.calls[1][4]
-        self.assertEqual(acc, int(400.0 * (4096 / 360.0) / 100.0))
+        att = [c for c in self.bus.calls if c[0] == "servo_attach"]
+        self.assertEqual(att[0][4], int(400.0 * (4096 / 360.0) / 100.0))
         self.bus.calls = []
         self._db(accel_dps2=99999.0)
-        self.assertEqual(self.bus.calls[1][4], 254)
+        att = [c for c in self.bus.calls if c[0] == "servo_attach"]
+        self.assertEqual(att[0][4], 254)
+
+    def test_reconstruction_in_the_same_boot_succeeds(self):
+        # The bench regression (bit twice in one day): a second
+        # ``openbricks run`` of the same script found the previous
+        # run's slots still claimed and died with "slot attach
+        # failed" until a power-cycle. Construction now tears down
+        # its own claims first.
+        self._db()
+        self._db()          # must not raise
+        # And attach genuinely happened twice (not skipped).
+        attaches = [c for c in self.bus.calls if c[0] == "servo_attach"]
+        self.assertEqual(len(attaches), 4)
 
     def test_missing_native_bus_raises_informatively(self):
         del _native.st_bus

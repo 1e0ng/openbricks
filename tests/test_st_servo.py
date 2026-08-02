@@ -193,6 +193,31 @@ class EStopTests(_Base):
         self.assertTrue(sb.torque_off_all())   # must not wait/queue
 
 
+class ProgramBoundaryResetTests(_Base):
+    def test_launcher_boundary_reset_frees_previous_programs_claims(self):
+        # run_program calls _reset_motor_process before every
+        # program; since 1.43.2 that also resets st_bus runtime state
+        # — the principled fix for "slot attach failed until
+        # power-cycle" (same precedent as motor_process.reset: a new
+        # program must not inherit the previous one's native state).
+        from openbricks import launcher
+        self.assertTrue(sb.servo_attach(0, 2, True, 45))
+        self.assertFalse(sb.servo_attach(0, 2, True, 45))  # claimed
+        launcher._reset_motor_process()
+        self.assertTrue(sb.servo_attach(0, 2, True, 45))   # freed
+
+    def test_reset_runtime_disables_the_drivebase(self):
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.wire.settle()
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+        sb.reset_runtime()
+        # Slots free again AND the drivebase no longer drives.
+        self.assertTrue(sb.servo_attach(0, 2, True, 45))
+        sb.db_straight(100.0, 100.0)   # config gone: ignored by pump
+        self.wire.settle(20)
+
+
 class ManualCoexistenceTests(_Base):
     def test_manual_result_is_not_stolen_by_the_pump(self):
         # The pump only consumes results of transactions IT started.

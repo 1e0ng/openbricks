@@ -692,6 +692,26 @@ static mp_obj_t sb_db_set_heading(mp_obj_t self_in, mp_obj_t body_deg_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_db_set_heading_obj, sb_db_set_heading);
 
+static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
+    // Program-boundary reset, called by launcher.run_program before
+    // every program (the motor_process.reset precedent): a new
+    // program must not inherit the previous one\'s servo slots or
+    // drivebase config — that inheritance is why a second run of the
+    // same script died with "slot attach failed" until a power-cycle.
+    // Hardware state (the attached UART) survives: it\'s environment,
+    // not program state, and attach_uart re-configures idempotently.
+    (void)self_in;
+    bus_take();
+    st_db_active = false;
+    st_db_slot_l = st_db_slot_r = -1;
+    ob_sservo_init(sservo_get());
+    tick_txn = 0;
+    tick_txn_is_read = 0;
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_reset_runtime_obj, sb_reset_runtime);
+
 static mp_obj_t sb_stats(mp_obj_t self_in) {
     (void)self_in;
     ob_bus_t *b = bus_get();
@@ -732,6 +752,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_pump),       MP_ROM_PTR(&sb_servo_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_encode),     MP_ROM_PTR(&sb_servo_encode_obj) },
     { MP_ROM_QSTR(MP_QSTR_torque_off_all),   MP_ROM_PTR(&sb_torque_off_all_obj) },
+    { MP_ROM_QSTR(MP_QSTR_reset_runtime),    MP_ROM_PTR(&sb_reset_runtime_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_config),        MP_ROM_PTR(&sb_db_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_disable),       MP_ROM_PTR(&sb_db_disable_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_straight),      MP_ROM_PTR(&sb_db_straight_obj) },
