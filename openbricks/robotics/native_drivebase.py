@@ -36,7 +36,7 @@ Example::
     mux = TCA9548A(I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000))
     imu = BNO055(i2c=mux[3], address=0x29)
     db = NativeDriveBase(left_id=2, right_id=1, invert_left=True,
-                         wheel_diameter_mm=88, axle_track_mm=138.5,
+                         wheel_diameter_mm=88, axle_track_mm=138,
                          imu=imu)
     db.use_gyro(True)
     db.straight(300)
