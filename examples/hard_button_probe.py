@@ -35,9 +35,20 @@ print("stats now:", m.hard_button_stats())
 # No mode args: reads the pad without reconfiguring it.
 print("raw Pin(%d).value() while NOT pressed (want 1):" % BUTTON_PIN,
       Pin(BUTTON_PIN).value())
+probe = getattr(m, "hard_button_probe", None)
+if probe:
+    # (pin, ob_gpio_read, raw_last, raw_count, stable_pressed) —
+    # unpressed want (4, 1, 0, big, 0). ob_gpio_read=0 here while
+    # Pin reads 1 = shim/pad disagreement.
+    print("sampler view (pin, shim_read, raw_last, raw_count, "
+          "stable):", probe())
 print()
-print(">>> press the STOP button within 20 s; stats print every 300 ms")
-for i in range(66):
-    time.sleep_ms(300)
-    print(i, m.hard_button_stats())
-print("no press detected in 20 s — done (that itself is a data point).")
+print(">>> press and HOLD the STOP button for ~1 s within the next "
+      "15 s; sampler view prints every 100 ms")
+for i in range(150):
+    time.sleep_ms(100)
+    if probe:
+        print(i, probe(), m.hard_button_stats())
+    else:
+        print(i, m.hard_button_stats())
+print("no press detected in 15 s — done (that itself is a data point).")

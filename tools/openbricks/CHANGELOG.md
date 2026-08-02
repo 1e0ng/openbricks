@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.47.2 — hard-button sampler probe
+
+The 1.47.1 in-stream stats settled that the hard path never sees the
+press (0 presses at the stop line) while every link visible from
+Python is healthy: dispatcher at 500 ticks/500 ms, config True,
+`machine.Pin(4)` reads the pad, watcher stops on the same pin. New
+`motor_process.hard_button_probe()` exposes the invisible links —
+`(pin, ob_gpio_read(pin), raw_last, raw_count, stable_pressed)` —
+and the probe example samples it at 100 ms through a press-and-hold.
+Distinguishes the two survivors: shim/pad disagreement
+(`ob_gpio_read` stuck at 1 during a held press) vs line chatter
+defeating the 20-tick debounce (raw flips but `raw_count` keeps
+resetting). Diagnostic only; no behavior change.
+
 ## 1.47.1 — hard-button evidence must survive to be read
 
 Bench 2026-08-03: the stop button cut a blocking-I2C program cleanly

@@ -471,6 +471,30 @@ static mp_obj_t mp_hard_button_arm(mp_obj_t self_in, mp_obj_t on_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_button_arm_obj, mp_hard_button_arm);
 
+static mp_obj_t mp_hard_button_probe(mp_obj_t self_in) {
+    // The sampler's OWN view of the world, for the bench diagnostic
+    // (2026-08-03: dispatcher alive, config True, machine.Pin reads
+    // the pad, Python watcher stops on the press — yet n_presses
+    // stayed 0; every link visible from Python was healthy, so
+    // expose the invisible ones): the pin the tick keys off,
+    // ob_gpio_read's answer for it RIGHT NOW, and the debounce
+    // machine's raw_last / raw_count / stable_pressed. A raw_count
+    // that keeps resetting during a press = line chatter defeating
+    // the 20-tick stability rule; ob_gpio_read stuck at 1 while
+    // machine.Pin reads 0 = the shim and the pad disagree.
+    (void)self_in;
+    int pin = hard_button_pin;
+    mp_obj_t t[5] = {
+        mp_obj_new_int(pin),
+        mp_obj_new_int(pin >= 0 ? ob_gpio_read(pin) : -1),
+        mp_obj_new_int(hard_button.raw_last),
+        mp_obj_new_int(hard_button.raw_count),
+        mp_obj_new_int(hard_button.stable_pressed),
+    };
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_button_probe_obj, mp_hard_button_probe);
+
 static mp_obj_t mp_hard_button_take_start(mp_obj_t self_in) {
     (void)self_in;
     if (hard_button_start_pending) {
@@ -590,6 +614,7 @@ static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_hard_button_arm), MP_ROM_PTR(&mp_hard_button_arm_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_button_take_start), MP_ROM_PTR(&mp_hard_button_take_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_button_stats), MP_ROM_PTR(&mp_hard_button_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_button_probe), MP_ROM_PTR(&mp_hard_button_probe_obj) },
     #endif
     #if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK
     { MP_ROM_QSTR(MP_QSTR_hard_tick_selftest), MP_ROM_PTR(&mp_hard_tick_selftest_obj) },
