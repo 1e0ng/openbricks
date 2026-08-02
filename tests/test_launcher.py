@@ -2102,6 +2102,63 @@ class LogPumpWiringTests(unittest.TestCase):
         self.assertIsNotNone(self.launch._last_stop_ms)
 
 
+class ResetMotorProcessBridgeTests(unittest.TestCase):
+    """_reset_motor_process is the program-boundary reset. Since
+    1.43.2 it also resets st_bus runtime state (same precedent as
+    motor_process.reset: a new program must not inherit the previous
+    one's native claims — the "slot attach failed until power-cycle"
+    bench bug). CPython has no real _openbricks_native, so these run
+    against a stub installed in sys.modules — which is also exactly
+    what makes the guarded branches coverable here."""
+
+    def _install(self, with_st_bus):
+        import sys as _sys
+        calls = []
+
+        class _MP:
+            @staticmethod
+            def reset():
+                calls.append("mp.reset")
+
+        class _SB:
+            @staticmethod
+            def reset_runtime():
+                calls.append("sb.reset_runtime")
+
+        class _Mod:
+            # A plain object in sys.modules works for ``from X
+            # import y`` on both runtimes (the import machinery just
+            # getattrs it); MicroPython can't instantiate the module
+            # type directly.
+            pass
+
+        mod = _Mod()
+        mod.motor_process = _MP()
+        if with_st_bus:
+            mod.st_bus = _SB()
+        prev = _sys.modules.get("_openbricks_native")
+        _sys.modules["_openbricks_native"] = mod
+
+        def _restore():
+            if prev is None:
+                _sys.modules.pop("_openbricks_native", None)
+            else:
+                _sys.modules["_openbricks_native"] = prev
+        self.addCleanup(_restore)
+        return calls
+
+    def test_boundary_reset_covers_the_bus_too(self):
+        calls = self._install(with_st_bus=True)
+        launcher._reset_motor_process()
+        self.assertEqual(calls, ["mp.reset", "sb.reset_runtime"])
+
+    def test_missing_st_bus_is_survived(self):
+        # Off-firmware builds (sim) have motor_process but no bus.
+        calls = self._install(with_st_bus=False)
+        launcher._reset_motor_process()     # must not raise
+        self.assertEqual(calls, ["mp.reset"])
+
+
 class TracebackInLogTests(unittest.TestCase):
     """A bench ENODEV landed in the run log as bare
     ``Exception: OSError(19,)`` — no line, no call, so the mux write
