@@ -658,6 +658,13 @@ class ST3215Motor(Motor):
     def run_speed(self, deg_per_s):
         """Set continuous wheel velocity in degrees per second."""
         estop.check()
+        if self._native_slot is not None:
+            # The slot was attached WITH this motor's invert flag, so
+            # pass the user-frame value; the slot applies the sign.
+            self._native_sb.servo_run(
+                self._native_slot,
+                int(float(deg_per_s) * self._steps_per_dps))
+            return
         self._abandon_pending()
         self._ensure_mode(_MODE_WHEEL)
         self._ensure_torque_on()
@@ -677,6 +684,9 @@ class ST3215Motor(Motor):
         A hard local stop without torque-off is ``accel_dps2=0`` at
         construction.
         """
+        if self._native_slot is not None:
+            self._native_sb.servo_run(self._native_slot, 0)
+            return
         self._abandon_pending()
         self._ensure_mode(_MODE_WHEEL)
         self._ensure_torque_on()
@@ -684,9 +694,38 @@ class ST3215Motor(Motor):
 
     def coast(self):
         """Disable torque — wheel free-wheels."""
+        if self._native_slot is not None:
+            self._native_sb.servo_coast(self._native_slot)
+            return
         self._abandon_pending()
         self._bus.write(self._id, _REG_TORQUE, bytes([0]))
         self._torque_on = False
+
+    # ---- native adoption (1.45.0) -------------------------------------
+    #
+    # When a DriveBase adopts this motor onto the hard-tick native
+    # bus, the machine.UART is released and the wheel-mode subset of
+    # the Motor API routes through the C servo slots instead: run /
+    # run_speed / dc / brake / stop / coast / angle / reset_angle.
+    # Step-mode and feedback-register methods (run_angle, run_target,
+    # hold, speed, load, stalled) raise with the roadmap item named —
+    # loudly incomplete beats silently wrong.
+
+    _native_slot = None       # class default; instance attr when adopted
+    _native_sb = None
+    _native_angle_offset = 0.0
+
+    def _adopt_native(self, sb, slot):
+        self._native_sb = sb
+        self._native_slot = slot
+        self._native_angle_offset = 0.0
+
+    def _native_only_error(self, method):
+        raise NotImplementedError(
+            "%s is not yet available while this motor is adopted by "
+            "the native drivebase (step-mode-in-C is the tracked "
+            "follow-up); construct the motor without a native "
+            "DriveBase to use it" % method)
 
     def hold(self):
         """Actively hold the current shaft angle so the position PID
