@@ -42,6 +42,13 @@ DEFAULT_COLOR_OFF = (255, 200, 0)     # yellow
 
 
 class BluetoothToggleButton:
+    """Polls a button and toggles BLE on each press-release cycle.
+
+    Optional RGB LED feedback (blue = BLE on, yellow = off). Call
+    ``start()`` to begin polling on a ``machine.Timer``; ``stop()``
+    releases the timer. The toggled state persists across reboots.
+    """
+
     def __init__(self, button, led=None,
                  poll_ms=DEFAULT_POLL_MS, timer_id=1,
                  color_on=DEFAULT_COLOR_ON,

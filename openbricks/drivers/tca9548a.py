@@ -35,6 +35,19 @@ _NUM_CHANNELS = 8
 
 
 class TCA9548A:
+    """8-channel I2C multiplexer for same-address sensors.
+
+    Index it like a list: ``mux[n]`` returns an I2C-compatible handle
+    for channel *n* (0-7) that selects the channel transparently
+    before every transaction — pass it to any driver in place of the
+    real ``machine.I2C``.
+
+    Args:
+        i2c: the upstream ``machine.I2C`` bus the mux sits on.
+        address: mux's own I2C address, 0x70-0x77 via A0/A1/A2 straps
+            (default 0x70).
+    """
+
     def __init__(self, i2c, address=_DEFAULT_ADDR):
         self._i2c = i2c
         self._addr = address

@@ -31,6 +31,38 @@ _DEFAULT_KP = 0.3
 
 
 class JGB37Motor(Motor):
+    """JGB37-520 DC gear motor with quadrature encoder, closed-loop.
+
+    Runs the full ``Motor`` contract on the native 1 kHz servo core:
+    ``run_speed(deg_per_s)``, ``run_angle(deg_per_s, target_angle)``,
+    ``dc(duty)``, ``brake()`` / ``coast()``, ``angle()`` /
+    ``reset_angle()``, ``speed()``. Pair two of them in a
+    :class:`~openbricks.robotics.drivebase.DriveBase` for the coupled
+    2-DOF chassis controller.
+
+    Args:
+        in1, in2, pwm: H-bridge pins (e.g. L298N IN1/IN2/EN).
+        encoder_a, encoder_b: quadrature encoder channel pins.
+        counts_per_output_rev: encoder edges per output-shaft
+            revolution (4 × PPR × gear ratio; 1320 for the common
+            11-PPR 1:30 variant).
+        invert: flip motor command AND encoder together — for a motor
+            wired backwards end-to-end (typically the mirrored side
+            of a drivebase).
+        encoder_invert: flip ONLY the encoder reading — for
+            mirror-mounted encoders that count down on motor-forward.
+        kp: speed-loop proportional gain (native servo core).
+
+    Example::
+
+        from openbricks.drivers.jgb37_520 import JGB37Motor
+
+        m = JGB37Motor(in1=12, in2=14, pwm=27,
+                       encoder_a=18, encoder_b=19)
+        m.run_angle(360, 720)      # two turns at 360 deg/s, blocking
+        print(m.angle())
+    """
+
     def __init__(
         self,
         in1, in2, pwm,

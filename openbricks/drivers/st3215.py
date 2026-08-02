@@ -284,6 +284,11 @@ class ST3215(Servo):
         return (raw - self._min) * self._range / (self._max - self._min)
 
     def move_to(self, angle_deg, speed=None, wait=True):
+        """Move to ``angle_deg`` within the configured position range.
+
+        ``speed`` (raw goal-speed register units) is optional; with
+        ``wait=True`` polls until within 2% of target or a 3 s
+        timeout."""
         estop.check()
         self._ensure_torque_on()
         if speed is not None:
@@ -303,6 +308,8 @@ class ST3215(Servo):
                 time.sleep_ms(20)
 
     def angle(self):
+        """Current shaft angle in degrees within the position range,
+        or ``None`` if the bus read timed out."""
         data = self._bus.read(self._id, _REG_PRESENT_POS, 2)
         if data is None:
             return None
@@ -310,6 +317,7 @@ class ST3215(Servo):
         return self._raw_to_deg(raw)
 
     def ping(self):
+        """``True`` if the servo answers on the bus."""
         return self._bus.ping(self._id)
 
 
@@ -1114,6 +1122,7 @@ class ST3215Motor(Motor):
     # --- ST-3215-specific extras ------------------------------------------
 
     def ping(self):
+        """``True`` if the servo answers on the bus."""
         return self._bus.ping(self._id)
 
 

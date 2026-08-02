@@ -32,6 +32,16 @@ _DUTY_MAX = 1023       # ESP32 default PWM resolution.
 
 
 class L298NMotor(Motor):
+    """Open-loop brushed DC motor on an L298N H-bridge channel.
+
+    No encoder, so only the open-loop subset of the ``Motor``
+    contract works: ``dc(duty)``, ``brake()``, ``coast()``.
+    Closed-loop methods (``run_speed``, ``run_angle``, ``angle``,
+    ``hold``) raise ``NotImplementedError`` — wrap the same H-bridge
+    channel in :class:`~openbricks.drivers.jgb37_520.JGB37Motor`
+    when the motor has an encoder.
+    """
+
     def __init__(self, in1, in2, pwm, invert=False, pwm_freq=_PWM_FREQ_HZ):
         """
         Args:

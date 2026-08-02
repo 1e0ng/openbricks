@@ -38,6 +38,44 @@ from openbricks._native import DriveBase as _NativeDriveBase
 
 
 class DriveBase:
+    """A two-wheel differential drive robot: two motors, one chassis.
+
+    Pybricks-compatible surface: ``straight(distance_mm)``,
+    ``turn(angle_deg)``, ``drive(speed_mm_s, turn_rate_dps)``,
+    ``stop(then=...)``, ``settings(...)``, ``use_gyro(True)`` and
+    non-blocking moves via ``wait=False`` + ``done()``. Positive
+    ``turn`` is right/clockwise viewed from above.
+
+    Give it any two closed-loop motors and it picks the right
+    controller automatically:
+
+    * **Encoder servos** (``JGB37Motor``, ``MG370Motor``) — the native
+      C 2-DOF coupled controller at 1 kHz.
+    * **Serial-bus servos** (``ST3032Motor``, ``ST3215Motor``) — the
+      motors are *adopted* onto the hard-tick native bus engine
+      (~220 Hz odometry per wheel, immune to Python stalls). Their
+      wheel-mode motor API keeps working after adoption.
+    * **Open-loop motors** (``L298NMotor``) — kinematic ``drive()`` /
+      ``stop()`` only; moves by distance need feedback and raise.
+
+    Example::
+
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics import DriveBase
+
+        left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                            invert=True)
+        db = DriveBase(left, right, wheel_diameter_mm=88,
+                       axle_track_mm=138)
+        db.straight(300)     # forward 300 mm
+        db.turn(90)          # turn right 90 degrees
+
+    Accurate ``wheel_diameter_mm`` / ``axle_track_mm`` values matter
+    more than any controller gain — see :doc:`/measuring` for how to
+    calibrate both in two short test drives.
+    """
+
     def __init__(self, left, right, wheel_diameter_mm, axle_track_mm,
                  imu=None):
         """
