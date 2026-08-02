@@ -249,7 +249,19 @@ class _SimStBus:
         self._rt = runtime
         self._raw = None
         self._active = False
+        # Firmware-parity arbitration (1.46.0): the drivebase owns
+        # its wheels only from db_straight/db_turn until db_stop /
+        # db_disable; yielded, per-slot moves and direct speed
+        # commands own them.
+        self._db_writing = False
+        self._moves = {}
         runtime.add_tick(self._tick)
+
+    def _move(self, slot):
+        if slot not in self._moves:
+            from openbricks_sim._native import RawServoMove
+            self._moves[slot] = RawServoMove()
+        return self._moves[slot]
 
     # -- engine-facing surface ---------------------------------------
 
@@ -266,24 +278,35 @@ class _SimStBus:
 
     def db_disable(self):
         self._active = False
+        self._db_writing = False
 
     def db_config(self, slot_l, slot_r, wheel_mm, axle_mm, accel):
         from openbricks_sim._native import RawDriveBase
         self._raw = RawDriveBase(float(wheel_mm), float(axle_mm))
         self._raw.set_accel(float(accel))
         self._active = True
+        self._db_writing = False
+        for m in self._moves.values():
+            m.stop()
 
     def db_set_accel(self, dps2):
         self._raw.set_accel(float(dps2))
 
     def db_straight(self, mm, mm_s):
+        for m in self._moves.values():
+            m.stop()                      # new command wins
+        self._db_writing = True
         self._raw.straight(self._rt.now_ms, float(mm), float(mm_s))
 
     def db_turn(self, deg, dps):
+        for m in self._moves.values():
+            m.stop()
+        self._db_writing = True
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
 
     def db_stop(self):
         self._raw.stop()
+        self._db_writing = False          # yield to the motor layer
         for w in self._wheels.values():
             w.run_speed(0)
 
@@ -297,22 +320,55 @@ class _SimStBus:
         self._raw.set_heading_override(float(body_deg))
 
     def servo_run(self, slot, steps_per_s):
+        self._move(slot).stop()           # new command wins
         self._wheels[slot].run_speed(steps_per_s / self._STEPS_PER_DEG)
         return True
 
     def servo_coast(self, slot):
+        self._move(slot).stop()
         self._wheels[slot].coast()
         return True
 
     def servo_counts(self, slot):
         return int(self._wheels[slot].angle() * self._STEPS_PER_DEG)
 
+    def _slot_ready(self, slot):
+        # Sim odometry is always live; only the db-ownership half of
+        # the firmware gate applies.
+        return slot in self._wheels and not (self._active
+                                             and self._db_writing)
+
+    def servo_move(self, slot, delta_counts, speed_cps, accel_cps2):
+        if not self._slot_ready(slot):
+            return False
+        self._move(slot).start(
+            self._rt.now_ms,
+            self._wheels[slot].angle() * self._STEPS_PER_DEG,
+            float(delta_counts), float(speed_cps), float(accel_cps2))
+        return True
+
+    def servo_hold(self, slot):
+        if not self._slot_ready(slot):
+            return False
+        self._move(slot).hold_at(
+            self._wheels[slot].angle() * self._STEPS_PER_DEG)
+        return True
+
+    def servo_move_done(self, slot):
+        return slot in self._moves and bool(self._moves[slot].is_done())
+
     def reset_runtime(self):
         self._active = False
+        self._db_writing = False
         self._raw = None
+        for m in self._moves.values():
+            m.stop()
 
     def torque_off_all(self):
         self._active = False
+        self._db_writing = False
+        for m in self._moves.values():
+            m.stop()
         for w in self._wheels.values():
             w.coast()
         return True
@@ -320,13 +376,18 @@ class _SimStBus:
     # -- sim step ------------------------------------------------------
 
     def _tick(self, now_ms):
-        if not self._active or self._raw is None:
-            return
-        l = self._wheels[0].angle()
-        r = self._wheels[1].angle()
-        lt, rt = self._raw.tick(now_ms, l, r)
-        self._wheels[0].run_speed(lt)
-        self._wheels[1].run_speed(rt)
+        if self._active and self._raw is not None and self._db_writing:
+            l = self._wheels[0].angle()
+            r = self._wheels[1].angle()
+            lt, rt = self._raw.tick(now_ms, l, r)
+            self._wheels[0].run_speed(lt)
+            self._wheels[1].run_speed(rt)
+        for slot, m in self._moves.items():
+            if m.is_active():
+                cmd = m.tick(now_ms,
+                             self._wheels[slot].angle()
+                             * self._STEPS_PER_DEG)
+                self._wheels[slot].run_speed(cmd / self._STEPS_PER_DEG)
 
 
 class ShimST3215Motor:

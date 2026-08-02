@@ -19,6 +19,7 @@
 
 #include "st_bus_core.h"
 #include "st_servo_core.h"
+#include "st_move_core.h"
 #include "drivebase_core.h"
 
 #include <string.h>
@@ -131,13 +132,28 @@ static ob_sservo_t *sservo_get(void) {
 static ob_servo_t st_db_bridge_l, st_db_bridge_r;
 static ob_drivebase_t st_db;
 static bool st_db_active;
+// Arbitration between the drivebase and per-slot moves (1.46.0):
+// the db writes its slots' speed targets only while it OWNS a move
+// — from db_straight/db_turn until db_stop/db_disable. Yielded, it
+// keeps its odometry synced (so the next move arms from the true
+// pose) but stays silent, which is what lets an adopted motor's
+// run_angle/hold — and plain run_speed after a stop — own the wheel.
+// Pre-1.46.0 the configured db wrote hold targets forever, which
+// also torqued the wheels stiff from the moment of construction.
+static bool st_db_writing;
 static int st_db_slot_l = -1, st_db_slot_r = -1;
 static uint32_t st_db_now_ms;      // clock fed by the pump caller
 
-static void st_db_tick_locked(void) {
-    if (!st_db_active) {
-        return;
+// Per-slot position moves (run_angle / hold on adopted motors).
+static ob_smove_t st_moves[OB_SSERVO_SLOTS];
+
+static void st_moves_reset_all(void) {
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        ob_smove_init(&st_moves[i]);
     }
+}
+
+static void st_db_sync_bridges_locked(void) {
     ob_sservo_t *sv = sservo_get();
     // Slot counts -> wheel degrees. ob_sservo_counts applies the
     // slot's invert, so both bridges live in the same wheel frame the
@@ -146,6 +162,17 @@ static void st_db_tick_locked(void) {
         (ob_float_t)(ob_sservo_counts(sv, st_db_slot_l) * ST_DB_DEG_PER_COUNT);
     st_db_bridge_r.observer.pos_hat =
         (ob_float_t)(ob_sservo_counts(sv, st_db_slot_r) * ST_DB_DEG_PER_COUNT);
+}
+
+static void st_db_tick_locked(void) {
+    if (!st_db_active) {
+        return;
+    }
+    st_db_sync_bridges_locked();
+    if (!st_db_writing) {
+        return;                    // configured but yielded
+    }
+    ob_sservo_t *sv = sservo_get();
     ob_drivebase_tick(&st_db, (long)st_db_now_ms);
     // Wheel-degree targets -> slot steps/s. set_speed re-applies the
     // slot invert, mirroring how counts un-applied it above.
@@ -155,8 +182,21 @@ static void st_db_tick_locked(void) {
         (int32_t)(st_db_bridge_r.target_dps * ST_DB_STEPS_PER_DEG));
 }
 
+static void st_moves_tick_locked(void) {
+    ob_sservo_t *sv = sservo_get();
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        if (!sv->slots[i].in_use || st_moves[i].state == OB_SMOVE_IDLE) {
+            continue;
+        }
+        ob_float_t cmd = ob_smove_tick(&st_moves[i], (long)st_db_now_ms,
+                                       (ob_float_t)ob_sservo_counts(sv, i));
+        ob_sservo_set_speed(sv, i, (int32_t)cmd);
+    }
+}
+
 static void servo_pump_locked(ob_bus_t *b) {
     st_db_tick_locked();
+    st_moves_tick_locked();
     ob_bus_poll(b);
     if (tick_txn
         && (b->state == OB_BUS_DONE || b->state == OB_BUS_TIMEOUT
@@ -253,6 +293,8 @@ void ob_st_bus_estop_from_tick(void) {
         ob_bus_take_result(b, NULL, NULL);
     }
     st_db_active = false;
+    st_db_writing = false;
+    st_moves_reset_all();
     ob_sservo_t *sv = sservo_get();
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         if (sv->slots[i].in_use) {
@@ -302,6 +344,8 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     tick_txn = 0;
     tick_txn_is_read = 0;
     st_db_active = false;
+    st_db_writing = false;
+    st_moves_reset_all();
     st_db_slot_l = st_db_slot_r = -1;
     st_db_now_ms = 0;
     bus_get();
@@ -490,8 +534,12 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_attach_obj, 5, 5, sb_servo_a
 
 static mp_obj_t sb_servo_detach(mp_obj_t self_in, mp_obj_t slot_in) {
     (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
     bus_take();
-    ob_sservo_detach(sservo_get(), mp_obj_get_int(slot_in));
+    if (slot >= 0 && slot < OB_SSERVO_SLOTS) {
+        ob_smove_stop(&st_moves[slot]);
+    }
+    ob_sservo_detach(sservo_get(), slot);
     bus_release();
     return mp_const_none;
 }
@@ -501,8 +549,12 @@ static mp_obj_t sb_servo_run(mp_obj_t self_in, mp_obj_t slot_in,
                              mp_obj_t steps_in) {
     // Signed encoder steps/s (Python converts dps; core is int-only).
     (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
     bus_take();
-    int r = ob_sservo_set_speed(sservo_get(), mp_obj_get_int(slot_in),
+    if (slot >= 0 && slot < OB_SSERVO_SLOTS) {
+        ob_smove_stop(&st_moves[slot]);   // new command wins
+    }
+    int r = ob_sservo_set_speed(sservo_get(), slot,
                                 (int32_t)mp_obj_get_int(steps_in));
     bus_release();
     return mp_obj_new_bool(r == 0);
@@ -511,12 +563,78 @@ static MP_DEFINE_CONST_FUN_OBJ_3(sb_servo_run_obj, sb_servo_run);
 
 static mp_obj_t sb_servo_coast(mp_obj_t self_in, mp_obj_t slot_in) {
     (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
     bus_take();
-    int r = ob_sservo_coast(sservo_get(), mp_obj_get_int(slot_in));
+    if (slot >= 0 && slot < OB_SSERVO_SLOTS) {
+        ob_smove_stop(&st_moves[slot]);   // new command wins
+    }
+    int r = ob_sservo_coast(sservo_get(), slot);
     bus_release();
     return mp_obj_new_bool(r == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_coast_obj, sb_servo_coast);
+
+// ---- per-slot position moves (run_angle / hold, 1.46.0) ----
+
+// Common gate: the slot must be attached with live odometry (a move
+// armed before the first feedback read would anchor to counts=0 and
+// slam the shaft toward a wrong absolute position), and the db must
+// not currently own the slot.
+static bool smove_slot_ready_locked(int slot) {
+    ob_sservo_t *sv = sservo_get();
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS || !sv->slots[slot].in_use
+        || !sv->slots[slot].have_raw) {
+        return false;
+    }
+    if (st_db_active && st_db_writing
+        && (slot == st_db_slot_l || slot == st_db_slot_r)) {
+        return false;
+    }
+    return true;
+}
+
+static mp_obj_t sb_servo_move(size_t n_args, const mp_obj_t *args) {
+    // (self, slot, delta_counts, speed_cps, accel_cps2) -> bool
+    (void)n_args;
+    int slot = mp_obj_get_int(args[1]);
+    bus_take();
+    bool ok = smove_slot_ready_locked(slot);
+    if (ok) {
+        ob_smove_start(&st_moves[slot], (long)st_db_now_ms,
+                       (ob_float_t)ob_sservo_counts(sservo_get(), slot),
+                       (ob_float_t)mp_obj_get_float(args[2]),
+                       (ob_float_t)mp_obj_get_float(args[3]),
+                       (ob_float_t)mp_obj_get_float(args[4]));
+    }
+    bus_release();
+    return mp_obj_new_bool(ok);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_move_obj, 5, 5, sb_servo_move);
+
+static mp_obj_t sb_servo_hold(mp_obj_t self_in, mp_obj_t slot_in) {
+    (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
+    bus_take();
+    bool ok = smove_slot_ready_locked(slot);
+    if (ok) {
+        ob_smove_hold_at(&st_moves[slot],
+                         (ob_float_t)ob_sservo_counts(sservo_get(), slot));
+    }
+    bus_release();
+    return mp_obj_new_bool(ok);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_hold_obj, sb_servo_hold);
+
+static mp_obj_t sb_servo_move_done(mp_obj_t self_in, mp_obj_t slot_in) {
+    (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
+    bus_take();
+    bool d = slot >= 0 && slot < OB_SSERVO_SLOTS
+             && ob_smove_is_done(&st_moves[slot]);
+    bus_release();
+    return mp_obj_new_bool(d);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_move_done_obj, sb_servo_move_done);
 
 static mp_obj_t sb_servo_counts(mp_obj_t self_in, mp_obj_t slot_in) {
     (void)self_in;
@@ -626,6 +744,12 @@ static mp_obj_t sb_db_config(size_t n_args, const mp_obj_t *args) {
                       OB_DRIVEBASE_DEFAULT_KP_DIFF);
     st_db.accel_dps2 = (ob_float_t)mp_obj_get_float(args[5]);
     st_db_active = true;
+    // Configured but yielded: the db starts writing at its first
+    // move, so a freshly constructed DriveBase leaves the wheels
+    // free instead of torquing them into a hold at pose zero.
+    st_db_writing = false;
+    ob_smove_init(&st_moves[st_db_slot_l]);
+    ob_smove_init(&st_moves[st_db_slot_r]);
     bus_release();
     return mp_const_none;
 }
@@ -635,6 +759,7 @@ static mp_obj_t sb_db_disable(mp_obj_t self_in) {
     (void)self_in;
     bus_take();
     st_db_active = false;
+    st_db_writing = false;
     st_db_slot_l = st_db_slot_r = -1;
     bus_release();
     return mp_const_none;
@@ -645,6 +770,13 @@ static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
                                mp_obj_t mm_s_in) {
     (void)self_in;
     bus_take();
+    // New command wins: the db takes its slots back from any
+    // per-slot move, and arms from freshly synced odometry (the
+    // yielded tick doesn't run ob_drivebase_tick, so sync here).
+    st_db_sync_bridges_locked();
+    ob_smove_stop(&st_moves[st_db_slot_l]);
+    ob_smove_stop(&st_moves[st_db_slot_r]);
+    st_db_writing = true;
     ob_drivebase_straight(&st_db, (long)st_db_now_ms,
                           (ob_float_t)mp_obj_get_float(mm_in),
                           (ob_float_t)mp_obj_get_float(mm_s_in));
@@ -657,6 +789,10 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
                            mp_obj_t dps_in) {
     (void)self_in;
     bus_take();
+    st_db_sync_bridges_locked();
+    ob_smove_stop(&st_moves[st_db_slot_l]);
+    ob_smove_stop(&st_moves[st_db_slot_r]);
+    st_db_writing = true;
     ob_drivebase_turn(&st_db, (long)st_db_now_ms,
                       (ob_float_t)mp_obj_get_float(deg_in),
                       (ob_float_t)mp_obj_get_float(dps_in));
@@ -680,6 +816,10 @@ static mp_obj_t sb_db_stop(mp_obj_t self_in) {
         : (st_db_bridge_l.observer.pos_hat
            - st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
     ob_drivebase_stop(&st_db);
+    // Yield: from here the motor layer owns the wheels (coast /
+    // brake / hold / run_angle per the caller's ``then=``), so the
+    // db must stop re-asserting its own hold every tick.
+    st_db_writing = false;
     if (st_db_slot_l >= 0) {
         ob_sservo_set_speed(sservo_get(), st_db_slot_l, 0);
         ob_sservo_set_speed(sservo_get(), st_db_slot_r, 0);
@@ -748,6 +888,8 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     (void)self_in;
     bus_take();
     st_db_active = false;
+    st_db_writing = false;
+    st_moves_reset_all();
     st_db_slot_l = st_db_slot_r = -1;
     ob_sservo_init(sservo_get());
     tick_txn = 0;
@@ -792,6 +934,9 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_detach),     MP_ROM_PTR(&sb_servo_detach_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_run),        MP_ROM_PTR(&sb_servo_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_coast),      MP_ROM_PTR(&sb_servo_coast_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_move),       MP_ROM_PTR(&sb_servo_move_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_hold),       MP_ROM_PTR(&sb_servo_hold_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_move_done),  MP_ROM_PTR(&sb_servo_move_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_counts),     MP_ROM_PTR(&sb_servo_counts_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_stats),      MP_ROM_PTR(&sb_servo_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_pump),       MP_ROM_PTR(&sb_servo_pump_obj) },

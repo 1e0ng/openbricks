@@ -30,8 +30,11 @@ fail=0
 run_one() {
     local name="$1"; shift
     echo "== ${name} =="
+    # -lm last: GNU ld resolves libraries left-to-right, and
+    # trajectory_core's sqrt needs libm on Linux (macOS's libSystem
+    # bundles it, which is why the gap only shows in CI).
     # shellcheck disable=SC2086
-    ${CC} ${CFLAGS} "$@" -o "${OUT}/${name}"
+    ${CC} ${CFLAGS} "$@" -o "${OUT}/${name}" -lm
     "${OUT}/${name}" || fail=1
 }
 
@@ -50,6 +53,11 @@ run_one test_st_servo_core \
 run_one test_st_button_core \
     "${TESTS}/test_st_button_core.c" \
     "${CORES}/st_button_core.c"
+
+run_one test_st_move_core \
+    "${TESTS}/test_st_move_core.c" \
+    "${CORES}/st_move_core.c" \
+    "${CORES}/trajectory_core.c"
 
 if [ "${fail}" -ne 0 ]; then
     echo "C unit tests: FAILED"

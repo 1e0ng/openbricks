@@ -22,6 +22,7 @@
 #include "motor_process_core.h"
 #include "servo_core.h"
 #include "drivebase_core.h"
+#include "st_move_core.h"
 
 
 /* -------------------------------------------------------------------
@@ -852,6 +853,123 @@ static PyTypeObject RawDriveBaseType = {
 
 
 /* -------------------------------------------------------------------
+ * RawServoMove — per-slot position move (st_move_core), the C side
+ * of run_angle/hold on adopted serial motors. The sim's _SimStBus
+ * runs the same core the firmware hard tick runs.
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    PyObject_HEAD
+    ob_smove_t core;
+} RawServoMoveObject;
+
+
+static int RawServoMove_init(RawServoMoveObject *self, PyObject *args,
+                             PyObject *kwargs) {
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "", kwlist)) {
+        return -1;
+    }
+    ob_smove_init(&self->core);
+    return 0;
+}
+
+
+static PyObject *RawServoMove_start(RawServoMoveObject *self, PyObject *args) {
+    long now_ms;
+    double from_counts, delta_counts, speed_cps, accel_cps2;
+    if (!PyArg_ParseTuple(args, "ldddd", &now_ms, &from_counts,
+                          &delta_counts, &speed_cps, &accel_cps2)) {
+        return NULL;
+    }
+    ob_smove_start(&self->core, now_ms, (ob_float_t)from_counts,
+                   (ob_float_t)delta_counts, (ob_float_t)speed_cps,
+                   (ob_float_t)accel_cps2);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawServoMove_hold_at(RawServoMoveObject *self, PyObject *arg) {
+    double counts = PyFloat_AsDouble(arg);
+    if (counts == -1.0 && PyErr_Occurred()) {
+        return NULL;
+    }
+    ob_smove_hold_at(&self->core, (ob_float_t)counts);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawServoMove_stop(RawServoMoveObject *self,
+                                   PyObject *Py_UNUSED(ignored)) {
+    ob_smove_stop(&self->core);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawServoMove_tick(RawServoMoveObject *self, PyObject *args) {
+    long now_ms;
+    double meas_counts;
+    if (!PyArg_ParseTuple(args, "ld", &now_ms, &meas_counts)) {
+        return NULL;
+    }
+    return PyFloat_FromDouble(
+        (double)ob_smove_tick(&self->core, now_ms,
+                              (ob_float_t)meas_counts));
+}
+
+
+static PyObject *RawServoMove_is_done(RawServoMoveObject *self,
+                                      PyObject *Py_UNUSED(ignored)) {
+    if (ob_smove_is_done(&self->core)) {
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+
+
+static PyObject *RawServoMove_is_active(RawServoMoveObject *self,
+                                        PyObject *Py_UNUSED(ignored)) {
+    if (self->core.state != OB_SMOVE_IDLE) {
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+
+
+static PyMethodDef RawServoMove_methods[] = {
+    {"start",     (PyCFunction)RawServoMove_start,     METH_VARARGS,
+     "start(now_ms, from_counts, delta_counts, speed_cps, accel_cps2)."},
+    {"hold_at",   (PyCFunction)RawServoMove_hold_at,   METH_O,
+     "Lock position at the given counts immediately."},
+    {"stop",      (PyCFunction)RawServoMove_stop,      METH_NOARGS,
+     "Back to IDLE — no further output."},
+    {"tick",      (PyCFunction)RawServoMove_tick,      METH_VARARGS,
+     "tick(now_ms, meas_counts) -> commanded counts/s."},
+    {"is_done",   (PyCFunction)RawServoMove_is_done,   METH_NOARGS,
+     "True iff arrived (profile expired AND |err| < tol), latched."},
+    {"is_active", (PyCFunction)RawServoMove_is_active, METH_NOARGS,
+     "True while profiling or holding (not IDLE)."},
+    {NULL, NULL, 0, NULL},
+};
+
+
+static PyTypeObject RawServoMoveType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name      = "openbricks_sim._native.RawServoMove",
+    .tp_basicsize = sizeof(RawServoMoveObject),
+    .tp_itemsize  = 0,
+    .tp_flags     = Py_TPFLAGS_DEFAULT,
+    .tp_doc       = PyDoc_STR(
+        "Per-slot position move: trapezoid trajectory + position-P "
+        "with velocity feedforward, arrival-latched done, position "
+        "hold. Same st_move_core the firmware hard tick runs."),
+    .tp_new       = PyType_GenericNew,
+    .tp_init      = (initproc)RawServoMove_init,
+    .tp_methods   = RawServoMove_methods,
+};
+
+
+/* -------------------------------------------------------------------
  * Module init
  * ------------------------------------------------------------------- */
 
@@ -876,6 +994,9 @@ PyMODINIT_FUNC PyInit__native(void) {
         return NULL;
     }
     if (PyType_Ready(&RawDriveBaseType) < 0) {
+        return NULL;
+    }
+    if (PyType_Ready(&RawServoMoveType) < 0) {
         return NULL;
     }
     Py_INCREF(&TrajectoryType);
@@ -931,6 +1052,13 @@ PyMODINIT_FUNC PyInit__native(void) {
     if (PyModule_AddObject(m, "RawDriveBase",
                            (PyObject *)&RawDriveBaseType) < 0) {
         Py_DECREF(&RawDriveBaseType);
+        Py_DECREF(m);
+        return NULL;
+    }
+    Py_INCREF(&RawServoMoveType);
+    if (PyModule_AddObject(m, "RawServoMove",
+                           (PyObject *)&RawServoMoveType) < 0) {
+        Py_DECREF(&RawServoMoveType);
         Py_DECREF(m);
         return NULL;
     }

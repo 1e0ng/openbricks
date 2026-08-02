@@ -540,18 +540,93 @@ class SimStBusEngineTests(_ShimTestBase):
         # servo_run / servo_counts / servo_coast are the st_bus verbs
         # the FIRMWARE driver's adopted wheel-mode API calls (the shim
         # motors answer those from MuJoCo directly, so exercise the
-        # bus surface itself — same contract as the C module). While
-        # the drivebase controller is active its per-tick targets own
-        # the wheels, so disable it first — direct servo verbs are the
-        # outside-a-move surface.
+        # bus surface itself — same contract as the C module). Since
+        # 1.46.0 an idle drivebase YIELDS its wheels (it writes only
+        # from db_straight/db_turn until db_stop), so direct verbs
+        # work right after construction — no db_disable needed.
         db, _, _ = self._serial_db()
         sb = db._serial_engine._sb
-        sb.db_disable()
         c0 = sb.servo_counts(0)
         self.assertTrue(sb.servo_run(0, 120 * sb._STEPS_PER_DEG))
         time.sleep_ms(300)
         self.assertGreater(sb.servo_counts(0), c0 + 10)
         self.assertTrue(sb.servo_coast(0))
+
+    def test_servo_move_drives_the_wheel_by_delta(self):
+        # The C per-slot move (RawServoMove = st_move_core) in
+        # physics: half a wheel-rev commanded through the bus surface,
+        # arrival-latched done, wheel lands within tolerance.
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        c0 = sb.servo_counts(0)
+        self.assertTrue(sb.servo_move(0, 2048.0, 2000.0, 8000.0))
+        self.assertFalse(sb.servo_move_done(0))
+        # The sim wheel's inner velocity loop settles the last few
+        # counts exponentially — give the arrival latch ~4.5 s.
+        time.sleep_ms(4500)
+        self.assertTrue(sb.servo_move_done(0))
+        self.assertLess(abs(sb.servo_counts(0) - c0 - 2048), 80)
+
+    def test_servo_move_refused_while_db_move_in_flight(self):
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        db.straight(300, wait=False)
+        self.assertFalse(sb.servo_move(0, 1000.0, 1000.0, 4000.0))
+        self.assertFalse(sb.servo_hold(0))
+        db.stop()
+        self.assertTrue(sb.servo_move(0, 1000.0, 1000.0, 4000.0))
+
+    def test_db_stop_yields_the_wheels(self):
+        # After stop() the db no longer re-asserts its hold, so a
+        # direct speed command moves the chassis.
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        db.settings(straight_speed=150, acceleration=360)
+        db.straight(500, wait=False)
+        time.sleep_ms(300)
+        db.stop()
+        c0 = sb.servo_counts(0)
+        sb.servo_run(0, 120 * sb._STEPS_PER_DEG)
+        time.sleep_ms(400)
+        self.assertGreater(sb.servo_counts(0) - c0, 60)
+
+    def test_db_and_runtime_verbs_cancel_armed_moves(self):
+        # New-command-wins in every direction: each db/runtime verb
+        # must cancel an ARMED per-slot move, not just tolerate an
+        # empty move table.
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.db_straight(50.0, 60.0)
+        self.assertFalse(sb._moves[0].is_active())
+        sb.db_stop()
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.db_turn(30.0, 60.0)
+        self.assertFalse(sb._moves[0].is_active())
+        sb.db_stop()
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.torque_off_all()
+        self.assertFalse(sb._moves[0].is_active())
+        self.assertTrue(sb.servo_move(1, 40960.0, 2000.0, 8000.0))
+        sb.reset_runtime()
+        self.assertFalse(sb._moves[1].is_active())
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.db_config(0, 1, 65.0, 120.0, 400.0)
+        self.assertFalse(sb._moves[0].is_active())
+
+    def test_adopted_motor_run_angle_via_the_engine_surface(self):
+        # End-to-end for the user-visible path: the ADOPTED firmware
+        # driver routes run_angle through servo_move — in the sim the
+        # shim motor keeps its own MuJoCo implementation, so pin the
+        # equivalent contract at the bus surface with hold: hold is
+        # done immediately and holds position.
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        self.assertTrue(sb.servo_hold(1))
+        self.assertTrue(sb.servo_move_done(1))
+        held = sb.servo_counts(1)
+        time.sleep_ms(500)
+        self.assertLess(abs(sb.servo_counts(1) - held), 40)
 
     def test_torque_off_all_stops_ticking_the_controller(self):
         # The estop broadcast surface: after torque_off_all the bus

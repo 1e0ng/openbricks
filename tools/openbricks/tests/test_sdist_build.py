@@ -36,6 +36,7 @@ _REQUIRED_CORES = [
     "motor_process_core.c", "motor_process_core.h",
     "servo_core.c",      "servo_core.h",
     "drivebase_core.c",  "drivebase_core.h",
+    "st_move_core.c",    "st_move_core.h",
 ]
 
 
