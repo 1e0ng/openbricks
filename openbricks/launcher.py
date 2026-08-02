@@ -1096,3 +1096,14 @@ def _reset_motor_process():
     except ImportError:
         return
     motor_process.reset()
+    # Same boundary, same reason, for the native serial bus: slots
+    # and drivebase config claimed by the PREVIOUS program must not
+    # leak into this one (bench: the second run of a NativeDriveBase
+    # script died with "slot attach failed" until a power-cycle).
+    # The attached UART survives — hardware config, not program
+    # state. Guarded: st_bus is absent off-firmware.
+    try:
+        from _openbricks_native import st_bus
+        st_bus.reset_runtime()
+    except (ImportError, AttributeError):
+        pass
