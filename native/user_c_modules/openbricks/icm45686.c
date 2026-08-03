@@ -14,6 +14,7 @@
 
 #include "py/runtime.h"
 #include "py/mphal.h"
+#include "py/mperrno.h"
 
 #include "icm45686_core.h"
 #include "motor_process.h"
