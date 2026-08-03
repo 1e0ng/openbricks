@@ -3,6 +3,30 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.50.0 — the WHOLE Motor contract works on adopted motors
+
+`speed()`, `load()` and `stalled()` — the last three
+`NotImplementedError` gates on motors adopted by a serial
+`DriveBase` — now work. The pump's per-slot feedback read widens
+from 2 bytes to 6: present-position (0x38), present-speed (0x3A)
+and present-load (0x3C) are contiguous, so all three ride ONE
+transaction for ~the old wire cost (reply +4 bytes ≈ 40 µs at
+1 Mbps) — no extra transactions, no odometry-rate dilution.
+
+Decoded per slot in `st_servo_core` (speed sign-magnitude b15, load
+b10 in 0.1%-of-stall units), exposed user-frame (slot invert, same
+rule as counts) via `st_bus.servo_feedback(slot)` →
+`(speed_steps, load_raw, fresh)`. Staleness is loud: `speed()` /
+`load()` return None and `stalled()` raises OSError while the bus
+is silent — never a silent 0. `stalled()` keeps the classic
+thresholds (load ≥ STALL_LOAD_PCT, |speed| ≤ STALL_SPEED_DPS). The
+sim's `_SimStBus` serves live wheel speed (load reads 0 — the shim
+wheel model has no torque estimate).
+
+Bench check pending: the ST-3032 answering a 6-byte multi-register
+read at 1 Mbps (standard SCS practice; the c-unit suite covers the
+decode, the wire harness the transaction shape).
+
 ## 1.49.1 — every stop must arm the start gates, not just watcher stops
 
 The 1.48.2 gates checked suppression state (`_lockout_until_ms`,

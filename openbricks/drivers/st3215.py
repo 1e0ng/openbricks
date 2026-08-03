@@ -616,9 +616,15 @@ class ST3215Motor(Motor):
         """Measured shaft speed in deg/s from the present-speed
         register (sign-magnitude, bit 15; steps/s scaled by
         ``steps_per_dps``). Returns ``None`` if the bus is silent,
-        matching ``angle()``."""
+        matching ``angle()``. On an adopted motor (native DriveBase)
+        the value comes from the hard-tick pump's widened feedback
+        read — no extra bus traffic."""
         if self._native_slot is not None:
-            self._native_only_error("speed")
+            steps, _load, fresh = self._native_sb.servo_feedback(
+                self._native_slot)
+            if not fresh:
+                return None
+            return steps / self._steps_per_dps
         data = self._bus.read(self._id, _REG_PRESENT_SPEED, 2)
         if data is None:
             return None
@@ -637,9 +643,15 @@ class ST3215Motor(Motor):
         (sign in bit 10, per the Feetech SCServo SDK); scaled by the
         model's datasheet stall torque (``STALL_TORQUE_MNM``), so
         treat it as an estimate, not a measurement. ``None`` if the
-        bus is silent."""
+        bus is silent. On an adopted motor the value comes from the
+        hard-tick pump's widened feedback read (user frame — the
+        slot carries this motor's invert)."""
         if self._native_slot is not None:
-            self._native_only_error("load")
+            _steps, load_raw, fresh = self._native_sb.servo_feedback(
+                self._native_slot)
+            if not fresh:
+                return None
+            return load_raw * self.STALL_TORQUE_MNM / 1000.0
         data = self._bus.read(self._id, _REG_PRESENT_LOAD, 2)
         if data is None:
             return None
@@ -660,7 +672,13 @@ class ST3215Motor(Motor):
         registers. Raises ``OSError`` if the bus is silent (a silent
         bus must not read as "not stalled")."""
         if self._native_slot is not None:
-            self._native_only_error("stalled")
+            steps, load_raw, fresh = self._native_sb.servo_feedback(
+                self._native_slot)
+            if not fresh:
+                raise OSError("bus silent while reading stall state")
+            return (abs(load_raw) >= self.STALL_LOAD_PCT * 10
+                    and abs(steps / self._steps_per_dps)
+                        <= self.STALL_SPEED_DPS)
         data = self._bus.read(self._id, _REG_PRESENT_LOAD, 2)
         spd = self.speed()
         if data is None or spd is None:
@@ -755,13 +773,6 @@ class ST3215Motor(Motor):
         self._native_slot = slot
         self._native_angle_offset = 0.0
         self._native_pending = None
-
-    def _native_only_error(self, method):
-        raise NotImplementedError(
-            "%s is not yet available while this motor is adopted by "
-            "the native drivebase (per-slot feedback-register reads "
-            "are the tracked follow-up); construct the motor without "
-            "a native DriveBase to use it" % method)
 
     @staticmethod
     def _native_move_budget_ms(travel_deg, rate_dps, accel_dps2):

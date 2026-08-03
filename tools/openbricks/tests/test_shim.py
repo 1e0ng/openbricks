@@ -610,6 +610,23 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertTrue(abs(drift) < 5.0,
                         "gyro square drifted %+.1f deg" % drift)
 
+    def test_servo_feedback_reports_live_wheel_speed(self):
+        # The 1.50.0 feedback surface: an adopted motor's speed()
+        # reads through servo_feedback; in the sim that's the MuJoCo
+        # wheel's actual velocity (load is 0 — the shim wheel model
+        # has no torque estimate; fresh stays True because speed IS
+        # live).
+        db, _, right = self._serial_db()
+        sb = db._serial_engine._sb
+        sb.servo_run(0, int(120 * sb._STEPS_PER_DEG))
+        time.sleep_ms(500)
+        steps, load, fresh = sb.servo_feedback(0)
+        self.assertTrue(fresh)
+        self.assertEqual(load, 0)
+        dps = steps / sb._STEPS_PER_DEG
+        self.assertTrue(60 < dps < 180, "wheel dps=%.0f" % dps)
+        sb.servo_coast(0)
+
     def test_db_and_runtime_verbs_cancel_armed_moves(self):
         # New-command-wins in every direction: each db/runtime verb
         # must cancel an ARMED per-slot move, not just tolerate an
