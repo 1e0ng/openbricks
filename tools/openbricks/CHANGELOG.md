@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.48.1 — the relay must not re-post from a Python frame
+
+1.48.0's bench run: two of three stop presses cut instantly with
+`hard_stops` counting — the hard path works. The third exposed the
+relay's flaw in its own traceback (`_tick →
+_resignal_stop_interrupt: KeyboardInterrupt`): a pending exception
+posted FROM Python fires at the poster's very next bytecode, so the
+relay re-received its own post and the interrupt escaped the
+callback anyway. Self-delivery is unavoidable in any Python frame.
+
+Fix: relay through the architecture that already solves this — the
+`request_stop()` flag + the armed C-function `stop_tick` Timer
+(20 ms), which runs no Python bytecodes after posting, so the
+injection lands in the program. The `resignal_keyboard_interrupt`
+binding is removed (an unused footgun after one unreleased-to-bench
+day: its semantics ARE the self-delivering post).
+
 ## 1.48.0 — the stop interrupt must not be eaten by our own callbacks
 
 The 1.47.2 probe run delivered the diagnosis: the hard-button path
