@@ -60,6 +60,7 @@ _TEST_MODULES = [
     "tests.test_st_servo",
     "tests.test_st_drivebase",
     "tests.test_st_move",
+    "tests.test_icm45686",
     "tests.test_native_drivebase",
     "tests.test_trajectory",
     "tests.test_observer",

@@ -115,6 +115,8 @@ jobs:
             tests.test_interfaces \
             tests.test_launcher \
             tests.test_native_drivebase \
+              tests.test_icm45686 \
+            tests.test_icm45686 \
             tests.test_l298n \
             tests.test_tcs34725 \
             tests.test_st3215 \

@@ -3,6 +3,30 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.51.0 — ICM-45686: heading computed inside the hard tick
+
+The raw-IMU arc, built ahead of the part's arrival so bring-up is a
+day, not a week. A seventh build-time patch
+(`esp32-openbricks-spi-shim`) wraps the IDF SPI master; the
+`icm45686` native module reads the 13-byte accel+gyro burst every
+hard tick (~13 µs at 8 MHz) and feeds gyro-Z into the 1.50.x-era
+yaw integrator — a gyro `DriveBase` with this IMU corrects heading
+at 1 kHz in C with no Python pump at all (`db_gyro_source(1)`,
+selected automatically by the `_hard_heading_source` marker).
+
+`ICM45686(sck=, mosi=, miso=, cs=)` — four free GPIOs; the I2C
+mux/color-sensor setup is untouched. Register logic derives from
+betaflight's and Zephyr's hardware-proven drivers (WHO_AM_I 0xE9
+verified at construction, loud OSError otherwise) and is pinned by
+injected-transfer c-unit tests before silicon contact. Gyro bias
+persists to NVS (`save_calibration()`, auto-seeded next boot — the
+pbio trick), so boot-and-immediately-run starts corrected.
+
+BENCH-VERIFY on arrival (marked in code): SPI mode (3 vs 0), burst
+byte order, mounting sign — `examples/icm45686_bringup.py` walks
+all three with printed evidence, then the gyro square vs the
+BNO055's +0.5..+1.8°.
+
 ## 1.50.1 — load sign: bit 10 means POSITIVE (bench-pinned)
 
 First live read of the present-load register in the project's

@@ -271,6 +271,9 @@ static void hard_tick_dispatch(void *ctx) {
     // Aligned 32-bit increment; read side is a single aligned load.
     hard_tick_probe_count = hard_tick_probe_count + 1;
     hard_button_tick();          // BEFORE the pump: stop jumps the queue
+    if (hard_imu_fn) {
+        hard_imu_fn();           // IMU read + yaw feed (~13 us SPI)
+    }
     ob_st_bus_hard_poll();
 }
 #endif
@@ -566,6 +569,30 @@ double openbricks_hard_yaw_deg(void) {
     return (double)ob_yaw_deg(hard_yaw_get());
 }
 
+void openbricks_hard_yaw_feed_c(double dt_ms, double rate_dps) {
+    ob_yaw_feed(hard_yaw_get(), (ob_float_t)dt_ms, (ob_float_t)rate_dps);
+}
+
+void openbricks_hard_yaw_configure_c(double scale) {
+    ob_yaw_init(hard_yaw_get(), (ob_float_t)scale);
+}
+
+void openbricks_hard_yaw_seed_bias_c(double bias_dps) {
+    // NVS-persisted calibration from a previous boot (the pbio
+    // trick): seed the estimator so a robot that boots and runs
+    // immediately isn't stuck in the pre-lock window. The slow
+    // tracker keeps refining from live stillness.
+    ob_yaw_t *y = hard_yaw_get();
+    y->bias_dps = (ob_float_t)bias_dps;
+    y->bias_locked = 1;
+}
+
+static void (*volatile hard_imu_fn)(void);
+
+void openbricks_hard_imu_install(void (*fn)(void)) {
+    hard_imu_fn = fn;
+}
+
 static mp_obj_t mp_hard_yaw_config(mp_obj_t self_in, mp_obj_t scale_in) {
     // Set the rate multiplier (mounting sign + sensitivity trim) —
     // re-inits the integrator: calibration belongs to a mounting.
@@ -596,6 +623,14 @@ static mp_obj_t mp_hard_yaw_reset(mp_obj_t self_in) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_yaw_reset_obj, mp_hard_yaw_reset);
+
+static mp_obj_t mp_hard_yaw_seed_bias(mp_obj_t self_in, mp_obj_t bias_in) {
+    (void)self_in;
+    openbricks_hard_yaw_seed_bias_c(mp_obj_get_float(bias_in));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_yaw_seed_bias_obj,
+                                 mp_hard_yaw_seed_bias);
 
 static mp_obj_t mp_hard_yaw_state(mp_obj_t self_in) {
     // (bias_dps, bias_locked, still_ms) — calibration diagnostics.
@@ -702,6 +737,7 @@ static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_hard_yaw_deg),   MP_ROM_PTR(&mp_hard_yaw_deg_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_yaw_reset), MP_ROM_PTR(&mp_hard_yaw_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_yaw_state), MP_ROM_PTR(&mp_hard_yaw_state_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_yaw_seed_bias), MP_ROM_PTR(&mp_hard_yaw_seed_bias_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_wall_clock), MP_ROM_PTR(&mp_set_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_wall_clock),    MP_ROM_PTR(&mp_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_tick_available), MP_ROM_PTR(&mp_hard_tick_available_obj) },

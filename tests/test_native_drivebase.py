@@ -110,6 +110,9 @@ class _FakeBus:
     def db_set_heading(self, deg):
         self.headings.append(deg)
 
+    def db_gyro_source(self, mode):
+        self.calls.append(("db_gyro_source", mode))
+
     def db_set_accel(self, dps2):
         self.calls.append(("db_set_accel", dps2))
 
@@ -163,6 +166,12 @@ class _FakeIMU:
 
     def heading(self):
         return self.h
+
+
+class _FakeHardIMU(_FakeIMU):
+    # The ICM-45686 marker: heading lives in the hard-tick
+    # integrator; the engine must select source 1 and never pump.
+    _hard_heading_source = True
 
 
 class _Base(unittest.TestCase):
@@ -278,6 +287,25 @@ class GyroOuterLoopTests(_Base):
         db.straight(50)
         self.assertTrue(abs(self.bus.headings[-1] - 2.0) < 0.01,
                         self.bus.headings)
+
+    def test_hard_source_imu_selects_source_1_and_never_pumps(self):
+        # ICM-45686 path: heading is computed in the hard tick; the
+        # engine selects db_gyro_source(1) (which captures the frame
+        # ref in C) and the Python pump must stay silent.
+        db = self._db(imu=_FakeHardIMU())
+        db.use_gyro(True)
+        self.assertIn(("db_gyro_source", 1), self.bus.calls)
+        self.bus.done_after = 3
+        db.straight(100)
+        self.assertEqual(self.bus.headings, [])
+
+    def test_classic_imu_selects_source_0_and_pumps(self):
+        db = self._db(imu=_FakeIMU())
+        db.use_gyro(True)
+        self.assertIn(("db_gyro_source", 0), self.bus.calls)
+        self.bus.done_after = 3
+        db.straight(100)
+        self.assertTrue(len(self.bus.headings) >= 1)
 
     def test_use_gyro_without_imu_raises(self):
         db = self._db()

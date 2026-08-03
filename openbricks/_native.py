@@ -32,3 +32,9 @@ try:
     from _openbricks_native import st_bus  # noqa: F401
 except ImportError:
     pass
+
+# Same attribute-presence contract for the raw-IMU heading source.
+try:
+    from _openbricks_native import icm45686  # noqa: F401
+except ImportError:
+    pass

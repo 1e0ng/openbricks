@@ -23,6 +23,14 @@ quacks the same) except the GPIO-driven HC-SR04.
     print(color.ambient())            # clear channel, 0-100
     print(imu.heading())              # degrees, CW-positive
 
+ICM-45686 (raw IMU, hard-tick heading)
+--------------------------------------
+
+.. automodule:: openbricks.drivers.icm45686
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 BNO055 (IMU)
 ------------
 
