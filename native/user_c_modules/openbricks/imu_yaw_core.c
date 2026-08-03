@@ -49,7 +49,19 @@ void ob_yaw_feed(ob_yaw_t *y, ob_float_t dt_ms, ob_float_t rate_dps) {
         // OB_YAW_STILL_RATE_DPS, so the bias target is bounded well
         // inside any sane range by construction.
         y->bias_dps += (y->mean_dps - y->bias_dps) * alpha;
-        y->bias_locked = 1;
+        // The lock flips only once the fast phase has CONVERGED —
+        // locking on the first update left ~all of the initial
+        // calibration to the slow tracker (caught by the binding
+        // test: 0.78 of a 0.9 dps bias learned after 1.5 s).
+        if (!y->bias_locked) {
+            ob_float_t err = y->mean_dps - y->bias_dps;
+            if (err < 0) {
+                err = -err;
+            }
+            if (err < (ob_float_t)0.05) {
+                y->bias_locked = 1;
+            }
+        }
     }
 
     y->yaw_deg += (rate_dps - y->bias_dps) * y->scale
