@@ -2347,6 +2347,76 @@ def tearDownModule():
     exec("pass")
 
 
+class HardStartLatchGateTests(unittest.TestCase):
+    """The hard button's start latch must pass the SAME gates as the
+    PCNT latch. Ungated (through 1.48.1), the stopping press's own
+    debounce confirmation — counted UNARMED ~20 ms after the disarm —
+    latched a start and the idle loop phantom-restarted the program
+    just stopped; the busy hub then killed the next BLE session
+    (bench 2026-08-03: presses 2->3, hard_stops frozen, then
+    notify_count=0)."""
+
+    def setUp(self):
+        import sys
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/x.py", poll_ms=50)
+        self.starts = []
+        self._orig_request_start = launcher._request_start
+        launcher._request_start = \
+            lambda inst: self.starts.append(1)
+        self.addCleanup(setattr, launcher, "_request_start",
+                        self._orig_request_start)
+
+        class _Stub:
+            pass
+
+        taken = [True]      # take_start answers True exactly once
+        self.taken = taken
+
+        class _MPN:
+            @staticmethod
+            def hard_button_take_start():
+                if taken and taken[0]:
+                    taken[0] = False
+                    return True
+                return False
+
+        stub = _Stub()
+        stub.motor_process = _MPN()
+        self._prev_native = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = stub
+
+        def _restore():
+            if self._prev_native is None:
+                try:
+                    del sys.modules["_openbricks_native"]
+                except KeyError:
+                    pass
+            else:
+                sys.modules["_openbricks_native"] = self._prev_native
+        self.addCleanup(_restore)
+
+    def _idle_tick(self):
+        self.btn._value = 1        # released
+        self.launcher._tick()
+
+    def test_clean_hard_latch_dispatches(self):
+        self._idle_tick()
+        self.assertEqual(len(self.starts), 1)
+
+    def test_hard_latch_swallowed_in_post_stop_lockout(self):
+        self.launcher._lockout_until_ms = launcher._now_ms() + 10000
+        self._idle_tick()
+        self.assertEqual(self.starts, [])
+
+    def test_hard_latch_attributed_to_a_held_start_press(self):
+        self.launcher._start_press_held = True
+        self.btn._value = 0        # still physically down
+        self.launcher._tick()
+        self.assertEqual(self.starts, [])
+
+
 class StopInterruptRelayTests(unittest.TestCase):
     """The hard-button stop interrupt is a pending exception the VM
     raises at the next boundary — including inside this watcher's own

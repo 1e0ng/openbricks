@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.48.2 — the hard start latch must pass the start gates
+
+Closes the "first BLE session after a button stop is dead" mystery,
+diagnosed from one stats tuple (presses 2→3 with hard_stops frozen):
+the STOPPING press's debounce confirmation lands ~20 ms after the
+disarm, so the hard sampler counts it UNARMED and latches
+`start_pending` — and the idle loop consumed that latch with NO
+gates, phantom-restarting the just-stopped program. A busy hub is
+exactly a hub whose next raw-REPL session times out with
+notify_count=0. The PCNT path has had the post-stop lockout +
+press-lifecycle attribution since Parts 9–12; the hard latch
+(1.44.0) bypassed all of it — the Part 12 meta-rule violated by the
+newest detector.
+
+Fix: `_start_gate_verdict()` — the shared gate both latches now
+pass (post-stop lockout, same-press chatter windows). Swallowed
+hard starts announce themselves ("start press ignored (...)"), per
+the Part 9 rule. Three new gate tests; the hard-button verification
+suite (1.48.1 bench, runs 1–3) stands: instant cuts, hard_stops
+counting, zero tracebacks.
+
 ## 1.48.1 — the relay must not re-post from a Python frame
 
 1.48.0's bench run: two of three stop presses cut instantly with

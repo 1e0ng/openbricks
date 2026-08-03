@@ -253,6 +253,25 @@ class Launcher:
         _flush_log()
         _request_stop(self)
 
+    def _start_gate_verdict(self, now):
+        """Shared start-dispatch gate for the PCNT latch AND the hard
+        button's start latch (Part 12 meta-rule: any detector slower
+        than the dispatcher re-reports the dispatching press — every
+        echo must be attributed to it, not treated as new input).
+        Returns ``None`` when a start may dispatch, else the reason
+        to swallow."""
+        if (self._lockout_until_ms is not None
+                and _ticks_diff(self._lockout_until_ms, now) > 0):
+            return "post-stop lockout"
+        if (self._start_press_open_ms is not None
+                or self._start_press_held
+                or self._press_consume_release
+                or (self._latch_ignore_until_ms is not None
+                    and _ticks_diff(self._latch_ignore_until_ms,
+                                    now) > 0)):
+            return "same-press chatter"
+        return None
+
     def _tick(self, _timer=None):
         try:
             self._tick_body(_timer)
@@ -398,8 +417,24 @@ class Launcher:
             try:
                 from _openbricks_native import motor_process as _mpn
                 if _mpn.hard_button_take_start():
-                    _event("hard-start-latch")
-                    _request_start(self)
+                    # Same gates as the PCNT path below (Part 12
+                    # meta-rule: every echo of a dispatching press
+                    # belongs to it). Ungated, the STOPPING press's
+                    # own debounce confirmation — which lands ~20 ms
+                    # after the disarm, so the hard sampler counts it
+                    # UNARMED — latched a start, and the idle loop
+                    # phantom-restarted the just-stopped program.
+                    # That busy hub is what killed the next BLE
+                    # session (bench 2026-08-03: presses 2->3 with
+                    # hard_stops frozen at 2, then notify_count=0).
+                    swallow = self._start_gate_verdict(now)
+                    if swallow is None:
+                        _event("hard-start-latch")
+                        _request_start(self)
+                    else:
+                        _event("hard-start-swallowed", swallow)
+                        print("openbricks: start press ignored (%s)"
+                              % swallow)
             except (ImportError, AttributeError):
                 pass
             if self._press_pcnt is not None:
@@ -412,21 +447,13 @@ class Launcher:
                     n = self._press_count_seen
                 if n != self._press_count_seen:
                     self._press_count_seen = n
-                    in_lockout = (
-                        self._lockout_until_ms is not None
-                        and _ticks_diff(self._lockout_until_ms, now) > 0)
-                    if in_lockout:
+                    verdict = self._start_gate_verdict(now)
+                    if verdict == "post-stop lockout":
                         # Post-stop bounce / re-contact edges.
                         _event("start-latch-swallowed", "lockout")
                         print("openbricks: start press ignored "
                               "(post-stop lockout)")
-                    elif (self._start_press_open_ms is not None
-                            or self._start_press_held
-                            or self._press_consume_release
-                            or (self._latch_ignore_until_ms is not None
-                                and _ticks_diff(
-                                    self._latch_ignore_until_ms,
-                                    now) > 0)):
+                    elif verdict is not None:
                         # Chatter edges of the press that already
                         # dispatched — including a press held clear
                         # through a short run's whole lifetime (its
