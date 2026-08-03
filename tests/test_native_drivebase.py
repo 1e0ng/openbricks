@@ -125,6 +125,10 @@ class _FakeBus:
         self.calls.append(("servo_counts", slot))
         return 0
 
+    def servo_feedback(self, slot):
+        self.calls.append(("servo_feedback", slot))
+        return getattr(self, "feedback", (0, 0, True))
+
     def servo_move(self, slot, delta_counts, speed_cps, accel_cps2):
         self.calls.append(("servo_move", slot, delta_counts,
                            speed_cps, accel_cps2))
@@ -389,13 +393,43 @@ class AdoptionTests(_Base):
         left.hold()
         self.assertIn(("servo_hold", 0), self.bus.calls)
 
-    def test_adopted_feedback_registers_still_raise(self):
-        # speed/load/stalled need per-slot register reads the pump
-        # doesn't do yet — still loudly gated.
+    def test_adopted_speed_load_stalled_route_through_feedback(self):
+        # 1.50.0: the pump's widened read arms the last three Motor
+        # methods. steps -> dps via steps_per_dps; load_raw (0.1% of
+        # stall) -> mNm via STALL_TORQUE_MNM; user frame comes from
+        # the slot (no double invert).
         db, left, _ = self._drivebase()
-        for method in (left.speed, left.load, left.stalled):
-            with self.assertRaises(NotImplementedError):
-                method()
+        self.bus.feedback = (455, -200, True)   # ~40 dps, -20% stall
+        self.assertAlmostEqual(left.speed(), 455 / (4096 / 360.0),
+                               places=3)
+        self.assertAlmostEqual(left.load(),
+                               -200 * left.STALL_TORQUE_MNM / 1000.0,
+                               places=3)
+        self.assertFalse(left.stalled())        # fast + light load
+
+    def test_adopted_stalled_contract(self):
+        db, left, _ = self._drivebase()
+        # Heavy load (>= STALL_LOAD_PCT*10) + barely moving.
+        self.bus.feedback = (
+            int(left.STALL_SPEED_DPS * (4096 / 360.0)) - 1,
+            left.STALL_LOAD_PCT * 10, True)
+        self.assertTrue(left.stalled())
+        # Same load but spinning fast: not stalled.
+        self.bus.feedback = (3000, left.STALL_LOAD_PCT * 10, True)
+        self.assertFalse(left.stalled())
+
+    def test_adopted_feedback_stale_is_loud(self):
+        # Silent bus: speed/load read None, stalled RAISES (a silent
+        # bus must never read as "not stalled") — classic contract.
+        db, left, _ = self._drivebase()
+        self.bus.feedback = (0, 0, False)
+        self.assertIsNone(left.speed())
+        self.assertIsNone(left.load())
+        try:
+            left.stalled()
+            self.fail("expected OSError")
+        except OSError:
+            pass
 
     def test_settings_acceleration_reaches_the_engine(self):
         db, _, _ = self._drivebase()

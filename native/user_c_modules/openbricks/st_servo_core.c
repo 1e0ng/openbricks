@@ -237,6 +237,19 @@ void ob_sservo_read_result(ob_sservo_t *s, int ok,
         sl->stale++;
         return;
     }
+    if (len >= OB_SSERVO_FEEDBACK_LEN) {
+        // Present-speed: sign-magnitude, bit 15 = negative.
+        uint16_t sp = (uint16_t)(payload[2] | (payload[3] << 8));
+        sl->speed_steps = (sp & 0x8000) ? -(int32_t)(sp & 0x7FFF)
+                                        : (int32_t)sp;
+        // Present-load: 0.1%-of-stall magnitude, bit 10 = negative
+        // (Feetech SCServo SDK convention, same decode as the Python
+        // driver's load()).
+        uint16_t ld = (uint16_t)(payload[4] | (payload[5] << 8));
+        sl->load_raw = (ld & 0x0400) ? -(int32_t)(ld & 0x03FF)
+                                     : (int32_t)(ld & 0x03FF);
+        sl->have_feedback = 1;
+    }
     uint16_t raw = (uint16_t)((payload[0] | (payload[1] << 8)) & 0x0FFF);
     if (sl->have_raw) {
         // Wrap-correct delta into [-2048, 2047]: the 12-bit position
@@ -263,4 +276,31 @@ int32_t ob_sservo_counts(const ob_sservo_t *s, int slot) {
     // paths; a drivebase depends on that symmetry).
     const ob_sservo_slot_t *sl = &s->slots[slot];
     return sl->invert ? -sl->accum : sl->accum;
+}
+
+
+int32_t ob_sservo_speed_steps(const ob_sservo_t *s, int slot) {
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
+        return 0;
+    }
+    const ob_sservo_slot_t *sl = &s->slots[slot];
+    return sl->invert ? -sl->speed_steps : sl->speed_steps;
+}
+
+
+int32_t ob_sservo_load_raw(const ob_sservo_t *s, int slot) {
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
+        return 0;
+    }
+    const ob_sservo_slot_t *sl = &s->slots[slot];
+    return sl->invert ? -sl->load_raw : sl->load_raw;
+}
+
+
+int ob_sservo_feedback_fresh(const ob_sservo_t *s, int slot) {
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
+        return 0;
+    }
+    const ob_sservo_slot_t *sl = &s->slots[slot];
+    return sl->in_use && sl->have_feedback && sl->stale == 0;
 }

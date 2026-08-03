@@ -332,6 +332,15 @@ class _SimStBus:
     def servo_counts(self, slot):
         return int(self._wheels[slot].angle() * self._STEPS_PER_DEG)
 
+    def servo_feedback(self, slot):
+        # (speed_steps, load_raw, fresh) — the firmware's widened
+        # 6-byte read surface (1.50.0). Speed is the wheel's actual
+        # velocity; the shim wheel model has no torque estimate, so
+        # load reads 0 (documented sim limitation, not a silent
+        # fake: fresh stays True because speed IS live).
+        w = self._wheels[slot]
+        return (int(w._vel_dps() * self._STEPS_PER_DEG), 0, True)
+
     def _slot_ready(self, slot):
         # Sim odometry is always live; only the db-ownership half of
         # the firmware gate applies.

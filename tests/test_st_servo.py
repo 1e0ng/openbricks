@@ -29,8 +29,15 @@ def _reply(servo_id, err, payload=b""):
     return b"\xff\xff" + body + bytes([_chk(body)])
 
 
-def _pos_reply(servo_id, raw):
-    return _reply(servo_id, 0, bytes([raw & 0xFF, (raw >> 8) & 0xFF]))
+def _pos_reply(servo_id, raw, speed=0, load=0):
+    # Widened 6-byte feedback (1.50.0): pos + speed (b15 sign) +
+    # load (b10 sign), matching the pump's read length.
+    sp = (0x8000 | -speed) if speed < 0 else speed
+    ld = (0x0400 | -load) if load < 0 else load
+    return _reply(servo_id, 0, bytes([
+        raw & 0xFF, (raw >> 8) & 0xFF,
+        sp & 0xFF, (sp >> 8) & 0xFF,
+        ld & 0xFF, (ld >> 8) & 0xFF]))
 
 
 class _Wire:

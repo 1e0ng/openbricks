@@ -40,6 +40,13 @@
 // Feedback-read deadline, in bus polls (hard ticks). 5 ms at 1 kHz.
 #define OB_SSERVO_READ_TICKS 5
 
+// Feedback read width: present-position (0x38), present-speed
+// (0x3A) and present-load (0x3C) are CONTIGUOUS, so one 6-byte read
+// returns all three for ~the wire cost of the old 2-byte position
+// read (reply grows 4 bytes ≈ 40 µs at 1 Mbps) — no extra
+// transactions, no odometry-rate dilution.
+#define OB_SSERVO_FEEDBACK_LEN 6
+
 // What the planner wants done on the (idle) bus next.
 typedef enum {
     OB_SOP_NONE = 0,        // nothing pending
@@ -83,6 +90,12 @@ typedef struct {
     uint16_t last_raw;      // last 12-bit reading
     uint8_t  have_raw;
     int32_t  accum;         // unwrapped counts (signed, multi-turn)
+    // Present-speed / present-load from the widened 6-byte read,
+    // decoded to MOTOR-frame signed values (invert applied by the
+    // accessors, like counts). Valid once have_feedback is set.
+    int32_t  speed_steps;   // signed steps/s (reg sign-magnitude b15)
+    int32_t  load_raw;      // signed 0.1%-of-stall units (b10 sign)
+    uint8_t  have_feedback;
     uint32_t reads_ok;
     uint32_t reads_failed;  // timeouts/bad replies on feedback
     uint32_t stale;         // consecutive failures (0 after success)
@@ -136,3 +149,13 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op);
 
 // Signed unwrapped position in encoder counts.
 int32_t ob_sservo_counts(const ob_sservo_t *s, int slot);
+
+// Present-speed (signed steps/s) and present-load (signed 0.1 % of
+// stall), USER frame (slot invert applied, same rule as counts).
+// Valid only while ob_sservo_feedback_fresh; both 0 before the
+// first widened read lands.
+int32_t  ob_sservo_speed_steps(const ob_sservo_t *s, int slot);
+int32_t  ob_sservo_load_raw(const ob_sservo_t *s, int slot);
+// 1 when speed/load have ever been decoded AND the last read
+// succeeded (stale == 0).
+int      ob_sservo_feedback_fresh(const ob_sservo_t *s, int slot);

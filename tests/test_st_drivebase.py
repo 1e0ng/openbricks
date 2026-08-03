@@ -63,11 +63,22 @@ class _PerfectWheels:
                 continue
             pid, ln, instr = tx[i + 2], tx[i + 3], tx[i + 4]
             pkt = tx[i:i + 4 + ln]
-            if instr == 0x02:                          # READ pos
+            if instr == 0x02:                          # READ feedback
                 self.reads += 1
                 raw = int(self.pos[pid]) & 0x0FFF
-                sb.feed_rx(_reply(pid, 0,
-                                  bytes([raw & 0xFF, (raw >> 8) & 0xFF])))
+                # Widened 6-byte feedback (1.50.0): pos + present-
+                # speed (sign-magnitude b15, = the commanded speed on
+                # a perfect wheel) + present-load (b10 sign; scaled
+                # stand-in so load plumbing is testable end to end).
+                spd = int(self.spd[pid])
+                sp = (0x8000 | -spd) if spd < 0 else spd
+                ld = min(abs(spd) // 4, 0x3FF)
+                if spd < 0:
+                    ld |= 0x0400
+                sb.feed_rx(_reply(pid, 0, bytes([
+                    raw & 0xFF, (raw >> 8) & 0xFF,
+                    sp & 0xFF, (sp >> 8) & 0xFF,
+                    ld & 0xFF, (ld >> 8) & 0xFF])))
             elif instr == 0x03 and pid != 0xFE:        # WRITE
                 sb.feed_rx(_reply(pid, 0))
             elif instr == 0x83:                        # SYNC speed
@@ -306,3 +317,48 @@ class StopAndGyroTests(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FeedbackReadTests(_Base):
+    """The widened 6-byte feedback read (1.50.0): present-speed and
+    present-load ride the SAME transaction as position — servo_feedback
+    exposes them user-frame, arming speed()/load()/stalled() on
+    adopted motors with zero extra bus traffic."""
+
+    def test_speed_and_load_flow_from_the_wire(self):
+        sb.servo_run(1, 500)          # slot 1 (id 1, not inverted)
+        self.w.advance(300)
+        steps, load, fresh = sb.servo_feedback(1)
+        self.assertTrue(fresh)
+        # _PerfectWheels reports its commanded speed as present-speed.
+        self.assertEqual(steps, 500)
+        self.assertEqual(load, 500 // 4)
+
+    def test_inverted_slot_reports_user_frame(self):
+        # Slot 0 is inverted: a user-frame +400 command runs the wire
+        # at -400; present-speed must come back user-frame +400, like
+        # counts (frame symmetry rule).
+        sb.servo_run(0, 400)
+        self.w.advance(300)
+        steps, load, fresh = sb.servo_feedback(0)
+        self.assertTrue(fresh)
+        self.assertEqual(steps, 400)
+        self.assertEqual(load, 400 // 4)
+
+    def test_feedback_not_fresh_before_first_read(self):
+        sb.test_reset()
+        self.w = _PerfectWheels()
+        sb.servo_attach(1, 1, False, 45)
+        _steps, _load, fresh = sb.servo_feedback(1)
+        self.assertFalse(fresh)
+
+    def test_feedback_goes_stale_on_bus_silence(self):
+        sb.servo_run(1, 300)
+        self.w.advance(200)
+        self.assertTrue(sb.servo_feedback(1)[2])
+        # Pump WITHOUT answering (silent wire): reads time out.
+        for _ in range(200):
+            self.w.now += 1
+            sb.servo_pump(self.w.now)
+            sb.take_tx()               # swallow requests, never reply
+        self.assertFalse(sb.servo_feedback(1)[2])

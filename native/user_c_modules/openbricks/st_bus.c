@@ -228,7 +228,8 @@ static void servo_pump_locked(ob_bus_t *b) {
                                                op.sync_n) == 0);
             break;
         case OB_SOP_READ_POS:
-            started = (ob_bus_start_read(b, op.id, OB_SREG_PRESENT_POS, 2,
+            started = (ob_bus_start_read(b, op.id, OB_SREG_PRESENT_POS,
+                                         OB_SSERVO_FEEDBACK_LEN,
                                          OB_SSERVO_READ_TICKS) == 0);
             break;
         default:
@@ -645,6 +646,26 @@ static mp_obj_t sb_servo_counts(mp_obj_t self_in, mp_obj_t slot_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_counts_obj, sb_servo_counts);
 
+static mp_obj_t sb_servo_feedback(mp_obj_t self_in, mp_obj_t slot_in) {
+    // (speed_steps_per_s, load_raw_0p1pct, fresh) — user frame (slot
+    // invert applied), from the widened 6-byte feedback read.
+    // fresh==False means the values are stale (bus silent) or no
+    // widened read has landed yet; callers surface that as None /
+    // OSError, never as a silent 0.
+    (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
+    bus_take();
+    ob_sservo_t *sv = sservo_get();
+    mp_obj_t t[3] = {
+        mp_obj_new_int(ob_sservo_speed_steps(sv, slot)),
+        mp_obj_new_int(ob_sservo_load_raw(sv, slot)),
+        mp_obj_new_bool(ob_sservo_feedback_fresh(sv, slot)),
+    };
+    bus_release();
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_feedback_obj, sb_servo_feedback);
+
 static mp_obj_t sb_servo_stats(mp_obj_t self_in, mp_obj_t slot_in) {
     (void)self_in;
     int slot = mp_obj_get_int(slot_in);
@@ -951,6 +972,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_hold),       MP_ROM_PTR(&sb_servo_hold_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_move_done),  MP_ROM_PTR(&sb_servo_move_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_counts),     MP_ROM_PTR(&sb_servo_counts_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_feedback),   MP_ROM_PTR(&sb_servo_feedback_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_stats),      MP_ROM_PTR(&sb_servo_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_pump),       MP_ROM_PTR(&sb_servo_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_encode),     MP_ROM_PTR(&sb_servo_encode_obj) },
