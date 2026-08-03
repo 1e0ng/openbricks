@@ -59,6 +59,10 @@ run_one test_st_move_core \
     "${CORES}/st_move_core.c" \
     "${CORES}/trajectory_core.c"
 
+run_one test_imu_yaw_core \
+    "${TESTS}/test_imu_yaw_core.c" \
+    "${CORES}/imu_yaw_core.c"
+
 if [ "${fail}" -ne 0 ]; then
     echo "C unit tests: FAILED"
     exit 1

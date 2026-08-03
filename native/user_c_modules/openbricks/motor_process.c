@@ -46,6 +46,7 @@
 
 #include "motor_process.h"
 #include "motor_process_core.h"
+#include "imu_yaw_core.h"
 
 #define DEFAULT_PERIOD_MS 1
 
@@ -544,6 +545,71 @@ static mp_obj_t mp_hard_button_stats(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_button_stats_obj, mp_hard_button_stats);
 #endif
 
+// ---- hard-tick yaw integrator (imu_yaw_core) ----
+//
+// The raw-IMU heading source for the ICM-45686 arc. The (future)
+// SPI driver feeds gyro-Z samples from the hard tick; until it
+// exists, the feed binding is the test/diagnostic seam. Unguarded:
+// the core is pure C and the unix suite drives it synthetically.
+static ob_yaw_t hard_yaw;
+static uint8_t  hard_yaw_inited;
+
+static ob_yaw_t *hard_yaw_get(void) {
+    if (!hard_yaw_inited) {
+        ob_yaw_init(&hard_yaw, (ob_float_t)1.0);
+        hard_yaw_inited = 1;
+    }
+    return &hard_yaw;
+}
+
+double openbricks_hard_yaw_deg(void) {
+    return (double)ob_yaw_deg(hard_yaw_get());
+}
+
+static mp_obj_t mp_hard_yaw_config(mp_obj_t self_in, mp_obj_t scale_in) {
+    // Set the rate multiplier (mounting sign + sensitivity trim) —
+    // re-inits the integrator: calibration belongs to a mounting.
+    (void)self_in;
+    ob_yaw_init(hard_yaw_get(), (ob_float_t)mp_obj_get_float(scale_in));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_yaw_config_obj, mp_hard_yaw_config);
+
+static mp_obj_t mp_hard_yaw_feed(mp_obj_t self_in, mp_obj_t dt_ms_in,
+                                 mp_obj_t rate_dps_in) {
+    (void)self_in;
+    ob_yaw_feed(hard_yaw_get(), (ob_float_t)mp_obj_get_float(dt_ms_in),
+                (ob_float_t)mp_obj_get_float(rate_dps_in));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mp_hard_yaw_feed_obj, mp_hard_yaw_feed);
+
+static mp_obj_t mp_hard_yaw_deg(mp_obj_t self_in) {
+    (void)self_in;
+    return mp_obj_new_float((mp_float_t)ob_yaw_deg(hard_yaw_get()));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_yaw_deg_obj, mp_hard_yaw_deg);
+
+static mp_obj_t mp_hard_yaw_reset(mp_obj_t self_in) {
+    (void)self_in;
+    ob_yaw_reset(hard_yaw_get());
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_yaw_reset_obj, mp_hard_yaw_reset);
+
+static mp_obj_t mp_hard_yaw_state(mp_obj_t self_in) {
+    // (bias_dps, bias_locked, still_ms) — calibration diagnostics.
+    (void)self_in;
+    ob_yaw_t *y = hard_yaw_get();
+    mp_obj_t t[3] = {
+        mp_obj_new_float((mp_float_t)y->bias_dps),
+        mp_obj_new_bool(y->bias_locked),
+        mp_obj_new_float((mp_float_t)y->still_ms),
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_yaw_state_obj, mp_hard_yaw_state);
+
 static mp_obj_t mp_now_ms(mp_obj_t self_in) {
     (void)self_in;
     (void)mp_get();   // lazy init
@@ -631,6 +697,11 @@ static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tick),          MP_ROM_PTR(&mp_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_running),    MP_ROM_PTR(&mp_is_running_obj) },
     { MP_ROM_QSTR(MP_QSTR_now_ms),        MP_ROM_PTR(&mp_now_ms_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_yaw_config), MP_ROM_PTR(&mp_hard_yaw_config_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_yaw_feed),  MP_ROM_PTR(&mp_hard_yaw_feed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_yaw_deg),   MP_ROM_PTR(&mp_hard_yaw_deg_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_yaw_reset), MP_ROM_PTR(&mp_hard_yaw_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_yaw_state), MP_ROM_PTR(&mp_hard_yaw_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_wall_clock), MP_ROM_PTR(&mp_set_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_wall_clock),    MP_ROM_PTR(&mp_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_tick_available), MP_ROM_PTR(&mp_hard_tick_available_obj) },

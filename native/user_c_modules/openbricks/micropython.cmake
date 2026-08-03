@@ -15,6 +15,7 @@ target_sources(usermod_openbricks INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/st_bus_core.c
     ${CMAKE_CURRENT_LIST_DIR}/st_servo_core.c
     ${CMAKE_CURRENT_LIST_DIR}/st_move_core.c
+    ${CMAKE_CURRENT_LIST_DIR}/imu_yaw_core.c
     ${CMAKE_CURRENT_LIST_DIR}/st_button_core.c
     ${CMAKE_CURRENT_LIST_DIR}/trajectory.c
     ${CMAKE_CURRENT_LIST_DIR}/trajectory_core.c

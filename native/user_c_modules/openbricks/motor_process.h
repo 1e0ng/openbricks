@@ -34,3 +34,9 @@ void openbricks_motor_process_unregister_c(openbricks_tick_fn_t fn, void *ctx);
 // and tests (where the virtual clock drives the timer, so real wall
 // time never advances inside a simulated tick).
 mp_int_t openbricks_motor_process_now_ms(void);
+
+// Continuous body heading (degrees, CW-positive) from the hard-tick
+// yaw integrator (imu_yaw_core) — the raw-IMU heading source
+// (ICM-45686 arc). st_bus reads it every db tick when
+// db_gyro_source(1) is selected.
+double openbricks_hard_yaw_deg(void);

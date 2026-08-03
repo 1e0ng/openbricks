@@ -362,3 +362,98 @@ class FeedbackReadTests(_Base):
             sb.servo_pump(self.w.now)
             sb.take_tx()               # swallow requests, never reply
         self.assertFalse(sb.servo_feedback(1)[2])
+
+
+class HardHeadingSourceTests(_Base):
+    """db_gyro_source(1): the db tick pulls heading from the hard-tick
+    yaw integrator (imu_yaw_core) every millisecond — the raw-IMU
+    (ICM-45686) path, no Python pump. The feed binding is the
+    synthetic-gyro seam until the SPI driver exists."""
+
+    def setUp(self):
+        super().setUp()
+        from _openbricks_native import motor_process as m
+        self.m = m
+        m.hard_yaw_config(1.0)     # re-init integrator, unit scale
+        sb.db_use_gyro(True)
+        sb.db_gyro_source(1)
+
+    def _pump_with_hard_gyro(self):
+        """One pump, feeding the integrator the body rate implied by
+        the wheels — an honest 1 kHz gyro on a non-slipping chassis."""
+        prev = ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+                * 360.0 / 4096.0) / (136.0 / 88.0)
+        self.w.pump()
+        now = ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+               * 360.0 / 4096.0) / (136.0 / 88.0)
+        self.m.hard_yaw_feed(1.0, (now - prev) * 1000.0)
+
+    def test_gyro_turn_converges_on_the_hard_source(self):
+        sb.db_turn(45.0, 60.0)
+        for _ in range(5000):
+            self._pump_with_hard_gyro()
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        body = ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+                * 360.0 / 4096.0) / (136.0 / 88.0)
+        self.assertTrue(abs(body - 45.0) < 3.0,
+                        "hard-source turn landed at %.1f body-deg" % body)
+
+    def test_source_selection_captures_the_reference(self):
+        # Yaw accumulated BEFORE selecting the source must not leak
+        # into the frame: select-time yaw is the zero.
+        for _ in range(500):
+            self.m.hard_yaw_feed(1.0, 90.0)   # +45 deg of pre-history
+        sb.db_gyro_source(1)                  # re-select: new ref
+        sb.db_turn(20.0, 60.0)
+        for _ in range(4000):
+            self._pump_with_hard_gyro()
+            if sb.db_done():
+                break
+        body = ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+                * 360.0 / 4096.0) / (136.0 / 88.0)
+        self.assertTrue(abs(body - 20.0) < 3.0,
+                        "pre-history leaked: landed %.1f" % body)
+
+    def test_reset_runtime_restores_python_source(self):
+        sb.reset_runtime()
+        # Rebuild a minimal db; with source back to 0, the tick must
+        # NOT pull from the integrator (the Python override rules).
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.w.advance(50)
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+        sb.db_use_gyro(True)
+        for _ in range(300):
+            self.m.hard_yaw_feed(1.0, 200.0)  # integrator spinning
+        sb.db_set_heading(0.0)
+        sb.db_straight(100.0, 60.0)
+        self.w.advance(200)
+        # Python source: heading pinned at 0 -> wheels stay matched
+        # (no counter-steer against the integrator's phantom spin).
+        dl = sb.servo_counts(0)
+        dr = sb.servo_counts(1)
+        self.assertTrue(abs(dl - dr) < 60, (dl, dr))
+
+    def test_yaw_bindings_and_calibration_surface(self):
+        # Exercises the full binding surface + the core's branch set
+        # under gcov (c-unit covers the core separately; this makes
+        # the MP-coverage build see it too): rest-bias learn -> state
+        # shows the lock; zero-dt guard; negative mounting scale;
+        # reset keeps calibration.
+        m = self.m
+        m.hard_yaw_config(-1.0)
+        for _ in range(1500):
+            m.hard_yaw_feed(1.0, 0.9)          # rest with 0.9 dps bias
+        bias, locked, _still = m.hard_yaw_state()
+        self.assertTrue(locked)
+        self.assertTrue(abs(bias - 0.9) < 0.1)
+        m.hard_yaw_feed(0.0, 500.0)            # zero-dt: ignored
+        for _ in range(1000):
+            m.hard_yaw_feed(1.0, 90.9)         # 90 dps turn (+bias)
+        self.assertTrue(abs(m.hard_yaw_deg() + 90.0) < 3.0)  # sign -1
+        m.hard_yaw_reset()
+        self.assertTrue(abs(m.hard_yaw_deg()) < 1e-6)
+        _bias2, locked2, _s2 = m.hard_yaw_state()
+        self.assertTrue(locked2)               # reset keeps the cal

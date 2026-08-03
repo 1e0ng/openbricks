@@ -21,6 +21,7 @@
 #include "st_servo_core.h"
 #include "st_move_core.h"
 #include "drivebase_core.h"
+#include "motor_process.h"
 
 #include <string.h>
 
@@ -141,6 +142,14 @@ static bool st_db_active;
 // Pre-1.46.0 the configured db wrote hold targets forever, which
 // also torqued the wheels stiff from the moment of construction.
 static bool st_db_writing;
+// Heading source for gyro mode: 0 = Python override (db_set_heading,
+// the BNO055 pump), 1 = the hard-tick yaw integrator
+// (openbricks_hard_yaw_deg — the raw-IMU/ICM-45686 path). With
+// source 1 the db tick pulls heading EVERY millisecond in C; the
+// reference is captured at source selection (enable-is-the-frame
+// rule, same as the Python engine's).
+static uint8_t st_db_gyro_source;
+static ob_float_t st_db_yaw_ref;
 static int st_db_slot_l = -1, st_db_slot_r = -1;
 static uint32_t st_db_now_ms;      // clock fed by the pump caller
 
@@ -173,6 +182,11 @@ static void st_db_tick_locked(void) {
         return;                    // configured but yielded
     }
     ob_sservo_t *sv = sservo_get();
+    if (st_db.use_gyro && st_db_gyro_source == 1) {
+        st_db.heading_override_wheel_deg = ob_drivebase_body_to_wheel_diff(
+            &st_db,
+            (ob_float_t)openbricks_hard_yaw_deg() - st_db_yaw_ref);
+    }
     ob_drivebase_tick(&st_db, (long)st_db_now_ms);
     // Wheel-degree targets -> slot steps/s. set_speed re-applies the
     // slot invert, mirroring how counts un-applied it above.
@@ -344,6 +358,7 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     sservo_inited = false;
     tick_txn = 0;
     tick_txn_is_read = 0;
+    st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
     st_moves_reset_all();
@@ -863,6 +878,22 @@ static mp_obj_t sb_db_stop(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_stop_obj, sb_db_stop);
 
+static mp_obj_t sb_db_gyro_source(mp_obj_t self_in, mp_obj_t mode_in) {
+    // 0 = Python db_set_heading override (default); 1 = hard-tick
+    // yaw integrator. Selecting 1 captures the current yaw as the
+    // frame reference.
+    (void)self_in;
+    int mode = mp_obj_get_int(mode_in);
+    bus_take();
+    st_db_gyro_source = (mode == 1) ? 1 : 0;
+    if (st_db_gyro_source == 1) {
+        st_db_yaw_ref = (ob_float_t)openbricks_hard_yaw_deg();
+    }
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_db_gyro_source_obj, sb_db_gyro_source);
+
 static mp_obj_t sb_db_done(mp_obj_t self_in) {
     (void)self_in;
     bus_take();
@@ -921,6 +952,7 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     // not program state, and attach_uart re-configures idempotently.
     (void)self_in;
     bus_take();
+    st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
     st_moves_reset_all();
@@ -984,6 +1016,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_turn),          MP_ROM_PTR(&sb_db_turn_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_stop),          MP_ROM_PTR(&sb_db_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_done),          MP_ROM_PTR(&sb_db_done_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_gyro_source),  MP_ROM_PTR(&sb_db_gyro_source_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_accel),     MP_ROM_PTR(&sb_db_set_accel_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_heading),   MP_ROM_PTR(&sb_db_set_heading_obj) },
