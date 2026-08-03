@@ -2382,18 +2382,25 @@ class StopInterruptRelayTests(unittest.TestCase):
         self.launcher._tick()
         self.assertEqual(self.resignals, [])
 
-    def test_resignal_helper_is_safe_on_every_runtime(self):
-        # The REAL helper body (un-patched): on unix-MP/firmware the
-        # binding posts a pending KeyboardInterrupt — delivered at the
-        # next VM boundary, absorbed right here; on CPython the
-        # binding is absent (or a stub without the attr) and the
-        # guard swallows. Either way it must not blow up the caller.
+    def test_resignal_helper_relays_via_the_stop_flag(self):
+        # The REAL helper body (un-patched) must NOT post a pending
+        # interrupt from Python — a Python-frame post self-delivers at
+        # the poster's next bytecode (the 1.48.0 relay re-received its
+        # own post; bench traceback into _resignal_stop_interrupt).
+        # It relays through the native request_stop flag instead, so
+        # the C-function stop_tick (no Python bytecodes after the
+        # post) does the injection. Calling it must therefore return
+        # cleanly on every runtime — no KeyboardInterrupt HERE.
+        self._orig_resignal()
+        for _ in range(4):
+            pass    # VM boundaries: nothing may fire in this frame
+        # Drop the flag we just set — disarm clears a stale request —
+        # so no later armed test inherits a phantom stop.
         try:
-            self._orig_resignal()
-            for _ in range(4):
-                pass    # a few VM boundaries for the pending delivery
-        except KeyboardInterrupt:
-            pass        # MP: the relayed interrupt arrived, as designed
+            from _openbricks_native import set_stop_armed
+            set_stop_armed(False)
+        except (ImportError, AttributeError):
+            pass
 
     def test_other_exceptions_still_propagate(self):
         # Only the stop interrupt is relayed; genuine bugs in the

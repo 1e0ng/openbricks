@@ -518,24 +518,6 @@ static mp_obj_t mp_hard_button_stats(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_button_stats_obj, mp_hard_button_stats);
 #endif
 
-static mp_obj_t mp_resignal_keyboard_interrupt(mp_obj_t self_in) {
-    // Relay for an EATEN stop interrupt. mp_sched_keyboard_interrupt
-    // sets a pending exception the VM raises at the next boundary —
-    // whichever Python frame that is. When a soft Timer callback
-    // (launcher watcher, BLE-toggle poll) happens to be executing,
-    // the interrupt unwinds the CALLBACK, MicroPython logs it, and
-    // the program keeps running (bench 2026-08-03: hard_stops
-    // incremented, traceback into launcher._tick/log.pump printed,
-    // program continued). Those callbacks catch KeyboardInterrupt
-    // and call this to re-post, so delivery retries until it lands
-    // in the program.
-    (void)self_in;
-    mp_sched_keyboard_interrupt();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mp_resignal_keyboard_interrupt_obj,
-                                 mp_resignal_keyboard_interrupt);
-
 static mp_obj_t mp_now_ms(mp_obj_t self_in) {
     (void)self_in;
     (void)mp_get();   // lazy init
@@ -623,7 +605,6 @@ static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tick),          MP_ROM_PTR(&mp_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_running),    MP_ROM_PTR(&mp_is_running_obj) },
     { MP_ROM_QSTR(MP_QSTR_now_ms),        MP_ROM_PTR(&mp_now_ms_obj) },
-    { MP_ROM_QSTR(MP_QSTR_resignal_keyboard_interrupt), MP_ROM_PTR(&mp_resignal_keyboard_interrupt_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_wall_clock), MP_ROM_PTR(&mp_set_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_wall_clock),    MP_ROM_PTR(&mp_wall_clock_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_tick_available), MP_ROM_PTR(&mp_hard_tick_available_obj) },

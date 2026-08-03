@@ -696,12 +696,23 @@ def dump_events():
 
 def _resignal_stop_interrupt():
     """Re-post a stop KeyboardInterrupt that was delivered into a
-    soft Timer callback instead of the program. Guarded: off-firmware
+    soft Timer callback instead of the program.
+
+    NOT via ``mp_sched_keyboard_interrupt`` from here: a pending
+    exception posted from Python fires at the poster's very next
+    bytecode — the 1.48.0 relay re-received its own post inside this
+    function and the interrupt escaped the callback anyway (bench:
+    traceback into ``_resignal_stop_interrupt``, stop delayed to the
+    watcher retry). The only self-delivery-proof context is a frame
+    with no Python bytecodes after the post — which is exactly the
+    C-function ``stop_tick`` Timer (Part 4 architecture). So relay
+    through its flag: ``request_stop()`` + the armed 20 ms stop tick
+    re-inject into the program, ≤20 ms later. Guarded: off-firmware
     the binding is absent, and the watcher's STOP_RETRY_MS machinery
     still delivers eventually."""
     try:
-        from _openbricks_native import motor_process as _mpn
-        _mpn.resignal_keyboard_interrupt()
+        from _openbricks_native import request_stop
+        request_stop()
     except (ImportError, AttributeError):
         pass
 
