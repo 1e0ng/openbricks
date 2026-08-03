@@ -2382,6 +2382,19 @@ class StopInterruptRelayTests(unittest.TestCase):
         self.launcher._tick()
         self.assertEqual(self.resignals, [])
 
+    def test_resignal_helper_is_safe_on_every_runtime(self):
+        # The REAL helper body (un-patched): on unix-MP/firmware the
+        # binding posts a pending KeyboardInterrupt — delivered at the
+        # next VM boundary, absorbed right here; on CPython the
+        # binding is absent (or a stub without the attr) and the
+        # guard swallows. Either way it must not blow up the caller.
+        try:
+            self._orig_resignal()
+            for _ in range(4):
+                pass    # a few VM boundaries for the pending delivery
+        except KeyboardInterrupt:
+            pass        # MP: the relayed interrupt arrived, as designed
+
     def test_other_exceptions_still_propagate(self):
         # Only the stop interrupt is relayed; genuine bugs in the
         # tick body must stay loud.
