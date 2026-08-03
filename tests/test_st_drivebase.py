@@ -457,3 +457,10 @@ class HardHeadingSourceTests(_Base):
         self.assertTrue(abs(m.hard_yaw_deg()) < 1e-6)
         _bias2, locked2, _s2 = m.hard_yaw_state()
         self.assertTrue(locked2)               # reset keeps the cal
+        # NVS-seeding path: a stored bias installs directly and
+        # counts as calibrated.
+        m.hard_yaw_config(1.0)                 # re-init: lock cleared
+        m.hard_yaw_seed_bias(0.5)
+        bias3, locked3, _s3 = m.hard_yaw_state()
+        self.assertTrue(locked3)
+        self.assertTrue(abs(bias3 - 0.5) < 1e-9)

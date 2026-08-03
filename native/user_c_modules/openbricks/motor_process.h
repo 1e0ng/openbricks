@@ -40,3 +40,13 @@ mp_int_t openbricks_motor_process_now_ms(void);
 // (ICM-45686 arc). st_bus reads it every db tick when
 // db_gyro_source(1) is selected.
 double openbricks_hard_yaw_deg(void);
+
+// C-side feeds/config for the hard-tick IMU consumer (icm45686.c) —
+// no mp_* involved, callable from the esp_timer context.
+void openbricks_hard_yaw_feed_c(double dt_ms, double rate_dps);
+void openbricks_hard_yaw_configure_c(double scale);
+void openbricks_hard_yaw_seed_bias_c(double bias_dps);
+
+// Single-slot hard-tick IMU consumer, called from the dispatcher
+// right after the button sampler. Install once at config time.
+void openbricks_hard_imu_install(void (*fn)(void));

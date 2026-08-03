@@ -172,16 +172,28 @@ class _SerialNativeEngine:
 
     def use_gyro(self, enable):
         """Heading feedback from the IMU instead of the wheel
-        differential. Requires ``imu`` at construction."""
+        differential. Requires ``imu`` at construction.
+
+        Hard-source IMUs (``_hard_heading_source`` marker — the
+        ICM-45686) feed the controller INSIDE the hard tick at
+        1 kHz: the C tick pulls the yaw integrator directly
+        (``db_gyro_source(1)``) and the Python pump is skipped
+        entirely. Fused/I2C IMUs (BNO055) keep the classic pump."""
         enable = bool(enable)
         if enable and self._imu is None:
             raise ValueError("use_gyro(True) needs an imu")
-        if enable and not self._use_gyro:
+        self._hard_gyro = bool(enable and getattr(
+            self._imu, "_hard_heading_source", False))
+        if enable and not self._use_gyro and not self._hard_gyro:
             # Fresh absolute frame: current heading is zero/target.
             self._gyro_cont = 0.0
             self._gyro_prev = self._imu.heading()
         self._use_gyro = enable
         self._sb.db_use_gyro(enable)
+        gyro_source = getattr(self._sb, "db_gyro_source", None)
+        if gyro_source is not None:
+            # Selecting source 1 captures the frame reference in C.
+            gyro_source(1 if self._hard_gyro else 0)
 
     # -- moves -----------------------------------------------------------
 
@@ -225,7 +237,10 @@ class _SerialNativeEngine:
     def _gyro_pump(self):
         """One outer-loop iteration: read the IMU, unwrap across the
         +/-180 boundary into the continuous frame, feed the C
-        controller. ~50-100 Hz from the wait loop."""
+        controller. ~50-100 Hz from the wait loop. No-op on the
+        hard source — the C tick feeds itself at 1 kHz."""
+        if getattr(self, "_hard_gyro", False):
+            return
         h = self._imu.heading()
         d = h - self._gyro_prev
         if d > 180.0:

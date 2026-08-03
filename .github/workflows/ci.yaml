@@ -78,8 +78,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Build + run C core tests (sanitized)
-        run: scripts/run_c_tests.sh
+      - name: Build + run C core tests (sanitized, gcov-instrumented)
+        run: COVERAGE=1 scripts/run_c_tests.sh
+      - name: Upload c-unit coverage to Codecov (c-core flag)
+        # Several cores (st_button, icm45686) are firmware-gated at
+        # the binding layer and can only EXECUTE here off-hardware;
+        # this upload is what makes their (thorough) c-unit coverage
+        # visible to codecov instead of reading as untested.
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: tests/c/build
+          flags: c-core
+          fail_ci_if_error: false
 
   cpython-tests:
     # Run every CPython-compatible firmware test under stock CPython 3.
@@ -115,6 +126,8 @@ jobs:
             tests.test_interfaces \
             tests.test_launcher \
             tests.test_native_drivebase \
+              tests.test_icm45686 \
+            tests.test_icm45686 \
             tests.test_l298n \
             tests.test_tcs34725 \
             tests.test_st3215 \
