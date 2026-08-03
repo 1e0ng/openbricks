@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.49.0 — majority-vote debounce: chatter must not hide presses
+
+The bench run-log cross-check showed the hard sampler missing
+1-of-4 real presses outright (hard counters frozen while the
+chatter-immune PCNT edge counter caught the same press) and
+catching another only after the disarm. The consecutive-stability
+rule was the culprit: 20 CONSECUTIVE ms at the new level, so one
+sub-ms glitch anywhere in the hold restarts the count — on a
+chattery line a press can never accumulate 20 clean samples.
+
+`st_button_core` now votes: pressed when ≥15 of the last 20 one-ms
+samples read pressed, released when ≤5 — the 10-sample hysteresis
+gap makes mid-hold flicker unable to toggle the state, and a clean
+press fires in 15 ms (faster than before). c-unit suite rewritten
+around the bench chatter patterns (80%-duty chattery press fires
+once; 50% alternating noise never fires; short taps rejected;
+sliding-count consistency over 100k samples). `hard_button_probe`'s
+fourth field is now the window count (near 20 during a healthy hold;
+mid-range = heavy chatter).
+
 ## 1.48.2 — the hard start latch must pass the start gates
 
 Closes the "first BLE session after a button stop is dead" mystery,

@@ -32,11 +32,21 @@
 
 #include <stdint.h>
 
-// Debounce: a level change must hold this many consecutive ticks
-// (1 kHz) to be believed. The launcher's 50 ms poll needed 2 polls
-// (100 ms); at 1 kHz, 20 ms of stability rejects the same contact
-// chatter with 5x less latency.
-#define OB_BUTTON_DEBOUNCE_TICKS 20
+// Debounce: N-of-M majority vote over a sliding sample window with
+// hysteresis, NOT consecutive-sample stability. The original rule
+// (20 CONSECUTIVE ticks at the new level) was defeated by real
+// contact chatter: one sub-ms glitch anywhere in the hold restarted
+// the count, and the bench sampler missed 1-of-4 presses outright
+// (2026-08-03, hard counters frozen while the chatter-immune PCNT
+// edge counter caught the same press). Majority voting absorbs
+// flicker: a press registers when >= ON_THRESH of the last WINDOW
+// 1 kHz samples read pressed (clean press: 15 ms to fire, FASTER
+// than the old 20), and releases only when <= OFF_THRESH read
+// pressed — the 10-sample hysteresis gap means mid-hold chatter
+// cannot toggle the state.
+#define OB_BUTTON_WINDOW       20
+#define OB_BUTTON_ON_THRESH    15
+#define OB_BUTTON_OFF_THRESH    5
 
 typedef enum {
     OB_BUTTON_NONE = 0,
@@ -51,9 +61,10 @@ typedef struct {
     int  (*read_pressed)(void *ctx);
     void *ctx;
 
-    uint8_t  stable_pressed;    // debounced level
-    uint8_t  raw_last;
-    uint16_t raw_count;         // consecutive ticks at raw_last
+    uint32_t window;            // last WINDOW samples, bit 0 = newest
+    uint8_t  win_count;         // pressed samples in the window
+    uint8_t  stable_pressed;    // debounced level (hysteresis state)
+    uint8_t  raw_last;          // most recent raw sample (diagnostics)
     uint32_t n_presses;         // cumulative debounced press edges
     uint32_t n_releases;
 } ob_button_t;
@@ -61,5 +72,5 @@ typedef struct {
 void ob_button_init(ob_button_t *b,
                     int (*read_pressed)(void *ctx), void *ctx);
 
-// One hard tick: sample, debounce, return the edge event (if any).
+// One hard tick: sample, vote, return the edge event (if any).
 ob_button_event_t ob_button_tick(ob_button_t *b);

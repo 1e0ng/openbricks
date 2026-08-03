@@ -478,17 +478,19 @@ static mp_obj_t mp_hard_button_probe(mp_obj_t self_in) {
     // stayed 0; every link visible from Python was healthy, so
     // expose the invisible ones): the pin the tick keys off,
     // ob_gpio_read's answer for it RIGHT NOW, and the debounce
-    // machine's raw_last / raw_count / stable_pressed. A raw_count
-    // that keeps resetting during a press = line chatter defeating
-    // the 20-tick stability rule; ob_gpio_read stuck at 1 while
-    // machine.Pin reads 0 = the shim and the pad disagree.
+    // machine's raw_last / window-count / stable_pressed. Since the
+    // N-of-M rewrite (1.49.0), the fourth field is the number of
+    // pressed samples in the last OB_BUTTON_WINDOW — during a held
+    // press it should sit near 20; hovering mid-range = heavy
+    // chatter; ob_gpio_read stuck at 1 while machine.Pin reads 0 =
+    // the shim and the pad disagree.
     (void)self_in;
     int pin = hard_button_pin;
     mp_obj_t t[5] = {
         mp_obj_new_int(pin),
         mp_obj_new_int(pin >= 0 ? ob_gpio_read(pin) : -1),
         mp_obj_new_int(hard_button.raw_last),
-        mp_obj_new_int(hard_button.raw_count),
+        mp_obj_new_int(hard_button.win_count),
         mp_obj_new_int(hard_button.stable_pressed),
     };
     return mp_obj_new_tuple(5, t);
