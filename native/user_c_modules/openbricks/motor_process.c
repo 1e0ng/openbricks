@@ -604,7 +604,7 @@ static mp_obj_t mp_hard_yaw_config(mp_obj_t self_in, mp_obj_t scale_in) {
     // Set the rate multiplier (mounting sign + sensitivity trim) —
     // re-inits the integrator: calibration belongs to a mounting.
     (void)self_in;
-    ob_yaw_init(hard_yaw_get(), (ob_float_t)mp_obj_get_float(scale_in));
+    openbricks_hard_yaw_configure_c(mp_obj_get_float(scale_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_yaw_config_obj, mp_hard_yaw_config);
@@ -612,8 +612,8 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_yaw_config_obj, mp_hard_yaw_config);
 static mp_obj_t mp_hard_yaw_feed(mp_obj_t self_in, mp_obj_t dt_ms_in,
                                  mp_obj_t rate_dps_in) {
     (void)self_in;
-    ob_yaw_feed(hard_yaw_get(), (ob_float_t)mp_obj_get_float(dt_ms_in),
-                (ob_float_t)mp_obj_get_float(rate_dps_in));
+    openbricks_hard_yaw_feed_c(mp_obj_get_float(dt_ms_in),
+                               mp_obj_get_float(rate_dps_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(mp_hard_yaw_feed_obj, mp_hard_yaw_feed);
