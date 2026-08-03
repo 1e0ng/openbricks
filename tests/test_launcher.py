@@ -2402,6 +2402,31 @@ class StopInterruptRelayTests(unittest.TestCase):
         except (ImportError, AttributeError):
             pass
 
+    def test_resignal_helper_calls_request_stop(self):
+        # The relay's whole contract is one native call: set the stop
+        # flag for the C-function stop_tick to deliver. Pin it with a
+        # recording stub (plain-class instance: works for from-import
+        # via sys.modules on BOTH runtimes; module instances can't be
+        # created on MP).
+        import sys
+        calls = []
+
+        class _Stub:
+            pass
+
+        stub = _Stub()
+        stub.request_stop = lambda: calls.append(1)
+        prev = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = stub
+        try:
+            self._orig_resignal()
+        finally:
+            if prev is None:
+                del sys.modules["_openbricks_native"]
+            else:
+                sys.modules["_openbricks_native"] = prev
+        self.assertEqual(len(calls), 1)
+
     def test_other_exceptions_still_propagate(self):
         # Only the stop interrupt is relayed; genuine bugs in the
         # tick body must stay loud.
