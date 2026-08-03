@@ -69,14 +69,14 @@ TEST(scale_carries_mounting_sign) {
     CHECK(fabs((double)ob_yaw_deg(&y) + 90.0) < 0.5);
 }
 
-TEST(bias_is_clamped) {
+TEST(bias_target_is_bounded_by_the_stillness_gate) {
+    // Learning only engages while |mean| < STILL_RATE, so the bias
+    // can converge to a target just under the gate but never chase
+    // anything beyond it (no clamp needed by construction).
     ob_yaw_init(&y, 1.0);
-    // A "bias" beyond the clamp is a broken part; the estimator must
-    // not chase it past the limit. 2.9 dps is under STILL_RATE so
-    // stillness engages; force mean high by feeding just under it.
     feed_ms(2.9, 10000);
-    CHECK((double)y.bias_dps <= OB_YAW_BIAS_MAX_DPS + 1e-9);
     CHECK(fabs((double)y.bias_dps - 2.9) < 0.1);
+    CHECK((double)y.bias_dps < OB_YAW_STILL_RATE_DPS);
 }
 
 TEST(dt_jitter_integrates_by_measured_time) {
@@ -122,7 +122,7 @@ int main(void) {
     RUN(slow_constant_creep_is_not_eaten_as_bias);
     RUN(noisy_rest_blocks_the_stillness_clock);
     RUN(scale_carries_mounting_sign);
-    RUN(bias_is_clamped);
+    RUN(bias_target_is_bounded_by_the_stillness_gate);
     RUN(dt_jitter_integrates_by_measured_time);
     RUN(reset_zeroes_yaw_but_keeps_calibration);
     RUN(zero_or_negative_dt_is_ignored);

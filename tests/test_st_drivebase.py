@@ -435,3 +435,25 @@ class HardHeadingSourceTests(_Base):
         dl = sb.servo_counts(0)
         dr = sb.servo_counts(1)
         self.assertTrue(abs(dl - dr) < 60, (dl, dr))
+
+    def test_yaw_bindings_and_calibration_surface(self):
+        # Exercises the full binding surface + the core's branch set
+        # under gcov (c-unit covers the core separately; this makes
+        # the MP-coverage build see it too): rest-bias learn -> state
+        # shows the lock; zero-dt guard; negative mounting scale;
+        # reset keeps calibration.
+        m = self.m
+        m.hard_yaw_config(-1.0)
+        for _ in range(1500):
+            m.hard_yaw_feed(1.0, 0.9)          # rest with 0.9 dps bias
+        bias, locked, _still = m.hard_yaw_state()
+        self.assertTrue(locked)
+        self.assertTrue(abs(bias - 0.9) < 0.1)
+        m.hard_yaw_feed(0.0, 500.0)            # zero-dt: ignored
+        for _ in range(1000):
+            m.hard_yaw_feed(1.0, 90.9)         # 90 dps turn (+bias)
+        self.assertTrue(abs(m.hard_yaw_deg() + 90.0) < 3.0)  # sign -1
+        m.hard_yaw_reset()
+        self.assertTrue(abs(m.hard_yaw_deg()) < 1e-6)
+        _bias2, locked2, _s2 = m.hard_yaw_state()
+        self.assertTrue(locked2)               # reset keeps the cal

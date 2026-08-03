@@ -45,12 +45,10 @@ void ob_yaw_feed(ob_yaw_t *y, ob_float_t dt_ms, ob_float_t rate_dps) {
         ob_float_t alpha = y->bias_locked
                            ? (ob_float_t)OB_YAW_BIAS_SLOW_ALPHA
                            : (ob_float_t)OB_YAW_BIAS_FAST_ALPHA;
+        // No clamp needed: learning only engages while |mean| <
+        // OB_YAW_STILL_RATE_DPS, so the bias target is bounded well
+        // inside any sane range by construction.
         y->bias_dps += (y->mean_dps - y->bias_dps) * alpha;
-        if (y->bias_dps > (ob_float_t)OB_YAW_BIAS_MAX_DPS) {
-            y->bias_dps = (ob_float_t)OB_YAW_BIAS_MAX_DPS;
-        } else if (y->bias_dps < -(ob_float_t)OB_YAW_BIAS_MAX_DPS) {
-            y->bias_dps = -(ob_float_t)OB_YAW_BIAS_MAX_DPS;
-        }
         y->bias_locked = 1;
     }
 

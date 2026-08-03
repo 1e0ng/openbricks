@@ -20,8 +20,8 @@
 //     toward the mean — FAST until the first lock (boot
 //     calibration: the robot is usually at rest when powered on),
 //     SLOW afterwards (temperature drift tracking).
-//   * Bias is clamped to ±OB_YAW_BIAS_MAX_DPS: a real bias beyond
-//     that means a broken part, not a calibration target.
+//   * The bias target is bounded by construction: learning only
+//     engages while |mean| < OB_YAW_STILL_RATE_DPS.
 //   * Before the first lock, integration runs with bias 0 — a robot
 //     that starts moving immediately gets relative heading with
 //     uncorrected drift until its first stillness. Documented
@@ -47,7 +47,6 @@
 #define OB_YAW_STILL_MS        500.0  // hold before bias updates
 #define OB_YAW_BIAS_FAST_ALPHA 0.05   // pre-first-lock slew, per sample
 #define OB_YAW_BIAS_SLOW_ALPHA 0.002  // post-lock tracking, per sample
-#define OB_YAW_BIAS_MAX_DPS    5.0
 
 typedef struct {
     ob_float_t yaw_deg;       // continuous heading, CW-positive
