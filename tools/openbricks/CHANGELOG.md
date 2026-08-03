@@ -3,6 +3,19 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.50.1 — load sign: bit 10 means POSITIVE (bench-pinned)
+
+First live read of the present-load register in the project's
+history, both spin directions: the servo sets bit 10 while pushing
+in its POSITIVE direction — a forward-driving motor read −160 mNm,
+a reverse-driving one +170. Our decode (bit 10 = negative) came
+from the Feetech SDK and is inverted relative to the Pybricks
+contract we promise (`load()` sign matches `speed()` sign when
+driving). Flipped at both decode sites — the widened C read AND the
+classic driver's `load()` (which had never been sign-validated on
+hardware) — with the test expectations re-pinned to the bench
+truth. `stalled()` unaffected (uses the magnitude).
+
 ## 1.50.0 — the WHOLE Motor contract works on adopted motors
 
 `speed()`, `load()` and `stalled()` — the last three

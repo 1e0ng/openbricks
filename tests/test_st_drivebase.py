@@ -73,8 +73,8 @@ class _PerfectWheels:
                 spd = int(self.spd[pid])
                 sp = (0x8000 | -spd) if spd < 0 else spd
                 ld = min(abs(spd) // 4, 0x3FF)
-                if spd < 0:
-                    ld |= 0x0400
+                if spd > 0:
+                    ld |= 0x0400      # bit 10 = pushing POSITIVE
                 sb.feed_rx(_reply(pid, 0, bytes([
                     raw & 0xFF, (raw >> 8) & 0xFF,
                     sp & 0xFF, (sp >> 8) & 0xFF,

@@ -242,12 +242,16 @@ void ob_sservo_read_result(ob_sservo_t *s, int ok,
         uint16_t sp = (uint16_t)(payload[2] | (payload[3] << 8));
         sl->speed_steps = (sp & 0x8000) ? -(int32_t)(sp & 0x7FFF)
                                         : (int32_t)sp;
-        // Present-load: 0.1%-of-stall magnitude, bit 10 = negative
-        // (Feetech SCServo SDK convention, same decode as the Python
-        // driver's load()).
+        // Present-load: 0.1%-of-stall magnitude, bit 10 = POSITIVE.
+        // Bench-measured 2026-08-03 (ST-3032, both directions): the
+        // servo sets bit 10 while pushing in its positive direction —
+        // the OPPOSITE of the Feetech SDK's decode, which read a
+        // forward-driving motor as negative torque. The Pybricks
+        // contract (load sign matches speed sign when driving) pins
+        // this decode.
         uint16_t ld = (uint16_t)(payload[4] | (payload[5] << 8));
-        sl->load_raw = (ld & 0x0400) ? -(int32_t)(ld & 0x03FF)
-                                     : (int32_t)(ld & 0x03FF);
+        sl->load_raw = (ld & 0x0400) ? (int32_t)(ld & 0x03FF)
+                                     : -(int32_t)(ld & 0x03FF);
         sl->have_feedback = 1;
     }
     uint16_t raw = (uint16_t)((payload[0] | (payload[1] << 8)) & 0x0FFF);

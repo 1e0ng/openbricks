@@ -658,7 +658,10 @@ class ST3215Motor(Motor):
         raw = data[0] | (data[1] << 8)
         magnitude = raw & 0x3FF          # 0..1000 = 0..100 % of stall
         mnm = magnitude * self.STALL_TORQUE_MNM / 1000.0
-        if raw & 0x400:
+        # Bit 10 = POSITIVE direction (bench 2026-08-03, both spin
+        # directions — the Feetech SDK's decode reads it inverted and
+        # made a forward-driving motor report negative torque).
+        if not (raw & 0x400):
             mnm = -mnm
         if self._invert:
             mnm = -mnm
