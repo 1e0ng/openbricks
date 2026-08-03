@@ -2416,6 +2416,53 @@ class HardStartLatchGateTests(unittest.TestCase):
         self.launcher._tick()
         self.assertEqual(self.starts, [])
 
+    def test_interrupt_teardown_calls_note_external_stop(self):
+        # The integration seam: _exec_program's KeyboardInterrupt
+        # handler must attribute the stop on the singleton, whichever
+        # detector delivered the interrupt.
+        import tests.test_log as tlog
+        from openbricks import log as log_mod
+        tlog._wipe(tlog._TEST_LOG_DIR)
+        prev_dir = log_mod.LOG_DIR
+        log_mod.LOG_DIR = tlog._TEST_LOG_DIR
+        prev_singleton = launcher._singleton
+        launcher._singleton = self.launcher
+        prog = tlog._TEST_LOG_DIR + "_stop_prog.py"
+        try:
+            with open(prog, "w") as f:
+                f.write("raise KeyboardInterrupt()\n")
+            try:
+                launcher._exec_program(prog, origin="test")
+            except KeyboardInterrupt:
+                pass
+            self.assertEqual(
+                self.launcher._start_gate_verdict(launcher._now_ms()),
+                "post-stop lockout")
+        finally:
+            launcher._singleton = prev_singleton
+            log_mod.LOG_DIR = prev_dir
+            tlog._wipe(tlog._TEST_LOG_DIR)
+            try:
+                import os
+                os.remove(prog)
+            except OSError:
+                pass
+
+    def test_external_stop_arms_the_gates_and_drains_the_latch(self):
+        # The 1.48.2 hole: a HARD-path stop outran the watcher, so
+        # the lockout the gates check never armed and the press's
+        # echoes dispatched a phantom start anyway. note_external_stop
+        # (called from every interrupt teardown) must arm the same
+        # suppression AND drain the already-latched start.
+        self.launcher.note_external_stop()
+        self.assertFalse(self.taken[0])         # latch drained
+        verdict = self.launcher._start_gate_verdict(launcher._now_ms())
+        self.assertEqual(verdict, "post-stop lockout")
+        # An echo edge arriving after the drain is swallowed too.
+        self.taken[0] = True
+        self._idle_tick()
+        self.assertEqual(self.starts, [])
+
 
 class StopInterruptRelayTests(unittest.TestCase):
     """The hard-button stop interrupt is a pending exception the VM

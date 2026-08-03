@@ -253,6 +253,34 @@ class Launcher:
         _flush_log()
         _request_stop(self)
 
+    def note_external_stop(self):
+        """Attribute a stop delivered OUTSIDE this watcher's own
+        machinery — the hard-button path, or a REPL Ctrl-C.
+
+        The 1.48.2 start gates check state (`_lockout_until_ms`,
+        press lifecycle) that only the watcher's stop path armed.
+        When the hard path wins the race (stop in ~2 ms, before the
+        watcher's next 50 ms tick), that state never arms: the
+        stopping press's echoes — PCNT edges, the hard latch's
+        post-disarm confirmation — read as fresh idle presses and
+        dispatch a phantom start (bench 2026-08-03, second
+        occurrence: gates in place, lockout never armed, next BLE
+        session dead again). Called from the program teardown, so
+        EVERY interrupt-unwound run arms the same suppression."""
+        now = _now_ms()
+        self._last_stop_ms = now
+        self._lockout_until_ms = now + self.START_LOCKOUT_MS
+        # The stopping press's release is still coming — consume it.
+        self._press_stopped = True
+        # Drain latches the press may already have filled.
+        try:
+            from _openbricks_native import motor_process as _mpn
+            _mpn.hard_button_take_start()
+        except (ImportError, AttributeError):
+            pass
+        self._sync_press_counter()
+        _event("external-stop-noted")
+
     def _start_gate_verdict(self, now):
         """Shared start-dispatch gate for the PCNT latch AND the hard
         button's start latch (Part 12 meta-rule: any detector slower
@@ -1032,6 +1060,16 @@ def _exec_program_raw(program_path, origin=None):
                 # program dies, and a retry landing inside the cleanup
                 # below would abort the very motor-stop it asked for.
                 _arm_stop_button(False)
+                # Attribute the stop to the watcher's suppression
+                # state no matter WHICH detector delivered it — the
+                # hard path stops faster than the watcher's next tick,
+                # and un-armed gates let the press's echoes dispatch a
+                # phantom start.
+                if _singleton is not None:
+                    try:
+                        _singleton.note_external_stop()
+                    except Exception:
+                        pass
                 # Then stop every motor before propagating so the robot
                 # halts no matter how the program was running.
                 # Idempotent if already stopped.
