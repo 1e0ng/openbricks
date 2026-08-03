@@ -2347,5 +2347,54 @@ def tearDownModule():
     exec("pass")
 
 
+class StopInterruptRelayTests(unittest.TestCase):
+    """The hard-button stop interrupt is a pending exception the VM
+    raises at the next boundary — including inside this watcher's own
+    soft Timer callback. Bench 2026-08-03: the interrupt unwound
+    ``_tick`` (traceback into log.pump), MicroPython logged it, and
+    the program kept running. The relay catches KeyboardInterrupt at
+    the callback top level and re-posts it."""
+
+    def setUp(self):
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/x.py", poll_ms=50)
+        self.resignals = []
+        self._orig_resignal = launcher._resignal_stop_interrupt
+        launcher._resignal_stop_interrupt = \
+            lambda: self.resignals.append(1)
+        self.addCleanup(setattr, launcher, "_resignal_stop_interrupt",
+                        self._orig_resignal)
+        self._orig_body = launcher.Launcher._tick_body
+
+    def tearDown(self):
+        launcher.Launcher._tick_body = self._orig_body
+
+    def test_interrupt_in_tick_body_is_relayed_not_eaten(self):
+        def boom(inst, _timer=None):
+            raise KeyboardInterrupt()
+        launcher.Launcher._tick_body = boom
+        # Must NOT raise out of the callback, and must re-post.
+        self.launcher._tick()
+        self.assertEqual(len(self.resignals), 1)
+
+    def test_normal_tick_does_not_resignal(self):
+        self.launcher._tick()
+        self.assertEqual(self.resignals, [])
+
+    def test_other_exceptions_still_propagate(self):
+        # Only the stop interrupt is relayed; genuine bugs in the
+        # tick body must stay loud.
+        def boom(inst, _timer=None):
+            raise ValueError("bug")
+        launcher.Launcher._tick_body = boom
+        try:
+            self.launcher._tick()
+            self.fail("expected ValueError")
+        except ValueError:
+            pass
+        self.assertEqual(self.resignals, [])
+
+
 if __name__ == "__main__":
     unittest.main()

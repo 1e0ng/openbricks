@@ -283,5 +283,32 @@ class BluetoothToggleButtonLEDTests(unittest.TestCase):
         self.assertEqual(led.last_rgb, (0, 255, 0))
 
 
+class StopInterruptRelayTests(unittest.TestCase):
+    """Same relay contract as launcher._tick: a hard-button stop
+    interrupt landing in this poll callback is re-posted, not eaten."""
+
+    def setUp(self):
+        _FakeNVS._reset_for_test()
+        _FakeBLE._reset_for_test()
+        Timer.reset_for_test()
+        _plant_hub_name()
+
+    def test_interrupt_in_tick_body_is_relayed(self):
+        from openbricks import launcher
+        recorded = []
+        orig = launcher._resignal_stop_interrupt
+        launcher._resignal_stop_interrupt = lambda: recorded.append(1)
+        self.addCleanup(setattr, launcher, "_resignal_stop_interrupt",
+                        orig)
+
+        class _BoomButton(_StubButton):
+            def pressed(self):
+                raise KeyboardInterrupt()
+
+        helper = BluetoothToggleButton(_BoomButton(), poll_ms=50)
+        helper._on_tick(None)      # must not raise
+        self.assertEqual(len(recorded), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

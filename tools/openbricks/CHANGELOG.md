@@ -3,6 +3,32 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.48.0 — the stop interrupt must not be eaten by our own callbacks
+
+The 1.47.2 probe run delivered the diagnosis: the hard-button path
+now demonstrably works end to end (press sampled within one tick,
+`hard_stops` incremented) — but its `KeyboardInterrupt` is a PENDING
+exception the VM raises at the next boundary, whichever Python frame
+that is. When the launcher's 50 ms watcher tick (or the BLE-toggle
+poll) happened to be executing, the interrupt unwound the CALLBACK:
+MicroPython printed the traceback (`launcher._tick → log.pump:
+KeyboardInterrupt`) and the program kept running; the stop only
+landed when the watcher's retry machinery re-injected it later. The
+1.8.12 lesson in a new costume — soft callbacks unwind themselves.
+
+Fix: the relay. `motor_process.resignal_keyboard_interrupt()` (new
+binding, all builds) re-posts the interrupt; `launcher._tick` and
+`BluetoothToggleButton._on_tick` catch `KeyboardInterrupt` at the
+callback top level and call it, so delivery retries until it lands
+in the program. Other exceptions still propagate (pinned). Restores
+the hard path's bounded-latency promise.
+
+Also confirmed by the probe runs: counters survive sessions and
+reset only on power-cycle (1.47.1's idempotent config working), and
+real line glitches exist that the 20-tick debounce correctly absorbs
+(`raw_count` 10071→66 blip). The 1.47.1 dead-sampling boot never
+reproduced across two fresh boots; kept under watch.
+
 ## 1.47.2 — hard-button sampler probe
 
 The 1.47.1 in-stream stats settled that the hard path never sees the
