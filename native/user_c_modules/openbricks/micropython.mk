@@ -11,6 +11,7 @@ SRC_USERMOD += $(USERMOD_DIR)/st_bus.c
 SRC_USERMOD += $(USERMOD_DIR)/st_bus_core.c
 SRC_USERMOD += $(USERMOD_DIR)/st_servo_core.c
 SRC_USERMOD += $(USERMOD_DIR)/st_move_core.c
+SRC_USERMOD += $(USERMOD_DIR)/imu_yaw_core.c
 SRC_USERMOD += $(USERMOD_DIR)/st_button_core.c
 SRC_USERMOD += $(USERMOD_DIR)/trajectory.c
 SRC_USERMOD += $(USERMOD_DIR)/trajectory_core.c
