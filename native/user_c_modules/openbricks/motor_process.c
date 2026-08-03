@@ -216,9 +216,31 @@ static int hb_read(void *ctx) {
     return ob_gpio_read(hard_button_pin) == 0;   // active-low
 }
 
+// A hard stop's injection is AT-LEAST-ONCE, not one-shot: the
+// pending KeyboardInterrupt can be swallowed silently — by design —
+// when it lands inside a dupterm stream method (Part 6 wraps those
+// in `except BaseException` because a raising stream gets
+// deactivated permanently). The Python watcher's retry machinery
+// covers ITS stops; a hard-path stop outruns the watcher and armed
+// nothing (bench 2026-08-03: hard_stops incremented, program ran
+// 1.3 s more under a print storm until a second press). So the hard
+// tick re-injects every RETRY ticks while the stop is in flight;
+// the teardown's disarm ends the flight.
+#define HARD_STOP_RETRY_TICKS 100    // ~100 ms at 1 kHz
+
+static volatile uint16_t hard_stop_inflight;   // 0 = idle
+
 static void hard_button_tick(void) {
     if (hard_button_pin < 0) {
         return;
+    }
+    if (hard_stop_inflight) {
+        if (!hard_button_armed) {
+            hard_stop_inflight = 0;    // teardown disarmed: delivered
+        } else if (++hard_stop_inflight > HARD_STOP_RETRY_TICKS) {
+            mp_sched_keyboard_interrupt();
+            hard_stop_inflight = 1;
+        }
     }
     ob_button_event_t e = ob_button_tick(&hard_button);
     if (e != OB_BUTTON_PRESSED) {
@@ -230,6 +252,7 @@ static void hard_button_tick(void) {
         // ISR-safe by design (the UART RX ISR calls it); sets the
         // pending KeyboardInterrupt the running program unwinds on.
         mp_sched_keyboard_interrupt();
+        hard_stop_inflight = 1;
     } else {
         hard_button_start_pending = 1;
     }
@@ -457,6 +480,7 @@ static mp_obj_t mp_hard_button_config(mp_obj_t self_in, mp_obj_t pin_in) {
         return mp_const_false;
     }
     ob_button_init(&hard_button, hb_read, NULL);
+    hard_stop_inflight = 0;
     hard_button_pin = pin;   // set LAST: the tick keys off it
     // Ensure the dispatcher is installed (idempotent single slot).
     (void)ob_hard_tick_install(hard_tick_dispatch, NULL, 1000);
