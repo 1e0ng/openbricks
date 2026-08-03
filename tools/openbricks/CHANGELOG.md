@@ -3,6 +3,36 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.49.1 — every stop must arm the start gates, not just watcher stops
+
+The 1.48.2 gates checked suppression state (`_lockout_until_ms`,
+press lifecycle) that only the WATCHER's stop path armed. A
+hard-path stop lands in ~2 ms — before the watcher's next 50 ms tick
+— so nothing armed, the gates passed, and the stopping press's
+echoes still dispatched a phantom start: the dead-next-session
+signature recurred on the 1.49.0 bench with the gates in place.
+
+Fix: `Launcher.note_external_stop()`, called from the program
+teardown's `KeyboardInterrupt` handler — EVERY interrupt-unwound
+run (hard-path stop, watcher stop, REPL Ctrl-C) now arms the same
+lockout, consumes the stopping press's coming release, and drains
+both start latches (hard `take_start` + PCNT re-sync). Pinned at
+both the unit seam and the `_exec_program` integration seam.
+
+Second gap, same bench session: a hard stop's injection was
+ONE-SHOT, and a pending KeyboardInterrupt landing inside a dupterm
+stream method is swallowed silently by design (Part 6 — a raising
+stream gets deactivated permanently). Under a print storm the probe
+caught it verbatim: `hard_stops` incremented, program ran 1.3 s
+more until a second press. The watcher's retry covers only ITS
+stops. Now the hard tick re-injects every ~100 ms while the stop is
+in flight; the teardown's disarm (already the handler's first
+statement, guarding against a retry landing mid-cleanup) ends the
+flight. At-least-once delivery from the hard side.
+
+Also validated by the same probe stream: the 1.49.0 majority-vote
+debounce caught every press including taps — no misses this round.
+
 ## 1.49.0 — majority-vote debounce: chatter must not hide presses
 
 The bench run-log cross-check showed the hard sampler missing
