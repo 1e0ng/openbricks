@@ -2448,6 +2448,45 @@ class HardStartLatchGateTests(unittest.TestCase):
             except OSError:
                 pass
 
+    def test_teardown_survives_a_raising_note_external_stop(self):
+        # The attribution is best-effort: a bug in it must never
+        # break the teardown that owns motor cleanup. The interrupt
+        # still propagates as KeyboardInterrupt, not the bug.
+        import tests.test_log as tlog
+        from openbricks import log as log_mod
+        tlog._wipe(tlog._TEST_LOG_DIR)
+        prev_dir = log_mod.LOG_DIR
+        log_mod.LOG_DIR = tlog._TEST_LOG_DIR
+        prev_singleton = launcher._singleton
+
+        boomed = []
+
+        def _boom():
+            boomed.append(1)
+            raise ValueError("attribution bug")
+        self.launcher.note_external_stop = _boom
+        launcher._singleton = self.launcher
+        prog = tlog._TEST_LOG_DIR + "_boom_prog.py"
+        try:
+            with open(prog, "w") as f:
+                f.write("raise KeyboardInterrupt()\n")
+            try:
+                launcher._exec_program(prog, origin="test")
+            except KeyboardInterrupt:
+                pass        # propagation is origin-dependent
+            except ValueError:
+                self.fail("attribution bug escaped the teardown")
+            self.assertEqual(len(boomed), 1)
+        finally:
+            launcher._singleton = prev_singleton
+            log_mod.LOG_DIR = prev_dir
+            tlog._wipe(tlog._TEST_LOG_DIR)
+            try:
+                import os
+                os.remove(prog)
+            except OSError:
+                pass
+
     def test_external_stop_arms_the_gates_and_drains_the_latch(self):
         # The 1.48.2 hole: a HARD-path stop outran the watcher, so
         # the lockout the gates check never armed and the press's
