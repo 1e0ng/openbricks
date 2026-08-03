@@ -786,17 +786,18 @@ class TestPybricksParityFeedback(unittest.TestCase):
 
     def test_load_scales_by_model_stall_torque(self):
         # 500/1000 of stall. ST-3215 stall = 2940 mNm -> 1470.
-        m = self._motor({_REG_PRESENT_LOAD: 500})
-        self.assertEqual(m.load(), 1470.0)
-        # Sign bit 10.
+        # Bit 10 = POSITIVE (bench-pinned 2026-08-03; the Feetech
+        # SDK decode was inverted).
         m = self._motor({_REG_PRESENT_LOAD: 500 | 0x400})
+        self.assertEqual(m.load(), 1470.0)
+        m = self._motor({_REG_PRESENT_LOAD: 500})
         self.assertEqual(m.load(), -1470.0)
 
     def test_load_st3032_uses_its_own_stall_torque(self):
         from openbricks.drivers.st3032 import ST3032Motor
         m = ST3032Motor(servo_id=2, steps_per_dps=10.0)
-        m._bus.read = lambda sid, reg, n: bytes([0xF4, 0x01])  # 500
-        self.assertEqual(m.load(), 490.0)   # 500/1000 x 980
+        m._bus.read = lambda sid, reg, n: bytes([0xF4, 0x05])  # 500|b10
+        self.assertEqual(m.load(), 490.0)   # 500/1000 x 980, positive
 
     def test_stalled_true_when_loaded_and_slow(self):
         m = self._motor({_REG_PRESENT_LOAD: 850,        # 85 % of stall

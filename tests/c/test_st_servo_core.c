@@ -161,7 +161,8 @@ TEST(widened_feedback_decodes_speed_and_load) {
     ob_sservo_attach(&sv, 0, 7, 0, 45);
     sv.slots[0].config_step = 3;
     sv.read_in_flight = 0;
-    // pos=0x123, speed=-300 (sign-magnitude b15), load=-25 (b10).
+    // pos=0x123, speed=-300 (sign-magnitude b15), load raw bit10
+    // SET = pushing POSITIVE (bench-pinned decode) -> +25.
     uint8_t pl[6] = {
         0x23, 0x01,
         (uint8_t)(300 & 0xFF), (uint8_t)(((300 >> 8) & 0x7F) | 0x80),
@@ -169,7 +170,7 @@ TEST(widened_feedback_decodes_speed_and_load) {
     };
     ob_sservo_read_result(&sv, 1, pl, 6);
     CHECK_EQ_INT(ob_sservo_speed_steps(&sv, 0), -300);
-    CHECK_EQ_INT(ob_sservo_load_raw(&sv, 0), -25);
+    CHECK_EQ_INT(ob_sservo_load_raw(&sv, 0), 25);
     CHECK_EQ_INT(ob_sservo_feedback_fresh(&sv, 0), 1);
 }
 
@@ -179,10 +180,12 @@ TEST(inverted_slot_flips_feedback_to_user_frame) {
     ob_sservo_attach(&sv, 0, 7, 1, 45);        // invert
     sv.slots[0].config_step = 3;
     sv.read_in_flight = 0;
-    uint8_t pl[6] = { 0, 0, 0xF4, 0x01, 0x64, 0x00 };  // +500, +100
+    // Raw: speed +500, load b10-clear = -100. The slot invert flips
+    // both into the user frame: speed -500, load +100.
+    uint8_t pl[6] = { 0, 0, 0xF4, 0x01, 0x64, 0x00 };
     ob_sservo_read_result(&sv, 1, pl, 6);
     CHECK_EQ_INT(ob_sservo_speed_steps(&sv, 0), -500);
-    CHECK_EQ_INT(ob_sservo_load_raw(&sv, 0), -100);
+    CHECK_EQ_INT(ob_sservo_load_raw(&sv, 0), 100);
 }
 
 TEST(short_reply_keeps_position_but_no_feedback_freshness) {
@@ -204,7 +207,7 @@ TEST(failed_read_marks_feedback_stale) {
     ob_sservo_attach(&sv, 0, 7, 0, 45);
     sv.slots[0].config_step = 3;
     sv.read_in_flight = 0;
-    uint8_t pl[6] = { 0, 0, 0x10, 0x00, 0x05, 0x00 };
+    uint8_t pl[6] = { 0, 0, 0x10, 0x00, 0x05, 0x04 };  // b10: +5
     ob_sservo_read_result(&sv, 1, pl, 6);
     CHECK_EQ_INT(ob_sservo_feedback_fresh(&sv, 0), 1);
     sv.read_in_flight = 0;
