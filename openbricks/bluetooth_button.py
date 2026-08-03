@@ -133,6 +133,16 @@ class BluetoothToggleButton:
     # ---- tick body ----
 
     def _on_tick(self, _timer):
+        try:
+            self._on_tick_body()
+        except KeyboardInterrupt:
+            # Same relay as launcher._tick: a hard-button stop
+            # interrupt that lands in this poll callback must be
+            # re-posted, not eaten with the callback's unwind.
+            from openbricks.launcher import _resignal_stop_interrupt
+            _resignal_stop_interrupt()
+
+    def _on_tick_body(self):
         if self._button.pressed():
             self._was_pressed = True
             return

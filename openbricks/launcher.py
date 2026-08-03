@@ -254,6 +254,22 @@ class Launcher:
         _request_stop(self)
 
     def _tick(self, _timer=None):
+        try:
+            self._tick_body(_timer)
+        except KeyboardInterrupt:
+            # A stop interrupt (the hard-button path's
+            # mp_sched_keyboard_interrupt) landed in THIS callback
+            # frame instead of the program — a pending exception
+            # fires at the next VM boundary, whichever Python frame
+            # holds it. Without the relay the callback unwinds,
+            # MicroPython logs the traceback, and the program keeps
+            # running (bench 2026-08-03: hard_stops incremented,
+            # traceback into _tick/log.pump, program survived).
+            # Re-post so delivery retries until it lands in the
+            # program.
+            _resignal_stop_interrupt()
+
+    def _tick_body(self, _timer=None):
         """Called on every ``poll_ms`` tick.
 
         While a program runs, a STOP fires on **press-down**
@@ -676,6 +692,18 @@ def dump_events():
     for k in range(n):
         ms, tag, args = _EVENTS[(start + k) % n]
         print("  %d %s %s" % (ms, tag, args))
+
+
+def _resignal_stop_interrupt():
+    """Re-post a stop KeyboardInterrupt that was delivered into a
+    soft Timer callback instead of the program. Guarded: off-firmware
+    the binding is absent, and the watcher's STOP_RETRY_MS machinery
+    still delivers eventually."""
+    try:
+        from _openbricks_native import motor_process as _mpn
+        _mpn.resignal_keyboard_interrupt()
+    except (ImportError, AttributeError):
+        pass
 
 
 def _install_press_counter(button_pin):
