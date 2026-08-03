@@ -19,6 +19,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CORES="${ROOT}/native/user_c_modules/openbricks"
 TESTS="${ROOT}/tests/c"
 OUT="${ROOT}/tests/c/build"
+# Hermetic: compiles are milliseconds, and stale flat binaries from
+# older layouts collide with the per-suite directories.
+rm -rf "${OUT}"
 mkdir -p "${OUT}"
 
 CC="${CC:-cc}"
@@ -26,16 +29,32 @@ CFLAGS="-std=c11 -Wall -Wextra -Werror -O1 -g \
         -fsanitize=address,undefined -fno-sanitize-recover=all \
         -I${CORES} -I${TESTS}"
 
+# COVERAGE=1: instrument with gcov so CI can upload this suite's
+# coverage under the c-core flag — several cores (st_button,
+# icm45686) are firmware-gated at the binding layer and can ONLY
+# execute here off-hardware; without this upload codecov reads them
+# as untested. Each suite compiles in its own directory: the same
+# core compiled into two binaries would otherwise collide on
+# .gcno/.gcda checksums.
+if [ "${COVERAGE:-0}" = "1" ]; then
+    CFLAGS="${CFLAGS} --coverage -O0"
+fi
+
 fail=0
 run_one() {
     local name="$1"; shift
     echo "== ${name} =="
+    local dir="${OUT}/${name}"
+    mkdir -p "${dir}"
     # -lm last: GNU ld resolves libraries left-to-right, and
     # trajectory_core's sqrt needs libm on Linux (macOS's libSystem
     # bundles it, which is why the gap only shows in CI).
     # shellcheck disable=SC2086
-    ${CC} ${CFLAGS} "$@" -o "${OUT}/${name}" -lm
-    "${OUT}/${name}" || fail=1
+    ( cd "${dir}" && ${CC} ${CFLAGS} "$@" -o "${dir}/${name}" -lm )
+    "${dir}/${name}" || fail=1
+    if [ "${COVERAGE:-0}" = "1" ]; then
+        ( cd "${dir}" && gcov -- *.gcno >/dev/null 2>&1 ) || true
+    fi
 }
 
 run_one test_motor_process_core \

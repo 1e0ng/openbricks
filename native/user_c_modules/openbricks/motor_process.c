@@ -266,6 +266,13 @@ static void hard_button_tick(void) { }
 // every hard-context consumer hangs off this function, in order.
 extern void ob_st_bus_hard_poll(void);
 
+// Defined with its install API in the unguarded yaw section below;
+// tentatively declared here because this dispatcher (guarded,
+// firmware-only) reads it — the unix build never compiles this
+// function, which is how the use-before-declaration slipped local
+// checks.
+static void (*volatile hard_imu_fn)(void);
+
 static void hard_tick_dispatch(void *ctx) {
     (void)ctx;
     // Aligned 32-bit increment; read side is a single aligned load.
