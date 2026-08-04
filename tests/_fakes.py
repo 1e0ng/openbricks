@@ -246,7 +246,33 @@ class UART:
 
     def write(self, data):
         self._tx_log.append(bytes(data))
+        self._ack_scs_write(bytes(data))
         return len(data)
+
+    def _ack_scs_write(self, packet):
+        """Answer an SCS/STS register write with a status packet, the
+        way a real servo does.
+
+        The driver confirms every write against this reply — a write
+        that vanishes is never allowed to look like one that landed
+        (goal-speed 0 means FULL SPEED on this hardware, so a lost
+        speed write is a runaway, not a rounding error). A fake that
+        stayed silent would model a servo with every wire cut.
+
+        Only non-broadcast WRITEs are answered: broadcasts and SYNC
+        WRITEs get no reply by protocol, and READs are left to the
+        tests that stage their own payloads.
+        """
+        if len(packet) < 6 or packet[0:2] != b"\xff\xff":
+            return
+        servo_id, instr = packet[2], packet[4]
+        if instr != 0x03 or servo_id == 0xFE:
+            return
+        body = bytes([servo_id, 2, 0])          # id, len, err=0
+        chk = 0
+        for b in body:
+            chk += b
+        self._rx_buf += b"\xff\xff" + body + bytes([(~chk) & 0xFF])
 
     def read(self, n=None):
         if not self._rx_buf:

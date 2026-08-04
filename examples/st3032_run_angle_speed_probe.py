@@ -108,14 +108,23 @@ def main():
 
     for rep in range(1, REPS + 1):
         before = snapshot(motor)
+        angle_before = motor.angle()
         t0 = time.ticks_ms()
         motor.run_angle(DEG_PER_S, ANGLE)
         elapsed = time.ticks_diff(time.ticks_ms(), t0)
+        # Measured travel, NOT the commanded angle: a short elapsed
+        # time means either a genuinely fast move or an early return
+        # while the shaft was still turning, and only the travelled
+        # angle tells those apart.
+        travelled = motor.angle() - angle_before
         after = snapshot(motor)
 
-        measured_dps = (abs(ANGLE) * 1000.0 / elapsed) if elapsed else 0.0
-        print("rep %d: %d ms  -> %.0f dps average" % (rep, elapsed,
-                                                      measured_dps))
+        true_dps = (abs(travelled) * 1000.0 / elapsed) if elapsed else 0.0
+        print("rep %d: %d ms  travelled %.1f deg (asked %d)  -> %.0f dps"
+              % (rep, elapsed, travelled, ANGLE, true_dps))
+        if abs(abs(travelled) - abs(ANGLE)) > 10:
+            print("   <-- SHORT MOVE: run_angle returned early, the "
+                  "shaft was still turning")
         print("   goal_speed after=%s (commanded %d)%s"
               % (after["goal_speed"], commanded,
                  "  <-- MISMATCH" if after["goal_speed"] not in

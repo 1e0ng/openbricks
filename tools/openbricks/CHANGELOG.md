@@ -3,6 +3,61 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.56.0 — the first run_angle no longer ignores its speed limit
+
+Bench report: the same `run_angle(200, -145)` moved at different
+speeds on different runs. Measuring it inverted the framing — the
+"slow" runs were the correct ones (197 dps against a commanded 200),
+and the **first move of each run was 3.5× too fast** (697 dps, near
+the servo's no-load ceiling).
+
+Two register defects behind it, both measured, not inferred:
+
+- **`goal_acc` read back 0** on every repetition despite the
+  constructor writing 171. A write that definitely happened did not
+  stick.
+- The **first** move of a run is the only one that writes the EEPROM
+  angle-limit registers (`_ensure_step_limits`, guarded by a
+  per-*instance* flag). Those registers were already zero from the
+  previous run, so every program run spent an EEPROM cycle
+  rewriting a value that was already there — and left the servo busy
+  immediately before the goal-speed write.
+
+That matters far more than a normal lost write, because on a Feetech
+servo **goal-speed 0 means maximum speed**. A dropped speed write
+doesn't make a move slightly wrong; it makes it run flat out.
+
+Fixes:
+
+- `_ensure_step_limits` reads before writing and skips the EEPROM
+  cycle entirely when the limits are already zero — the common case
+  for any servo that has run `run_angle` before. A real write now
+  settles for 20 ms before anything else is sent.
+- `run_angle` re-asserts `goal_acc` alongside `goal_speed` instead of
+  trusting the constructor's write to have survived, and **verifies
+  both by reading them back**, retrying once and then raising. A
+  servo that won't accept its motion settings is refused loudly
+  rather than run at full speed.
+
+**And the general rule, not just the two registers that bit us: a
+lost write is never silent again.** `_SCServoBus.write` sent the
+packet and threw the servo's status reply away, so a write that
+never landed — servo busy finishing an EEPROM cycle, loose
+connector, wrong id — was indistinguishable from one that
+succeeded. Every write is now confirmed against that reply and
+raises on a missing, mis-addressed, corrupt, or error-flagged
+acknowledgement, naming the servo, the register and the value.
+Broadcasts (id 0xFE) are exempt because the protocol defines no
+reply for them, so the e-stop broadcast still cannot raise.
+
+Servos configured with a status-return level that answers reads
+only can opt out with `verify_writes=False` — a deliberate choice,
+stated in the error message, never a silent fallback.
+
+`examples/st3032_run_angle_speed_probe.py` also now measures actual
+shaft travel, so a short elapsed time can be told apart from a
+genuinely fast move.
+
 ## 1.55.0 — a dead motor raises, and says which motor
 
 Reported from the bench: with a dead motor the drivebase did

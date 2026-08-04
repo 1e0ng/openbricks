@@ -112,7 +112,13 @@ _DEFAULT_STEPS_PER_DPS = _COUNTS_PER_REV / 360.0   # = 11.378
 class _SCServoBus:
     """Shared UART bus. One instance per physical bus; many servos per bus."""
 
-    def __init__(self, uart_id, tx, rx, baud=1_000_000, dir_pin=None):
+    def __init__(self, uart_id, tx, rx, baud=1_000_000, dir_pin=None,
+                 verify_writes=True):
+        # Every write is confirmed against the servo's status packet
+        # (see ``write``). Turn this off only for servos configured
+        # with a status-return level that answers reads alone —
+        # deliberately, never as a way to quieten an error.
+        self.verify_writes = bool(verify_writes)
         pins.check(tx, "serial-bus UART TX")
         pins.check(rx, "serial-bus UART RX", output=False)
         if dir_pin is not None:
@@ -166,14 +172,69 @@ class _SCServoBus:
                 time.sleep_ms(1)
         return buf
 
-    def write(self, servo_id, register, data):
+    def write(self, servo_id, register, data, timeout_ms=20):
+        """Write a register and CONFIRM the servo took it.
+
+        The servo answers a write with a status packet
+        (``FF FF <id> <len> <err> <chk>``). This used to be read and
+        thrown away, which meant a write that never landed — because
+        the servo was busy finishing an EEPROM cycle, because a
+        connector was loose, because the id was wrong — looked exactly
+        like a write that succeeded.
+
+        That is never acceptable, and on this hardware it is actively
+        dangerous: goal-speed 0 means MAXIMUM SPEED, so a lost speed
+        write doesn't slow a move down, it sends the shaft flying
+        (bench 2026-08-04, measured at 697 dps against a commanded
+        200). Losses are now raised, never swallowed.
+
+        Broadcasts (id 0xFE) are exempt — the protocol defines no
+        reply for them. Set ``verify_writes=False`` on the servo if
+        yours are configured with a status-return level that only
+        answers reads; that is a deliberate choice, not a default.
+        """
         length = len(data) + 3  # register + params + checksum + instr -> LEN = params + 2 conceptually; +1 for register
         params = bytes([register]) + bytes(data)
         body = bytes([servo_id, length, _INSTR_WRITE]) + params
         packet = _HEADER + body + bytes([self._checksum(body)])
         self._tx(packet)
-        # Discard any status response.
-        self._rx(6, timeout_ms=10)
+        if servo_id == _BROADCAST_ID or not self.verify_writes:
+            return
+        resp = self._rx(6, timeout_ms=timeout_ms)
+        self._check_write_ack(resp, servo_id, register, data)
+
+    def _check_write_ack(self, resp, servo_id, register, data):
+        detail = ("servo id %s register 0x%02X = %s"
+                  % (servo_id, register, bytes(data)))
+        if len(resp) < 6 or not resp.startswith(_HEADER):
+            raise OSError(
+                "no acknowledgement for a write to %s (got %d bytes). "
+                "The write may never have landed. Check power and the "
+                "TX/RX wiring, and that a servo really has that id "
+                "(`openbricks servo-id --scan`). If these servos are "
+                "configured to answer reads only, construct them with "
+                "verify_writes=False." % (detail, len(resp)))
+        if resp[2] != servo_id:
+            raise OSError(
+                "write to %s was acknowledged by servo id %d instead — "
+                "two servos are answering to one id, or replies are "
+                "arriving out of step" % (detail, resp[2]))
+        if self._checksum(resp[2:5]) != resp[5]:
+            raise OSError(
+                "corrupt acknowledgement for a write to %s — the reply "
+                "failed its checksum, so the bus is unreliable (wiring, "
+                "termination, or baud mismatch)" % detail)
+        if resp[4] != 0:
+            # The datasheet names three protections: over-load
+            # (>80%% of stall for 2 s), over-voltage (outside 9-14 V)
+            # and over-heat (>80 C). It does not publish the bit
+            # positions, so report the raw byte rather than invent a
+            # decode.
+            raise OSError(
+                "servo reported error flags 0x%02X on a write to %s — "
+                "typically over-load, over-voltage or over-temperature "
+                "(reissuing a command clears the overload latch)"
+                % (resp[4], detail))
 
     def read(self, servo_id, register, nbytes):
         length = 4
@@ -538,17 +599,77 @@ class ST3215Motor(Motor):
         clamps a step move to one revolution; zeroing them unlocks the
         ±7-turn envelope.
 
-        Written once per power session (guarded by an in-memory flag),
-        the first time ``run_angle`` runs on this motor — never at
-        construction — so a wheel-only motor never has its limits
-        touched. These are EEPROM registers, but a single write per
-        session is well within endurance.
+        These are EEPROM registers, and the guard flag is per
+        INSTANCE — so before 1.56.0 every program run rewrote them on
+        its first ``run_angle``, even though they were already zero
+        from the previous run. Two costs, one of them a real bug:
+
+        * endurance — an EEPROM cycle per program run, forever;
+        * an EEPROM operation leaves the servo busy, and the writes
+          that follow it (op-mode, goal-acc, goal-speed) are issued
+          straight after with no acknowledgement checked. Bench
+          2026-08-04: the FIRST move of every run behaved differently
+          from every later move, with goal-acc reading 0 afterwards
+          despite the constructor writing 171.
+
+        So: read first, and only spend an EEPROM cycle if the limits
+        are not already what we need. The common case — a servo that
+        has run ``run_angle`` before — becomes two reads and no write
+        at all.
         """
         if self._step_limits_zeroed:
             return
+        lo = self._bus.read(self._id, _REG_MIN_ANGLE, 2)
+        hi = self._bus.read(self._id, _REG_MAX_ANGLE, 2)
+        if lo == b"\x00\x00" and hi == b"\x00\x00":
+            self._step_limits_zeroed = True
+            return                     # already multi-turn capable
         self._bus.write(self._id, _REG_MIN_ANGLE, bytes([0, 0]))
         self._bus.write(self._id, _REG_MAX_ANGLE, bytes([0, 0]))
+        # Let the EEPROM cycle finish before anything else is written:
+        # packets sent into that window are what went missing.
+        time.sleep_ms(20)
         self._step_limits_zeroed = True
+
+    def _write_motion_regs(self, speed_steps):
+        """Write the two registers that govern how a step move runs —
+        goal-acc and goal-speed — and VERIFY they took.
+
+        ``_SCServoBus.write`` sends the packet and discards the status
+        reply without checking it, so a dropped or rejected register
+        write is silent. That is tolerable for most registers. It is
+        not tolerable for these two, because on a Feetech servo
+        **goal-speed 0 means maximum speed**: a lost speed write does
+        not make the move slightly wrong, it makes the move run flat
+        out. Bench 2026-08-04 measured a first move at ~700 dps
+        against a commanded 200, with goal-acc reading 0 despite the
+        constructor writing 171.
+
+        Re-asserting goal-acc here (rather than trusting the
+        constructor's write to have survived) is what keeps the
+        documented uniform-acceleration rule true in step mode.
+        """
+        acc = self._encode_goal_acc()
+        speed = bytes([speed_steps & 0xFF, (speed_steps >> 8) & 0xFF])
+        for _ in range(2):
+            self._bus.write(self._id, _REG_GOAL_ACC, bytes([acc]))
+            self._bus.write(self._id, _REG_GOAL_SPEED, speed)
+            got_speed = self._bus.read(self._id, _REG_GOAL_SPEED, 2)
+            got_acc = self._bus.read(self._id, _REG_GOAL_ACC, 1)
+            if got_speed is None or got_acc is None:
+                continue                    # silent bus — retry once
+            if (got_speed[0] | (got_speed[1] << 8)) == speed_steps \
+                    and got_acc[0] == acc:
+                return
+        raise OSError(
+            "servo id %s would not accept its motion settings: asked "
+            "goal_speed=%d acc=%d, reads back goal_speed=%s acc=%s. "
+            "Refusing the move — goal_speed 0 means FULL SPEED on this "
+            "servo, so running it now could send the shaft flying."
+            % (self._id, speed_steps, acc,
+               None if got_speed is None
+               else got_speed[0] | (got_speed[1] << 8),
+               None if got_acc is None else got_acc[0]))
 
     def _write_step(self, counts):
         """Write one signed relative step to the goal-position register
@@ -1165,9 +1286,7 @@ class ST3215Motor(Motor):
         self._ensure_torque_on()
         self._ensure_step_limits()       # angle limits = 0 (once)
         self._ensure_mode(_MODE_STEP)    # op_mode = 3
-        self._bus.write(self._id, _REG_GOAL_SPEED,
-                        bytes([speed_steps & 0xFF,
-                               (speed_steps >> 8) & 0xFF]))
+        self._write_motion_regs(speed_steps)
 
         # First step (clamped to the ±7-turn envelope).
         first = target_counts
