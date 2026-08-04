@@ -37,6 +37,25 @@ over the wheels: a DriveBase hands their UART to the native bus
 driver when it adopts them, so a SyncServoGroup can't drive them at
 all.
 
+A wheel that stops answering the bus — no power, a knocked-loose
+TX/RX wire, the wrong ``servo_id`` — raises instead of quietly doing
+nothing, and the error names the motor:
+
+.. code-block:: text
+
+    OSError: motor is not responding on the bus: right wheel
+    (servo id 1, slot 1) on UART1 tx=14 rx=6 — 0 replies, 137 failed
+    reads (137 in a row). Check the servo's power and TX/RX wiring,
+    and that it really has that bus id — `openbricks servo-id --scan`
+    lists the ids actually answering on the bus.
+
+Both wheels are verified when the DriveBase is constructed, and on
+every move afterwards. If one goes silent mid-move the controller
+halts immediately rather than winding that wheel's command to the
+rail — a frozen odometry reading would otherwise look like "infinite
+error" to the heading loop. ``db.check_motors()`` runs the same check
+on demand.
+
 With an IMU attached, ``use_gyro(True)`` steers by measured body
 rotation instead of the encoder differential — immune to wheel slip:
 

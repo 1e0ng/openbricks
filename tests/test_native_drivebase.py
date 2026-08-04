@@ -96,6 +96,22 @@ class _FakeBus:
         self.calls.append(("db_turn", deg, dps))
         self._left = self.done_after
 
+    def servo_stats(self, slot):
+        # (reads_ok, reads_failed, stale). ``dead_slots`` marks wheels
+        # that never answered — the unplugged / wrong-id / no-power
+        # case. A slot named by ``fault_bits`` reports the shape the C
+        # layer would actually have when it latches: the fault fires
+        # only after a run of failures, so "faulted but 0 stale" is
+        # not a state real hardware can be in.
+        if slot in getattr(self, "dead_slots", ()):
+            return (0, 137, 137)
+        if getattr(self, "fault_bits", 0) & (1 << slot):
+            return (500, 42, 42)
+        return (500, 0, 0)
+
+    def db_fault(self):
+        return getattr(self, "fault_bits", 0)
+
     def db_move_wheels(self, l, r):
         self.calls.append(("db_move_wheels", l, r))
         return getattr(self, "move_wheels_ok", True)
@@ -563,6 +579,109 @@ class AtomicStopTests(_Base):
         except RuntimeError:
             pass
         self.assertIn(("db_stop", None), self.bus.calls)
+
+
+class DeadMotorDiagnosisTests(_Base):
+    """A dead motor must raise, and the message must say WHICH motor
+    and where it's wired — "nothing moved" is the least actionable
+    error a robot can give."""
+
+    def test_construction_raises_naming_the_silent_motor(self):
+        self.bus.dead_slots = (1,)          # right wheel never answers
+        try:
+            self._db()
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        # Identity: side, bus id, slot, UART and pins.
+        self.assertTrue("right wheel" in msg, msg)
+        self.assertTrue("servo id 1" in msg, msg)
+        self.assertTrue("slot 1" in msg, msg)
+        self.assertTrue("UART1" in msg, msg)
+        self.assertTrue("tx=14" in msg, msg)
+        self.assertTrue("rx=6" in msg, msg)
+        # Evidence + a next step.
+        self.assertTrue("137" in msg, msg)
+        self.assertTrue("servo-id" in msg, msg)
+
+    def test_left_motor_is_named_when_it_is_the_dead_one(self):
+        self.bus.dead_slots = (0,)
+        try:
+            self._db()
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("left wheel" in str(e), str(e))
+            self.assertTrue("servo id 2" in str(e), str(e))
+
+    def test_healthy_pair_constructs_silently(self):
+        self._db()                           # must not raise
+
+    def test_mid_move_fault_raises_before_the_settle_timeout(self):
+        db = self._db()
+        self.bus.done_after = 10_000         # would never finish
+        self.bus.fault_bits = 0x02           # right wheel went quiet
+        try:
+            db.straight(200)
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("right wheel" in msg, msg)
+        self.assertTrue("running away" in msg, msg)
+
+    def test_faulted_move_never_reports_success(self):
+        # Halting on a fault latches the controller's ``done`` flag,
+        # so a wait loop that tested done first would exit reporting
+        # success. The health check must come first.
+        db = self._db()
+        self.bus.fault_bits = 0x01
+        self.bus._left = 0                   # db_done() would say True
+        try:
+            db.straight(200)
+            self.fail("faulted move reported success")
+        except OSError:
+            pass
+
+    def test_move_wheels_surfaces_a_dead_motor(self):
+        # Nothing waits on move_wheels, so without this check a dead
+        # motor is silent forever — the line-follow shape.
+        db = self._db()
+        self.bus.fault_bits = 0x01
+        try:
+            db.move_wheels(100, 100)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("left wheel" in str(e), str(e))
+
+    def test_check_motors_is_available_on_the_drivebase(self):
+        from openbricks.drivers.st3215 import ST3215
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics import DriveBase
+        ST3215._buses.clear()
+        left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                           invert=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        db = DriveBase(left, right, wheel_diameter_mm=88,
+                       axle_track_mm=138)
+        db.check_motors()                    # healthy: silent
+        self.bus.fault_bits = 0x02
+        try:
+            db.check_motors()
+            self.fail("expected OSError")
+        except OSError:
+            pass
+
+    def test_settle_timeout_reports_both_wheels_traffic(self):
+        # Both wheels talking but the target unreached = mechanical.
+        # The per-wheel counters localise it.
+        db = self._db()
+        self.bus.done_after = 10_000
+        try:
+            db.straight(200)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            msg = str(e)
+        self.assertTrue("did not reach target" in msg, msg)
+        self.assertTrue("left" in msg and "right" in msg, msg)
 
 
 class MoveWheelsTests(_Base):
