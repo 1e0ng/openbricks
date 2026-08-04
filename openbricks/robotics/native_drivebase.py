@@ -58,7 +58,11 @@ from openbricks import estop
 
 
 _STEPS_PER_DEG = 4096 / 360.0
-_LEFT_SLOT, _RIGHT_SLOT = 0, 1
+# Slots are claimed first-come, not reserved by role. Reserving 0/1
+# for wheels meant a script that built its task motors first ran out
+# of slots before the DriveBase was reached, on a robot that fits the
+# hardware exactly (4 motors, 4 slots).
+_ALL_SLOTS = (0, 1, 2, 3)
 
 
 def _bus():
@@ -99,14 +103,21 @@ class _SerialNativeEngine:
         # Hand the UART over: MicroPython driver out, IDF driver in.
         bus._uart.deinit()
         del ST3215._buses[params]
+        # A wheel constructed on an already-native bus holds a slot
+        # of its own; adopt that rather than demanding a fixed index.
+        held_l = getattr(left, "_native_slot", None)
+        held_r = getattr(right, "_native_slot", None)
         eng = cls(left_id=left._id, right_id=right._id,
                   wheel_diameter_mm=wheel_diameter_mm,
                   axle_track_mm=axle_track_mm, imu=imu,
                   invert_left=left._invert, invert_right=right._invert,
                   uart_id=uart_id, tx=tx, rx=rx, baud=baud,
-                  accel_dps2=accel_dps2)
-        left._adopt_native(eng._sb, 0)
-        right._adopt_native(eng._sb, 1)
+                  accel_dps2=accel_dps2,
+                  slot_l=held_l, slot_r=held_r)
+        if held_l is None:
+            left._adopt_native(eng._sb, eng._slot_l)
+        if held_r is None:
+            right._adopt_native(eng._sb, eng._slot_r)
         # Anything else that was sharing that UART comes across too.
         # The IDF driver owns the pins now, so a motor left on the
         # MicroPython bus would be talking into a closed UART — and
@@ -119,7 +130,8 @@ class _SerialNativeEngine:
                  axle_track_mm, imu=None,
                  invert_left=False, invert_right=False,
                  uart_id=1, tx=14, rx=6, baud=1_000_000,
-                 accel_dps2=400.0, sb=None):
+                 accel_dps2=400.0, sb=None,
+                 slot_l=None, slot_r=None):
         # ``sb`` is the bus-surface seam: firmware injects the real
         # st_bus (default), the sim injects its emulation — the ONE
         # engine code path serves both worlds.
@@ -154,25 +166,50 @@ class _SerialNativeEngine:
         # down our own claims first; detach of an unclaimed slot is
         # silent, so a fresh boot pays nothing.
         self._sb.db_disable()
-        self._sb.servo_detach(_LEFT_SLOT)
-        self._sb.servo_detach(_RIGHT_SLOT)
         if not self._sb.attach_uart(uart_id, baud, tx, rx):
             raise RuntimeError("attach_uart(%d) failed" % uart_id)
         acc = int(accel_dps2 * _STEPS_PER_DEG / 100.0)
         acc = 0 if acc < 0 else (254 if acc > 254 else acc)
-        if not self._sb.servo_attach(_LEFT_SLOT, left_id,
-                                     bool(invert_left), acc):
-            raise RuntimeError("left servo slot attach failed")
-        if not self._sb.servo_attach(_RIGHT_SLOT, right_id,
-                                     bool(invert_right), acc):
-            raise RuntimeError("right servo slot attach failed")
-        self._sb.db_config(_LEFT_SLOT, _RIGHT_SLOT,
+        # A wheel may ALREADY hold a slot: on a natively-owned bus a
+        # motor claims one the moment it is constructed, and a script
+        # is free to build its wheels in any order relative to its
+        # task motors. Adopt the slot it has rather than insisting on
+        # a fixed index — insisting is what made construction order
+        # matter, and ran a 4-motor robot out of slots before the
+        # DriveBase was even reached.
+        self._slot_l = (slot_l if slot_l is not None
+                        else self._claim_slot(left_id, invert_left, acc,
+                                              "left"))
+        self._slot_r = (slot_r if slot_r is not None
+                        else self._claim_slot(right_id, invert_right, acc,
+                                              "right"))
+        self._sb.db_config(self._slot_l, self._slot_r,
                            float(wheel_diameter_mm), float(axle_track_mm),
                            float(accel_dps2))
         # Wiring/ID/power problems are found HERE, at construction,
         # not as mysterious non-motion later: attaching a slot only
         # claims it in C, it never asks the servo whether it exists.
         self._require_live_wheels()
+
+    def _claim_slot(self, servo_id, invert, acc, side):
+        """Take the first free slot for a wheel that does not have
+        one yet (it was on the MicroPython bus until adoption)."""
+        # Already driving this servo? Reuse its slot. One physical
+        # servo, one slot — otherwise re-running a script in the same
+        # boot claims a second slot for a motor that has one, and a
+        # 4-motor robot on 4 slots runs out.
+        slot_of = getattr(self._sb, "servo_slot_of", None)
+        if slot_of is not None:
+            held = slot_of(servo_id)
+            if held >= 0:
+                return held
+        for slot in _ALL_SLOTS:
+            if self._sb.servo_attach(slot, servo_id, bool(invert), acc):
+                return slot
+        raise RuntimeError(
+            "no free native slot for the %s wheel (servo id %s): all "
+            "%d slots are claimed. More motors than slots needs a "
+            "second UART." % (side, servo_id, len(_ALL_SLOTS)))
 
     # -- motor health ----------------------------------------------------
     #
@@ -187,8 +224,9 @@ class _SerialNativeEngine:
     _LIVE_WHEEL_TIMEOUT_MS = 400     # ~130 read attempts per wheel
 
     def _wheel_desc(self, slot):
-        side = "left" if slot == _LEFT_SLOT else "right"
-        ids = {_LEFT_SLOT: self._left_id, _RIGHT_SLOT: self._right_id}
+        side = "left" if slot == self._slot_l else "right"
+        ids = {self._slot_l: self._left_id,
+               self._slot_r: self._right_id}
         return ("%s wheel (servo id %s, slot %d) on UART%s tx=%s rx=%s"
                 % (side, ids[slot], slot, self._uart_id,
                    self._tx, self._rx))
@@ -216,7 +254,7 @@ class _SerialNativeEngine:
         if stats is None:
             return                  # bus surface without health data
         deadline = time.ticks_ms() + self._LIVE_WHEEL_TIMEOUT_MS
-        pending = [_LEFT_SLOT, _RIGHT_SLOT]
+        pending = [self._slot_l, self._slot_r]
         while pending:
             pending = [s for s in pending if stats(s)[0] == 0]
             if not pending:
@@ -251,7 +289,7 @@ class _SerialNativeEngine:
         bits = fault()
         if not bits:
             return
-        slot = _LEFT_SLOT if bits & 0x01 else _RIGHT_SLOT
+        slot = self._slot_l if bits & 0x01 else self._slot_r
         raise self._dead_wheel_error(
             slot, "motor stopped responding mid-move; the drivebase "
                   "halted to stop it running away")
@@ -419,8 +457,8 @@ class _SerialNativeEngine:
         if stats is None:
             return msg
         return msg + (" [left%s; right%s]"
-                      % (self._wheel_evidence(_LEFT_SLOT),
-                         self._wheel_evidence(_RIGHT_SLOT)))
+                      % (self._wheel_evidence(self._slot_l),
+                         self._wheel_evidence(self._slot_r)))
 
     def _wait(self):
         deadline = self._deadline

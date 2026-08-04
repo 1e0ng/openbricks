@@ -950,11 +950,12 @@ class ST3215Motor(Motor):
             self, right, wheel_diameter_mm=wheel_diameter_mm,
             axle_track_mm=axle_track_mm, imu=imu, accel_dps2=accel_dps2)
 
-    # Slots 0 and 1 belong to the DriveBase (its engine attaches them
-    # by fixed index and detaches whatever is there first, so a task
-    # motor parked in one would be evicted mid-run). Task motors take
-    # what is left, top down.
-    _TASK_SLOTS = (2, 3)
+    # First free slot wins, whoever asks. Reserving 0/1 for wheels
+    # made construction order matter: a script that built its task
+    # motors first exhausted the free slots before its DriveBase was
+    # reached. The DriveBase now adopts whatever slots its wheels
+    # already hold, so no reservation is needed.
+    _TASK_SLOTS = (0, 1, 2, 3)
 
     def _attach_task_slot(self):
         """Claim a native slot for a motor that is not a drivebase
@@ -970,16 +971,23 @@ class ST3215Motor(Motor):
             pass
         acc = int(self._accel_dps2 * self._steps_per_dps / 100.0)
         acc = 0 if acc < 0 else (254 if acc > 254 else acc)
+        slot_of = getattr(sb, "servo_slot_of", None)
+        if slot_of is not None:
+            held = slot_of(self._id)
+            if held >= 0:                 # one servo, one slot
+                self._adopt_native(sb, held)
+                self._await_slot_odometry(held)
+                return
         for slot in self._TASK_SLOTS:
             if sb.servo_attach(slot, self._id, self._invert, acc):
                 self._adopt_native(sb, slot)
                 self._await_slot_odometry(slot)
                 return
         raise RuntimeError(
-            "no free native slot for servo id %s: the bus has %d slots, "
-            "two reserved for the DriveBase's wheels and both task "
-            "slots already claimed. A fifth motor needs a second UART."
-            % (self._id, 2 + len(self._TASK_SLOTS)))
+            "no free native slot for servo id %s: all %d are claimed. "
+            "This bus drives at most %d motors — more needs a second "
+            "UART." % (self._id, len(self._TASK_SLOTS),
+                       len(self._TASK_SLOTS)))
 
     _SLOT_ODOMETRY_TIMEOUT_MS = 400
 
@@ -1547,6 +1555,20 @@ class SyncServoGroup:
     def __init__(self, servos):
         if not servos:
             raise ValueError("SyncServoGroup needs at least one servo")
+        for s in servos:
+            slot = getattr(s, "_native_slot", None)
+            if slot is not None:
+                raise RuntimeError(
+                    "servo id %s is driven by the native bus (slot %d), "
+                    "so a SyncServoGroup cannot command it: this class "
+                    "writes through the MicroPython UART, which the "
+                    "native driver now owns — the two collide on the "
+                    "wire and each reads the other's replies. For "
+                    "drivebase wheels use ``DriveBase.move_wheels("
+                    "left, right)``, which gives the same one-packet "
+                    "guarantee from inside the engine; for a task "
+                    "motor drive it directly (``motor.run_speed(...)``)."
+                    % (s._id, slot))
         bus = servos[0]._bus
         for s in servos[1:]:
             if s._bus is not bus:

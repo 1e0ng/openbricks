@@ -3,6 +3,29 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.58.0 — SyncServoGroup refuses wheels it cannot drive
+
+The last place two drivers could still meet on one wire.
+
+Adopting wheels into a `DriveBase` hands their UART to the native
+driver, but a `SyncServoGroup` built over those same wheels writes
+through the MicroPython one. Both talk; each reads the other's
+replies. On the bench that surfaced as *"write to servo id 2
+acknowledged by servo id 4"* from inside a line-align routine — the
+motors were fine, the bus had two owners.
+
+`SyncServoGroup` now refuses at construction if any member is driven
+by the native bus, and names the replacement: `DriveBase.move_wheels(
+left, right)` for wheels (same one-packet guarantee, from inside the
+engine), or driving a task motor directly. Off the native bus it is
+unchanged — grippers and multi-axis arms are what it is for.
+
+`examples/line_align.py` is migrated. Its per-wheel independent stop
+survives: instead of `left_motor.brake()`, the wheel's entry in a
+speed pair goes to zero and both go out together, so the behaviour is
+the same and every update is still one packet. Cleanup uses
+`db.stop(then="brake")`.
+
 ## 1.57.3 — "never asked" and "asked, got silence" are different faults
 
 A slot with 0 replies and 0 failed reads was reported as "not

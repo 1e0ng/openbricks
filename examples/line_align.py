@@ -30,16 +30,22 @@ from machine import I2C, Pin
 from openbricks.tools import wait
 
 from openbricks.drivers.st3032 import ST3032Motor
-from openbricks.drivers.st3215 import SyncServoGroup
 from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.drivers.tcs34725 import TCS34725
+from openbricks.robotics import DriveBase
 
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
 right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6, invert=True)
-# One SYNC WRITE starts both wheels at the same packet boundary,
-# instead of two serialised bus writes.
-wheels = SyncServoGroup([left_motor, right_motor])
+# ``db.move_wheels(left, right)`` puts both setpoints in ONE
+# sync-write packet, so the wheels change together. It replaces the
+# SyncServoGroup this example used to build: adopting wheels into a
+# DriveBase hands their UART to the native driver, and a
+# SyncServoGroup writes through the MicroPython one — two drivers on
+# a single wire. The chassis dimensions matter only to
+# straight()/turn(); this routine steers by wheel speeds.
+db = DriveBase(left_motor, right_motor,
+               wheel_diameter_mm=88, axle_track_mm=136)
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux = TCA9548A(i2c)
@@ -73,19 +79,26 @@ def align_on_line():
     right_done = False
     left_ambient = None
     right_ambient = None
-    wheels.set_goal_speeds([approach_dps, approach_dps])
+    # Per-wheel speeds, updated as each side arrives. Zeroing one
+    # side stops that wheel while the other keeps creeping — same
+    # independent-stop behaviour as the old per-motor brake(), but
+    # every change still leaves in a single packet.
+    speeds = [approach_dps, approach_dps]
+    db.move_wheels(speeds[0], speeds[1])
     try:
         for _ in range(max(1, timeout_ms // poll_ms)):
             if not left_done:
                 left_ambient = left_sensor.ambient()
                 if left_ambient < LINE_AMBIENT:
-                    left_motor.brake()
+                    speeds[0] = 0
+                    db.move_wheels(speeds[0], speeds[1])
                     left_done = True
                     print('left wheel stopped (ambient=%d)' % left_ambient)
             if not right_done:
                 right_ambient = right_sensor.ambient()
                 if right_ambient < LINE_AMBIENT:
-                    right_motor.brake()
+                    speeds[1] = 0
+                    db.move_wheels(speeds[0], speeds[1])
                     right_done = True
                     print('right wheel stopped (ambient=%d)' % right_ambient)
 
@@ -94,11 +107,8 @@ def align_on_line():
             wait(poll_ms)
     finally:
         # Whatever ends the loop — success, timeout, Ctrl-C — no
-        # wheel keeps creeping.
-        if not left_done:
-            left_motor.brake()
-        if not right_done:
-            right_motor.brake()
+        # wheel keeps creeping. One call, both wheels.
+        db.stop(then="brake")
     raise RuntimeError(
         "no line found within %d ms (last ambient: left=%r right=%r) — "
         "is the line in reach, and is LINE_AMBIENT calibrated for "
