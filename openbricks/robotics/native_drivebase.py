@@ -222,8 +222,21 @@ class _SerialNativeEngine:
             if not pending:
                 return
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                slot = pending[0]
+                # Distinguish "asked and got silence" from "never
+                # asked" — a wedged pump is a firmware fault, not a
+                # wiring one, and saying "check your wiring" sends
+                # the user hunting the wrong thing (1.57.2).
+                if stats(slot)[1] == 0:
+                    raise OSError(
+                        "%s: the bus pump never polled it — 0 reads "
+                        "ATTEMPTED, not 0 answered. Not a wiring "
+                        "fault: the hard tick is not running, or the "
+                        "bus is stuck mid-transaction. Power-cycle "
+                        "the hub; if it persists, report it."
+                        % self._wheel_desc(slot))
                 raise self._dead_wheel_error(
-                    pending[0], "motor is not responding on the bus")
+                    slot, "motor is not answering on the bus")
             time.sleep_ms(10)
 
     def check_motors(self):

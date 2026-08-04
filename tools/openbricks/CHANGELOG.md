@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.57.3 — "never asked" and "asked, got silence" are different faults
+
+A slot with 0 replies and 0 failed reads was reported as "not
+responding: check power and TX/RX wiring". That is the opposite of
+what the counters said. A servo that is unplugged shows failed reads
+CLIMBING; a bus pump that never ran shows neither counter moving.
+
+Conflating them cost a bench session hunting a wiring fault that was
+really the wedged bus fixed in 1.57.2. The two now read differently:
+the wiring advice and `openbricks servo-id --scan` appear only when
+the bus actually asked and got silence, and a never-polled slot says
+so plainly and calls itself a firmware fault rather than sending
+anyone to a screwdriver.
+
+Applies to both the task-motor slot check and the DriveBase's
+construction-time wheel check.
+
 ## 1.57.2 — the bus no longer wedges at a program boundary
 
 A latent wedge, exposed by 1.57.0 and older than it.
