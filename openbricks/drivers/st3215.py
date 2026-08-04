@@ -1007,13 +1007,28 @@ class ST3215Motor(Motor):
         while stats(slot)[0] == 0:
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
                 ok, failed, stale = stats(slot)
+                # "Never asked" and "asked, no answer" are different
+                # faults and must not read alike. A silent servo shows
+                # failed reads CLIMBING; a pump that never ran shows
+                # neither counter moving. Conflating them sent one
+                # bench session hunting a wiring problem that was
+                # actually a wedged bus (1.57.2).
+                if failed == 0:
+                    raise OSError(
+                        "servo id %s (native slot %d): the bus pump "
+                        "never polled it — 0 reads ATTEMPTED, not 0 "
+                        "answered. This is not a wiring fault: the "
+                        "hard tick is not running, or the bus is stuck "
+                        "mid-transaction. Power-cycle the hub; if it "
+                        "persists, it is a firmware bug — report the "
+                        "counters." % (self._id, slot))
                 raise OSError(
-                    "servo id %s (native slot %d) is not responding: "
-                    "%d replies, %d failed reads. Check the servo's "
-                    "power and TX/RX wiring, and that it really has "
-                    "that bus id — `openbricks servo-id --scan` lists "
-                    "the ids actually answering."
-                    % (self._id, slot, ok, failed))
+                    "servo id %s (native slot %d) is not answering: "
+                    "%d replies, %d failed reads — the bus asked and "
+                    "got silence. Check the servo's power and TX/RX "
+                    "wiring, and that it really has that bus id "
+                    "(`openbricks servo-id --scan` lists the ids "
+                    "actually answering)." % (self._id, slot, ok, failed))
             time.sleep_ms(10)
 
     @classmethod

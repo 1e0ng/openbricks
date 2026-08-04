@@ -103,8 +103,10 @@ class _FakeBus:
         # layer would actually have when it latches: the fault fires
         # only after a run of failures, so "faulted but 0 stale" is
         # not a state real hardware can be in.
+        if slot in getattr(self, "wedged_slots", ()):
+            return (0, 0, 0)     # pump never ASKED — a wedged bus
         if slot in getattr(self, "dead_slots", ()):
-            return (0, 137, 137)
+            return (0, 137, 137)  # asked repeatedly, got silence
         if getattr(self, "fault_bits", 0) & (1 << slot):
             return (500, 42, 42)
         return (500, 0, 0)
@@ -782,8 +784,24 @@ class OneBusOneOwnerTests(_Base):
         except OSError as e:
             msg = str(e)
         self.assertTrue("servo id 4" in msg, msg)
-        self.assertTrue("not responding" in msg, msg)
+        self.assertTrue("not answering" in msg, msg)
+        self.assertTrue("137 failed reads" in msg, msg)
         self.assertTrue("servo-id" in msg, msg)
+
+    def test_a_pump_that_never_polled_is_not_blamed_on_wiring(self):
+        # 0 replies AND 0 failed reads means the bus never ASKED —
+        # a wedged pump, not a dead servo. Saying "check your wiring"
+        # there sent a bench session hunting the wrong fault (1.57.2).
+        db, _, _ = self._drivebase()
+        self.bus.wedged_slots = (2, 3)
+        try:
+            self._motor(4)
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("never polled" in msg, msg)
+        self.assertTrue("not a wiring fault" in msg, msg)
+        self.assertFalse("servo-id --scan" in msg, msg)
 
     def test_without_a_native_bus_nothing_changes(self):
         # No drivebase, no native ownership: the plain MicroPython
