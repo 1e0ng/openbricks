@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.57.1 — a task motor is usable the moment it is constructed
+
+1.57.0 put task motors on native slots but returned from the
+constructor before the slot had any odometry. A slot goes live only
+when the pump's round-robin reaches it — config writes go out first
+— and the C layer refuses a position move until then, because arming
+one against `counts=0` would slam the shaft toward a wrong absolute
+target. So a `run_angle` issued immediately after construction died
+with *"slot odometry is not live yet"*.
+
+The constructor now waits for the first feedback read, and arms the
+hard tick itself (a drivebase does that in its own constructor, but
+a task motor may be the only thing on the bus).
+
+The wait doubles as the liveness check the drivebase wheels already
+get: a servo that never answers is a wiring / id / power fault,
+named at construction with its bus id and the `openbricks servo-id
+--scan` remedy, rather than surfacing later as a puzzling refusal.
+
 ## 1.57.0 — one bus, one owner: task motors share the DriveBase's UART
 
 Four ST-3032s on one UART — two wheels, two task motors — used to be
