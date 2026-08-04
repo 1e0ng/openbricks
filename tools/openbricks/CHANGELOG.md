@@ -3,6 +3,52 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.55.0 — a dead motor raises, and says which motor
+
+Reported from the bench: with a dead motor the drivebase did
+nothing — no motion, no exception, no message. Reproducing it found
+a second, worse problem behind the silence.
+
+**The runaway.** A silent wheel's odometry freezes at its last
+reading, so the coupled controller sees an ever-growing heading
+error and winds that wheel's command toward the rail. Reproduced
+off-hardware: 8468 steps/s commanded on the silent wheel while the
+live one sat at 6. A motor that is alive but merely not *reporting*
+— a broken feedback line, the common failure — would take off. The
+C tick now stops driving within ~200 ms of a wheel going quiet and
+latches which one.
+
+**The diagnosis.** Every layer that could hide the failure now
+checks, and every message names the motor:
+
+```text
+OSError: motor is not responding on the bus: right wheel (servo id 1,
+slot 1) on UART1 tx=14 rx=6 — 0 replies, 137 failed reads (137 in a
+row). Check the servo's power and TX/RX wiring, and that it really
+has that bus id — `openbricks servo-id --scan` lists the ids actually
+answering on the bus.
+```
+
+- **At construction** — both wheels must answer at least one
+  feedback read before you get a DriveBase. `servo_attach` only
+  claims a slot in C; it never asks the servo whether it exists, so
+  wiring/id/power faults used to surface as mysterious non-motion
+  much later.
+- **During moves** — a mid-move fault raises in ~200 ms naming the
+  wheel, instead of burning the 8 s settle timeout and blaming
+  "stalled, blocked, or gyro frame diverged".
+- **`move_wheels` / control loops** — nothing waits on a
+  fire-and-forget speed command, so it checks before commanding; in
+  a loop the failure lands on the next iteration.
+- **`db.check_motors()`** — the same check on demand.
+
+Halting on a fault also latches the controller's `done` flag, so the
+wait loop now tests motor health *before* `done` — otherwise a
+faulted move would exit reporting success, which is the exact
+silent-failure shape being fixed. The settle-timeout message also
+carries both wheels' traffic counters now; an asymmetry localises a
+mechanical stall.
+
 ## 1.54.0 — DriveBase.move_wheels(left, right)
 
 Direct per-wheel speed control, in wheel-deg/s, as a first-class

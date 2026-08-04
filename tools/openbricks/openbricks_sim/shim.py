@@ -357,6 +357,15 @@ class _SimStBus:
     def servo_counts(self, slot):
         return int(self._wheels[slot].angle() * self._STEPS_PER_DEG)
 
+    def servo_stats(self, slot):
+        # (reads_ok, reads_failed, stale). Sim wheels never go silent,
+        # so this reports permanently healthy — the health CONTRACT is
+        # exercised, the failure mode is a hardware one.
+        return (1, 0, 0)
+
+    def db_fault(self):
+        return 0
+
     def servo_feedback(self, slot):
         # (speed_steps, load_raw, fresh) — the firmware's widened
         # 6-byte read surface (1.50.0). Speed is the wheel's actual

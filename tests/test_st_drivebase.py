@@ -189,6 +189,111 @@ class TurnTests(_Base):
         self.assertTrue(dl < 0 and dr > 0, (dl, dr))
 
 
+class _DeadRightWheel(_PerfectWheels):
+    """Servo id 1 (the right wheel) never answers — unplugged, wrong
+    bus id, or dead. The left wheel is healthy throughout."""
+
+    DEAD_ID = 1
+
+    def pump(self):
+        self.now += 1
+        for i in (1, 2):
+            self.pos[i] += self.spd[i] * self.track / 1000.0
+        sb.servo_pump(self.now)
+        tx = sb.take_tx()
+        i = 0
+        while i + 4 <= len(tx):
+            if tx[i:i + 2] != b"\xff\xff":
+                i += 1
+                continue
+            pid, ln, instr = tx[i + 2], tx[i + 3], tx[i + 4]
+            pkt = tx[i:i + 4 + ln]
+            if pid == self.DEAD_ID:
+                i += 4 + ln
+                continue                       # silence
+            if instr == 0x02:
+                self.reads += 1
+                raw = int(self.pos[pid]) & 0x0FFF
+                sb.feed_rx(_reply(pid, 0, bytes([
+                    raw & 0xFF, (raw >> 8) & 0xFF, 0, 0, 0, 0])))
+            elif instr == 0x03 and pid != 0xFE:
+                sb.feed_rx(_reply(pid, 0))
+            elif instr == 0x83:
+                reg, dl = pkt[5], pkt[6]
+                j, end = 7, 2 + 2 + ln - 1
+                if reg == 0x2E:
+                    self.syncs += 1
+                    while j + dl + 1 <= end:
+                        sid = pkt[j]
+                        v = pkt[j + 1] | (pkt[j + 2] << 8)
+                        if sid in self.spd:
+                            self.spd[sid] = (-(v & 0x7FFF) if v & 0x8000
+                                             else v)
+                        j += 1 + dl
+            i += 4 + ln
+
+
+class DeadWheelTests(_Base):
+    """A wheel that stops answering must be caught, not absorbed.
+
+    Before this existed the coupled controller integrated the silent
+    wheel's frozen odometry: the diff error grew without bound and
+    wound that wheel's command to the rail (bench-reproduced at 8468
+    steps/s while the live wheel sat at 6). A motor that is alive but
+    merely not REPORTING — a broken feedback line — would take off.
+    """
+
+    def setUp(self):
+        # Dead from the FIRST packet — _Base.setUp would let the
+        # right wheel reply during its own settle window.
+        if sb is None:
+            raise unittest.SkipTest("st_bus is firmware/unix-MP only")
+        sb.test_reset()
+        self.w = _DeadRightWheel()
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.w.advance(50)
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+
+    def test_silent_wheel_is_visible_in_the_stats(self):
+        self.w.advance(200)
+        self.assertGreater(sb.servo_stats(0)[0], 0)     # left replying
+        self.assertEqual(sb.servo_stats(1)[0], 0)       # right silent
+        self.assertGreater(sb.servo_stats(1)[2], 20)
+
+    def test_move_faults_instead_of_running_the_wheel_away(self):
+        sb.db_straight(200.0, 150.0)
+        self.w.advance(3000)
+        # Fault latched, naming the RIGHT wheel (bit 1).
+        self.assertEqual(sb.db_fault(), 0x02)
+        # And the commanded speeds were cut, not railed.
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+
+    def test_fault_stops_the_runaway_quickly(self):
+        # The whole point: the silent wheel must not be driven far.
+        # Unguarded this reached ~21000 counts in 3000 pumps.
+        sb.db_straight(500.0, 150.0)
+        self.w.advance(3000)
+        self.assertLess(abs(self.w.pos[1]), 200, self.w.pos)
+
+    def test_healthy_pair_never_faults(self):
+        _Base.setUp(self)                     # clean, fully-alive rig
+        sb.db_straight(200.0, 150.0)
+        self.w.advance(3000)
+        self.assertEqual(sb.db_fault(), 0)
+        self.assertTrue(sb.db_done())
+
+    def test_arming_a_new_move_clears_the_latch_for_a_retry(self):
+        sb.db_straight(200.0, 150.0)
+        self.w.advance(3000)
+        self.assertEqual(sb.db_fault(), 0x02)
+        sb.db_straight(200.0, 150.0)          # user retries
+        self.assertEqual(sb.db_fault(), 0)    # cleared...
+        self.w.advance(3000)
+        self.assertEqual(sb.db_fault(), 0x02)  # ...and re-detected
+
+
 class StopAndGyroTests(_Base):
     def test_stop_zeroes_the_wheel_speeds(self):
         sb.db_straight(500.0, 150.0)

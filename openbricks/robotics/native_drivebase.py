@@ -130,6 +130,10 @@ class _SerialNativeEngine:
         self._deadline = 0
         self._straight_speed_dps = 200
         self._turn_rate_dps = 150
+        # Kept for diagnostics: a dead-motor message is only useful if
+        # it says WHICH motor and where it's wired.
+        self._left_id, self._right_id = left_id, right_id
+        self._uart_id, self._tx, self._rx = uart_id, tx, rx
 
         try:
             from openbricks._native import motor_process
@@ -159,6 +163,79 @@ class _SerialNativeEngine:
         self._sb.db_config(_LEFT_SLOT, _RIGHT_SLOT,
                            float(wheel_diameter_mm), float(axle_track_mm),
                            float(accel_dps2))
+        # Wiring/ID/power problems are found HERE, at construction,
+        # not as mysterious non-motion later: attaching a slot only
+        # claims it in C, it never asks the servo whether it exists.
+        self._require_live_wheels()
+
+    # -- motor health ----------------------------------------------------
+    #
+    # A serial wheel that stops answering is invisible to every layer
+    # above it unless someone looks: ``servo_attach`` only claims a
+    # slot, the controller happily integrates a frozen odometry
+    # reading, and a fire-and-forget speed command has nothing to
+    # wait for. So the engine checks explicitly, and every message
+    # names the motor — side, bus id, slot, UART and pins — because
+    # "nothing moved" is the least actionable error a robot can give.
+
+    _LIVE_WHEEL_TIMEOUT_MS = 400     # ~130 read attempts per wheel
+
+    def _wheel_desc(self, slot):
+        side = "left" if slot == _LEFT_SLOT else "right"
+        ids = {_LEFT_SLOT: self._left_id, _RIGHT_SLOT: self._right_id}
+        return ("%s wheel (servo id %s, slot %d) on UART%s tx=%s rx=%s"
+                % (side, ids[slot], slot, self._uart_id,
+                   self._tx, self._rx))
+
+    def _wheel_evidence(self, slot):
+        stats = getattr(self._sb, "servo_stats", None)
+        if stats is None:
+            return ""
+        ok, failed, stale = stats(slot)
+        return (" — %d replies, %d failed reads (%d in a row)"
+                % (ok, failed, stale))
+
+    def _dead_wheel_error(self, slot, headline):
+        return OSError(
+            "%s: %s%s. Check the servo's power and TX/RX wiring, and "
+            "that it really has that bus id — `openbricks servo-id "
+            "--scan` lists the ids actually answering on the bus."
+            % (headline, self._wheel_desc(slot),
+               self._wheel_evidence(slot)))
+
+    def _require_live_wheels(self):
+        """Both wheels must answer at least one feedback read before
+        we hand the user a drivebase. Raises naming the silent one."""
+        stats = getattr(self._sb, "servo_stats", None)
+        if stats is None:
+            return                  # bus surface without health data
+        deadline = time.ticks_ms() + self._LIVE_WHEEL_TIMEOUT_MS
+        pending = [_LEFT_SLOT, _RIGHT_SLOT]
+        while pending:
+            pending = [s for s in pending if stats(s)[0] == 0]
+            if not pending:
+                return
+            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                raise self._dead_wheel_error(
+                    pending[0], "motor is not responding on the bus")
+            time.sleep_ms(10)
+
+    def check_motors(self):
+        """Raise if a wheel has gone silent since the last check.
+
+        The C tick latches the fault and stops driving (a frozen
+        odometry reading otherwise winds that wheel's command to the
+        rail), so this converts the latch into a diagnosis."""
+        fault = getattr(self._sb, "db_fault", None)
+        if fault is None:
+            return
+        bits = fault()
+        if not bits:
+            return
+        slot = _LEFT_SLOT if bits & 0x01 else _RIGHT_SLOT
+        raise self._dead_wheel_error(
+            slot, "motor stopped responding mid-move; the drivebase "
+                  "halted to stop it running away")
 
     # -- configuration ---------------------------------------------------
 
@@ -233,6 +310,10 @@ class _SerialNativeEngine:
         over the two wheels (which adoption makes unreachable: the
         motors' MicroPython UART is gone)."""
         estop.check()
+        # Nothing downstream waits for these, so a silent wheel would
+        # never surface — check before commanding. In a control loop
+        # the failure lands on the next iteration.
+        self.check_motors()
         ok = self._sb.db_move_wheels(
             int(float(left_wheel_speed) * _STEPS_PER_DEG),
             int(float(right_wheel_speed) * _STEPS_PER_DEG))
@@ -295,22 +376,45 @@ class _SerialNativeEngine:
         polls this for wait=False moves; _wait() below is the
         blocking form of the same loop."""
         estop.check()
+        # A silent wheel fails HERE, in ~200 ms with the motor named,
+        # rather than burning the full settle timeout and blaming
+        # "stalled or gyro diverged".
+        self.check_motors()
         if self._use_gyro:
             self._gyro_pump()
         if self._sb.db_done():
             return True
         if time.ticks_diff(self._deadline, time.ticks_ms()) <= 0:
             self._sb.db_stop()
-            raise RuntimeError(
-                "DriveBase move did not reach target within "
-                "%d ms — wheel stalled, blocked, or gyro frame "
-                "diverged" % self._SETTLE_TIMEOUT_MS)
+            raise RuntimeError(self._settle_timeout_message())
         return False
+
+    def _settle_timeout_message(self):
+        """The move ran out of time with both wheels still talking —
+        so this is mechanical. Include each wheel's traffic anyway;
+        an asymmetry between them localises the problem."""
+        msg = ("DriveBase move did not reach target within %d ms — "
+               "wheel stalled, blocked, or gyro frame diverged"
+               % self._SETTLE_TIMEOUT_MS)
+        stats = getattr(self._sb, "servo_stats", None)
+        if stats is None:
+            return msg
+        return msg + (" [left%s; right%s]"
+                      % (self._wheel_evidence(_LEFT_SLOT),
+                         self._wheel_evidence(_RIGHT_SLOT)))
 
     def _wait(self):
         deadline = self._deadline
-        while not self._sb.db_done():
+        while True:
             estop.check()
+            # BEFORE db_done: halting on a dead wheel latches the
+            # controller's ``done`` flag, so testing done first would
+            # let a faulted move exit the wait reporting success —
+            # the silent-failure shape this whole check exists to
+            # kill.
+            self.check_motors()
+            if self._sb.db_done():
+                return
             if self._use_gyro:
                 self._gyro_pump()
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
@@ -319,8 +423,5 @@ class _SerialNativeEngine:
                 # that physically can't reach the target must raise
                 # (classic stall-timeout contract).
                 self._sb.db_stop()
-                raise RuntimeError(
-                    "DriveBase move did not reach target within "
-                    "%d ms — wheel stalled, blocked, or gyro frame "
-                    "diverged" % self._SETTLE_TIMEOUT_MS)
+                raise RuntimeError(self._settle_timeout_message())
             time.sleep_ms(10)

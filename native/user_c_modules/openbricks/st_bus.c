@@ -150,6 +150,25 @@ static bool st_db_writing;
 // rule, same as the Python engine's).
 static uint8_t st_db_gyro_source;
 static ob_float_t st_db_yaw_ref;
+// Dead-wheel fault latch. A wheel that stops answering feedback
+// reads is CATASTROPHIC for the coupled controller, not merely
+// invisible: its odometry freezes, so the diff error grows without
+// bound and the P term winds that wheel's command toward the rail
+// (bench-reproduced: 8468 steps/s commanded on the silent wheel
+// while the live one sat at 6). If the motor is alive but simply
+// not REPORTING — a broken feedback line, the classic failure — the
+// robot takes off. So the tick stops driving as soon as a wheel
+// goes quiet, and latches which one for Python to report.
+//
+// Threshold is in consecutive failed reads. Each failed read costs
+// OB_SSERVO_READ_TICKS (5) pump iterations and the two wheels share
+// the round-robin, so 20 is roughly 200 ms of silence at the 1 kHz
+// tick — long enough to ride out bus noise, short enough that a
+// runaway never gets going.
+#define ST_DB_STALE_FAULT 20
+#define ST_DB_FAULT_LEFT  0x01
+#define ST_DB_FAULT_RIGHT 0x02
+static uint8_t st_db_fault;
 static int st_db_slot_l = -1, st_db_slot_r = -1;
 static uint32_t st_db_now_ms;      // clock fed by the pump caller
 
@@ -182,6 +201,21 @@ static void st_db_tick_locked(void) {
         return;                    // configured but yielded
     }
     ob_sservo_t *sv = sservo_get();
+    // Silent-wheel guard, BEFORE the control law: a frozen odometry
+    // reading would otherwise wind that wheel's command to the rail.
+    if (sv->slots[st_db_slot_l].stale >= ST_DB_STALE_FAULT) {
+        st_db_fault |= ST_DB_FAULT_LEFT;
+    }
+    if (sv->slots[st_db_slot_r].stale >= ST_DB_STALE_FAULT) {
+        st_db_fault |= ST_DB_FAULT_RIGHT;
+    }
+    if (st_db_fault) {
+        ob_sservo_set_speed(sv, st_db_slot_l, 0);
+        ob_sservo_set_speed(sv, st_db_slot_r, 0);
+        ob_drivebase_stop(&st_db);
+        st_db_writing = false;     // yield; Python raises on the fault
+        return;
+    }
     if (st_db.use_gyro && st_db_gyro_source == 1) {
         st_db.heading_override_wheel_deg = ob_drivebase_body_to_wheel_diff(
             &st_db,
@@ -314,6 +348,7 @@ void ob_st_bus_estop_from_tick(void) {
     }
     st_db_active = false;
     st_db_writing = false;
+    st_db_fault = 0;
     st_moves_reset_all();
     ob_sservo_t *sv = sservo_get();
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
@@ -366,6 +401,7 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
+    st_db_fault = 0;
     st_moves_reset_all();
     st_db_slot_l = st_db_slot_r = -1;
     st_db_now_ms = 0;
@@ -789,6 +825,7 @@ static mp_obj_t sb_db_config(size_t n_args, const mp_obj_t *args) {
     // move, so a freshly constructed DriveBase leaves the wheels
     // free instead of torquing them into a hold at pose zero.
     st_db_writing = false;
+    st_db_fault = 0;
     ob_smove_init(&st_moves[st_db_slot_l]);
     ob_smove_init(&st_moves[st_db_slot_r]);
     bus_release();
@@ -801,6 +838,7 @@ static mp_obj_t sb_db_disable(mp_obj_t self_in) {
     bus_take();
     st_db_active = false;
     st_db_writing = false;
+    st_db_fault = 0;
     st_db_slot_l = st_db_slot_r = -1;
     bus_release();
     return mp_const_none;
@@ -817,6 +855,7 @@ static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
     st_db_sync_bridges_locked();
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
+    st_db_fault = 0;      // retry re-detects within ~200 ms
     st_db_writing = true;
     ob_drivebase_straight(&st_db, (long)st_db_now_ms,
                           (ob_float_t)mp_obj_get_float(mm_in),
@@ -833,6 +872,7 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
     st_db_sync_bridges_locked();
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
+    st_db_fault = 0;      // retry re-detects within ~200 ms
     st_db_writing = true;
     ob_drivebase_turn(&st_db, (long)st_db_now_ms,
                       (ob_float_t)mp_obj_get_float(deg_in),
@@ -959,6 +999,19 @@ static mp_obj_t sb_db_stop(size_t n_args, const mp_obj_t *args) {
     return mp_obj_new_bool(ok);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_db_stop_obj, 1, 2, sb_db_stop);
+
+// db_fault() -> bitmask: 0x01 left wheel silent, 0x02 right wheel
+// silent, 0 healthy. Latched by the tick; cleared when a new move is
+// armed, so a retry re-detects within ~200 ms rather than bricking
+// the drivebase until reconstruction.
+static mp_obj_t sb_db_fault(mp_obj_t self_in) {
+    (void)self_in;
+    bus_take();
+    uint8_t f = st_db_fault;
+    bus_release();
+    return mp_obj_new_int_from_uint(f);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_fault_obj, sb_db_fault);
 
 static mp_obj_t sb_db_gyro_source(mp_obj_t self_in, mp_obj_t mode_in) {
     // 0 = Python db_set_heading override (default); 1 = hard-tick
@@ -1098,6 +1151,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_turn),          MP_ROM_PTR(&sb_db_turn_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_stop),          MP_ROM_PTR(&sb_db_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_move_wheels),   MP_ROM_PTR(&sb_db_move_wheels_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_fault),         MP_ROM_PTR(&sb_db_fault_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_done),          MP_ROM_PTR(&sb_db_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_gyro_source),  MP_ROM_PTR(&sb_db_gyro_source_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },

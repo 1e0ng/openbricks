@@ -242,6 +242,19 @@ class DriveBase:
         self._run_at_dps(self._left,  fwd_wheel_dps + diff_wheel_dps)
         self._run_at_dps(self._right, fwd_wheel_dps - diff_wheel_dps)
 
+    def check_motors(self):
+        """Raise if a wheel has stopped answering the bus.
+
+        Serial-bus wheels are checked at construction and on every
+        move, so you rarely need this directly — reach for it in a
+        long-running open-loop control loop (``move_wheels`` in a
+        ``while`` loop already calls it for you), or to verify the
+        chassis before a run. The error names the motor: side, bus
+        id, slot, UART and pins.
+        """
+        if self._serial_engine is not None:
+            self._serial_engine.check_motors()
+
     def move_wheels(self, left_wheel_speed, right_wheel_speed):
         """Drive the two wheels at independent speeds, in wheel-deg/s.
 
