@@ -561,6 +561,17 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertEqual(rt.data.ctrl[left._servo._adapter._actuator_id], 0.0)
         self.assertEqual(rt.data.ctrl[right._servo._adapter._actuator_id], 0.0)
 
+        # turn + then="brake" take the same one-call route (mode 1).
+        db.turn(45, wait=False)
+        time.sleep_ms(100)
+        self.assertTrue(left._servo._adapter._attached)
+        self.assertTrue(right._servo._adapter._attached)
+        db.stop(then="brake")
+        self.assertFalse(left._servo._adapter._attached)
+        self.assertFalse(right._servo._adapter._attached)
+        self.assertEqual(rt.data.ctrl[left._servo._adapter._actuator_id], 0.0)
+        self.assertEqual(rt.data.ctrl[right._servo._adapter._actuator_id], 0.0)
+
     def test_servo_verbs_proxy_to_mujoco_wheels(self):
         # servo_run / servo_counts / servo_coast are the st_bus verbs
         # the FIRMWARE driver's adopted wheel-mode API calls (the shim

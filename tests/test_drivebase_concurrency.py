@@ -147,6 +147,20 @@ class EncoderPathConcurrencyTests(unittest.TestCase):
         self.assertEqual(self._bridge(self.left), (0, 0, 0))
         self.assertEqual(self._bridge(self.right), (0, 0, 0))
 
+    def test_stop_then_hold_is_refused_on_encoder_servos(self):
+        # There is no native position hold for encoder servos, so
+        # ``hold`` takes the per-motor fall-through — and JGB37/MG370
+        # don't implement hold() at all. It must fail loudly rather
+        # than silently degrade to coast; the controller is halted
+        # either way.
+        self.db.straight(100, wait=False)
+        raised = False
+        try:
+            self.db.stop(then="hold")
+        except (AttributeError, NotImplementedError):
+            raised = True
+        self.assertTrue(raised, "stop(then='hold') should refuse here")
+
     def test_drive_still_clears_the_trajectory_without_an_end_state(self):
         # ``drive()`` calls the no-mode stop to drop an in-flight
         # profile before writing its own per-wheel speeds — it must
