@@ -200,6 +200,65 @@ TEST(fairness_sync_then_read_alternation) {
     CHECK_EQ_INT(reads, 5);
 }
 
+TEST(parked_slots_do_not_halve_a_driving_wheels_odometry) {
+    // Two wheels driving, two task motors parked. Under a flat
+    // round-robin the wheels got half the reads they had when alone
+    // on the bus — and that rate IS the drivebase heading loop's
+    // bandwidth. Driving slots must keep nearly all of it.
+    reset();
+    for (int i = 0; i < 4; i++) {
+        ob_sservo_attach(&sv, i, (uint8_t)(i + 1), 0, 45);
+        sv.slots[i].config_step = 3;
+        sv.slots[i].torque_on = 1;
+    }
+    sv.slots[0].hot = 1;      // left wheel driving
+    sv.slots[1].hot = 1;      // right wheel driving
+    sv.slots[2].hot = 0;      // task motors parked
+    sv.slots[3].hot = 0;
+
+    int reads[4] = {0, 0, 0, 0};
+    ob_sservo_op_t op;
+    for (int n = 0; n < 400; n++) {
+        ob_sservo_next_op(&sv, &op);
+        if (op.kind == OB_SOP_READ_POS) {
+            reads[op.slot]++;
+            ob_sservo_op_started(&sv, &op);
+            ob_sservo_read_result(&sv, 1, (const uint8_t *)"\x00\x00", 2);
+        } else {
+            ob_sservo_op_started(&sv, &op);
+        }
+    }
+    int hot = reads[0] + reads[1];
+    int cold = reads[2] + reads[3];
+    // Wheels take the large majority; parked motors still get a
+    // trickle so angle()/speed() never go arbitrarily stale.
+    CHECK(hot > cold * 5);
+    CHECK(cold > 0);
+    // And the two wheels share evenly between themselves.
+    int diff = reads[0] - reads[1];
+    CHECK(diff < 3 && diff > -3);
+}
+
+TEST(all_parked_still_get_polled) {
+    // No slot driving: everything is cold, and the bus must still
+    // service them rather than stall on an empty preference.
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    sv.slots[0].config_step = 3;
+    sv.slots[0].hot = 0;
+    ob_sservo_op_t op;
+    int reads = 0;
+    for (int n = 0; n < 20; n++) {
+        ob_sservo_next_op(&sv, &op);
+        if (op.kind == OB_SOP_READ_POS) {
+            reads++;
+            ob_sservo_op_started(&sv, &op);
+            ob_sservo_read_result(&sv, 1, (const uint8_t *)"\x00\x00", 2);
+        }
+    }
+    CHECK(reads > 10);
+}
+
 TEST(failed_reads_count_stale_and_recover) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
@@ -306,6 +365,8 @@ int main(void) {
     RUN(mixed_torque_values_share_one_sync_packet);
     RUN(torque_sync_skips_the_fairness_gate);
     RUN(fairness_sync_then_read_alternation);
+    RUN(parked_slots_do_not_halve_a_driving_wheels_odometry);
+    RUN(all_parked_still_get_polled);
     RUN(failed_reads_count_stale_and_recover);
     RUN(bounds_are_guarded);
     return harness_exit("st_servo_core");

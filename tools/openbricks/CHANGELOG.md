@@ -3,6 +3,34 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.59.0 — parked motors no longer cost the drivebase its bandwidth
+
+Putting four motors on one bus (1.57.0) had a price nobody had
+measured: the pump polled every attached slot round-robin, so two
+parked task motors took exactly as much bus as two wheels steering a
+heading loop. Per-wheel odometry fell from ~220 Hz to ~110 — and
+that rate, not the 1 kHz tick, is what sets the coupled controller's
+real bandwidth.
+
+Reads are now weighted by whether a slot is actually driving. A slot
+is "hot" when a per-slot move is in flight, when the drivebase owns
+it and is running a move, or when it has a non-zero commanded speed.
+Hot slots take the bus; parked ones get one turn in eight — enough
+that `angle()` and `speed()` never drift arbitrarily stale, little
+enough that they cost a driving wheel almost nothing. Wheels keep
+roughly 7/8 of the rate they had alone on the bus.
+
+Driving and parked slots rotate on separate cursors, so a parked
+motor's occasional turn cannot bias the rotation between the two
+wheels — without that they shared unevenly, which would show up as
+one wheel's odometry being fresher than the other's inside a
+differential controller.
+
+One honest consequence: a dead motor that is *parked* takes
+proportionally longer to be noticed, because it is being asked less
+often. Detection while driving is unchanged — that slot is hot, and
+the runaway guard trips as promptly as before.
+
 ## 1.58.1 — the second run of a script adopts its wheels again
 
 Run a script once: fine. Run it again without a power cycle:

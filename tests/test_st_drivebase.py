@@ -296,7 +296,14 @@ class DeadWheelTests(_Base):
         sb.db_config(0, 1, 88.0, 136.0, 400.0)
 
     def test_silent_wheel_is_visible_in_the_stats(self):
-        self.w.advance(200)
+        # Slots that are not driving are polled at a reduced rate
+        # (they must not spend the bus a moving wheel needs), so an
+        # IDLE dead wheel takes proportionally longer to show. That
+        # is fine: the fault only matters while driving, and a
+        # driving slot is polled at full rate — see
+        # test_move_faults_instead_of_running_the_wheel_away, which
+        # arms a move first and trips the latch promptly.
+        self.w.advance(1600)
         self.assertGreater(sb.servo_stats(0)[0], 0)     # left replying
         self.assertEqual(sb.servo_stats(1)[0], 0)       # right silent
         self.assertGreater(sb.servo_stats(1)[2], 20)
