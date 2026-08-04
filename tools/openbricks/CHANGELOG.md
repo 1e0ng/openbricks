@@ -3,6 +3,33 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.56.1 — don't ground a robot over an acceleration it can't store
+
+1.56.0 verified both goal-speed and goal-acceleration and refused
+the move if either disagreed. The bench then showed an ST-3032 that
+**acknowledges the goal-acc write and still reports 0** — the ramp
+simply isn't settable on that unit. As shipped, 1.56.0 would have
+raised on every single `run_angle` there.
+
+The two registers now get the treatment their failure modes deserve:
+
+- **goal-speed stays strict.** 0 means full speed; a mismatch
+  refuses the move, because running anyway risks the shaft.
+- **goal-acc warns once and proceeds.** Refusing to move at all
+  because the servo won't store a *preference* about ramp shape
+  grounds a working robot to enforce a nicety. The message says the
+  servo doesn't take a ramp and that motion is otherwise unaffected
+  — loud, but not fatal.
+
+Also: the speed probe's first theory is dead and the probe now says
+so. "Only the first move is fast, because only it writes the EEPROM
+angle limits" cannot survive a run where moves 1 *and* 2 were fast —
+move 2 writes no EEPROM at all. `examples/st3032_run_angle_speed_probe.py`
+now runs three sweeps that separate the variables: same-direction
+(move number and position advance together), alternating-direction
+(position stays put while move number climbs), and half-speed (does
+"fast" mean "unlimited" or is it a scale error?).
+
 ## 1.56.0 — the first run_angle no longer ignores its speed limit
 
 Bench report: the same `run_angle(200, -145)` moved at different

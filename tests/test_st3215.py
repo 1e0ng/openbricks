@@ -623,6 +623,22 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self.assertEqual(_writes_to(log, _REG_GOAL_ACC),
                          [(1, bytes([m._encode_goal_acc()]))])
 
+    def test_servo_that_wont_store_goal_acc_still_moves(self):
+        # Bench 2026-08-04: an ST-3032 acknowledges the goal-acc write
+        # and still reports 0 — the ramp is not settable on that unit.
+        # Refusing every move over an acceleration the servo won't
+        # store would ground a working robot to enforce a preference,
+        # so this warns and proceeds. goal-SPEED keeps the strict
+        # treatment (see the next test); the two failures cost
+        # different amounts.
+        m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_remaining(m, [1024, 1024, 0])
+        m._bus.read = lambda sid, reg, n: (
+            b"\x00" if reg == _REG_GOAL_ACC
+            else self._register_file_read(m._bus, sid, reg, n))
+        m.run_angle(deg_per_s=200, target_angle=90)   # must not raise
+        self.assertTrue(m._acc_mismatch_warned)
+
     def test_lost_speed_write_is_refused_not_run_at_full_speed(self):
         # goal_speed 0 means MAXIMUM SPEED on a Feetech servo, and
         # _SCServoBus.write never checked the ACK — so a dropped speed

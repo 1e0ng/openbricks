@@ -15,31 +15,33 @@ finds out which, by measuring instead of guessing.
 
 Each repetition records, around one move:
 
-* the registers the servo ACTUALLY holds afterwards — goal speed,
-  goal acc, op mode, angle limits. ``_SCServoBus.write`` does not
-  verify the servo's acknowledgement (it sends and discards the
-  status reply), so a dropped or rejected register write is silent.
-  If a slow run shows a goal-speed readback that differs from the
-  commanded value, that is the answer.
-* supply voltage and temperature. A Feetech servo that can't hold
-  the commanded rate under a sagging supply, or that has entered
-  overload protection after repeated runs, moves slower with every
-  register perfectly correct.
-* wall-clock duration and the resulting degrees-per-second. This is
-  the objective version of "fast" vs "slow" — eyeballing can't tell
-  0.8 s from 1.4 s reliably.
+Round 1 established the facts: the "slow" moves are the CORRECT
+ones (196 dps against a commanded 200) and the fast ones genuinely
+travel the full angle at ~700 dps — the servo's no-load ceiling is
+895 dps, so those moves run flat out. Supply (11.9 V) and
+temperature (40 C) are steady throughout, and goal-speed always
+reads back exactly as commanded. So it is not supply sag, not
+overload throttling, and not a lost speed write.
 
-Read the numbers like this:
+Round 1 also killed the first theory. "Only the first move is fast,
+because only it writes the EEPROM angle limits" cannot survive a run
+where moves 1 AND 2 were both fast — move 2 writes no EEPROM at all,
+and the count of fast moves changed between runs.
 
-* goal-speed readback differs between runs -> a register write is
-  being lost; the bug is in the driver's unverified writes.
-* registers identical, VOLTAGE lower on the slow runs -> supply sag
-  (battery, wiring, or a brownout under load).
-* registers identical, TEMPERATURE climbing across runs -> the
-  servo's overload protection is throttling it.
-* registers identical, voltage and temperature steady, duration
-  still varying -> mechanical: binding, a rubbing shaft, or the
-  load changing with the arm's resting position.
+So this round separates the variables instead of guessing again:
+
+* **A** repeats the same move, so move number and accumulated shaft
+  position advance together (the original reproduction).
+* **B** alternates direction, so the shaft stays near where it began
+  while the move number keeps climbing. A and B agreeing means the
+  effect follows the MOVE NUMBER; B breaking the pattern means it
+  follows the POSITION.
+* **C** halves the commanded speed. If "fast" really means
+  "unlimited", it lands near the same ~700 dps regardless; if it
+  scales with the command, this is a units problem instead.
+
+The ``from`` column is the shaft position each move started at —
+that is where a position-dependent effect shows up.
 
 Hardware: one ST-3032 on the bench UART (id 4, UART1 tx=14 rx=6 —
 edit below to match). Nothing else should be running: a drivebase
@@ -94,6 +96,26 @@ def snapshot(motor):
     }
 
 
+def sweep(motor, label, angles, commanded):
+    """Run a sequence of moves, reporting speed and where the shaft
+    was when each one started."""
+    print("\n=== %s ===" % label)
+    for i, ang in enumerate(angles, 1):
+        start = motor.angle()
+        t0 = time.ticks_ms()
+        motor.run_angle(DEG_PER_S, ang)
+        elapsed = time.ticks_diff(time.ticks_ms(), t0)
+        travelled = motor.angle() - start
+        dps = (abs(travelled) * 1000.0 / elapsed) if elapsed else 0.0
+        verdict = "FAST" if dps > commanded * 1.5 else "ok  "
+        # ``start`` is the shaft position this move began from. If the
+        # fast/slow split tracks position rather than move number,
+        # this column is where it shows.
+        print("  %d: %s %4d ms  %+7.1f deg from %+8.1f  -> %3.0f dps"
+              % (i, verdict, elapsed, travelled, start, dps))
+        time.sleep_ms(SETTLE_MS)
+
+
 def main():
     motor = ST3032Motor(servo_id=SERVO_ID, uart_id=UART_ID, tx=TX, rx=RX)
 
@@ -106,43 +128,42 @@ def main():
     print("commanded goal_acc   = %d" % motor._encode_goal_acc())
     print("")
 
-    for rep in range(1, REPS + 1):
-        before = snapshot(motor)
-        angle_before = motor.angle()
-        t0 = time.ticks_ms()
-        motor.run_angle(DEG_PER_S, ANGLE)
-        elapsed = time.ticks_diff(time.ticks_ms(), t0)
-        # Measured travel, NOT the commanded angle: a short elapsed
-        # time means either a genuinely fast move or an early return
-        # while the shaft was still turning, and only the travelled
-        # angle tells those apart.
-        travelled = motor.angle() - angle_before
-        after = snapshot(motor)
+    # The first theory — "only the first move is fast, because only it
+    # writes the EEPROM angle limits" — died when a second run showed
+    # TWO fast moves, the second of which writes no EEPROM at all. So
+    # stop guessing and separate the variables.
+    #
+    # A: same direction every time, so the shaft walks steadily away
+    #    from where it started. Move number and accumulated position
+    #    advance together — this is the original reproduction.
+    # B: alternating direction, so the shaft stays near where it
+    #    began while the move number keeps climbing. If the fast moves
+    #    follow the MOVE NUMBER, A and B look alike. If they follow
+    #    the POSITION, B's pattern breaks.
+    # C: half speed. If "fast" is really "unlimited", it lands near
+    #    the same ~700 dps no matter what was asked; if it scales with
+    #    the command, it is a units/scale problem instead.
+    sweep(motor, "A: same direction (walks away)",
+          [ANGLE] * 6, DEG_PER_S)
+    sweep(motor, "B: alternating (stays near start)",
+          [ANGLE, -ANGLE] * 3, DEG_PER_S)
 
-        true_dps = (abs(travelled) * 1000.0 / elapsed) if elapsed else 0.0
-        print("rep %d: %d ms  travelled %.1f deg (asked %d)  -> %.0f dps"
-              % (rep, elapsed, travelled, ANGLE, true_dps))
-        if abs(abs(travelled) - abs(ANGLE)) > 10:
-            print("   <-- SHORT MOVE: run_angle returned early, the "
-                  "shaft was still turning")
-        print("   goal_speed after=%s (commanded %d)%s"
-              % (after["goal_speed"], commanded,
-                 "  <-- MISMATCH" if after["goal_speed"] not in
-                 (commanded, None) else ""))
-        print("   goal_acc=%s op_mode=%s limits=%s/%s"
-              % (after["goal_acc"], after["op_mode"],
-                 after["min_angle"], after["max_angle"]))
-        v = after["voltage_dv"]
-        print("   voltage=%s V  temp=%s C   (before: %s V, %s C)"
-              % ("?" if v is None else "%.1f" % (v / 10.0),
-                 after["temp_c"],
-                 "?" if before["voltage_dv"] is None
-                 else "%.1f" % (before["voltage_dv"] / 10.0),
-                 before["temp_c"]))
+    print("\n=== C: half speed, same direction ===")
+    for i in range(1, 5):
+        start = motor.angle()
+        t0 = time.ticks_ms()
+        motor.run_angle(DEG_PER_S // 2, ANGLE)
+        elapsed = time.ticks_diff(time.ticks_ms(), t0)
+        travelled = motor.angle() - start
+        dps = (abs(travelled) * 1000.0 / elapsed) if elapsed else 0.0
+        print("  %d: %4d ms  %+7.1f deg from %+8.1f  -> %3.0f dps "
+              "(asked %d)" % (i, elapsed, travelled, start, dps,
+                              DEG_PER_S // 2))
         time.sleep_ms(SETTLE_MS)
 
     motor.coast()
-    print("\ndone — compare the rows: what differs on the slow ones?")
+    print("\ndone — A vs B says whether it tracks the move number or "
+          "the shaft position; C says whether 'fast' means 'unlimited'.")
 
 
 if __name__ == "__main__":
