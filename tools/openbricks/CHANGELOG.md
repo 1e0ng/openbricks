@@ -3,6 +3,37 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.53.0 — straight/turn/stop command both wheels together
+
+1.52.0 made `stop` atomic on serial-bus motors; auditing the other
+two methods and the other engine found the same shape on the
+**encoder-servo** path, where it had been since the native
+DriveBase shipped:
+
+- `straight()` / `turn()` subscribed the two servos as two separate
+  Python `run_speed(0)` calls before arming, so between them the
+  left wheel was already closed-loop holding zero — an active brake
+  on a rolling chassis — while the right was untouched. The native
+  drivebase now attaches both servos itself inside the same C call
+  that arms the move.
+- `stop(then=...)` dispatched `left.coast(); right.coast()` from
+  Python. Between those two statements the second wheel's 1 kHz
+  control tick kept driving at the last commanded speed, so the
+  chassis veered on every stop. `DriveBase.stop([mode])` now takes
+  the same 0=coast / 1=brake argument the serial engine got in
+  1.52.0 and writes both bridges before returning; the no-argument
+  form still halts the controller only, which is what `drive()`
+  needs.
+
+The e-stop gate that used to ride on those `run_speed(0)` calls is
+now checked explicitly at the arm site (pinned by test). The sim's
+`ShimDriveBase.stop(mode)` mirrors the surface.
+
+New `tests/test_drivebase_concurrency.py` states the rule for both
+engines and pins it structurally — no per-motor Python dispatch
+survives on either path — plus the symmetric end state it produces.
+Five of its eight tests fail against the pre-fix build.
+
 ## 1.52.0 — atomic DriveBase.stop: both wheels, one packet
 
 `DriveBase.stop(then=...)` on serial-bus motors used to finish per

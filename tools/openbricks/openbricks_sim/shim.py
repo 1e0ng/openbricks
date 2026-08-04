@@ -797,6 +797,8 @@ class ShimDriveBase:
             axle_track_mm=float(axle_track_mm),
             kp_sum=kp_sum,
             kp_diff=kp_diff)
+        self._left     = left
+        self._right    = right
         self._imu      = imu
         self._use_gyro = False
         if imu is not None:
@@ -811,8 +813,19 @@ class ShimDriveBase:
     def turn(self, angle_deg, rate_dps):
         self._db.turn(float(angle_deg), float(rate_dps))
 
-    def stop(self):
+    def stop(self, mode=None):
+        # Firmware parity (see drivebase.c db_stop): without ``mode``
+        # halt the controller only; with it (0 = coast, 1 = brake)
+        # the end state applies to BOTH wheels in this one call.
+        # SimDriveBase already subscribes both motors in one call, so
+        # arming needs no equivalent here.
         self._db.stop()
+        if mode == 0:
+            self._left.coast()
+            self._right.coast()
+        elif mode == 1:
+            self._left.brake()
+            self._right.brake()
 
     def is_done(self):
         return self._db.is_done()

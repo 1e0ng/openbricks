@@ -83,6 +83,13 @@ static void drivebase_register(drivebase_obj_t *self) {
     if (self->registered) {
         return;
     }
+    // Subscribe BOTH servos here, in this one C call. Until 1.53.0
+    // the Python caller did it as two separate ``run_speed(0)``
+    // calls, so between them the left wheel was already closed-loop
+    // holding zero (an active brake on a rolling chassis) while the
+    // right was still untouched — arming was not atomic.
+    openbricks_servo_attach_c(self->left_obj);
+    openbricks_servo_attach_c(self->right_obj);
     // (No gyro re-baseline here — the absolute frame is seeded once
     // at the use_gyro enable transition, deliberately NOT per move.)
     // Re-baseline each servo's observer so the first tick doesn't see
@@ -101,10 +108,8 @@ static void drivebase_register(drivebase_obj_t *self) {
     self->core.left->last_time_ms  = now;
     self->core.right->last_time_ms = now;
 
-    // Hand both servos into "speed" mode at zero target. The Python
-    // caller is expected to have already attached the servos to the
-    // motor process (e.g. via ``run_speed(0)``); we just make sure
-    // their internal trajectory tracking is off so DriveBase's
+    // Hand both servos into "speed" mode at zero target: their
+    // internal trajectory tracking must be off so DriveBase's
     // target_dps writes aren't fought by the per-servo profile.
     self->core.left->target_dps   = 0.0;
     self->core.right->target_dps  = 0.0;
@@ -156,13 +161,29 @@ static mp_obj_t db_turn(mp_obj_t self_in, mp_obj_t angle_in,
 static MP_DEFINE_CONST_FUN_OBJ_3(db_turn_obj, db_turn);
 
 
-static mp_obj_t db_stop(mp_obj_t self_in) {
-    drivebase_obj_t *self = MP_OBJ_TO_PTR(self_in);
+// db.stop([mode]) — without the arg: halt the controller and drop
+// the drivebase tick only, leaving the servos subscribed (``drive()``
+// uses this to clear a trajectory before writing its own per-wheel
+// speeds). With it (0 = coast, 1 = brake) the END STATE is applied to
+// BOTH wheels inside this one call: neither wheel keeps driving at
+// its last commanded speed while the other is already released, which
+// is what two Python-level ``coast()`` calls could not guarantee —
+// the un-stopped servo's control tick kept running in the gap.
+static mp_obj_t db_stop(size_t n_args, const mp_obj_t *args) {
+    drivebase_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    int mode = (n_args >= 2) ? mp_obj_get_int(args[1]) : -1;
     ob_drivebase_stop(&self->core);
     drivebase_unregister(self);
+    if (mode == 0) {
+        openbricks_servo_coast_c(self->left_obj);
+        openbricks_servo_coast_c(self->right_obj);
+    } else if (mode == 1) {
+        openbricks_servo_brake_c(self->left_obj);
+        openbricks_servo_brake_c(self->right_obj);
+    }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(db_stop_obj, db_stop);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(db_stop_obj, 1, 2, db_stop);
 
 
 static mp_obj_t db_use_gyro(mp_obj_t self_in, mp_obj_t enable_in) {
