@@ -1116,6 +1116,23 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     ob_sservo_init(sservo_get());
     tick_txn = 0;
     tick_txn_is_read = 0;
+    // ABANDON any transaction the previous program left in flight.
+    //
+    // The hard tick pumps right up to the instant a program ends, so
+    // the bus is usually mid-transaction here. The pump only consumes
+    // results IT started (``tick_txn``) — and that flag was just
+    // cleared — so a reply left un-taken holds the bus in a non-IDLE
+    // state that nothing ever clears, and ``servo_pump_locked``
+    // returns early forever: no config writes, no feedback reads, no
+    // slot ever serviced.
+    //
+    // Bench 2026-08-05: a task motor attached at program start
+    // reported "0 replies, 0 failed reads" — not a dead servo (that
+    // shows failed reads CLIMBING), but a pump that never ran.
+    // ``attach_uart`` hid this for years by re-initialising the bus,
+    // so only a program that constructed its DriveBase FIRST ever
+    // recovered; 1.57.0 let a task motor get there first.
+    test_bus.state = OB_BUS_IDLE;
     bus_release();
     return mp_const_none;
 }
