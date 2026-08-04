@@ -829,6 +829,32 @@ class OneBusOneOwnerTests(_Base):
         self.assertTrue("not a wiring fault" in msg, msg)
         self.assertFalse("servo-id --scan" in msg, msg)
 
+    def test_wheels_built_on_an_already_native_bus_still_adopt(self):
+        # THE bench ordering (seasonq4.py): task motors first, so the
+        # UART is already native by the time the WHEELS are built —
+        # they go straight onto slots and have no MicroPython bus.
+        # Adoption used to demand a registry entry for a bus that
+        # never existed ("motor bus not found in the registry").
+        # The UART survives program boundaries, so on any run after
+        # the first it is ALREADY native when the script starts —
+        # every motor goes straight onto a slot, wheels included.
+        self.bus.uart_num = lambda: 1
+        task_a, task_b = self._motor(3), self._motor(4)
+        left, right = self._motor(2, invert=True), self._motor(1)
+        self.assertIsNone(left._bus)           # straight onto a slot
+        from openbricks.robotics import DriveBase
+        db = DriveBase(left, right, wheel_diameter_mm=88,
+                       axle_track_mm=138)
+        self.assertIsNotNone(db._serial_engine)
+        # All four motors hold distinct slots.
+        slots = sorted([task_a._native_slot, task_b._native_slot,
+                        left._native_slot, right._native_slot])
+        self.assertEqual(slots, [0, 1, 2, 3])
+        # And the drivebase drives the slots its wheels actually hold.
+        cfg = [c for c in self.bus.calls if c[0] == "db_config"][-1]
+        self.assertEqual(cfg[1:3], (left._native_slot,
+                                    right._native_slot))
+
     def test_sync_servo_group_refuses_adopted_wheels(self):
         # Bench 2026-08-05: a line-align routine built a
         # SyncServoGroup over the drivebase wheels. Those wheels are

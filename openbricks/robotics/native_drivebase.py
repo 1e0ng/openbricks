@@ -92,17 +92,25 @@ class _SerialNativeEngine:
         bus = left._bus
         if right._bus is not bus:
             raise ValueError("left and right motors must share one bus")
-        params = None
-        for key, val in ST3215._buses.items():
-            if val is bus:
-                params = key
-                break
-        if params is None:
-            raise RuntimeError("motor bus not found in the registry")
-        uart_id, tx, rx, baud = params
-        # Hand the UART over: MicroPython driver out, IDF driver in.
-        bus._uart.deinit()
-        del ST3215._buses[params]
+        if bus is None:
+            # Both wheels are ALREADY on native slots — they were
+            # constructed on a UART the native driver owns, so there
+            # is no MicroPython bus to hand over and no registry
+            # entry to find. Take the wiring from the motor itself;
+            # attach_uart is idempotent.
+            uart_id, tx, rx, baud = left._uart_params
+        else:
+            params = None
+            for key, val in ST3215._buses.items():
+                if val is bus:
+                    params = key
+                    break
+            if params is None:
+                raise RuntimeError("motor bus not found in the registry")
+            uart_id, tx, rx, baud = params
+            # Hand the UART over: MicroPython driver out, IDF in.
+            bus._uart.deinit()
+            del ST3215._buses[params]
         # A wheel constructed on an already-native bus holds a slot
         # of its own; adopt that rather than demanding a fixed index.
         held_l = getattr(left, "_native_slot", None)
@@ -123,7 +131,8 @@ class _SerialNativeEngine:
         # MicroPython bus would be talking into a closed UART — and
         # before 1.57.0, one that re-opened its own would put two
         # drivers on one wire and eat the hard tick's replies.
-        left.migrate_bus_to_native(bus, skip=(left, right))
+        if bus is not None:
+            left.migrate_bus_to_native(bus, skip=(left, right))
         return eng
 
     def __init__(self, left_id, right_id, wheel_diameter_mm,
