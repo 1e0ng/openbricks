@@ -590,6 +590,25 @@ class SimStBusEngineTests(_ShimTestBase):
         time.sleep_ms(400)
         self.assertGreater(sb.servo_counts(0) - c0, 60)
 
+    def test_stop_then_applies_the_end_state_to_both_wheels_atomically(self):
+        # Firmware-parity for the atomic stop: DriveBase.stop(then=)
+        # routes ONE db_stop(mode) call instead of per-motor
+        # dispatch. hold arms the REAL C position holds (st_move_core)
+        # on both wheels in the same call; coast releases both.
+        db, left, right = self._serial_db()
+        sb = db._serial_engine._sb
+        db.settings(straight_speed=150, acceleration=360)
+        db.straight(300, wait=False)
+        time.sleep_ms(200)
+        db.stop(then="hold")
+        self.assertTrue(sb._moves[0].is_active())
+        self.assertTrue(sb._moves[1].is_active())
+        db.stop(then="coast")
+        self.assertFalse(sb._moves[0].is_active())
+        self.assertFalse(sb._moves[1].is_active())
+        self.assertEqual(left._mode, "idle")
+        self.assertEqual(right._mode, "idle")
+
     def test_gyro_square_drift_stays_bounded_across_stops(self):
         # THE +7.6-deg bench regression: RawDriveBase.stop() (like the
         # firmware binding) re-captured turn_hold from measured

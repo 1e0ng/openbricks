@@ -81,13 +81,16 @@ TEST(planner_priorities_and_torque_dedup) {
         ob_sservo_op_started(&sv, &op);
     }
 
-    // Speed command: torque-on first (priority 1), then ONE sync.
+    // Speed command: torque-on first (priority 1, as a sync since
+    // the atomic-stop change), then ONE speed sync.
     ob_sservo_set_speed(&sv, 0, 500);
     ob_sservo_next_op(&sv, &op);
-    CHECK_EQ_INT(op.kind, OB_SOP_WRITE);
-    CHECK_EQ_INT(op.reg, OB_SREG_TORQUE);
-    CHECK_EQ_INT(op.data[0], 1);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_TORQUE);
+    CHECK_EQ_INT(op.sync_n, 1);
+    CHECK_EQ_INT(op.sync_ids[0], 7);
+    CHECK_EQ_INT(op.sync_data[0], 1);
     ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.slots[0].torque_on, 1);
     ob_sservo_next_op(&sv, &op);
     CHECK_EQ_INT(op.kind, OB_SOP_SYNC_SPEED);
     ob_sservo_op_started(&sv, &op);
@@ -97,7 +100,79 @@ TEST(planner_priorities_and_torque_dedup) {
     // syncs, 98 packets in 100).
     ob_sservo_set_speed(&sv, 0, 600);
     ob_sservo_next_op(&sv, &op);
-    CHECK(op.kind != OB_SOP_WRITE || op.reg != OB_SREG_TORQUE);
+    CHECK(op.kind != OB_SOP_SYNC_TORQUE);
+}
+
+TEST(coast_both_wheels_rides_one_sync_torque_packet) {
+    // The atomic-stop contract: two slots with pending torque
+    // commands produce ONE sync-write covering both — a drivebase
+    // coast releases both wheels at the same packet boundary.
+    reset();
+    ob_sservo_attach(&sv, 0, 2, 1, 45);
+    ob_sservo_attach(&sv, 1, 1, 0, 45);
+    sv.slots[0].config_step = 3;
+    sv.slots[1].config_step = 3;
+    sv.slots[0].torque_on = 1;
+    sv.slots[1].torque_on = 1;
+    CHECK_EQ_INT(ob_sservo_coast(&sv, 0), 0);
+    CHECK_EQ_INT(ob_sservo_coast(&sv, 1), 0);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_TORQUE);
+    CHECK_EQ_INT(op.sync_n, 2);
+    CHECK_EQ_INT(op.sync_ids[0], 2);
+    CHECK_EQ_INT(op.sync_data[0], 0);
+    CHECK_EQ_INT(op.sync_ids[1], 1);
+    CHECK_EQ_INT(op.sync_data[1], 0);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.slots[0].torque_cmd, -1);
+    CHECK_EQ_INT(sv.slots[1].torque_cmd, -1);
+    CHECK_EQ_INT(sv.slots[0].torque_on, 0);
+    CHECK_EQ_INT(sv.slots[1].torque_on, 0);
+    // Fully consumed: no second torque packet.
+    ob_sservo_next_op(&sv, &op);
+    CHECK(op.kind != OB_SOP_SYNC_TORQUE);
+}
+
+TEST(mixed_torque_values_share_one_sync_packet) {
+    // Per-servo data in a sync-write is independent: one slot
+    // coasting while the other torques on still takes one packet.
+    reset();
+    ob_sservo_attach(&sv, 0, 2, 0, 45);
+    ob_sservo_attach(&sv, 1, 1, 0, 45);
+    sv.slots[0].config_step = 3;
+    sv.slots[1].config_step = 3;
+    sv.slots[0].torque_on = 1;
+    CHECK_EQ_INT(ob_sservo_coast(&sv, 0), 0);
+    CHECK_EQ_INT(ob_sservo_set_speed(&sv, 1, 200), 0);  // stages torque-on
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_TORQUE);
+    CHECK_EQ_INT(op.sync_n, 2);
+    CHECK_EQ_INT(op.sync_data[0], 0);
+    CHECK_EQ_INT(op.sync_data[1], 1);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.slots[0].torque_on, 0);
+    CHECK_EQ_INT(sv.slots[1].torque_on, 1);
+}
+
+TEST(torque_sync_skips_the_fairness_gate) {
+    // A speed sync just went out (last_was_sync set); a torque
+    // command must still go out NEXT — coast is e-stop-adjacent and
+    // must never wait behind the sync/read alternation.
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    sv.slots[0].config_step = 3;
+    sv.slots[0].torque_on = 1;
+    sv.last_was_sync = 1;
+    CHECK_EQ_INT(ob_sservo_coast(&sv, 0), 0);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_TORQUE);
+    // And it leaves the fairness state alone: the deferred speed
+    // sync still owes a read first.
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.last_was_sync, 1);
 }
 
 TEST(fairness_sync_then_read_alternation) {
@@ -227,6 +302,9 @@ int main(void) {
     RUN(unwrap_across_zero_both_directions);
     RUN(invert_mirrors_reported_frame);
     RUN(planner_priorities_and_torque_dedup);
+    RUN(coast_both_wheels_rides_one_sync_torque_packet);
+    RUN(mixed_torque_values_share_one_sync_packet);
+    RUN(torque_sync_skips_the_fairness_gate);
     RUN(fairness_sync_then_read_alternation);
     RUN(failed_reads_count_stale_and_recover);
     RUN(bounds_are_guarded);

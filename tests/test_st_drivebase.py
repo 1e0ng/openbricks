@@ -46,9 +46,14 @@ class _PerfectWheels:
     def __init__(self):
         self.pos = {1: 0.0, 2: 0.0}
         self.spd = {1: 0, 2: 0}
+        self.torque = {1: None, 2: None}   # last value seen per servo
         self.now = 0
         self.reads = 0
         self.syncs = 0
+        # One entry per sync-write to the TORQUE register: the list
+        # of (servo_id, value) pairs that shared that ONE packet —
+        # the atomic-stop tests assert both wheels appear together.
+        self.torque_pkts = []
 
     def pump(self):
         self.now += 1
@@ -80,18 +85,33 @@ class _PerfectWheels:
                     sp & 0xFF, (sp >> 8) & 0xFF,
                     ld & 0xFF, (ld >> 8) & 0xFF])))
             elif instr == 0x03 and pid != 0xFE:        # WRITE
+                if pkt[5] == 0x28 and pid in self.torque:   # TORQUE
+                    self.torque[pid] = pkt[6]
                 sb.feed_rx(_reply(pid, 0))
-            elif instr == 0x83:                        # SYNC speed
-                self.syncs += 1
-                dl = pkt[6]
+            elif instr == 0x83:                        # SYNC write
+                reg, dl = pkt[5], pkt[6]
                 j = 7
                 end = 2 + 2 + ln - 1                   # before checksum
-                while j + dl + 1 <= end:
-                    sid = pkt[j]
-                    v = pkt[j + 1] | (pkt[j + 2] << 8)
-                    if sid in self.spd:
-                        self.spd[sid] = -(v & 0x7FFF) if v & 0x8000 else v
-                    j += 1 + dl
+                if reg == 0x2E:                        # GOAL_SPEED
+                    self.syncs += 1
+                    while j + dl + 1 <= end:
+                        sid = pkt[j]
+                        v = pkt[j + 1] | (pkt[j + 2] << 8)
+                        if sid in self.spd:
+                            self.spd[sid] = (-(v & 0x7FFF) if v & 0x8000
+                                             else v)
+                        j += 1 + dl
+                elif reg == 0x28:                      # TORQUE
+                    entries = []
+                    while j + dl + 1 <= end:
+                        sid, val = pkt[j], pkt[j + 1]
+                        entries.append((sid, val))
+                        if sid in self.torque:
+                            self.torque[sid] = val
+                            if val == 0:
+                                self.spd[sid] = 0    # coasting wheel
+                        j += 1 + dl
+                    self.torque_pkts.append(entries)
             i += 4 + ln
 
     def advance(self, ms):
@@ -293,6 +313,73 @@ class StopAndGyroTests(_Base):
         self.assertTrue(drift_wheel_deg < 6.0,
                         "straight after an aborted turn moved the "
                         "diff axis %.1f wheel-deg" % drift_wheel_deg)
+
+    def test_move_start_torques_both_wheels_in_one_packet(self):
+        # Both wheels engage at the same packet boundary too: the
+        # first move's torque-on is ONE sync-write covering both ids.
+        self.w.torque_pkts = []
+        sb.db_straight(100.0, 80.0)
+        self.w.advance(20)
+        self.assertEqual(len(self.w.torque_pkts), 1, self.w.torque_pkts)
+        pairs = sorted(self.w.torque_pkts[0])
+        self.assertEqual(pairs, [(1, 1), (2, 1)])
+
+    def test_stop_coast_releases_both_wheels_in_one_packet(self):
+        # THE atomic-stop contract, on the wire: db_stop(0) puts both
+        # wheels' torque-off in ONE sync-write — previously each
+        # wheel got its own single-servo write, a bus transaction
+        # apart, so one wheel free-wheeled while the other still
+        # drove.
+        sb.db_straight(500.0, 150.0)
+        self.w.advance(400)                    # mid-move, cruising
+        self.assertTrue(abs(self.w.spd[1]) > 0)
+        self.w.torque_pkts = []
+        self.assertTrue(sb.db_stop(0))
+        self.w.advance(30)
+        self.assertEqual(len(self.w.torque_pkts), 1, self.w.torque_pkts)
+        pairs = sorted(self.w.torque_pkts[0])
+        self.assertEqual(pairs, [(1, 0), (2, 0)])
+        self.assertEqual(self.w.torque[1], 0)
+        self.assertEqual(self.w.torque[2], 0)
+
+    def test_stop_brake_zeroes_speeds_with_torque_kept_on(self):
+        sb.db_straight(500.0, 150.0)
+        self.w.advance(400)
+        self.w.torque_pkts = []
+        self.assertTrue(sb.db_stop(1))
+        self.w.advance(30)
+        # No torque traffic at all — the zero-speed sync IS the brake.
+        self.assertEqual(self.w.torque_pkts, [])
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque[1], 1)
+        self.assertEqual(self.w.torque[2], 1)
+
+    def test_stop_hold_arms_both_position_holds_at_once(self):
+        sb.db_straight(150.0, 150.0)
+        self.w.advance(3000)
+        self.assertTrue(sb.db_done())
+        self.assertTrue(sb.db_stop(2))
+        self.w.advance(50)
+        here = (self.w.pos[1], self.w.pos[2])
+        # Shove both wheels off the captured pose; the C holds must
+        # pull them back without any Python involvement.
+        self.w.pos[1] += 60
+        self.w.pos[2] += 60
+        self.w.advance(800)
+        self.assertTrue(abs(self.w.pos[1] - here[0]) < 15,
+                        (here[0], self.w.pos[1]))
+        self.assertTrue(abs(self.w.pos[2] - here[1]) < 15,
+                        (here[1], self.w.pos[2]))
+
+    def test_stop_hold_before_odometry_is_refused(self):
+        # A hold with no live odometry would anchor to counts=0 and
+        # slam the shafts — must be refused loudly, not armed wrong.
+        sb.test_reset()
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+        self.assertFalse(sb.db_stop(2))        # no feedback read yet
 
     def test_torque_starvation_regression(self):
         # The OTHER planner regression: set_speed re-staging torque

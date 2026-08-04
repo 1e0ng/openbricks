@@ -52,6 +52,9 @@ typedef enum {
     OB_SOP_NONE = 0,        // nothing pending
     OB_SOP_WRITE,           // single-register write to one servo
     OB_SOP_SYNC_SPEED,      // sync-write goal_speed to every dirty slot
+    OB_SOP_SYNC_TORQUE,     // sync-write torque to every pending slot —
+                            // both drivebase wheels coast at the same
+                            // packet boundary, not one write apart
     OB_SOP_READ_POS,        // read present-position of one slot
 } ob_sservo_op_kind_t;
 
@@ -62,7 +65,7 @@ typedef struct {
     uint8_t  reg;
     uint8_t  data[2];
     uint8_t  data_len;
-    // OB_SOP_SYNC_SPEED:
+    // OB_SOP_SYNC_SPEED (2 bytes/slot) / OB_SOP_SYNC_TORQUE (1 byte/slot):
     uint8_t  sync_ids[OB_SSERVO_SLOTS];
     uint8_t  sync_data[OB_SSERVO_SLOTS * 2];
     uint8_t  sync_n;

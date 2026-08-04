@@ -115,11 +115,14 @@ class SpeedCommandTests(_Base):
         enc_r = sb.servo_encode(800)
         self.assertIn(bytes([2, enc_l & 0xFF, enc_l >> 8]), tx)
         self.assertIn(bytes([1, enc_r & 0xFF, enc_r >> 8]), tx)
-        # Both wheels' setpoints share ONE packet (the SyncServoGroup
-        # time-alignment lesson): exactly one broadcast frame. (Count
-        # broadcast HEADERS — 0x83 as a bare byte also occurs inside
-        # encoded reverse speeds, e.g. 0x8000|1000 = 0x83E8.)
-        self.assertEqual(tx.count(b"\xff\xff\xfe"), 1)
+        # Both wheels' setpoints share ONE speed packet (the
+        # SyncServoGroup time-alignment lesson), and both torque-ons
+        # share ONE torque packet (the atomic-stop rule) — identified
+        # by their instr+reg+dlen signatures, since a bare 0x83 also
+        # occurs inside encoded reverse speeds (0x8000|1000 = 0x83E8).
+        self.assertEqual(tx.count(b"\x83\x2e\x02"), 1)   # speed sync
+        self.assertEqual(tx.count(b"\x83\x28\x01"), 1)   # torque sync
+        self.assertEqual(tx.count(b"\xff\xff\xfe"), 2)
 
     def test_run_implies_torque_on(self):
         sb.servo_run(1, 500)
@@ -131,7 +134,12 @@ class SpeedCommandTests(_Base):
         sb.servo_coast(1)
         self.wire.settle(6)
         tx = self.wire.tx_log
-        self.assertIn(bytes([0x28, 0x00]), tx)
+        # Torque-off rides the sync-torque frame: instr 0x83, reg
+        # 0x28, dlen 1, then (id=1, value=0).
+        i = tx.find(b"\x83\x28\x01")
+        self.assertTrue(i >= 0, tx)
+        self.assertEqual(tx[i + 3], 1)      # servo id
+        self.assertEqual(tx[i + 4], 0)      # torque value: coast
         # The stale speed must NOT have gone out after the coast.
         enc = sb.servo_encode(500)
         self.assertEqual(tx.count(bytes([1, enc & 0xFF, enc >> 8])), 0)

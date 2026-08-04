@@ -241,6 +241,11 @@ static void servo_pump_locked(ob_bus_t *b) {
                                                op.sync_ids, op.sync_data,
                                                op.sync_n) == 0);
             break;
+        case OB_SOP_SYNC_TORQUE:
+            started = (ob_bus_start_sync_write(b, OB_SREG_TORQUE, 1,
+                                               op.sync_ids, op.sync_data,
+                                               op.sync_n) == 0);
+            break;
         case OB_SOP_READ_POS:
             started = (ob_bus_start_read(b, op.id, OB_SREG_PRESENT_POS,
                                          OB_SSERVO_FEEDBACK_LEN,
@@ -837,8 +842,19 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_turn_obj, sb_db_turn);
 
-static mp_obj_t sb_db_stop(mp_obj_t self_in) {
-    (void)self_in;
+static mp_obj_t sb_db_stop(size_t n_args, const mp_obj_t *args) {
+    // db_stop([then_mode]) — without the arg: yield only (the abort
+    // paths; the caller dispatches the end-state itself). With it
+    // (0 = coast, 1 = brake, 2 = hold) the COMPLETE stop is staged
+    // inside this one critical section, so both wheels reach their
+    // end-state together: coast rides one sync-torque packet, brake
+    // one sync-speed packet, and hold captures both poses at the
+    // same instant. The Python layer previously dispatched per
+    // motor, releasing the wheels one bus transaction apart.
+    // Returns False only for mode 2 before slot odometry is live
+    // (a hold would anchor to counts=0 and slam the shaft).
+    int mode = (n_args >= 2) ? mp_obj_get_int(args[1]) : -1;
+    bool ok = true;
     bus_take();
     // Hold capture is ABORT-ONLY. Two cases:
     //
@@ -870,13 +886,36 @@ static mp_obj_t sb_db_stop(mp_obj_t self_in) {
     // db must stop re-asserting its own hold every tick.
     st_db_writing = false;
     if (st_db_slot_l >= 0) {
-        ob_sservo_set_speed(sservo_get(), st_db_slot_l, 0);
-        ob_sservo_set_speed(sservo_get(), st_db_slot_r, 0);
+        ob_sservo_t *sv = sservo_get();
+        ob_sservo_set_speed(sv, st_db_slot_l, 0);
+        ob_sservo_set_speed(sv, st_db_slot_r, 0);
+        if (mode == 0 || mode == 1) {
+            // New command wins: kill any per-slot move too.
+            ob_smove_stop(&st_moves[st_db_slot_l]);
+            ob_smove_stop(&st_moves[st_db_slot_r]);
+            if (mode == 0) {
+                ob_sservo_coast(sv, st_db_slot_l);
+                ob_sservo_coast(sv, st_db_slot_r);
+            }
+            // mode 1 (brake): the zero-speed staging above IS the
+            // brake — one sync-write, torque stays on, the servos'
+            // goal_acc ramps to zero (the uniform-accel rule).
+        } else if (mode == 2) {
+            if (sv->slots[st_db_slot_l].have_raw
+                && sv->slots[st_db_slot_r].have_raw) {
+                ob_smove_hold_at(&st_moves[st_db_slot_l],
+                    (ob_float_t)ob_sservo_counts(sv, st_db_slot_l));
+                ob_smove_hold_at(&st_moves[st_db_slot_r],
+                    (ob_float_t)ob_sservo_counts(sv, st_db_slot_r));
+            } else {
+                ok = false;
+            }
+        }
     }
     bus_release();
-    return mp_const_none;
+    return mp_obj_new_bool(ok);
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_stop_obj, sb_db_stop);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_db_stop_obj, 1, 2, sb_db_stop);
 
 static mp_obj_t sb_db_gyro_source(mp_obj_t self_in, mp_obj_t mode_in) {
     // 0 = Python db_set_heading override (default); 1 = hard-tick

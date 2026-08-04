@@ -96,8 +96,12 @@ class _FakeBus:
         self.calls.append(("db_turn", deg, dps))
         self._left = self.done_after
 
-    def db_stop(self):
-        self.calls.append(("db_stop",))
+    def db_stop(self, mode=None):
+        # mode None = yield-only (abort paths); 0/1/2 = the atomic
+        # coast/brake/hold staged in C. stop_ok=False models the
+        # C layer refusing a hold before odometry is live.
+        self.calls.append(("db_stop", mode))
+        return getattr(self, "stop_ok", True)
 
     def db_done(self):
         left = getattr(self, "_left", 0)
@@ -472,6 +476,89 @@ class AdoptionTests(_Base):
         del _native.st_bus
         with self.assertRaises(RuntimeError):
             self._drivebase()
+
+
+class AtomicStopTests(_Base):
+    """DriveBase.stop(then=...) on the serial path routes the WHOLE
+    stop — end-state included — through one C call (db_stop(mode)),
+    never through per-motor coast/brake/hold dispatch: that released
+    the wheels one bus transaction apart."""
+
+    def _drivebase(self):
+        from openbricks.drivers.st3215 import ST3215
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics import DriveBase
+        ST3215._buses.clear()
+        left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                           invert=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        db = DriveBase(left, right, wheel_diameter_mm=88,
+                       axle_track_mm=138)
+        return db, left, right
+
+    def test_stop_coast_is_one_atomic_engine_call(self):
+        db, _, _ = self._drivebase()
+        self.bus.calls = []
+        db.stop()                              # default then="coast"
+        self.assertIn(("db_stop", 0), self.bus.calls)
+        names = [c[0] for c in self.bus.calls]
+        self.assertFalse("servo_coast" in names)
+
+    def test_stop_brake_and_hold_map_to_modes(self):
+        db, _, _ = self._drivebase()
+        self.bus.calls = []
+        db.stop(then="brake")
+        self.assertIn(("db_stop", 1), self.bus.calls)
+        db.stop(then="hold")
+        self.assertIn(("db_stop", 2), self.bus.calls)
+        names = [c[0] for c in self.bus.calls]
+        self.assertFalse("servo_run" in names)
+        self.assertFalse("servo_hold" in names)
+
+    def test_wait_false_done_dispatch_is_atomic_too(self):
+        db, _, _ = self._drivebase()
+        self.bus.done_after = 2
+        db.straight(150, then="hold", wait=False)
+        while not db.done():
+            pass
+        self.assertIn(("db_stop", 2), self.bus.calls)
+        names = [c[0] for c in self.bus.calls]
+        self.assertFalse("servo_hold" in names)
+
+    def test_stop_supersedes_motor_level_pending_moves(self):
+        # A wait=False run_angle's deferred then= must not fire after
+        # the drivebase stop took the wheels back (new command wins —
+        # the per-motor dispatch used to clear this as a side effect).
+        db, left, _ = self._drivebase()
+        left.run_angle(100, 90, wait=False)
+        self.assertEqual(left._native_pending, "coast")
+        db.stop()
+        self.assertIsNone(left._native_pending)
+
+    def test_refused_hold_raises(self):
+        # C refuses a hold before slot odometry is live; the engine
+        # must surface that loudly, not park a wrong silent state.
+        db, _, _ = self._drivebase()
+        self.bus.stop_ok = False
+        try:
+            db.stop(then="hold")
+            self.fail("expected RuntimeError")
+        except RuntimeError:
+            pass
+
+    def test_engine_abort_paths_still_yield_only(self):
+        # The settle-timeout abort inside _wait calls db_stop()
+        # WITHOUT a mode: the end-state dispatch belongs to the
+        # caller's then=, not to the abort.
+        db = self._db()
+        self.bus._left = 10_000          # never done
+        try:
+            db._deadline = 0             # expire immediately
+            db._wait()
+            self.fail("expected RuntimeError")
+        except RuntimeError:
+            pass
+        self.assertIn(("db_stop", None), self.bus.calls)
 
 
 class EStopGateTests(_Base):

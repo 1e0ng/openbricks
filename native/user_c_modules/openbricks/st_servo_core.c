@@ -108,18 +108,25 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     op->slot = -1;
 
     // 1. Torque changes first — coast is the e-stop-adjacent path and
-    //    must never queue behind feedback reads.
+    //    must never queue behind feedback reads. ONE sync-write
+    //    covers every pending slot, so a drivebase stop releases
+    //    both wheels at the same packet boundary (previously one
+    //    single-servo write each, a bus transaction apart). Torque
+    //    commands are one-shot, so this deliberately skips the
+    //    sync/read fairness rule below: they can't starve anything.
+    uint8_t tn = 0;
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         ob_sservo_slot_t *sl = &s->slots[i];
         if (sl->in_use && sl->config_step >= 3 && sl->torque_cmd >= 0) {
-            op->kind = OB_SOP_WRITE;
-            op->slot = i;
-            op->id = sl->id;
-            op->reg = OB_SREG_TORQUE;
-            op->data[0] = (uint8_t)sl->torque_cmd;
-            op->data_len = 1;
-            return;
+            op->sync_ids[tn] = sl->id;
+            op->sync_data[tn] = (uint8_t)sl->torque_cmd;
+            tn++;
         }
+    }
+    if (tn > 0) {
+        op->kind = OB_SOP_SYNC_TORQUE;
+        op->sync_n = tn;
+        return;
     }
 
     // 2. Config sequences.
@@ -187,15 +194,14 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
 void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
     switch (op->kind) {
         case OB_SOP_WRITE: {
+            // Post-config torque rides OB_SOP_SYNC_TORQUE; the only
+            // single writes left are the config sequence.
             ob_sservo_slot_t *sl = &s->slots[op->slot];
             if (sl->config_step < 3) {
                 sl->config_step++;
                 if (op->reg == OB_SREG_TORQUE) {
                     sl->torque_on = 0;     // config writes torque 0
                 }
-            } else if (op->reg == OB_SREG_TORQUE) {
-                sl->torque_cmd = -1;
-                sl->torque_on = (op->data[0] != 0);
             }
             break;
         }
@@ -206,6 +212,18 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
                     if (s->slots[i].in_use
                         && s->slots[i].id == op->sync_ids[k]) {
                         s->slots[i].target_dirty = 0;
+                    }
+                }
+            }
+            break;
+        case OB_SOP_SYNC_TORQUE:
+            // Not counted for sync/read fairness — one-shot commands.
+            for (uint8_t k = 0; k < op->sync_n; k++) {
+                for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+                    ob_sservo_slot_t *sl = &s->slots[i];
+                    if (sl->in_use && sl->id == op->sync_ids[k]) {
+                        sl->torque_cmd = -1;
+                        sl->torque_on = (op->sync_data[k] != 0);
                     }
                 }
             }

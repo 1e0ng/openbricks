@@ -251,13 +251,25 @@ class DriveBase:
         * ``"hold"`` — both motors actively hold their current angle.
           Requires motors that implement ``hold()`` (e.g. ``ST3215Motor``);
           open-loop drivers raise ``NotImplementedError``.
+
+        On serial-bus (adopted) motors the whole stop is staged
+        atomically in the C engine: both wheels reach the end-state
+        at the same bus-packet boundary — one sync-torque packet for
+        coast, one sync-speed packet for brake, same-instant pose
+        capture for hold — never one motor at a time.
         """
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
         self._pending = None
         if self._serial_engine is not None:
-            self._serial_engine.stop()
+            self._serial_engine.stop(then)
+            # New command wins: the atomic stop supersedes any
+            # motor-level wait=False move (the per-motor dispatch
+            # used to clear these as a side effect).
+            self._left._native_pending = None
+            self._right._native_pending = None
+            return
         if self._native is not None:
             self._native.stop()
         if then == "coast":
