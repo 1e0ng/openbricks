@@ -41,7 +41,7 @@ Read the numbers like this:
   still varying -> mechanical: binding, a rubbing shaft, or the
   load changing with the arm's resting position.
 
-Hardware: one ST-3032 on the bench UART (id 1, UART1 tx=14 rx=6 —
+Hardware: one ST-3032 on the bench UART (id 4, UART1 tx=14 rx=6 —
 edit below to match). Nothing else should be running: a drivebase
 script left resident in the same power session keeps its own bus
 traffic going, which would muddy every reading here.
@@ -53,7 +53,7 @@ from openbricks.drivers.st3032 import ST3032Motor
 
 
 # --- the move under investigation (the user's actual call) ---
-SERVO_ID   = 1
+SERVO_ID   = 4
 UART_ID, TX, RX = 1, 14, 6
 DEG_PER_S  = 200
 ANGLE      = -145
