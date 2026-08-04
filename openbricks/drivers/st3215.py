@@ -112,7 +112,13 @@ _DEFAULT_STEPS_PER_DPS = _COUNTS_PER_REV / 360.0   # = 11.378
 class _SCServoBus:
     """Shared UART bus. One instance per physical bus; many servos per bus."""
 
-    def __init__(self, uart_id, tx, rx, baud=1_000_000, dir_pin=None):
+    def __init__(self, uart_id, tx, rx, baud=1_000_000, dir_pin=None,
+                 verify_writes=True):
+        # Every write is confirmed against the servo's status packet
+        # (see ``write``). Turn this off only for servos configured
+        # with a status-return level that answers reads alone —
+        # deliberately, never as a way to quieten an error.
+        self.verify_writes = bool(verify_writes)
         pins.check(tx, "serial-bus UART TX")
         pins.check(rx, "serial-bus UART RX", output=False)
         if dir_pin is not None:
@@ -166,14 +172,69 @@ class _SCServoBus:
                 time.sleep_ms(1)
         return buf
 
-    def write(self, servo_id, register, data):
+    def write(self, servo_id, register, data, timeout_ms=20):
+        """Write a register and CONFIRM the servo took it.
+
+        The servo answers a write with a status packet
+        (``FF FF <id> <len> <err> <chk>``). This used to be read and
+        thrown away, which meant a write that never landed — because
+        the servo was busy finishing an EEPROM cycle, because a
+        connector was loose, because the id was wrong — looked exactly
+        like a write that succeeded.
+
+        That is never acceptable, and on this hardware it is actively
+        dangerous: goal-speed 0 means MAXIMUM SPEED, so a lost speed
+        write doesn't slow a move down, it sends the shaft flying
+        (bench 2026-08-04, measured at 697 dps against a commanded
+        200). Losses are now raised, never swallowed.
+
+        Broadcasts (id 0xFE) are exempt — the protocol defines no
+        reply for them. Set ``verify_writes=False`` on the servo if
+        yours are configured with a status-return level that only
+        answers reads; that is a deliberate choice, not a default.
+        """
         length = len(data) + 3  # register + params + checksum + instr -> LEN = params + 2 conceptually; +1 for register
         params = bytes([register]) + bytes(data)
         body = bytes([servo_id, length, _INSTR_WRITE]) + params
         packet = _HEADER + body + bytes([self._checksum(body)])
         self._tx(packet)
-        # Discard any status response.
-        self._rx(6, timeout_ms=10)
+        if servo_id == _BROADCAST_ID or not self.verify_writes:
+            return
+        resp = self._rx(6, timeout_ms=timeout_ms)
+        self._check_write_ack(resp, servo_id, register, data)
+
+    def _check_write_ack(self, resp, servo_id, register, data):
+        detail = ("servo id %s register 0x%02X = %s"
+                  % (servo_id, register, bytes(data)))
+        if len(resp) < 6 or not resp.startswith(_HEADER):
+            raise OSError(
+                "no acknowledgement for a write to %s (got %d bytes). "
+                "The write may never have landed. Check power and the "
+                "TX/RX wiring, and that a servo really has that id "
+                "(`openbricks servo-id --scan`). If these servos are "
+                "configured to answer reads only, construct them with "
+                "verify_writes=False." % (detail, len(resp)))
+        if resp[2] != servo_id:
+            raise OSError(
+                "write to %s was acknowledged by servo id %d instead — "
+                "two servos are answering to one id, or replies are "
+                "arriving out of step" % (detail, resp[2]))
+        if self._checksum(resp[2:5]) != resp[5]:
+            raise OSError(
+                "corrupt acknowledgement for a write to %s — the reply "
+                "failed its checksum, so the bus is unreliable (wiring, "
+                "termination, or baud mismatch)" % detail)
+        if resp[4] != 0:
+            # The datasheet names three protections: over-load
+            # (>80%% of stall for 2 s), over-voltage (outside 9-14 V)
+            # and over-heat (>80 C). It does not publish the bit
+            # positions, so report the raw byte rather than invent a
+            # decode.
+            raise OSError(
+                "servo reported error flags 0x%02X on a write to %s — "
+                "typically over-load, over-voltage or over-temperature "
+                "(reissuing a command clears the overload latch)"
+                % (resp[4], detail))
 
     def read(self, servo_id, register, nbytes):
         length = 4

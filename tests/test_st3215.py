@@ -164,6 +164,109 @@ class TestST3215(unittest.TestCase):
         self.assertIsNot(s1._bus, s3._bus)
 
 
+class TestWriteAcknowledgement(unittest.TestCase):
+    """A write that never landed must never look like one that did.
+
+    The driver used to send a register write and discard the servo's
+    status packet. On this hardware that is not a cosmetic gap:
+    goal-speed 0 means MAXIMUM SPEED, so a lost speed write is a
+    runaway rather than a small error (bench 2026-08-04, 697 dps
+    against a commanded 200).
+    """
+
+    def setUp(self):
+        ST3215._buses = {}
+
+    def _motor(self):
+        return ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+
+    def test_silent_servo_raises_naming_the_register(self):
+        m = self._motor()
+        m._bus._uart._ack_scs_write = lambda pkt: None   # servo goes mute
+        try:
+            m.run_speed(100)
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("no acknowledgement" in msg, msg)
+        self.assertTrue("servo id 1" in msg, msg)
+        # run_speed enables torque before it writes a speed, so the
+        # FIRST unacknowledged write is the one reported — failing at
+        # the first lost packet beats reporting the last one.
+        self.assertTrue("0x28" in msg, msg)
+        self.assertTrue("verify_writes=False" in msg, msg)
+
+    def test_error_flags_in_the_ack_are_raised(self):
+        m = self._motor()
+        uart = m._bus._uart
+
+        def erroring_ack(packet):
+            if len(packet) < 6 or packet[4] != 0x03 or packet[2] == 0xFE:
+                return
+            body = bytes([packet[2], 2, 0x20])           # error flags set
+            chk = 0
+            for b in body:
+                chk += b
+            uart._rx_buf += b"\xff\xff" + body + bytes([(~chk) & 0xFF])
+
+        uart._ack_scs_write = erroring_ack
+        try:
+            m.run_speed(100)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("error flags 0x20" in str(e), str(e))
+
+    def test_wrong_responder_id_is_raised(self):
+        # Two servos sharing an id, or replies arriving out of step.
+        m = self._motor()
+        uart = m._bus._uart
+
+        def impostor_ack(packet):
+            if len(packet) < 6 or packet[4] != 0x03 or packet[2] == 0xFE:
+                return
+            body = bytes([9, 2, 0])                      # id 9 answers
+            chk = 0
+            for b in body:
+                chk += b
+            uart._rx_buf += b"\xff\xff" + body + bytes([(~chk) & 0xFF])
+
+        uart._ack_scs_write = impostor_ack
+        try:
+            m.run_speed(100)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("servo id 9" in str(e), str(e))
+
+    def test_corrupt_ack_checksum_is_raised(self):
+        m = self._motor()
+        uart = m._bus._uart
+
+        def corrupt_ack(packet):
+            if len(packet) < 6 or packet[4] != 0x03 or packet[2] == 0xFE:
+                return
+            uart._rx_buf += b"\xff\xff" + bytes([packet[2], 2, 0, 0x00])
+
+        uart._ack_scs_write = corrupt_ack
+        try:
+            m.run_speed(100)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("checksum" in str(e), str(e))
+
+    def test_broadcast_writes_expect_no_reply(self):
+        # The protocol defines no answer to id 0xFE, so verification
+        # must skip it — the e-stop broadcast must never raise.
+        m = self._motor()
+        m._bus._uart._ack_scs_write = lambda pkt: None
+        m._bus.write(0xFE, 0x28, bytes([0]))             # must not raise
+
+    def test_verify_writes_false_is_an_explicit_opt_out(self):
+        m = self._motor()
+        m._bus.verify_writes = False
+        m._bus._uart._ack_scs_write = lambda pkt: None
+        m.run_speed(100)                                  # must not raise
+
+
 def _decode_write(packet):
     """Pull (servo_id, register, data_bytes) out of an SCServo write packet."""
     assert packet.startswith(_HEADER)

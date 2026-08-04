@@ -39,6 +39,21 @@ Fixes:
   servo that won't accept its motion settings is refused loudly
   rather than run at full speed.
 
+**And the general rule, not just the two registers that bit us: a
+lost write is never silent again.** `_SCServoBus.write` sent the
+packet and threw the servo's status reply away, so a write that
+never landed — servo busy finishing an EEPROM cycle, loose
+connector, wrong id — was indistinguishable from one that
+succeeded. Every write is now confirmed against that reply and
+raises on a missing, mis-addressed, corrupt, or error-flagged
+acknowledgement, naming the servo, the register and the value.
+Broadcasts (id 0xFE) are exempt because the protocol defines no
+reply for them, so the e-stop broadcast still cannot raise.
+
+Servos configured with a status-return level that answers reads
+only can opt out with `verify_writes=False` — a deliberate choice,
+stated in the error message, never a silent fallback.
+
 `examples/st3032_run_angle_speed_probe.py` also now measures actual
 shaft travel, so a short elapsed time can be told apart from a
 genuinely fast move.
