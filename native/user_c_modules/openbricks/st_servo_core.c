@@ -102,6 +102,24 @@ uint16_t ob_sservo_encode_speed(int32_t steps_per_s) {
 }
 
 
+// Next readable slot from the round-robin cursor. ``hot_wanted``:
+// 1 = only driving slots, 0 = only parked ones, -1 = either.
+int ob_sservo_pick_read(ob_sservo_t *s, int hot_wanted) {
+    int start = (hot_wanted == 0) ? s->rr_cold : s->rr_next;
+    for (int k = 0; k < OB_SSERVO_SLOTS; k++) {
+        int i = (start + k) % OB_SSERVO_SLOTS;
+        ob_sservo_slot_t *sl = &s->slots[i];
+        if (!sl->in_use || sl->config_step < 3) {
+            continue;
+        }
+        if (hot_wanted < 0 || (sl->hot != 0) == (hot_wanted != 0)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+
 void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     memset(op, 0, sizeof(*op));
     op->kind = OB_SOP_NONE;
@@ -177,16 +195,28 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     }
     op->sync_n = 0;   // sync deferred for fairness (or none dirty)
 
-    // 4. Feedback: round-robin present-position reads.
-    for (int k = 0; k < OB_SSERVO_SLOTS; k++) {
-        int i = (s->rr_next + k) % OB_SSERVO_SLOTS;
-        ob_sservo_slot_t *sl = &s->slots[i];
-        if (sl->in_use && sl->config_step >= 3) {
-            op->kind = OB_SOP_READ_POS;
-            op->slot = i;
-            op->id = sl->id;
-            return;
-        }
+    // 4. Feedback: round-robin present-position reads, WEIGHTED.
+    //
+    // A flat rotation gives a parked task motor exactly as much bus
+    // as a wheel steering a heading loop, so putting two task motors
+    // on the bus halved the drivebase's odometry rate (~220 Hz per
+    // wheel -> ~110). Slots that are driving get the bus; parked
+    // ones get one turn in OB_SSERVO_COLD_EVERY — enough that
+    // angle()/speed() never drift arbitrarily stale, little enough
+    // that they cost the wheels almost nothing.
+    int want_cold = 0;
+    if (++s->cold_tick >= OB_SSERVO_COLD_EVERY) {
+        s->cold_tick = 0;
+        want_cold = 1;
+    }
+    int pick = ob_sservo_pick_read(s, want_cold ? 0 : 1);
+    if (pick < 0) {
+        pick = ob_sservo_pick_read(s, -1);   // whatever is available
+    }
+    if (pick >= 0) {
+        op->kind = OB_SOP_READ_POS;
+        op->slot = pick;
+        op->id = s->slots[pick].id;
     }
 }
 
@@ -231,7 +261,11 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
         case OB_SOP_READ_POS:
             s->last_was_sync = 0;    // fairness satisfied
             s->read_in_flight = op->slot;
-            s->rr_next = (op->slot + 1) % OB_SSERVO_SLOTS;
+            if (s->slots[op->slot].hot) {
+                s->rr_next = (op->slot + 1) % OB_SSERVO_SLOTS;
+            } else {
+                s->rr_cold = (op->slot + 1) % OB_SSERVO_SLOTS;
+            }
             break;
         default:
             break;

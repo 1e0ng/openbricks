@@ -242,8 +242,27 @@ static void st_moves_tick_locked(void) {
     }
 }
 
+// Which slots are DRIVING right now. Only st_bus knows: the servo
+// core can't see per-slot moves or who the drivebase owns.
+static void st_mark_hot_locked(void) {
+    ob_sservo_t *sv = sservo_get();
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        uint8_t hot = 0;
+        if (st_moves[i].state != OB_SMOVE_IDLE) {
+            hot = 1;                       // run_angle / hold in flight
+        } else if (st_db_active && st_db_writing
+                   && (i == st_db_slot_l || i == st_db_slot_r)) {
+            hot = 1;                       // a drivebase move is running
+        } else if (sv->slots[i].target_steps != 0) {
+            hot = 1;                       // commanded to keep turning
+        }
+        sv->slots[i].hot = hot;
+    }
+}
+
 static void servo_pump_locked(ob_bus_t *b) {
     st_db_tick_locked();
+    st_mark_hot_locked();
     st_moves_tick_locked();
     ob_bus_poll(b);
     if (tick_txn

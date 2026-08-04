@@ -40,6 +40,13 @@
 // Feedback-read deadline, in bus polls (hard ticks). 5 ms at 1 kHz.
 #define OB_SSERVO_READ_TICKS 5
 
+// One turn in this many reads goes to a parked ("cold") slot. The
+// rest go to slots that are actually driving. With two wheels under
+// a drivebase and two idle task motors this keeps the wheels at
+// ~7/8 of the odometry rate they had when they were alone on the
+// bus, instead of the half they get under a flat round-robin.
+#define OB_SSERVO_COLD_EVERY 8
+
 // Feedback read width: present-position (0x38), present-speed
 // (0x3A) and present-load (0x3C) are CONTIGUOUS, so one 6-byte read
 // returns all three for ~the wire cost of the old 2-byte position
@@ -102,12 +109,24 @@ typedef struct {
     uint32_t reads_ok;
     uint32_t reads_failed;  // timeouts/bad replies on feedback
     uint32_t stale;         // consecutive failures (0 after success)
+    // Poll priority. A slot that is DRIVING needs its odometry now;
+    // a parked one does not, and polling both alike splits the bus
+    // evenly — which halved the drivebase's feedback rate the moment
+    // two task motors joined the bus. Set by the pump each tick.
+    uint8_t  hot;
 } ob_sservo_slot_t;
 
 typedef struct {
     ob_sservo_slot_t slots[OB_SSERVO_SLOTS];
-    int      rr_next;       // round-robin cursor for feedback reads
+    int      rr_next;       // round-robin cursor, DRIVING slots
+    int      rr_cold;       // separate cursor for parked slots, so a
+                            // cold slot's turn never perturbs the
+                            // rotation between the driving ones
     int      read_in_flight; // slot whose POS read is on the bus, or -1
+    // Cold slots still get an occasional turn: skipping them
+    // entirely would let angle()/speed() drift arbitrarily stale
+    // while still reporting themselves fresh.
+    uint8_t  cold_tick;
     uint8_t  last_was_sync;  // fairness: a sync must be followed by a
                              // read before the next sync — a
                              // drivebase re-staging speeds every tick
@@ -138,6 +157,10 @@ uint16_t ob_sservo_encode_speed(int32_t steps_per_s);
 // Priority: pending torque > config sequence > dirty speeds (one
 // sync-write covers all) > round-robin feedback read.
 void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op);
+
+// Next readable slot from the round-robin cursor; hot_wanted 1 =
+// driving only, 0 = parked only, -1 = either. Exposed for tests.
+int ob_sservo_pick_read(ob_sservo_t *s, int hot_wanted);
 
 // Result routing. For reads: payload is the 2-byte present-position
 // little-endian (12-bit) — folds into the unwrap accumulator. ok=0
