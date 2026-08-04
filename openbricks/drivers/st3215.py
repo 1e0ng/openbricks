@@ -961,17 +961,60 @@ class ST3215Motor(Motor):
         wheel. Raises rather than silently running unowned."""
         from openbricks import _native
         sb = _native.st_bus
+        # The pump is what makes a slot live. A drivebase arms the
+        # hard tick in its own constructor; a task motor may be the
+        # only thing on the bus, so arm it here too (idempotent).
+        try:
+            _native.motor_process.hard_tick_selftest()
+        except (ImportError, AttributeError):
+            pass
         acc = int(self._accel_dps2 * self._steps_per_dps / 100.0)
         acc = 0 if acc < 0 else (254 if acc > 254 else acc)
         for slot in self._TASK_SLOTS:
             if sb.servo_attach(slot, self._id, self._invert, acc):
                 self._adopt_native(sb, slot)
+                self._await_slot_odometry(slot)
                 return
         raise RuntimeError(
             "no free native slot for servo id %s: the bus has %d slots, "
             "two reserved for the DriveBase's wheels and both task "
             "slots already claimed. A fifth motor needs a second UART."
             % (self._id, 2 + len(self._TASK_SLOTS)))
+
+    _SLOT_ODOMETRY_TIMEOUT_MS = 400
+
+    def _await_slot_odometry(self, slot):
+        """Block until the slot's first feedback read lands.
+
+        A freshly attached slot has no odometry until the pump's
+        round-robin reaches it (config writes go out first), and the
+        C layer REFUSES a position move until then — arming one
+        against counts=0 would slam the shaft toward a wrong absolute
+        target. Without this wait the constructor returned a motor
+        that failed its very next ``run_angle`` with "slot odometry is
+        not live yet" (bench 2026-08-05, a task motor driven
+        immediately after construction).
+
+        Waiting here also means a task motor gets the same
+        construction-time liveness check the drivebase wheels get: a
+        servo that never answers is a wiring / id / power fault, and
+        is reported as one rather than as a puzzling refusal later.
+        """
+        stats = getattr(self._native_sb, "servo_stats", None)
+        if stats is None:
+            return
+        deadline = time.ticks_ms() + self._SLOT_ODOMETRY_TIMEOUT_MS
+        while stats(slot)[0] == 0:
+            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                ok, failed, stale = stats(slot)
+                raise OSError(
+                    "servo id %s (native slot %d) is not responding: "
+                    "%d replies, %d failed reads. Check the servo's "
+                    "power and TX/RX wiring, and that it really has "
+                    "that bus id — `openbricks servo-id --scan` lists "
+                    "the ids actually answering."
+                    % (self._id, slot, ok, failed))
+            time.sleep_ms(10)
 
     @classmethod
     def migrate_bus_to_native(cls, bus, skip=()):

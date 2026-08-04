@@ -757,6 +757,34 @@ class OneBusOneOwnerTests(_Base):
         self.assertIsNotNone(task._native_slot)
         self.assertIsNone(task._bus)
 
+    def test_task_motor_is_usable_the_moment_it_is_constructed(self):
+        # THE bench failure (2026-08-05): a slot has no odometry until
+        # the pump's round-robin reaches it, and the C layer refuses a
+        # position move until then — so a run_angle issued right after
+        # construction died with "slot odometry is not live yet". The
+        # constructor now waits for the first feedback read.
+        db, _, _ = self._drivebase()
+        task = self._motor(4)
+        self.bus.calls = []
+        task.run_angle(100, 90)
+        self.assertTrue(any(c[0] == "servo_move" for c in self.bus.calls),
+                        self.bus.calls)
+
+    def test_task_motor_that_never_answers_raises_at_construction(self):
+        # Same liveness standard the drivebase wheels get: a silent
+        # servo is a wiring/id/power fault, named at construction
+        # rather than surfacing as a puzzling refusal later.
+        db, _, _ = self._drivebase()
+        self.bus.dead_slots = (2, 3)
+        try:
+            self._motor(4)
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("servo id 4" in msg, msg)
+        self.assertTrue("not responding" in msg, msg)
+        self.assertTrue("servo-id" in msg, msg)
+
     def test_without_a_native_bus_nothing_changes(self):
         # No drivebase, no native ownership: the plain MicroPython
         # driver path is untouched.
