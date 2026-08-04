@@ -610,6 +610,29 @@ static mp_obj_t sb_servo_attach(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_attach_obj, 5, 5, sb_servo_attach);
 
+// slot_of(servo_id) -> the slot already driving that servo, or -1.
+//
+// One physical servo, one slot. Without this, re-running a script in
+// the same boot (or building a second engine) would claim a SECOND
+// slot for a servo that already has one, and a 4-motor robot on 4
+// slots would run out.
+static mp_obj_t sb_servo_slot_of(mp_obj_t self_in, mp_obj_t id_in) {
+    (void)self_in;
+    uint8_t want = (uint8_t)mp_obj_get_int(id_in);
+    int found = -1;
+    bus_take();
+    ob_sservo_t *sv = sservo_get();
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        if (sv->slots[i].in_use && sv->slots[i].id == want) {
+            found = i;
+            break;
+        }
+    }
+    bus_release();
+    return mp_obj_new_int(found);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_slot_of_obj, sb_servo_slot_of);
+
 static mp_obj_t sb_servo_detach(mp_obj_t self_in, mp_obj_t slot_in) {
     (void)self_in;
     int slot = mp_obj_get_int(slot_in);
@@ -1171,6 +1194,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stats),            MP_ROM_PTR(&sb_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_attach),     MP_ROM_PTR(&sb_servo_attach_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_detach),     MP_ROM_PTR(&sb_servo_detach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_slot_of),    MP_ROM_PTR(&sb_servo_slot_of_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_run),        MP_ROM_PTR(&sb_servo_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_coast),      MP_ROM_PTR(&sb_servo_coast_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_move),       MP_ROM_PTR(&sb_servo_move_obj) },

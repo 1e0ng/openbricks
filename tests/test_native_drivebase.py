@@ -76,6 +76,14 @@ class _FakeBus:
         self.calls.append(("servo_detach", slot))
         self.attached.discard(slot)
 
+    def servo_slot_of(self, servo_id):
+        # One physical servo, one slot — the real bus answers this so
+        # a re-run reuses a claim instead of consuming a second slot.
+        for slot, sid in getattr(self, "slot_ids", {}).items():
+            if sid == servo_id:
+                return slot
+        return -1
+
     def servo_attach(self, *a):
         # Slot-claim model: attach fails on an in-use slot, exactly
         # like the C layer — what the re-construction test rides on.
@@ -83,6 +91,9 @@ class _FakeBus:
         if a[0] in self.attached:
             return False
         self.attached.add(a[0])
+        if not hasattr(self, "slot_ids"):
+            self.slot_ids = {}
+        self.slot_ids[a[0]] = a[1]
         return True
 
     def db_config(self, *a):
@@ -231,25 +242,34 @@ class ConstructionTests(_Base):
     def test_bench_construction_wires_the_stack(self):
         self._db()
         names = [c[0] for c in self.bus.calls]
-        self.assertEqual(
-            names, ["db_disable", "servo_detach", "servo_detach",
-                    "attach_uart", "servo_attach", "servo_attach",
-                    "db_config"])
+        # Slots are claimed by scanning for a free one (the right
+        # wheel's first probe hits the left's slot), so the exact
+        # attach count is an implementation detail — pin the shape.
+        self.assertEqual(names[0], "db_disable")
+        self.assertEqual(names[1], "attach_uart")
+        self.assertEqual(names[-1], "db_config")
+        self.assertTrue(names.count("servo_attach") >= 2, names)
+        self.assertFalse("servo_detach" in names, names)
         # Bench defaults: UART1 @1M on 14/6; left slot0 id2 inverted.
         by = {}
         for c in self.bus.calls:
             by.setdefault(c[0], []).append(c)
         self.assertEqual(by["attach_uart"][0],
                          ("attach_uart", 1, 1_000_000, 14, 6))
-        self.assertEqual(by["servo_attach"][0][1:4], (0, 2, True))
-        self.assertEqual(by["servo_attach"][1][1:4], (1, 1, False))
+        cfg = by["db_config"][0]
+        self.assertEqual(cfg[1:3], (0, 1))      # left slot, right slot
+        ok = [c for c in self.bus.calls
+              if c[0] == "servo_attach" and c[1] in (0, 1)]
+        self.assertEqual(ok[0][1:4], (0, 2, True))     # left: id 2
+        self.assertEqual(ok[-1][1:4], (1, 1, False))   # right: id 1
 
     def test_goal_acc_encoding_matches_the_driver_formula(self):
         # st3215.py::_encode_goal_acc — steps/100 units, clamped 254.
         self._db(accel_dps2=400.0)
         att = [c for c in self.bus.calls if c[0] == "servo_attach"]
         self.assertEqual(att[0][4], int(400.0 * (4096 / 360.0) / 100.0))
-        self.bus.calls = []
+        self.bus = _FakeBus()
+        _native.st_bus = self.bus
         self._db(accel_dps2=99999.0)
         att = [c for c in self.bus.calls if c[0] == "servo_attach"]
         self.assertEqual(att[0][4], 254)
@@ -261,10 +281,13 @@ class ConstructionTests(_Base):
         # failed" until a power-cycle. Construction now tears down
         # its own claims first.
         self._db()
+        mark = len(self.bus.calls)
         self._db()          # must not raise
-        # And attach genuinely happened twice (not skipped).
-        attaches = [c for c in self.bus.calls if c[0] == "servo_attach"]
-        self.assertEqual(len(attaches), 4)
+        # The second engine REUSES the slots its servo ids already
+        # hold rather than consuming two more — on a 4-slot bus,
+        # claiming again would exhaust it.
+        second = [c for c in self.bus.calls[mark:] if c[0] == "servo_attach"]
+        self.assertEqual(second, [], second)
 
     def test_missing_native_bus_raises_informatively(self):
         del _native.st_bus
@@ -374,9 +397,12 @@ class AdoptionTests(_Base):
         # UART handed over: MP driver released, registry emptied.
         self.assertEqual(len(ST3215._buses), 0)
         # Slots attached with the motors' ids + inverts.
-        att = [c for c in self.bus.calls if c[0] == "servo_attach"]
+        cfg = [c for c in self.bus.calls if c[0] == "db_config"][0]
+        self.assertEqual(cfg[1:3], (0, 1))
+        att = [c for c in self.bus.calls
+               if c[0] == "servo_attach" and c[1] in (0, 1)]
         self.assertEqual(att[0][1:4], (0, 2, True))
-        self.assertEqual(att[1][1:4], (1, 1, False))
+        self.assertEqual(att[-1][1:4], (1, 1, False))
 
     def test_straight_routes_through_the_engine(self):
         db, _, _ = self._drivebase()
