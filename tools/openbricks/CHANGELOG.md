@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.58.1 — the second run of a script adopts its wheels again
+
+Run a script once: fine. Run it again without a power cycle:
+`RuntimeError: motor bus not found in the registry`.
+
+The native UART deliberately survives a program boundary — only the
+slots are cleared. So on the FIRST run the wheels are built on a
+MicroPython bus and adoption hands that UART over; on every run
+after, the UART is already native, the wheels go straight onto slots
+with no MicroPython bus at all, and adoption went looking for a
+registry entry that was never created.
+
+Adoption now recognises wheels that already hold slots: it takes the
+wiring from the motor itself (stored at construction, since there is
+no bus object to recover it from) and skips the hand-over entirely.
+`attach_uart` is idempotent, so re-attaching costs nothing.
+
+Pinned by a test that models the real ordering — a UART already
+native at program start, all four motors claiming slots, and the
+DriveBase driving the two its wheels actually hold.
+
 ## 1.58.0 — SyncServoGroup refuses wheels it cannot drive
 
 The last place two drivers could still meet on one wire.

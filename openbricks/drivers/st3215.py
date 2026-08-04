@@ -451,7 +451,12 @@ class ST3215Motor(Motor):
         # answers to our packets (bench 2026-08-04: a write to id 4
         # acknowledged by id 1). Take a native slot instead; the whole
         # Motor API already routes through slots.
+        # Kept whether or not a MicroPython bus is ever opened: when
+        # this motor goes straight onto a native slot there is no bus
+        # object to recover these from later, and DriveBase adoption
+        # still needs them to (idempotently) attach the UART.
         self._uart_id = uart_id
+        self._uart_params = (uart_id, tx, rx, baud)
         if _native_bus_owns(uart_id):
             self._bus = None
             self._attach_task_slot()
