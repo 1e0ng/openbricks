@@ -314,6 +314,52 @@ class StopAndGyroTests(_Base):
                         "straight after an aborted turn moved the "
                         "diff axis %.1f wheel-deg" % drift_wheel_deg)
 
+    def test_move_wheels_sends_both_speeds_in_one_packet(self):
+        # The SyncServoGroup replacement: two independent wheel
+        # speeds must leave in ONE sync-write, with each slot's
+        # invert applied (slot0 = id2 inverted, slot1 = id1).
+        self.w.syncs = 0
+        self.assertTrue(sb.db_move_wheels(400, 200))
+        self.w.advance(6)
+        self.assertEqual(self.w.syncs, 1, "expected exactly one packet")
+        self.assertEqual(self.w.spd[2], -400)      # inverted slot
+        self.assertEqual(self.w.spd[1], 200)
+
+    def test_move_wheels_supersedes_an_in_flight_move(self):
+        # A direct wheel command wins over the coupled controller,
+        # and the db must stop re-asserting its own targets.
+        sb.db_straight(500.0, 150.0)
+        self.w.advance(300)
+        self.assertFalse(sb.db_done())
+        sb.db_move_wheels(100, 100)
+        self.w.advance(100)
+        # Our speeds survived the ticks (the db is yielded, not
+        # fighting us) — the unfixed shape would overwrite them.
+        self.assertEqual(self.w.spd[2], -100)
+        self.assertEqual(self.w.spd[1], 100)
+
+    def test_move_wheels_then_a_move_rearms_cleanly(self):
+        # After direct control the next coupled move must arm from
+        # the true pose, not lurch back toward a stale hold.
+        sb.db_move_wheels(200, 200)
+        self.w.advance(400)
+        here = (self._mm(0), self._mm(1))
+        sb.db_straight(100.0, 150.0)
+        self.w.advance(4000)
+        self.assertTrue(sb.db_done())
+        self.assertTrue(abs(self._mm(0) - here[0] - 100) < 12,
+                        (here[0], self._mm(0)))
+
+    def test_move_wheels_zero_is_a_stop_not_a_coast(self):
+        sb.db_move_wheels(300, 300)
+        self.w.advance(50)
+        self.w.torque_pkts = []
+        sb.db_move_wheels(0, 0)
+        self.w.advance(30)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque_pkts, [])   # torque stays on
+
     def test_move_start_torques_both_wheels_in_one_packet(self):
         # Both wheels engage at the same packet boundary too: the
         # first move's torque-on is ONE sync-write covering both ids.

@@ -1246,10 +1246,16 @@ class SyncServoGroup:
     just blasts the same register on all listed IDs.
 
     Use this whenever you have multiple servos that should apply a
-    setpoint at the same packet boundary (drivebase wheels, multi-
-    finger gripper) — each servo receives its byte slot of the
+    setpoint at the same packet boundary (a multi-finger gripper, a
+    multi-axis arm) — each servo receives its byte slot of the
     broadcast packet at the same instant, instead of N serialised
     individual writes.
+
+    NOT for drivebase wheels: use ``DriveBase.move_wheels(left,
+    right)`` instead. It gives the same one-packet guarantee, and a
+    SyncServoGroup cannot drive adopted wheels at all — a DriveBase
+    hands their UART to the native bus driver, so the MicroPython
+    bus this class writes through is closed.
 
     Example
     -------
@@ -1257,11 +1263,11 @@ class SyncServoGroup:
 
         from openbricks.drivers.st3215 import ST3215Motor, SyncServoGroup
 
-        left  = ST3215Motor(servo_id=1)
-        right = ST3215Motor(servo_id=2, invert=True)
-        group = SyncServoGroup([left, right])
+        thumb = ST3215Motor(servo_id=1)
+        index = ST3215Motor(servo_id=2)
+        group = SyncServoGroup([thumb, index])
 
-        # Both wheels start moving at the same packet boundary —
+        # Both fingers start moving at the same packet boundary —
         # one SYNC WRITE instead of two individual writes.
         group.set_goal_speeds([200, 200])
     """

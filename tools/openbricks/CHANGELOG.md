@@ -3,6 +3,36 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.54.0 — DriveBase.move_wheels(left, right)
+
+Direct per-wheel speed control, in wheel-deg/s, as a first-class
+DriveBase method:
+
+```python
+db.move_wheels(200, 120)     # gentle right-hand arc
+db.move_wheels(200, -200)    # spin in place
+db.stop()
+```
+
+Non-blocking and continuous like `drive()`, and it supersedes any
+move in flight. Where `drive(speed_mm_s, turn_rate_dps)` speaks
+chassis kinematics, this speaks wheels — the right shape for
+line-following, tank-style teleop, or any controller computing its
+own per-wheel outputs.
+
+This exists so nobody has to build a `SyncServoGroup` over the
+drivebase wheels. That was never really an option anyway: adopting
+motors into a DriveBase hands their UART to the native bus driver,
+so the MicroPython bus a SyncServoGroup writes through is closed.
+`move_wheels` gives the same one-packet guarantee from inside the
+engine — both setpoints staged in one C critical section, emitted
+by the planner in a single sync-write. On encoder servos both
+targets are set and both servos subscribed inside one native call;
+open-loop pairs are supported but can't batch (documented).
+
+`SyncServoGroup` keeps its place for what it's actually good at —
+grippers, multi-axis arms — and its docs now say so.
+
 ## 1.53.0 — straight/turn/stop command both wheels together
 
 1.52.0 made `stop` atomic on serial-bus motors; auditing the other

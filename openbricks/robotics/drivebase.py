@@ -242,6 +242,58 @@ class DriveBase:
         self._run_at_dps(self._left,  fwd_wheel_dps + diff_wheel_dps)
         self._run_at_dps(self._right, fwd_wheel_dps - diff_wheel_dps)
 
+    def move_wheels(self, left_wheel_speed, right_wheel_speed):
+        """Drive the two wheels at independent speeds, in wheel-deg/s.
+
+        Positive is forward on both sides (each motor's ``invert``
+        is already applied), so ``move_wheels(200, 200)`` drives
+        straight and ``move_wheels(200, -200)`` spins in place.
+
+        Non-blocking and continuous, like ``drive()``: the wheels
+        hold these speeds until you call it again, issue another
+        move, or ``stop()``. It supersedes any move in flight.
+
+        Use this instead of building a ``SyncServoGroup`` over the
+        wheels. On serial-bus motors both setpoints leave in a
+        single sync-write packet, so the wheels change speed at the
+        same packet boundary — and a ``SyncServoGroup`` could not
+        drive them anyway, because adopting them into a DriveBase
+        hands their UART to the native driver. On encoder servos
+        both targets are set and both servos subscribed inside one
+        native call.
+
+        Where ``drive(speed_mm_s, turn_rate_dps)`` speaks chassis
+        kinematics, this speaks wheels directly — the right tool for
+        line-following, tank-style teleop, or any controller that
+        computes per-wheel outputs itself.
+
+        Example::
+
+            db.move_wheels(200, 120)     # gentle right-hand arc
+            time.sleep_ms(500)
+            db.stop()
+
+        Open-loop motor pairs (no encoder, no serial bus) are
+        supported but cannot batch: the two speeds are written one
+        after the other.
+        """
+        estop.check()
+        left  = float(left_wheel_speed)
+        right = float(right_wheel_speed)
+        # A direct wheel command supersedes a pending wait=False move
+        # (pybricks "new command wins").
+        self._pending = None
+        if self._serial_engine is not None:
+            self._serial_engine.move_wheels(left, right)
+            self._left._native_pending = None
+            self._right._native_pending = None
+            return
+        if self._native is not None:
+            self._native.move_wheels(left, right)
+            return
+        self._run_at_dps(self._left, left)
+        self._run_at_dps(self._right, right)
+
     def stop(self, then="coast"):
         """Halt both wheels. Also clears any pending ``wait=False``
         move (new command supersedes, pybricks-style). ``then``

@@ -226,6 +226,21 @@ class _SerialNativeEngine:
         self.arm_turn(angle_deg)
         self._wait()
 
+    def move_wheels(self, left_wheel_speed, right_wheel_speed):
+        """Independent per-wheel speeds (wheel-deg/s), both staged in
+        one C critical section so they leave in a single sync-write
+        packet — the drivebase-owned equivalent of a SyncServoGroup
+        over the two wheels (which adoption makes unreachable: the
+        motors' MicroPython UART is gone)."""
+        estop.check()
+        ok = self._sb.db_move_wheels(
+            int(float(left_wheel_speed) * _STEPS_PER_DEG),
+            int(float(right_wheel_speed) * _STEPS_PER_DEG))
+        if not ok:
+            raise RuntimeError(
+                "move_wheels refused: the drivebase has no slots "
+                "configured")
+
     _STOP_MODES = {"coast": 0, "brake": 1, "hold": 2}
 
     def stop(self, then=None):

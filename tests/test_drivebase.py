@@ -141,6 +141,22 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             db.stop(then="hold")
 
+    def test_move_wheels_drives_each_side_independently(self):
+        # Open-loop pairs can't batch (two PWM writes), but the API
+        # must still work — documented in the method's docstring.
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        db.move_wheels(300, -300)          # spin in place
+
+        self.assertEqual(left._in1.value(), 1)
+        self.assertEqual(left._in2.value(), 0)
+        self.assertEqual(right._in1.value(), 0)
+        self.assertEqual(right._in2.value(), 1)
+        self.assertGreater(left._pwm.duty(), 0)
+        self.assertEqual(left._pwm.duty(), right._pwm.duty())
+
     def test_stop_then_invalid_raises_value_error(self):
         left = L298NMotor(in1=1, in2=2, pwm=17)
         right = L298NMotor(in1=9, in2=10, pwm=11)
