@@ -3,6 +3,43 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.57.0 — one bus, one owner: task motors share the DriveBase's UART
+
+Four ST-3032s on one UART — two wheels, two task motors — used to be
+impossible, and failed in the worst way: silently. Adopting the
+wheels into a DriveBase hands the UART to the native IDF driver, but
+a task motor constructed afterwards opened its *own*
+`machine.UART` on the same pins. Two drivers on one wire: the hard
+tick polls the wheels at ~1 kHz, and those replies land in the
+MicroPython driver's buffer where the task motor's next packet
+consumes one as its own answer.
+
+1.56.0's write verification is what finally made it visible —
+`write to servo id 4 register 0x28 was acknowledged by servo id 1`.
+A servo only replies when addressed, so that acknowledgement was
+proof of a second conversation on the wire. Before verification the
+same interleaving silently corrupted *reads* too.
+
+Now any `ST3215Motor` / `ST3032Motor` on a natively-owned UART takes
+a **native slot** instead of opening a competing UART. The bus has
+four: slots 0 and 1 stay reserved for the DriveBase's wheels (its
+engine claims them by fixed index and detaches whatever is there
+first, so a task motor parked in one would be evicted mid-run), and
+task motors take 2 and 3. An adopted motor is not a degraded one —
+`run_angle`, `hold`, `speed`, `load`, `stalled` and the rest already
+route through slots.
+
+Construction order does not matter: a task motor built *before* the
+DriveBase is migrated onto a slot when adoption takes the UART, so
+it never ends up talking into a closed one. A fifth motor is refused
+with the reason and the remedy (a second UART) rather than silently
+contending.
+
+Ownership is asked in C (`st_bus.uart_num()`), not remembered in
+Python, because the attached UART deliberately survives a program
+boundary while `reset_runtime` clears the slots — a fresh program's
+Python state would claim nobody owns pins the IDF driver still holds.
+
 ## 1.56.1 — don't ground a robot over an acceleration it can't store
 
 1.56.0 verified both goal-speed and goal-acceleration and refused

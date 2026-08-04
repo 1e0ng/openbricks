@@ -574,6 +574,27 @@ static mp_obj_t sb_attach_uart(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_attach_uart_obj, 5, 5, sb_attach_uart);
 #endif
 
+// uart_num() -> the UART the native bus has taken over, or -1.
+//
+// This is the authority on "who owns those pins". A servo driver that
+// opened its own machine.UART on a natively-owned bus would put two
+// drivers on one wire: the hard tick's replies land in the other
+// driver's RX buffer and get consumed as the wrong packet's answer
+// (bench 2026-08-04 — a write to id 4 acknowledged by id 1). It has
+// to be asked in C rather than remembered in Python, because the
+// attached UART deliberately SURVIVES a program boundary while
+// reset_runtime clears the slots: a fresh program's Python state
+// would say "nobody owns it" while the IDF driver still does.
+static mp_obj_t sb_uart_num(mp_obj_t self_in) {
+    (void)self_in;
+#if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
+    return mp_obj_new_int(fw_uart_num);
+#else
+    return mp_obj_new_int(-1);   // test backend owns no real UART
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_uart_num_obj, sb_uart_num);
+
 // ---- servo-slot bindings ----
 
 static mp_obj_t sb_servo_attach(size_t n_args, const mp_obj_t *args) {
@@ -1160,6 +1181,11 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     #if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
     { MP_ROM_QSTR(MP_QSTR_attach_uart),      MP_ROM_PTR(&sb_attach_uart_obj) },
     #endif
+    // Unguarded: drivers ASK whether a UART is natively owned before
+    // opening their own, and must get a truthful -1 on builds with no
+    // UART backend rather than an AttributeError they'd have to guess
+    // the meaning of.
+    { MP_ROM_QSTR(MP_QSTR_uart_num),         MP_ROM_PTR(&sb_uart_num_obj) },
     // States as constants so tests read like the header enum.
     { MP_ROM_QSTR(MP_QSTR_IDLE),        MP_ROM_INT(OB_BUS_IDLE) },
     { MP_ROM_QSTR(MP_QSTR_AWAIT_REPLY), MP_ROM_INT(OB_BUS_AWAIT_REPLY) },
