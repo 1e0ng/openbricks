@@ -419,6 +419,28 @@ class TestST3215MotorRunAngle(unittest.TestCase):
 
     def setUp(self):
         ST3215._buses = {}
+        # Give the fake servo a REGISTER FILE: a read returns whatever
+        # was last written to that register. run_angle verifies its
+        # goal-speed / goal-acc writes by reading them back (a lost
+        # speed write means FULL SPEED on real hardware, bench
+        # 2026-08-04), so the fake has to model storage, not just
+        # swallow writes.
+        from openbricks.drivers.st3215 import _SCServoBus
+        self._bus_cls = _SCServoBus
+        self._real_read = _SCServoBus.read
+
+        def register_file_read(bus, servo_id, register, nbytes):
+            for packet in reversed(bus._uart._tx_log):
+                if (len(packet) >= 6 + nbytes and packet[2] == servo_id
+                        and packet[4] == 0x03 and packet[5] == register):
+                    return bytes(packet[6:6 + nbytes])
+            return None
+
+        _SCServoBus.read = register_file_read
+        self._register_file_read = register_file_read
+
+    def tearDown(self):
+        self._bus_cls.read = self._real_read
 
     def _patch_remaining(self, motor, sequence):
         """Make successive ``motor._read_step_remaining()`` calls return
@@ -460,6 +482,62 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         log = m._bus._uart._tx_log[baseline:]
         self.assertEqual(_writes_to(log, _REG_MIN_ANGLE), [])
         self.assertEqual(_writes_to(log, _REG_MAX_ANGLE), [])
+
+    def test_already_zeroed_limits_cost_no_eeprom_write(self):
+        # THE FIRST-MOVE BUG (bench 2026-08-04). The guard flag is per
+        # INSTANCE, so every program run used to rewrite these EEPROM
+        # registers on its first run_angle even though a previous run
+        # had already zeroed them — burning an EEPROM cycle per run
+        # and, worse, leaving the servo busy right before the
+        # goal-speed write. That made the first move of every run
+        # behave differently from every later move: measured 697 dps
+        # against a commanded 200, with goal-acc reading 0 afterwards
+        # despite the constructor writing 171.
+        m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+        # Servo already reports limits 0/0 (a servo that has run
+        # run_angle before — i.e. every run after the very first).
+        m._bus.read = lambda sid, reg, n: (
+            b"\x00\x00" if reg in (_REG_MIN_ANGLE, _REG_MAX_ANGLE)
+            else self._register_file_read(m._bus, sid, reg, n))
+        baseline = len(m._bus._uart._tx_log)
+        self._patch_remaining(m, [1024, 1024, 0])
+        m.run_angle(deg_per_s=200, target_angle=90)
+        log = m._bus._uart._tx_log[baseline:]
+        self.assertEqual(_writes_to(log, _REG_MIN_ANGLE), [])
+        self.assertEqual(_writes_to(log, _REG_MAX_ANGLE), [])
+
+    def test_run_angle_reasserts_goal_acc_every_move(self):
+        # goal-acc read back 0 on the bench despite the constructor
+        # writing it, so the move no longer trusts that write to have
+        # survived — the documented uniform-acceleration rule has to
+        # hold in step mode too.
+        m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0,
+                        accel_dps2=1500.0)
+        baseline = len(m._bus._uart._tx_log)
+        self._patch_remaining(m, [1024, 1024, 0])
+        m.run_angle(deg_per_s=200, target_angle=90)
+        log = m._bus._uart._tx_log[baseline:]
+        self.assertEqual(_writes_to(log, _REG_GOAL_ACC),
+                         [(1, bytes([m._encode_goal_acc()]))])
+
+    def test_lost_speed_write_is_refused_not_run_at_full_speed(self):
+        # goal_speed 0 means MAXIMUM SPEED on a Feetech servo, and
+        # _SCServoBus.write never checked the ACK — so a dropped speed
+        # write used to mean the move ran flat out. Verified now, and
+        # a servo that won't take the setting is refused loudly.
+        m = ST3215Motor(servo_id=1, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_remaining(m, [1024, 1024, 0])
+        # Servo accepts the packet but the register never changes.
+        m._bus.read = lambda sid, reg, n: (
+            b"\x00\x00"[:n] if reg == _REG_GOAL_SPEED
+            else self._register_file_read(m._bus, sid, reg, n))
+        try:
+            m.run_angle(deg_per_s=200, target_angle=90)
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("servo id 1" in msg, msg)
+        self.assertTrue("FULL SPEED" in msg, msg)
 
     def test_drivebase_wheel_motor_keeps_stock_limits(self):
         # A motor used purely for wheel/velocity work (never run_angle)
