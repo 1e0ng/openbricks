@@ -61,6 +61,29 @@ class ReleaseTagNamespaceTests(unittest.TestCase):
         self.assertNotIn("git tag v{v} cli/v{v}", self.bump)
         self.assertNotIn("git tag openbricks/v{version}", self.bump)
 
+    def test_release_artifact_glob_cannot_match_wheel_artifacts(self):
+        # The 1000-asset regression (2026-08-04): the release job's
+        # download glob ran openbricks-*-<version>, and on main
+        # pushes <version> is "latest" — which ALSO matched the wheel
+        # artifacts (openbricks-wheels-ubuntu-latest etc., the
+        # runner-OS suffix collides). Every push dumped 16 versioned
+        # wheels onto the rolling release until GitHub's per-release
+        # asset cap failed the job on every push. The glob must stay
+        # chip-prefixed, and must genuinely exclude the wheel names.
+        import fnmatch
+        marker = "pattern: openbricks-esp32*-${{ needs.firmware.outputs.version }}"
+        self.assertIn(marker, self.ci)
+        self.assertNotIn(
+            "pattern: openbricks-*-${{ needs.firmware.outputs.version }}",
+            self.ci)
+        glob = "openbricks-esp32*-latest"     # main-push substitution
+        for fw in ("openbricks-esp32-latest", "openbricks-esp32s3-latest"):
+            self.assertTrue(fnmatch.fnmatch(fw, glob), fw)
+        for whl in ("openbricks-wheels-ubuntu-latest",
+                    "openbricks-wheels-macos-latest",
+                    "openbricks-wheels-windows-latest"):
+            self.assertFalse(fnmatch.fnmatch(whl, glob), whl)
+
     def test_firmware_and_cli_versions_match(self):
         # The lockstep pin, host-suite side (the firmware suite pins
         # it too — whichever CI job runs first catches a desync).

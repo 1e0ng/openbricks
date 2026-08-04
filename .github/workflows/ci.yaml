@@ -561,12 +561,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Download every matrix artifact (openbricks-esp32-*, openbricks-esp32s3-*, …)
-      # and merge them into a single release-out/ directory.
+      # Download every firmware matrix artifact (openbricks-esp32-*,
+      # openbricks-esp32s3-*, …) and merge them into a single
+      # release-out/ directory. The glob must stay chip-prefixed:
+      # on main pushes the firmware version output is "latest", and a
+      # bare openbricks-*-latest also matches the WHEEL artifacts
+      # (openbricks-wheels-ubuntu-latest etc. — the runner-OS suffix
+      # collides) — which dumped 16 versioned wheels onto the rolling
+      # release per push until it hit GitHub's 1000-assets-per-release
+      # cap and the job failed every push (caught 2026-08-04).
       - name: Download firmware artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: openbricks-*-${{ needs.firmware.outputs.version }}
+          pattern: openbricks-esp32*-${{ needs.firmware.outputs.version }}
           path: release-out/
           merge-multiple: true
 
