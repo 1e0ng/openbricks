@@ -304,6 +304,17 @@ class _SimStBus:
         self._db_writing = True
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
 
+    def db_move_wheels(self, left_steps_per_s, right_steps_per_s):
+        # Firmware parity (st_bus.c sb_db_move_wheels): independent
+        # per-wheel speeds, the db yields, per-slot moves cancelled.
+        self._raw.stop()
+        self._db_writing = False
+        for slot, w in self._wheels.items():
+            self._move(slot).stop()
+        self._wheels[0].run_speed(left_steps_per_s / self._STEPS_PER_DEG)
+        self._wheels[1].run_speed(right_steps_per_s / self._STEPS_PER_DEG)
+        return True
+
     def db_stop(self, mode=None):
         # Firmware parity (see st_bus.c sb_db_stop): without ``mode``
         # yield only; with it the end-state is applied to both wheels
@@ -812,6 +823,13 @@ class ShimDriveBase:
 
     def turn(self, angle_deg, rate_dps):
         self._db.turn(float(angle_deg), float(rate_dps))
+
+    def move_wheels(self, left_dps, right_dps):
+        # Firmware parity (drivebase.c db_move_wheels): the coupled
+        # controller yields, both wheels take their own speed.
+        self._db.stop()
+        self._left.run_speed(float(left_dps))
+        self._right.run_speed(float(right_dps))
 
     def stop(self, mode=None):
         # Firmware parity (see drivebase.c db_stop): without ``mode``

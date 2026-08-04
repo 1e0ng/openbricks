@@ -45,7 +45,7 @@ Tuning:
 
 Hardware (same bus layout as ``line_align.py`` / ``color_array.py``):
     * ESP32-S3 (I2C on 15/16; serial bus UART on 14/6)
-    * 2x ST-3032 wheel servos, IDs 1 (left) / 2 (right)
+    * 2x ST-3032 wheel servos, IDs 2 (left) / 1 (right)
     * TCA9548A mux, one TCS34725 per channel: 0 = left, 1 = right,
       both facing the mat at the front of the chassis
 """
@@ -56,16 +56,21 @@ from machine import I2C, Pin
 from openbricks.tools import wait
 
 from openbricks.drivers.st3032 import ST3032Motor
-from openbricks.drivers.st3215 import SyncServoGroup
 from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.drivers.tcs34725 import TCS34725
+from openbricks.robotics import DriveBase
 
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
 right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-# One SYNC WRITE updates both wheels at the same packet boundary,
-# instead of two serialised bus writes.
-wheels = SyncServoGroup([left_motor, right_motor])
+# ``db.move_wheels(left, right)`` drives each wheel at its own speed
+# and puts both setpoints in ONE sync-write packet, so they take
+# effect at the same packet boundary. The chassis dimensions below
+# are only used by straight()/turn(); this loop steers by wheel
+# speeds, so they don't affect its behaviour — measure your own if
+# you add distance-based moves (see docs/measuring).
+db = DriveBase(left_motor, right_motor,
+               wheel_diameter_mm=88, axle_track_mm=136)
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux = TCA9548A(i2c)
@@ -161,9 +166,7 @@ def _pid_wheel_speeds(left_ambient, right_ambient, state, dt_s):
 def follow_line():
     # No print() inside the poll loop (the line_align lesson): each
     # one streams over the BLE console and stretches a 10 ms tick to
-    # many times that, turning crisp corrections into wobble. The
-    # bus is also only written when the decision CHANGES — re-sending
-    # the same speeds every tick just steals ticks from sensing.
+    # many times that, turning crisp corrections into wobble.
 
     state = PID_STATE0
     prev_ms = time.ticks_ms()
@@ -179,12 +182,12 @@ def follow_line():
         if speeds is None:
             print("intersection reached — stopping.")
             break
-        wheels.set_goal_speeds(list(speeds))
+        db.move_wheels(speeds[0], speeds[1])
         wait(10) # ms
-    # stop() = Pybricks semantics: coast and let friction settle it.
-    # (Use brake() instead for a firmer stop that holds zero speed.)
-    left_motor.stop()
-    right_motor.stop()
+    # Default then="coast" = Pybricks semantics: coast and let
+    # friction settle it. Use then="brake" for a firmer stop that
+    # holds zero speed. Either way both wheels release together.
+    db.stop()
 
 
 def main():

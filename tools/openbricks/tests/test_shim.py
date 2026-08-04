@@ -561,6 +561,13 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertEqual(rt.data.ctrl[left._servo._adapter._actuator_id], 0.0)
         self.assertEqual(rt.data.ctrl[right._servo._adapter._actuator_id], 0.0)
 
+        # move_wheels on the native path: both wheels re-subscribed,
+        # each at its own speed.
+        db.move_wheels(150, 90)
+        self.assertTrue(left._servo._adapter._attached)
+        self.assertTrue(right._servo._adapter._attached)
+        db.stop()
+
         # turn + then="brake" take the same one-call route (mode 1).
         db.turn(45, wait=False)
         time.sleep_ms(100)
@@ -571,6 +578,26 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertFalse(right._servo._adapter._attached)
         self.assertEqual(rt.data.ctrl[left._servo._adapter._actuator_id], 0.0)
         self.assertEqual(rt.data.ctrl[right._servo._adapter._actuator_id], 0.0)
+
+    def test_move_wheels_drives_each_wheel_at_its_own_speed(self):
+        # The SyncServoGroup replacement, in physics: unequal wheel
+        # speeds must actually turn the chassis, and a later coupled
+        # move must still work (the db yields, then re-arms).
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        l0, r0 = sb.servo_counts(0), sb.servo_counts(1)
+        db.move_wheels(200, 100)
+        time.sleep_ms(600)
+        dl = sb.servo_counts(0) - l0
+        dr = sb.servo_counts(1) - r0
+        self.assertGreater(dl, 0)
+        self.assertGreater(dr, 0)
+        self.assertGreater(dl, dr * 1.3)    # left genuinely faster
+        db.stop()
+        # And the coupled controller still owns the wheels afterwards.
+        db.settings(straight_speed=150, acceleration=360)
+        db.straight(50)
+        self.assertTrue(db.done())
 
     def test_servo_verbs_proxy_to_mujoco_wheels(self):
         # servo_run / servo_counts / servo_coast are the st_bus verbs

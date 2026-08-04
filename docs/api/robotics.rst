@@ -20,6 +20,23 @@ body-degrees.
         db.straight(300)
         db.turn(90)
 
+For direct control of each wheel — line-following, tank-style
+teleop, or any controller that computes its own per-wheel outputs —
+``move_wheels`` takes two speeds in wheel-deg/s:
+
+.. code-block:: python
+
+    db.move_wheels(200, 120)     # gentle right-hand arc
+    time.sleep_ms(500)
+    db.stop()
+
+Both setpoints leave in a single sync-write packet on serial-bus
+motors, so the wheels change speed at the same packet boundary.
+Reach for this rather than a :class:`~openbricks.drivers.st3215.SyncServoGroup`
+over the wheels: a DriveBase hands their UART to the native bus
+driver when it adopts them, so a SyncServoGroup can't drive them at
+all.
+
 With an IMU attached, ``use_gyro(True)`` steers by measured body
 rotation instead of the encoder differential — immune to wheel slip:
 

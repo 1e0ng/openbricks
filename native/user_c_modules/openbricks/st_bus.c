@@ -842,20 +842,12 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_turn_obj, sb_db_turn);
 
-static mp_obj_t sb_db_stop(size_t n_args, const mp_obj_t *args) {
-    // db_stop([then_mode]) — without the arg: yield only (the abort
-    // paths; the caller dispatches the end-state itself). With it
-    // (0 = coast, 1 = brake, 2 = hold) the COMPLETE stop is staged
-    // inside this one critical section, so both wheels reach their
-    // end-state together: coast rides one sync-torque packet, brake
-    // one sync-speed packet, and hold captures both poses at the
-    // same instant. The Python layer previously dispatched per
-    // motor, releasing the wheels one bus transaction apart.
-    // Returns False only for mode 2 before slot odometry is live
-    // (a hold would anchor to counts=0 and slam the shaft).
-    int mode = (n_args >= 2) ? mp_obj_get_int(args[1]) : -1;
-    bool ok = true;
-    bus_take();
+// Take the wheels away from the coupled controller: capture the
+// frame if a move was aborted mid-flight, halt the profiles, and
+// yield so the tick stops re-asserting the db's own hold. Shared by
+// db_stop and db_move_wheels — ONE implementation, because the
+// capture rule below is subtle enough that two copies would drift.
+static void st_db_abort_capture_and_yield_locked(void) {
     // Hold capture is ABORT-ONLY. Two cases:
     //
     // * Move NOT done (mid-move abort): the holds still carry
@@ -881,10 +873,61 @@ static mp_obj_t sb_db_stop(size_t n_args, const mp_obj_t *args) {
                - st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
     }
     ob_drivebase_stop(&st_db);
-    // Yield: from here the motor layer owns the wheels (coast /
-    // brake / hold / run_angle per the caller's ``then=``), so the
-    // db must stop re-asserting its own hold every tick.
     st_db_writing = false;
+}
+
+// db_move_wheels(left_steps_per_s, right_steps_per_s) — drive the two
+// wheels at independent speeds, both staged inside this one critical
+// section so they leave in a single sync-write packet. This is the
+// drivebase-owned replacement for building a SyncServoGroup over the
+// wheels: after adoption the motors' MicroPython UART is gone (the
+// IDF driver owns the pins), so a SyncServoGroup physically cannot
+// reach them any more.
+//
+// A direct wheel command supersedes everything: the coupled move,
+// and any per-slot run_angle/hold. Returns False if the drivebase
+// has no slots configured.
+static mp_obj_t sb_db_move_wheels(mp_obj_t self_in, mp_obj_t l_in,
+                                  mp_obj_t r_in) {
+    (void)self_in;
+    int32_t l = (int32_t)mp_obj_get_int(l_in);
+    int32_t r = (int32_t)mp_obj_get_int(r_in);
+    bool ok = false;
+    bus_take();
+    st_db_abort_capture_and_yield_locked();
+    if (st_db_slot_l >= 0) {
+        ob_sservo_t *sv = sservo_get();
+        ob_smove_stop(&st_moves[st_db_slot_l]);
+        ob_smove_stop(&st_moves[st_db_slot_r]);
+        // Both dirty before the lock drops -> the planner emits them
+        // together (ob_sservo_next_op batches every dirty slot).
+        ob_sservo_set_speed(sv, st_db_slot_l, l);
+        ob_sservo_set_speed(sv, st_db_slot_r, r);
+        ok = true;
+    }
+    bus_release();
+    return mp_obj_new_bool(ok);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_move_wheels_obj, sb_db_move_wheels);
+
+static mp_obj_t sb_db_stop(size_t n_args, const mp_obj_t *args) {
+    // db_stop([then_mode]) — without the arg: yield only (the abort
+    // paths; the caller dispatches the end-state itself). With it
+    // (0 = coast, 1 = brake, 2 = hold) the COMPLETE stop is staged
+    // inside this one critical section, so both wheels reach their
+    // end-state together: coast rides one sync-torque packet, brake
+    // one sync-speed packet, and hold captures both poses at the
+    // same instant. The Python layer previously dispatched per
+    // motor, releasing the wheels one bus transaction apart.
+    // Returns False only for mode 2 before slot odometry is live
+    // (a hold would anchor to counts=0 and slam the shaft).
+    int mode = (n_args >= 2) ? mp_obj_get_int(args[1]) : -1;
+    bool ok = true;
+    bus_take();
+    // The abort-only hold capture and the yield that hands the
+    // wheels to the motor layer for the caller's ``then=`` both live
+    // in this helper, with the full reasoning.
+    st_db_abort_capture_and_yield_locked();
     if (st_db_slot_l >= 0) {
         ob_sservo_t *sv = sservo_get();
         ob_sservo_set_speed(sv, st_db_slot_l, 0);
@@ -1054,6 +1097,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_straight),      MP_ROM_PTR(&sb_db_straight_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_turn),          MP_ROM_PTR(&sb_db_turn_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_stop),          MP_ROM_PTR(&sb_db_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_move_wheels),   MP_ROM_PTR(&sb_db_move_wheels_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_done),          MP_ROM_PTR(&sb_db_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_gyro_source),  MP_ROM_PTR(&sb_db_gyro_source_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },

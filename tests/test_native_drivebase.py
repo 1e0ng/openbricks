@@ -96,6 +96,10 @@ class _FakeBus:
         self.calls.append(("db_turn", deg, dps))
         self._left = self.done_after
 
+    def db_move_wheels(self, l, r):
+        self.calls.append(("db_move_wheels", l, r))
+        return getattr(self, "move_wheels_ok", True)
+
     def db_stop(self, mode=None):
         # mode None = yield-only (abort paths); 0/1/2 = the atomic
         # coast/brake/hold staged in C. stop_ok=False models the
@@ -559,6 +563,61 @@ class AtomicStopTests(_Base):
         except RuntimeError:
             pass
         self.assertIn(("db_stop", None), self.bus.calls)
+
+
+class MoveWheelsTests(_Base):
+    """``move_wheels`` — the drivebase-owned SyncServoGroup
+    replacement. One engine call carrying both speeds, converted
+    from wheel-deg/s to encoder steps/s."""
+
+    def _drivebase(self):
+        from openbricks.drivers.st3215 import ST3215
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics import DriveBase
+        ST3215._buses.clear()
+        left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                           invert=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        return DriveBase(left, right, wheel_diameter_mm=88,
+                         axle_track_mm=138), left, right
+
+    def test_speeds_convert_to_steps_and_ride_one_call(self):
+        db, _, _ = self._drivebase()
+        self.bus.calls = []
+        db.move_wheels(200, -100)
+        steps = 4096 / 360.0
+        self.assertEqual(
+            self.bus.calls,
+            [("db_move_wheels", int(200 * steps), int(-100 * steps))])
+
+    def test_move_wheels_supersedes_a_pending_wait_false_move(self):
+        db, left, _ = self._drivebase()
+        self.bus.done_after = 10
+        db.straight(300, wait=False)
+        left.run_angle(100, 90, wait=False)
+        db.move_wheels(150, 150)
+        self.assertTrue(db.done())            # db move cleared
+        self.assertIsNone(left._native_pending)
+
+    def test_refusal_raises(self):
+        db, _, _ = self._drivebase()
+        self.bus.move_wheels_ok = False
+        try:
+            db.move_wheels(100, 100)
+            self.fail("expected RuntimeError")
+        except RuntimeError:
+            pass
+
+    def test_move_wheels_is_estop_gated(self):
+        db, _, _ = self._drivebase()
+        estop.engage()
+        try:
+            db.move_wheels(100, 100)
+            self.fail("expected KeyboardInterrupt")
+        except KeyboardInterrupt:
+            pass
+        finally:
+            estop.clear()
 
 
 class EStopGateTests(_Base):

@@ -186,6 +186,32 @@ static mp_obj_t db_stop(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(db_stop_obj, 1, 2, db_stop);
 
 
+// db.move_wheels(left_dps, right_dps) — drive the two wheels at
+// independent speeds (wheel-deg/s), superseding any coupled move.
+// Both targets are set and both servos subscribed inside this one
+// call, so the wheels start together; ``left.run_speed(a);
+// right.run_speed(b)`` from Python would start them a statement
+// apart. The drivebase's own controller yields — these are direct
+// speed commands, not a 2-DOF move.
+static mp_obj_t db_move_wheels(mp_obj_t self_in, mp_obj_t l_in,
+                               mp_obj_t r_in) {
+    drivebase_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    ob_drivebase_stop(&self->core);
+    drivebase_unregister(self);
+    // Targets first, then subscribe: whichever servo was already
+    // active picks up its new target on the same tick as the other
+    // one's first.
+    ob_servo_set_speed(self->core.left,
+                       (ob_float_t)mp_obj_get_float(l_in));
+    ob_servo_set_speed(self->core.right,
+                       (ob_float_t)mp_obj_get_float(r_in));
+    openbricks_servo_attach_c(self->left_obj);
+    openbricks_servo_attach_c(self->right_obj);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(db_move_wheels_obj, db_move_wheels);
+
+
 static mp_obj_t db_use_gyro(mp_obj_t self_in, mp_obj_t enable_in) {
     drivebase_obj_t *self = MP_OBJ_TO_PTR(self_in);
     bool enable = mp_obj_is_true(enable_in);
@@ -299,6 +325,7 @@ static const mp_rom_map_elem_t db_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_straight), MP_ROM_PTR(&db_straight_obj) },
     { MP_ROM_QSTR(MP_QSTR_turn),     MP_ROM_PTR(&db_turn_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop),     MP_ROM_PTR(&db_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_move_wheels), MP_ROM_PTR(&db_move_wheels_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_done),  MP_ROM_PTR(&db_is_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_use_gyro), MP_ROM_PTR(&db_use_gyro_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_accel), MP_ROM_PTR(&db_set_accel_obj) },

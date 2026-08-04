@@ -147,6 +147,37 @@ class EncoderPathConcurrencyTests(unittest.TestCase):
         self.assertEqual(self._bridge(self.left), (0, 0, 0))
         self.assertEqual(self._bridge(self.right), (0, 0, 0))
 
+    def test_move_wheels_commands_both_targets_in_one_native_call(self):
+        # The SyncServoGroup replacement on the encoder path: both
+        # targets set and both servos subscribed by one call, with no
+        # per-motor Python dispatch to stagger them.
+        ls, rs = _Spy(self.left, "run_speed"), _Spy(self.right, "run_speed")
+        self.db.move_wheels(200, 120)
+        self.assertEqual(ls.calls, [])
+        self.assertEqual(rs.calls, [])
+        self.assertTrue(self.left._servo.is_active())
+        self.assertTrue(self.right._servo.is_active())
+        self.assertAlmostEqual(self.left._servo.target_dps(), 200.0, places=3)
+        self.assertAlmostEqual(self.right._servo.target_dps(), 120.0, places=3)
+
+    def test_move_wheels_supersedes_a_coupled_move(self):
+        self.db.straight(500, wait=False)
+        self.db.move_wheels(-80, 80)     # spin in place instead
+        self.assertAlmostEqual(self.left._servo.target_dps(), -80.0, places=3)
+        self.assertAlmostEqual(self.right._servo.target_dps(), 80.0, places=3)
+        self.assertTrue(self.db.done())  # the pending move is gone
+
+    def test_move_wheels_is_estop_gated(self):
+        from openbricks import estop
+        estop.engage()
+        try:
+            self.db.move_wheels(100, 100)
+            self.fail("expected KeyboardInterrupt")
+        except KeyboardInterrupt:
+            pass
+        finally:
+            estop.clear()
+
     def test_stop_then_hold_is_refused_on_encoder_servos(self):
         # There is no native position hold for encoder servos, so
         # ``hold`` takes the per-motor fall-through — and JGB37/MG370
