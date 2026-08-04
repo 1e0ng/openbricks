@@ -1547,6 +1547,20 @@ class SyncServoGroup:
     def __init__(self, servos):
         if not servos:
             raise ValueError("SyncServoGroup needs at least one servo")
+        for s in servos:
+            slot = getattr(s, "_native_slot", None)
+            if slot is not None:
+                raise RuntimeError(
+                    "servo id %s is driven by the native bus (slot %d), "
+                    "so a SyncServoGroup cannot command it: this class "
+                    "writes through the MicroPython UART, which the "
+                    "native driver now owns — the two collide on the "
+                    "wire and each reads the other's replies. For "
+                    "drivebase wheels use ``DriveBase.move_wheels("
+                    "left, right)``, which gives the same one-packet "
+                    "guarantee from inside the engine; for a task "
+                    "motor drive it directly (``motor.run_speed(...)``)."
+                    % (s._id, slot))
         bus = servos[0]._bus
         for s in servos[1:]:
             if s._bus is not bus:

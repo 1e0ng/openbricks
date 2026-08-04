@@ -803,6 +803,30 @@ class OneBusOneOwnerTests(_Base):
         self.assertTrue("not a wiring fault" in msg, msg)
         self.assertFalse("servo-id --scan" in msg, msg)
 
+    def test_sync_servo_group_refuses_adopted_wheels(self):
+        # Bench 2026-08-05: a line-align routine built a
+        # SyncServoGroup over the drivebase wheels. Those wheels are
+        # driven by the native bus, but the group writes through the
+        # MicroPython UART — two drivers on one wire, and each reads
+        # the other's replies ("write to servo id 2 acknowledged by
+        # servo id 4"). Refuse it, and name the replacement.
+        from openbricks.drivers.st3215 import SyncServoGroup
+        db, left, right = self._drivebase()
+        try:
+            SyncServoGroup([left, right])
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            msg = str(e)
+        self.assertTrue("native bus" in msg, msg)
+        self.assertTrue("move_wheels" in msg, msg)
+
+    def test_sync_servo_group_still_works_off_the_native_bus(self):
+        # Non-adopted servos on a plain MicroPython bus are exactly
+        # what this class is for (grippers, multi-axis arms).
+        from openbricks.drivers.st3215 import SyncServoGroup
+        a, b = self._motor(6), self._motor(7)
+        SyncServoGroup([a, b])            # must not raise
+
     def test_without_a_native_bus_nothing_changes(self):
         # No drivebase, no native ownership: the plain MicroPython
         # driver path is untouched.
