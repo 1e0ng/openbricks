@@ -154,6 +154,28 @@ static void servo_detach(servo_obj_t *self) {
     self->core.traj_done   = true;
 }
 
+
+// ---- C entry points for sibling modules (see servo.h) ----
+//
+// The MP methods below route through these too, so there is exactly
+// one implementation of each end state.
+
+void openbricks_servo_attach_c(mp_obj_t servo_in) {
+    servo_attach((servo_obj_t *)MP_OBJ_TO_PTR(servo_in));
+}
+
+void openbricks_servo_coast_c(mp_obj_t servo_in) {
+    servo_obj_t *self = (servo_obj_t *)MP_OBJ_TO_PTR(servo_in);
+    servo_detach(self);
+    servo_coast_bridge(self);
+}
+
+void openbricks_servo_brake_c(mp_obj_t servo_in) {
+    servo_obj_t *self = (servo_obj_t *)MP_OBJ_TO_PTR(servo_in);
+    servo_detach(self);
+    servo_brake_bridge(self);
+}
+
 // -----------------------------------------------------------------------
 // Python-facing methods
 
@@ -213,17 +235,13 @@ static mp_obj_t servo_run(mp_obj_t self_in, mp_obj_t power_in) {
 static MP_DEFINE_CONST_FUN_OBJ_2(servo_run_obj, servo_run);
 
 static mp_obj_t servo_brake(mp_obj_t self_in) {
-    servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    servo_detach(self);
-    servo_brake_bridge(self);
+    openbricks_servo_brake_c(self_in);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_brake_obj, servo_brake);
 
 static mp_obj_t servo_coast(mp_obj_t self_in) {
-    servo_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    servo_detach(self);
-    servo_coast_bridge(self);
+    openbricks_servo_coast_c(self_in);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(servo_coast_obj, servo_coast);

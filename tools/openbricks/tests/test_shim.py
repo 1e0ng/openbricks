@@ -536,6 +536,42 @@ class SimStBusEngineTests(_ShimTestBase):
                         "gyro turn(90) rotated %+.1f deg" % turned)
         db.use_gyro(False)
 
+    def test_native_path_stop_applies_the_end_state_to_both_wheels(self):
+        # Firmware parity for the ENCODER path (drivebase.c db_stop):
+        # DriveBase.stop(then=) routes ONE ShimDriveBase.stop(mode)
+        # call that puts both wheels into the end state, instead of
+        # per-motor coast()/brake() dispatch from Python.
+        from openbricks.drivers.jgb37_520 import JGB37Motor
+        from openbricks.robotics.drivebase import DriveBase
+
+        left  = JGB37Motor(in1=1, in2=2, pwm=17, encoder_a=7, encoder_b=8)
+        right = JGB37Motor(in1=9, in2=10, pwm=11, encoder_a=12, encoder_b=13)
+        db = DriveBase(left, right, wheel_diameter_mm=65, axle_track_mm=120)
+        self.assertIsNotNone(db._native)
+        db.straight(200, wait=False)
+        time.sleep_ms(100)
+        self.assertTrue(left._servo._adapter._attached)
+        self.assertTrue(right._servo._adapter._attached)
+        db.stop()                                  # then="coast"
+        # Both detached from the tick loop and both actuators zeroed
+        # by the one call — neither wheel outlives the other.
+        rt = left._servo._adapter.runtime
+        self.assertFalse(left._servo._adapter._attached)
+        self.assertFalse(right._servo._adapter._attached)
+        self.assertEqual(rt.data.ctrl[left._servo._adapter._actuator_id], 0.0)
+        self.assertEqual(rt.data.ctrl[right._servo._adapter._actuator_id], 0.0)
+
+        # turn + then="brake" take the same one-call route (mode 1).
+        db.turn(45, wait=False)
+        time.sleep_ms(100)
+        self.assertTrue(left._servo._adapter._attached)
+        self.assertTrue(right._servo._adapter._attached)
+        db.stop(then="brake")
+        self.assertFalse(left._servo._adapter._attached)
+        self.assertFalse(right._servo._adapter._attached)
+        self.assertEqual(rt.data.ctrl[left._servo._adapter._actuator_id], 0.0)
+        self.assertEqual(rt.data.ctrl[right._servo._adapter._actuator_id], 0.0)
+
     def test_servo_verbs_proxy_to_mujoco_wheels(self):
         # servo_run / servo_counts / servo_coast are the st_bus verbs
         # the FIRMWARE driver's adopted wheel-mode API calls (the shim

@@ -67,6 +67,7 @@ _TEST_MODULES = [
     "tests.test_scheduler",
     "tests.test_jgb37_520",
     "tests.test_drivebase",
+    "tests.test_drivebase_concurrency",
     "tests.test_drivebase_native_2dof",
     "tests.test_drivebase_use_gyro",
     "tests.test_drivebase_accel",

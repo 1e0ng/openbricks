@@ -34,6 +34,7 @@ profile-based moves would feel sluggish.
 import math
 import time
 
+from openbricks import estop
 from openbricks._native import DriveBase as _NativeDriveBase
 
 
@@ -252,11 +253,15 @@ class DriveBase:
           Requires motors that implement ``hold()`` (e.g. ``ST3215Motor``);
           open-loop drivers raise ``NotImplementedError``.
 
-        On serial-bus (adopted) motors the whole stop is staged
-        atomically in the C engine: both wheels reach the end-state
-        at the same bus-packet boundary — one sync-torque packet for
+        Both wheels are always commanded together, never one motor at
+        a time. On serial-bus (adopted) motors the whole stop is
+        staged atomically in the C engine and reaches the wheels at
+        the same bus-packet boundary — one sync-torque packet for
         coast, one sync-speed packet for brake, same-instant pose
-        capture for hold — never one motor at a time.
+        capture for hold. On encoder servos ``coast`` / ``brake``
+        likewise apply to both bridges inside one native call, so the
+        second wheel's 1 kHz control tick can't keep driving while
+        the first is already released.
         """
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
@@ -270,7 +275,14 @@ class DriveBase:
             self._left._native_pending = None
             self._right._native_pending = None
             return
+        if self._native is not None and then in ("coast", "brake"):
+            # Both bridges written inside the one native call.
+            self._native.stop(0 if then == "coast" else 1)
+            return
         if self._native is not None:
+            # then="hold": no native position hold on encoder servos,
+            # so this falls through to the per-motor dispatch below
+            # (which raises for motors without hold(), as documented).
             self._native.stop()
         if then == "coast":
             self._left.coast()
@@ -362,11 +374,11 @@ class DriveBase:
             self._pending = {"mode": "straight_serial", "then": then}
             return
         if self._native is not None:
-            # Ensure both servos are attached to motor_process; the
-            # native drivebase writes directly to their target_dps
-            # but doesn't subscribe them itself.
-            self._left.run_speed(0)
-            self._right.run_speed(0)
+            # The native drivebase subscribes BOTH servos itself, in
+            # one C call (1.53.0). It used to be two Python
+            # ``run_speed(0)`` calls here — non-atomic, and the
+            # e-stop gate rode on them, hence the explicit check.
+            estop.check()
             speed_mm_s = self._straight_speed_dps * self._wheel_circumference / 360
             self._native.straight(float(distance_mm), float(speed_mm_s))
             self._pending = {"mode": "straight_native", "then": then}
@@ -381,8 +393,7 @@ class DriveBase:
             self._pending = {"mode": "turn_serial", "then": then}
             return
         if self._native is not None:
-            self._left.run_speed(0)
-            self._right.run_speed(0)
+            estop.check()       # see _arm_straight
             self._native.turn(float(angle_deg), float(self._turn_rate_dps))
             self._pending = {"mode": "turn_native", "then": then}
             return
