@@ -3,6 +3,33 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.57.2 — the bus no longer wedges at a program boundary
+
+A latent wedge, exposed by 1.57.0 and older than it.
+
+The hard tick pumps right up to the instant a program ends, so the
+bus is normally mid-transaction when the next one starts.
+`reset_runtime` cleared `tick_txn` — the flag saying *the pump owns
+the in-flight transaction* — but left the bus state machine alone.
+With the flag cleared, nothing ever consumed that result, so the bus
+sat in a non-IDLE state permanently and `servo_pump_locked` returned
+early forever: no config writes, no feedback reads, no slot ever
+serviced.
+
+`attach_uart` re-initialises the bus, which hid this for as long as
+the native bus existed — a program that built its DriveBase first
+always recovered by accident. 1.57.0 let a **task motor** reach the
+bus first, and nothing un-wedged it.
+
+The signature is distinctive and worth remembering: a slot reporting
+**0 replies and 0 failed reads**. A dead servo shows failed reads
+climbing; a wedged pump shows neither, because it never ran.
+
+`reset_runtime` now abandons the in-flight transaction and returns
+the bus to IDLE — a new program inherits no transaction, the same
+way it inherits no slots. Pinned by two tests that both fail against
+the unfixed build.
+
 ## 1.57.1 — a task motor is usable the moment it is constructed
 
 1.57.0 put task motors on native slots but returned from the

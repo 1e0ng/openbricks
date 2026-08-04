@@ -233,6 +233,46 @@ class _DeadRightWheel(_PerfectWheels):
             i += 4 + ln
 
 
+class ProgramBoundaryTests(_Base):
+    """``reset_runtime`` runs between programs. A transaction the
+    previous one left in flight must not survive it.
+
+    The pump consumes only results it started (``tick_txn``), and the
+    reset clears that flag — so an un-taken reply pins the bus in a
+    non-IDLE state that nothing clears, and every subsequent pump
+    returns early. Symptom (bench 2026-08-05): a slot attached at
+    program start reports 0 replies AND 0 failed reads — a dead servo
+    shows failed reads climbing, a wedged pump shows neither.
+    """
+
+    def test_in_flight_transaction_does_not_survive_the_reset(self):
+        # Leave a read in flight, exactly as a program ending
+        # mid-transaction would.
+        sb.db_straight(200.0, 150.0)
+        for _ in range(3):
+            sb.servo_pump(self.w.now + 1)
+            self.w.now += 1
+        sb.take_tx()                       # swallow it: no reply comes
+        sb.reset_runtime()
+        # A fresh program attaches a slot and the pump must service it.
+        sb.servo_attach(0, 2, True, 45)
+        w = _PerfectWheels()
+        w.advance(200)
+        ok, failed, stale = sb.servo_stats(0)
+        self.assertTrue(ok > 0,
+                        "pump wedged after reset: %d ok, %d failed"
+                        % (ok, failed))
+
+    def test_reset_leaves_the_bus_idle(self):
+        sb.db_straight(200.0, 150.0)
+        for _ in range(3):
+            sb.servo_pump(self.w.now + 1)
+            self.w.now += 1
+        sb.take_tx()
+        sb.reset_runtime()
+        self.assertEqual(sb.state(), sb.IDLE)
+
+
 class DeadWheelTests(_Base):
     """A wheel that stops answering must be caught, not absorbed.
 
