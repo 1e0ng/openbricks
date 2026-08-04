@@ -453,6 +453,8 @@ class ST3215Motor(Motor):
         # a ``DriveBase`` wheel keeps its stock single-turn limits and
         # its present-position reads keep wrapping cleanly at one rev.
         self._step_limits_zeroed = False
+        # One warning per motor if the servo won't store goal_acc.
+        self._acc_mismatch_warned = False
 
         # State for ``run_angle(wait=False)``. ``None`` means no
         # non-blocking move is in flight; ``done()`` returns True.
@@ -648,28 +650,46 @@ class ST3215Motor(Motor):
         Re-asserting goal-acc here (rather than trusting the
         constructor's write to have survived) is what keeps the
         documented uniform-acceleration rule true in step mode.
+
+        The two registers are held to DIFFERENT standards, because
+        getting them wrong costs different amounts:
+
+        * goal-speed is verified and a mismatch REFUSES the move.
+          Speed 0 means full speed; running anyway risks the shaft.
+        * goal-acc is written and checked, but a mismatch only warns
+          once. Bench 2026-08-04: an ST-3032 acknowledges the write
+          and still reports 0 — the ramp is simply not settable on
+          that unit. Refusing every move over an acceleration the
+          servo won't store would ground a working robot to enforce a
+          preference. Not silent, not fatal.
         """
         acc = self._encode_goal_acc()
         speed = bytes([speed_steps & 0xFF, (speed_steps >> 8) & 0xFF])
         for _ in range(2):
             self._bus.write(self._id, _REG_GOAL_ACC, bytes([acc]))
             self._bus.write(self._id, _REG_GOAL_SPEED, speed)
-            got_speed = self._bus.read(self._id, _REG_GOAL_SPEED, 2)
             got_acc = self._bus.read(self._id, _REG_GOAL_ACC, 1)
-            if got_speed is None or got_acc is None:
+            if (got_acc is not None and got_acc[0] != acc
+                    and not self._acc_mismatch_warned):
+                self._acc_mismatch_warned = True
+                print("openbricks: servo id %s stored goal_acc=%d, not "
+                      "the %d asked for — this servo does not take an "
+                      "acceleration ramp, so moves start and stop "
+                      "abruptly. Motion is otherwise unaffected."
+                      % (self._id, got_acc[0], acc))
+            got_speed = self._bus.read(self._id, _REG_GOAL_SPEED, 2)
+            if got_speed is None:
                 continue                    # silent bus — retry once
-            if (got_speed[0] | (got_speed[1] << 8)) == speed_steps \
-                    and got_acc[0] == acc:
+            if (got_speed[0] | (got_speed[1] << 8)) == speed_steps:
                 return
         raise OSError(
-            "servo id %s would not accept its motion settings: asked "
-            "goal_speed=%d acc=%d, reads back goal_speed=%s acc=%s. "
-            "Refusing the move — goal_speed 0 means FULL SPEED on this "
-            "servo, so running it now could send the shaft flying."
-            % (self._id, speed_steps, acc,
+            "servo id %s would not accept its speed setting: asked "
+            "goal_speed=%d, reads back %s. Refusing the move — "
+            "goal_speed 0 means FULL SPEED on this servo, so running "
+            "it now could send the shaft flying."
+            % (self._id, speed_steps,
                None if got_speed is None
-               else got_speed[0] | (got_speed[1] << 8),
-               None if got_acc is None else got_acc[0]))
+               else got_speed[0] | (got_speed[1] << 8)))
 
     def _write_step(self, counts):
         """Write one signed relative step to the goal-position register
