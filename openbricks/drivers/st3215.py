@@ -109,6 +109,23 @@ _MAX_STEP_COUNTS = 7 * _COUNTS_PER_REV
 _DEFAULT_STEPS_PER_DPS = _COUNTS_PER_REV / 360.0   # = 11.378
 
 
+def _native_bus_owns(uart_id):
+    """Has the native C bus taken this UART over?
+
+    Asked in C, not remembered in Python: the attached UART
+    deliberately survives a program boundary (``reset_runtime`` clears
+    the slots but not the hardware), so a fresh program's Python state
+    would claim nobody owns pins the IDF driver still holds.
+    """
+    try:
+        from openbricks import _native
+        sb = getattr(_native, "st_bus", None)
+        uart_num = getattr(sb, "uart_num", None)
+        return uart_num is not None and uart_num() == uart_id
+    except (ImportError, AttributeError):
+        return False
+
+
 class _SCServoBus:
     """Shared UART bus. One instance per physical bus; many servos per bus."""
 
@@ -119,6 +136,9 @@ class _SCServoBus:
         # with a status-return level that answers reads alone —
         # deliberately, never as a way to quieten an error.
         self.verify_writes = bool(verify_writes)
+        # Motors constructed on this bus, so a later DriveBase
+        # adoption can migrate them onto native slots.
+        self._motors = []
         pins.check(tx, "serial-bus UART TX")
         pins.check(rx, "serial-bus UART RX", output=False)
         if dir_pin is not None:
@@ -310,6 +330,7 @@ class ST3215(Servo):
             cls._buses[key] = _SCServoBus(uart_id, tx, rx, baud, dir_pin)
         return cls._buses[key]
 
+
     def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
                  baud=1_000_000, dir_pin=None,
                  min_raw=0, max_raw=4095, range_deg=360):
@@ -419,11 +440,28 @@ class ST3215Motor(Motor):
                  max_dps=600.0,
                  accel_dps2=1500.0):
         self._id    = servo_id
-        self._bus   = self._bus_for(uart_id, tx, rx, baud, dir_pin)
         self._invert = bool(invert)
         self._steps_per_dps = float(steps_per_dps)
         self._max_dps       = float(max_dps)
         self._accel_dps2    = float(accel_dps2)
+        # ONE BUS, ONE OWNER. If the native C bus already drives this
+        # UART — because a DriveBase adopted its wheels onto it — then
+        # opening a MicroPython UART here would put two drivers on one
+        # wire, and the hard tick's replies would be consumed as the
+        # answers to our packets (bench 2026-08-04: a write to id 4
+        # acknowledged by id 1). Take a native slot instead; the whole
+        # Motor API already routes through slots.
+        self._uart_id = uart_id
+        if _native_bus_owns(uart_id):
+            self._bus = None
+            self._attach_task_slot()
+            return
+        self._bus   = self._bus_for(uart_id, tx, rx, baud, dir_pin)
+        # Remembered so a later DriveBase adoption can migrate every
+        # motor already on this bus (see ``migrate_bus_to_native``) —
+        # adoption takes the UART away, and a motor left holding the
+        # closed one would go silent.
+        self._bus._motors.append(self)
 
         # Software multi-turn accumulator state. ``_accum_count`` is the
         # absolute shaft position in motor-frame encoder counts. In
@@ -911,6 +949,43 @@ class ST3215Motor(Motor):
         return _SerialNativeEngine.adopt_motors(
             self, right, wheel_diameter_mm=wheel_diameter_mm,
             axle_track_mm=axle_track_mm, imu=imu, accel_dps2=accel_dps2)
+
+    # Slots 0 and 1 belong to the DriveBase (its engine attaches them
+    # by fixed index and detaches whatever is there first, so a task
+    # motor parked in one would be evicted mid-run). Task motors take
+    # what is left, top down.
+    _TASK_SLOTS = (2, 3)
+
+    def _attach_task_slot(self):
+        """Claim a native slot for a motor that is not a drivebase
+        wheel. Raises rather than silently running unowned."""
+        from openbricks import _native
+        sb = _native.st_bus
+        acc = int(self._accel_dps2 * self._steps_per_dps / 100.0)
+        acc = 0 if acc < 0 else (254 if acc > 254 else acc)
+        for slot in self._TASK_SLOTS:
+            if sb.servo_attach(slot, self._id, self._invert, acc):
+                self._adopt_native(sb, slot)
+                return
+        raise RuntimeError(
+            "no free native slot for servo id %s: the bus has %d slots, "
+            "two reserved for the DriveBase's wheels and both task "
+            "slots already claimed. A fifth motor needs a second UART."
+            % (self._id, 2 + len(self._TASK_SLOTS)))
+
+    @classmethod
+    def migrate_bus_to_native(cls, bus, skip=()):
+        """Move every motor still on ``bus`` onto native slots.
+
+        Called by DriveBase adoption right after it takes the UART:
+        the wheels become slots 0/1 by their own path, and anything
+        else that was sharing the MicroPython bus has to come across
+        too or it is left talking into a closed UART."""
+        for motor in list(getattr(bus, "_motors", ())):
+            if motor in skip or motor._native_slot is not None:
+                continue
+            motor._bus = None
+            motor._attach_task_slot()
 
     def _adopt_native(self, sb, slot):
         self._native_sb = sb

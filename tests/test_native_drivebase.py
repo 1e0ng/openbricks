@@ -684,6 +684,87 @@ class DeadMotorDiagnosisTests(_Base):
         self.assertTrue("left" in msg and "right" in msg, msg)
 
 
+class OneBusOneOwnerTests(_Base):
+    """Four ST-3032s on ONE UART: two wheels plus two task motors.
+
+    A task motor that opened its own ``machine.UART`` on a bus the
+    native driver already owns puts two drivers on one wire — the
+    hard tick's replies land in the other driver's buffer and get
+    consumed as the wrong packet's answer (bench 2026-08-04: a write
+    to id 4 acknowledged by id 1). So every motor on a natively-owned
+    UART takes a slot instead.
+    """
+
+    def setUp(self):
+        _Base.setUp(self)
+        from openbricks.drivers.st3215 import ST3215
+        ST3215._buses.clear()
+        self.bus.uart_num = lambda: -1      # native bus owns nothing yet
+
+    def _motor(self, servo_id, **kw):
+        from openbricks.drivers.st3032 import ST3032Motor
+        return ST3032Motor(servo_id=servo_id, uart_id=1, tx=14, rx=6, **kw)
+
+    def _drivebase(self):
+        from openbricks.robotics import DriveBase
+        left = self._motor(2, invert=True)
+        right = self._motor(1)
+        db = DriveBase(left, right, wheel_diameter_mm=88,
+                       axle_track_mm=138)
+        # Adoption has taken the UART; the native bus owns it now.
+        self.bus.uart_num = lambda: 1
+        return db, left, right
+
+    def test_task_motor_built_after_adoption_takes_a_slot(self):
+        db, _, _ = self._drivebase()
+        task = self._motor(4)
+        self.assertIsNotNone(task._native_slot)
+        self.assertIsNone(task._bus)            # no competing UART
+        self.assertIn(task._native_slot, (2, 3))
+
+    def test_two_task_motors_get_the_two_free_slots(self):
+        db, _, _ = self._drivebase()
+        a, b = self._motor(3), self._motor(4)
+        self.assertEqual(sorted([a._native_slot, b._native_slot]), [2, 3])
+
+    def test_task_slots_never_steal_the_drivebase_wheels(self):
+        # Slots 0/1 are attached by fixed index by the engine, which
+        # detaches whatever is there first — a task motor parked in
+        # one would be evicted mid-run.
+        db, left, right = self._drivebase()
+        self._motor(3), self._motor(4)
+        self.assertEqual(left._native_slot, 0)
+        self.assertEqual(right._native_slot, 1)
+
+    def test_a_fifth_motor_is_refused_with_the_reason(self):
+        db, _, _ = self._drivebase()
+        self._motor(3), self._motor(4)
+        try:
+            self._motor(5)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            msg = str(e)
+        self.assertTrue("no free native slot" in msg, msg)
+        self.assertTrue("second UART" in msg, msg)
+
+    def test_task_motor_built_BEFORE_the_drivebase_is_migrated(self):
+        # Construction order must not matter: adoption takes the UART
+        # away, so a motor already on the MicroPython bus has to come
+        # across or it talks into a closed UART.
+        task = self._motor(4)
+        self.assertIsNone(task._native_slot)     # plain bus for now
+        db, _, _ = self._drivebase()
+        self.assertIsNotNone(task._native_slot)
+        self.assertIsNone(task._bus)
+
+    def test_without_a_native_bus_nothing_changes(self):
+        # No drivebase, no native ownership: the plain MicroPython
+        # driver path is untouched.
+        task = self._motor(4)
+        self.assertIsNone(task._native_slot)
+        self.assertIsNotNone(task._bus)
+
+
 class MoveWheelsTests(_Base):
     """``move_wheels`` — the drivebase-owned SyncServoGroup
     replacement. One engine call carrying both speeds, converted

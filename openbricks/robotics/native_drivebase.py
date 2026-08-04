@@ -107,6 +107,12 @@ class _SerialNativeEngine:
                   accel_dps2=accel_dps2)
         left._adopt_native(eng._sb, 0)
         right._adopt_native(eng._sb, 1)
+        # Anything else that was sharing that UART comes across too.
+        # The IDF driver owns the pins now, so a motor left on the
+        # MicroPython bus would be talking into a closed UART — and
+        # before 1.57.0, one that re-opened its own would put two
+        # drivers on one wire and eat the hard tick's replies.
+        left.migrate_bus_to_native(bus, skip=(left, right))
         return eng
 
     def __init__(self, left_id, right_id, wheel_diameter_mm,
