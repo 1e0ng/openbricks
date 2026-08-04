@@ -304,11 +304,25 @@ class _SimStBus:
         self._db_writing = True
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
 
-    def db_stop(self):
+    def db_stop(self, mode=None):
+        # Firmware parity (see st_bus.c sb_db_stop): without ``mode``
+        # yield only; with it the end-state is applied to both wheels
+        # in the same call — 0 = coast, 1 = brake (zero speed),
+        # 2 = hold (REAL C position holds via st_move_core, same as
+        # firmware). The sim has no wire, so "same packet boundary"
+        # is trivially true; what this preserves is the contract.
         self._raw.stop()
         self._db_writing = False          # yield to the motor layer
-        for w in self._wheels.values():
+        for slot, w in self._wheels.items():
             w.run_speed(0)
+            if mode == 0:
+                self._move(slot).stop()
+                w.coast()
+            elif mode == 1:
+                self._move(slot).stop()
+            elif mode == 2:
+                self._move(slot).hold_at(w.angle() * self._STEPS_PER_DEG)
+        return True
 
     def db_done(self):
         return bool(self._raw.is_done())

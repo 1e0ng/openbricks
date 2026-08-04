@@ -226,8 +226,26 @@ class _SerialNativeEngine:
         self.arm_turn(angle_deg)
         self._wait()
 
-    def stop(self):
-        self._sb.db_stop()
+    _STOP_MODES = {"coast": 0, "brake": 1, "hold": 2}
+
+    def stop(self, then=None):
+        """Stop the drivebase and yield the wheels.
+
+        Without ``then`` the engine only yields (abort paths — the
+        caller dispatches the wheels' end-state itself). With
+        ``then`` the complete stop is staged atomically in C, so
+        both wheels reach the end-state at the same bus-packet
+        boundary: coast is one sync-torque write covering both
+        servos, brake one sync-speed write, and hold captures both
+        wheel poses at the same instant — instead of one motor at a
+        time, a bus transaction apart."""
+        if then is None:
+            self._sb.db_stop()
+            return
+        ok = self._sb.db_stop(self._STOP_MODES[then])
+        if then == "hold" and not ok:
+            raise RuntimeError(
+                "hold refused: slot odometry is not live yet")
 
     def done(self):
         return bool(self._sb.db_done())

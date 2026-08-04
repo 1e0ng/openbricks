@@ -3,6 +3,31 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.52.0 — atomic DriveBase.stop: both wheels, one packet
+
+`DriveBase.stop(then=...)` on serial-bus motors used to finish per
+motor: `left.coast()` then `right.coast()`, each its own
+single-servo torque write — so one wheel free-wheeled while the
+other still drove, a bus transaction apart (holds also captured
+the two wheel poses at slightly different instants). The complete
+stop is now staged inside ONE C critical section
+(`db_stop(mode)`): the planner batches every pending torque
+command into a single sync-write (new `OB_SOP_SYNC_TORQUE`, same
+Feetech 0x83 instruction the speed path already uses), so
+coast releases both wheels at the same packet boundary, brake is
+the existing one-packet zero-speed sync, and hold captures both
+poses at the same instant before arming the C position holds.
+Move starts benefit too: the first command's torque-on now engages
+both wheels in one packet.
+
+Torque syncs deliberately skip the sync/read fairness gate —
+coast is e-stop-adjacent and must never queue behind feedback
+reads; being one-shot, it can't starve them. A `then="hold"`
+before slot odometry is live is refused loudly (RuntimeError)
+instead of anchoring the holds to counts=0. The sim's emulated
+bus mirrors the mode argument, so the same user code exercises
+the same contract there.
+
 ## 1.51.0 — ICM-45686: heading computed inside the hard tick
 
 The raw-IMU arc, built ahead of the part's arrival so bring-up is a
