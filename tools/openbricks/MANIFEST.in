@@ -28,7 +28,7 @@ recursive-include examples *.py
 # the repo-root docs/ by setup.py::_sync_docs before the sdist is
 # built; bundling them here lets the wheel-build step (which runs
 # from the unpacked sdist, where ../../docs doesn't exist) find them.
-recursive-include openbricks_dev/_docs *.md
+include openbricks_dev/_docs/offline-docs.zip
 
 # CHANGELOG so the migration guide ships with the wheel.
 include CHANGELOG.md

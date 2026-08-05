@@ -3,6 +3,40 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.63.0 — `openbricks docs` shows the whole manual, offline
+
+The CLI shipped the nine hand-written guides and re-rendered them
+with a markdown library, so everything generated from docstrings —
+the entire API reference — was simply absent. Both output paths had
+the hole: the terminal renderer and the browser view shared the same
+bundled markdown, and the browser one never opened the website
+despite its own footer pointing there.
+
+It now ships the SAME Sphinx build as docs.openbricks.dev as a
+single archive and opens that. Parity is structural: same sources,
+same extensions, same autodoc, so the two cannot drift.
+
+**304 KB**, from 19 MB of raw Sphinx output. Most of that was never
+real content — ~6 MB of `.doctrees` build cache, and the theme
+shipping Lato and FontAwesome in five formats across two directories.
+`docs/_static/custom.css` now sets a system font stack, so the fonts
+are dropped at the source rather than deleted afterwards and the
+build produces exactly what ships. Only the typeface differs from
+the website; layout, structure and every cross-reference are
+identical.
+
+Verified genuinely offline: no remote stylesheets, scripts or fonts,
+pinned by a test. The remote URLs that remain are ordinary links you
+click (GitHub, python.org intersphinx), not resources the page loads.
+
+`--text` is gone with the markdown renderer. Topics still work and
+now include API pages — `openbricks docs robotics` opens the
+DriveBase reference.
+
+The archive is committed and byte-reproducible, so a wheel build
+needs no Sphinx; the docs workflow rebuilds and diffs it, failing if
+it goes stale.
+
 ## 1.62.0 — a stalled run_angle reports, and says which failure it was
 
 **A stalled task motor no longer aborts the run.** On a mission

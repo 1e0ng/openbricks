@@ -35,3 +35,32 @@
   background: rgba(255, 255, 255, 0.15);
   text-decoration: none;
 }
+
+/* ---------------------------------------------------------------
+   System font stack.
+
+   The Read-the-Docs theme ships Lato and FontAwesome as web fonts,
+   and does it twice (_static/fonts/ and _static/css/fonts/). That is
+   ~2 MB of the built site — the difference between a 1.1 MB offline
+   bundle and a 308 KB one, for a typeface. ``openbricks docs`` ships
+   that bundle, so the fonts are dropped and the system stack is used
+   instead. Declared HERE rather than deleted from the output after
+   the fact, so what Sphinx builds is exactly what ships and the
+   drift check stays meaningful.
+
+   Layout, structure and every cross-reference are unaffected; only
+   the typeface changes.
+   --------------------------------------------------------------- */
+body,
+h1, h2, h3, h4, h5, h6,
+.rst-content .toctree-wrapper > p.caption,
+.wy-menu-vertical a,
+.wy-side-nav-search > a,
+.wy-nav-top a {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+}
+code, pre, .rst-content tt, .rst-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+               "Liberation Mono", monospace;
+}

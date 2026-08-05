@@ -40,6 +40,21 @@ jobs:
         run: pip install -r docs/requirements.txt
       - name: Build docs (warnings are errors)
         run: sphinx-build -W --keep-going -b html docs docs/_build/html
+
+      - name: Offline docs bundle is up to date
+        # ``openbricks docs`` ships this archive so the CLI shows the
+        # same manual as the website, API reference included. It is
+        # COMMITTED so a wheel build needs no Sphinx — which only
+        # stays honest if a stale one is caught. The build is
+        # byte-reproducible, so rebuilding and diffing is exact.
+        run: |
+          cp tools/openbricks/openbricks_dev/_docs/offline-docs.zip /tmp/committed.zip
+          PYTHON=python scripts/build-offline-docs.sh
+          if ! cmp -s /tmp/committed.zip \
+                      tools/openbricks/openbricks_dev/_docs/offline-docs.zip; then
+            echo "::error::offline-docs.zip is stale — run scripts/build-offline-docs.sh and commit it"
+            exit 1
+          fi
       - name: Install LaTeX toolchain (for the PDF build)
         run: |
           sudo apt-get update

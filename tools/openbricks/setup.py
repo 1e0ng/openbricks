@@ -97,40 +97,28 @@ _sync_cores()
 
 # Guide pages bundled for ``openbricks docs`` (offline reading).
 # Same two-mode shape as ``_sync_cores``: repo checkout → copy from
-# the repo-root ``docs/``; sdist build → the pages were pre-bundled
-# by MANIFEST.in, verify and leave them. Only the hand-written
-# top-level guides ship — the api/ reference is autodoc (offline
-# equivalent: Python's help()) and datasheets are PDFs.
-DOCS_SRC = HERE.parent.parent / "docs"
+# the repo-root ``docs/``. The bundle is the SAME Sphinx build as
+# docs.openbricks.dev — API reference included — so ``openbricks
+# docs`` shows the whole manual rather than the hand-written guides
+# alone. Built by scripts/build-offline-docs.sh and committed, so a
+# wheel build needs no Sphinx.
 DOCS_DST = HERE / "openbricks_dev" / "_docs"
-
-_DOC_PAGES = [
-    "index.md",
-    "install.md",
-    "hardware.md",
-    "cli.md",
-    "simulator.md",
-    "examples.md",
-    "architecture.md",
-    "build.md",
-    "measuring.md",
-]
+_DOC_BUNDLE = "offline-docs.zip"
 
 
 def _sync_docs():
+    """Copy the offline documentation bundle into the package.
+
+    One archive built by ``scripts/build-offline-docs.sh`` — the same
+    Sphinx build as the website, so the API reference travels with
+    the CLI instead of being absent from it.
+    """
     DOCS_DST.mkdir(parents=True, exist_ok=True)
-    src_available = DOCS_SRC.is_dir()
-    for fname in _DOC_PAGES:
-        src = DOCS_SRC / fname
-        dst = DOCS_DST / fname
-        if src_available and src.is_file():
-            shutil.copyfile(src, dst)
-            continue
-        if not dst.is_file():
-            raise RuntimeError(
-                "missing guide page: cannot copy from " + str(src) +
-                " (repo docs/ unavailable) and " + str(dst) +
-                " is not bundled either — broken checkout?")
+    dst = DOCS_DST / _DOC_BUNDLE
+    if not dst.is_file():
+        raise RuntimeError(
+            "missing offline docs bundle: " + str(dst) +
+            " — run scripts/build-offline-docs.sh")
 
 
 _sync_docs()

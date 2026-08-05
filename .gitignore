@@ -38,4 +38,10 @@ robot.local.json
 *.so
 tools/openbricks/native/_shared/
 docs/_build/
-tools/openbricks/openbricks_dev/_docs/
+# _docs/ was generated at build time (guides synced from docs/), so it
+# was ignored wholesale. The offline manual bundle is now COMMITTED —
+# that is what lets a wheel build work without Sphinx — so ignore the
+# directory's CONTENTS and keep the one archive. A directory-level
+# ignore cannot be undone by a later negation, hence the /* form.
+tools/openbricks/openbricks_dev/_docs/*
+!tools/openbricks/openbricks_dev/_docs/offline-docs.zip

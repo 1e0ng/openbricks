@@ -183,68 +183,75 @@ footer { color:var(--muted); font-size:0.85em; margin-top:3rem; }
 """
 
 
-def _render_html():
-    """All guides → one self-contained HTML string (nav + sections)."""
-    import markdown as md
-    nav = "  ".join('<a href="#%s">%s</a>' % (t, _title(t))
-                    for t in TOPICS)
-    sections = []
-    for t in TOPICS:
-        body = md.markdown(_load(t),
-                           extensions=["tables", "fenced_code"])
-        sections.append('<section id="%s">\n%s\n</section>' % (t, body))
-    return (
-        "<!DOCTYPE html>\n<html lang=\"en\"><head>"
-        "<meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" "
-        "content=\"width=device-width, initial-scale=1\">"
-        "<title>openbricks documentation (offline)</title>"
-        "<style>%s</style></head><body><main>"
-        "<nav class=\"toc\">%s</nav>\n%s\n"
-        "<footer>Rendered offline by <code>openbricks docs</code> — "
-        "the full manual with the generated API reference is at "
-        "<a href=\"https://docs.openbricks.dev/\">docs.openbricks.dev"
-        "</a>.</footer>"
-        "</main></body></html>"
-        % (_CSS, nav, "\n".join(sections)))
+_BUNDLE = "offline-docs.zip"
 
 
-def _open_in_browser(topic):
-    path = os.path.join(tempfile.gettempdir(), "openbricks-docs.html")
-    with open(path, "w") as f:
-        f.write(_render_html())
-    url = "file://" + path + (("#" + topic) if topic else "")
-    if not webbrowser.open(url):
+def _bundle_path():
+    path = os.path.join(_docs_dir(), _BUNDLE)
+    if not os.path.exists(path):
         raise DocsError(
-            "could not open a browser (headless session?) — read in "
-            "the terminal instead:  openbricks docs --text %s"
-            % (topic or "<topic>"))
-    print("opened %s" % url)
-    return 0
+            "the offline documentation bundle is missing (%s). A wheel "
+            "always ships it; from a source checkout run "
+            "scripts/build-offline-docs.sh first." % path)
+    return path
+
+
+def _extract():
+    """Unpack the bundle to a temp dir, once per version.
+
+    Extracted rather than served from the archive because a browser
+    needs real files for the stylesheet, search index and inter-page
+    links. Keyed by content hash so a CLI upgrade never opens the
+    previous version's manual out of a stale directory.
+    """
+    import hashlib
+    import zipfile
+    src = _bundle_path()
+    with open(src, "rb") as f:
+        tag = hashlib.sha256(f.read()).hexdigest()[:12]
+    out = os.path.join(tempfile.gettempdir(), "openbricks-docs-" + tag)
+    index = os.path.join(out, "index.html")
+    if not os.path.exists(index):
+        with zipfile.ZipFile(src) as z:
+            z.extractall(out)
+    if not os.path.exists(index):
+        raise DocsError(
+            "the offline bundle has no index.html — it is corrupt; "
+            "reinstall openbricks or rebuild it with "
+            "scripts/build-offline-docs.sh")
+    return out
+
+
+def _page_for(topic):
+    """Topic -> page within the extracted site. API pages live under
+    ``api/``, guides at the top level."""
+    if not topic:
+        return "index.html"
+    for rel in (topic + ".html", os.path.join("api", topic + ".html")):
+        yield_path = rel
+        if os.path.exists(os.path.join(_extract(), rel)):
+            return yield_path
+    raise DocsError(
+        "no page %r in the manual — open the index with "
+        "``openbricks docs`` and use its sidebar or search." % topic)
 
 
 def run(args):
+    """Open the offline manual.
+
+    This is the SAME Sphinx build as docs.openbricks.dev — the API
+    reference included. It used to be the hand-written guides only,
+    re-rendered from markdown, so everything generated from
+    docstrings was missing entirely.
+    """
     topic = getattr(args, "topic", None)
-    if topic and topic not in TOPICS:
-        # Validate before any rendering/browser side effects.
+    root = _extract()
+    page = _page_for(topic)
+    url = "file://" + os.path.join(root, page)
+    if not webbrowser.open(url):
         raise DocsError(
-            "unknown topic %r — available: %s" % (topic, ", ".join(TOPICS)))
-    if not getattr(args, "text", False):
-        return _open_in_browser(topic)
-    if not topic:
-        lines = ["Offline documentation topics:", ""]
-        for t in TOPICS:
-            lines.append("  %-14s %s" % (t, _title(t)))
-        lines += [
-            "",
-            "Read one with:  openbricks docs --text <topic>",
-            "Or drop --text to open the styled offline manual in "
-            "your browser.",
-            "The full manual (with API reference) is at "
-            "https://docs.openbricks.dev/ — or its PDF, "
-            "https://docs.openbricks.dev/openbricks-docs.pdf",
-        ]
-        _emit("\n".join(lines) + "\n")
-        return 0
-    _emit(_load(topic))
+            "could not open a browser (headless session?) — the manual "
+            "is extracted at %s, or read it online at "
+            "https://docs.openbricks.dev/" % root)
+    print("opened %s" % url)
     return 0
