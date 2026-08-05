@@ -511,7 +511,37 @@ class AdoptionTests(_Base):
             left.run_angle(100, 90)
             self.fail("expected RuntimeError")
         except RuntimeError as e:
-            self.assertTrue("gave up after" in str(e), str(e))
+            self.assertTrue("gave up" in str(e), str(e))
+
+    def test_a_stuck_move_gives_up_on_stillness_not_on_the_budget(self):
+        # A shaft that has not advanced a count in a second is stuck,
+        # whatever the budget says — so the report names STILLNESS,
+        # and the wait is ~1 s rather than the multi-second budget.
+        msg = self._timeout_msg(0)
+        self.assertTrue("stopped moving for" in msg, msg)
+        self.assertFalse("ran out of its" in msg, msg)
+
+    def test_a_move_that_keeps_inching_is_not_called_stuck(self):
+        # The opposite error: a move fighting a heavy load is still a
+        # move. Advancing counts must keep resetting the stillness
+        # clock, so only the total budget can end it.
+        from openbricks.drivers.st3215 import ST3215Motor
+        db, left, _ = self._drivebase()
+        self.bus.done_after = 10_000
+        creep = [0]
+        def _creep(slot):
+            creep[0] += 8          # ~0.7 deg per poll: slow but real
+            return creep[0]
+        self.bus.servo_counts = _creep
+        seen = []
+        orig = ST3215Motor._report_stall
+        ST3215Motor._report_stall = staticmethod(seen.append)
+        try:
+            left.run_angle(100, 90)
+        finally:
+            ST3215Motor._report_stall = orig
+        self.assertTrue(seen, "expected a report")
+        self.assertTrue("ran out of its" in seen[0], seen[0])
 
     def test_a_completed_run_angle_reports_success(self):
         # The return value is the contract now, so it must be True on

@@ -108,6 +108,12 @@ _MAX_STEP_COUNTS = 7 * _COUNTS_PER_REV
 # kwarg in case future ST-3215 revisions ship with a different scale.
 _DEFAULT_STEPS_PER_DPS = _COUNTS_PER_REV / 360.0   # = 11.378
 
+# A move is "progressing" if the shaft advanced at least this many
+# counts since the last check. Small enough to see a genuinely slow
+# move (4 counts ~= 0.35 deg), large enough to ignore encoder jitter
+# on a stationary shaft.
+_STALL_PROGRESS_COUNTS = 4
+
 
 def _native_bus_owns(uart_id):
     """Has the native C bus taken this UART over?
@@ -439,7 +445,8 @@ class ST3215Motor(Motor):
                  steps_per_dps=_DEFAULT_STEPS_PER_DPS,
                  max_dps=600.0,
                  accel_dps2=1500.0,
-                 raise_on_stall=False):
+                 raise_on_stall=False,
+                 stall_idle_ms=1000):
         self._id    = servo_id
         self._invert = bool(invert)
         self._steps_per_dps = float(steps_per_dps)
@@ -451,6 +458,10 @@ class ST3215Motor(Motor):
         # log, and a False return. Pass raise_on_stall=True to make
         # it fatal instead.
         self._raise_on_stall = bool(raise_on_stall)
+        # How long the shaft may sit still before the move is called
+        # stuck. Independent of the total budget: a loaded move that
+        # keeps inching is fine, a still one is not.
+        self._stall_idle_ms = int(stall_idle_ms)
         # ONE BUS, ONE OWNER. If the native C bus already drives this
         # UART — because a DriveBase adopted its wheels onto it — then
         # opening a MicroPython UART here would put two drivers on one
@@ -1119,12 +1130,27 @@ class ST3215Motor(Motor):
                                                 accel)
         start_counts = self._native_sb.servo_counts(self._native_slot)
         t0 = time.ticks_ms()
+        # Give up when the shaft STOPS MOVING, not when a fixed budget
+        # expires. A move fighting a heavy load is still a move and
+        # must not be cut short; a move that has not advanced a count
+        # in a second is stuck, whatever the budget says. That also
+        # turns a 4-second wait into a 1-second one on a real jam.
+        last_counts = start_counts
+        last_move_ms = t0
         while not self._native_sb.servo_move_done(self._native_slot):
             estop.check()
-            if time.ticks_diff(time.ticks_ms(), t0) > budget_ms:
+            now = time.ticks_ms()
+            counts = self._native_sb.servo_counts(self._native_slot)
+            if abs(counts - last_counts) >= _STALL_PROGRESS_COUNTS:
+                last_counts = counts
+                last_move_ms = now
+            idle_ms = time.ticks_diff(now, last_move_ms)
+            if idle_ms > self._stall_idle_ms or \
+                    time.ticks_diff(now, t0) > budget_ms:
                 self._native_sb.servo_run(self._native_slot, 0)
                 report = self._native_stall_report(
-                    budget_ms, start_counts, target_angle)
+                    budget_ms, start_counts, target_angle,
+                    idle_ms if idle_ms > self._stall_idle_ms else None)
                 if self._raise_on_stall:
                     raise RuntimeError(report)
                 # A stalled task motor should not abort a mission
@@ -1152,7 +1178,8 @@ class ST3215Motor(Motor):
         except Exception:
             pass
 
-    def _native_stall_report(self, budget_ms, start_counts, target_angle):
+    def _native_stall_report(self, budget_ms, start_counts,
+                             target_angle, idle_ms=None):
         """Say WHICH failure this was, not which three it might be.
 
         "stalled, blocked, or in overload protection" are different
@@ -1192,9 +1219,11 @@ class ST3215Motor(Motor):
                           "%.0f mNm of load."
                           % (speed_steps / self._steps_per_dps,
                              load_raw * self.STALL_TORQUE_MNM / 1000.0))
-        return ("run_angle(%g deg) on servo id %s gave up after %d ms: "
-                "%s. It moved %.1f deg of the %.1f asked.%s"
-                % (want, self._id, budget_ms, why, moved, want, detail))
+        when = ("stopped moving for %d ms" % idle_ms if idle_ms
+                else "ran out of its %d ms budget" % budget_ms)
+        return ("run_angle(%g deg) on servo id %s gave up — %s: %s. "
+                "It moved %.1f deg of the %.1f asked.%s"
+                % (want, self._id, when, why, moved, want, detail))
 
     def hold(self):
         """Actively hold the current shaft angle so the position PID

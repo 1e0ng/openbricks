@@ -17,6 +17,16 @@ This also aligns the two paths: the non-adopted `run_angle` has
 always returned quietly when a step failed to park. Both now return
 `True` when the target was reached and `False` when they gave up.
 
+**It also gives up on stillness, not on a stopwatch.** The old rule
+was a fixed budget (4x the ideal move time, so 4233 ms for the move
+that prompted this). That is both too slow on a real jam and too
+harsh on a move fighting a heavy load. A move now ends when the
+shaft has not advanced a count for **1 second** — configurable via
+`stall_idle_ms`. A loaded move that keeps inching is left alone; a
+still one is caught in a second. The total budget stays as a
+backstop for a move that creeps forever without arriving, and the
+report says which rule ended it.
+
 ### And it says WHICH failure it was
 
 `run_angle did not reach target within 4233 ms — wheel stalled,
