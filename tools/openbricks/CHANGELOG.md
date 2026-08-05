@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.59.1 — a newly attached slot is no longer starved of its first read
+
+Regression in 1.59.0, and it landed on the worst possible moment:
+while a script is still constructing its motors.
+
+The weighted scheduler prefers driving slots seven times in eight.
+When NOTHING is driving — exactly the state during construction —
+that preference found no match and fell through to "any available",
+scanned from the *hot* cursor. But a cold read advances the *cold*
+cursor, so the hot one never moved and the fallback returned the
+same slot every time. One slot took the large majority of reads and
+the rest were starved; a slot could get literally zero.
+
+Since a motor cannot be used until its first feedback read lands,
+that failed construction outright: *"servo id 2 (native slot 2): the
+bus pump never polled it — 0 reads ATTEMPTED"*.
+
+The fallback now asks for the other kind explicitly, so the rotation
+is always driven by a cursor that is actually advancing. Pinned by a
+test that fails against the unfixed build with a slot on zero reads.
+
 ## 1.59.0 — parked motors no longer cost the drivebase its bandwidth
 
 Putting four motors on one bus (1.57.0) had a price nobody had

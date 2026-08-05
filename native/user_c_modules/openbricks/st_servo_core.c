@@ -102,17 +102,19 @@ uint16_t ob_sservo_encode_speed(int32_t steps_per_s) {
 }
 
 
-// Next readable slot from the round-robin cursor. ``hot_wanted``:
-// 1 = only driving slots, 0 = only parked ones, -1 = either.
-int ob_sservo_pick_read(ob_sservo_t *s, int hot_wanted) {
-    int start = (hot_wanted == 0) ? s->rr_cold : s->rr_next;
+// Next readable slot of the requested kind from that kind's own
+// round-robin cursor. ``want_hot``: 1 = driving slots, 0 = parked.
+// Each kind has its own cursor so a parked slot's occasional turn
+// cannot bias the rotation between two driving wheels.
+int ob_sservo_pick_read(ob_sservo_t *s, int want_hot) {
+    int start = want_hot ? s->rr_next : s->rr_cold;
     for (int k = 0; k < OB_SSERVO_SLOTS; k++) {
         int i = (start + k) % OB_SSERVO_SLOTS;
         ob_sservo_slot_t *sl = &s->slots[i];
         if (!sl->in_use || sl->config_step < 3) {
             continue;
         }
-        if (hot_wanted < 0 || (sl->hot != 0) == (hot_wanted != 0)) {
+        if ((sl->hot != 0) == (want_hot != 0)) {
             return i;
         }
     }
@@ -211,8 +213,17 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     }
     int pick = ob_sservo_pick_read(s, want_cold ? 0 : 1);
     if (pick < 0) {
-        pick = ob_sservo_pick_read(s, -1);   // whatever is available
+        // Nothing of the preferred kind. Fall back to the OTHER kind
+        // explicitly, so the rotation is driven by that kind's own
+        // cursor. Falling straight through to "any" scanned from the
+        // hot cursor while a cold read advanced the cold one — with
+        // every slot parked (exactly the state while a script is
+        // still constructing its motors) the hot cursor never moved
+        // and one slot took 7 reads in 8, starving the rest.
+        pick = ob_sservo_pick_read(s, want_cold ? 1 : 0);
     }
+    // No third fallback: every readable slot is either hot or cold,
+    // so asking for both has already covered all of them.
     if (pick >= 0) {
         op->kind = OB_SOP_READ_POS;
         op->slot = pick;
