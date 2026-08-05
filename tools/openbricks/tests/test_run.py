@@ -775,6 +775,70 @@ class HostInterruptForwardingTests(unittest.TestCase):
 
 
 
+    def test_interrupt_survives_a_link_that_is_already_gone(self):
+        import asyncio
+        link = _ProtocolLink([])
+        restore_calls = []
+        stream_calls = []
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            # The link dies as the interrupt arrives — a real
+            # possibility, since Ctrl-C often follows the robot
+            # driving out of BLE range. The write must not mask the
+            # KeyboardInterrupt, and the idle loop must still be
+            # restored.
+            async def _dead_write(_data):
+                raise OSError("link gone")
+            link.write = _dead_write
+            return link
+
+        async def _stub(blink, l):
+            return None
+
+        async def _stub_upload(blink, l, script_bytes):
+            return None
+
+        async def _stream(blink, l, out):
+            stream_calls.append(1)
+            if len(stream_calls) == 1:
+                raise KeyboardInterrupt()
+            # The drain fails too: the link is gone, so there is
+            # nothing to read the interrupt traceback from.
+            raise OSError("link gone")
+
+        async def _restore(l):
+            restore_calls.append(1)
+
+        async def _stub_stage(blink, l, target_path, payload, hub_name):
+            return None
+
+        patches = [
+            ("_enter_raw_repl", _stub),
+            ("_stage_file", _stub_stage),
+            ("_raw_paste_upload", _stub_upload),
+            ("_stream_output", _stream),
+            ("_restore_idle_loop", _restore),
+        ]
+        orig_connect = run_mod.NUSLink.connect
+        run_mod.NUSLink.connect = _fake_connect
+        origs = [(n, getattr(run_mod, n)) for n, _ in patches]
+        for n, fn in patches:
+            setattr(run_mod, n, fn)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                asyncio.run(run_mod._run_async(
+                    "X", None, 1.0, command="print(1)"))
+        finally:
+            run_mod.NUSLink.connect = orig_connect
+            for n, fn in origs:
+                setattr(run_mod, n, fn)
+        # The interrupt still propagates and cleanup still runs,
+        # even though forwarding it was impossible.
+        self.assertEqual(restore_calls, [1])
+
+
+
+
 class VerifiedRestoreTests(unittest.TestCase):
     """_restore_idle_loop must confirm the hub's idle banner, retrying
     the send — a restore lost in session teardown used to leave the
