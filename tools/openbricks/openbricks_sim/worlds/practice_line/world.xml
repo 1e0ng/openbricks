@@ -1,0 +1,65 @@
+<!--
+  practice-line — a line to follow, and something to stop at.
+
+  A 2.0 × 1.0 m white floor with a 20 mm dark line running along +X
+  from the spawn point, and a stop bar across it at +X 1.2 m.
+
+  The line is deliberately the same width as the sensor separation
+  the chassis carries (the two downward cameras sit ±18 mm off
+  centre), so a centred robot has BOTH sensors on the mat either
+  side of the line and reads a near-zero error — which is what a
+  differential line-follower steers on. Drift either way and the
+  inboard sensor crosses onto the line, producing a large,
+  correctly-signed error.
+
+  The stop bar is the intersection case: wide enough that both
+  sensors go dark at once, which is what ``line_follow.py`` treats
+  as "stop" rather than "steer". A branch that darkens only ONE
+  sensor must be ignored, so a short stub is included at +X 0.6 m
+  to exercise exactly that.
+
+  Geometry is slabs rather than a texture on purpose: the colour
+  sensor resolves an untextured geom from its rgba, so this world
+  needs no PNG and stays byte-identical across platforms — a
+  control test that fails should mean the control law changed, not
+  that an image decoded differently.
+
+  Origin at floor centre-left. +X forward of the spawned chassis.
+  All dimensions in metres.
+-->
+
+<mujoco model="practice_line">
+  <compiler angle="degree" coordinate="local"/>
+  <option timestep="0.001" iterations="20" solver="Newton" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.5 0.5 0.5" specular="0 0 0"/>
+  </visual>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1"/>
+
+    <!-- White floor — 2.0 × 1.0 m, centred so +X runs 1.0 m ahead. -->
+    <geom name="floor" type="plane" size="1.0 0.5 0.05"
+          rgba="1 1 1 1" friction="0.9 0.02 0.0001"/>
+
+    <!-- The line: 20 mm wide, from the spawn point to past the stop
+         bar. Raised 1 mm so the downward raycast hits it, not the
+         floor. -->
+    <geom name="line_main" type="box"
+          pos="0.60 0 0.001" size="0.70 0.010 0.001"
+          rgba="0.03 0.03 0.03 1"/>
+
+    <!-- Branch stub: darkens the LEFT sensor only. A follower that
+         steers toward a single dark sensor peels off onto this; the
+         correct behaviour is to hold course until it passes. -->
+    <geom name="line_branch" type="box"
+          pos="0.60 0.045 0.001" size="0.030 0.035 0.001"
+          rgba="0.03 0.03 0.03 1"/>
+
+    <!-- Stop bar: both sensors dark at once = intersection. -->
+    <geom name="line_stop" type="box"
+          pos="1.20 0 0.001" size="0.020 0.12 0.001"
+          rgba="0.03 0.03 0.03 1"/>
+  </worldbody>
+</mujoco>

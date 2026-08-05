@@ -779,3 +779,28 @@ class SimStBusEngineTests(_ShimTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorldAliasTableTests(unittest.TestCase):
+    """``cli.py`` and ``robot.py`` each carry a world-alias table.
+
+    They must agree: a world registered in one and not the other
+    loads from the CLI and fails from ``SimRobot`` (or the reverse),
+    which is exactly how ``practice-line`` first failed.
+    """
+
+    def test_the_two_alias_tables_match(self):
+        from openbricks_sim.cli import _BUILTIN_WORLDS as cli_worlds
+        from openbricks_sim.robot import _BUILTIN_WORLDS as robot_worlds
+        self.assertEqual(cli_worlds, robot_worlds)
+
+    def test_every_aliased_world_file_exists(self):
+        import pathlib
+        from openbricks_sim.robot import _BUILTIN_WORLDS
+        root = pathlib.Path(
+            __import__("openbricks_sim").__file__).resolve().parent
+        for alias, rel in _BUILTIN_WORLDS.items():
+            if rel is None:
+                continue
+            self.assertTrue((root / rel).is_file(),
+                            "%s -> %s missing" % (alias, rel))
