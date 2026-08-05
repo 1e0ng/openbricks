@@ -34,6 +34,7 @@ _BUILTIN_WORLDS = {
     # ``worlds/<name>/README.md`` for the layout + suggested missions.
     "practice-zones":      "worlds/practice_zones/world.xml",
     "practice-walls":      "worlds/practice_walls/world.xml",
+    "practice-line":       "worlds/practice_line/world.xml",
 }
 
 

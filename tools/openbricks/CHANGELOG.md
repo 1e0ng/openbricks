@@ -3,6 +3,36 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.61.0 — the line-follower runs in CI
+
+`examples/line_follow.py`'s control law now drives a simulated
+chassis down a simulated line on every pull request. Measured on the
+new `practice-line` world: **0.94 m advanced, worst deviation 6.3 mm
+from a 20 mm line, intersection detected and stopped.**
+
+The world is built from slabs rather than a texture on purpose — the
+colour sensor resolves an untextured geom from its `rgba`, so it
+needs no PNG and stays byte-identical across platforms. A control
+test that fails should mean the control law changed, not that an
+image decoded differently. It carries the two cases that matter: a
+stop bar wide enough to darken both sensors (intersection), and a
+branch stub that darkens only one (must be ignored, not steered
+toward).
+
+The closed-loop test lives in the host suite, not the smoke step.
+Smoke answers "does the CLI start and does each world parse" in a
+fraction of a second per entry; a physics control loop is seconds
+long, can sit near a tolerance, and wants a trajectory in its
+failure output rather than an exit code. Smoke gains one line — the
+new world loads — which is the check that would catch the two
+cameras silently regressing to one.
+
+Also fixes a drift hazard found while doing it: `cli.py` and
+`robot.py` each carried a world-alias table, and registering a world
+in one but not the other loads from the CLI and fails from
+`SimRobot`. A test now pins that the two tables match and that every
+aliased file exists.
+
 ## 1.60.0 — the sim can see a line with two sensors
 
 The simulated TCS34725 already sampled the real `mat.png` texel
