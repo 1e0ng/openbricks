@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.61.2 — Ctrl-C stops the robot, not just the CLI
+
+Reported from the bench: pressing Ctrl-C during `openbricks run`
+exited the CLI while the robot kept driving.
+
+`run` already had a handler to forward the interrupt to the hub
+before dropping the link — but it caught `asyncio.CancelledError`,
+and a host Ctrl-C raises **`KeyboardInterrupt`**. `asyncio.run` does
+not convert SIGINT to a cancellation; it raises KeyboardInterrupt at
+the await point. So the forwarding never ran: the CLI printed
+"aborted.", closed the BLE link, and left the program executing on
+the hub.
+
+That is the worst possible response to someone reaching for Ctrl-C,
+which on a moving robot is usually a reach for the brakes.
+
+The handler now catches both. The hub gets the same `\x03` that
+`openbricks stop` sends, over the link that is already open — so the
+stop is immediate rather than waiting on a reconnect.
+
 ## 1.61.1 — the SyncServoGroup refusal no longer depends on run order
 
 Reported from the bench: *"run second time still this error, first

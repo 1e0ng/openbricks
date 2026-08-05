@@ -587,10 +587,21 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
             out = sys.stdout
             try:
                 await _stream_output(blink, link, out)
-            except asyncio.CancelledError:
-                # Host-side Ctrl-C — forward and drain the interrupt
-                # traceback before disconnecting.
-                await link.write(_CTRL_C)
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                # Host-side Ctrl-C — forward it to the hub BEFORE the
+                # link drops, then drain the interrupt traceback.
+                #
+                # KeyboardInterrupt is the one that actually arrives:
+                # asyncio.run does not convert SIGINT to
+                # CancelledError, it raises KeyboardInterrupt at the
+                # await point. Catching only CancelledError meant this
+                # never ran — the CLI printed "aborted." and exited
+                # while the robot kept driving, which is the worst
+                # possible response to someone reaching for Ctrl-C.
+                try:
+                    await link.write(_CTRL_C)
+                except Exception:
+                    pass
                 try:
                     await _stream_output(blink, link, out)
                 except Exception:

@@ -718,6 +718,63 @@ class HostInterruptForwardingTests(unittest.TestCase):
         self.assertEqual(restore_calls, [1])
 
 
+    def test_keyboard_interrupt_forwards_ctrl_c(self):
+        import asyncio
+        link = _ProtocolLink([])
+        restore_calls = []
+        stream_calls = []
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return link
+
+        async def _stub(blink, l):
+            return None
+
+        async def _stub_upload(blink, l, script_bytes):
+            return None
+
+        async def _stream(blink, l, out):
+            stream_calls.append(1)
+            if len(stream_calls) == 1:
+                raise KeyboardInterrupt()
+
+        async def _restore(l):
+            restore_calls.append(1)
+
+        async def _stub_stage(blink, l, target_path, payload, hub_name):
+            return None
+
+        patches = [
+            ("_enter_raw_repl", _stub),
+            ("_stage_file", _stub_stage),
+            ("_raw_paste_upload", _stub_upload),
+            ("_stream_output", _stream),
+            ("_restore_idle_loop", _restore),
+        ]
+        orig_connect = run_mod.NUSLink.connect
+        run_mod.NUSLink.connect = _fake_connect
+        origs = [(n, getattr(run_mod, n)) for n, _ in patches]
+        for n, fn in patches:
+            setattr(run_mod, n, fn)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                asyncio.run(run_mod._run_async(
+                    "X", None, 1.0, command="print(1)"))
+        finally:
+            run_mod.NUSLink.connect = orig_connect
+            for n, fn in origs:
+                setattr(run_mod, n, fn)
+        # THE case that actually happens at a terminal: asyncio.run
+        # raises KeyboardInterrupt at the await point, not
+        # CancelledError. Catching only the latter meant the CLI
+        # exited while the robot kept driving.
+        # Ctrl-C forwarded to the hub, drain attempted, idle restored.
+        self.assertIn(run_mod._CTRL_C, link.writes)
+        self.assertEqual(len(stream_calls), 2)
+        self.assertEqual(restore_calls, [1])
+
+
+
 class VerifiedRestoreTests(unittest.TestCase):
     """_restore_idle_loop must confirm the hub's idle banner, retrying
     the send — a restore lost in session teardown used to leave the
