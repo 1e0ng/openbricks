@@ -3,11 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
-## 1.62.0 — a stalled run_angle says which failure it was
+## 1.62.0 — a stalled run_angle reports, and says which failure it was
+
+**A stalled task motor no longer aborts the run.** On a mission
+robot, one stuck arm should not end the mission — so `run_angle`
+now REPORTS a stall instead of raising, and says so three ways:
+the console sees it, the run log keeps it (`log.note`, so a stall
+that scrolled past is still there afterwards), and the call returns
+`False`. `raise_on_stall=True` at construction restores the old
+fatal behaviour.
+
+This also aligns the two paths: the non-adopted `run_angle` has
+always returned quietly when a step failed to park. Both now return
+`True` when the target was reached and `False` when they gave up.
+
+### And it says WHICH failure it was
 
 `run_angle did not reach target within 4233 ms — wheel stalled,
-blocked, or in overload protection` names three faults with three
-different fixes and leaves you to guess. The slot has reported
+blocked, or in overload protection` named three faults with three
+different fixes and left you to guess. The slot has reported
 travel, speed and load since 1.50.0, so it can simply say.
 
 How far the shaft got separates them:

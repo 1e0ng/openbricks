@@ -438,12 +438,19 @@ class ST3215Motor(Motor):
                  invert=False,
                  steps_per_dps=_DEFAULT_STEPS_PER_DPS,
                  max_dps=600.0,
-                 accel_dps2=1500.0):
+                 accel_dps2=1500.0,
+                 raise_on_stall=False):
         self._id    = servo_id
         self._invert = bool(invert)
         self._steps_per_dps = float(steps_per_dps)
         self._max_dps       = float(max_dps)
         self._accel_dps2    = float(accel_dps2)
+        # A run_angle that gives up REPORTS by default rather than
+        # raising: on a mission robot one stalled task motor should
+        # not abort the run. It is loud either way — console, run
+        # log, and a False return. Pass raise_on_stall=True to make
+        # it fatal instead.
+        self._raise_on_stall = bool(raise_on_stall)
         # ONE BUS, ONE OWNER. If the native C bus already drives this
         # UART — because a DriveBase adopted its wheels onto it — then
         # opening a MicroPython UART here would put two drivers on one
@@ -1116,10 +1123,34 @@ class ST3215Motor(Motor):
             estop.check()
             if time.ticks_diff(time.ticks_ms(), t0) > budget_ms:
                 self._native_sb.servo_run(self._native_slot, 0)
-                raise RuntimeError(self._native_stall_report(
-                    budget_ms, start_counts, target_angle))
+                report = self._native_stall_report(
+                    budget_ms, start_counts, target_angle)
+                if self._raise_on_stall:
+                    raise RuntimeError(report)
+                # A stalled task motor should not abort a mission
+                # run: report it and let the caller decide. Loud, not
+                # fatal — the console sees it, the run log keeps it,
+                # and the return value says it. This also matches the
+                # non-adopted path, which has always returned quietly
+                # when a step failed to park.
+                self._report_stall(report)
+                return False
             time.sleep_ms(10)
         self._native_dispatch_then(then)
+        return True
+
+    @staticmethod
+    def _report_stall(report):
+        """Console AND run log. ``log.note`` is file-only by design,
+        so a stall that scrolled past on the console is still in the
+        log afterwards — and one that happened while nothing was
+        watching is not lost."""
+        print("openbricks: " + report)
+        try:
+            from openbricks import log
+            log.note("STALL " + report)
+        except Exception:
+            pass
 
     def _native_stall_report(self, budget_ms, start_counts, target_angle):
         """Say WHICH failure this was, not which three it might be.
@@ -1448,8 +1479,8 @@ class ST3215Motor(Motor):
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
         if self._native_slot is not None:
             self._native_pending = None
-            self._native_run_angle(deg_per_s, target_angle, wait, then)
-            return
+            return self._native_run_angle(deg_per_s, target_angle,
+                                          wait, then)
         if target_angle == 0:
             return
         max_dps = abs(float(deg_per_s))
@@ -1526,6 +1557,7 @@ class ST3215Motor(Motor):
             remaining_counts -= first
 
         self._dispatch_then(then)
+        return True
 
     def _await_step(self, step, speed_steps, tol_counts):
         """Block until the in-flight step parks (its remaining register
