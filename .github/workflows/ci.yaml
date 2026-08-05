@@ -79,12 +79,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build + run C core tests (sanitized, gcov-instrumented)
-        run: COVERAGE=1 scripts/run_c_tests.sh
+        run: |
+          # Instrumented only on PRs, where the upload happens; a
+          # tag build runs the same tests at full optimisation.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            COVERAGE=1 scripts/run_c_tests.sh
+          else
+            scripts/run_c_tests.sh
+          fi
       - name: Upload c-unit coverage to Codecov (c-core flag)
         # Several cores (st_button, icm45686) are firmware-gated at
         # the binding layer and can only EXECUTE here off-hardware;
         # this upload is what makes their (thorough) c-unit coverage
         # visible to codecov instead of reading as untested.
+        if: github.event_name == 'pull_request'
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -185,6 +193,7 @@ jobs:
           python -m coverage xml -o coverage.xml
 
       - name: Upload openbricks-py coverage to Codecov
+        if: github.event_name == 'pull_request'
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -227,6 +236,7 @@ jobs:
           coverage xml -o coverage.xml
 
       - name: Upload host coverage to Codecov (CLI flag)
+        if: github.event_name == 'pull_request'
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -235,6 +245,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload host coverage to Codecov (sim flag)
+        if: github.event_name == 'pull_request'
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -265,6 +276,12 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
+    # Coverage is a REVIEW signal, not a release gate: it answers
+    # "is this diff tested?", which only has meaning on a pull
+    # request. Tag builds pay for it in CI minutes and get nothing —
+    # the tests that gate a release run in ``test`` / ``c-unit`` /
+    # ``openbricks-host`` regardless.
+    if: github.event_name == 'pull_request'
     # C coverage for the openbricks user_c_module, following the same
     # pattern MicroPython itself uses (ports/unix VARIANT=coverage +
     # gcov + codecov-action). Python coverage isn't attempted — our
@@ -330,6 +347,7 @@ jobs:
           ls coverage-out/
 
       - name: Upload coverage to Codecov
+        if: github.event_name == 'pull_request'
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
