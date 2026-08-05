@@ -872,6 +872,27 @@ class OneBusOneOwnerTests(_Base):
         self.assertTrue("native bus" in msg, msg)
         self.assertTrue("move_wheels" in msg, msg)
 
+    def test_group_built_BEFORE_adoption_is_refused_on_use(self):
+        # THE order-dependent case (bench 2026-08-05: "run second
+        # time still this error, first time ok"). On a first run the
+        # motors are still on the MicroPython bus when the group is
+        # built, so construction passes — and then a DriveBase adopts
+        # them a line later, leaving the group holding wheels it can
+        # no longer reach. It used to write into a contended bus
+        # silently. Refusing only at construction made the failure
+        # depend on run order, which is worse than either.
+        from openbricks.drivers.st3215 import SyncServoGroup
+        left, right = self._motor(2, invert=True), self._motor(1)
+        group = SyncServoGroup([left, right])      # allowed: no slots yet
+        from openbricks.robotics import DriveBase
+        DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=138)
+        self.bus.uart_num = lambda: 1
+        try:
+            group.set_goal_speeds([100, 100])
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("move_wheels" in str(e), str(e))
+
     def test_sync_servo_group_still_works_off_the_native_bus(self):
         # Non-adopted servos on a plain MicroPython bus are exactly
         # what this class is for (grippers, multi-axis arms).
