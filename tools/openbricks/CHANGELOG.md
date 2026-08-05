@@ -3,6 +3,35 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.60.0 — the sim can see a line with two sensors
+
+The simulated TCS34725 already sampled the real `mat.png` texel
+under it — printed WRO lines are genuinely visible, CPU-side, no GL
+context, headless on CI. But the chassis had exactly one downward
+camera and every `ShimTCS34725` bound to it, so a pair of sensors
+read the *same point*. Line-following is entirely the DIFFERENCE
+between two sensors straddling a line, so that error was identically
+zero and no control law could work in simulation.
+
+The chassis now carries a left/right camera pair either side of the
+centre line, and a shim sensor picks its camera by **mux channel** —
+the same construction that selects a physical sensor
+(`TCS34725(mux[1])`) selects the camera under it. A sensor built
+without a mux still gets the centre camera, so every existing script
+and test behaves exactly as before.
+
+Tests pin the thing that was impossible: straddling a line both
+sensors read the mat and agree; drifted off it they disagree by a
+wide margin; and the sign of that error reverses with the direction
+of the drift.
+
+This is the groundwork for running a line-follow in CI. Worth being
+clear about what such a test would and would not prove: it catches
+control-law and integration regressions, not the bus-contention,
+slot-assignment and program-boundary bugs that actually dominated
+the 1.56–1.59 series — the sim emulates the bus surface rather than
+reproducing it, so those are invisible there by construction.
+
 ## 1.59.1 — a newly attached slot is no longer starved of its first read
 
 Regression in 1.59.0, and it landed on the worst possible moment:
