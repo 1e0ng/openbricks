@@ -3,6 +3,51 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.62.0 — a stalled run_angle reports, and says which failure it was
+
+**A stalled task motor no longer aborts the run.** On a mission
+robot, one stuck arm should not end the mission — so `run_angle`
+now REPORTS a stall instead of raising, and says so three ways:
+the console sees it, the run log keeps it (`log.note`, so a stall
+that scrolled past is still there afterwards), and the call returns
+`False`. `raise_on_stall=True` at construction restores the old
+fatal behaviour.
+
+This also aligns the two paths: the non-adopted `run_angle` has
+always returned quietly when a step failed to park. Both now return
+`True` when the target was reached and `False` when they gave up.
+
+**It also gives up on stillness, not on a stopwatch.** The old rule
+was a fixed budget (4x the ideal move time, so 4233 ms for the move
+that prompted this). That is both too slow on a real jam and too
+harsh on a move fighting a heavy load. A move now ends when the
+shaft has not advanced a count for **1 second** — configurable via
+`stall_idle_ms`. A loaded move that keeps inching is left alone; a
+still one is caught in a second. The total budget stays as a
+backstop for a move that creeps forever without arriving, and the
+report says which rule ended it.
+
+### And it says WHICH failure it was
+
+`run_angle did not reach target within 4233 ms — wheel stalled,
+blocked, or in overload protection` named three faults with three
+different fixes and left you to guess. The slot has reported
+travel, speed and load since 1.50.0, so it can simply say.
+
+How far the shaft got separates them:
+
+* **moved ~nothing** — jammed, or torque never reached it
+* **moved partway** — stalled under load, or the servo's overload
+  protection cut in (trips above ~80% of stall torque held ~2 s,
+  clears when a new command is issued)
+* **moved essentially all of it** — arriving but never *latching*,
+  which is an arrival-tolerance or odometry problem and explicitly
+  NOT a mechanical one
+
+The message now carries the diagnosis, the travel ("moved 45.0 deg
+of the 90.0 asked"), and the speed and load the servo reported at
+the moment it gave up.
+
 ## 1.61.2 — Ctrl-C stops the robot, not just the CLI
 
 Reported from the bench: pressing Ctrl-C during `openbricks run`

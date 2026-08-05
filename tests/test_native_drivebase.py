@@ -456,6 +456,101 @@ class AdoptionTests(_Base):
         self.assertIn(("servo_coast", 0), self.bus.calls)
         self.assertTrue(left.done())    # idempotent after dispatch
 
+    def _timeout_msg(self, moved_counts, motor_kw=None):
+        """Force the stall path with a chosen amount of travel and
+        return what got REPORTED. A stall is loud, not fatal: the
+        console and run log get the diagnosis and run_angle returns
+        False, so a mission does not abort over one stuck motor."""
+        from openbricks.drivers.st3215 import ST3215Motor
+        db, left, _ = self._drivebase(**(motor_kw or {}))
+        self.bus.done_after = 10_000              # never completes
+        counts = [0, moved_counts]
+        self.bus.servo_counts = (
+            lambda slot: counts.pop(0) if counts else moved_counts)
+        seen = []
+        orig = ST3215Motor._report_stall
+        ST3215Motor._report_stall = staticmethod(seen.append)
+        try:
+            result = left.run_angle(100, 90)
+        finally:
+            ST3215Motor._report_stall = orig
+        self.assertFalse(result, "a stall must report False, not True")
+        return seen[0]
+
+    def test_stall_report_says_it_never_moved(self):
+        msg = self._timeout_msg(0)
+        self.assertTrue("never moved" in msg, msg)
+        self.assertTrue("servo id 2" in msg, msg)
+
+    def test_stall_report_says_stopped_partway(self):
+        # Half of 90 deg, in counts.
+        msg = self._timeout_msg(int(45 * 4096 / 360.0))
+        self.assertTrue("stopped partway" in msg, msg)
+        self.assertTrue("overload" in msg, msg)
+        self.assertTrue("45.0 deg of the 90.0" in msg, msg)
+
+    def test_stall_report_distinguishes_a_move_that_did_not_latch(self):
+        # Travelled the whole way: mechanically fine, so pointing the
+        # user at a jam or a stall would send them to the wrong place.
+        msg = self._timeout_msg(int(90 * 4096 / 360.0))
+        self.assertTrue("never latched" in msg, msg)
+        self.assertTrue("NOT a mechanical fault" in msg, msg)
+
+    def test_raise_on_stall_restores_the_fatal_behaviour(self):
+        # Opt-in for callers who would rather abort than continue.
+        from openbricks.drivers.st3215 import ST3215
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics import DriveBase
+        ST3215._buses.clear()
+        left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                           invert=True, raise_on_stall=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=138)
+        self.bus.done_after = 10_000
+        try:
+            left.run_angle(100, 90)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("gave up" in str(e), str(e))
+
+    def test_a_stuck_move_gives_up_on_stillness_not_on_the_budget(self):
+        # A shaft that has not advanced a count in a second is stuck,
+        # whatever the budget says — so the report names STILLNESS,
+        # and the wait is ~1 s rather than the multi-second budget.
+        msg = self._timeout_msg(0)
+        self.assertTrue("stopped moving for" in msg, msg)
+        self.assertFalse("ran out of its" in msg, msg)
+
+    def test_a_move_that_keeps_inching_is_not_called_stuck(self):
+        # The opposite error: a move fighting a heavy load is still a
+        # move. Advancing counts must keep resetting the stillness
+        # clock, so only the total budget can end it.
+        from openbricks.drivers.st3215 import ST3215Motor
+        db, left, _ = self._drivebase()
+        self.bus.done_after = 10_000
+        creep = [0]
+        def _creep(slot):
+            creep[0] += 8          # ~0.7 deg per poll: slow but real
+            return creep[0]
+        self.bus.servo_counts = _creep
+        seen = []
+        orig = ST3215Motor._report_stall
+        ST3215Motor._report_stall = staticmethod(seen.append)
+        try:
+            left.run_angle(100, 90)
+        finally:
+            ST3215Motor._report_stall = orig
+        self.assertTrue(seen, "expected a report")
+        self.assertTrue("ran out of its" in seen[0], seen[0])
+
+    def test_a_completed_run_angle_reports_success(self):
+        # The return value is the contract now, so it must be True on
+        # the happy path — otherwise callers that branch on it would
+        # treat every good move as a stall.
+        db, left, _ = self._drivebase()
+        self.bus.done_after = 2
+        self.assertTrue(left.run_angle(100, 90))
+
     def test_adopted_run_angle_refused_raises(self):
         # The C layer refuses a move while the DriveBase owns the
         # slot (or before odometry is live) — surfaced as a loud
