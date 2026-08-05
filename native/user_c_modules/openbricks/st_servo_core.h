@@ -158,9 +158,9 @@ uint16_t ob_sservo_encode_speed(int32_t steps_per_s);
 // sync-write covers all) > round-robin feedback read.
 void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op);
 
-// Next readable slot from the round-robin cursor; hot_wanted 1 =
-// driving only, 0 = parked only, -1 = either. Exposed for tests.
-int ob_sservo_pick_read(ob_sservo_t *s, int hot_wanted);
+// Next readable slot of the requested kind (1 = driving, 0 = parked)
+// from that kind's own cursor, or -1. Exposed for tests.
+int ob_sservo_pick_read(ob_sservo_t *s, int want_hot);
 
 // Result routing. For reads: payload is the 2-byte present-position
 // little-endian (12-bit) — folds into the unwrap accumulator. ok=0
