@@ -239,6 +239,42 @@ TEST(parked_slots_do_not_halve_a_driving_wheels_odometry) {
     CHECK(diff < 3 && diff > -3);
 }
 
+TEST(all_parked_slots_share_the_bus_evenly) {
+    // The state while a script is still CONSTRUCTING its motors:
+    // nothing is driving, so every slot is cold. The rotation must
+    // still reach all of them — a newly attached slot is waiting on
+    // its first read before it can be used, and starving it there
+    // fails the construction outright (bench 2026-08-05: "servo id 2
+    // (native slot 2): 0 reads ATTEMPTED").
+    reset();
+    for (int i = 0; i < 4; i++) {
+        ob_sservo_attach(&sv, i, (uint8_t)(i + 1), 0, 45);
+        sv.slots[i].config_step = 3;
+        sv.slots[i].hot = 0;
+    }
+    int reads[4] = {0, 0, 0, 0};
+    ob_sservo_op_t op;
+    for (int n = 0; n < 400; n++) {
+        ob_sservo_next_op(&sv, &op);
+        if (op.kind == OB_SOP_READ_POS) {
+            reads[op.slot]++;
+            ob_sservo_op_started(&sv, &op);
+            ob_sservo_read_result(&sv, 1, (const uint8_t *)"\x00\x00", 2);
+        } else {
+            ob_sservo_op_started(&sv, &op);
+        }
+    }
+    // Every slot polled, and no slot hogging: the worst-served slot
+    // must get at least half the best-served one's share.
+    int lo = reads[0], hi = reads[0];
+    for (int i = 1; i < 4; i++) {
+        if (reads[i] < lo) lo = reads[i];
+        if (reads[i] > hi) hi = reads[i];
+    }
+    CHECK(lo > 0);
+    CHECK(lo * 2 >= hi);
+}
+
 TEST(all_parked_still_get_polled) {
     // No slot driving: everything is cold, and the bus must still
     // service them rather than stall on an empty preference.
@@ -366,6 +402,7 @@ int main(void) {
     RUN(torque_sync_skips_the_fairness_gate);
     RUN(fairness_sync_then_read_alternation);
     RUN(parked_slots_do_not_halve_a_driving_wheels_odometry);
+    RUN(all_parked_slots_share_the_bus_evenly);
     RUN(all_parked_still_get_polled);
     RUN(failed_reads_count_stale_and_recover);
     RUN(bounds_are_guarded);

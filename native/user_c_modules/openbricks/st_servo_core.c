@@ -211,7 +211,17 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     }
     int pick = ob_sservo_pick_read(s, want_cold ? 0 : 1);
     if (pick < 0) {
-        pick = ob_sservo_pick_read(s, -1);   // whatever is available
+        // Nothing of the preferred kind. Fall back to the OTHER kind
+        // explicitly, so the rotation is driven by that kind's own
+        // cursor. Falling straight through to "any" scanned from the
+        // hot cursor while a cold read advanced the cold one — with
+        // every slot parked (exactly the state while a script is
+        // still constructing its motors) the hot cursor never moved
+        // and one slot took 7 reads in 8, starving the rest.
+        pick = ob_sservo_pick_read(s, want_cold ? 1 : 0);
+    }
+    if (pick < 0) {
+        pick = ob_sservo_pick_read(s, -1);   // last resort
     }
     if (pick >= 0) {
         op->kind = OB_SOP_READ_POS;
