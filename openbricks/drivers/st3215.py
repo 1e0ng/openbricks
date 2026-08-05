@@ -1557,23 +1557,39 @@ class SyncServoGroup:
         group.set_goal_speeds([200, 200])
     """
 
+    @staticmethod
+    def _refuse_native(servos):
+        """A servo on a native slot cannot be commanded from here.
+
+        Checked at construction AND before every write, because
+        adoption can happen in between: build the group first and a
+        DriveBase adopts the same motors a line later, and the group
+        is left holding wheels it can no longer safely reach. That
+        ordering used to pass construction and then write into a
+        contended bus — silently, which is the whole failure this
+        guard exists to end. Refusing in one place and not the other
+        made the error depend on run order (fine the first time,
+        refused the second), which is worse than either.
+        """
+        for s in servos:
+            slot = getattr(s, "_native_slot", None)
+            if slot is None:
+                continue
+            raise RuntimeError(
+                "servo id %s is driven by the native bus (slot %d), "
+                "so a SyncServoGroup cannot command it: this class "
+                "writes through the MicroPython UART, which the "
+                "native driver now owns — the two collide on the "
+                "wire and each reads the other's replies. For "
+                "drivebase wheels use ``DriveBase.move_wheels(left, "
+                "right)``, which gives the same one-packet guarantee "
+                "from inside the engine; for a task motor drive it "
+                "directly (``motor.run_speed(...)``)." % (s._id, slot))
+
     def __init__(self, servos):
         if not servos:
             raise ValueError("SyncServoGroup needs at least one servo")
-        for s in servos:
-            slot = getattr(s, "_native_slot", None)
-            if slot is not None:
-                raise RuntimeError(
-                    "servo id %s is driven by the native bus (slot %d), "
-                    "so a SyncServoGroup cannot command it: this class "
-                    "writes through the MicroPython UART, which the "
-                    "native driver now owns — the two collide on the "
-                    "wire and each reads the other's replies. For "
-                    "drivebase wheels use ``DriveBase.move_wheels("
-                    "left, right)``, which gives the same one-packet "
-                    "guarantee from inside the engine; for a task "
-                    "motor drive it directly (``motor.run_speed(...)``)."
-                    % (s._id, slot))
+        self._refuse_native(servos)
         bus = servos[0]._bus
         for s in servos[1:]:
             if s._bus is not bus:
@@ -1594,6 +1610,7 @@ class SyncServoGroup:
         position-mode ``ST3215`` class) raise ``TypeError``.
         """
         estop.check()
+        self._refuse_native(self._servos)
         if len(speeds_dps) != len(self._servos):
             raise ValueError(
                 "speed count (%d) doesn't match servo count (%d)"

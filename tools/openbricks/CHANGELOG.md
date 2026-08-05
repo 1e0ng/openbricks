@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.61.1 — the SyncServoGroup refusal no longer depends on run order
+
+Reported from the bench: *"run second time still this error, first
+time ok"*. The first run was not ok — it was the silent failure.
+
+1.58.0 refused a `SyncServoGroup` built over motors already on
+native slots. But adoption can happen *after* construction: build
+the group, and a `DriveBase` adopts the same motors a line later.
+Construction passed, and the group was left holding wheels it could
+no longer reach — writing into a contended bus exactly as before the
+guard existed. On a fresh boot the motors are still on the
+MicroPython bus at construction, so that is the path a first run
+took; on any later run the UART is already native and the group was
+refused at construction. Same script, two behaviours, depending on
+whether the hub had been used since power-up.
+
+The check now runs before every write as well as at construction, so
+the refusal is deterministic. A group that becomes unusable raises
+the moment it is next used, with the same message naming
+`DriveBase.move_wheels`.
+
 ## 1.61.0 — the line-follower runs in CI
 
 `examples/line_follow.py`'s control law now drives a simulated
