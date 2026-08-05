@@ -456,6 +456,37 @@ class AdoptionTests(_Base):
         self.assertIn(("servo_coast", 0), self.bus.calls)
         self.assertTrue(left.done())    # idempotent after dispatch
 
+    def _timeout_msg(self, moved_counts):
+        """Force the stall path with a chosen amount of travel."""
+        db, left, _ = self._drivebase()
+        self.bus.done_after = 10_000              # never completes
+        counts = [0, moved_counts]
+        self.bus.servo_counts = lambda slot: counts.pop(0) if counts else moved_counts
+        try:
+            left.run_angle(100, 90)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            return str(e)
+
+    def test_stall_report_says_it_never_moved(self):
+        msg = self._timeout_msg(0)
+        self.assertTrue("never moved" in msg, msg)
+        self.assertTrue("servo id 2" in msg, msg)
+
+    def test_stall_report_says_stopped_partway(self):
+        # Half of 90 deg, in counts.
+        msg = self._timeout_msg(int(45 * 4096 / 360.0))
+        self.assertTrue("stopped partway" in msg, msg)
+        self.assertTrue("overload" in msg, msg)
+        self.assertTrue("45.0 deg of the 90.0" in msg, msg)
+
+    def test_stall_report_distinguishes_a_move_that_did_not_latch(self):
+        # Travelled the whole way: mechanically fine, so pointing the
+        # user at a jam or a stall would send them to the wrong place.
+        msg = self._timeout_msg(int(90 * 4096 / 360.0))
+        self.assertTrue("never latched" in msg, msg)
+        self.assertTrue("NOT a mechanical fault" in msg, msg)
+
     def test_adopted_run_angle_refused_raises(self):
         # The C layer refuses a move while the DriveBase owns the
         # slot (or before odometry is live) — surfaced as a loud

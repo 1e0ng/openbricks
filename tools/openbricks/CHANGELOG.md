@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.62.0 — a stalled run_angle says which failure it was
+
+`run_angle did not reach target within 4233 ms — wheel stalled,
+blocked, or in overload protection` names three faults with three
+different fixes and leaves you to guess. The slot has reported
+travel, speed and load since 1.50.0, so it can simply say.
+
+How far the shaft got separates them:
+
+* **moved ~nothing** — jammed, or torque never reached it
+* **moved partway** — stalled under load, or the servo's overload
+  protection cut in (trips above ~80% of stall torque held ~2 s,
+  clears when a new command is issued)
+* **moved essentially all of it** — arriving but never *latching*,
+  which is an arrival-tolerance or odometry problem and explicitly
+  NOT a mechanical one
+
+The message now carries the diagnosis, the travel ("moved 45.0 deg
+of the 90.0 asked"), and the speed and load the servo reported at
+the moment it gave up.
+
 ## 1.61.2 — Ctrl-C stops the robot, not just the CLI
 
 Reported from the bench: pressing Ctrl-C during `openbricks run`

@@ -1110,17 +1110,60 @@ class ST3215Motor(Motor):
             return
         budget_ms = self._native_move_budget_ms(target_angle, capped,
                                                 accel)
+        start_counts = self._native_sb.servo_counts(self._native_slot)
         t0 = time.ticks_ms()
         while not self._native_sb.servo_move_done(self._native_slot):
             estop.check()
             if time.ticks_diff(time.ticks_ms(), t0) > budget_ms:
                 self._native_sb.servo_run(self._native_slot, 0)
-                raise RuntimeError(
-                    "run_angle did not reach target within %d ms — "
-                    "wheel stalled, blocked, or in overload "
-                    "protection" % budget_ms)
+                raise RuntimeError(self._native_stall_report(
+                    budget_ms, start_counts, target_angle))
             time.sleep_ms(10)
         self._native_dispatch_then(then)
+
+    def _native_stall_report(self, budget_ms, start_counts, target_angle):
+        """Say WHICH failure this was, not which three it might be.
+
+        "stalled, blocked, or in overload protection" are different
+        faults with different fixes, and the slot has been reporting
+        travel, speed and load since 1.50.0 — so read them instead of
+        listing possibilities. How far it got separates them:
+
+        * moved ~nothing   -> never started: jammed, or no torque
+        * moved partway    -> stalled under load, or the servo's
+          overload protection cut in (>80% of stall for 2 s, cleared
+          by reissuing a command)
+        * moved ~all of it -> it is arriving but not LATCHING, which
+          is a tolerance/odometry problem, not a mechanical one
+        """
+        moved = ((self._native_sb.servo_counts(self._native_slot)
+                  - start_counts) * 360.0 / _COUNTS_PER_REV)
+        want = float(target_angle)
+        frac = abs(moved) / abs(want) if want else 0.0
+        if frac < 0.05:
+            why = ("it never moved — the shaft is jammed, or torque "
+                   "is not reaching it")
+        elif frac > 0.9:
+            why = ("it travelled essentially the whole way but the "
+                   "move never latched as done — suspect arrival "
+                   "tolerance or odometry, NOT a mechanical fault")
+        else:
+            why = ("it stopped partway — stalled under load, or the "
+                   "servo's overload protection cut in (it trips "
+                   "above ~80% of stall torque held for ~2 s, and "
+                   "clears when a new command is issued)")
+        detail = ""
+        feedback = getattr(self._native_sb, "servo_feedback", None)
+        if feedback is not None:
+            speed_steps, load_raw, fresh = feedback(self._native_slot)
+            if fresh:
+                detail = (" At the timeout it reported %.0f deg/s and "
+                          "%.0f mNm of load."
+                          % (speed_steps / self._steps_per_dps,
+                             load_raw * self.STALL_TORQUE_MNM / 1000.0))
+        return ("run_angle(%g deg) on servo id %s gave up after %d ms: "
+                "%s. It moved %.1f deg of the %.1f asked.%s"
+                % (want, self._id, budget_ms, why, moved, want, detail))
 
     def hold(self):
         """Actively hold the current shaft angle so the position PID
