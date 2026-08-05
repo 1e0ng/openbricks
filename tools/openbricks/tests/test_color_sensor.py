@@ -246,3 +246,74 @@ class ShimTCS34725Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# A dark stripe down the middle of a light floor: the shape a
+# line-follower actually steers on. The two sensors straddle it, so
+# the left one sits over light, the right one over light, and the
+# error between them is what the control law consumes.
+_LINE_TEMPLATE = """\
+<mujoco model="color_sensor_line_test">
+  <option timestep="0.001" gravity="0 0 -9.81"/>
+  <worldbody>
+    <body name="chassis" pos="{cx} {cy} 0.05">
+      <freejoint name="chassis_free"/>
+      <inertial pos="0 0 0" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
+      <geom name="chassis_body" type="box" size="0.02 0.02 0.01"
+            rgba="0.10 0.50 0.90 1.0"/>
+      <camera name="chassis_cam_down" pos="0 0 0"
+              xyaxes="0 -1 0 1 0 0" fovy="20"/>
+      <camera name="chassis_cam_down_l" pos="0 0.018 0"
+              xyaxes="0 -1 0 1 0 0" fovy="20"/>
+      <camera name="chassis_cam_down_r" pos="0 -0.018 0"
+              xyaxes="0 -1 0 1 0 0" fovy="20"/>
+    </body>
+    <geom name="floor" type="plane" size="0.5 0.5 0.1"
+          rgba="0.9 0.9 0.9 1"/>
+    <geom name="line" type="box" pos="0 0 0.001" size="0.5 0.010 0.001"
+          rgba="0.03 0.03 0.03 1"/>
+  </worldbody>
+</mujoco>
+"""
+
+
+class TwoSensorLineTests(unittest.TestCase):
+    """The pair must read DIFFERENT points.
+
+    A line-follower's entire error signal is the difference between
+    two sensors straddling the line. With both bound to one camera —
+    which is what the shim did before the left/right pair existed —
+    that difference is identically zero and no control law can work.
+    """
+
+    def _runtime(self, cx=0.0, cy=0.0):
+        model = mujoco.MjModel.from_xml_string(
+            _LINE_TEMPLATE.format(cx=cx, cy=cy))
+        return SimRuntime(model, mujoco.MjData(model))
+
+    def test_centred_on_the_line_both_sensors_see_the_mat(self):
+        rt = self._runtime()
+        left = SimColorSensor(rt, camera_name="chassis_cam_down_l")
+        right = SimColorSensor(rt, camera_name="chassis_cam_down_r")
+        # Straddling: both outboard of a 20 mm line, so both light.
+        self.assertGreater(left.ambient(), 50)
+        self.assertGreater(right.ambient(), 50)
+        self.assertLess(abs(left.ambient() - right.ambient()), 5)
+
+    def test_drifting_off_line_makes_the_sensors_disagree(self):
+        # Chassis shifted so the LEFT sensor is over the dark line.
+        rt = self._runtime(cy=-0.018)
+        left = SimColorSensor(rt, camera_name="chassis_cam_down_l")
+        right = SimColorSensor(rt, camera_name="chassis_cam_down_r")
+        self.assertLess(left.ambient(), 20)      # over the line
+        self.assertGreater(right.ambient(), 50)  # over the mat
+        # THE signal: a large, correctly-signed error to steer on.
+        self.assertGreater(right.ambient() - left.ambient(), 40)
+
+    def test_the_error_reverses_with_the_drift(self):
+        rt = self._runtime(cy=+0.018)
+        left = SimColorSensor(rt, camera_name="chassis_cam_down_l")
+        right = SimColorSensor(rt, camera_name="chassis_cam_down_r")
+        self.assertGreater(left.ambient(), 50)
+        self.assertLess(right.ambient(), 20)
+        self.assertLess(right.ambient() - left.ambient(), -40)

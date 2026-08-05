@@ -151,6 +151,18 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         '           camera looks along body -Z (straight down). -->\n'
         '      <camera name="{name}_cam_down" pos="{front:.4f} 0 {cam_z:.4f}"\n'
         '              xyaxes="0 -1 0 1 0 0" fovy="20"/>\n'
+        '      <!-- Left/right pair, offset either side of the centre\n'
+        '           line. Line-following is entirely about the\n'
+        '           DIFFERENCE between two sensors straddling a line,\n'
+        '           so one shared camera makes that error identically\n'
+        '           zero. Offset is half the mat line width either\n'
+        '           way, matching how the real pair is mounted. -->\n'
+        '      <camera name="{name}_cam_down_l" fovy="20"\n'
+        '              pos="{front:.4f} {cam_dy:.4f} {cam_z:.4f}"\n'
+        '              xyaxes="0 -1 0 1 0 0"/>\n'
+        '      <camera name="{name}_cam_down_r" fovy="20"\n'
+        '              pos="{front:.4f} -{cam_dy:.4f} {cam_z:.4f}"\n'
+        '              xyaxes="0 -1 0 1 0 0"/>\n'
         '      <!-- Forward-facing range-sensor site (HC-SR04 /\n'
         '           VL53L0X shims raycast from here along body +X). -->\n'
         '      <site name="{name}_dist" pos="{dist_x:.4f} 0 0"\n'
@@ -170,6 +182,9 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         cx=caster_x, cz_local=caster_z_local,
         cm=spec.caster_mass, cr=spec.caster_radius,
         front=bx - 0.010, cam_z=-bz + 0.002,
+        # Half the sensor separation. The pair straddles a line, so
+        # this is what makes their readings differ at all.
+        cam_dy=0.018,
         dist_x=bx + 0.001,
     )
 

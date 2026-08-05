@@ -687,11 +687,23 @@ class ShimTCS34725:
     sees realistic-looking values.
     """
 
+    # Mux channel -> chassis camera. Real code addresses the two
+    # sensors by mux channel (``TCS34725(mux[1])``), so that is the
+    # natural key: the same construction that picks a physical
+    # sensor picks the camera under it. Channels with no mapping —
+    # and a sensor built without a mux at all — get the centre
+    # camera, which is what every existing script and test expects.
+    _CHANNEL_CAMERAS = {0: "chassis_cam_down_r", 1: "chassis_cam_down_l"}
+
     def __init__(self, *args, **kwargs):
         if _INSTALLED is None:
             raise RuntimeError(
                 "shim not installed; call install(runtime) first")
-        self._cs = SimColorSensor(_INSTALLED.runtime)
+        bus = kwargs.get("i2c", args[0] if args else None)
+        channel = getattr(bus, "_channel", None)
+        camera = self._CHANNEL_CAMERAS.get(channel, "chassis_cam_down")
+        self._channel = channel
+        self._cs = SimColorSensor(_INSTALLED.runtime, camera_name=camera)
 
     def rgb(self):
         return self._cs.rgb()
