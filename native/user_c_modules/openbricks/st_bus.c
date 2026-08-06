@@ -470,13 +470,20 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_test_reset_obj, sb_test_reset);
 
 static mp_obj_t sb_start_read(size_t n_args, const mp_obj_t *args) {
+    // RULE for every binding: MP conversions/allocations happen
+    // OUTSIDE bus_take()/bus_release(). A raising conversion
+    // (mp_obj_get_int on a string) longjmps past bus_release, and
+    // the non-recursive spinlock then wedges core 0's esp_timer
+    // task forever — all motors and all system timers dead until
+    // power-cycle. sb_servo_stats/sb_take_result always did this
+    // right; these bindings now match.
     (void)n_args;
+    uint8_t id  = (uint8_t)mp_obj_get_int(args[1]);
+    uint8_t reg = (uint8_t)mp_obj_get_int(args[2]);
+    uint8_t n   = (uint8_t)mp_obj_get_int(args[3]);
+    int ticks   = mp_obj_get_int(args[4]);
     bus_take();
-    int r = ob_bus_start_read(bus_get(),
-                              (uint8_t)mp_obj_get_int(args[1]),
-                              (uint8_t)mp_obj_get_int(args[2]),
-                              (uint8_t)mp_obj_get_int(args[3]),
-                              mp_obj_get_int(args[4]));
+    int r = ob_bus_start_read(bus_get(), id, reg, n, ticks);
     bus_release();
     return mp_obj_new_bool(r == 0);
 }
@@ -658,11 +665,12 @@ static MP_DEFINE_CONST_FUN_OBJ_1(sb_uart_num_obj, sb_uart_num);
 static mp_obj_t sb_servo_attach(size_t n_args, const mp_obj_t *args) {
     // (self, slot, id, invert, goal_acc)
     (void)n_args;
+    int slot        = mp_obj_get_int(args[1]);
+    uint8_t id      = (uint8_t)mp_obj_get_int(args[2]);
+    uint8_t invert  = mp_obj_is_true(args[3]) ? 1 : 0;
+    uint8_t acc     = (uint8_t)mp_obj_get_int(args[4]);
     bus_take();
-    int r = ob_sservo_attach(sservo_get(), mp_obj_get_int(args[1]),
-                             (uint8_t)mp_obj_get_int(args[2]),
-                             mp_obj_is_true(args[3]) ? 1 : 0,
-                             (uint8_t)mp_obj_get_int(args[4]));
+    int r = ob_sservo_attach(sservo_get(), slot, id, invert, acc);
     bus_release();
     return mp_obj_new_bool(r == 0);
 }
@@ -709,12 +717,12 @@ static mp_obj_t sb_servo_run(mp_obj_t self_in, mp_obj_t slot_in,
     // Signed encoder steps/s (Python converts dps; core is int-only).
     (void)self_in;
     int slot = mp_obj_get_int(slot_in);
+    int32_t steps = (int32_t)mp_obj_get_int(steps_in);
     bus_take();
     if (slot >= 0 && slot < OB_SSERVO_SLOTS) {
         ob_smove_stop(&st_moves[slot]);   // new command wins
     }
-    int r = ob_sservo_set_speed(sservo_get(), slot,
-                                (int32_t)mp_obj_get_int(steps_in));
+    int r = ob_sservo_set_speed(sservo_get(), slot, steps);
     bus_release();
     return mp_obj_new_bool(r == 0);
 }
@@ -756,14 +764,15 @@ static mp_obj_t sb_servo_move(size_t n_args, const mp_obj_t *args) {
     // (self, slot, delta_counts, speed_cps, accel_cps2) -> bool
     (void)n_args;
     int slot = mp_obj_get_int(args[1]);
+    ob_float_t delta = (ob_float_t)mp_obj_get_float(args[2]);
+    ob_float_t speed = (ob_float_t)mp_obj_get_float(args[3]);
+    ob_float_t accel = (ob_float_t)mp_obj_get_float(args[4]);
     bus_take();
     bool ok = smove_slot_ready_locked(slot);
     if (ok) {
         ob_smove_start(&st_moves[slot], (long)st_db_now_ms,
                        (ob_float_t)ob_sservo_counts(sservo_get(), slot),
-                       (ob_float_t)mp_obj_get_float(args[2]),
-                       (ob_float_t)mp_obj_get_float(args[3]),
-                       (ob_float_t)mp_obj_get_float(args[4]));
+                       delta, speed, accel);
     }
     bus_release();
     return mp_obj_new_bool(ok);
@@ -797,8 +806,9 @@ static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_move_done_obj, sb_servo_move_done);
 
 static mp_obj_t sb_servo_counts(mp_obj_t self_in, mp_obj_t slot_in) {
     (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
     bus_take();
-    int32_t c = ob_sservo_counts(sservo_get(), mp_obj_get_int(slot_in));
+    int32_t c = ob_sservo_counts(sservo_get(), slot);
     bus_release();
     return mp_obj_new_int(c);
 }
@@ -814,12 +824,15 @@ static mp_obj_t sb_servo_feedback(mp_obj_t self_in, mp_obj_t slot_in) {
     int slot = mp_obj_get_int(slot_in);
     bus_take();
     ob_sservo_t *sv = sservo_get();
-    mp_obj_t t[3] = {
-        mp_obj_new_int(ob_sservo_speed_steps(sv, slot)),
-        mp_obj_new_int(ob_sservo_load_raw(sv, slot)),
-        mp_obj_new_bool(ob_sservo_feedback_fresh(sv, slot)),
-    };
+    int32_t speed = ob_sservo_speed_steps(sv, slot);
+    int32_t load  = ob_sservo_load_raw(sv, slot);
+    int fresh     = ob_sservo_feedback_fresh(sv, slot);
     bus_release();
+    mp_obj_t t[3] = {
+        mp_obj_new_int(speed),
+        mp_obj_new_int(load),
+        mp_obj_new_bool(fresh),
+    };
     return mp_obj_new_tuple(3, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_feedback_obj, sb_servo_feedback);
@@ -877,9 +890,14 @@ static mp_obj_t sb_servo_pump(size_t n_args, const mp_obj_t *args) {
     // firmware path feeds ob_hard_ticks_ms instead — NOT the
     // motor_process clock, which advances on the starvable scheduler
     // path).
+    uint32_t now = 0;
+    bool have_now = (n_args == 2);
+    if (have_now) {
+        now = (uint32_t)mp_obj_get_int_truncated(args[1]);
+    }
     bus_take();
-    if (n_args == 2) {
-        st_db_now_ms = (uint32_t)mp_obj_get_int_truncated(args[1]);
+    if (have_now) {
+        st_db_now_ms = now;
     }
     servo_pump_locked(bus_get());
     bus_release();
@@ -934,17 +952,29 @@ static mp_obj_t sb_db_config(size_t n_args, const mp_obj_t *args) {
     // (self, slot_l, slot_r, wheel_diameter_mm, axle_track_mm,
     //  accel_dps2)
     (void)n_args;
+    int slot_l = mp_obj_get_int(args[1]);
+    int slot_r = mp_obj_get_int(args[2]);
+    ob_float_t wheel = (ob_float_t)mp_obj_get_float(args[3]);
+    ob_float_t axle  = (ob_float_t)mp_obj_get_float(args[4]);
+    ob_float_t accel = (ob_float_t)mp_obj_get_float(args[5]);
+    // Caller-supplied indices land in st_moves[]/slots[] from the
+    // tick: an out-of-range or duplicate pair must fail HERE (and
+    // outside the lock), not corrupt adjacent statics later.
+    if (slot_l < 0 || slot_l >= OB_SSERVO_SLOTS
+        || slot_r < 0 || slot_r >= OB_SSERVO_SLOTS
+        || slot_l == slot_r) {
+        mp_raise_ValueError(MP_ERROR_TEXT("db_config: bad slot pair"));
+    }
     bus_take();
-    st_db_slot_l = mp_obj_get_int(args[1]);
-    st_db_slot_r = mp_obj_get_int(args[2]);
+    st_db_slot_l = slot_l;
+    st_db_slot_r = slot_r;
     memset(&st_db_bridge_l, 0, sizeof(st_db_bridge_l));
     memset(&st_db_bridge_r, 0, sizeof(st_db_bridge_r));
     ob_drivebase_init(&st_db, &st_db_bridge_l, &st_db_bridge_r,
-                      (ob_float_t)mp_obj_get_float(args[3]),
-                      (ob_float_t)mp_obj_get_float(args[4]),
+                      wheel, axle,
                       OB_DRIVEBASE_DEFAULT_KP_SUM,
                       OB_DRIVEBASE_DEFAULT_KP_DIFF);
-    st_db.accel_dps2 = (ob_float_t)mp_obj_get_float(args[5]);
+    st_db.accel_dps2 = accel;
     st_db_active = true;
     // Configured but yielded: the db starts writing at its first
     // move, so a freshly constructed DriveBase leaves the wheels
@@ -973,7 +1003,17 @@ static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_disable_obj, sb_db_disable);
 static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
                                mp_obj_t mm_s_in) {
     (void)self_in;
+    ob_float_t mm   = (ob_float_t)mp_obj_get_float(mm_in);
+    ob_float_t mm_s = (ob_float_t)mp_obj_get_float(mm_s_in);
     bus_take();
+    // Unconfigured (or disabled) db: slots are -1 and st_moves[-1]
+    // writes into adjacent statics. sb_db_stop/sb_db_move_wheels
+    // always guarded this; the arm paths now do too.
+    if (st_db_slot_l < 0 || st_db_slot_r < 0) {
+        bus_release();
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("db_straight before db_config"));
+    }
     // New command wins: the db takes its slots back from any
     // per-slot move, and arms from freshly synced odometry (the
     // yielded tick doesn't run ob_drivebase_tick, so sync here).
@@ -982,9 +1022,7 @@ static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
     st_db_writing = true;
-    ob_drivebase_straight(&st_db, (long)st_db_now_ms,
-                          (ob_float_t)mp_obj_get_float(mm_in),
-                          (ob_float_t)mp_obj_get_float(mm_s_in));
+    ob_drivebase_straight(&st_db, (long)st_db_now_ms, mm, mm_s);
     bus_release();
     return mp_const_none;
 }
@@ -993,15 +1031,20 @@ static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_straight_obj, sb_db_straight);
 static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
                            mp_obj_t dps_in) {
     (void)self_in;
+    ob_float_t deg = (ob_float_t)mp_obj_get_float(deg_in);
+    ob_float_t dps = (ob_float_t)mp_obj_get_float(dps_in);
     bus_take();
+    if (st_db_slot_l < 0 || st_db_slot_r < 0) {
+        bus_release();
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("db_turn before db_config"));
+    }
     st_db_sync_bridges_locked();
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
     st_db_writing = true;
-    ob_drivebase_turn(&st_db, (long)st_db_now_ms,
-                      (ob_float_t)mp_obj_get_float(deg_in),
-                      (ob_float_t)mp_obj_get_float(dps_in));
+    ob_drivebase_turn(&st_db, (long)st_db_now_ms, deg, dps);
     bus_release();
     return mp_const_none;
 }
@@ -1168,8 +1211,9 @@ static mp_obj_t sb_db_set_accel(mp_obj_t self_in, mp_obj_t dps2_in) {
     // retune the trajectory accel without re-running db_config (which
     // would reset the pose holds).
     (void)self_in;
+    ob_float_t dps2 = (ob_float_t)mp_obj_get_float(dps2_in);
     bus_take();
-    st_db.accel_dps2 = (ob_float_t)mp_obj_get_float(dps2_in);
+    st_db.accel_dps2 = dps2;
     bus_release();
     return mp_const_none;
 }
@@ -1194,9 +1238,10 @@ static mp_obj_t sb_db_set_heading(mp_obj_t self_in, mp_obj_t body_deg_in) {
     // expects. Called at ~50 Hz from a soft timer — a float store
     // under the lock, nothing more.
     (void)self_in;
+    ob_float_t body_deg = (ob_float_t)mp_obj_get_float(body_deg_in);
     bus_take();
     st_db.heading_override_wheel_deg = ob_drivebase_body_to_wheel_diff(
-        &st_db, (ob_float_t)mp_obj_get_float(body_deg_in));
+        &st_db, body_deg);
     bus_release();
     return mp_const_none;
 }

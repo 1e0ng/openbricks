@@ -45,6 +45,7 @@ def _extract():
     previous version's manual out of a stale directory.
     """
     import hashlib
+    import shutil
     import zipfile
     src = _bundle_path()
     with open(src, "rb") as f:
@@ -52,8 +53,27 @@ def _extract():
     out = os.path.join(tempfile.gettempdir(), "openbricks-docs-" + tag)
     index = os.path.join(out, "index.html")
     if not os.path.exists(index):
+        # Extract to a scratch dir and RENAME into place. Extracting
+        # directly meant an interrupted first run (Ctrl-C, disk full)
+        # that got past index.html — entry 54 of 64 — left a
+        # half-manual that every later invocation reused forever,
+        # because index.html was the only completeness check. The
+        # rename is atomic; a torn extraction leaves only scratch.
+        tmp = out + ".partial-%d" % os.getpid()
         with zipfile.ZipFile(src) as z:
-            z.extractall(out)
+            z.extractall(tmp)
+        if not os.path.exists(os.path.join(tmp, "index.html")):
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise DocsError(
+                "the offline bundle has no index.html — it is "
+                "corrupt; reinstall openbricks or rebuild it with "
+                "scripts/build-offline-docs.sh")
+        try:
+            os.rename(tmp, out)
+        except OSError:
+            # A concurrent invocation won the rename; its extraction
+            # of the same content-hash is byte-identical.
+            shutil.rmtree(tmp, ignore_errors=True)
     if not os.path.exists(index):
         raise DocsError(
             "the offline bundle has no index.html — it is corrupt; "
@@ -87,7 +107,11 @@ def run(args):
     topic = getattr(args, "topic", None)
     root = _extract()
     page = _page_for(topic)
-    url = "file://" + os.path.join(root, page)
+    # pathlib's as_uri, not "file://" + path: string concatenation
+    # produced file://C:\...\api\robotics.html backslash URLs on
+    # Windows (a declared platform), which browsers reject.
+    from pathlib import Path
+    url = Path(root, page).as_uri()
     if not webbrowser.open(url):
         raise DocsError(
             "could not open a browser (headless session?) — the manual "

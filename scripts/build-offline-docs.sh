@@ -47,6 +47,17 @@ find "$WORK/html/_static" -type f \
      \( -name '*.ttf' -o -name '*.eot' -o -name '*.svg' \
         -o -name '*.woff' -o -name '*.woff2' \) -delete
 
+# Record a fingerprint of the SOURCES this bundle was built from —
+# CI compares it against the checkout, so editing a docs/ page
+# without rebuilding the bundle fails the drift check even though
+# the page SET didn't change. (docs/ only: autodoc'd docstrings
+# aren't captured, so a docstring-only change still needs the
+# page-set check or a manual rebuild to surface.)
+( cd "$ROOT/docs" && find . -type f \( -name '*.md' -o -name '*.py' \
+      -o -name '*.css' -o -name '*.txt' \) \
+    | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 \
+    | cut -d' ' -f1 ) > "$WORK/html/.source-hash"
+
 # Sorted entries and fixed timestamps, so rebuilding on the SAME
 # machine is byte-stable and a diff shows real changes. Do not rely
 # on byte-identity ACROSS machines: Sphinx emits slightly different

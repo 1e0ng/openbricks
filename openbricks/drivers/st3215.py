@@ -197,7 +197,7 @@ class _SCServoBus:
             self._dir.value(0)
 
     def _rx(self, n, timeout_ms=50):
-        deadline = time.ticks_ms() + timeout_ms
+        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
         buf = b""
         while len(buf) < n and time.ticks_diff(deadline, time.ticks_ms()) > 0:
             chunk = self._uart.read(n - len(buf))
@@ -440,7 +440,7 @@ class ST3215(Servo):
                         bytes([raw & 0xFF, (raw >> 8) & 0xFF]))
         if wait:
             # Poll position until within 2% of target or timeout.
-            deadline = time.ticks_ms() + 3000
+            deadline = time.ticks_add(time.ticks_ms(), 3000)
             while time.ticks_diff(deadline, time.ticks_ms()) > 0:
                 current = self.angle()
                 if current is not None and abs(current - angle_deg) < self._range * 0.02:
@@ -1087,7 +1087,8 @@ class ST3215Motor(Motor):
         if stats is None:
             return
         wstats = getattr(self._native_sb, "servo_write_stats", None)
-        deadline = time.ticks_ms() + self._SLOT_ODOMETRY_TIMEOUT_MS
+        deadline = time.ticks_add(time.ticks_ms(),
+                                  self._SLOT_ODOMETRY_TIMEOUT_MS)
         while stats(slot)[0] == 0:
             if wstats is not None:
                 wfailed, latched = wstats(slot)
@@ -1822,7 +1823,7 @@ class ST3215Motor(Motor):
         # there is no fixed ceiling that could cut a slow multi-turn step
         # short.
         est_ms = int(abs(step) * 1000 / speed_steps + 200)
-        deadline = time.ticks_ms() + est_ms * 3
+        deadline = time.ticks_add(time.ticks_ms(), est_ms * 3)
         started = False
         last_rem = step
         parked = False

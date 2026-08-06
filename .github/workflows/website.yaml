@@ -49,16 +49,19 @@ jobs:
         # NOT a byte comparison: Sphinx emits slightly different HTML
         # between versions, so comparing bytes across machines fails
         # on build noise rather than on real drift (it did, on the
-        # commit that introduced it). Comparing the page SET catches
-        # the actual mistake and is stable across environments.
+        # commit that introduced it). Two environment-stable signals
+        # instead: the page SET (a page added without a rebuild), and
+        # the SOURCE fingerprint the build recorded (a docs/ page
+        # EDITED without a rebuild — the more common miss, which the
+        # page set alone never catches).
         run: |
           python - <<'PY'
-          import pathlib, zipfile, sys
+          import hashlib, pathlib, subprocess, sys, zipfile
+          zf = zipfile.ZipFile(
+              "tools/openbricks/openbricks_dev/_docs/offline-docs.zip")
           built = {p.relative_to("docs/_build/html").as_posix()
                    for p in pathlib.Path("docs/_build/html").rglob("*.html")}
-          bundled = {n for n in zipfile.ZipFile(
-              "tools/openbricks/openbricks_dev/_docs/offline-docs.zip"
-          ).namelist() if n.endswith(".html")}
+          bundled = {n for n in zf.namelist() if n.endswith(".html")}
           # _modules/ is stripped from the bundle on purpose (viewcode
           # re-renders the whole source tree; ~1.3 MB for [source] links).
           missing = {p for p in built - bundled
@@ -68,7 +71,22 @@ jobs:
                     + ", ".join(sorted(missing))
                     + " — run scripts/build-offline-docs.sh and commit it")
               sys.exit(1)
-          print("bundle covers all %d pages" % len(bundled))
+          want = subprocess.run(
+              "cd docs && find . -type f \\( -name '*.md' -o -name "
+              "'*.py' -o -name '*.css' -o -name '*.txt' \\) "
+              "| LC_ALL=C sort | xargs shasum -a 256 "
+              "| shasum -a 256 | cut -d' ' -f1",
+              shell=True, capture_output=True, text=True).stdout.strip()
+          have = zf.read(".source-hash").decode().strip() \
+              if ".source-hash" in zf.namelist() else "(absent)"
+          if have != want:
+              print("::error::offline-docs.zip was built from "
+                    "different docs/ sources (bundle %s vs checkout "
+                    "%s) — run scripts/build-offline-docs.sh and "
+                    "commit it" % (have[:12], want[:12]))
+              sys.exit(1)
+          print("bundle covers all %d pages, sources match (%s)"
+                % (len(bundled), want[:12]))
           PY
 
       - name: Install LaTeX toolchain (for the PDF build)

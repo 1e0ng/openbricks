@@ -293,7 +293,8 @@ class _SerialNativeEngine:
         if stats is None:
             return                  # bus surface without health data
         wstats = getattr(self._sb, "servo_write_stats", None)
-        deadline = time.ticks_ms() + self._LIVE_WHEEL_TIMEOUT_MS
+        deadline = time.ticks_add(time.ticks_ms(),
+                                  self._LIVE_WHEEL_TIMEOUT_MS)
         pending = [self._slot_l, self._slot_r]
         while pending:
             pending = [s for s in pending if stats(s)[0] == 0]
@@ -479,7 +480,8 @@ class _SerialNativeEngine:
     _SETTLE_TIMEOUT_MS = 8000
 
     def _arm_deadline(self):
-        self._deadline = time.ticks_ms() + self._SETTLE_TIMEOUT_MS
+        self._deadline = time.ticks_add(time.ticks_ms(),
+                                        self._SETTLE_TIMEOUT_MS)
 
     def tick_done(self):
         """One non-blocking iteration of the drive loop: gyro pump,
