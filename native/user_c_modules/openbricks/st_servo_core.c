@@ -72,7 +72,13 @@ int ob_sservo_set_speed(ob_sservo_t *s, int slot, int32_t steps_per_s) {
     // set_speed EVERY tick, and unconditionally re-staging torque
     // starved the sync-writes behind an endless stream of priority-1
     // torque packets (caught by the first drivebase sim run).
-    if (!sl->torque_on) {
+    //
+    // A PENDING coast (torque_cmd == 0, not yet shipped) must be
+    // superseded too: torque_on still reads 1 in that window, but the
+    // wire is about to get torque-off — without the second clause a
+    // stop() followed immediately by run() shipped the coast, then
+    // the new speed, and the motor sat limp with a live goal speed.
+    if (!sl->torque_on || sl->torque_cmd == 0) {
         sl->torque_cmd = 1;
     }
     return 0;
@@ -86,6 +92,13 @@ int ob_sservo_coast(ob_sservo_t *s, int slot) {
     ob_sservo_slot_t *sl = &s->slots[slot];
     sl->torque_cmd = 0;      // torque off = instant coast (e-stop rule)
     sl->target_dirty = 0;    // a stale speed must not re-drive it
+    sl->target_steps = 0;    // ...and must not keep the slot HOT: the
+                             // pump's heat heuristic reads a non-zero
+                             // target as "commanded to keep turning",
+                             // so a coasted-and-parked task motor was
+                             // taking a full share of the read
+                             // rotation forever — the exact bandwidth
+                             // OB_SSERVO_COLD_EVERY exists to protect
     return 0;
 }
 

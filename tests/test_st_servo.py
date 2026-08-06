@@ -167,6 +167,46 @@ class SpeedCommandTests(_Base):
         enc = sb.servo_encode(500)
         self.assertEqual(tx.count(bytes([1, enc & 0xFF, enc >> 8])), 0)
 
+    def test_coast_then_run_immediately_still_drives(self):
+        # stop(); run_speed(...) faster than the pump ships the coast:
+        # the pending torque-off is superseded. Unfixed, the wire got
+        # torque-off then the new speed — motor limp with a live goal
+        # speed, and nothing ever re-staged torque.
+        sb.servo_run(1, 500)
+        self.wire.settle(6)
+        self.wire.tx_log = b""
+        sb.servo_coast(1)
+        sb.servo_run(1, 400)                # before any pump
+        self.wire.settle(6)
+        tx = self.wire.tx_log
+        i = tx.find(b"\x83\x28\x01")
+        self.assertTrue(i >= 0, tx)
+        self.assertEqual(tx[i + 4], 1)      # torque ON ships, not off
+        self.assertEqual(tx.count(b"\x83\x28\x01"), 1)   # ONE sync
+        enc = sb.servo_encode(400)
+        self.assertIn(bytes([1, enc & 0xFF, enc >> 8]), tx)
+
+    def test_a_coasted_motor_stops_costing_the_driving_one_reads(self):
+        # Heat heuristic end-to-end: both drive, then slot 1 coasts.
+        # A parked motor must drop to the cold rotation (one read in
+        # OB_SSERVO_COLD_EVERY), not keep splitting the bus 50/50 —
+        # the 1.59.x bandwidth regression, which a stale target_steps
+        # quietly reintroduced for coast (but not brake).
+        sb.servo_run(0, 300)
+        sb.servo_run(1, 300)
+        self.wire.settle(10)
+        sb.servo_coast(1)
+        self.wire.settle(6)                 # coast ships
+        self.wire.tx_log = b""
+        self.wire.settle(160)
+        tx = self.wire.tx_log
+        reads_driving = tx.count(b"\xff\xff\x02\x04\x02\x38")
+        reads_coasted = tx.count(b"\xff\xff\x01\x04\x02\x38")
+        self.assertTrue(reads_driving > 0 and reads_coasted > 0,
+                        (reads_driving, reads_coasted))
+        self.assertTrue(reads_driving > 3 * reads_coasted,
+                        (reads_driving, reads_coasted))
+
 
 class OdometryTests(_Base):
     def setUp(self):

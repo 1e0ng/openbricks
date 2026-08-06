@@ -313,6 +313,44 @@ TEST(failed_reads_count_stale_and_recover) {
     CHECK_EQ_INT(sv.slots[0].stale, 0);    // success clears streak
 }
 
+TEST(coast_then_run_immediately_still_drives) {
+    // stop(); run_speed(...) back-to-back, faster than the pump ships
+    // the coast: the pending torque-off must be SUPERSEDED, not left
+    // to disarm the new speed. Unfixed, the pump shipped torque-off
+    // then the speed sync — motor limp with a live goal speed, and
+    // nothing ever re-staged torque for a one-shot caller.
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    sv.slots[0].config_step = 3;
+    sv.slots[0].torque_on = 1;            // driving; wire has torque
+    ob_sservo_coast(&sv, 0);              // stop() stages torque-off
+    ob_sservo_set_speed(&sv, 0, 300);     // run() before the pump ran
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_TORQUE);
+    CHECK_EQ_INT(op.sync_data[0], 1);     // torque ON ships, not off
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_SPEED);   // then the speed
+}
+
+TEST(coast_parks_the_slot_for_the_heat_heuristic) {
+    // The pump reads target_steps != 0 as "commanded to keep
+    // turning" (hot). A coasted motor is parked: leaving the stale
+    // target let it keep a full share of the read rotation forever,
+    // exactly the bandwidth regression OB_SSERVO_COLD_EVERY fixed —
+    // and gave coast and brake different polling behaviour.
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    sv.slots[0].config_step = 3;
+    ob_sservo_set_speed(&sv, 0, 300);
+    CHECK_EQ_INT(sv.slots[0].target_steps, 300);
+    ob_sservo_coast(&sv, 0);
+    CHECK_EQ_INT(sv.slots[0].target_steps, 0);
+    CHECK_EQ_INT(sv.slots[0].target_dirty, 0);
+    CHECK_EQ_INT(sv.slots[0].torque_cmd, 0);    // coast still ships
+}
+
 TEST(config_write_lost_is_retried_at_the_same_step) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
@@ -481,6 +519,8 @@ int main(void) {
     RUN(all_parked_slots_share_the_bus_evenly);
     RUN(all_parked_still_get_polled);
     RUN(failed_reads_count_stale_and_recover);
+    RUN(coast_then_run_immediately_still_drives);
+    RUN(coast_parks_the_slot_for_the_heat_heuristic);
     RUN(config_write_lost_is_retried_at_the_same_step);
     RUN(dead_servo_latches_config_failed_and_frees_the_bus);
     RUN(write_result_with_nothing_in_flight_is_inert);
