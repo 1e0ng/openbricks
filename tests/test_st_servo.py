@@ -88,6 +88,29 @@ class ConfigSequenceTests(_Base):
         self.assertTrue(sb.servo_attach(0, 1, False, 0))
         self.assertFalse(sb.servo_attach(0, 2, False, 0))
 
+    def test_lost_config_write_retries_the_same_register(self):
+        # The op_mode ACK is eaten once; the pump must reissue reg
+        # 0x21, not advance past it — a skipped op_mode is a servo in
+        # position mode receiving speed sync-writes.
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        dropped = [False]
+        for _ in range(30):
+            sb.servo_pump()
+            tx = sb.take_tx()
+            self.wire.tx_log += tx
+            if (len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE
+                    and not dropped[0]):
+                dropped[0] = True          # first write: silence
+                continue
+            if len(tx) >= 8 and tx[4] == 0x02:
+                sb.feed_rx(_pos_reply(tx[2], 0))
+            elif len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE:
+                sb.feed_rx(_reply(tx[2], 0))
+        tx = self.wire.tx_log
+        self.assertEqual(tx.count(bytes([0x21, 0x01])), 2)  # reissued
+        self.assertEqual(sb.servo_write_stats(0), (1, 0))   # counted
+        self.assertTrue(sb.servo_stats(0)[0] > 0)           # then lives
+
 
 class SpeedCommandTests(_Base):
     def setUp(self):

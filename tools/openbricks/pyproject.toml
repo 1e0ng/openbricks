@@ -58,10 +58,9 @@ dependencies = [
     # esptool already pulls pyserial in transitively; declared
     # explicitly because we import ``serial`` ourselves.
     "pyserial >= 3.5",
-    # ``openbricks docs`` renders the bundled guide pages to the
-    # styled offline HTML it opens in the browser. Pure-Python,
-    # tiny, no transitive deps.
-    "markdown >= 3.4",
+    # (``markdown`` lived here until 1.64.0 — the pre-1.63 docs
+    # renderer needed it; ``openbricks docs`` now opens the bundled
+    # Sphinx site and imports nothing to do it.)
     # Flashing ESP32 / ESP32-S3 images. esptool v5 (out for ~12
     # months) renamed the binary (``esptool.py`` → ``esptool``) and
     # switched commands to kebab-case (``write-flash`` etc.) — the

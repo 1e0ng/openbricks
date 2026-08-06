@@ -709,6 +709,19 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertTrue(60 < dps < 180, "wheel dps=%.0f" % dps)
         sb.servo_coast(0)
 
+    def test_bus_health_surface_reports_permanently_healthy(self):
+        # The engine consults servo_stats / servo_write_stats /
+        # db_fault when a wheel misbehaves. Sim wheels cannot go
+        # silent or lose writes, so the CONTRACT answers healthy —
+        # the failure modes themselves are hardware ones (documented
+        # sim limitation, mirrored in the firmware fakes).
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        self.assertEqual(sb.servo_stats(0), (1, 0, 0))
+        self.assertEqual(sb.servo_write_stats(0), (0, 0))
+        self.assertEqual(sb.servo_write_stats(1), (0, 0))
+        self.assertEqual(sb.db_fault(), 0)
+
     def test_db_and_runtime_verbs_cancel_armed_moves(self):
         # New-command-wins in every direction: each db/runtime verb
         # must cancel an ARMED per-slot move, not just tolerate an

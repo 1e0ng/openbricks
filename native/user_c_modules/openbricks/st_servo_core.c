@@ -13,6 +13,7 @@
 void ob_sservo_init(ob_sservo_t *s) {
     memset(s, 0, sizeof(*s));
     s->read_in_flight = -1;
+    s->write_in_flight = -1;
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         s->slots[i].torque_cmd = -1;
     }
@@ -46,6 +47,9 @@ void ob_sservo_detach(ob_sservo_t *s, int slot) {
     }
     if (s->read_in_flight == slot) {
         s->read_in_flight = -1;
+    }
+    if (s->write_in_flight == slot) {
+        s->write_in_flight = -1;
     }
     memset(&s->slots[slot], 0, sizeof(s->slots[slot]));
     s->slots[slot].torque_cmd = -1;
@@ -149,10 +153,14 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
         return;
     }
 
-    // 2. Config sequences.
+    // 2. Config sequences. A config_failed slot issues nothing more:
+    //    retrying a dead servo forever would hog the bus (config
+    //    outranks speeds and reads) and starve every healthy slot.
+    //    Python sees the latch via servo_write_stats and the absence
+    //    of odometry.
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         ob_sservo_slot_t *sl = &s->slots[i];
-        if (!sl->in_use || sl->config_step >= 3) {
+        if (!sl->in_use || sl->config_step >= 3 || sl->config_failed) {
             continue;
         }
         op->kind = OB_SOP_WRITE;
@@ -234,18 +242,16 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
 
 void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
     switch (op->kind) {
-        case OB_SOP_WRITE: {
+        case OB_SOP_WRITE:
             // Post-config torque rides OB_SOP_SYNC_TORQUE; the only
-            // single writes left are the config sequence.
-            ob_sservo_slot_t *sl = &s->slots[op->slot];
-            if (sl->config_step < 3) {
-                sl->config_step++;
-                if (op->reg == OB_SREG_TORQUE) {
-                    sl->torque_on = 0;     // config writes torque 0
-                }
-            }
+            // single writes left are the config sequence. The step
+            // does NOT advance here: a write is done when its
+            // verified ACK comes back (ob_sservo_write_result), not
+            // when its bytes leave — advancing at TX let a lost
+            // op_mode write mark a servo "configured" while it was
+            // still in position mode, receiving speed sync-writes.
+            s->write_in_flight = op->slot;
             break;
-        }
         case OB_SOP_SYNC_SPEED:
             s->last_was_sync = 1;
             for (uint8_t k = 0; k < op->sync_n; k++) {
@@ -331,6 +337,32 @@ void ob_sservo_read_result(ob_sservo_t *s, int ok,
     sl->last_raw = raw;
     sl->reads_ok++;
     sl->stale = 0;
+}
+
+
+void ob_sservo_write_result(ob_sservo_t *s, int ok) {
+    int slot = s->write_in_flight;
+    s->write_in_flight = -1;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
+        return;             // no single write in flight (sync/none)
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    if (!sl->in_use || sl->config_step >= 3) {
+        return;             // detached mid-flight, or already done
+    }
+    if (!ok) {
+        sl->writes_failed++;
+        if (++sl->config_fails >= OB_SSERVO_CONFIG_TRIES) {
+            sl->config_failed = 1;
+        }
+        return;             // step unchanged: next_op reissues it
+    }
+    if (sl->config_step == 1) {
+        sl->torque_on = 0;  // the torque(coast) write is CONFIRMED on
+                            // the wire, not merely transmitted
+    }
+    sl->config_step++;
+    sl->config_fails = 0;
 }
 
 

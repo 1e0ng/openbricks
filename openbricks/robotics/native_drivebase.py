@@ -262,12 +262,27 @@ class _SerialNativeEngine:
         stats = getattr(self._sb, "servo_stats", None)
         if stats is None:
             return                  # bus surface without health data
+        wstats = getattr(self._sb, "servo_write_stats", None)
         deadline = time.ticks_ms() + self._LIVE_WHEEL_TIMEOUT_MS
         pending = [self._slot_l, self._slot_r]
         while pending:
             pending = [s for s in pending if stats(s)[0] == 0]
             if not pending:
                 return
+            if wstats is not None:
+                for slot in pending:
+                    wfailed, latched = wstats(slot)
+                    if latched:
+                        # Configuration gave up: the servo never ACKed
+                        # its wheel-mode setup. Reads never start for
+                        # an unconfigured slot, so waiting out the
+                        # timeout below would misreport this as a
+                        # never-polled pump fault. Fail fast, name the
+                        # wheel, count the losses.
+                        raise self._dead_wheel_error(
+                            slot,
+                            "motor never ACKed its configuration "
+                            "(%d writes unacknowledged)" % wfailed)
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
                 slot = pending[0]
                 # Distinguish "asked and got silence" from "never

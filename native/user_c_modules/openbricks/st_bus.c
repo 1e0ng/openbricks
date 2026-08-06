@@ -108,6 +108,13 @@ static ob_sservo_t sservo;
 static bool sservo_inited;
 static uint8_t tick_txn;        // pump-started transaction in flight
 static uint8_t tick_txn_is_read;
+static uint8_t tick_txn_is_swrite;  // single-servo write (config) —
+                                    // its result must reach
+                                    // ob_sservo_write_result, and ONLY
+                                    // its result: routing a sync's
+                                    // completion there would
+                                    // misattribute it to whatever
+                                    // write_in_flight last held
 
 static ob_sservo_t *sservo_get(void) {
     if (!sservo_inited) {
@@ -203,10 +210,17 @@ static void st_db_tick_locked(void) {
     ob_sservo_t *sv = sservo_get();
     // Silent-wheel guard, BEFORE the control law: a frozen odometry
     // reading would otherwise wind that wheel's command to the rail.
-    if (sv->slots[st_db_slot_l].stale >= ST_DB_STALE_FAULT) {
+    // A config_failed wheel is the attach-time flavour of the same
+    // death: it never gets feedback reads AT ALL (the planner skips
+    // unconfigured slots), so its stale counter would sit at 0
+    // forever — fault it immediately, don't wait for a climb that
+    // cannot happen.
+    if (sv->slots[st_db_slot_l].stale >= ST_DB_STALE_FAULT
+        || sv->slots[st_db_slot_l].config_failed) {
         st_db_fault |= ST_DB_FAULT_LEFT;
     }
-    if (sv->slots[st_db_slot_r].stale >= ST_DB_STALE_FAULT) {
+    if (sv->slots[st_db_slot_r].stale >= ST_DB_STALE_FAULT
+        || sv->slots[st_db_slot_r].config_failed) {
         st_db_fault |= ST_DB_FAULT_RIGHT;
     }
     if (st_db_fault) {
@@ -267,16 +281,20 @@ static void servo_pump_locked(ob_bus_t *b) {
     ob_bus_poll(b);
     if (tick_txn
         && (b->state == OB_BUS_DONE || b->state == OB_BUS_TIMEOUT
-            || b->state == OB_BUS_BAD_REPLY)) {
+            || b->state == OB_BUS_BAD_REPLY
+            || b->state == OB_BUS_SERVO_ERR)) {
         uint8_t payload[OB_BUS_MAX_READ];
         uint8_t plen = 0;
         ob_bus_state_t st = ob_bus_take_result(b, payload, &plen);
         if (tick_txn_is_read) {
             ob_sservo_read_result(sservo_get(), st == OB_BUS_DONE,
                                   payload, plen);
+        } else if (tick_txn_is_swrite) {
+            ob_sservo_write_result(sservo_get(), st == OB_BUS_DONE);
         }
         tick_txn = 0;
         tick_txn_is_read = 0;
+        tick_txn_is_swrite = 0;
     }
     if (b->state != OB_BUS_IDLE) {
         return;
@@ -310,6 +328,7 @@ static void servo_pump_locked(ob_bus_t *b) {
     if (started) {
         tick_txn = 1;
         tick_txn_is_read = (op.kind == OB_SOP_READ_POS);
+        tick_txn_is_swrite = (op.kind == OB_SOP_WRITE);
         ob_sservo_op_started(sservo_get(), &op);
     }
 }
@@ -360,6 +379,10 @@ void ob_st_bus_estop_from_tick(void) {
         b->state = OB_BUS_IDLE;
         tick_txn = 0;
         tick_txn_is_read = 0;
+        tick_txn_is_swrite = 0;
+        // The abandoned transaction's slot must not soak up the NEXT
+        // single-write's result.
+        sservo_get()->write_in_flight = -1;
     }
     uint8_t off = 0;
     if (ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1) == 0) {
@@ -806,6 +829,29 @@ static mp_obj_t sb_servo_stats(mp_obj_t self_in, mp_obj_t slot_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_stats_obj, sb_servo_stats);
 
+static mp_obj_t sb_servo_write_stats(mp_obj_t self_in, mp_obj_t slot_in) {
+    // The write-side counterpart of servo_stats: (writes_failed,
+    // config_failed). A separate binding rather than a wider tuple so
+    // existing servo_stats unpackers keep working.
+    (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
+    bus_take();
+    ob_sservo_t *sv = sservo_get();
+    uint32_t failed = 0, latched = 0;
+    if (slot >= 0 && slot < OB_SSERVO_SLOTS) {
+        failed  = sv->slots[slot].writes_failed;
+        latched = sv->slots[slot].config_failed;
+    }
+    bus_release();
+    mp_obj_t t[2] = {
+        mp_obj_new_int_from_uint(failed),
+        mp_obj_new_int_from_uint(latched),
+    };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_write_stats_obj,
+                                 sb_servo_write_stats);
+
 static mp_obj_t sb_servo_pump(size_t n_args, const mp_obj_t *args) {
     // One pump iteration — the hard tick's exact code path, callable
     // from Python. On firmware with the tick running this is a
@@ -1158,6 +1204,7 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     ob_sservo_init(sservo_get());
     tick_txn = 0;
     tick_txn_is_read = 0;
+    tick_txn_is_swrite = 0;
     // ABANDON any transaction the previous program left in flight.
     //
     // The hard tick pumps right up to the instant a program ends, so
@@ -1222,6 +1269,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_counts),     MP_ROM_PTR(&sb_servo_counts_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_feedback),   MP_ROM_PTR(&sb_servo_feedback_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_stats),      MP_ROM_PTR(&sb_servo_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_write_stats), MP_ROM_PTR(&sb_servo_write_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_pump),       MP_ROM_PTR(&sb_servo_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_encode),     MP_ROM_PTR(&sb_servo_encode_obj) },
     { MP_ROM_QSTR(MP_QSTR_torque_off_all),   MP_ROM_PTR(&sb_torque_off_all_obj) },
@@ -1252,6 +1300,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_DONE),        MP_ROM_INT(OB_BUS_DONE) },
     { MP_ROM_QSTR(MP_QSTR_TIMEOUT),     MP_ROM_INT(OB_BUS_TIMEOUT) },
     { MP_ROM_QSTR(MP_QSTR_BAD_REPLY),   MP_ROM_INT(OB_BUS_BAD_REPLY) },
+    { MP_ROM_QSTR(MP_QSTR_SERVO_ERR),   MP_ROM_INT(OB_BUS_SERVO_ERR) },
 };
 static MP_DEFINE_CONST_DICT(st_bus_locals_dict, st_bus_locals_table);
 

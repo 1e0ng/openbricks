@@ -47,6 +47,15 @@
 // bus, instead of the half they get under a flat round-robin.
 #define OB_SSERVO_COLD_EVERY 8
 
+// How many times a lost/refused config write is retried before the
+// slot is latched config_failed and stops issuing ops. Transient
+// status loss on the half-duplex line costs one retry; a servo that
+// fails this many CONSECUTIVE writes is absent or broken, and letting
+// it retry forever would hog the bus (config outranks speed syncs and
+// feedback reads) and starve every healthy slot behind it. Python
+// surfaces the latch through servo_write_stats.
+#define OB_SSERVO_CONFIG_TRIES 8
+
 // Feedback read width: present-position (0x38), present-speed
 // (0x3A) and present-load (0x3C) are CONTIGUOUS, so one 6-byte read
 // returns all three for ~the wire cost of the old 2-byte position
@@ -109,6 +118,11 @@ typedef struct {
     uint32_t reads_ok;
     uint32_t reads_failed;  // timeouts/bad replies on feedback
     uint32_t stale;         // consecutive failures (0 after success)
+    // Write-side accounting — the read counters' counterpart, so a
+    // lost command is as visible as a lost reply.
+    uint32_t writes_failed; // config writes that timed out / errored
+    uint8_t  config_fails;  // consecutive failures of the CURRENT step
+    uint8_t  config_failed; // latched: gave up after CONFIG_TRIES
     // Poll priority. A slot that is DRIVING needs its odometry now;
     // a parked one does not, and polling both alike splits the bus
     // evenly — which halved the drivebase's feedback rate the moment
@@ -123,6 +137,9 @@ typedef struct {
                             // cold slot's turn never perturbs the
                             // rotation between the driving ones
     int      read_in_flight; // slot whose POS read is on the bus, or -1
+    int      write_in_flight; // slot whose config WRITE is on the bus,
+                              // or -1 — its step advances only when
+                              // the verified ACK comes back
     // Cold slots still get an occasional turn: skipping them
     // entirely would let angle()/speed() drift arbitrarily stale
     // while still reporting themselves fresh.
@@ -168,9 +185,18 @@ int ob_sservo_pick_read(ob_sservo_t *s, int want_hot);
 void ob_sservo_read_result(ob_sservo_t *s, int ok,
                            const uint8_t *payload, uint8_t len);
 
+// Result routing for single-servo WRITES (the config sequence). ok=1
+// (verified ACK) advances the slot's config_step; ok=0 counts the
+// failure and retries, latching config_failed after
+// OB_SSERVO_CONFIG_TRIES consecutive losses. No-op when no write is
+// in flight (sync-writes are broadcast: no reply by protocol).
+void ob_sservo_write_result(ob_sservo_t *s, int ok);
+
 // Op-issued bookkeeping: the caller reports which op it actually
-// started (planner state like config_step / dirty flags advance HERE,
-// not in next_op, so a refused bus start retries the same op).
+// started (planner state like dirty flags advance HERE, not in
+// next_op, so a refused bus start retries the same op — and
+// config_step advances even later, at write_result, so a LOST config
+// write retries too).
 void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op);
 
 // Signed unwrapped position in encoder counts.

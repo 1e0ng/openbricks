@@ -3,6 +3,30 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.64.0 — the C bus verifies every single-servo write ACK
+
+Firmware-side fix; the host package rides the lockstep version and
+its sim shim gains the matching `servo_write_stats` surface.
+
+The native bus collected each write's 6-byte status reply but, when
+it never arrived, counted the write OK — justified by a comment
+claiming the Python driver "discards the status without caring",
+which has been false since 1.56.0. A lost config write could mark a
+servo "configured" while it was still in position mode, silently
+receiving speed sync-writes. The servo's error flags (overload,
+over-heat, EEPROM lock) were never examined at all.
+
+Now: a status that never comes is a TIMEOUT; a status carrying error
+flags fails the write (`SERVO_ERR`); a wrong-sender or corrupt
+status was already refused. Config steps advance only on a verified
+ACK — a lost write reissues the same register, and a servo that
+fails 8 in a row is latched `config_failed` so its retries stop
+hogging the bus. The latch feeds the drivebase fault path (an
+unplugged wheel faults immediately — its stale counter can never
+climb because unconfigured slots are never polled) and construction
+errors now name the loss: "N configuration writes went
+unacknowledged", instead of misblaming the pump.
+
 ## 1.63.0 — `openbricks docs` shows the whole manual, offline
 
 The CLI shipped the nine hand-written guides and re-rendered them

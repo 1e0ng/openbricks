@@ -190,10 +190,15 @@ class TurnTests(_Base):
 
 
 class _DeadRightWheel(_PerfectWheels):
-    """Servo id 1 (the right wheel) never answers — unplugged, wrong
-    bus id, or dead. The left wheel is healthy throughout."""
+    """Servo id 1 (the right wheel) never answers a READ — the alive-
+    but-not-reporting motor (broken feedback line) whose frozen
+    odometry the runaway guard exists for. Its writes still ACK, so
+    it configures normally and the evidence is a CLIMBING stale
+    counter. The left wheel is healthy throughout. For the wheel that
+    answers nothing at all, see _UnpluggedRightWheel."""
 
     DEAD_ID = 1
+    ANSWERS_WRITES = True
 
     def pump(self):
         self.now += 1
@@ -209,8 +214,10 @@ class _DeadRightWheel(_PerfectWheels):
             pid, ln, instr = tx[i + 2], tx[i + 3], tx[i + 4]
             pkt = tx[i:i + 4 + ln]
             if pid == self.DEAD_ID:
+                if instr == 0x03 and self.ANSWERS_WRITES:
+                    sb.feed_rx(_reply(pid, 0))   # command line fine
                 i += 4 + ln
-                continue                       # silence
+                continue                       # reads: silence
             if instr == 0x02:
                 self.reads += 1
                 raw = int(self.pos[pid]) & 0x0FFF
@@ -339,6 +346,55 @@ class DeadWheelTests(_Base):
         self.assertEqual(sb.db_fault(), 0)    # cleared...
         self.w.advance(3000)
         self.assertEqual(sb.db_fault(), 0x02)  # ...and re-detected
+
+
+class _UnpluggedRightWheel(_DeadRightWheel):
+    """Total silence from the first packet — unplugged, no power, or
+    wrong bus id. Unlike the broken-feedback-line case above, the
+    config writes go unACKed too, so the slot never configures, is
+    never polled, and its stale counter CANNOT climb: the evidence
+    lives in the write counters and the config_failed latch."""
+
+    ANSWERS_WRITES = False
+
+
+class UnpluggedWheelTests(_Base):
+
+    def setUp(self):
+        if sb is None:
+            raise unittest.SkipTest("st_bus is firmware/unix-MP only")
+        sb.test_reset()
+        self.w = _UnpluggedRightWheel()
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.w.advance(200)                    # config retries + latch
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+
+    def test_unacked_config_is_visible_in_the_write_stats(self):
+        wfailed, latched = sb.servo_write_stats(1)
+        self.assertEqual(latched, 1)
+        self.assertTrue(wfailed >= 8, wfailed)
+        self.assertEqual(sb.servo_write_stats(0), (0, 0))   # left clean
+        self.assertTrue(sb.servo_stats(0)[0] > 0)   # left reads flow
+        self.assertEqual(sb.servo_stats(1)[0], 0)   # right never polled
+
+    def test_the_dead_slot_does_not_hog_the_healthy_ones_bus(self):
+        # Config outranks reads in the planner: without the latch the
+        # dead wheel's endless retries would starve the left wheel's
+        # odometry behind a write every few polls.
+        before = sb.servo_stats(0)[0]
+        self.w.advance(400)
+        self.assertTrue(sb.servo_stats(0)[0] - before > 50,
+                        (before, sb.servo_stats(0)))
+
+    def test_move_faults_immediately_not_never(self):
+        # The stale counter cannot climb for a slot that is never
+        # polled — before the config_failed latch fed the fault, this
+        # move would have driven the healthy wheel and never faulted.
+        sb.db_straight(200.0, 150.0)
+        self.w.advance(100)
+        self.assertEqual(sb.db_fault(), 0x02)
+        self.assertEqual(self.w.spd[2], 0)     # healthy wheel held
 
 
 class StopAndGyroTests(_Base):
