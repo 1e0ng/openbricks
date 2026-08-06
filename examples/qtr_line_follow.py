@@ -14,10 +14,16 @@ darkens most of the array at once — ``dark_count`` >= the threshold.
 A branch stub darkens only one end and barely moves the centroid, so
 it is steered through, not flinched at.
 
-Hardware (bench layout): QTRX-HD-15A with 9 channels wired to ADC1
-GPIO 1..9 left-to-right (CTRL tied high), wheels = two ST-3032 on
-UART1 tx=14 rx=6 (left id 2 inverted, right id 1), 88 mm wheels on a
-136 mm track.
+Hardware (bench layout): QTRX-HD-15A — line cluster = channels
+15..9 (adjacent, 4 mm pitch) on ADC1 GPIO 1,2,3,4,5,7,8 left-to-
+right (GPIO 6 is the servo-bus RX and stays free), branch flag =
+channel 1 (far right) on GPIO 9, CTRL tied high. Wheels = two
+ST-3032 on UART1 tx=14 rx=6 (left id 2 inverted, right id 1), 88 mm
+wheels on a 136 mm track.
+
+The branch flag rides OUTSIDE the steering centroid: a marker under
+it must not yank the position. Here it only prints; hang your turn
+decision off it.
 
 Calibrate on every run: the first 3 seconds sweep the array across
 the line (the program spins the chassis in place for you).
@@ -25,7 +31,7 @@ the line (the program spins the chassis in place for you).
 
 import time
 
-from openbricks.drivers.qtr import QTRArray
+from openbricks.drivers.qtr import QTRArray, QTRChannel
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
 
@@ -45,8 +51,10 @@ KD = 0.6
 MAX_DPS = 800          # never reverse; see line_follow.py's note
 
 # dark_count at or above this = full-width bar = intersection: stop.
-# 6 of 9 elements cannot be a branch stub (a stub darkens one end).
-INTERSECTION_COUNT = 6
+# With a ~20 mm line on a 24 mm window (7 adjacent 4 mm channels),
+# NORMAL following already darkens ~5 elements — only ALL of them
+# dark discriminates a bar from the line itself.
+INTERSECTION_COUNT = 7
 
 # When the line escapes the array entirely, steer hard back toward
 # the side it was last seen (mm, fed to the same PD as a synthetic
@@ -90,10 +98,12 @@ def _pd_wheel_speeds(position_mm, last_side, dark_count, state, dt_s):
 # --- end control law ---
 
 
-QTR_PINS = (1, 2, 3, 4, 5, 6, 7, 8, 9)   # left -> right as mounted
-PITCH_MM = 8.0
+QTR_PINS = (1, 2, 3, 4, 5, 7, 8)   # channels 15..9, left -> right
+PITCH_MM = 4.0
+BRANCH_PIN = 9                     # channel 1, far right
 
 qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
+branch = QTRChannel(pin=BRANCH_PIN)
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
                          invert=True)
@@ -105,6 +115,7 @@ db = DriveBase(left_motor, right_motor,
 print("calibrating: spinning across the line for 3 s")
 db.move_wheels(120, -120)
 qtr.calibrate(duration_ms=3000)
+branch.calibrate(duration_ms=3000)
 db.stop()
 
 print("following. Intersection stops the run.")
@@ -119,5 +130,9 @@ while True:
         db.stop(then="brake")
         print("intersection - stopped")
         break
+    if branch.dark():
+        # Marker under the flag channel. Deliberately NOT steering
+        # on it — put your route decision here.
+        print("branch marker")
     db.move_wheels(speeds[0], speeds[1])
     time.sleep_ms(10)

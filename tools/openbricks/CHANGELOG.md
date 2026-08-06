@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.1 — QTR examples match the real bench wiring; QTRChannel
+
+The bench array is wired as TWO instruments, and the driver now
+models that: QTRX channels 15..9 (adjacent, 4 mm pitch) are the
+line cluster on ADC1 GPIO 1,2,3,4,5,7,8 (GPIO 6 belongs to the
+servo bus), and channel 1 — far right — is a branch/marker flag on
+GPIO 9. New `QTRChannel`: one element with the array's
+calibrate/read contract plus `value()`/`dark()`, kept OUT of the
+steering centroid on purpose — a marker under a flag element must
+not yank the position. `position()` on a single element raises and
+points there.
+
+With a ~20 mm line on the 24 mm 7-channel window, normal following
+already darkens ~5 elements, so the follower's intersection
+threshold is ALL 7 — and the probe now prints the branch flag next
+to the bars.
+
 ## 1.66.0 — QTR/QTRX reflectance-array driver
 
 New `openbricks.drivers.qtr.QTRArray` for Pololu QTR/QTRX analog
