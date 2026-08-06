@@ -199,6 +199,7 @@ class _DeadRightWheel(_PerfectWheels):
 
     DEAD_ID = 1
     ANSWERS_WRITES = True
+    READ_GRACE = 0          # 0 = reads silent from the first packet
 
     def pump(self):
         self.now += 1
@@ -216,6 +217,18 @@ class _DeadRightWheel(_PerfectWheels):
             if pid == self.DEAD_ID:
                 if instr == 0x03 and self.ANSWERS_WRITES:
                     sb.feed_rx(_reply(pid, 0))   # command line fine
+                elif instr == 0x02:
+                    # READ_GRACE > 0 models a wheel that dies LATER:
+                    # the first N reads answer (odometry goes live),
+                    # then the feedback line breaks mid-run.
+                    self.read_grace = getattr(self, "read_grace",
+                                              self.READ_GRACE)
+                    if self.read_grace > 0:
+                        self.read_grace -= 1
+                        raw = int(self.pos[pid]) & 0x0FFF
+                        sb.feed_rx(_reply(pid, 0, bytes([
+                            raw & 0xFF, (raw >> 8) & 0xFF,
+                            0, 0, 0, 0])))
                 i += 4 + ln
                 continue                       # reads: silence
             if instr == 0x02:
@@ -346,6 +359,49 @@ class DeadWheelTests(_Base):
         self.assertEqual(sb.db_fault(), 0)    # cleared...
         self.w.advance(3000)
         self.assertEqual(sb.db_fault(), 0x02)  # ...and re-detected
+
+
+class _DiesMidMoveRightWheel(_DeadRightWheel):
+    """Answers the first N reads (odometry goes live, moves can arm),
+    then the feedback line breaks — the failure striking MID-move."""
+
+    READ_GRACE = 40
+
+
+class MidMoveDeathTests(_Base):
+
+    def setUp(self):
+        if sb is None:
+            raise unittest.SkipTest("st_bus is firmware/unix-MP only")
+        sb.test_reset()
+        self.w = _DiesMidMoveRightWheel()
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.w.advance(30)                     # config + first reads
+
+    def test_per_slot_move_is_halted_in_c_when_feedback_dies(self):
+        # The drivebase got its stale latch in 1.55.0; per-slot moves
+        # relied on Python's ~1 s stall detector while ff + kp*err
+        # ramped the command on frozen odometry. The tick now halts
+        # the move at the same ~200 ms stale threshold the db path
+        # considered mandatory, and zeroes the wheel.
+        self.assertTrue(sb.servo_move(1, 40960.0, 2000.0, 8000.0))
+        self.w.advance(30)
+        self.assertTrue(abs(self.w.spd[1]) > 0)   # move is driving
+        self.w.advance(2000)                      # grace exhausted
+        self.assertEqual(self.w.spd[1], 0)        # halted, not railed
+        self.assertFalse(sb.servo_move_done(1))   # NOT "arrived"
+
+    def test_program_boundary_clears_a_latched_fault(self):
+        # reset_runtime is where the previous run's diagnosis has
+        # been read: leaving the latch made the NEXT program's first
+        # db_fault() report a wheel fault belonging to the last one.
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+        sb.db_straight(200.0, 150.0)
+        self.w.advance(3000)                      # feedback dies, faults
+        self.assertEqual(sb.db_fault(), 0x02)
+        sb.reset_runtime()
+        self.assertEqual(sb.db_fault(), 0)
 
 
 class _UnpluggedRightWheel(_DeadRightWheel):
