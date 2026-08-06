@@ -58,13 +58,17 @@ MAX_DPS = 300          # never reverse. Cap scaled with the gentle
                        # cruise: it bounds steering AND the recovery
                        # pivot, so nothing spins fast on a slow run.
 
-# Intersection = dark_count at or above INTERSECTION_COUNT for
-# INTERSECTION_TICKS CONSECUTIVE polls. The count alone is not
-# enough: bench 2026-08-07 recorded all 7 elements crossing the
-# threshold for a single tick during a plain line crossing
-# ([:*#%%#-] dark=7) — a real stop bar stays under the array for
-# many polls (~20 mm of travel), a crossing transient for one or
-# two.
+# An INTERSECTION is branches on BOTH sides at once: the branch
+# flag dark (line under the flag's side) AND the array's far-edge
+# element dark (line extending past the opposite end) — or the
+# whole array dark (a perpendicular bar, which is also both-sides
+# and catches bars the flag straddles). Either way the condition
+# must hold for INTERSECTION_TICKS CONSECUTIVE polls: bench
+# 2026-08-07 recorded all 7 elements crossing the threshold for a
+# single tick during a plain line crossing ([:*#%%#-] dark=7) — a
+# real intersection stays under the array for many polls (~20 mm of
+# travel), a transient for one or two. A branch on ONE side never
+# stops: it routes through the fork policy below.
 INTERSECTION_COUNT = 7
 INTERSECTION_TICKS = 3
 
@@ -91,7 +95,8 @@ def _clamp(dps):
 
 
 def _pd_wheel_speeds(position_mm, fork_mm, peak, branch_dark,
-                     last_side, dark_count, state, dt_s):
+                     far_edge_dark, last_side, dark_count, state,
+                     dt_s):
     """One control tick: ``(decision, state)``.
 
     ``decision`` is ``None`` (intersection: stop) or
@@ -104,12 +109,15 @@ def _pd_wheel_speeds(position_mm, fork_mm, peak, branch_dark,
     which end (see BRANCH_SIDE), the law only knows that during a
     branch the global centroid points between the two lines and the
     chosen cluster is the real one. Both + = right of centre,
-    ``None`` when nothing is dark. ``peak`` is the brightest
-    calibrated reading — a weak peak is off-mat mush and falls to
-    the ``last_side`` (+1/-1) recovery steer.
+    ``None`` when nothing is dark. ``far_edge_dark`` is the array
+    element FARTHEST from the flag: dark together with the flag =
+    branches on both sides = an intersection. ``peak`` is the
+    brightest calibrated reading — a weak peak is off-mat mush and
+    falls to the ``last_side`` (+1/-1) recovery steer.
     """
     prev_error, streak = state
-    if dark_count >= INTERSECTION_COUNT:
+    if (dark_count >= INTERSECTION_COUNT
+            or (branch_dark and far_edge_dark)):
         streak += 1
         if streak >= INTERSECTION_TICKS:
             return None, (prev_error, streak)
@@ -172,12 +180,15 @@ while True:
     branch_dark = branch.dark()
     if BRANCH_SIDE == "right":
         fork_pos = qtr.leftmost_position(readings)
+        far_edge_dark = readings[0] >= 300     # leftmost element
     else:
         fork_pos = qtr.rightmost_position(readings)
+        far_edge_dark = readings[-1] >= 300    # rightmost element
     speeds, state = _pd_wheel_speeds(qtr.position(readings),
                                      fork_pos,
                                      max(readings),
                                      branch_dark,
+                                     far_edge_dark,
                                      qtr.last_side(),
                                      qtr.dark_count(readings),
                                      state, 0.010)

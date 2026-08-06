@@ -10,8 +10,11 @@ centroid lands between them — steering into the gap. New
 `QTRArray.leftmost_position()` / `rightmost_position()`: each
 contiguous cluster's own centre, computed every tick alongside the
 global centroid so switching is jump-free (rightmost recorded now
-for a future right-fork policy). The follower steers on the fork cluster whenever the branch flag
-is dark — which SIDE is one config constant (`BRANCH_SIDE`): the
+for a future right-fork policy). An INTERSECTION is branches on both sides at once — the flag dark
+AND the array's far-edge element dark (or the whole array dark, a
+perpendicular bar) held for the debounce — and stops the run; a
+branch on one side never stops. The follower steers on the fork
+cluster whenever the branch flag is dark — which SIDE is one config constant (`BRANCH_SIDE`): the
 flag sits over the branch line, so the fork to follow is the
 cluster on the opposite side. Flag on the right end (bench) takes
 the leftmost cluster; rewire the flag to the left end and the same
