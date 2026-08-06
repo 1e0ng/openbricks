@@ -71,11 +71,12 @@ jobs:
                     + ", ".join(sorted(missing))
                     + " — run scripts/build-offline-docs.sh and commit it")
               sys.exit(1)
+          # Git-tracked files only — identical in every clean
+          # checkout, immune to local build output (a bare find in a
+          # dev tree swept up docs/_build and never matched CI).
           want = subprocess.run(
-              "cd docs && find . -type f \\( -name '*.md' -o -name "
-              "'*.py' -o -name '*.css' -o -name '*.txt' \\) "
-              "| LC_ALL=C sort | xargs shasum -a 256 "
-              "| shasum -a 256 | cut -d' ' -f1",
+              "git ls-files docs | LC_ALL=C sort "
+              "| xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1",
               shell=True, capture_output=True, text=True).stdout.strip()
           have = zf.read(".source-hash").decode().strip() \
               if ".source-hash" in zf.namelist() else "(absent)"
