@@ -3,6 +3,7 @@
 
 import tests._fakes  # noqa: F401
 
+import time
 import unittest
 
 from openbricks.drivers import st3215 as st3215_mod
@@ -814,18 +815,99 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         m.run_angle(deg_per_s=200, target_angle=0)
         self.assertEqual(len(m._bus._uart._tx_log), baseline)
 
-    def test_run_angle_silent_bus_writes_no_step(self):
+    def test_run_angle_silent_bus_raises_and_writes_no_step(self):
         # If the bus-alive probe read fails (servo silent) run_angle
-        # bails before commanding a move it can't track — no step write,
-        # no end-state dispatch (torque stays as it was).
+        # bails before commanding a move it can't track — no step
+        # write, no end-state dispatch (torque stays as it was) — and
+        # it RAISES naming the servo. The old quiet return made an
+        # unplugged servo look exactly like a completed move.
         m = ST3215Motor(servo_id=15, steps_per_dps=10.0, max_dps=1000.0)
         m._read_step_remaining = lambda: None
         baseline = len(m._bus._uart._tx_log)
-        m.run_angle(deg_per_s=200, target_angle=90)
+        try:
+            m.run_angle(deg_per_s=200, target_angle=90)
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("servo id 15" in msg, msg)
+        self.assertTrue("wiring" in msg, msg)
         steps = _writes_to(m._bus._uart._tx_log[baseline:], _REG_GOAL_POSITION)
         self.assertEqual(steps, [])
         torque_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_TORQUE)
         self.assertEqual(torque_writes, [])
+
+    def test_run_angle_step_that_never_parks_reports_not_succeeds(self):
+        # The step register stops counting down and the budget
+        # expires. This used to fall through and return True — a
+        # stalled motor reporting a fully successful move. Now it
+        # reports loudly and returns False (raise_on_stall opts into
+        # fatal, tested below).
+        m = ST3215Motor(servo_id=16, steps_per_dps=10.0, max_dps=1000.0)
+        self._patch_remaining(m, [1024, 512, 512])   # frozen partway
+        seen = []
+        orig = ST3215Motor._report_stall
+        ST3215Motor._report_stall = staticmethod(seen.append)
+        try:
+            result = m.run_angle(deg_per_s=1000, target_angle=90)
+        finally:
+            ST3215Motor._report_stall = orig
+        self.assertFalse(result, "a stall must return False, not True")
+        self.assertTrue(seen and "gave up" in seen[0], seen)
+        self.assertTrue("servo id 16" in seen[0], seen[0])
+
+    def test_run_angle_stall_raises_when_asked(self):
+        m = ST3215Motor(servo_id=17, steps_per_dps=10.0, max_dps=1000.0,
+                        raise_on_stall=True)
+        self._patch_remaining(m, [1024, 512, 512])
+        try:
+            m.run_angle(deg_per_s=1000, target_angle=90)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("gave up" in str(e), str(e))
+
+    def test_done_polling_detects_a_frozen_step(self):
+        # THE documented wait=False pattern: while not m.done(): ...
+        # A jammed motor froze the register and done() returned False
+        # forever. The poller now runs the same idle rule as the
+        # blocking path.
+        m = ST3215Motor(servo_id=18, steps_per_dps=10.0, max_dps=1000.0)
+        m._stall_idle_ms = 30
+        self._patch_remaining(m, [1024, 512, 512])   # started, frozen
+        m.run_angle(deg_per_s=1000, target_angle=90, wait=False)
+        seen = []
+        orig = ST3215Motor._report_stall
+        ST3215Motor._report_stall = staticmethod(seen.append)
+        try:
+            for _ in range(200):
+                if m.done():
+                    break
+                time.sleep_ms(5)
+            else:
+                self.fail("done() never detected the frozen step")
+        finally:
+            ST3215Motor._report_stall = orig
+        self.assertTrue(seen and "stopped counting down" in seen[0],
+                        seen)
+        self.assertTrue(m.done())        # pending cleared
+
+    def test_done_polling_raises_on_a_bus_that_goes_silent(self):
+        # Persistent silence mid-move is a wiring fault, not a stall:
+        # polling it forever hides the loss.
+        m = ST3215Motor(servo_id=19, steps_per_dps=10.0, max_dps=1000.0)
+        m._stall_idle_ms = 30
+        self._patch_remaining(m, [1024, 512])
+        m.run_angle(deg_per_s=1000, target_angle=90, wait=False)
+        m._read_step_remaining = lambda: None        # bus dies
+        try:
+            for _ in range(200):
+                if m.done():
+                    self.fail("silent bus must raise, not complete")
+                time.sleep_ms(5)
+            self.fail("done() never raised on the silent bus")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("SILENT" in msg, msg)
+        self.assertTrue("servo id 19" in msg, msg)
 
     # --- wait=False / done() ----------------------------------------------
 

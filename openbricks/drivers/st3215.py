@@ -114,6 +114,15 @@ _DEFAULT_STEPS_PER_DPS = _COUNTS_PER_REV / 360.0   # = 11.378
 # on a stationary shaft.
 _STALL_PROGRESS_COUNTS = 4
 
+# Consecutive failed feedback reads that mean the BUS is dead, not
+# the shaft: matches the C drivebase's ST_DB_STALE_FAULT (~200 ms of
+# silence at the hard-tick polling rate). A dead bus freezes counts
+# exactly like a jam, so every stall path must check this FIRST —
+# "the shaft is jammed" advice for an unplugged servo sends the user
+# to the wrong part of the robot, and a wiring fault must raise, not
+# report-and-continue (only mechanical stalls are survivable).
+_DEAD_BUS_STALE = 20
+
 
 def _native_bus_owns(uart_id):
     """Has the native C bus taken this UART over?
@@ -1143,13 +1152,26 @@ class ST3215Motor(Motor):
                 "run_angle refused: wheel is owned by an in-flight "
                 "DriveBase move (stop it first), or slot odometry is "
                 "not live yet")
-        if not wait:
-            self._native_pending = then
-            return
         budget_ms = self._native_move_budget_ms(target_angle, capped,
                                                 accel)
         start_counts = self._native_sb.servo_counts(self._native_slot)
         t0 = time.ticks_ms()
+        if not wait:
+            # ``done()`` carries the same stall/dead-bus watch the
+            # blocking path runs below — without it, the documented
+            # ``while not m.done():`` polling loop span forever on a
+            # jammed or unplugged motor (1.62.0's detection covered
+            # only wait=True).
+            self._native_pending = {
+                "then":         then,
+                "t0":           t0,
+                "budget_ms":    budget_ms,
+                "start_counts": start_counts,
+                "target":       float(target_angle),
+                "last_counts":  start_counts,
+                "last_move_ms": t0,
+            }
+            return
         # Give up when the shaft STOPS MOVING, not when a fixed budget
         # expires. A move fighting a heavy load is still a move and
         # must not be cut short; a move that has not advanced a count
@@ -1159,6 +1181,11 @@ class ST3215Motor(Motor):
         last_move_ms = t0
         while not self._native_sb.servo_move_done(self._native_slot):
             estop.check()
+            # Bus death first, every pass: it freezes counts exactly
+            # like a jam, and waiting out the stall-idle window to
+            # then call it "jammed" is the wrong fault named a second
+            # too late. This raises within ~200 ms of the silence.
+            self._native_check_bus_alive()
             now = time.ticks_ms()
             counts = self._native_sb.servo_counts(self._native_slot)
             if abs(counts - last_counts) >= _STALL_PROGRESS_COUNTS:
@@ -1173,17 +1200,33 @@ class ST3215Motor(Motor):
                     idle_ms if idle_ms > self._stall_idle_ms else None)
                 if self._raise_on_stall:
                     raise RuntimeError(report)
-                # A stalled task motor should not abort a mission
-                # run: report it and let the caller decide. Loud, not
+                # A MECHANICAL stall should not abort a mission run:
+                # report it and let the caller decide. Loud, not
                 # fatal — the console sees it, the run log keeps it,
-                # and the return value says it. This also matches the
-                # non-adopted path, which has always returned quietly
-                # when a step failed to park.
+                # and the return value says it. (Bus death is not
+                # survivable and raised above.)
                 self._report_stall(report)
                 return False
             time.sleep_ms(10)
         self._native_dispatch_then(then)
         return True
+
+    def _native_check_bus_alive(self):
+        """Raise when the slot's feedback has gone consecutively
+        silent — the unplugged/broken-wire fault whose frozen counts
+        would otherwise read as a mechanical jam."""
+        stats = getattr(self._native_sb, "servo_stats", None)
+        if stats is None:
+            return
+        ok_n, failed, stale = stats(self._native_slot)
+        if stale >= _DEAD_BUS_STALE:
+            raise OSError(
+                "servo id %s (native slot %d) went SILENT mid-move: "
+                "%d consecutive failed feedback reads (%d ok, %d "
+                "failed total). This is a bus/wiring/power fault, not "
+                "a stall — frozen odometry only LOOKS like a jam. "
+                "Check the servo's power and TX/RX wiring."
+                % (self._id, self._native_slot, stale, ok_n, failed))
 
     @staticmethod
     def _report_stall(report):
@@ -1317,9 +1360,34 @@ class ST3215Motor(Motor):
         if self._native_slot is not None:
             if self._native_pending is None:
                 return True
+            st = self._native_pending
             if not self._native_sb.servo_move_done(self._native_slot):
+                # The same stall/dead-bus watch the blocking path
+                # runs: without it, the documented polling loop hangs
+                # forever on a jammed or unplugged motor.
+                self._native_check_bus_alive()
+                now = time.ticks_ms()
+                counts = self._native_sb.servo_counts(self._native_slot)
+                if abs(counts - st["last_counts"]) >= \
+                        _STALL_PROGRESS_COUNTS:
+                    st["last_counts"] = counts
+                    st["last_move_ms"] = now
+                idle_ms = time.ticks_diff(now, st["last_move_ms"])
+                if idle_ms > self._stall_idle_ms or \
+                        time.ticks_diff(now, st["t0"]) > st["budget_ms"]:
+                    self._native_sb.servo_run(self._native_slot, 0)
+                    self._native_pending = None
+                    report = self._native_stall_report(
+                        st["budget_ms"], st["start_counts"],
+                        st["target"],
+                        idle_ms if idle_ms > self._stall_idle_ms
+                        else None)
+                    if self._raise_on_stall:
+                        raise RuntimeError(report)
+                    self._report_stall(report)
+                    return True     # move is over; wheel stopped
                 return False
-            then = self._native_pending
+            then = st["then"]
             self._native_pending = None
             self._native_dispatch_then(then)
             return True
@@ -1330,10 +1398,24 @@ class ST3215Motor(Motor):
     def _poll_pending(self):
         """One iteration of the wait=False state machine. See ``done``."""
         state = self._pending
+        now = time.ticks_ms()
         rem = self._read_step_remaining()
         if rem is None:
-            # Bus glitch — keep waiting, tolerate transient drops.
+            # A transient drop is tolerated; PERSISTENT silence is a
+            # dead bus, and polling it forever hides the fault.
+            if state["silent_since"] is None:
+                state["silent_since"] = now
+            elif time.ticks_diff(now, state["silent_since"]) > \
+                    self._stall_idle_ms:
+                self._pending = None
+                raise OSError(
+                    "servo id %s went SILENT mid-move: no reply to "
+                    "%d ms of step-register reads. This is a "
+                    "bus/wiring/power fault, not a stall. Check the "
+                    "servo's power and TX/RX wiring."
+                    % (self._id, self._stall_idle_ms))
             return False
+        state["silent_since"] = None
         tol = state["tol_counts"]
         if not state["started"]:
             # Guard against a stale ~0 read before the servo has loaded
@@ -1341,8 +1423,31 @@ class ST3215Motor(Motor):
             # remaining register confirms the move launched.
             if abs(rem) > tol:
                 state["started"] = True
+                state["last_rem"] = rem
+                state["last_move_ms"] = now
             return False
         if abs(rem) > tol:
+            if abs(rem - state["last_rem"]) >= _STALL_PROGRESS_COUNTS:
+                state["last_rem"] = rem
+                state["last_move_ms"] = now
+            elif time.ticks_diff(now, state["last_move_ms"]) > \
+                    self._stall_idle_ms:
+                # The register stopped counting down: a stall, per the
+                # same idle rule as the blocking paths. Report (or
+                # raise) and end the move instead of returning False
+                # forever.
+                self._pending = None
+                report = (
+                    "run_angle on servo id %s gave up — the step "
+                    "stopped counting down for %d ms: stalled under "
+                    "load, jammed, or in overload protection (clears "
+                    "when a new command is issued). %d counts of this "
+                    "step remain." % (self._id, self._stall_idle_ms,
+                                      rem))
+                if self._raise_on_stall:
+                    raise RuntimeError(report)
+                self._report_stall(report)
+                return True
             return False
         # Current step parked — bank the counts it actually travelled.
         self._advance_accum(state["first"] - rem)
@@ -1563,14 +1668,21 @@ class ST3215Motor(Motor):
         # New command supersedes any pending wait=False move.
         self._abandon_pending()
 
-        # Bail if the bus is silent rather than command a move we can't
-        # track. Probed BEFORE the mode/torque writes so a glitching
-        # servo is left exactly as it was — since motors coast at
-        # construction, enabling torque first and then bailing would
-        # leave a stiff servo with no move commanded. (The value read
-        # here is irrelevant; we only care that the servo answers.)
+        # A silent bus fails the move LOUDLY rather than commanding
+        # one we can't track. Probed BEFORE the mode/torque writes so
+        # a glitching servo is left exactly as it was — since motors
+        # coast at construction, enabling torque first and then
+        # bailing would leave a stiff servo with no move commanded.
+        # (The value read is irrelevant; only that the servo answers.
+        # Returning quietly here made an unplugged servo look like a
+        # completed move.)
         if self._read_step_remaining() is None:
-            return
+            raise OSError(
+                "servo id %s did not answer the pre-move probe — "
+                "run_angle cannot track a move it can't read back. "
+                "Check the servo's power and TX/RX wiring "
+                "(`openbricks servo-id --scan` lists the ids actually "
+                "answering)." % self._id)
 
         self._ensure_torque_on()
         self._ensure_step_limits()       # angle limits = 0 (once)
@@ -1585,17 +1697,46 @@ class ST3215Motor(Motor):
         remaining_counts = target_counts - first
 
         if not wait:
+            now = time.ticks_ms()
             self._pending = {
                 "first":            first,
                 "remaining_counts": remaining_counts,
                 "tol_counts":       tol_counts,
                 "then":             then,
                 "started":          False,
+                # Stall/dead-bus watch state (see _poll_pending) —
+                # without it the documented ``while not m.done():``
+                # loop polls a jammed or unplugged motor forever.
+                "last_rem":         first,
+                "last_move_ms":     now,
+                "silent_since":     None,
             }
             return
 
         while True:
-            self._advance_accum(self._await_step(first, speed_steps, tol_counts))
+            travelled, parked = self._await_step(first, speed_steps,
+                                                 tol_counts)
+            self._advance_accum(travelled)
+            if not parked:
+                # The step never parked within its budget. This used
+                # to fall through and return True — a stalled motor
+                # reporting a fully successful move. Same contract as
+                # the adopted path now: raise if asked, else report
+                # loudly and say False.
+                report = (
+                    "run_angle(%g deg) on servo id %s gave up — a "
+                    "step never parked within its time budget: "
+                    "stalled under load, jammed, or in overload "
+                    "protection (clears when a new command is "
+                    "issued). This step travelled %.1f deg of the "
+                    "%.1f commanded."
+                    % (float(target_angle), self._id,
+                       travelled * 360.0 / _COUNTS_PER_REV,
+                       first * 360.0 / _COUNTS_PER_REV))
+                if self._raise_on_stall:
+                    raise RuntimeError(report)
+                self._report_stall(report)
+                return False
             if remaining_counts == 0:
                 break
             # Issue the next ±7-turn step.
@@ -1611,8 +1752,10 @@ class ST3215Motor(Motor):
     def _await_step(self, step, speed_steps, tol_counts):
         """Block until the in-flight step parks (its remaining register
         counts down to within ``tol_counts`` of 0) or a time budget
-        expires. Returns the counts actually travelled (``step`` minus
-        the final remaining), for the shaft-angle accumulator.
+        expires. Returns ``(travelled_counts, parked)`` — the counts
+        actually covered (``step`` minus the final remaining) for the
+        shaft-angle accumulator, and whether the step really parked
+        (False = the budget expired on a stall; the caller reports).
 
         A ``started`` latch guards against a stale ~0 read at kickoff:
         we only watch for completion once the remaining register has
@@ -1626,6 +1769,7 @@ class ST3215Motor(Motor):
         deadline = time.ticks_ms() + est_ms * 3
         started = False
         last_rem = step
+        parked = False
         while time.ticks_diff(deadline, time.ticks_ms()) > 0:
             rem = self._read_step_remaining()
             if rem is not None:
@@ -1635,9 +1779,10 @@ class ST3215Motor(Motor):
                         started = True
                 elif abs(rem) <= tol_counts:
                     last_rem = rem
+                    parked = True
                     break
             time.sleep_ms(10)
-        return step - last_rem
+        return step - last_rem, parked
 
     # --- ST-3215-specific extras ------------------------------------------
 

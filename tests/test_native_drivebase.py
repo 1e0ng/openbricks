@@ -17,6 +17,7 @@ import tests._fakes  # noqa: F401
 
 import math
 import sys
+import time
 import unittest
 
 # CPython has no _openbricks_native at all (the C module is MP-only);
@@ -510,6 +511,63 @@ class AdoptionTests(_Base):
         self.assertTrue("never latched" in msg, msg)
         self.assertTrue("NOT a mechanical fault" in msg, msg)
 
+    def test_a_dead_bus_mid_move_raises_not_stall_reports(self):
+        # Bus death freezes counts exactly like a jam, and the stall
+        # reporter used to call it one — "the shaft is jammed" for an
+        # unplugged servo sends the user to the wrong part of the
+        # robot. A wiring fault is not survivable, so it raises even
+        # with the default raise_on_stall=False, naming the real
+        # fault.
+        db, left, _ = self._drivebase()
+        self.bus.done_after = 10_000
+        self.bus.dead_slots = (0,)
+        try:
+            left.run_angle(100, 90)
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("SILENT" in msg, msg)
+        self.assertTrue("wiring" in msg, msg)
+        self.assertTrue("jam" in msg, msg)     # names the trap it dodges
+
+    def test_wait_false_polling_detects_the_stall(self):
+        # THE documented pattern: while not m.done(): ... — 1.62.0's
+        # stall detection covered only wait=True, so this loop hung
+        # forever on a jammed motor.
+        from openbricks.drivers.st3215 import ST3215Motor
+        db, left, _ = self._drivebase()
+        self.bus.done_after = 10_000           # never arrives
+        left._stall_idle_ms = 30
+        seen = []
+        orig = ST3215Motor._report_stall
+        ST3215Motor._report_stall = staticmethod(seen.append)
+        try:
+            left.run_angle(100, 90, wait=False)
+            detected = False
+            for _ in range(200):
+                if left.done():
+                    detected = True
+                    break
+                time.sleep_ms(5)
+            self.assertTrue(detected,
+                            "done() never detected the stall")
+        finally:
+            ST3215Motor._report_stall = orig
+        self.assertTrue(seen and "gave up" in seen[0], seen)
+        self.assertIn(("servo_run", 0, 0), self.bus.calls)  # stopped
+        self.assertTrue(left.done())           # pending cleared
+
+    def test_wait_false_polling_raises_on_a_dead_bus(self):
+        db, left, _ = self._drivebase()
+        self.bus.done_after = 10_000
+        left.run_angle(100, 90, wait=False)
+        self.bus.dead_slots = (0,)             # bus dies mid-move
+        try:
+            left.done()
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("SILENT" in str(e), str(e))
+
     def test_raise_on_stall_restores_the_fatal_behaviour(self):
         # Opt-in for callers who would rather abort than continue.
         from openbricks.drivers.st3215 import ST3215
@@ -688,7 +746,10 @@ class AtomicStopTests(_Base):
         # the per-motor dispatch used to clear this as a side effect).
         db, left, _ = self._drivebase()
         left.run_angle(100, 90, wait=False)
-        self.assertEqual(left._native_pending, "coast")
+        # _native_pending is the watch dict since 1.65.0 (it carries
+        # the wait=False stall detection); "then" is the deferred
+        # end-state.
+        self.assertEqual(left._native_pending["then"], "coast")
         db.stop()
         self.assertIsNone(left._native_pending)
 
