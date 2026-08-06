@@ -149,7 +149,6 @@ jobs:
             tests.test_interfaces \
             tests.test_launcher \
             tests.test_native_drivebase \
-              tests.test_icm45686 \
             tests.test_icm45686 \
             tests.test_l298n \
             tests.test_tcs34725 \
@@ -631,13 +630,39 @@ jobs:
           path: release-out/
           merge-multiple: true
 
+      # A main push skips every test job ("already proven on the pull
+      # request") — but a commit pushed DIRECTLY to main was never
+      # proven anywhere, and the release gate above cannot tell:
+      # needs.test.result reads 'skipped' either way. That published
+      # an untested rolling build on 2026-08-06 (70afaae). So the
+      # rolling publish additionally requires the head commit to have
+      # arrived through a MERGED pull request. Tag pushes are
+      # unaffected — the full suite genuinely runs on tags and gates
+      # the versioned release the ordinary way.
+      - name: Check the commit came through a pull request (main)
+        if: github.ref == 'refs/heads/main'
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+                --jq '[.[] | select(.merged_at != null)] | length')
+          if [ "$n" -gt 0 ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::${{ github.sha }} reached main without a merged PR — no tests ever ran on it, so the rolling 'latest' release is NOT updated. Land changes through a PR to publish."
+          fi
+
       # Rolling ``latest`` pre-release for every push to main — the
       # GitHub-native way to expose the "head of main" firmware image
       # without us managing tags manually. Existing assets are replaced
       # on each run; the release itself is kept (just re-pointed to the
       # new commit).
       - name: Publish rolling latest (main)
-        if: github.ref == 'refs/heads/main'
+        if: >
+          github.ref == 'refs/heads/main'
+          && steps.provenance.outputs.ok == 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
