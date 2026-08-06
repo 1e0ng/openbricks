@@ -78,6 +78,14 @@ TCS34725 (color)
    :undoc-members:
    :show-inheritance:
 
+QTR / QTRX (reflectance array)
+------------------------------
+
+.. automodule:: openbricks.drivers.qtr
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 HC-SR04 (ultrasonic distance)
 -----------------------------
 

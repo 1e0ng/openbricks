@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.0 — QTR/QTRX reflectance-array driver
+
+New `openbricks.drivers.qtr.QTRArray` for Pololu QTR/QTRX analog
+arrays (bench: QTRX-HD-15A, 9 channels on ADC1). Unlike a pair of
+colour sensors, the array reports a CONTINUOUS line position — a
+weighted centroid in millimetres — so a follower steers on a real
+analog error instead of edge-crossings, and a lost line still leaves
+a recovery direction (`last_side`). `dark_count` is the
+intersection/stop-bar signal.
+
+Calibration is mandatory and loud: reading before `calibrate()`
+raises (an uncalibrated centroid is a plausible-looking wrong
+number), and a channel that never sees line/mat contrast during the
+sweep is named by index — that is the unwired one.
+
+`examples/qtr_probe.py` is the bring-up tool (bar display, position,
+dark count — verifies wiring and left/right orientation before any
+control), and `examples/qtr_line_follow.py` is the array follower:
+PD on millimetre error, intersection stop, spin-in-place
+calibration, lost-line recovery.
+
 ## 1.65.2 — review cleanups: CLI, sim, and lock hygiene
 
 * `openbricks docs` extraction is atomic (scratch dir + rename): an
