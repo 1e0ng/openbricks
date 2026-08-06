@@ -25,11 +25,11 @@ from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
 
 
-LEFT_ID, RIGHT_ID = 1, 2
+LEFT_ID, RIGHT_ID = 2, 1
 UART_ID, TX, RX   = 1, 14, 6
 
-WHEEL_DIAMETER_MM = 65    # EDIT to your wheels
-AXLE_TRACK_MM     = 120   # EDIT to your chassis
+WHEEL_DIAMETER_MM = 88    # EDIT to your wheels
+AXLE_TRACK_MM     = 136   # EDIT to your chassis
 
 # Geometry of the square. SIDE_MM 200 traces a 20 cm × 20 cm square —
 # fits comfortably on a small mat. Bump for a larger arena.
@@ -48,9 +48,8 @@ def main():
     print("--- ST-3032 drivebase square (%d mm sides × %d laps) ---" %
           (SIDE_MM, NUM_LAPS))
 
-    left  = ST3032Motor(servo_id=LEFT_ID,  uart_id=UART_ID, tx=TX, rx=RX)
-    right = ST3032Motor(servo_id=RIGHT_ID, uart_id=UART_ID, tx=TX, rx=RX,
-                        invert=True)
+    left  = ST3032Motor(servo_id=LEFT_ID,  uart_id=UART_ID, tx=TX, rx=RX, invert=True)
+    right = ST3032Motor(servo_id=RIGHT_ID, uart_id=UART_ID, tx=TX, rx=RX)
 
     db = DriveBase(left, right,
                    wheel_diameter_mm=WHEEL_DIAMETER_MM,
