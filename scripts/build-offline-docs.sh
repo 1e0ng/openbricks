@@ -47,9 +47,10 @@ find "$WORK/html/_static" -type f \
      \( -name '*.ttf' -o -name '*.eot' -o -name '*.svg' \
         -o -name '*.woff' -o -name '*.woff2' \) -delete
 
-# Deterministic archive: sorted entries and a fixed timestamp, so
-# rebuilding identical docs produces an identical file and the drift
-# check compares content rather than build noise.
+# Sorted entries and fixed timestamps, so rebuilding on the SAME
+# machine is byte-stable and a diff shows real changes. Do not rely
+# on byte-identity ACROSS machines: Sphinx emits slightly different
+# HTML between versions, so CI checks page COVERAGE instead.
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 find "$WORK/html" -exec touch -t 200001010000 {} +

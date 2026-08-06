@@ -41,20 +41,36 @@ jobs:
       - name: Build docs (warnings are errors)
         run: sphinx-build -W --keep-going -b html docs docs/_build/html
 
-      - name: Offline docs bundle is up to date
-        # ``openbricks docs`` ships this archive so the CLI shows the
-        # same manual as the website, API reference included. It is
-        # COMMITTED so a wheel build needs no Sphinx — which only
-        # stays honest if a stale one is caught. The build is
-        # byte-reproducible, so rebuilding and diffing is exact.
+      - name: Offline docs bundle covers every page
+        # The bundle is committed so a wheel build needs no Sphinx.
+        # The risk that creates is a STALE one — a doc page added and
+        # the bundle not rebuilt — so that is what this checks.
+        #
+        # NOT a byte comparison: Sphinx emits slightly different HTML
+        # between versions, so comparing bytes across machines fails
+        # on build noise rather than on real drift (it did, on the
+        # commit that introduced it). Comparing the page SET catches
+        # the actual mistake and is stable across environments.
         run: |
-          cp tools/openbricks/openbricks_dev/_docs/offline-docs.zip /tmp/committed.zip
-          PYTHON=python scripts/build-offline-docs.sh
-          if ! cmp -s /tmp/committed.zip \
-                      tools/openbricks/openbricks_dev/_docs/offline-docs.zip; then
-            echo "::error::offline-docs.zip is stale — run scripts/build-offline-docs.sh and commit it"
-            exit 1
-          fi
+          python - <<'PY'
+          import pathlib, zipfile, sys
+          built = {p.relative_to("docs/_build/html").as_posix()
+                   for p in pathlib.Path("docs/_build/html").rglob("*.html")}
+          bundled = {n for n in zipfile.ZipFile(
+              "tools/openbricks/openbricks_dev/_docs/offline-docs.zip"
+          ).namelist() if n.endswith(".html")}
+          # _modules/ is stripped from the bundle on purpose (viewcode
+          # re-renders the whole source tree; ~1.3 MB for [source] links).
+          missing = {p for p in built - bundled
+                     if not p.startswith("_modules/")}
+          if missing:
+              print("::error::offline-docs.zip is stale — missing: "
+                    + ", ".join(sorted(missing))
+                    + " — run scripts/build-offline-docs.sh and commit it")
+              sys.exit(1)
+          print("bundle covers all %d pages" % len(bundled))
+          PY
+
       - name: Install LaTeX toolchain (for the PDF build)
         run: |
           sudo apt-get update
