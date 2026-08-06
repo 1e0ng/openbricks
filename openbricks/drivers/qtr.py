@@ -60,6 +60,7 @@ class QTRArray:
         for p in pins:
             _pins.check(p, "QTR analog input", output=False)
             self._check_adc_capable(p)
+        self._pins = tuple(int(p) for p in pins)
         self._pitch = float(pitch_mm)
         self._threshold = int(dark_threshold)
         self._adcs = [self._make_adc(p) for p in pins]
@@ -163,6 +164,50 @@ class QTRArray:
                 "element(s) %s (left=0) — that channel is unwired, "
                 "or the sweep never carried it across the line"
                 % ",".join(str(i) for i in flat))
+
+    def save_calibration(self, path):
+        """Persist the calibration to a file on the hub filesystem, so
+        one sweep (``examples/qtr_calibrate.py``) serves every later
+        run. The wiring is stored with it: a calibration is per-
+        element min/max, so loading it onto different pins would
+        silently mis-scale every reading."""
+        self._check_calibration()
+        import json
+        with open(path, "w") as f:
+            json.dump({"pins": list(self._pins),
+                       "min": self._cal_min,
+                       "max": self._cal_max}, f)
+
+    def load_calibration(self, path):
+        """Load a calibration saved by :meth:`save_calibration`.
+
+        Raises with the remedy when the file is missing (run the
+        calibrate script), corrupt, or was recorded for DIFFERENT
+        wiring. Calibration is height- and mat-dependent — resweep
+        after remounting the array or changing mats."""
+        import json
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except OSError:
+            raise RuntimeError(
+                "no saved QTR calibration at %s — run "
+                "examples/qtr_calibrate.py once (sweep the array "
+                "across the line while it runs)" % path)
+        except ValueError:
+            raise RuntimeError(
+                "saved QTR calibration at %s is corrupt — delete it "
+                "and re-run examples/qtr_calibrate.py" % path)
+        if tuple(data.get("pins", ())) != self._pins:
+            raise RuntimeError(
+                "saved QTR calibration at %s was recorded for pins %s "
+                "but this array is wired to %s — per-element min/max "
+                "does not transfer across wiring; re-run "
+                "examples/qtr_calibrate.py"
+                % (path, tuple(data.get("pins", ())), self._pins))
+        self._cal_min = [int(v) for v in data["min"]]
+        self._cal_max = [int(v) for v in data["max"]]
+        self._check_calibration()
 
     # ---- reading -----------------------------------------------------
 

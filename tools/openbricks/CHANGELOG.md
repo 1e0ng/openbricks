@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.4 — QTR calibration persists: sweep once, load everywhere
+
+Calibration and probing split into separate steps.
+`examples/qtr_calibrate.py` sweeps once and saves the per-element
+extremes to the hub's filesystem (`/qtr_line.cal`,
+`/qtr_branch.cal`, with the per-element spans printed so weak
+contrast is visible); `qtr_probe.py` and `qtr_line_follow.py` load
+them instead of resweeping on every run — the follower's
+spin-in-place calibration is gone.
+
+Loading fails loudly with the remedy: missing file names the
+calibrate script, a corrupt file says so, and a calibration
+recorded for DIFFERENT wiring is refused by pin list — per-element
+min/max doesn't transfer across wiring, it silently mis-scales
+every reading. Recalibrate after remounting the array or changing
+mats.
+
 ## 1.66.3 — S3 BLE-button default moves off ADC1 (GPIO 5 → 38)
 
 The ESP32-S3 has exactly ten analog-capable pins worth using (ADC1,

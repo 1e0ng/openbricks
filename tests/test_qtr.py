@@ -136,6 +136,77 @@ class ConstructionTests(unittest.TestCase):
         self.assertTrue("element(s) 4" in msg, msg)
 
 
+class CalibrationPersistenceTests(unittest.TestCase):
+    """One sweep (qtr_calibrate.py) serves every later run: the
+    calibration saves to the hub filesystem and loads with loud
+    failures for missing / corrupt / wrong-wiring files."""
+
+    _PATH = "qtr_test.cal"
+
+    def setUp(self):
+        _pins._claims_reset()
+
+    def tearDown(self):
+        ADC.reads = {}
+        _pins._claims_reset()
+        try:
+            import os
+            os.remove(self._PATH)
+        except OSError:
+            pass
+
+    def test_round_trip_restores_readings(self):
+        qtr = _calibrated()
+        qtr.save_calibration(self._PATH)
+        _pins._claims_reset()
+        fresh = QTRArray(pins=_PINS, pitch_mm=8.0)
+        fresh.load_calibration(self._PATH)
+        _script(dark_pins=(5,))
+        self.assertEqual(fresh.read()[4], 1000)
+        self.assertEqual(fresh.position(), 0.0)
+
+    def test_missing_file_names_the_calibrate_script(self):
+        _script()
+        qtr = QTRArray(pins=_PINS)
+        try:
+            qtr.load_calibration(self._PATH)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("qtr_calibrate.py" in str(e), e)
+
+    def test_corrupt_file_is_named(self):
+        with open(self._PATH, "w") as f:
+            f.write("not json{")
+        _script()
+        qtr = QTRArray(pins=_PINS)
+        try:
+            qtr.load_calibration(self._PATH)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("corrupt" in str(e), e)
+
+    def test_wrong_wiring_is_refused(self):
+        # Per-element min/max does not transfer across wiring: a
+        # calibration recorded for other pins silently mis-scales
+        # every reading — refuse it by name.
+        qtr = _calibrated()
+        qtr.save_calibration(self._PATH)
+        _pins._claims_reset()
+        ADC.reads = {p: _MAT for p in (1, 2, 3)}
+        other = QTRArray(pins=(1, 2, 3))
+        try:
+            other.load_calibration(self._PATH)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("wired to" in str(e), e)
+
+    def test_saving_uncalibrated_raises(self):
+        _script()
+        qtr = QTRArray(pins=_PINS)
+        with self.assertRaises(RuntimeError):
+            qtr.save_calibration(self._PATH)
+
+
 class ReadingTests(unittest.TestCase):
     def setUp(self):
         _pins._claims_reset()

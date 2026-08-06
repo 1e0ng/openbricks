@@ -25,8 +25,9 @@ The branch flag rides OUTSIDE the steering centroid: a marker under
 it must not yank the position. Here it only prints; hang your turn
 decision off it.
 
-Calibrate on every run: the first 3 seconds sweep the array across
-the line (the program spins the chassis in place for you).
+Calibration is loaded from the file saved by
+``examples/qtr_calibrate.py`` — run that once after mounting or
+changing mats; this program refuses to guess without it.
 """
 
 import time
@@ -108,21 +109,19 @@ QTR_PINS = (1, 2, 3, 7, 8, 9, 10)  # channels 15..9, left -> right
 PITCH_MM = 4.0
 BRANCH_PIN = 5                     # channel 1, far right
 
+LINE_CAL = "/qtr_line.cal"
+BRANCH_CAL = "/qtr_branch.cal"
+
 qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
 branch = QTRChannel(pin=BRANCH_PIN)
+qtr.load_calibration(LINE_CAL)
+branch.load_calibration(BRANCH_CAL)
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
                          invert=True)
 right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
 db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
-
-# Calibration sweep: spin in place so the array crosses the line.
-print("calibrating: spinning across the line for 3 s")
-db.move_wheels(120, -120)
-qtr.calibrate(duration_ms=3000)
-branch.calibrate(duration_ms=3000)
-db.stop()
 
 print("following. Intersection stops the run.")
 state = PD_STATE0
