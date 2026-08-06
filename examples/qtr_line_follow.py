@@ -15,9 +15,9 @@ A branch stub darkens only one end and barely moves the centroid, so
 it is steered through, not flinched at.
 
 Hardware (bench layout): QTRX-HD-15A — line cluster = channels
-15..9 (adjacent, 4 mm pitch) on ADC1 GPIO 1,2,3,4,5,7,8 left-to-
-right (GPIO 6 is the servo-bus RX and stays free), branch flag =
-channel 1 (far right) on GPIO 9, CTRL tied high. Wheels = two
+15..9 (adjacent, 4 mm pitch) on ADC1 GPIO 1,2,3,7,8,9,10 left-to-
+right, branch flag = channel 1 (far right) on GPIO 5, CTRL tied
+high. See the pin-budget note at the wiring constants for why. Wheels = two
 ST-3032 on UART1 tx=14 rx=6 (left id 2 inverted, right id 1), 88 mm
 wheels on a 136 mm track.
 
@@ -98,9 +98,15 @@ def _pd_wheel_speeds(position_mm, last_side, dark_count, state, dt_s):
 # --- end control law ---
 
 
-QTR_PINS = (1, 2, 3, 4, 5, 7, 8)   # channels 15..9, left -> right
+# Bench GPIO budget: ADC1 (GPIO 1-10) is the ONLY reliable analog
+# bank on the S3, and it also hosts the start/stop button (GPIO 4)
+# and the servo-bus RX (GPIO 6) — so the BLE button moved to GPIO 38
+# to free GPIO 5 for the branch flag. GPIO 38-42 have no ADC (fine
+# for buttons, useless for the array); GPIO 11-20 are ADC2 = radio-
+# shared and errata-flaky.
+QTR_PINS = (1, 2, 3, 7, 8, 9, 10)  # channels 15..9, left -> right
 PITCH_MM = 4.0
-BRANCH_PIN = 9                     # channel 1, far right
+BRANCH_PIN = 5                     # channel 1, far right
 
 qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
 branch = QTRChannel(pin=BRANCH_PIN)

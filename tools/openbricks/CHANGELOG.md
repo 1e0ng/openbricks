@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.2 — QTR refuses non-ADC pins by name; final bench pin map
+
+Wiring the bench exposed the gap: `pins.check` knows the S3's GPIO
+map but not its ANALOG map, so five channels soldered to GPIO 38-42
+(no ADC at all on the S3) would have failed at runtime with a bare
+`ValueError` from `machine.ADC`. The driver now refuses at
+construction, naming the pin and the rule: ADC1 = GPIO 1-10 only
+(GPIO 11-20 is ADC2 — radio-shared and errata-flaky, called out
+separately; classic ESP32: GPIO 32-39).
+
+Examples move to the final bench map — ADC1 also hosts the
+start/stop button (GPIO 4) and servo-bus RX (GPIO 6), so the line
+cluster is GPIO 1,2,3,7,8,9,10 and the branch flag takes GPIO 5,
+with the BLE button moving to a non-ADC pin (GPIO 38).
+
 ## 1.66.1 — QTR examples match the real bench wiring; QTRChannel
 
 The bench array is wired as TWO instruments, and the driver now
