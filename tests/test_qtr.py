@@ -251,22 +251,26 @@ class ReadingTests(unittest.TestCase):
         _script(dark_pins=())
         self.assertEqual(self.qtr.last_side(), -1)
 
-    def test_leftmost_cluster_wins_at_a_fork(self):
+    def test_cluster_positions_split_a_fork(self):
         # Two dark clusters (a branch): the global centroid lands
-        # between them — steering into the gap — while the leftmost
-        # cluster is the left line's own centre.
+        # between them — steering into the gap — while the leftmost/
+        # rightmost clusters are each line's own centre.
         _script(dark_pins=(2, 8))
         self.assertEqual(self.qtr.position(), 0.0)      # the gap
         self.assertEqual(self.qtr.leftmost_position(), -3 * 8.0)
+        self.assertEqual(self.qtr.rightmost_position(), +3 * 8.0)
 
-    def test_leftmost_matches_position_on_a_single_line(self):
+    def test_cluster_positions_match_on_a_single_line(self):
         _script(dark_pins=(5, 6))
         self.assertEqual(self.qtr.leftmost_position(),
                          self.qtr.position())
+        self.assertEqual(self.qtr.rightmost_position(),
+                         self.qtr.position())
 
-    def test_leftmost_is_none_when_nothing_is_dark(self):
+    def test_cluster_positions_none_when_nothing_is_dark(self):
         _script(dark_pins=())
         self.assertIsNone(self.qtr.leftmost_position())
+        self.assertIsNone(self.qtr.rightmost_position())
 
     def test_dark_count_is_the_intersection_signal(self):
         _script(dark_pins=(3, 4, 5, 6, 7, 8, 9))    # stop bar
