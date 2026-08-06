@@ -141,6 +141,81 @@ class BundleFailureTests(unittest.TestCase):
         finally:
             docs._BUNDLE = real
 
+    def test_a_stale_partial_extraction_is_replaced(self):
+        # The pre-1.65.2 failure: an interrupted extraction left a
+        # half-manual (no index.html) that every later invocation
+        # reused forever. The atomic path must replace it.
+        import hashlib
+        import tempfile as tf
+        src = docs._bundle_path()
+        with open(src, "rb") as f:
+            tag = hashlib.sha256(f.read()).hexdigest()[:12]
+        with tf.TemporaryDirectory() as tmp:
+            real = docs.tempfile.gettempdir
+            docs.tempfile.gettempdir = lambda: tmp
+            try:
+                partial = os.path.join(tmp, "openbricks-docs-" + tag)
+                os.makedirs(partial)
+                with open(os.path.join(partial, "install.html"), "w") as f:
+                    f.write("<html>half</html>")   # no index.html
+                out = docs._extract()
+                self.assertTrue(
+                    os.path.exists(os.path.join(out, "index.html")))
+            finally:
+                docs.tempfile.gettempdir = real
+
+    def test_losing_the_extraction_race_reuses_the_winner(self):
+        # A COMPLETE extraction already sits at the content-hash path
+        # (another invocation won): _extract must reuse it as-is —
+        # same hash means byte-identical content — and must not
+        # replace or re-extract it.
+        import hashlib
+        import tempfile as tf
+        with tf.TemporaryDirectory() as tmp:
+            real_gettmp = docs.tempfile.gettempdir
+            docs.tempfile.gettempdir = lambda: tmp
+            try:
+                with open(docs._bundle_path(), "rb") as f:
+                    tag = hashlib.sha256(f.read()).hexdigest()[:12]
+                done = os.path.join(tmp, "openbricks-docs-" + tag)
+                os.makedirs(done)
+                marker = os.path.join(done, "index.html")
+                with open(marker, "w") as f:
+                    f.write("<html>winner</html>")
+                self.assertEqual(docs._extract(), done)
+                with open(marker) as f:            # untouched
+                    self.assertIn("winner", f.read())
+            finally:
+                docs.tempfile.gettempdir = real_gettmp
+
+    def test_race_lost_at_the_rename_reuses_the_winner(self):
+        # The winner appears BETWEEN our extraction and our rename:
+        # the rename fails, the winner is complete, our scratch copy
+        # is discarded and the winner's dir is returned untouched.
+        import hashlib
+        import tempfile as tf
+        with tf.TemporaryDirectory() as tmp:
+            real_gettmp = docs.tempfile.gettempdir
+            real_rename = docs.os.rename
+            docs.tempfile.gettempdir = lambda: tmp
+            with open(docs._bundle_path(), "rb") as f:
+                tag = hashlib.sha256(f.read()).hexdigest()[:12]
+            done = os.path.join(tmp, "openbricks-docs-" + tag)
+
+            def winner_appears(a, b):
+                os.makedirs(done)
+                with open(os.path.join(done, "index.html"), "w") as f:
+                    f.write("<html>winner</html>")
+                raise OSError("target exists")
+            docs.os.rename = winner_appears
+            try:
+                self.assertEqual(docs._extract(), done)
+                with open(os.path.join(done, "index.html")) as f:
+                    self.assertIn("winner", f.read())
+            finally:
+                docs.os.rename = real_rename
+                docs.tempfile.gettempdir = real_gettmp
+
     def test_corrupt_bundle_without_index_is_named(self):
         import tempfile
         import zipfile

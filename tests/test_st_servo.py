@@ -290,9 +290,15 @@ class ProgramBoundaryResetTests(_Base):
         self.wire.settle()
         sb.db_config(0, 1, 88.0, 136.0, 400.0)
         sb.reset_runtime()
-        # Slots free again AND the drivebase no longer drives.
+        # Slots free again AND the drivebase no longer drives: arming
+        # without a config RAISES (1.65.1) instead of indexing
+        # st_moves[-1] and arming a zero-geometry controller.
         self.assertTrue(sb.servo_attach(0, 2, True, 45))
-        sb.db_straight(100.0, 100.0)   # config gone: ignored by pump
+        try:
+            sb.db_straight(100.0, 100.0)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("db_config" in str(e), e)
         self.wire.settle(20)
 
 

@@ -39,6 +39,11 @@ _END = "# --- end control law ---"
 
 def _load_control_law():
     src = _EXAMPLE.read_text()
+    if _BEGIN not in src or _END not in src:
+        raise AssertionError(
+            "control-law markers %r / %r not found in %s — they are "
+            "load-bearing for this suite AND tests/test_line_follow.py"
+            % (_BEGIN, _END, _EXAMPLE))
     ns = {}
     exec(src[src.index(_BEGIN):src.index(_END)], ns)
     return ns
@@ -56,13 +61,24 @@ class LineFollowInPhysicsTests(unittest.TestCase):
             pass
         self.robot = SimRobot(world="practice-line")
         shim.install(self.robot.runtime)
+        # From here on the shim IS installed: if anything below
+        # raises, unittest skips tearDown, and the patched
+        # time/machine would leak into every later suite in the
+        # process. addCleanup runs regardless.
+        self.addCleanup(self._uninstall)
         self.ns = _load_control_law()
 
-    def tearDown(self):
+    @staticmethod
+    def _uninstall():
         try:
             shim.uninstall()
         except Exception:
             pass
+
+    def tearDown(self):
+        # Redundant with the addCleanup (uninstall is idempotent) —
+        # kept so a reader sees the symmetry without chasing setUp.
+        self._uninstall()
 
     def _build(self):
         """The example's own wiring, minus the module-level globals."""

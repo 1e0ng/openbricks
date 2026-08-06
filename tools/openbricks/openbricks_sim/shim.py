@@ -757,8 +757,27 @@ class ShimST3215Motor:
         self._attach()
         if not wait:
             return
+        # Bounded like the firmware's stall budget (trapezoid time
+        # x4 + 1 s): a physically blocked wheel (chassis against a
+        # wall, jammed arm) defeats the crawl floor, and an unbounded
+        # loop turned that into a CI timeout instead of a named
+        # stall. Firmware reports and continues; so does the sim.
+        cruise = self._move["cruise"] if self._move["cruise"] > 1 else 1
+        budget_ms = int(abs(delta) / cruise * 1000) * 4 + 1000
+        waited = 0
         while self._mode == "angle":
             _real_time.sleep_ms(10)
+            waited += 10
+            if waited > budget_ms:
+                self._mode = "idle"
+                self._move = None
+                print("openbricks-sim: run_angle(%g deg) gave up "
+                      "after %d ms — the wheel is blocked (wall, "
+                      "jam?). Same report-and-continue contract as "
+                      "the firmware stall detector."
+                      % (delta, budget_ms))
+                return False
+        return True
 
     def done(self):
         return self._mode != "angle"
@@ -819,7 +838,22 @@ class ShimTCS34725:
                 "shim not installed; call install(runtime) first")
         bus = kwargs.get("i2c", args[0] if args else None)
         channel = getattr(bus, "_channel", None)
-        camera = self._CHANNEL_CAMERAS.get(channel, "chassis_cam_down")
+        if channel is None:
+            # No mux: the single documented default camera.
+            camera = "chassis_cam_down"
+        elif channel in self._CHANNEL_CAMERAS:
+            camera = self._CHANNEL_CAMERAS[channel]
+        else:
+            # An unmapped channel silently fell back to the centre
+            # camera — plausible readings from the WRONG sensor (the
+            # bench has a third TCS34725 on channel 2). A sensor the
+            # sim cannot model must say so, not impersonate another.
+            raise RuntimeError(
+                "sim chassis has no camera for mux channel %r — "
+                "mapped channels: %s (and no-mux uses the centre "
+                "camera). Add a camera to the chassis model or move "
+                "the sensor." % (channel,
+                                 sorted(self._CHANNEL_CAMERAS)))
         self._channel = channel
         self._cs = SimColorSensor(_INSTALLED.runtime, camera_name=camera)
 
@@ -1104,6 +1138,9 @@ def install(runtime: SimRuntime) -> None:
             ("ticks_ms",   _patched_ticks_ms),
             ("ticks_us",   _patched_ticks_us),
             ("ticks_diff", _patched_ticks_diff),
+            # Wrap-safe deadline arithmetic (the sim clock is a plain
+            # int, so a sum suffices; real ports wrap at 2^30 ms).
+            ("ticks_add",  lambda t, d: t + d),
     ]:
         state.prev_time_attrs[attr] = getattr(_real_time, attr, _MISSING)
         setattr(_real_time, attr, patched)
@@ -1173,6 +1210,17 @@ def uninstall() -> None:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = prev
+
+    # 1b. Evict every ``openbricks.*`` module imported WHILE the shim
+    # was installed: their module-level ``from machine import UART``
+    # bindings captured the fakes, and the cached module would keep
+    # serving those to a later import in the same process — where a
+    # clean CPython import of e.g. ``openbricks.drivers.st3215``
+    # would fail on ``machine``. Order-dependent test poison.
+    for name in [n for n in list(sys.modules)
+                 if n == "openbricks" or n.startswith("openbricks.")]:
+        if name not in state.prev_sys_modules:
+            sys.modules.pop(name, None)
 
     # 2. time attributes.
     for attr, prev in state.prev_time_attrs.items():

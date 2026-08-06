@@ -3,6 +3,35 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.65.2 — review cleanups: CLI, sim, and lock hygiene
+
+* `openbricks docs` extraction is atomic (scratch dir + rename): an
+  interrupted first extraction used to leave a half-manual that
+  every later invocation reused forever, because `index.html` — the
+  only completeness check — sits at entry 54 of 64 in the archive.
+  File URLs are built with `pathlib.as_uri()`, fixing backslash
+  `file://` URLs on Windows.
+* Sim: a physically blocked wheel's `run_angle` now reports and
+  continues after a firmware-style budget instead of hanging the
+  suite until CI's timeout; a colour sensor on an unmapped mux
+  channel raises instead of silently impersonating the centre
+  camera; `shim.uninstall()` evicts `openbricks.*` modules imported
+  under the fake `machine`, closing an order-dependent test poison;
+  the line-follow suite can no longer leak an installed shim when
+  its setUp fails.
+* Firmware: every deadline uses wrap-safe `time.ticks_add` (raw
+  `ticks_ms() + n` misbehaves at the 2^30 ms wrap, ~12 days of
+  uptime); every `st_bus` binding hoists MicroPython conversions
+  outside the bus spinlock (a raising conversion longjmped past the
+  release and wedged core 0's timer task until power-cycle);
+  `db_straight`/`db_turn` on an unconfigured drivebase raise instead
+  of indexing `st_moves[-1]`, and `db_config` validates its slot
+  pair.
+* The offline-docs drift check also compares the docs/ source
+  fingerprint recorded at build time, so EDITING a page without
+  rebuilding the bundle now fails CI (the page-set check only caught
+  additions).
+
 ## 1.65.1 — six edges from the review, closed
 
 * `drive()` now supersedes an in-flight move like every other motion

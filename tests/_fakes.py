@@ -110,6 +110,11 @@ class _FakeTime:
     ticks_ms = staticmethod(_ticks_ms)
     ticks_us = staticmethod(_ticks_us)
     ticks_diff = staticmethod(_ticks_diff)
+    # Wrap-safe deadline arithmetic. The fake clock is a plain int so
+    # a sum suffices; on real MicroPython ports raw ``ticks_ms() + n``
+    # misbehaves at the 2^30 ms wrap (~12 days uptime), which is why
+    # the driver code calls this instead.
+    ticks_add = staticmethod(lambda t, d: t + d)
     sleep_ms = staticmethod(_sleep_ms)
     sleep_us = staticmethod(_sleep_us)
     # Pass-through to the real time module for wall-clock-only helpers
