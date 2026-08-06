@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.5 — the follower survives what the first bench probe found
+
+Two control hazards recorded during the 2026-08-07 hand-probe of
+the real array, both now handled in the follower's law:
+
+* A plain line crossing lit **all seven** elements for a single
+  tick (`[:*#%%#-] dark=7`) — the count-only intersection test
+  would have stopped the robot mid-corner. Intersections now
+  require the count for `INTERSECTION_TICKS` consecutive polls; a
+  real bar persists (~20 mm of travel), a transient doesn't, and a
+  broken streak starts over.
+* Lifted off the mat (or over its edge), every element floats at a
+  uniform ~300 and some cross the dark threshold — the probe
+  recorded steered positions from that mush. A position now counts
+  only when the brightest element beats `PEAK_MIN` (calibrated
+  units); off-mat mush falls to the lost-line recovery steer.
+
+Example + law tests only — no firmware change, no reflash needed.
+
 ## 1.66.4 — QTR calibration persists: sweep once, load everywhere
 
 Calibration and probing split into separate steps.

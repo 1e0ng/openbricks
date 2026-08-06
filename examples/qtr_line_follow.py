@@ -51,50 +51,72 @@ KD = 0.6
 
 MAX_DPS = 800          # never reverse; see line_follow.py's note
 
-# dark_count at or above this = full-width bar = intersection: stop.
-# With a ~20 mm line on a 24 mm window (7 adjacent 4 mm channels),
-# NORMAL following already darkens ~5 elements — only ALL of them
-# dark discriminates a bar from the line itself.
+# Intersection = dark_count at or above INTERSECTION_COUNT for
+# INTERSECTION_TICKS CONSECUTIVE polls. The count alone is not
+# enough: bench 2026-08-07 recorded all 7 elements crossing the
+# threshold for a single tick during a plain line crossing
+# ([:*#%%#-] dark=7) — a real stop bar stays under the array for
+# many polls (~20 mm of travel), a crossing transient for one or
+# two.
 INTERSECTION_COUNT = 7
+INTERSECTION_TICKS = 3
+
+# A real line is a strong LOCALIZED peak; lifted off the mat (or
+# over the mat edge) every element floats at a uniform ~250-330 and
+# some cross the dark threshold — bench 2026-08-07 recorded
+# positions steered on that mush ([:::::: ] pos=-1.8 dark=5). A
+# position only counts when the brightest element beats this
+# (calibrated units); otherwise it is treated as line-lost and the
+# recovery path runs.
+PEAK_MIN = 550
 
 # When the line escapes the array entirely, steer hard back toward
 # the side it was last seen (mm, fed to the same PD as a synthetic
 # error so recovery uses the ordinary steering path).
 RECOVERY_ERROR_MM = 40.0
 
-PD_STATE0 = None       # previous error, or None on the first tick
+# (previous error or None, consecutive intersection-count ticks)
+PD_STATE0 = (None, 0)
 
 
 def _clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def _pd_wheel_speeds(position_mm, last_side, dark_count, state, dt_s):
+def _pd_wheel_speeds(position_mm, peak, last_side, dark_count,
+                     state, dt_s):
     """One control tick: ``(decision, state)``.
 
     ``decision`` is ``None`` (intersection: stop) or
-    ``(left_dps, right_dps)``. ``state`` carries the previous error;
-    thread each returned state into the next call, starting from
-    ``PD_STATE0``.
+    ``(left_dps, right_dps)``. ``state`` is ``(previous_error,
+    intersection_streak)``; thread each returned state into the next
+    call, starting from ``PD_STATE0``.
 
     ``position_mm`` is the array's centroid (+ = line right of
-    centre) or ``None`` when the line is not under the array at all —
-    then ``last_side`` (+1/-1) picks the recovery direction.
+    centre) or ``None`` when the line is not under the array;
+    ``peak`` is the brightest calibrated reading — a position with a
+    weak peak is off-mat mush, not a line, and both fall to the
+    ``last_side`` (+1/-1) recovery steer.
     """
+    prev_error, streak = state
     if dark_count >= INTERSECTION_COUNT:
-        return None, state
-    if position_mm is None:
+        streak += 1
+        if streak >= INTERSECTION_TICKS:
+            return None, (prev_error, streak)
+    else:
+        streak = 0
+    if position_mm is None or peak < PEAK_MIN:
         error = RECOVERY_ERROR_MM * (last_side if last_side else 1)
     else:
         error = position_mm
     derivative = 0.0
-    if state is not None and dt_s > 0:
-        derivative = (error - state) / dt_s
+    if prev_error is not None and dt_s > 0:
+        derivative = (error - prev_error) / dt_s
     steer = KP * error + KD * derivative
     # Line right of centre (+error) -> steer right: left wheel up,
     # right wheel down — same convention as line_follow.py.
     return (_clamp(CRUISE_DPS + steer),
-            _clamp(CRUISE_DPS - steer)), error
+            _clamp(CRUISE_DPS - steer)), (error, streak)
 
 # --- end control law ---
 
@@ -128,6 +150,7 @@ state = PD_STATE0
 while True:
     readings = qtr.read()
     speeds, state = _pd_wheel_speeds(qtr.position(readings),
+                                     max(readings),
                                      qtr.last_side(),
                                      qtr.dark_count(readings),
                                      state, 0.010)
