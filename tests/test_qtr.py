@@ -57,9 +57,29 @@ class ConstructionTests(unittest.TestCase):
         ADC.reads = {}
         _pins._claims_reset()
 
-    def test_needs_two_elements(self):
+    def test_needs_at_least_one_element(self):
         with self.assertRaises(ValueError):
-            QTRArray(pins=(1,))
+            QTRArray(pins=())
+
+    def test_single_element_has_no_position(self):
+        # One element is a detector flag, not a line: its "centroid"
+        # would always read centre. QTRChannel is the API for it.
+        from openbricks.drivers.qtr import QTRChannel
+        flip = [False]
+
+        def swing():
+            flip[0] = not flip[0]
+            return _LINE if flip[0] else _MAT
+        ADC.reads = {9: swing}
+        ch = QTRChannel(pin=9)
+        with self.assertRaises(RuntimeError):
+            ch.position()
+        ch.calibrate(duration_ms=100)
+        ADC.reads = {9: _LINE}
+        self.assertEqual(ch.value(), 1000)
+        self.assertTrue(ch.dark())
+        ADC.reads = {9: _MAT}
+        self.assertFalse(ch.dark())
 
     def test_reading_before_calibration_raises(self):
         # An uncalibrated centroid is a plausible-looking wrong

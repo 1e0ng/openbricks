@@ -19,23 +19,26 @@ hand and check:
     right-to-left — reverse it);
   * dark_count jumps when you hold it over a stop bar / intersection.
 
-Pins below assume the QTRX-HD-15A's wired channels on ADC1
-(GPIO 1..9, left to right) with CTRL tied high. pitch_mm=8.0 assumes
-every OTHER channel of the 4 mm-pitch array is wired; use 4.0 for
-nine adjacent channels.
+Bench wiring: QTRX channels 15..9 (the line cluster, adjacent =
+4 mm pitch) on ADC1 GPIO 1,2,3,4,5,7,8 left-to-right — GPIO 6 is
+the servo-bus RX and stays free — and channel 1 (far right, the
+branch/marker flag) on GPIO 9. CTRL tied high.
 """
 
 import time
 
-from openbricks.drivers.qtr import QTRArray
+from openbricks.drivers.qtr import QTRArray, QTRChannel
 
-QTR_PINS = (1, 2, 3, 4, 5, 6, 7, 8, 9)   # left -> right as mounted
-PITCH_MM = 8.0
+QTR_PINS = (1, 2, 3, 4, 5, 7, 8)   # channels 15..9, left -> right
+PITCH_MM = 4.0
+BRANCH_PIN = 9                     # channel 1, far right
 
 qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
+branch = QTRChannel(pin=BRANCH_PIN)
 
 print("calibrating for 3 s — sweep the array across the line NOW")
 qtr.calibrate(duration_ms=3000)
+branch.calibrate(duration_ms=3000)
 print("calibrated. streaming (Ctrl-C to stop):")
 
 _BARS = " .:-=+*#%@"
@@ -45,8 +48,9 @@ while True:
     bars = "".join(_BARS[min(v * (len(_BARS) - 1) // 1000,
                              len(_BARS) - 1)] for v in r)
     pos = qtr.position(r)
-    print("[%s]  pos=%s  dark=%d" % (
+    print("[%s]  pos=%s  dark=%d  branch=%s" % (
         bars,
         "----" if pos is None else "%+6.1fmm" % pos,
-        qtr.dark_count(r)))
+        qtr.dark_count(r),
+        "DARK" if branch.dark() else "-"))
     time.sleep_ms(100)

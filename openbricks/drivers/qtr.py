@@ -20,15 +20,17 @@ so the array MUST be calibrated once per session: sweep it across the
 line while ``calibrate()`` runs. Reading before calibration raises —
 an uncalibrated centroid is a plausible-looking wrong number.
 
-Example::
+Example (bench: channels 15..9 left-to-right on ADC1, GPIO 6 is
+the servo-bus RX and stays free)::
 
-    from machine import Pin
-    from openbricks.drivers.qtr import QTRArray
+    from openbricks.drivers.qtr import QTRArray, QTRChannel
 
-    qtr = QTRArray(pins=(1, 2, 3, 4, 5, 6, 7, 8, 9), pitch_mm=8.0)
-    qtr.calibrate(duration_ms=3000)   # sweep across the line now
+    line   = QTRArray(pins=(1, 2, 3, 4, 5, 7, 8), pitch_mm=4.0)
+    branch = QTRChannel(pin=9)        # array channel 1, far right
+    line.calibrate(duration_ms=3000)  # sweep across the line now
+    branch.calibrate(duration_ms=3000)
     while True:
-        pos = qtr.position()          # mm, +right of centre, or None
+        pos = line.position()         # mm, +right of centre, or None
 """
 
 import time
@@ -53,8 +55,8 @@ class QTRArray:
 
     def __init__(self, pins, pitch_mm=4.0, ctrl=None,
                  dark_threshold=300):
-        if len(pins) < 2:
-            raise ValueError("a line position needs at least 2 elements")
+        if len(pins) < 1:
+            raise ValueError("at least one element required")
         for p in pins:
             _pins.check(p, "QTR analog input", output=False)
         self._pitch = float(pitch_mm)
@@ -161,6 +163,11 @@ class QTRArray:
         line is to the RIGHT. ``None`` when no element sees the line —
         use :meth:`last_side` to know which way it escaped.
         """
+        if len(self._adcs) < 2:
+            raise RuntimeError(
+                "position() needs at least 2 elements — a single "
+                "detector channel has no centroid (use QTRChannel"
+                ".dark() for a flag)")
         readings = self.read() if readings is None else readings
         weight_sum = 0
         moment = 0.0
@@ -192,3 +199,33 @@ class QTRArray:
         """Drive the CTRL pin (no-op when CTRL is tied high)."""
         if self._ctrl is not None:
             self._ctrl.value(1 if on else 0)
+
+
+class QTRChannel(QTRArray):
+    """One reflectance element with the array's calibrate/read
+    contract — for a DETECTOR channel wired apart from the line
+    cluster (a branch / marker flag).
+
+    Kept out of :class:`QTRArray` on purpose: a flag element folded
+    into the steering centroid would yank the position toward every
+    marker it passes. Steer on the array; DECIDE on this.
+
+    Example (bench: QTRX channel 1, far right, on GPIO 9)::
+
+        branch = QTRChannel(pin=9)
+        branch.calibrate(duration_ms=3000)   # same sweep as the array
+        if branch.dark():
+            ...   # marker under the flag channel
+    """
+
+    def __init__(self, pin, dark_threshold=300):
+        QTRArray.__init__(self, pins=(pin,),
+                          dark_threshold=dark_threshold)
+
+    def value(self):
+        """Calibrated reading, 0 (mat) .. 1000 (marker/line)."""
+        return self.read()[0]
+
+    def dark(self):
+        """True when the element is over a marker/line."""
+        return self.value() >= self._threshold
