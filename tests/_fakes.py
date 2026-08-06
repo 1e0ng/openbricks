@@ -377,12 +377,36 @@ class Timer:
 # they would on firmware.
 
 
+class ADC:
+    """machine.ADC stand-in for the QTR array driver.
+
+    Tests script per-pin readings via the class-level ``reads`` map:
+    ``ADC.reads[pin_num] = value`` (a constant) or a zero-arg callable
+    for sequences. Unset pins read mid-scale.
+    """
+
+    ATTN_11DB = 3
+    reads = {}
+
+    def __init__(self, pin):
+        # Accepts a fake Pin (has ._num-ish identity) or a bare int.
+        self._pin = getattr(pin, "pin", pin)
+
+    def atten(self, _db):
+        pass
+
+    def read_u16(self):
+        v = self.reads.get(self._pin, 32768)
+        return v() if callable(v) else v
+
+
 class _FakeMachineModule:
     Pin = Pin
     PWM = PWM
     I2C = I2C
     UART = UART
     Timer = Timer
+    ADC = ADC
 
     # ``time_pulse_us`` stand-in for the HC-SR04 driver. By default
     # returns -1 ("no echo"); tests rebind via

@@ -86,6 +86,8 @@ _TEST_MODULES = [
     "tests.test_vl53l1x",
     "tests.test_example_pins",
     "tests.test_line_follow",
+    "tests.test_qtr",
+    "tests.test_qtr_line_follow",
     "tests.test_version_lockstep",
     "tests.test_pins",
     "tests.test_timer_allocation",
