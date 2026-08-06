@@ -1,18 +1,14 @@
 # SPDX-License-Identifier: MIT
 """QTR array bring-up probe — verify wiring before trusting control.
 
-Run me FIRST on a freshly mounted QTRX array:
+Run ``examples/qtr_calibrate.py`` once first (it saves the
+calibration on the hub); this probe loads it and streams:
 
     openbricks run -n <hub> examples/qtr_probe.py
 
-Phase 1 (3 s): calibration sweep — slide/rotate the robot so the
-array crosses the line a few times. A channel that never sees
-contrast is named with its index (left = 0): that is the unwired /
-mis-mounted one.
-
-Phase 2: streams calibrated readings as a bar row plus the centroid
-position in mm and the dark count. Push the robot across the line by
-hand and check:
+Streams calibrated readings as a bar row plus the centroid position
+in mm and the dark count. Push the robot across the line by hand
+and check:
 
   * the dark bars track the line's true position, LEFT of the robot
     = NEGATIVE mm (if the sign is flipped, your pin list is wired
@@ -39,13 +35,14 @@ QTR_PINS = (1, 2, 3, 7, 8, 9, 10)  # channels 15..9, left -> right
 PITCH_MM = 4.0
 BRANCH_PIN = 5                     # channel 1, far right
 
+LINE_CAL = "/qtr_line.cal"
+BRANCH_CAL = "/qtr_branch.cal"
+
 qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
 branch = QTRChannel(pin=BRANCH_PIN)
-
-print("calibrating for 3 s — sweep the array across the line NOW")
-qtr.calibrate(duration_ms=3000)
-branch.calibrate(duration_ms=3000)
-print("calibrated. streaming (Ctrl-C to stop):")
+qtr.load_calibration(LINE_CAL)          # raises with the remedy if
+branch.load_calibration(BRANCH_CAL)     # qtr_calibrate.py never ran
+print("loaded calibration. streaming (Ctrl-C to stop):")
 
 _BARS = " .:-=+*#%@"
 
