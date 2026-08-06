@@ -32,14 +32,15 @@ class QTRLawTests(unittest.TestCase):
     def setUpClass(cls):
         cls.ns = _load()
 
-    def _tick(self, pos, fork=None, peak=900, branch=False, side=0,
-              dark=1, state=None, dt=0.01):
+    def _tick(self, pos, fork=None, peak=900, branch=False,
+              far_edge=False, side=0, dark=1, state=None, dt=0.01):
         if state is None:
             state = self.ns["PD_STATE0"]
         if fork is None:
             fork = pos
         return self.ns["_pd_wheel_speeds"](pos, fork, peak, branch,
-                                           side, dark, state, dt)
+                                           far_edge, side, dark,
+                                           state, dt)
 
     def test_centred_line_drives_straight(self):
         speeds, _ = self._tick(0.0)
@@ -126,6 +127,37 @@ class QTRLawTests(unittest.TestCase):
     def test_branch_with_nothing_dark_still_recovers(self):
         (l, r), _ = self._tick(None, fork=None, branch=True, side=+1)
         self.assertTrue(l > r, (l, r))        # recovery, not a crash
+
+    def test_branches_on_both_sides_stop(self):
+        # THE intersection definition: flag dark (line under the
+        # flag side) AND the far-edge element dark (line past the
+        # opposite end) — held for the debounce.
+        state = self.ns["PD_STATE0"]
+        speeds = ()
+        for _ in range(self.ns["INTERSECTION_TICKS"]):
+            speeds, state = self._tick(0.0, branch=True,
+                                       far_edge=True, state=state)
+        self.assertIsNone(speeds)
+
+    def test_a_branch_on_one_side_never_stops(self):
+        # Flag alone (fork mode) or far edge alone (left spur): both
+        # keep driving, however long they persist.
+        state = self.ns["PD_STATE0"]
+        for _ in range(self.ns["INTERSECTION_TICKS"] * 3):
+            speeds, state = self._tick(0.0, branch=True,
+                                       far_edge=False, state=state)
+            self.assertTrue(speeds is not None)
+        state = self.ns["PD_STATE0"]
+        for _ in range(self.ns["INTERSECTION_TICKS"] * 3):
+            speeds, state = self._tick(0.0, branch=False,
+                                       far_edge=True, state=state)
+            self.assertTrue(speeds is not None)
+
+    def test_both_sides_transient_is_debounced(self):
+        state = self.ns["PD_STATE0"]
+        speeds, state = self._tick(0.0, branch=True, far_edge=True,
+                                   state=state)
+        self.assertTrue(speeds is not None)   # one tick: drive on
 
     def test_state_threads_the_error(self):
         _, state = self._tick(+7.5)
