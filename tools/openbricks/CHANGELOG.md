@@ -3,6 +3,24 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.64.1 — stop-then-run drives; a coasted motor goes cold
+
+Two coast-path firmware bugs, no host-side changes beyond the
+lockstep version.
+
+`stop()` followed quickly by `run()` left the motor limp with a live
+goal speed: the pending torque-off (staged, not yet on the wire)
+survived the new speed command — `set_speed` only staged torque when
+the WIRE said off, and the pump ships torque first. The drivebase
+never noticed (it re-stages every tick); one-shot task-motor calls
+had no second chance. A pending coast is now superseded.
+
+And `stop()` (coast) left the old target speed in the slot, which
+the pump's heat heuristic reads as "commanded to keep turning" — so
+a coasted-and-parked task motor kept a full share of the feedback
+rotation forever, re-creating the odometry-bandwidth regression
+1.59.x fixed, for coast but not brake. Coast now parks the slot.
+
 ## 1.64.0 — the C bus verifies every single-servo write ACK
 
 Firmware-side fix; the host package rides the lockstep version and
