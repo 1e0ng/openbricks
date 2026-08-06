@@ -20,6 +20,10 @@ the real array, both now handled in the follower's law:
   only when the brightest element beats `PEAK_MIN` (calibrated
   units); off-mat mush falls to the lost-line recovery steer.
 
+The follower also slows to a bench-friendly `CRUISE_DPS = 100`
+(cap 300 — bounding steering and the recovery pivot alike); raise
+it once the gains are trusted.
+
 Example + law tests only — no firmware change, no reflash needed.
 
 ## 1.66.4 — QTR calibration persists: sweep once, load everywhere

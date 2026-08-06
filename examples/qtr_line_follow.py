@@ -38,7 +38,9 @@ from openbricks.robotics import DriveBase
 
 # --- control law (pure logic, unit-tested in tests/test_qtr_line_follow.py) ---
 
-CRUISE_DPS = 400   # wheel speed when perfectly centred
+CRUISE_DPS = 100   # wheel speed when perfectly centred — deliberately
+                   # gentle for bench/tuning runs (raise once the
+                   # gains are trusted)
 
 # PD gains on the position error in MILLIMETRES (the array reports
 # the line centre directly). KP: dps of steering per mm of error.
@@ -49,7 +51,9 @@ CRUISE_DPS = 400   # wheel speed when perfectly centred
 KP = 14.0
 KD = 0.6
 
-MAX_DPS = 800          # never reverse; see line_follow.py's note
+MAX_DPS = 300          # never reverse. Cap scaled with the gentle
+                       # cruise: it bounds steering AND the recovery
+                       # pivot, so nothing spins fast on a slow run.
 
 # Intersection = dark_count at or above INTERSECTION_COUNT for
 # INTERSECTION_TICKS CONSECUTIVE polls. The count alone is not
