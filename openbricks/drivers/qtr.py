@@ -265,6 +265,35 @@ class QTRArray:
             self._last_side = -1
         return pos
 
+    def _cluster_position(self, readings, rightmost):
+        """Centroid of the leftmost (or rightmost) contiguous dark
+        cluster, with one sub-threshold neighbour each side joining
+        the weighting — the same between-element interpolation
+        position() has. ``None`` when nothing is dark."""
+        n = len(readings)
+        order = range(n - 1, -1, -1) if rightmost else range(n)
+        first = None
+        for i in order:
+            if readings[i] >= self._threshold:
+                first = i
+                break
+        if first is None:
+            return None
+        last = first
+        step = -1 if rightmost else 1
+        while 0 <= last + step < n and \
+                readings[last + step] >= self._threshold:
+            last += step
+        i0, i1 = (last, first) if rightmost else (first, last)
+        lo = i0 - 1 if i0 > 0 else 0
+        hi = i1 + 1 if i1 + 1 < n else i1
+        weight_sum = 0
+        moment = 0.0
+        for i in range(lo, hi + 1):
+            weight_sum += readings[i]
+            moment += readings[i] * self._x_mm[i]
+        return moment / weight_sum
+
     def leftmost_position(self, readings=None):
         """Centroid of the LEFTMOST contiguous dark cluster, in mm
         (same frame as :meth:`position`), or ``None`` when nothing is
@@ -277,27 +306,14 @@ class QTRArray:
         flag says a second line is present. Computed the same way
         every tick, so switching between the two is jump-free."""
         readings = self.read() if readings is None else readings
-        i0 = None
-        for i, r in enumerate(readings):
-            if r >= self._threshold:
-                i0 = i
-                break
-        if i0 is None:
-            return None
-        i1 = i0
-        n = len(readings)
-        while i1 + 1 < n and readings[i1 + 1] >= self._threshold:
-            i1 += 1
-        # One sub-threshold neighbour each side joins the weighting,
-        # for the same between-element interpolation position() has.
-        lo = i0 - 1 if i0 > 0 else 0
-        hi = i1 + 1 if i1 + 1 < n else i1
-        weight_sum = 0
-        moment = 0.0
-        for i in range(lo, hi + 1):
-            weight_sum += readings[i]
-            moment += readings[i] * self._x_mm[i]
-        return moment / weight_sum
+        return self._cluster_position(readings, rightmost=False)
+
+    def rightmost_position(self, readings=None):
+        """Mirror of :meth:`leftmost_position`: the RIGHTMOST
+        contiguous dark cluster's centre — the right fork, for a
+        route policy that takes it."""
+        readings = self.read() if readings is None else readings
+        return self._cluster_position(readings, rightmost=True)
 
     def last_side(self):
         """+1 if the line was last seen right of centre, -1 left,

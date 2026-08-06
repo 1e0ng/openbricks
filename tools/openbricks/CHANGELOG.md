@@ -7,9 +7,10 @@ Firmware versions are tracked separately on the `v*` tag namespace.
 
 At a branch the array sees TWO dark clusters and the global
 centroid lands between them — steering into the gap. New
-`QTRArray.leftmost_position()`: the leftmost contiguous cluster's
-own centre, computed every tick alongside the global centroid so
-switching is jump-free. The follower steers on it whenever the
+`QTRArray.leftmost_position()` / `rightmost_position()`: each
+contiguous cluster's own centre, computed every tick alongside the
+global centroid so switching is jump-free (rightmost recorded now
+for a future right-fork policy). The follower steers on it whenever the
 branch flag is dark (a second line under the right side), taking
 the left fork; the probe prints both positions. Firmware-side —
 the bench needs the updated image.
