@@ -52,6 +52,9 @@ typedef enum {
     OB_BUS_DONE,            // reply validated; payload available
     OB_BUS_TIMEOUT,         // deadline passed with no valid reply
     OB_BUS_BAD_REPLY,       // framing/checksum/id mismatch
+    OB_BUS_SERVO_ERR,       // authentic reply, but the servo's error
+                            // flags are set — the write it acknowledges
+                            // did not do what was asked
 } ob_bus_state_t;
 
 typedef struct {
@@ -76,6 +79,8 @@ typedef struct {
     uint32_t        n_ok;
     uint32_t        n_timeout;
     uint32_t        n_bad;
+    uint32_t        n_err;          // replies carrying servo error flags
+    uint8_t         last_err;       // most recent non-zero ERR byte
 } ob_bus_t;
 
 void ob_bus_init(ob_bus_t *b, ob_bus_io_t io);

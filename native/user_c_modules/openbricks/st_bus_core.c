@@ -16,11 +16,13 @@
 #define SCS_INSTR_SYNCW 0x83
 #define SCS_BROADCAST   0xFE
 
-// Fire-and-forget writes still elicit a 6-byte status reply from the
-// servo (unless broadcast). We collect and discard it — leaving it in
-// the RX path would mis-frame the NEXT transaction's reply, which is
-// exactly the stale-residue failure st3215.py's drain rule exists
-// for. Short deadline: status arrives fast or not at all.
+// Single-servo writes elicit a 6-byte status reply (unless
+// broadcast). It is collected — leaving it in the RX path would
+// mis-frame the NEXT transaction's reply, the stale-residue failure
+// st3215.py's drain rule exists for — AND verified: sender, checksum
+// and error flags, like st3215.py::_check_write_ack. A status that
+// never arrives is a TIMEOUT, not a shrug; the caller retries.
+// Short deadline: status arrives fast or not at all.
 #define WRITE_STATUS_LEN    6
 #define WRITE_STATUS_TICKS  3
 
@@ -175,6 +177,22 @@ void ob_bus_poll(ob_bus_t *b) {
             b->state = OB_BUS_BAD_REPLY;
             return;
         }
+        if (r[4] != 0) {
+            // The servo itself reports a fault (overload, over-heat,
+            // over-voltage...). The frame is authentic, so record the
+            // flags either way. A WRITE acknowledged with error flags
+            // did not do what was asked — fail it, like the reference
+            // driver (st3215.py::_check_write_ack) raises. A READ's
+            // payload is still valid data (a latched overload flag
+            // doesn't corrupt present-position), and failing every
+            // read would make a protection flag look like a dead bus.
+            b->last_err = r[4];
+            b->n_err++;
+            if (!b->want_reply) {
+                b->state = OB_BUS_SERVO_ERR;
+                return;
+            }
+        }
         if (b->want_reply) {
             b->payload_len = (uint8_t)(b->expect_len - 6);
             memcpy(b->payload, &r[5], b->payload_len);
@@ -186,16 +204,13 @@ void ob_bus_poll(ob_bus_t *b) {
         return;
     }
     if (--b->ticks_left <= 0) {
-        if (!b->want_reply) {
-            // A write whose status never came: the command itself
-            // very likely still landed (status loss is common on a
-            // shared half-duplex line). Match the Python driver,
-            // which discards the status without caring: not an error.
-            b->payload_len = 0;
-            b->n_ok++;
-            b->state = OB_BUS_DONE;
-            return;
-        }
+        // A lost reply is a loss, write status and read payload
+        // alike. This used to count a write whose status never came
+        // as OK ("very likely still landed") — but a silently lost
+        // config write leaves a servo in the wrong op-mode with zero
+        // diagnostic, and speed sync-writes then move it in a mode
+        // nobody configured. Register writes are idempotent, so the
+        // caller retries; see st_servo_core's config sequence.
         b->n_timeout++;
         b->state = OB_BUS_TIMEOUT;
     }
@@ -205,7 +220,8 @@ void ob_bus_poll(ob_bus_t *b) {
 ob_bus_state_t ob_bus_take_result(ob_bus_t *b, uint8_t *out,
                                   uint8_t *out_len) {
     ob_bus_state_t s = b->state;
-    if (s != OB_BUS_DONE && s != OB_BUS_TIMEOUT && s != OB_BUS_BAD_REPLY) {
+    if (s != OB_BUS_DONE && s != OB_BUS_TIMEOUT && s != OB_BUS_BAD_REPLY
+        && s != OB_BUS_SERVO_ERR) {
         return OB_BUS_IDLE;
     }
     if (out_len != NULL) {

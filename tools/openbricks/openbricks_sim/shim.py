@@ -363,6 +363,11 @@ class _SimStBus:
         # exercised, the failure mode is a hardware one.
         return (1, 0, 0)
 
+    def servo_write_stats(self, slot):
+        # (writes_failed, config_failed). Sim writes always land, for
+        # the same reason servo_stats is permanently healthy.
+        return (0, 0)
+
     def db_fault(self):
         return 0
 

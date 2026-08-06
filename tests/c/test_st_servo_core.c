@@ -71,7 +71,8 @@ TEST(planner_priorities_and_torque_dedup) {
     ob_sservo_attach(&sv, 0, 7, 0, 45);
     ob_sservo_op_t op;
 
-    // Config sequence first, exact order.
+    // Config sequence first, exact order. Each step advances only on
+    // its verified ACK (write_result), not at TX.
     static const uint8_t regs[3] = { OB_SREG_OP_MODE, OB_SREG_TORQUE,
                                      OB_SREG_GOAL_ACC };
     for (int i = 0; i < 3; i++) {
@@ -79,6 +80,9 @@ TEST(planner_priorities_and_torque_dedup) {
         CHECK_EQ_INT(op.kind, OB_SOP_WRITE);
         CHECK_EQ_INT(op.reg, regs[i]);
         ob_sservo_op_started(&sv, &op);
+        CHECK_EQ_INT(sv.slots[0].config_step, i);   // TX alone: no
+        ob_sservo_write_result(&sv, 1);
+        CHECK_EQ_INT(sv.slots[0].config_step, i + 1);
     }
 
     // Speed command: torque-on first (priority 1, as a sync since
@@ -309,6 +313,68 @@ TEST(failed_reads_count_stale_and_recover) {
     CHECK_EQ_INT(sv.slots[0].stale, 0);    // success clears streak
 }
 
+TEST(config_write_lost_is_retried_at_the_same_step) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_op_t op;
+    // op_mode goes out, its ACK never comes back.
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.reg, OB_SREG_OP_MODE);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_write_result(&sv, 0);
+    CHECK_EQ_INT(sv.slots[0].config_step, 0);
+    CHECK_EQ_INT(sv.slots[0].writes_failed, 1);
+    // The SAME register is reissued — not skipped. A skipped op_mode
+    // is a servo in position mode receiving speed sync-writes.
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_WRITE);
+    CHECK_EQ_INT(op.reg, OB_SREG_OP_MODE);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_write_result(&sv, 1);
+    CHECK_EQ_INT(sv.slots[0].config_step, 1);
+    CHECK_EQ_INT(sv.slots[0].config_fails, 0);   // success resets streak
+}
+
+TEST(dead_servo_latches_config_failed_and_frees_the_bus) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 0);       // never answers
+    ob_sservo_attach(&sv, 1, 8, 0, 0);       // healthy, configured
+    sv.slots[1].config_step = 3;
+    ob_sservo_op_t op;
+    for (int i = 0; i < OB_SSERVO_CONFIG_TRIES; i++) {
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_WRITE);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_write_result(&sv, 0);
+    }
+    CHECK_EQ_INT(sv.slots[0].config_failed, 1);
+    CHECK_EQ_INT(sv.slots[0].writes_failed, OB_SSERVO_CONFIG_TRIES);
+    // The dead slot stops issuing ops: the healthy slot's feedback
+    // reads own the bus again instead of queueing behind an endless
+    // config retry (config outranks reads in the planner).
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_READ_POS);
+    CHECK_EQ_INT(op.slot, 1);
+}
+
+TEST(write_result_with_nothing_in_flight_is_inert) {
+    // Sync-writes are broadcast (no reply); their completion must not
+    // be misattributed to whatever slot last held write_in_flight.
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_write_result(&sv, 0);
+    CHECK_EQ_INT(sv.slots[0].writes_failed, 0);
+    CHECK_EQ_INT(sv.slots[0].config_step, 0);
+    // A result landing after detach is dropped too.
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.write_in_flight, 0);
+    ob_sservo_detach(&sv, 0);
+    CHECK_EQ_INT(sv.write_in_flight, -1);
+    ob_sservo_write_result(&sv, 1);              // no crash, no state
+}
+
 TEST(bounds_are_guarded) {
     reset();
     CHECK_EQ_INT(ob_sservo_attach(&sv, -1, 1, 0, 0), -1);
@@ -405,6 +471,9 @@ int main(void) {
     RUN(all_parked_slots_share_the_bus_evenly);
     RUN(all_parked_still_get_polled);
     RUN(failed_reads_count_stale_and_recover);
+    RUN(config_write_lost_is_retried_at_the_same_step);
+    RUN(dead_servo_latches_config_failed_and_frees_the_bus);
+    RUN(write_result_with_nothing_in_flight_is_inert);
     RUN(bounds_are_guarded);
     return harness_exit("st_servo_core");
 }

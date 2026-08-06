@@ -155,16 +155,30 @@ class WriteSemanticsTests(_Base):
         self.assertEqual(state, sb.DONE)
         self.assertEqual(payload, b"")       # discarded, not surfaced
 
-    def test_write_with_lost_status_still_succeeds(self):
-        # Matches the Python driver: the command very likely landed;
-        # status loss on a shared half-duplex line is not an error.
+    def test_write_with_lost_status_is_a_timeout(self):
+        # This used to count as DONE ("the command very likely
+        # landed") — which let a lost config write mark a servo
+        # configured while it was still in position mode. A loss is
+        # never silent: the pump retries idempotent register writes.
         sb.start_write(1, 0x2A, b"\x10\x27")
         sb.take_tx()
         for _ in range(3):
             sb.poll()
         state, _ = sb.take_result()
-        self.assertEqual(state, sb.DONE)
-        self.assertEqual(sb.stats()[1], 0)   # no timeout counted
+        self.assertEqual(state, sb.TIMEOUT)
+        self.assertEqual(sb.stats()[1], 1)   # timeout counted
+
+    def test_write_status_with_error_flags_fails_the_write(self):
+        # An authentic status carrying error flags means the servo
+        # REFUSED or mangled the command (overload, EEPROM lock...) —
+        # the reference driver raises here; the C bus reports it as
+        # its own state so the loss is never silent.
+        sb.start_write(1, 0x2A, b"\x10\x27")
+        sb.take_tx()
+        sb.feed_rx(_reply(1, 0x20))
+        sb.poll()
+        state, _ = sb.take_result()
+        self.assertEqual(state, sb.SERVO_ERR)
 
     def test_broadcast_write_completes_immediately(self):
         sb.start_write(0xFE, 0x28, b"\x00")

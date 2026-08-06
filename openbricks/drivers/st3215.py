@@ -1034,8 +1034,28 @@ class ST3215Motor(Motor):
         stats = getattr(self._native_sb, "servo_stats", None)
         if stats is None:
             return
+        wstats = getattr(self._native_sb, "servo_write_stats", None)
         deadline = time.ticks_ms() + self._SLOT_ODOMETRY_TIMEOUT_MS
         while stats(slot)[0] == 0:
+            if wstats is not None:
+                wfailed, latched = wstats(slot)
+                if latched:
+                    # The C layer gave up configuring this servo: its
+                    # setup writes (wheel mode, torque, acceleration)
+                    # went unacknowledged OB_SSERVO_CONFIG_TRIES times
+                    # in a row. Feedback reads never even start for an
+                    # unconfigured slot, so without this check the
+                    # timeout below would blame "the pump never polled
+                    # it" — a firmware-fault message for what is a
+                    # wiring fault. Fail fast and name it.
+                    raise OSError(
+                        "servo id %s (native slot %d): %d configuration "
+                        "writes went unacknowledged — the servo never "
+                        "ACKed wheel-mode setup. Check its power and "
+                        "TX/RX wiring, and that it really has that bus "
+                        "id (`openbricks servo-id --scan` lists the "
+                        "ids actually answering)."
+                        % (self._id, slot, wfailed))
             if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
                 ok, failed, stale = stats(slot)
                 # "Never asked" and "asked, no answer" are different

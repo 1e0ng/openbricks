@@ -132,15 +132,65 @@ TEST(wrong_id_and_bad_checksum_rejected) {
     CHECK_EQ_INT(bus.n_bad, 2);
 }
 
-TEST(write_status_lost_is_not_an_error) {
+TEST(write_status_lost_is_a_timeout) {
+    // The 1.63-era core counted this as OK ("very likely still
+    // landed") — which let a lost op_mode config write mark a servo
+    // configured while it was still in position mode. A loss should
+    // never be silent; the caller retries idempotent writes.
     io_reset();
     uint8_t data[] = { 0x10, 0x27 };
     CHECK_EQ_INT(ob_bus_start_write(&bus, 1, 0x2A, data, 2), 0);
     for (int i = 0; i < 5; i++) {
         ob_bus_poll(&bus);
     }
+    CHECK_EQ_INT(ob_bus_take_result(&bus, NULL, NULL), OB_BUS_TIMEOUT);
+    CHECK_EQ_INT(bus.n_timeout, 1);
+    CHECK_EQ_INT(bus.n_ok, 0);
+}
+
+TEST(write_status_verified_ok_and_err_flags_fail_it) {
+    // A clean 6-byte status completes the write...
+    io_reset();
+    uint8_t data[] = { 0x10, 0x27 };
+    CHECK_EQ_INT(ob_bus_start_write(&bus, 1, 0x2A, data, 2), 0);
+    feed_reply(1, 0, (const uint8_t *)"", 0);
+    ob_bus_poll(&bus);
     CHECK_EQ_INT(ob_bus_take_result(&bus, NULL, NULL), OB_BUS_DONE);
-    CHECK_EQ_INT(bus.n_timeout, 0);       // half-duplex reality rule
+
+    // ...a status carrying servo error flags fails it: the servo is
+    // telling us the command did NOT do what was asked (overload,
+    // EEPROM lock, ...) — st3215.py::_check_write_ack raises here.
+    CHECK_EQ_INT(ob_bus_start_write(&bus, 1, 0x2A, data, 2), 0);
+    feed_reply(1, 0x20, (const uint8_t *)"", 0);
+    ob_bus_poll(&bus);
+    CHECK_EQ_INT(ob_bus_take_result(&bus, NULL, NULL), OB_BUS_SERVO_ERR);
+    CHECK_EQ_INT(bus.last_err, 0x20);
+    CHECK_EQ_INT(bus.n_err, 1);
+
+    // ...and a status from the WRONG servo is the two-conversations-
+    // on-one-wire signature (bench 2026-08-04), not an ACK.
+    CHECK_EQ_INT(ob_bus_start_write(&bus, 1, 0x2A, data, 2), 0);
+    feed_reply(3, 0, (const uint8_t *)"", 0);
+    ob_bus_poll(&bus);
+    CHECK_EQ_INT(ob_bus_take_result(&bus, NULL, NULL), OB_BUS_BAD_REPLY);
+}
+
+TEST(read_with_error_flags_still_delivers_payload) {
+    // A latched protection flag doesn't corrupt present-position;
+    // failing every read would make an overload look like a dead
+    // bus. The flags are recorded for diagnostics, the data flows.
+    io_reset();
+    CHECK_EQ_INT(ob_bus_start_read(&bus, 1, 0x38, 2, 5), 0);
+    uint8_t pl[] = { 0xD2, 0x04 };
+    feed_reply(1, 0x04, pl, 2);
+    ob_bus_poll(&bus);
+    uint8_t out[8];
+    uint8_t out_len = 0;
+    CHECK_EQ_INT(ob_bus_take_result(&bus, out, &out_len), OB_BUS_DONE);
+    CHECK_EQ_INT(out_len, 2);
+    CHECK(out[0] == 0xD2 && out[1] == 0x04);
+    CHECK_EQ_INT(bus.last_err, 0x04);
+    CHECK_EQ_INT(bus.n_err, 1);
 }
 
 TEST(sync_write_layout_and_broadcast_immediacy) {
@@ -179,7 +229,9 @@ int main(void) {
     RUN(timeout_is_exactly_budgeted);
     RUN(refused_tx_fails_visibly_not_wedged);
     RUN(wrong_id_and_bad_checksum_rejected);
-    RUN(write_status_lost_is_not_an_error);
+    RUN(write_status_lost_is_a_timeout);
+    RUN(write_status_verified_ok_and_err_flags_fail_it);
+    RUN(read_with_error_flags_still_delivers_payload);
     RUN(sync_write_layout_and_broadcast_immediacy);
     RUN(guards_reject_bad_sizes);
     RUN(busy_bus_rejects_new_start);

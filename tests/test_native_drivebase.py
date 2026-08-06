@@ -116,11 +116,25 @@ class _FakeBus:
         # not a state real hardware can be in.
         if slot in getattr(self, "wedged_slots", ()):
             return (0, 0, 0)     # pump never ASKED — a wedged bus
+        if slot in getattr(self, "config_failed_slots", ()):
+            # An unconfigured slot never gets a feedback read: the C
+            # planner requires config_step 3 before polling. So the
+            # READ counters look exactly like the wedged-pump case —
+            # which is why the write counters must be consulted first.
+            return (0, 0, 0)
         if slot in getattr(self, "dead_slots", ()):
             return (0, 137, 137)  # asked repeatedly, got silence
         if getattr(self, "fault_bits", 0) & (1 << slot):
             return (500, 42, 42)
         return (500, 0, 0)
+
+    def servo_write_stats(self, slot):
+        # (writes_failed, config_failed). ``config_failed_slots``
+        # models the servo that never ACKed its wheel-mode setup —
+        # the C layer's retry-then-latch outcome for a dead servo.
+        if slot in getattr(self, "config_failed_slots", ()):
+            return (8, 1)
+        return (0, 0)
 
     def db_fault(self):
         return getattr(self, "fault_bits", 0)
@@ -908,6 +922,38 @@ class OneBusOneOwnerTests(_Base):
         self.assertTrue("not answering" in msg, msg)
         self.assertTrue("137 failed reads" in msg, msg)
         self.assertTrue("servo-id" in msg, msg)
+
+    def test_task_motor_that_never_acked_config_names_the_write_loss(self):
+        # A servo that never ACKs its wheel-mode setup has 0 reads
+        # attempted (unconfigured slots are never polled) — the same
+        # READ counters as a wedged pump. Without consulting the
+        # write counters this raised "the bus pump never polled it —
+        # not a wiring fault" for what IS a wiring fault.
+        db, _, _ = self._drivebase()
+        self.bus.config_failed_slots = (2, 3)
+        try:
+            self._motor(4)
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("servo id 4" in msg, msg)
+        self.assertTrue("configuration" in msg, msg)
+        self.assertTrue("8" in msg, msg)               # the loss count
+        self.assertTrue("wiring" in msg, msg)
+        self.assertTrue("never polled" not in msg, msg)
+
+    def test_a_wheel_that_never_acked_config_is_named_at_adoption(self):
+        # The drivebase's liveness gate gets the same discrimination.
+        self.bus.config_failed_slots = (0,)
+        try:
+            self._drivebase()
+            self.fail("expected OSError")
+        except OSError as e:
+            msg = str(e)
+        self.assertTrue("left wheel" in msg, msg)
+        self.assertTrue("never ACKed its configuration" in msg, msg)
+        self.assertTrue("8 writes unacknowledged" in msg, msg)
+        self.assertTrue("never polled" not in msg, msg)
 
     def test_a_pump_that_never_polled_is_not_blamed_on_wiring(self):
         # 0 replies AND 0 failed reads means the bus never ASKED —
