@@ -12,6 +12,7 @@ import tests._fakes  # noqa: F401
 import unittest
 
 from machine import ADC
+from openbricks import pins as _pins
 from openbricks.drivers.qtr import QTRArray
 
 
@@ -46,8 +47,15 @@ def _calibrated(**kwargs):
 
 
 class ConstructionTests(unittest.TestCase):
+    def setUp(self):
+        # The pin-claim registry is process-global; earlier suites in
+        # the same run (hub, L298N fixtures) own low GPIOs under
+        # other roles.
+        _pins._claims_reset()
+
     def tearDown(self):
         ADC.reads = {}
+        _pins._claims_reset()
 
     def test_needs_two_elements(self):
         with self.assertRaises(ValueError):
@@ -81,10 +89,12 @@ class ConstructionTests(unittest.TestCase):
 
 class ReadingTests(unittest.TestCase):
     def setUp(self):
+        _pins._claims_reset()
         self.qtr = _calibrated()
 
     def tearDown(self):
         ADC.reads = {}
+        _pins._claims_reset()
 
     def test_read_normalizes_to_full_scale(self):
         _script(dark_pins=(5,))
