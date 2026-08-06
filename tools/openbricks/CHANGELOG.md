@@ -10,10 +10,13 @@ centroid lands between them — steering into the gap. New
 `QTRArray.leftmost_position()` / `rightmost_position()`: each
 contiguous cluster's own centre, computed every tick alongside the
 global centroid so switching is jump-free (rightmost recorded now
-for a future right-fork policy). The follower steers on it whenever the
-branch flag is dark (a second line under the right side), taking
-the left fork; the probe prints both positions. Firmware-side —
-the bench needs the updated image.
+for a future right-fork policy). The follower steers on the fork cluster whenever the branch flag
+is dark — which SIDE is one config constant (`BRANCH_SIDE`): the
+flag sits over the branch line, so the fork to follow is the
+cluster on the opposite side. Flag on the right end (bench) takes
+the leftmost cluster; rewire the flag to the left end and the same
+law takes the rightmost. The probe prints both positions.
+Firmware-side — the bench needs the updated image.
 
 ## 1.66.5 — the follower survives what the first bench probe found
 

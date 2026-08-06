@@ -90,7 +90,7 @@ def _clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def _pd_wheel_speeds(position_mm, leftmost_mm, peak, branch_dark,
+def _pd_wheel_speeds(position_mm, fork_mm, peak, branch_dark,
                      last_side, dark_count, state, dt_s):
     """One control tick: ``(decision, state)``.
 
@@ -99,14 +99,14 @@ def _pd_wheel_speeds(position_mm, leftmost_mm, peak, branch_dark,
     intersection_streak)``; thread each returned state into the next
     call, starting from ``PD_STATE0``.
 
-    ``position_mm`` is the global centroid, ``leftmost_mm`` the
-    leftmost cluster's centre (both + = right of centre, ``None``
-    when nothing is dark); ``peak`` is the brightest calibrated
-    reading — a weak peak is off-mat mush and falls to the
-    ``last_side`` (+1/-1) recovery steer. While ``branch_dark`` a
-    second line sits under the branch flag, the global centroid
-    points between the two lines, and steering runs on
-    ``leftmost_mm`` — the left fork.
+    ``position_mm`` is the global centroid; ``fork_mm`` is the
+    cluster to steer on while ``branch_dark`` — the caller picks
+    which end (see BRANCH_SIDE), the law only knows that during a
+    branch the global centroid points between the two lines and the
+    chosen cluster is the real one. Both + = right of centre,
+    ``None`` when nothing is dark. ``peak`` is the brightest
+    calibrated reading — a weak peak is off-mat mush and falls to
+    the ``last_side`` (+1/-1) recovery steer.
     """
     prev_error, streak = state
     if dark_count >= INTERSECTION_COUNT:
@@ -115,8 +115,8 @@ def _pd_wheel_speeds(position_mm, leftmost_mm, peak, branch_dark,
             return None, (prev_error, streak)
     else:
         streak = 0
-    if branch_dark and leftmost_mm is not None:
-        steer_on = leftmost_mm
+    if branch_dark and fork_mm is not None:
+        steer_on = fork_mm
     else:
         steer_on = position_mm
     if steer_on is None or peak < PEAK_MIN:
@@ -144,6 +144,12 @@ def _pd_wheel_speeds(position_mm, leftmost_mm, peak, branch_dark,
 QTR_PINS = (1, 2, 3, 7, 8, 9, 10)  # channels 15..9, left -> right
 PITCH_MM = 4.0
 BRANCH_PIN = 5                     # channel 1, far right
+# Which SIDE of the line cluster the branch flag is mounted on. The
+# flag sits over the branch line, so the fork to follow is the
+# cluster on the OPPOSITE side: flag right -> leftmost cluster,
+# flag left -> rightmost. Rewire the flag to the array's other end
+# and this is the only line that changes.
+BRANCH_SIDE = "right"
 
 LINE_CAL = "/qtr_line.cal"
 BRANCH_CAL = "/qtr_branch.cal"
@@ -164,8 +170,12 @@ state = PD_STATE0
 while True:
     readings = qtr.read()
     branch_dark = branch.dark()
+    if BRANCH_SIDE == "right":
+        fork_pos = qtr.leftmost_position(readings)
+    else:
+        fork_pos = qtr.rightmost_position(readings)
     speeds, state = _pd_wheel_speeds(qtr.position(readings),
-                                     qtr.leftmost_position(readings),
+                                     fork_pos,
                                      max(readings),
                                      branch_dark,
                                      qtr.last_side(),
