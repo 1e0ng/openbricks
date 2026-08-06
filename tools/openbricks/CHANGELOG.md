@@ -3,6 +3,34 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.64.3 — the sim bus stops lying about pose, slots, and motor count
+
+Three fidelity gaps between the emulated `st_bus` and the firmware
+one, all sim-side (the firmware is unchanged beyond the lockstep
+version):
+
+**Pose.** The shim fed bridge odometry to the drivebase controller
+only while the drivebase was WRITING; the firmware syncs it every
+hard tick. So `straight(50)` after two seconds of `move_wheels()`
+armed against the pose from before the yielded stretch and drove the
+chassis **backward 142.6 mm** — verified by execution, now a pinned
+regression test. `RawDriveBase` grew the firmware's yielded-tick
+half (`sync()`); the shim calls it every tick and at every arm.
+
+**Slots.** `servo_attach` never marked a slot in use, so the
+engine's first-free-slot loop handed BOTH wheels slot 0. Occupied
+slots now refuse and `servo_slot_of` exists, like the firmware.
+
+**Motor count.** The sim refused a third motor; the firmware bus has
+four slots and the bench robot is four ST-3032s on one UART. The
+third and fourth constructed motors now bind kinematic task-motor
+slots — no MuJoCo body, the shaft integrates its commanded speed —
+so a real four-servo `main.py` constructs and runs end-to-end.
+Encoder motors still get only the two physical slots, wheels must be
+the first two constructed (the sim binds by construction order, not
+servo id), and adopting a kinematic stand-in into a DriveBase is
+refused loudly.
+
 ## 1.64.1 — stop-then-run drives; a coasted motor goes cold
 
 Two coast-path firmware bugs, no host-side changes beyond the
