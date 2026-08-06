@@ -3,6 +3,31 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.65.0 — a dead bus is never called a jam, and polling finds stalls
+
+Firmware-side; the host package rides the lockstep version.
+
+1.62.0 taught `run_angle` to report which failure a stall was — but a
+servo that goes bus-silent freezes its odometry exactly like a jam,
+so the reporter told users "the shaft is jammed, or torque is not
+reaching it" about an unplugged wire, then carried on. Every stall
+path now checks the feedback counters FIRST: consecutive silence
+(~200 ms, the C fault latch's own threshold) raises a wiring-fault
+error naming the servo, regardless of `raise_on_stall` — a wiring
+fault is not survivable, only mechanical stalls are.
+
+`run_angle(wait=False)` had no detection at all: the documented
+`while not m.done():` loop polled a jammed or unplugged motor
+forever. `done()` now runs the same progress-idle watch as the
+blocking path on both the adopted and MicroPython-bus paths —
+stall → stop the wheel, report (or raise), and end the move; bus
+silence → raise.
+
+And two silent losses on the MicroPython-bus path are loud now: a
+servo that fails the pre-move probe raises instead of returning as
+if the move completed, and a step that never parks reports a stall
+and returns False instead of returning True — a stalled motor no
+longer reports a fully successful move.
 ## 1.64.4 — Ctrl-C stops the robot verifiably, and says so
 
 1.61.2 made Ctrl-C forward an interrupt to the hub — but exactly one,
