@@ -188,6 +188,34 @@ class BundleFailureTests(unittest.TestCase):
             finally:
                 docs.tempfile.gettempdir = real_gettmp
 
+    def test_race_lost_at_the_rename_reuses_the_winner(self):
+        # The winner appears BETWEEN our extraction and our rename:
+        # the rename fails, the winner is complete, our scratch copy
+        # is discarded and the winner's dir is returned untouched.
+        import hashlib
+        import tempfile as tf
+        with tf.TemporaryDirectory() as tmp:
+            real_gettmp = docs.tempfile.gettempdir
+            real_rename = docs.os.rename
+            docs.tempfile.gettempdir = lambda: tmp
+            with open(docs._bundle_path(), "rb") as f:
+                tag = hashlib.sha256(f.read()).hexdigest()[:12]
+            done = os.path.join(tmp, "openbricks-docs-" + tag)
+
+            def winner_appears(a, b):
+                os.makedirs(done)
+                with open(os.path.join(done, "index.html"), "w") as f:
+                    f.write("<html>winner</html>")
+                raise OSError("target exists")
+            docs.os.rename = winner_appears
+            try:
+                self.assertEqual(docs._extract(), done)
+                with open(os.path.join(done, "index.html")) as f:
+                    self.assertIn("winner", f.read())
+            finally:
+                docs.os.rename = real_rename
+                docs.tempfile.gettempdir = real_gettmp
+
     def test_corrupt_bundle_without_index_is_named(self):
         import tempfile
         import zipfile

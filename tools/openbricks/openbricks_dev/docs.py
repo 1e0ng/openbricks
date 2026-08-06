@@ -81,11 +81,9 @@ def _extract():
                 # path: replace it with the complete one.
                 shutil.rmtree(out, ignore_errors=True)
                 os.rename(tmp, out)
-    if not os.path.exists(index):
-        raise DocsError(
-            "the offline bundle has no index.html — it is corrupt; "
-            "reinstall openbricks or rebuild it with "
-            "scripts/build-offline-docs.sh")
+    # No final index re-check: every path above either found a
+    # complete extraction, renamed a verified-complete one into
+    # place, or raised.
     return out
 
 
