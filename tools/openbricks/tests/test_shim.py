@@ -85,6 +85,19 @@ class InstallLifecycleTests(unittest.TestCase):
         finally:
             shim.uninstall()
 
+    def test_uninstall_evicts_openbricks_modules(self):
+        # openbricks.* imported UNDER the shim capture the fake
+        # machine at module level; leaving them cached poisons a
+        # later import in the same process (order-dependent tests).
+        robot = SimRobot()
+        shim.install(robot.runtime)
+        try:
+            import openbricks.drivers.st3215  # noqa: F401
+            self.assertIn("openbricks.drivers.st3215", sys.modules)
+        finally:
+            shim.uninstall()
+        self.assertNotIn("openbricks.drivers.st3215", sys.modules)
+
     def test_uninstall_when_not_installed_is_noop(self):
         # Should not raise even when nothing's installed.
         shim.uninstall()
@@ -454,6 +467,37 @@ class ShimSerialMotorTests(_ShimTestBase):
         from openbricks.drivers.st3032 import ST3032Motor
         m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
         self.assertTrue(m.ping())
+
+    def test_blocked_run_angle_reports_and_continues(self):
+        # A physically blocked wheel defeats the crawl floor; the
+        # wait loop used to spin forever (a CI timeout instead of a
+        # named stall). Firmware-style budget: report, return False,
+        # park — the mission continues.
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        m._apply_v = lambda now_ms, v_cmd: None    # shaft never moves
+        result = m.run_angle(200, 90)
+        self.assertFalse(result)
+        self.assertEqual(m._mode, "idle")          # gave up, parked
+        # And an unblocked move still completes with True.
+        m2 = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
+        self.assertTrue(m2.run_angle(200, 45))
+
+    def test_unmapped_mux_channel_raises_not_impersonates(self):
+        # The bench has a third TCS34725 on mux channel 2; the shim
+        # silently fell back to the CENTRE camera for it — plausible
+        # readings from the wrong sensor. A sensor the sim cannot
+        # model must say so.
+        from openbricks.drivers.tca9548a import TCA9548A
+        from openbricks.drivers.tcs34725 import TCS34725
+        from machine import I2C, Pin
+        mux = TCA9548A(I2C(0, sda=Pin(15), scl=Pin(16)))
+        TCS34725(mux[0])                    # mapped: fine
+        try:
+            TCS34725(mux[2])
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("channel 2" in str(e), e)
 
     def test_fifth_serial_motor_exhausts_slots(self):
         # Four slots now — 2 physical wheels + 2 kinematic task

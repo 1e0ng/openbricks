@@ -71,9 +71,16 @@ def _extract():
         try:
             os.rename(tmp, out)
         except OSError:
-            # A concurrent invocation won the rename; its extraction
-            # of the same content-hash is byte-identical.
-            shutil.rmtree(tmp, ignore_errors=True)
+            if os.path.exists(index):
+                # A concurrent invocation won the rename; its
+                # extraction of the same content-hash is identical.
+                shutil.rmtree(tmp, ignore_errors=True)
+            else:
+                # A stale HALF-manual from an interrupted pre-1.65.2
+                # extraction (no index.html) is squatting on the
+                # path: replace it with the complete one.
+                shutil.rmtree(out, ignore_errors=True)
+                os.rename(tmp, out)
     if not os.path.exists(index):
         raise DocsError(
             "the offline bundle has no index.html — it is corrupt; "
