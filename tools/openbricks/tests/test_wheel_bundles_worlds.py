@@ -175,26 +175,32 @@ class WheelBundlesWorldsTests(unittest.TestCase):
             "to flat material rgba without these." % missing)
 
 
-    def test_wheel_contains_offline_docs_pages(self):
-        # ``openbricks docs`` reads guide pages bundled into
-        # openbricks_dev/_docs/ by setup.py::_sync_docs. Same
-        # ship-the-command-forget-the-data bug class as the missing
-        # worlds (0.10.3-0.10.5) and missing .ldr props
-        # (0.10.7-0.10.10): without the package-data stanza the
-        # command exists but every topic 404s on an installed wheel.
-        from openbricks_dev import docs as docs_mod
+    def test_wheel_contains_the_offline_docs_bundle(self):
+        # ``openbricks docs`` opens the Sphinx site out of
+        # openbricks_dev/_docs/offline-docs.zip (1.63.0 — before that,
+        # markdown guide pages). Same ship-the-command-forget-the-data
+        # bug class as the missing worlds (0.10.3-0.10.5) and missing
+        # .ldr props (0.10.7-0.10.10): without the package-data stanza
+        # the command exists but shows nothing on an installed wheel.
         with tempfile.TemporaryDirectory() as tmp:
             wheel = _build_wheel_into(tmp)
             with zipfile.ZipFile(wheel) as zf:
                 names = zf.namelist()
-        missing = [
-            t for t in docs_mod.TOPICS
-            if ("openbricks_dev/_docs/" + t + ".md") not in names]
-        self.assertEqual(
-            missing, [],
-            "wheel is missing offline doc pages: %s — check "
-            "setup.py::_sync_docs, MANIFEST.in, and the "
-            "openbricks_dev package-data stanza." % missing)
+                bundle = "openbricks_dev/_docs/offline-docs.zip"
+                self.assertIn(
+                    bundle, names,
+                    "wheel is missing the offline docs bundle — check "
+                    "setup.py::_sync_docs, MANIFEST.in, and the "
+                    "openbricks_dev package-data stanza.")
+                # And the bundle inside the wheel is the real site,
+                # not an empty or truncated file: the pages the CLI's
+                # topic map points at must exist.
+                import io
+                with zipfile.ZipFile(io.BytesIO(zf.read(bundle))) as dz:
+                    pages = set(dz.namelist())
+        for page in ("index.html", "install.html", "api/robotics.html"):
+            self.assertIn(page, pages,
+                          "offline-docs.zip in the wheel lacks %s" % page)
 
 
 class MatTextureSizeBudgetTests(unittest.TestCase):
