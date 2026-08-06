@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.64.4 — Ctrl-C stops the robot verifiably, and says so
+
+1.61.2 made Ctrl-C forward an interrupt to the hub — but exactly one,
+unverified, with every failure swallowed. The hub can eat a single
+injected interrupt (a scheduled callback catches it — the same
+disease the raw-REPL entry retries 6× for), the send itself can fail
+with the robot out of BLE range, and a second Ctrl-C abandoned the
+whole stop mid-flight (`KeyboardInterrupt` is a `BaseException`; the
+`except Exception` guards never saw it). In all three cases the CLI
+printed "aborted." and exited — indistinguishable from a successful
+stop, while the robot kept driving.
+
+The stop is now the same verified, retried primitive the connection
+path trusts: re-enter the raw REPL and wait for its banner, which is
+proof the program died. A second (or third) Ctrl-C restarts the stop
+instead of killing it. The outcome is printed either way — "robot
+stopped." or a warning naming what failed and what to do ("press its
+hub button or cut power"). The idle-loop restore gets the same
+treatment: absorbed repeat interrupts, and a named warning ("button
+may not start programs until power-cycled") instead of a silent
+`pass`. Dropping the old post-interrupt drain also removes a path
+that could hang the exit for 30 s mis-framing the output stream.
 ## 1.64.3 — the sim bus stops lying about pose, slots, and motor count
 
 Three fidelity gaps between the emulated `st_bus` and the firmware
