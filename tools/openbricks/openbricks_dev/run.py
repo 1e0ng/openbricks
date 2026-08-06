@@ -588,8 +588,8 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
             try:
                 await _stream_output(blink, link, out)
             except (asyncio.CancelledError, KeyboardInterrupt):
-                # Host-side Ctrl-C — forward it to the hub BEFORE the
-                # link drops, then drain the interrupt traceback.
+                # Host-side Ctrl-C — stop the ROBOT before the link
+                # drops, and VERIFY it stopped.
                 #
                 # KeyboardInterrupt is the one that actually arrives:
                 # asyncio.run does not convert SIGINT to
@@ -598,20 +598,61 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
                 # never ran — the CLI printed "aborted." and exited
                 # while the robot kept driving, which is the worst
                 # possible response to someone reaching for Ctrl-C.
-                try:
-                    await link.write(_CTRL_C)
-                except Exception:
-                    pass
-                try:
-                    await _stream_output(blink, link, out)
-                except Exception:
-                    pass
+                #
+                # The stop is _enter_raw_repl, not one bare Ctrl-C
+                # write: a single injected interrupt can be eaten by
+                # a scheduled callback on the hub (the file-top
+                # comment — one eaten interrupt costs one retry), and
+                # an unverified write makes "stopped" and "still
+                # driving" indistinguishable at the terminal. Reaching
+                # the raw-REPL banner IS the proof the program died.
+                #
+                # A SECOND Ctrl-C lands as another KeyboardInterrupt
+                # at whatever await the stop sequence is in. Absorb it
+                # and restart the stop (Ctrl-C/Ctrl-A are idempotent)
+                # instead of letting it abandon a moving robot
+                # mid-stop.
+                stopped = False
+                for _ in range(3):
+                    try:
+                        blink._step = "stopping the robot"
+                        await _enter_raw_repl(blink, link)
+                        stopped = True
+                        break
+                    except (asyncio.CancelledError, KeyboardInterrupt):
+                        continue
+                    except Exception:
+                        break
+                if stopped:
+                    print("\nrobot stopped.", file=sys.stderr)
+                else:
+                    print("\nWARNING: could not confirm the robot "
+                          "stopped — the interrupt was sent but the "
+                          "hub never acknowledged it. If the robot is "
+                          "still moving, press its hub button or cut "
+                          "power.", file=sys.stderr)
                 raise
         finally:
-            try:
-                await _restore_idle_loop(link)
-            except Exception:
-                pass
+            # The restore is the same critical section: a Ctrl-C here
+            # (or a dead link) previously vanished into ``pass`` and
+            # left the hub with a dead idle loop — button presses
+            # silently doing nothing until a power-cycle. Absorb
+            # repeat interrupts, and NAME the failure instead of
+            # leaving the silent trap.
+            restored = False
+            for _ in range(3):
+                try:
+                    await _restore_idle_loop(link)
+                    restored = True
+                    break
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    continue
+                except Exception:
+                    break
+            if not restored:
+                print("WARNING: could not re-arm the hub's idle loop "
+                      "— the button may not start programs until the "
+                      "hub is power-cycled.", file=sys.stderr)
 
 
 def run(args):

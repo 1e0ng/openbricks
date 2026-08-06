@@ -662,38 +662,49 @@ class BufferedLinkDrainTests(unittest.TestCase):
 
 
 class HostInterruptForwardingTests(unittest.TestCase):
-    """Host-side Ctrl-C mid-run: _run_async forwards a Ctrl-C to the
-    hub, drains the interrupt traceback, restores the idle loop, and
-    re-raises so the client exits."""
+    """Host-side Ctrl-C mid-run: _run_async stops the ROBOT — via the
+    verified, retried _enter_raw_repl primitive, not one unverified
+    Ctrl-C write — reports the outcome on stderr either way, restores
+    the idle loop, and re-raises so the client exits.
 
-    def test_cancelled_error_forwards_ctrl_c(self):
-        import asyncio
+    Why not a bare write: a single injected interrupt can be eaten by
+    a scheduled callback on the hub, and ``except Exception: pass``
+    around it made "stopped" and "still driving at full speed"
+    indistinguishable at the terminal."""
+
+    def _interrupt(self, stream_exc, raw_repl=None, restore=None):
+        """Run _run_async to its interrupt path with the protocol
+        stubbed out. ``raw_repl``/``restore`` are per-call hooks fed
+        the 1-based call count. Returns (call counts, stderr text)."""
+        import sys
         link = _ProtocolLink([])
-        restore_calls = []
-        stream_calls = []
+        calls = {"raw_repl": 0, "stream": 0, "restore": 0}
 
         async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return link
 
-        async def _stub(blink, l):
+        async def _raw_repl(blink, l):
+            calls["raw_repl"] += 1
+            if raw_repl is not None:
+                await raw_repl(calls["raw_repl"])
+
+        async def _stream(blink, l, out):
+            calls["stream"] += 1
+            raise stream_exc()
+
+        async def _restore(l):
+            calls["restore"] += 1
+            if restore is not None:
+                await restore(calls["restore"])
+
+        async def _stub_stage(blink, l, target_path, payload, hub_name):
             return None
 
         async def _stub_upload(blink, l, script_bytes):
             return None
 
-        async def _stream(blink, l, out):
-            stream_calls.append(1)
-            if len(stream_calls) == 1:
-                raise asyncio.CancelledError()
-
-        async def _restore(l):
-            restore_calls.append(1)
-
-        async def _stub_stage(blink, l, target_path, payload, hub_name):
-            return None
-
         patches = [
-            ("_enter_raw_repl", _stub),
+            ("_enter_raw_repl", _raw_repl),
             ("_stage_file", _stub_stage),
             ("_raw_paste_upload", _stub_upload),
             ("_stream_output", _stream),
@@ -704,139 +715,86 @@ class HostInterruptForwardingTests(unittest.TestCase):
         origs = [(n, getattr(run_mod, n)) for n, _ in patches]
         for n, fn in patches:
             setattr(run_mod, n, fn)
+        err = io.StringIO()
+        orig_stderr = sys.stderr
+        sys.stderr = err
         try:
-            with self.assertRaises(asyncio.CancelledError):
+            with self.assertRaises(
+                    (KeyboardInterrupt, asyncio.CancelledError)):
                 asyncio.run(run_mod._run_async(
                     "X", None, 1.0, command="print(1)"))
         finally:
+            sys.stderr = orig_stderr
             run_mod.NUSLink.connect = orig_connect
             for n, fn in origs:
                 setattr(run_mod, n, fn)
-        # Ctrl-C forwarded to the hub, drain attempted, idle restored.
-        self.assertIn(run_mod._CTRL_C, link.writes)
-        self.assertEqual(len(stream_calls), 2)
-        self.assertEqual(restore_calls, [1])
+        return calls, err.getvalue()
 
-
-    def test_keyboard_interrupt_forwards_ctrl_c(self):
-        import asyncio
-        link = _ProtocolLink([])
-        restore_calls = []
-        stream_calls = []
-
-        async def _fake_connect(name, scan_timeout=5.0, debug=False):
-            return link
-
-        async def _stub(blink, l):
-            return None
-
-        async def _stub_upload(blink, l, script_bytes):
-            return None
-
-        async def _stream(blink, l, out):
-            stream_calls.append(1)
-            if len(stream_calls) == 1:
-                raise KeyboardInterrupt()
-
-        async def _restore(l):
-            restore_calls.append(1)
-
-        async def _stub_stage(blink, l, target_path, payload, hub_name):
-            return None
-
-        patches = [
-            ("_enter_raw_repl", _stub),
-            ("_stage_file", _stub_stage),
-            ("_raw_paste_upload", _stub_upload),
-            ("_stream_output", _stream),
-            ("_restore_idle_loop", _restore),
-        ]
-        orig_connect = run_mod.NUSLink.connect
-        run_mod.NUSLink.connect = _fake_connect
-        origs = [(n, getattr(run_mod, n)) for n, _ in patches]
-        for n, fn in patches:
-            setattr(run_mod, n, fn)
-        try:
-            with self.assertRaises(KeyboardInterrupt):
-                asyncio.run(run_mod._run_async(
-                    "X", None, 1.0, command="print(1)"))
-        finally:
-            run_mod.NUSLink.connect = orig_connect
-            for n, fn in origs:
-                setattr(run_mod, n, fn)
+    def test_keyboard_interrupt_stops_verified_and_reports(self):
         # THE case that actually happens at a terminal: asyncio.run
         # raises KeyboardInterrupt at the await point, not
-        # CancelledError. Catching only the latter meant the CLI
-        # exited while the robot kept driving.
-        # Ctrl-C forwarded to the hub, drain attempted, idle restored.
-        self.assertIn(run_mod._CTRL_C, link.writes)
-        self.assertEqual(len(stream_calls), 2)
-        self.assertEqual(restore_calls, [1])
+        # CancelledError. The stop is _enter_raw_repl called a second
+        # time — reaching the raw-REPL banner IS the proof the
+        # program died — and the user is told so.
+        calls, err = self._interrupt(KeyboardInterrupt)
+        self.assertEqual(calls["raw_repl"], 2)
+        self.assertEqual(calls["restore"], 1)
+        self.assertIn("robot stopped.", err)
+        self.assertNotIn("WARNING", err)
 
+    def test_cancelled_error_takes_the_same_path(self):
+        calls, err = self._interrupt(asyncio.CancelledError)
+        self.assertEqual(calls["raw_repl"], 2)
+        self.assertIn("robot stopped.", err)
 
-
-    def test_interrupt_survives_a_link_that_is_already_gone(self):
-        import asyncio
-        link = _ProtocolLink([])
-        restore_calls = []
-        stream_calls = []
-
-        async def _fake_connect(name, scan_timeout=5.0, debug=False):
-            # The link dies as the interrupt arrives — a real
-            # possibility, since Ctrl-C often follows the robot
-            # driving out of BLE range. The write must not mask the
-            # KeyboardInterrupt, and the idle loop must still be
-            # restored.
-            async def _dead_write(_data):
+    def test_unconfirmed_stop_is_loud_not_silent(self):
+        # The link dies as the interrupt arrives — Ctrl-C often
+        # follows the robot driving out of BLE range. The old code
+        # swallowed the failure and printed only "aborted.": success
+        # and a still-driving robot looked identical. Now the failure
+        # is named, with what to do about it.
+        async def dead_link(n):
+            if n >= 2:                     # connect-time call succeeds
                 raise OSError("link gone")
-            link.write = _dead_write
-            return link
+        calls, err = self._interrupt(KeyboardInterrupt,
+                                     raw_repl=dead_link)
+        self.assertIn("could not confirm the robot stopped", err)
+        self.assertIn("hub button", err)
+        self.assertEqual(calls["restore"], 1)
 
-        async def _stub(blink, l):
-            return None
-
-        async def _stub_upload(blink, l, script_bytes):
-            return None
-
-        async def _stream(blink, l, out):
-            stream_calls.append(1)
-            if len(stream_calls) == 1:
+    def test_second_ctrl_c_does_not_abandon_the_stop(self):
+        # A second Ctrl-C lands as another KeyboardInterrupt at
+        # whatever await the stop sequence is in. It must restart the
+        # stop, not abandon a moving robot mid-stop (KeyboardInterrupt
+        # is a BaseException: the old ``except Exception`` guards let
+        # it fly straight through).
+        async def second_ctrl_c(n):
+            if n == 2:
                 raise KeyboardInterrupt()
-            # The drain fails too: the link is gone, so there is
-            # nothing to read the interrupt traceback from.
+        calls, err = self._interrupt(KeyboardInterrupt,
+                                     raw_repl=second_ctrl_c)
+        self.assertEqual(calls["raw_repl"], 3)     # stop re-run
+        self.assertIn("robot stopped.", err)
+
+    def test_ctrl_c_during_restore_is_absorbed(self):
+        async def flaky_restore(n):
+            if n == 1:
+                raise KeyboardInterrupt()
+        calls, err = self._interrupt(KeyboardInterrupt,
+                                     restore=flaky_restore)
+        self.assertEqual(calls["restore"], 2)
+        self.assertNotIn("re-arm", err)
+
+    def test_failed_restore_names_the_trap(self):
+        # A dead idle loop means button presses silently do nothing
+        # until a power-cycle — the exact trap _restore_idle_loop was
+        # built to close. Failing to restore must say so, not pass.
+        async def dead_restore(n):
             raise OSError("link gone")
-
-        async def _restore(l):
-            restore_calls.append(1)
-
-        async def _stub_stage(blink, l, target_path, payload, hub_name):
-            return None
-
-        patches = [
-            ("_enter_raw_repl", _stub),
-            ("_stage_file", _stub_stage),
-            ("_raw_paste_upload", _stub_upload),
-            ("_stream_output", _stream),
-            ("_restore_idle_loop", _restore),
-        ]
-        orig_connect = run_mod.NUSLink.connect
-        run_mod.NUSLink.connect = _fake_connect
-        origs = [(n, getattr(run_mod, n)) for n, _ in patches]
-        for n, fn in patches:
-            setattr(run_mod, n, fn)
-        try:
-            with self.assertRaises(KeyboardInterrupt):
-                asyncio.run(run_mod._run_async(
-                    "X", None, 1.0, command="print(1)"))
-        finally:
-            run_mod.NUSLink.connect = orig_connect
-            for n, fn in origs:
-                setattr(run_mod, n, fn)
-        # The interrupt still propagates and cleanup still runs,
-        # even though forwarding it was impossible.
-        self.assertEqual(restore_calls, [1])
-
-
+        calls, err = self._interrupt(KeyboardInterrupt,
+                                     restore=dead_restore)
+        self.assertIn("could not re-arm", err)
+        self.assertIn("power-cycle", err)
 
 
 class VerifiedRestoreTests(unittest.TestCase):
