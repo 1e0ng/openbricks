@@ -20,13 +20,13 @@ so the array MUST be calibrated once per session: sweep it across the
 line while ``calibrate()`` runs. Reading before calibration raises —
 an uncalibrated centroid is a plausible-looking wrong number.
 
-Example (bench: channels 15..9 left-to-right on ADC1, GPIO 6 is
-the servo-bus RX and stays free)::
+Example (bench: channels 15..9 left-to-right on ADC1; GPIO 4/6
+belong to the stop button and servo bus)::
 
     from openbricks.drivers.qtr import QTRArray, QTRChannel
 
-    line   = QTRArray(pins=(1, 2, 3, 4, 5, 7, 8), pitch_mm=4.0)
-    branch = QTRChannel(pin=9)        # array channel 1, far right
+    line   = QTRArray(pins=(1, 2, 3, 7, 8, 9, 10), pitch_mm=4.0)
+    branch = QTRChannel(pin=5)        # array channel 1, far right
     line.calibrate(duration_ms=3000)  # sweep across the line now
     branch.calibrate(duration_ms=3000)
     while True:
@@ -59,6 +59,7 @@ class QTRArray:
             raise ValueError("at least one element required")
         for p in pins:
             _pins.check(p, "QTR analog input", output=False)
+            self._check_adc_capable(p)
         self._pitch = float(pitch_mm)
         self._threshold = int(dark_threshold)
         self._adcs = [self._make_adc(p) for p in pins]
@@ -77,6 +78,36 @@ class QTRArray:
         # and this is the only information left. Follower logic uses
         # it to steer back instead of guessing.
         self._last_side = 0
+
+    @staticmethod
+    def _check_adc_capable(pin):
+        """Refuse pins with no usable ADC, BY NAME, at construction.
+
+        ``pins.check`` validates the board's GPIO map but not analog
+        capability, and ``machine.ADC`` fails with a bare ValueError —
+        after the user already soldered the harness (bench 2026-08-06:
+        five channels landed on GPIO 38-42, which have no ADC at all
+        on the S3).
+        """
+        chip = _pins._detect_chip()
+        if chip == "esp32s3":
+            if not 1 <= pin <= 10:
+                if 11 <= pin <= 20:
+                    raise ValueError(
+                        "GPIO %d is ADC2 on the ESP32-S3 — unusable "
+                        "for the QTR array: ADC2 is shared with the "
+                        "radio (BLE is up during `openbricks run`) "
+                        "and unreliable by errata. Use ADC1, GPIO "
+                        "1-10." % pin)
+                raise ValueError(
+                    "GPIO %d has no ADC on the ESP32-S3 — analog "
+                    "inputs must be ADC1, GPIO 1-10." % pin)
+        elif chip == "esp32":
+            if not 32 <= pin <= 39:
+                raise ValueError(
+                    "GPIO %d is not an ADC1 pin on the classic ESP32 "
+                    "— use GPIO 32-39 (ADC2 is shared with the "
+                    "radio)." % pin)
 
     @staticmethod
     def _make_adc(pin):

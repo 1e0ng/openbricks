@@ -20,18 +20,24 @@ hand and check:
   * dark_count jumps when you hold it over a stop bar / intersection.
 
 Bench wiring: QTRX channels 15..9 (the line cluster, adjacent =
-4 mm pitch) on ADC1 GPIO 1,2,3,4,5,7,8 left-to-right — GPIO 6 is
-the servo-bus RX and stays free — and channel 1 (far right, the
-branch/marker flag) on GPIO 9. CTRL tied high.
+4 mm pitch) on ADC1 GPIO 1,2,3,7,8,9,10 left-to-right and channel 1 (far
+right, the branch/marker flag) on GPIO 5. CTRL tied high. See the
+pin-budget note below for why exactly these.
 """
 
 import time
 
 from openbricks.drivers.qtr import QTRArray, QTRChannel
 
-QTR_PINS = (1, 2, 3, 4, 5, 7, 8)   # channels 15..9, left -> right
+# Bench GPIO budget: ADC1 (GPIO 1-10) is the ONLY reliable analog
+# bank on the S3, and it also hosts the start/stop button (GPIO 4)
+# and the servo-bus RX (GPIO 6) — so the BLE button moved to GPIO 38
+# to free GPIO 5 for the branch flag. GPIO 38-42 have no ADC (fine
+# for buttons, useless for the array); GPIO 11-20 are ADC2 = radio-
+# shared and errata-flaky.
+QTR_PINS = (1, 2, 3, 7, 8, 9, 10)  # channels 15..9, left -> right
 PITCH_MM = 4.0
-BRANCH_PIN = 9                     # channel 1, far right
+BRANCH_PIN = 5                     # channel 1, far right
 
 qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
 branch = QTRChannel(pin=BRANCH_PIN)

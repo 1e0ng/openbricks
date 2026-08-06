@@ -61,6 +61,35 @@ class ConstructionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             QTRArray(pins=())
 
+    def test_non_adc_pins_are_refused_by_name(self):
+        # pins.check knows the GPIO map, not analog capability, and
+        # machine.ADC fails with a bare ValueError — after the
+        # harness is soldered (bench 2026-08-06: five channels
+        # landed on GPIO 38-42, which have no ADC on the S3).
+        real = _pins._detect_chip
+        _pins._detect_chip = lambda: "esp32s3"
+        try:
+            try:
+                QTRArray(pins=(38, 39))
+                self.fail("expected ValueError")
+            except ValueError as e:
+                self.assertTrue("no ADC" in str(e), e)
+                self.assertTrue("38" in str(e), e)
+            try:
+                QTRArray(pins=(18, 2))
+                self.fail("expected ValueError")
+            except ValueError as e:
+                self.assertTrue("ADC2" in str(e), e)
+                self.assertTrue("radio" in str(e), e)
+            _pins._detect_chip = lambda: "esp32"
+            try:
+                QTRArray(pins=(4, 5))
+                self.fail("expected ValueError")
+            except ValueError as e:
+                self.assertTrue("32-39" in str(e), e)
+        finally:
+            _pins._detect_chip = real
+
     def test_single_element_has_no_position(self):
         # One element is a detector flag, not a line: its "centroid"
         # would always read centre. QTRChannel is the API for it.
