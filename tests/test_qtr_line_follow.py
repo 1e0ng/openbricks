@@ -32,13 +32,13 @@ class QTRLawTests(unittest.TestCase):
     def setUpClass(cls):
         cls.ns = _load()
 
-    def _tick(self, pos, left=None, peak=900, branch=False, side=0,
+    def _tick(self, pos, fork=None, peak=900, branch=False, side=0,
               dark=1, state=None, dt=0.01):
         if state is None:
             state = self.ns["PD_STATE0"]
-        if left is None:
-            left = pos
-        return self.ns["_pd_wheel_speeds"](pos, left, peak, branch,
+        if fork is None:
+            fork = pos
+        return self.ns["_pd_wheel_speeds"](pos, fork, peak, branch,
                                            side, dark, state, dt)
 
     def test_centred_line_drives_straight(self):
@@ -103,21 +103,28 @@ class QTRLawTests(unittest.TestCase):
         self.assertEqual(r, 0)                    # clamped at zero
         self.assertEqual(l, self.ns["MAX_DPS"])
 
-    def test_branch_steers_on_the_leftmost_cluster(self):
+    def test_branch_steers_on_the_chosen_fork(self):
         # At a fork the centroid points between the lines (+2 here);
-        # with the branch flag dark the law must steer on the LEFT
-        # cluster (-6): expect a left turn, not the gap's slight
-        # right.
-        (l, r), _ = self._tick(+2.0, left=-6.0, branch=True)
+        # with the branch flag dark the law must steer on the fork
+        # cluster the caller chose (-6, the side opposite the flag):
+        # expect a left turn, not the gap's slight right. The side
+        # SELECTION is the caller's (BRANCH_SIDE) — the law is
+        # side-agnostic, which is what lets the flag be rewired to
+        # either end of the array.
+        (l, r), _ = self._tick(+2.0, fork=-6.0, branch=True)
         self.assertTrue(l < r, (l, r))
+        # Mirrored wiring (flag left, fork right): same law, other
+        # sign.
+        (l, r), _ = self._tick(-2.0, fork=+6.0, branch=True)
+        self.assertTrue(l > r, (l, r))
 
-    def test_no_branch_ignores_the_leftmost_split(self):
+    def test_no_branch_ignores_the_fork_split(self):
         # Same geometry without the flag: steer on the centroid.
-        (l, r), _ = self._tick(+2.0, left=-6.0, branch=False)
+        (l, r), _ = self._tick(+2.0, fork=-6.0, branch=False)
         self.assertTrue(l > r, (l, r))
 
     def test_branch_with_nothing_dark_still_recovers(self):
-        (l, r), _ = self._tick(None, left=None, branch=True, side=+1)
+        (l, r), _ = self._tick(None, fork=None, branch=True, side=+1)
         self.assertTrue(l > r, (l, r))        # recovery, not a crash
 
     def test_state_threads_the_error(self):
