@@ -22,8 +22,11 @@ ST-3032 on UART1 tx=14 rx=6 (left id 2 inverted, right id 1), 88 mm
 wheels on a 136 mm track.
 
 The branch flag rides OUTSIDE the steering centroid: a marker under
-it must not yank the position. Here it only prints; hang your turn
-decision off it.
+it must not yank the position. It GATES the fork policy instead:
+while the flag is dark a second line is under the right side, the
+global centroid lands between the two lines, and the law steers on
+the LEFTMOST cluster's own centre — the left fork. Both positions
+are computed every tick, so the switch is jump-free.
 
 Calibration is loaded from the file saved by
 ``examples/qtr_calibrate.py`` — run that once after mounting or
@@ -87,8 +90,8 @@ def _clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def _pd_wheel_speeds(position_mm, peak, last_side, dark_count,
-                     state, dt_s):
+def _pd_wheel_speeds(position_mm, leftmost_mm, peak, branch_dark,
+                     last_side, dark_count, state, dt_s):
     """One control tick: ``(decision, state)``.
 
     ``decision`` is ``None`` (intersection: stop) or
@@ -96,11 +99,14 @@ def _pd_wheel_speeds(position_mm, peak, last_side, dark_count,
     intersection_streak)``; thread each returned state into the next
     call, starting from ``PD_STATE0``.
 
-    ``position_mm`` is the array's centroid (+ = line right of
-    centre) or ``None`` when the line is not under the array;
-    ``peak`` is the brightest calibrated reading — a position with a
-    weak peak is off-mat mush, not a line, and both fall to the
-    ``last_side`` (+1/-1) recovery steer.
+    ``position_mm`` is the global centroid, ``leftmost_mm`` the
+    leftmost cluster's centre (both + = right of centre, ``None``
+    when nothing is dark); ``peak`` is the brightest calibrated
+    reading — a weak peak is off-mat mush and falls to the
+    ``last_side`` (+1/-1) recovery steer. While ``branch_dark`` a
+    second line sits under the branch flag, the global centroid
+    points between the two lines, and steering runs on
+    ``leftmost_mm`` — the left fork.
     """
     prev_error, streak = state
     if dark_count >= INTERSECTION_COUNT:
@@ -109,10 +115,14 @@ def _pd_wheel_speeds(position_mm, peak, last_side, dark_count,
             return None, (prev_error, streak)
     else:
         streak = 0
-    if position_mm is None or peak < PEAK_MIN:
+    if branch_dark and leftmost_mm is not None:
+        steer_on = leftmost_mm
+    else:
+        steer_on = position_mm
+    if steer_on is None or peak < PEAK_MIN:
         error = RECOVERY_ERROR_MM * (last_side if last_side else 1)
     else:
-        error = position_mm
+        error = steer_on
     derivative = 0.0
     if prev_error is not None and dt_s > 0:
         derivative = (error - prev_error) / dt_s
@@ -153,8 +163,11 @@ print("following. Intersection stops the run.")
 state = PD_STATE0
 while True:
     readings = qtr.read()
+    branch_dark = branch.dark()
     speeds, state = _pd_wheel_speeds(qtr.position(readings),
+                                     qtr.leftmost_position(readings),
                                      max(readings),
+                                     branch_dark,
                                      qtr.last_side(),
                                      qtr.dark_count(readings),
                                      state, 0.010)
@@ -162,9 +175,9 @@ while True:
         db.stop(then="brake")
         print("intersection - stopped")
         break
-    if branch.dark():
-        # Marker under the flag channel. Deliberately NOT steering
-        # on it — put your route decision here.
+    if branch_dark:
+        # A second line under the flag: the law is steering on the
+        # LEFT fork right now (see _pd_wheel_speeds).
         print("branch marker")
     db.move_wheels(speeds[0], speeds[1])
     time.sleep_ms(10)

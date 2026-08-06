@@ -32,12 +32,14 @@ class QTRLawTests(unittest.TestCase):
     def setUpClass(cls):
         cls.ns = _load()
 
-    def _tick(self, pos, peak=900, side=0, dark=1, state=None,
-              dt=0.01):
+    def _tick(self, pos, left=None, peak=900, branch=False, side=0,
+              dark=1, state=None, dt=0.01):
         if state is None:
             state = self.ns["PD_STATE0"]
-        return self.ns["_pd_wheel_speeds"](pos, peak, side, dark,
-                                           state, dt)
+        if left is None:
+            left = pos
+        return self.ns["_pd_wheel_speeds"](pos, left, peak, branch,
+                                           side, dark, state, dt)
 
     def test_centred_line_drives_straight(self):
         speeds, _ = self._tick(0.0)
@@ -100,6 +102,23 @@ class QTRLawTests(unittest.TestCase):
         (l, r), _ = self._tick(+1000.0)
         self.assertEqual(r, 0)                    # clamped at zero
         self.assertEqual(l, self.ns["MAX_DPS"])
+
+    def test_branch_steers_on_the_leftmost_cluster(self):
+        # At a fork the centroid points between the lines (+2 here);
+        # with the branch flag dark the law must steer on the LEFT
+        # cluster (-6): expect a left turn, not the gap's slight
+        # right.
+        (l, r), _ = self._tick(+2.0, left=-6.0, branch=True)
+        self.assertTrue(l < r, (l, r))
+
+    def test_no_branch_ignores_the_leftmost_split(self):
+        # Same geometry without the flag: steer on the centroid.
+        (l, r), _ = self._tick(+2.0, left=-6.0, branch=False)
+        self.assertTrue(l > r, (l, r))
+
+    def test_branch_with_nothing_dark_still_recovers(self):
+        (l, r), _ = self._tick(None, left=None, branch=True, side=+1)
+        self.assertTrue(l > r, (l, r))        # recovery, not a crash
 
     def test_state_threads_the_error(self):
         _, state = self._tick(+7.5)

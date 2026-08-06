@@ -265,6 +265,40 @@ class QTRArray:
             self._last_side = -1
         return pos
 
+    def leftmost_position(self, readings=None):
+        """Centroid of the LEFTMOST contiguous dark cluster, in mm
+        (same frame as :meth:`position`), or ``None`` when nothing is
+        dark.
+
+        At a branch the array sees TWO dark regions and the global
+        centroid lands between them — steering into the gap. The
+        leftmost cluster is the left line's own centre: a follower
+        that must take the left fork steers on this while its branch
+        flag says a second line is present. Computed the same way
+        every tick, so switching between the two is jump-free."""
+        readings = self.read() if readings is None else readings
+        i0 = None
+        for i, r in enumerate(readings):
+            if r >= self._threshold:
+                i0 = i
+                break
+        if i0 is None:
+            return None
+        i1 = i0
+        n = len(readings)
+        while i1 + 1 < n and readings[i1 + 1] >= self._threshold:
+            i1 += 1
+        # One sub-threshold neighbour each side joins the weighting,
+        # for the same between-element interpolation position() has.
+        lo = i0 - 1 if i0 > 0 else 0
+        hi = i1 + 1 if i1 + 1 < n else i1
+        weight_sum = 0
+        moment = 0.0
+        for i in range(lo, hi + 1):
+            weight_sum += readings[i]
+            moment += readings[i] * self._x_mm[i]
+        return moment / weight_sum
+
     def last_side(self):
         """+1 if the line was last seen right of centre, -1 left,
         0 if it has never been off-centre. The recovery hint for a

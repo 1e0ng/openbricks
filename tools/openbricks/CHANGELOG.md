@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.6 — forks: the branch flag now picks the left line
+
+At a branch the array sees TWO dark clusters and the global
+centroid lands between them — steering into the gap. New
+`QTRArray.leftmost_position()`: the leftmost contiguous cluster's
+own centre, computed every tick alongside the global centroid so
+switching is jump-free. The follower steers on it whenever the
+branch flag is dark (a second line under the right side), taking
+the left fork; the probe prints both positions. Firmware-side —
+the bench needs the updated image.
+
 ## 1.66.5 — the follower survives what the first bench probe found
 
 Two control hazards recorded during the 2026-08-07 hand-probe of

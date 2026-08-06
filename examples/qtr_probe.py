@@ -51,9 +51,11 @@ while True:
     bars = "".join(_BARS[min(v * (len(_BARS) - 1) // 1000,
                              len(_BARS) - 1)] for v in r)
     pos = qtr.position(r)
-    print("[%s]  pos=%s  dark=%d  branch=%s" % (
+    left = qtr.leftmost_position(r)
+    print("[%s]  pos=%s  left=%s  dark=%d  branch=%s" % (
         bars,
         "----" if pos is None else "%+6.1fmm" % pos,
+        "----" if left is None else "%+6.1fmm" % left,
         qtr.dark_count(r),
         "DARK" if branch.dark() else "-"))
     time.sleep_ms(100)
