@@ -77,7 +77,7 @@ See {doc}`the CLI reference <cli>` for every command, and
 ## Troubleshooting
 
 - **Hub doesn't show up in `openbricks list`** — BLE may be toggled
-  off. Short-press the Bluetooth button (GPIO 5 by default); on the
+  off. Short-press the Bluetooth button (GPIO 38 on the S3, GPIO 5 on the classic ESP32); on the
   ESP32-S3 the onboard LED turns blue when BLE is on, yellow when off.
   See {class}`openbricks.hub.ESP32S3DevkitHub`.
 - **Serial port permission errors on Linux** — add yourself to the

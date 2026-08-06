@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.3 — S3 BLE-button default moves off ADC1 (GPIO 5 → 38)
+
+The ESP32-S3 has exactly ten analog-capable pins worth using (ADC1,
+GPIO 1-10) and the BLE-toggle button was parked on one of them by
+default — which surfaced the moment the QTR array needed GPIO 5:
+the frozen boot main constructs the hub (claiming the button pin)
+before any user code runs, so no program could free it.
+
+The S3 default is now GPIO 38: free, non-strapping, digital-only —
+a button needs no ADC. **Wiring change for existing S3 hubs**: move
+the BLE-button wire from GPIO 5 to GPIO 38 (the classic-ESP32
+default is unchanged at 5, which is not an ADC pin there). A hub
+that must keep the old wiring can construct
+``ESP32S3DevkitHub(bluetooth_button_pin=5)`` in its own code, but
+the boot-time hub uses the default.
+
 ## 1.66.2 — QTR refuses non-ADC pins by name; final bench pin map
 
 Wiring the bench exposed the gap: `pins.check` knows the S3's GPIO

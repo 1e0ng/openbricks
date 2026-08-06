@@ -100,10 +100,10 @@ def _pd_wheel_speeds(position_mm, last_side, dark_count, state, dt_s):
 
 # Bench GPIO budget: ADC1 (GPIO 1-10) is the ONLY reliable analog
 # bank on the S3, and it also hosts the start/stop button (GPIO 4)
-# and the servo-bus RX (GPIO 6) — so the BLE button moved to GPIO 38
-# to free GPIO 5 for the branch flag. GPIO 38-42 have no ADC (fine
-# for buttons, useless for the array); GPIO 11-20 are ADC2 = radio-
-# shared and errata-flaky.
+# and the servo-bus RX (GPIO 6). The hub's BLE button defaults to
+# GPIO 38 (since 1.66.3 — buttons need no ADC), which is what frees
+# GPIO 5 for the branch flag. GPIO 38-42 have no ADC; GPIO 11-20
+# are ADC2 = radio-shared and errata-flaky.
 QTR_PINS = (1, 2, 3, 7, 8, 9, 10)  # channels 15..9, left -> right
 PITCH_MM = 4.0
 BRANCH_PIN = 5                     # channel 1, far right

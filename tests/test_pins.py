@@ -157,8 +157,11 @@ class DriverIntegrationTests(_GuardCase):
     def test_hub_claims_its_pins(self):
         hub = ESP32S3DevkitHub(bluetooth=False)
         self.assertIsNotNone(hub)
-        self.expect_reserved(lambda: pins.check(5, "H-bridge IN1"),
+        # Default button pin is 38 since 1.66.3 (off ADC1) — and the
+        # OLD default must be genuinely free for analog use.
+        self.expect_reserved(lambda: pins.check(38, "H-bridge IN1"),
                              "Bluetooth-toggle button")
+        pins.check(5, "QTR analog input", output=False)   # free now
 
     def test_hub_reconstruction_is_allowed(self):
         ESP32S3DevkitHub(bluetooth=False)

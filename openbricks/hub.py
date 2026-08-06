@@ -12,8 +12,10 @@ Concrete hubs:
 Both hubs expect **two** momentary pushbuttons, each wired between a
 GPIO and GND:
 
-* ``bluetooth_button_pin`` (default **GPIO 5**) — short-press toggles
-  BLE on/off. Watched by
+* ``bluetooth_button_pin`` (classic ESP32 default **GPIO 5**;
+  ESP32-S3 default **GPIO 38** — the S3 has only ten analog-capable
+  pins, ADC1 = GPIO 1-10, and a button doesn't need one) —
+  short-press toggles BLE on/off. Watched by
   :class:`openbricks.bluetooth_button.BluetoothToggleButton` which
   the hub auto-wires when ``bluetooth=True`` (the default).
 * The **program button** (default **GPIO 4**) — short-press starts
@@ -183,20 +185,25 @@ class ESP32DevkitHub(Hub):
 
 class ESP32S3DevkitHub(Hub):
     """ESP32-S3 DevKitC-1 onboard hub: WS2812 RGB LED on GPIO 48,
-    BLE-toggle button on GPIO 5.
+    BLE-toggle button on GPIO 38.
 
     ``led_pin`` defaults to 48 (the DevKitC-1 onboard WS2812). Pass
     ``led_pin=None`` to disable the LED entirely, or any other GPIO for a
     WS2812 wired elsewhere. ``brightness`` (0.0 – 1.0) scales channel
     values on write; default 0.2 is comfortable indoors.
 
-    ``bluetooth_button_pin`` defaults to 5 — a safe, free pin on the
-    DevKitC-1. Wire a momentary switch between GPIO 5 and GND; the
-    pin is configured ``Pin.IN`` with ``PULL_UP`` so no external
-    resistor is needed. Override via ``bluetooth_button_pin=<N>``.
+    ``bluetooth_button_pin`` defaults to 38 (was 5 until 1.66.3): the
+    S3 has exactly ten analog-capable pins (ADC1, GPIO 1-10) and a
+    button needs none of them — parking the default there cost an
+    analog channel the moment a sensor array arrived. GPIO 38 is
+    free, non-strapping and digital-only. Wire a momentary switch
+    between GPIO 38 and GND; the pin is configured ``Pin.IN`` with
+    ``PULL_UP`` so no external resistor is needed. Override via
+    ``bluetooth_button_pin=<N>`` (a hub wired to the old default
+    passes 5).
     """
 
-    def __init__(self, led_pin=48, bluetooth_button_pin=5, brightness=0.2,
+    def __init__(self, led_pin=48, bluetooth_button_pin=38, brightness=0.2,
                  bluetooth=True):
         if led_pin is not None:
             pins.check(led_pin, "status LED")
