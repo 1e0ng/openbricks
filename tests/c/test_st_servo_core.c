@@ -373,6 +373,16 @@ TEST(write_result_with_nothing_in_flight_is_inert) {
     ob_sservo_detach(&sv, 0);
     CHECK_EQ_INT(sv.write_in_flight, -1);
     ob_sservo_write_result(&sv, 1);              // no crash, no state
+    // And a result for a slot that finished config in the meantime
+    // (detach + re-attach + fast config) is dropped, not double-
+    // counted past step 3.
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    sv.slots[0].config_step = 3;
+    ob_sservo_write_result(&sv, 1);
+    CHECK_EQ_INT(sv.slots[0].config_step, 3);
+    CHECK_EQ_INT(sv.write_in_flight, -1);
 }
 
 TEST(bounds_are_guarded) {

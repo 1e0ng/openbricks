@@ -125,5 +125,39 @@ class RunTests(unittest.TestCase):
             self.assertIn("extracted at", str(e))
 
 
+class BundleFailureTests(unittest.TestCase):
+    """The two ways the bundle itself can be broken, each with its
+    own remedy in the message — a missing or corrupt data file must
+    never surface as a bare traceback."""
+
+    def test_missing_bundle_names_the_build_script(self):
+        real = docs._BUNDLE
+        docs._BUNDLE = "no-such-bundle.zip"
+        try:
+            docs._bundle_path()
+            self.fail("expected DocsError")
+        except docs.DocsError as e:
+            self.assertIn("scripts/build-offline-docs.sh", str(e))
+        finally:
+            docs._BUNDLE = real
+
+    def test_corrupt_bundle_without_index_is_named(self):
+        import tempfile
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "bad.zip")
+            with zipfile.ZipFile(bad, "w") as z:
+                z.writestr("not-index.html", "<html></html>")
+            real = docs._bundle_path
+            docs._bundle_path = lambda: bad
+            try:
+                docs._extract()
+                self.fail("expected DocsError")
+            except docs.DocsError as e:
+                self.assertIn("corrupt", str(e))
+            finally:
+                docs._bundle_path = real
+
+
 if __name__ == "__main__":
     unittest.main()
