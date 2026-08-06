@@ -154,6 +154,50 @@ class TestST3215(unittest.TestCase):
         result = servo._bus.read(servo._id, _REG_PRESENT_POS, 2)
         self.assertEqual(result, b"\x39\x05")
 
+    def _stage_reply(self, servo, reply):
+        """Stage ``reply`` to arrive after the next TX (the fake UART
+        drain-before-TX empties the buffer, so pre-stuffing alone is
+        not enough — same trick as the stale-RX test)."""
+        uart = servo._bus._uart
+        if not hasattr(uart, "_pristine_write"):
+            uart._pristine_write = uart.write
+
+        def write_then_stage(data):
+            uart._rx_buf = reply
+            return uart._pristine_write(data)
+        uart.write = write_then_stage
+
+    def test_read_rejects_a_wrong_sender(self):
+        # Reads feed the angle accumulator's wrap heuristic and the
+        # step-park detector; a reply from the WRONG servo (the
+        # two-conversations-on-one-wire signature) must read as "no
+        # reply", not as data.
+        servo = ST3215(servo_id=1)
+        body = bytes([2, 4, 0, 0x39, 0x05])         # id 2, not 1
+        self._stage_reply(servo,
+                          _HEADER + body + bytes([_checksum(body)]))
+        self.assertIsNone(servo._bus.read(1, _REG_PRESENT_POS, 2))
+
+    def test_read_rejects_a_corrupt_checksum(self):
+        servo = ST3215(servo_id=1)
+        body = bytes([1, 4, 0, 0x39, 0x05])
+        good = _HEADER + body + bytes([_checksum(body)])
+        self._stage_reply(servo, good[:-1] + bytes([good[-1] ^ 0xFF]))
+        self.assertIsNone(servo._bus.read(1, _REG_PRESENT_POS, 2))
+
+    def test_ping_requires_the_right_sender_and_frame(self):
+        # "Any 6 bytes" also matched stale residue and other servos'
+        # replies — reporting a present servo that wasn't.
+        servo = ST3215(servo_id=1)
+        body = bytes([1, 2, 0])
+        self._stage_reply(servo,
+                          _HEADER + body + bytes([_checksum(body)]))
+        self.assertTrue(servo.ping())
+        wrong = bytes([3, 2, 0])
+        self._stage_reply(servo,
+                          _HEADER + wrong + bytes([_checksum(wrong)]))
+        self.assertFalse(servo.ping())
+
     def test_buses_are_shared_per_uart(self):
         # Two servos on the same UART params share one _SCServoBus instance.
         s1 = ST3215(servo_id=1, uart_id=2, tx=14, rx=6)

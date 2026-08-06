@@ -250,6 +250,19 @@ static void st_moves_tick_locked(void) {
         if (!sv->slots[i].in_use || st_moves[i].state == OB_SMOVE_IDLE) {
             continue;
         }
+        // Dead-feedback guard, same rule as the drivebase's
+        // ST_DB_STALE_FAULT: feeding the profile a FROZEN position
+        // winds ff + kp*err toward the rail at rising speed for as
+        // long as Python's ~1 s stall detector takes to notice — the
+        // db path bounded this at ~200 ms and called it mandatory;
+        // the per-slot moves relied on Python alone. Halt the move
+        // and zero the wheel in C; Python's stall/dead-bus check
+        // then names the fault from the stats.
+        if (sv->slots[i].stale >= ST_DB_STALE_FAULT) {
+            ob_smove_init(&st_moves[i]);
+            ob_sservo_set_speed(sv, i, 0);
+            continue;
+        }
         ob_float_t cmd = ob_smove_tick(&st_moves[i], (long)st_db_now_ms,
                                        (ob_float_t)ob_sservo_counts(sv, i));
         ob_sservo_set_speed(sv, i, (int32_t)cmd);
@@ -390,7 +403,10 @@ void ob_st_bus_estop_from_tick(void) {
     }
     st_db_active = false;
     st_db_writing = false;
-    st_db_fault = 0;
+    // st_db_fault deliberately NOT cleared: a latched dead-wheel
+    // diagnosis must survive the button stop that follows it, or a
+    // post-mortem db_fault() reads healthy (diagnostics must not
+    // destroy evidence). The next db_straight/db_turn clears it.
     st_moves_reset_all();
     ob_sservo_t *sv = sservo_get();
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
@@ -1199,6 +1215,12 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
+    // The fault latch IS cleared here (unlike the estop path, which
+    // preserves it as evidence): a program boundary is where the
+    // previous run's diagnosis has been read — leaving it latched
+    // made the NEXT program's first db_fault() report a wheel fault
+    // that belonged to the last one.
+    st_db_fault = 0;
     st_moves_reset_all();
     st_db_slot_l = st_db_slot_r = -1;
     ob_sservo_init(sservo_get());

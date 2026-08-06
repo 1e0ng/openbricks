@@ -230,6 +230,11 @@ class DriveBase:
         ``stop()``) to change. Positive turn rate = right turn
         (clockwise viewed from above), Pybricks convention.
         """
+        # New command wins — same rule as move_wheels/stop. drive()
+        # was the ONE motion verb that skipped it: a still-running
+        # straight() overwrote its speeds every tick (~1 kHz) and a
+        # later done() poll dispatched the stale move's then= on top.
+        self._pending = None
         if self._native is not None:
             # Clear any in-flight straight/turn trajectory first.
             self._native.stop()
@@ -239,6 +244,17 @@ class DriveBase:
         diff_mm_s      = turn_rad_s * (self._axle_track / 2)
         diff_wheel_dps = diff_mm_s / self._wheel_circumference * 360
 
+        if self._serial_engine is not None:
+            # Route through move_wheels: it aborts the engine's
+            # in-flight move and ships both setpoints in one
+            # sync-write. Sending per-motor run_speed here left the
+            # drivebase writing its own targets over them.
+            self._serial_engine.move_wheels(
+                fwd_wheel_dps + diff_wheel_dps,
+                fwd_wheel_dps - diff_wheel_dps)
+            self._left._native_pending = None
+            self._right._native_pending = None
+            return
         self._run_at_dps(self._left,  fwd_wheel_dps + diff_wheel_dps)
         self._run_at_dps(self._right, fwd_wheel_dps - diff_wheel_dps)
 

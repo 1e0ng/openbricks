@@ -108,6 +108,20 @@ class _SerialNativeEngine:
             if params is None:
                 raise RuntimeError("motor bus not found in the registry")
             uart_id, tx, rx, baud = params
+            # Position-mode servos on this UART cannot come across
+            # (native slots configure wheel mode) — refuse BEFORE the
+            # handover, while the MicroPython bus is still intact.
+            # After the deinit there is no clean way back: the C
+            # driver keeps the pins until power-cycle.
+            stranded = list(getattr(bus, "_servos", ()))
+            if stranded:
+                raise RuntimeError(
+                    "cannot adopt UART%s: position-mode servo id(s) "
+                    "%s share it, and they have no native-slot path. "
+                    "Put position-mode servos on a second UART, or "
+                    "use the Motor class (run/run_angle) for them."
+                    % (uart_id,
+                       ", ".join(str(s._id) for s in stranded)))
             # Hand the UART over: MicroPython driver out, IDF in.
             bus._uart.deinit()
             del ST3215._buses[params]
@@ -115,13 +129,29 @@ class _SerialNativeEngine:
         # of its own; adopt that rather than demanding a fixed index.
         held_l = getattr(left, "_native_slot", None)
         held_r = getattr(right, "_native_slot", None)
-        eng = cls(left_id=left._id, right_id=right._id,
-                  wheel_diameter_mm=wheel_diameter_mm,
-                  axle_track_mm=axle_track_mm, imu=imu,
-                  invert_left=left._invert, invert_right=right._invert,
-                  uart_id=uart_id, tx=tx, rx=rx, baud=baud,
-                  accel_dps2=accel_dps2,
-                  slot_l=held_l, slot_r=held_r)
+        try:
+            eng = cls(left_id=left._id, right_id=right._id,
+                      wheel_diameter_mm=wheel_diameter_mm,
+                      axle_track_mm=axle_track_mm, imu=imu,
+                      invert_left=left._invert,
+                      invert_right=right._invert,
+                      uart_id=uart_id, tx=tx, rx=rx, baud=baud,
+                      accel_dps2=accel_dps2,
+                      slot_l=held_l, slot_r=held_r)
+        except BaseException:
+            # Engine construction RAISES by design (dead wheel, slot
+            # exhaustion, attach failure) — but the MicroPython bus
+            # was already deinited and deregistered above. Without
+            # putting it back, a caller that catches the error and
+            # tries plain motor commands writes into a dead UART for
+            # the rest of the program (self-healing only at the next
+            # program boundary). Restore what we took.
+            if bus is not None:
+                from machine import UART
+                ST3215._buses[params] = bus
+                bus._uart = UART(uart_id, baudrate=baud, tx=tx, rx=rx,
+                                 timeout=50)
+            raise
         if held_l is None:
             left._adopt_native(eng._sb, eng._slot_l)
         if held_r is None:

@@ -277,17 +277,37 @@ class _SCServoBus:
         body = bytes([servo_id, length, _INSTR_READ]) + params
         packet = _HEADER + body + bytes([self._checksum(body)])
         self._tx(packet)
-        # Response: FF FF ID LEN ERR DATA... CHK
+        # Response: FF FF ID LEN ERR DATA... CHK — verified like a
+        # write ACK (sender, checksum), not merely length-checked:
+        # reads feed the angle accumulator's wrap heuristic and the
+        # step-park detector, so a wrong-sender or corrupt reply can
+        # falsely park a step or corrupt multi-turn odometry. A bad
+        # reply reads as "no reply" (None) — the callers' retry /
+        # stale accounting is the right place for the loss, and every
+        # loss is counted there, never absorbed. (Error FLAGS do not
+        # invalidate a read: a latched overload doesn't corrupt
+        # present-position, and failing every read on a protection
+        # flag would look like a dead bus.)
         resp = self._rx(6 + nbytes)
         if len(resp) < 6 + nbytes or not resp.startswith(_HEADER):
+            return None
+        if resp[2] != servo_id:
+            return None
+        if self._checksum(resp[2:5 + nbytes]) != resp[5 + nbytes]:
             return None
         return resp[5:5 + nbytes]
 
     def ping(self, servo_id):
+        # A ping must be answered by THE servo asked, with an intact
+        # frame — "any 6 bytes" also matched stale residue and other
+        # servos' replies, reporting a present servo that wasn't.
         body = bytes([servo_id, 2, _INSTR_PING])
         packet = _HEADER + body + bytes([self._checksum(body)])
         self._tx(packet)
-        return len(self._rx(6)) == 6
+        resp = self._rx(6)
+        return (len(resp) == 6 and resp.startswith(_HEADER)
+                and resp[2] == servo_id
+                and self._checksum(resp[2:5]) == resp[5])
 
     def sync_write(self, register, data_len, servo_data):
         """Broadcast SYNC WRITE: one packet writes ``register`` on N
@@ -350,7 +370,30 @@ class ST3215(Servo):
                  baud=1_000_000, dir_pin=None,
                  min_raw=0, max_raw=4095, range_deg=360):
         self._id = servo_id
+        if _native_bus_owns(uart_id):
+            # The Motor classes take a native slot in this situation;
+            # the position-mode servo has no native-slot path (slots
+            # configure wheel mode), so opening its own machine.UART
+            # here would put two drivers on one wire — the hard
+            # tick's replies land in this driver's buffer and get
+            # consumed as the wrong packet's answers (bench
+            # 2026-08-04: a write to id 4 acknowledged by id 1).
+            # Refuse loudly with the remedy instead of corrupting
+            # both conversations.
+            raise RuntimeError(
+                "servo id %s: UART%s is owned by the native bus "
+                "driver (a DriveBase adopted motors on it), and the "
+                "position-mode ST3215/ST3032 class has no native-"
+                "slot path. Put position-mode servos on a second "
+                "UART, or use the Motor class (run/run_angle) which "
+                "takes a native slot." % (servo_id, uart_id))
         self._bus = self._bus_for(uart_id, tx, rx, baud, dir_pin)
+        # Registered so a LATER DriveBase adoption of this UART can
+        # refuse with the same remedy instead of silently closing the
+        # UART under us (migrate_bus_to_native migrates Motor
+        # instances; position-mode servos cannot come across).
+        self._bus._servos = getattr(self._bus, "_servos", [])
+        self._bus._servos.append(self)
         self._min = min_raw
         self._max = max_raw
         self._range = range_deg
@@ -1099,6 +1142,19 @@ class ST3215Motor(Motor):
         the wheels become slots 0/1 by their own path, and anything
         else that was sharing the MicroPython bus has to come across
         too or it is left talking into a closed UART."""
+        stranded = [s for s in getattr(bus, "_servos", ())]
+        if stranded:
+            # Position-mode servos CANNOT come across — native slots
+            # configure wheel mode. Silently proceeding left them
+            # writing into a closed UART (constructed-before-adoption
+            # flavour of the two-drivers-one-wire fault). Refuse the
+            # adoption with the remedy.
+            raise RuntimeError(
+                "cannot adopt this UART: position-mode servo id(s) "
+                "%s share it, and they have no native-slot path. "
+                "Put position-mode servos on a second UART, or use "
+                "the Motor class (run/run_angle) for them."
+                % ", ".join(str(s._id) for s in stranded))
         for motor in list(getattr(bus, "_motors", ())):
             if motor in skip or motor._native_slot is not None:
                 continue

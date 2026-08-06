@@ -511,6 +511,22 @@ class AdoptionTests(_Base):
         self.assertTrue("never latched" in msg, msg)
         self.assertTrue("NOT a mechanical fault" in msg, msg)
 
+    def test_drive_supersedes_pending_and_ships_one_sync(self):
+        # drive() was the ONE motion verb that skipped new-command-
+        # wins: a still-running straight() overwrote its per-motor
+        # speeds every tick, and a later done() poll dispatched the
+        # stale move's then= on top. It now routes through
+        # move_wheels — engine move aborted, both setpoints in one
+        # sync-write — and clears pending state like every other verb.
+        db, left, _ = self._drivebase()
+        left.run_angle(100, 90, wait=False)
+        self.assertIsNotNone(left._native_pending)
+        db.drive(100, 0)
+        self.assertIsNone(left._native_pending)
+        mw = [c for c in self.bus.calls if c[0] == "db_move_wheels"]
+        self.assertEqual(len(mw), 1)
+        self.assertAlmostEqual(mw[0][1], mw[0][2], places=3)  # straight
+
     def test_a_dead_bus_mid_move_raises_not_stall_reports(self):
         # Bus death freezes counts exactly like a jam, and the stall
         # reporter used to call it one — "the shaft is jammed" for an
@@ -912,6 +928,62 @@ class OneBusOneOwnerTests(_Base):
         # Adoption has taken the UART; the native bus owns it now.
         self.bus.uart_num = lambda: 1
         return db, left, right
+
+    def test_failed_adoption_restores_the_micropython_bus(self):
+        # Engine construction raises BY DESIGN (dead wheel, slot
+        # exhaustion) — but the MicroPython bus was already deinited
+        # and deregistered. A caller that caught the error and tried
+        # plain motor commands wrote into a dead UART for the rest of
+        # the program. The handover is now unwound on failure.
+        from openbricks.drivers.st3215 import ST3215
+        from openbricks.robotics import DriveBase
+        left = self._motor(2, invert=True)
+        right = self._motor(1)
+        self.bus.dead_slots = (0, 1)          # liveness gate will raise
+        try:
+            DriveBase(left, right, wheel_diameter_mm=88,
+                      axle_track_mm=138)
+            self.fail("expected OSError")
+        except OSError:
+            pass
+        self.assertEqual(len(ST3215._buses), 1)   # re-registered
+        self.assertIsNotNone(left._bus)
+        left.run_speed(50)                    # and it still drives
+
+    def test_adoption_refuses_a_uart_shared_with_position_servos(self):
+        # A position-mode ST3215 has no native-slot path (slots
+        # configure wheel mode). Adoption used to close the UART
+        # under it silently; it now refuses BEFORE the handover,
+        # naming the servo and the remedy.
+        from openbricks.drivers.st3215 import ST3215
+        from openbricks.robotics import DriveBase
+        left = self._motor(2, invert=True)
+        right = self._motor(1)
+        ST3215(servo_id=7, uart_id=1, tx=14, rx=6)   # gripper
+        try:
+            DriveBase(left, right, wheel_diameter_mm=88,
+                      axle_track_mm=138)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            msg = str(e)
+        self.assertTrue("position-mode" in msg, msg)
+        self.assertTrue("7" in msg, msg)
+        self.assertTrue("second UART" in msg, msg)
+        self.assertEqual(len(ST3215._buses), 1)   # bus untouched
+
+    def test_position_servo_refused_on_a_natively_owned_uart(self):
+        # Constructed AFTER adoption: opening its own machine.UART on
+        # pins the IDF driver owns is the two-drivers-one-wire fault
+        # (bench 2026-08-04). Refused with the remedy.
+        from openbricks.drivers.st3215 import ST3215
+        db, _, _ = self._drivebase()      # native bus owns UART 1 now
+        try:
+            ST3215(servo_id=7, uart_id=1, tx=14, rx=6)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            msg = str(e)
+        self.assertTrue("owned by the native bus" in msg, msg)
+        self.assertTrue("second UART" in msg, msg)
 
     def test_task_motor_built_after_adoption_takes_a_slot(self):
         db, _, _ = self._drivebase()

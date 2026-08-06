@@ -3,6 +3,35 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.65.1 — six edges from the review, closed
+
+* `drive()` now supersedes an in-flight move like every other motion
+  verb — it was the one that didn't, so a still-running `straight()`
+  overwrote its speeds ~1000×/s and a later `done()` poll dispatched
+  the stale move's end-state on top. On serial wheels it also ships
+  both setpoints in one sync-write now.
+* A failed DriveBase adoption (dead wheel, slot exhaustion — designed
+  raises) no longer strands the motors: the MicroPython bus it had
+  already taken is restored, so plain motor commands still work after
+  catching the error.
+* Position-mode `ST3215`/`ST3032` servos are refused loudly on a
+  UART the native driver owns — both directions (constructed after
+  adoption, or present before it) — instead of silently joining the
+  two-drivers-one-wire fault or being left talking into a closed
+  UART. The remedy (second UART, or the Motor class) is in the error.
+* Per-slot `run_angle`/`hold` gets the drivebase's dead-feedback
+  guard in C: a wheel whose feedback dies mid-move is halted at the
+  same ~200 ms threshold, instead of ramping open-loop on frozen
+  odometry until Python's ~1 s stall detector noticed.
+* `read()` and `ping()` verify sender and checksum like write ACKs —
+  a wrong-sender or corrupt reply read as data could falsely park a
+  step or corrupt multi-turn odometry; "any 6 bytes" made ping
+  report a present servo that wasn't.
+* Fault evidence has the right lifetime: a button stop no longer
+  erases a latched dead-wheel diagnosis (post-mortem `db_fault()`
+  read healthy), and a program boundary now does clear it (the next
+  program's first read reported the previous run's fault).
+
 ## 1.65.0 — a dead bus is never called a jam, and polling finds stalls
 
 Firmware-side; the host package rides the lockstep version.
