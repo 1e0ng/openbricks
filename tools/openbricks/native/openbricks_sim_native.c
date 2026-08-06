@@ -725,6 +725,24 @@ static PyObject *RawDriveBase_tick(RawDriveBaseObject *self, PyObject *args) {
 }
 
 
+static PyObject *RawDriveBase_sync(RawDriveBaseObject *self, PyObject *args) {
+    /* Firmware parity: st_db_tick_locked syncs slot odometry into the
+     * bridges EVERY hard tick — writing or yielded — and the arm
+     * paths re-sync before baselining a move. The shim used to feed
+     * positions only through tick() while the db was WRITING, so a
+     * straight() after move_wheels() (or any yielded stretch) armed
+     * against a stale pose: verified driving the chassis BACKWARD
+     * 142.6 mm on a +50 mm command. */
+    double l_deg, r_deg;
+    if (!PyArg_ParseTuple(args, "dd", &l_deg, &r_deg)) {
+        return NULL;
+    }
+    self->bridge_l.observer.pos_hat = (ob_float_t)l_deg;
+    self->bridge_r.observer.pos_hat = (ob_float_t)r_deg;
+    Py_RETURN_NONE;
+}
+
+
 static PyObject *RawDriveBase_straight(RawDriveBaseObject *self, PyObject *args) {
     long now_ms;
     double mm, mm_s;
@@ -823,6 +841,10 @@ static PyObject *RawDriveBase_set_accel(RawDriveBaseObject *self, PyObject *arg)
 static PyMethodDef RawDriveBase_methods[] = {
     {"tick",                 (PyCFunction)RawDriveBase_tick,                 METH_VARARGS,
      "tick(now_ms, left_pos_deg, right_pos_deg) -> (left_dps, right_dps)."},
+    {"sync",                 (PyCFunction)RawDriveBase_sync,                 METH_VARARGS,
+     "sync(left_pos_deg, right_pos_deg) — update bridge odometry "
+     "without running the controller (the yielded-tick half of the "
+     "firmware's st_db_tick)."},
     {"straight",             (PyCFunction)RawDriveBase_straight,             METH_VARARGS,
      "straight(now_ms, distance_mm, speed_mm_s)."},
     {"turn",                 (PyCFunction)RawDriveBase_turn,                 METH_VARARGS,

@@ -117,12 +117,26 @@ class MotorSlotAllocationTests(_ShimTestBase):
         self.assertNotEqual(s_left._adapter._actuator_id,
                              s_right._adapter._actuator_id)
 
-    def test_third_servo_construction_raises(self):
+    def test_third_encoder_servo_is_refused_but_serial_takes_the_slot(self):
+        # Two physical wheel slots. The kinematic third/fourth slots
+        # are serial-only — an encoder motor's whole point is the
+        # physics behind it — so a third Servo still raises, while a
+        # third serial motor binds a kinematic slot (bench shape).
         from _openbricks_native import Servo
+        from openbricks.drivers.st3032 import ST3032Motor
         Servo(in1=12, in2=14, pwm=27, encoder=None)
         Servo(in1=13, in2=15, pwm=26, encoder=None)
         with self.assertRaises(RuntimeError):
             Servo(in1=99, in2=98, pwm=97, encoder=None)
+        # The refusal must not burn the slot: serial task motors
+        # still get BOTH kinematic slots...
+        t1 = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
+        t2 = ST3032Motor(servo_id=4, uart_id=1, tx=14, rx=6)
+        self.assertIsNone(t1._plumb)            # kinematic
+        self.assertIsNone(t2._plumb)
+        # ...and the fifth motor overall is refused with the count.
+        with self.assertRaises(RuntimeError):
+            ST3032Motor(servo_id=5, uart_id=1, tx=14, rx=6)
 
 
 class ShimServoBehaviourTests(_ShimTestBase):
@@ -298,6 +312,60 @@ class MachineFakeTests(_ShimTestBase):
         # Reads return 0 by convention (no-op fake).
 
 
+class BenchShapeTests(_ShimTestBase):
+    """The user's actual robot: four ST-3032s on ONE UART — two
+    DriveBase wheels + two task motors, exactly the firmware's four
+    native slots. That main.py must construct AND run under the sim;
+    it used to be refused at the third motor."""
+
+    def _bench(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics.drivebase import DriveBase
+        left  = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                            invert=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        db = DriveBase(left, right,
+                       wheel_diameter_mm=88, axle_track_mm=136)
+        t1 = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
+        t2 = ST3032Motor(servo_id=4, uart_id=1, tx=14, rx=6)
+        return db, t1, t2
+
+    def test_four_motor_script_constructs_and_everything_moves(self):
+        db, t1, t2 = self._bench()
+        # Kinematic task motor: run_angle completes and lands.
+        t1.run_angle(200, 90)
+        self.assertTrue(80 < t1.angle() < 100, t1.angle())
+        # Speed mode integrates too.
+        t2.run_speed(120)
+        time.sleep_ms(500)
+        self.assertTrue(t2.angle() > 30, t2.angle())
+        t2.coast()
+        # And the chassis still drives — task motors took the
+        # kinematic slots, not the wheels'.
+        x0 = float(self.robot.runtime.data.qpos[0])
+        db.straight(40)
+        self.assertTrue(db.done())
+        self.assertTrue(abs(float(self.robot.runtime.data.qpos[0]) - x0)
+                        > 0.005)
+
+    def test_task_wheels_cannot_back_a_drivebase(self):
+        # Construction order is the sim's binding rule: wheels must
+        # be the FIRST TWO motors. Adopting kinematic stand-ins would
+        # silently produce a drivebase that moves nothing — refuse
+        # loudly instead.
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics.drivebase import DriveBase
+        ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
+        ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        a = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
+        b = ST3032Motor(servo_id=4, uart_id=1, tx=14, rx=6)
+        try:
+            DriveBase(a, b, wheel_diameter_mm=88, axle_track_mm=136)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertIn("first two motors", str(e))
+
+
 class ShimSerialMotorTests(_ShimTestBase):
     """ST3215Motor / ST3032Motor resolve to shim classes and answer
     the Motor API from MuJoCo. These are the classes the serial-bus
@@ -387,12 +455,15 @@ class ShimSerialMotorTests(_ShimTestBase):
         m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
         self.assertTrue(m.ping())
 
-    def test_third_serial_motor_exhausts_slots(self):
+    def test_fifth_serial_motor_exhausts_slots(self):
+        # Four slots now — 2 physical wheels + 2 kinematic task
+        # motors, the firmware bus's count and the bench robot's
+        # shape (a third used to be refused outright).
         from openbricks.drivers.st3032 import ST3032Motor
-        ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-        ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
+        for sid in (1, 2, 3, 4):
+            ST3032Motor(servo_id=sid, uart_id=1, tx=14, rx=6)
         with self.assertRaises(RuntimeError):
-            ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
+            ST3032Motor(servo_id=5, uart_id=1, tx=14, rx=6)
 
 
 class FullFirmwareCodeIntegrationTest(_ShimTestBase):
@@ -721,6 +792,41 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertEqual(sb.servo_write_stats(0), (0, 0))
         self.assertEqual(sb.servo_write_stats(1), (0, 0))
         self.assertEqual(sb.db_fault(), 0)
+
+    def test_straight_after_move_wheels_goes_forward_not_backward(self):
+        # THE stale-bridge regression (this week's review, verified
+        # by execution): 2 s of move_wheels advanced the chassis
+        # ~177 mm, then straight(50) drove it BACKWARD 142.6 mm — the
+        # db armed against the pose from before the yielded stretch,
+        # because bridge odometry was only fed while the db was
+        # WRITING. Firmware syncs the bridges every hard tick; the
+        # shim now does too (RawDriveBase.sync).
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        db.move_wheels(200, 200)
+        time.sleep_ms(2000)
+        db.stop()
+        x0 = float(self.robot.runtime.data.qpos[0])
+        db.straight(50)
+        self.assertTrue(db.done())
+        moved = float(self.robot.runtime.data.qpos[0]) - x0
+        # Forward, and in the right ballpark — the bug was -0.14 m.
+        self.assertTrue(0.01 < moved < 0.15,
+                        "straight(50) after move_wheels moved %+.1f mm"
+                        % (moved * 1000.0))
+
+    def test_wheels_claim_distinct_slots_and_reattach_is_refused(self):
+        # Firmware-faithful slot bookkeeping: an occupied slot
+        # refuses, so the engine's first-free-slot loop hands out 0
+        # then 1. Before this, both wheels reported slot 0.
+        db, _, _ = self._serial_db()
+        eng = db._serial_engine
+        self.assertEqual((eng._slot_l, eng._slot_r), (0, 1))
+        sb = eng._sb
+        self.assertEqual(sb.servo_slot_of(1), 0)     # left_id
+        self.assertEqual(sb.servo_slot_of(2), 1)     # right_id
+        self.assertEqual(sb.servo_slot_of(9), -1)
+        self.assertFalse(sb.servo_attach(0, 9, False, 0))  # occupied
 
     def test_db_and_runtime_verbs_cancel_armed_moves(self):
         # New-command-wins in every direction: each db/runtime verb

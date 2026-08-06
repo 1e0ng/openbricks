@@ -44,8 +44,10 @@ MuJoCo:
 Slot allocation is sequential: the first motor constructed —
 ``Servo(...)`` or a serial ``ST3215Motor(...)`` / ``ST3032Motor(...)``
 — binds to ``chassis_motor_l`` / ``chassis_enc_l``, the second to the
-``_r`` pair. The default chassis has exactly two motor slots; trying
-to construct a third raises ``RuntimeError``.
+``_r`` pair. The third and fourth bind KINEMATIC task-motor slots
+(no chassis body — the shaft integrates its commanded speed), so a
+real robot's four-servo ``main.py`` constructs and runs; a fifth
+raises ``RuntimeError``.
 
 After ``install(runtime)``, calling ``uninstall()`` restores the
 original ``sys.modules`` + ``time`` state so back-to-back tests can
@@ -91,20 +93,37 @@ class _ShimState:
 # Slot allocation
 
 
+# The first two slots are the chassis's physical wheels; the next two
+# are KINEMATIC task-motor slots (None): the firmware bus has four
+# native slots and the bench robot is four ST-3032s on one UART
+# (2 wheels + 2 task motors), so a real robot's main.py must at least
+# CONSTRUCT under the sim. Task motors have no MuJoCo body — their
+# shafts integrate the commanded speed (see ShimST3215Motor).
 _MOTOR_SLOTS = [
     ("chassis_enc_l", "chassis_motor_l"),
     ("chassis_enc_r", "chassis_motor_r"),
+    None,
+    None,
 ]
 
 
-def _next_motor_slot():
+def _next_motor_slot(kinematic_ok=True):
     if _INSTALLED is None:
         raise RuntimeError("shim not installed; call install(runtime) first")
     if _INSTALLED.motor_idx >= len(_MOTOR_SLOTS):
         raise RuntimeError(
-            "default chassis has only %d motor slots; constructed too "
-            "many JGB37Motor / Servo objects" % len(_MOTOR_SLOTS))
+            "default chassis has only %d motor slots (2 wheels + 2 "
+            "kinematic task motors); constructed too many motor "
+            "objects" % len(_MOTOR_SLOTS))
     slot = _MOTOR_SLOTS[_INSTALLED.motor_idx]
+    if slot is None and not kinematic_ok:
+        # Refused WITHOUT consuming the slot: an encoder motor that
+        # can't use a kinematic slot must not burn it for the serial
+        # motor that can.
+        raise RuntimeError(
+            "default chassis has two encoder-motor slots; the third "
+            "and fourth are kinematic task slots for serial servos "
+            "(ST3215Motor / ST3032Motor) only")
     _INSTALLED.motor_idx += 1
     return slot
 
@@ -181,7 +200,9 @@ class ShimServo:
                  counts_per_rev: int = 1320,
                  invert: bool = False,
                  kp: float = 0.3):
-        sensor_name, actuator_name = _next_motor_slot()
+        # kinematic_ok=False: an encoder motor's whole point is the
+        # physics behind it, so it can't take a kinematic task slot.
+        sensor_name, actuator_name = _next_motor_slot(kinematic_ok=False)
         self._adapter = SimMotor(
             _INSTALLED.runtime, sensor_name, actuator_name,
             counts_per_rev=int(counts_per_rev),
@@ -255,6 +276,7 @@ class _SimStBus:
         # commands own them.
         self._db_writing = False
         self._moves = {}
+        self._slot_ids = {}
         runtime.add_tick(self._tick)
 
     def _move(self, slot):
@@ -271,10 +293,27 @@ class _SimStBus:
     def servo_attach(self, slot, servo_id, invert, goal_acc):
         # invert intentionally ignored: the sim chassis mounts both
         # wheel hinges on one axis (see ShimST3215Motor docstring).
-        return slot in self._wheels
+        #
+        # Slot bookkeeping is firmware-faithful: an occupied slot
+        # REFUSES, which is what makes the engine's first-free-slot
+        # claim loop hand out 0 then 1. Without it both wheels
+        # reported slot 0, and anything addressing the right wheel by
+        # its claimed slot silently operated on the left one.
+        if slot not in self._wheels or slot in self._slot_ids:
+            return False
+        self._slot_ids[slot] = int(servo_id)
+        return True
+
+    def servo_slot_of(self, servo_id):
+        # One physical servo, one slot — a re-run reuses the claim
+        # (firmware st_bus.servo_slot_of).
+        for slot, sid in self._slot_ids.items():
+            if sid == int(servo_id):
+                return slot
+        return -1
 
     def servo_detach(self, slot):
-        pass
+        self._slot_ids.pop(slot, None)
 
     def db_disable(self):
         self._active = False
@@ -292,15 +331,24 @@ class _SimStBus:
     def db_set_accel(self, dps2):
         self._raw.set_accel(float(dps2))
 
+    def _sync_bridges(self):
+        # Firmware parity (st_bus.c sb_db_straight/sb_db_turn): arm
+        # against LIVE odometry. The per-tick sync below usually keeps
+        # the bridges current, but a move armed in the same tick as a
+        # wheel command must not race it.
+        self._raw.sync(self._wheels[0].angle(), self._wheels[1].angle())
+
     def db_straight(self, mm, mm_s):
         for m in self._moves.values():
             m.stop()                      # new command wins
+        self._sync_bridges()
         self._db_writing = True
         self._raw.straight(self._rt.now_ms, float(mm), float(mm_s))
 
     def db_turn(self, deg, dps):
         for m in self._moves.values():
             m.stop()
+        self._sync_bridges()
         self._db_writing = True
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
 
@@ -424,12 +472,22 @@ class _SimStBus:
     # -- sim step ------------------------------------------------------
 
     def _tick(self, now_ms):
-        if self._active and self._raw is not None and self._db_writing:
+        if self._raw is not None:
             l = self._wheels[0].angle()
             r = self._wheels[1].angle()
-            lt, rt = self._raw.tick(now_ms, l, r)
-            self._wheels[0].run_speed(lt)
-            self._wheels[1].run_speed(rt)
+            if self._active and self._db_writing:
+                lt, rt = self._raw.tick(now_ms, l, r)
+                self._wheels[0].run_speed(lt)
+                self._wheels[1].run_speed(rt)
+            else:
+                # Yielded (move_wheels / per-slot moves own the
+                # wheels): keep the bridge odometry live anyway, like
+                # the firmware's st_db_tick does on every hard tick —
+                # the next straight()/turn() arms from the TRUE pose,
+                # and a mid-move abort captures the TRUE pose for its
+                # holds. Unsynced, a straight(50) after 2 s of
+                # move_wheels drove the chassis backward 142.6 mm.
+                self._raw.sync(l, r)
         for slot, m in self._moves.items():
             if m.is_active():
                 cmd = m.tick(now_ms,
@@ -496,16 +554,35 @@ class ShimST3215Motor:
     def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
                  baud=1_000_000, dir_pin=None,
                  invert=False, max_dps=600.0, **_ignored):
-        sensor_name, actuator_name = _next_motor_slot()
+        slot = _next_motor_slot()
         rt = _INSTALLED.runtime
         self._rt = rt
-        # Reuse SimMotor purely for the (sensor, actuator) plumbing —
-        # ids, ctrl scale, raw angle read. Its servo core is never
-        # ticked (see class docstring for why).
-        self._plumb = SimMotor(rt, sensor_name, actuator_name)
-        joint_id  = int(rt.model.sensor_objid[self._plumb._sensor_id])
-        self._dof = int(rt.model.jnt_dofadr[joint_id])
-        self._actuator_id = self._plumb._actuator_id
+        # Kinematic integrator state — used only when this motor got
+        # a task-motor slot (no MuJoCo actuator); defined always so
+        # the tick can branch on _plumb alone.
+        self._kin_angle   = 0.0
+        self._kin_vel     = 0.0
+        self._kin_last_ms = None
+        if slot is None:
+            # Task-motor slot (third/fourth constructed): the default
+            # chassis has two physical wheels, so this shaft
+            # INTEGRATES its commanded speed instead of driving a
+            # MuJoCo joint. run/run_angle/angle()/done() all behave;
+            # load stays 0 and nothing pushes back — behavioural, not
+            # physical, exactly like the bench robot's gripper motors
+            # need for the script to run end-to-end.
+            self._plumb = None
+            self._dof = None
+            self._actuator_id = None
+        else:
+            sensor_name, actuator_name = slot
+            # Reuse SimMotor purely for the (sensor, actuator)
+            # plumbing — ids, ctrl scale, raw angle read. Its servo
+            # core is never ticked (see class docstring for why).
+            self._plumb = SimMotor(rt, sensor_name, actuator_name)
+            joint_id  = int(rt.model.sensor_objid[self._plumb._sensor_id])
+            self._dof = int(rt.model.jnt_dofadr[joint_id])
+            self._actuator_id = self._plumb._actuator_id
 
         self._max_dps      = float(max_dps)
         self._angle_offset = 0.0
@@ -524,6 +601,9 @@ class ShimST3215Motor:
 
     def _attach(self):
         if not self._attached:
+            # A kinematic shaft must not integrate across the time it
+            # spent detached (coasted): restart the dt clock.
+            self._kin_last_ms = None
             self._rt.add_tick(self._tick)
             self._attached = True
 
@@ -533,11 +613,36 @@ class ShimST3215Motor:
             self._attached = False
 
     def _vel_dps(self):
+        if self._plumb is None:
+            return self._kin_vel
         return float(self._rt.data.qvel[self._dof]) * (180.0 / math.pi)
+
+    def _apply_v(self, now_ms, v_cmd):
+        """Drive the shaft. ``None`` = coast (zero torque). Physical
+        slots run the P loop into the DC-motor model; kinematic task
+        slots integrate the command directly (massless shaft — the
+        honest analogue of a free gripper motor with no sim body)."""
+        if self._plumb is not None:
+            if v_cmd is None:
+                self._rt.data.ctrl[self._actuator_id] = 0.0
+                return
+            power = self._KP_VEL * (v_cmd - self._vel_dps())
+            if power >  100.0: power =  100.0
+            if power < -100.0: power = -100.0
+            # Through the shared DC-motor model — a serial servo's
+            # inner loop is still a DC motor behind a controller.
+            self._plumb.apply_power(power)
+            return
+        dt = 0.0
+        if self._kin_last_ms is not None:
+            dt = (now_ms - self._kin_last_ms) / 1000.0
+        self._kin_last_ms = now_ms
+        self._kin_vel = 0.0 if v_cmd is None else v_cmd
+        self._kin_angle += self._kin_vel * dt
 
     def _tick(self, now_ms):
         if self._mode == "idle":
-            self._rt.data.ctrl[self._actuator_id] = 0.0
+            self._apply_v(now_ms, None)
             return
         if self._mode == "angle":
             mv = self._move
@@ -551,7 +656,7 @@ class ShimST3215Motor:
                     self._target_dps = 0.0
                 else:
                     self._mode = "idle"       # coast
-                    self._rt.data.ctrl[self._actuator_id] = 0.0
+                    self._apply_v(now_ms, None)
                     return
                 v_cmd = 0.0
             else:
@@ -563,12 +668,7 @@ class ShimST3215Motor:
                 v_cmd = v * mv["direction"]
         else:   # "speed"
             v_cmd = self._target_dps
-        power = self._KP_VEL * (v_cmd - self._vel_dps())
-        if power >  100.0: power =  100.0
-        if power < -100.0: power = -100.0
-        # Through the shared DC-motor model — a serial servo's inner
-        # loop is still a DC motor behind a controller.
-        self._plumb.apply_power(power)
+        self._apply_v(now_ms, v_cmd)
 
     def _clamp(self, dps):
         if dps >  self._max_dps: return  self._max_dps
@@ -580,6 +680,12 @@ class ShimST3215Motor:
         """DriveBase adoption hook, sim edition: the engine runs
         UNCHANGED against the emulated bus."""
         from openbricks.robotics.native_drivebase import _SerialNativeEngine
+        if self._plumb is None or right._plumb is None:
+            raise RuntimeError(
+                "sim DriveBase wheels must be the first two motors "
+                "constructed — the third and fourth are kinematic "
+                "task-motor stand-ins with no chassis body (the sim "
+                "binds motors by construction order, not servo id)")
         emu = _SimStBus(self, right, self._rt)
         return _SerialNativeEngine(
             left_id=1, right_id=2,
@@ -613,13 +719,20 @@ class ShimST3215Motor:
         self._mode = "idle"
         self._move = None
         self._detach()
-        self._rt.data.ctrl[self._actuator_id] = 0.0
+        if self._plumb is not None:
+            self._rt.data.ctrl[self._actuator_id] = 0.0
+        else:
+            self._kin_vel = 0.0
+
+    def _raw_angle(self):
+        return (self._kin_angle if self._plumb is None
+                else self._plumb.angle())
 
     def angle(self):
-        return self._plumb.angle() - self._angle_offset
+        return self._raw_angle() - self._angle_offset
 
     def reset_angle(self, angle=0):
-        self._angle_offset = self._plumb.angle() - float(angle)
+        self._angle_offset = self._raw_angle() - float(angle)
 
     def ping(self):
         return True
