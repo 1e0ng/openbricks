@@ -121,8 +121,10 @@ class ESP32S3DevkitHubTests(unittest.TestCase):
         self.assertIsInstance(hub.bluetooth_button, Button)
 
     def test_button_default_pin(self):
+        # 38 since 1.66.3: off ADC1 (GPIO 1-10), which sensors need
+        # and buttons don't.
         hub = ESP32S3DevkitHub(bluetooth=False)
-        self.assertEqual(hub.bluetooth_button._pin.pin, 5)
+        self.assertEqual(hub.bluetooth_button._pin.pin, 38)
 
     def test_led_default_pin_is_48(self):
         hub = ESP32S3DevkitHub(bluetooth=False)

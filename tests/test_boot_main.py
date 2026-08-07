@@ -85,7 +85,11 @@ class BootMainTests(unittest.TestCase):
         self._persist_ble(True)
         _run_boot()
         self.assertTrue(_FakeBLE().active(), "radio must be up")
-        self.assertTrue(5 in pins._claims, "BLE button must be wired")
+        self.assertTrue(38 in pins._claims,
+                        "BLE button must be wired (S3 default 38 — "
+                        "off ADC1, which sensors need)")
+        self.assertFalse(5 in pins._claims,
+                         "GPIO 5 must stay free for analog use")
         self.assertEqual(len(self._run_calls), 1,
                          "launcher.run must be entered")
 
@@ -96,7 +100,7 @@ class BootMainTests(unittest.TestCase):
         _run_boot()
         self.assertFalse(_FakeBLE().active(), "radio must stay down")
         self.assertTrue(
-            5 in pins._claims,
+            38 in pins._claims,
             "BLE button must be wired even with BLE persisted off — "
             "it's the only way to turn BLE back on without a USB "
             "cable or a full-erase reflash")
