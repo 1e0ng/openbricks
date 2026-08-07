@@ -31,11 +31,11 @@ while True:
     bars = "".join(_BARS[min(e.value * (len(_BARS) - 1) // 1000,
                              len(_BARS) - 1)] for e in r)
     pos = r.position()
-    left = r.leftmost_position()
-    print("[%s]  pos=%s  left=%s  dark=%d  branch=%s" % (
+    edge = r.left_edge_position()
+    print("[%s]  pos=%s  edge=%s  dark=%d  branch=%s" % (
         bars,
         "----" if pos is None else "%+6.1fmm" % pos,
-        "----" if left is None else "%+6.1fmm" % left,
+        "----" if edge is None else "%+6.1fmm" % edge,
         r.dark_count(),
         "DARK" if branch.dark() else "-"))
     time.sleep_ms(100)

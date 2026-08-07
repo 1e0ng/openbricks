@@ -103,6 +103,8 @@ class ConstructionTests(unittest.TestCase):
         ch = QTRChannel(pin=9)
         with self.assertRaises(RuntimeError):
             ch.position()
+        with self.assertRaises(RuntimeError):
+            ch.left_edge_position()
         ch.calibrate(duration_ms=100)
         ADC.reads = {9: _LINE}
         self.assertEqual(ch.value(), 1000)
@@ -271,6 +273,58 @@ class ReadingTests(unittest.TestCase):
         _script(dark_pins=())
         self.assertIsNone(self.qtr.leftmost_position())
         self.assertIsNone(self.qtr.rightmost_position())
+
+    def test_left_edge_interpolates_the_boundary(self):
+        # Pins 5,6,7 dark (values 1000), pin 4 white (0): the
+        # white→black crossing sits where the interpolated value
+        # passes dark_threshold=300 — 30% of the way from element
+        # index 3 (x=-8) toward index 4. Line width doesn't move it.
+        _script(dark_pins=(5, 6, 7))
+        edge = self.qtr.left_edge_position()
+        self.assertAlmostEqual(edge, -8.0 + 0.3 * 8.0, places=6)
+
+    def test_left_edge_is_left_of_the_cluster_centre(self):
+        _script(dark_pins=(5, 6, 7))
+        self.assertTrue(self.qtr.left_edge_position()
+                        < self.qtr.leftmost_position())
+
+    def test_left_edge_uses_partial_brightness(self):
+        # A half-covered element shifts the crossing: cal 200 on the
+        # white side, cal 800 on the dark side → the threshold (300)
+        # is 1/6 of the way across the pitch. Raw values are chosen
+        # to normalize exactly (span 58000).
+        ADC.reads = {p: _MAT for p in _PINS}
+        ADC.reads[5] = _MAT + 200 * (_LINE - _MAT) // 1000
+        ADC.reads[6] = _MAT + 800 * (_LINE - _MAT) // 1000
+        edge = self.qtr.left_edge_position()
+        self.assertAlmostEqual(edge, 0.0 + (100 / 600) * 8.0,
+                               places=6)
+
+    def test_left_edge_none_when_nothing_is_dark(self):
+        _script(dark_pins=())
+        self.assertIsNone(self.qtr.left_edge_position())
+
+    def test_left_edge_saturates_off_array(self):
+        # Leftmost element dark: the true edge is beyond the array;
+        # the estimate sits half a pitch past it so the error keeps
+        # sign and magnitude.
+        _script(dark_pins=(1, 2))
+        self.assertEqual(self.qtr.left_edge_position(),
+                         -4 * 8.0 - 4.0)
+
+    def test_left_edge_ignores_a_right_branch(self):
+        # Two clusters: the left line's edge must not move when a
+        # branch appears under the right side.
+        _script(dark_pins=(2,))
+        alone = self.qtr.left_edge_position()
+        _script(dark_pins=(2, 8))
+        self.assertEqual(self.qtr.left_edge_position(), alone)
+
+    def test_left_edge_rides_the_reading_snapshot(self):
+        _script(dark_pins=(5, 6))
+        reading = self.qtr.read()
+        self.assertEqual(reading.left_edge_position(),
+                         self.qtr.left_edge_position(reading))
 
     def test_reading_is_the_user_facing_snapshot(self):
         # THE call-site contract, verbatim from the user:
