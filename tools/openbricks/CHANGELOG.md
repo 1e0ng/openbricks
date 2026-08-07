@@ -8,11 +8,13 @@ Firmware versions are tracked separately on the `v*` tag namespace.
 - EVERY file in `examples/` is stripped to bare code: docstring
   plus code, no comments. The only comments left are SPDX headers
   and the control-law markers the law tests extract by.
-- The branch policy covers exactly the bench layout (it's an
-  example, not a framework): flag on the right; while it is dark
-  the law steers on the LEFTMOST cluster (the pin-15 end).
-  `BRANCH_SIDE` is gone. The intersection stop (whole array AND
-  flag dark, immediate) is unchanged.
+- The follower always steers on the LEFTMOST dark cluster (the
+  pin-15 end) — with a single line under the array that is the
+  line's centre, and at a right-side branch it is the main line,
+  so no per-tick source switching at all. The branch flag now only
+  gates the stop. `BRANCH_SIDE` is gone; the intersection stop
+  (whole array AND flag dark, immediate) is unchanged.
+- `db.stop()` at the intersection coasts (no brake).
 
 ## 1.67.1 — qtr_line_follow: minimal law
 

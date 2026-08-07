@@ -5,7 +5,7 @@ Same extract-and-exec trick as ``tests/test_line_follow.py``: the
 example wires hardware at module level, so the pure control-law
 block is pulled out by its markers. What is pinned here is the
 CONTRACT the bench relies on: sign conventions, the immediate
-whole-array-AND-flag stop, branch-steers-on-the-leftmost-cluster,
+whole-array-AND-flag stop, always-steer-on-the-leftmost-cluster,
 real-dt derivative scaling, hold-on-lost-line, and the clamp.
 """
 
@@ -29,16 +29,12 @@ def _load():
 
 
 class _Reading:
-    """``QTRReading`` stand-in: the law consumes exactly these three
+    """``QTRReading`` stand-in: the law consumes exactly these two
     methods of the snapshot, nothing else."""
 
-    def __init__(self, pos=None, left=None, all_dark=False):
-        self._pos = pos
-        self._left = left if left is not None else pos
+    def __init__(self, left=None, all_dark=False):
+        self._left = left
         self._all = all_dark
-
-    def position(self):
-        return self._pos
 
     def leftmost_position(self):
         return self._left
@@ -52,9 +48,9 @@ class QTRLawTests(unittest.TestCase):
     def setUpClass(cls):
         cls.ns = _load()
 
-    def _tick(self, pos, left=None, branch=False, all_dark=False,
-              prev=None, dt=0.01):
-        reading = _Reading(pos=pos, left=left, all_dark=all_dark)
+    def _tick(self, left, branch=False, all_dark=False, prev=None,
+              dt=0.01):
+        reading = _Reading(left=left, all_dark=all_dark)
         return self.ns["_pd_wheel_speeds"](reading, branch, prev, dt)
 
     def _cruise(self):
@@ -71,6 +67,13 @@ class QTRLawTests(unittest.TestCase):
         self.assertTrue(l > r, (l, r))
         (l, r), _ = self._tick(-10.0)
         self.assertTrue(l < r, (l, r))
+
+    def test_steering_ignores_the_branch_flag(self):
+        # The flag only gates the stop: with or without it, the same
+        # leftmost cluster gives the same speeds.
+        with_flag, _ = self._tick(+10.0, branch=True)
+        without, _ = self._tick(+10.0, branch=False)
+        self.assertEqual(with_flag, without)
 
     def test_derivative_damps_a_closing_error(self):
         # Error shrinking fast: KD subtracts from the P steering.
@@ -102,32 +105,13 @@ class QTRLawTests(unittest.TestCase):
         speeds, _ = self._tick(+2.0, branch=True, all_dark=True)
         self.assertIsNone(speeds)
 
-    def test_branch_steers_on_the_leftmost_cluster(self):
-        # At a fork the centroid points between the lines (+2 here);
-        # with the flag dark the law steers on the LEFTMOST cluster
-        # (-6, the pin-15 end): expect a left turn, not the gap's
-        # slight right.
-        (l, r), err = self._tick(+2.0, left=-6.0, branch=True)
-        self.assertTrue(l < r, (l, r))
-        self.assertEqual(err, -6.0)
-
-    def test_no_branch_ignores_the_leftmost_split(self):
-        # Same geometry without the flag: steer on the centroid.
-        (l, r), _ = self._tick(+2.0, left=-6.0, branch=False)
-        self.assertTrue(l > r, (l, r))
-
-    def test_branch_with_nothing_dark_holds_course(self):
-        # Flag dark but no cluster on the array: hold the previous
-        # correction, no crash.
+    def test_branch_alone_never_stops(self):
         # assertTrue, not assertIsNotNone: MP's unittest %-formats
         # the default message and a TUPLE value spreads its args.
-        (l, r), err = self._tick(None, branch=True, prev=+10.0)
-        self.assertTrue(l > r, (l, r))
-        self.assertEqual(err, 10.0)
+        speeds, _ = self._tick(0.0, branch=True, all_dark=False)
+        self.assertTrue(speeds is not None)
 
     def test_all_dark_alone_never_stops(self):
-        # A bar without the flag (a wide blob, a bar the flag
-        # missed): keep driving on the centroid.
         speeds, _ = self._tick(0.0, branch=False, all_dark=True)
         self.assertTrue(speeds is not None)
 
@@ -143,6 +127,11 @@ class QTRLawTests(unittest.TestCase):
         speeds, err = self._tick(None)
         self.assertEqual(speeds, self._cruise())
         self.assertEqual(err, 0.0)
+
+    def test_lost_line_during_branch_holds_too(self):
+        (l, r), err = self._tick(None, branch=True, prev=+10.0)
+        self.assertTrue(l > r, (l, r))
+        self.assertEqual(err, 10.0)
 
     def test_clamp_never_reverses_a_wheel(self):
         (l, r), _ = self._tick(+1000.0)

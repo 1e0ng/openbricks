@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Line following on a QTR reflectance array — continuous-position PD.
 
-Run ``examples/qtr_calibrate.py`` once first. While the branch flag
-is dark, the leftmost cluster (the pin-15 end) is followed; the
-whole array AND the flag dark in the same snapshot stops the run.
+Run ``examples/qtr_calibrate.py`` once first. Steers on the
+leftmost dark cluster; the whole array AND the branch flag dark in
+the same snapshot stops the run.
 """
 
 import time
@@ -27,10 +27,7 @@ def _clamp(dps):
 def _pd_wheel_speeds(reading, branch_dark, prev_error, dt_s):
     if branch_dark and reading.all_dark():
         return None, prev_error
-    if branch_dark:
-        error = reading.leftmost_position()
-    else:
-        error = reading.position()
+    error = reading.leftmost_position()
     if error is None:
         error = prev_error if prev_error is not None else 0.0
     derivative = 0.0
