@@ -82,7 +82,7 @@ def main():
     else:
         print("--- found at least one servo ---")
         print("Reconstructor with: ST3215Motor(servo_id=<id>, "
-              "uart_id=1, tx=14, rx=6, baud=<baud>)")
+              "uart_id=1, tx=14, rx=41, baud=<baud>)")
 
 
 main()

@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: MIT
-"""Line following on a QTR reflectance array — continuous-position PD.
+"""Line following on the split 5+5 QTR rig — stateless pure P.
 
-Run ``examples/qtr_calibrate.py`` once first. Follows the line's
-LEFT edge (the white→black boundary stays under the array centre);
-the whole array AND the branch flag dark in the same snapshot
-stops the run.
+Run ``examples/qtr_calibrate.py`` once first. The LEFT cluster
+follows the line's left edge; the RIGHT cluster is the branch /
+intersection flag bank. Left cluster fully dark AND the right
+cluster seeing dark in the same instant stops the run.
 """
 
 import time
 
-from openbricks.drivers.qtr import QTRArray, QTRChannel
+from openbricks.drivers.qtr import QTRArray
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
 
@@ -34,28 +34,28 @@ def get_wheel_speeds(reading, branch_dark):
 # --- end control law ---
 
 
-QTR_PINS = (1, 2, 3, 7, 8, 9, 10)
+LEFT_PINS = (1, 2, 3, 4, 5)
+RIGHT_PINS = (6, 7, 8, 9, 10)
 PITCH_MM = 4.0
-BRANCH_PIN = 5
 
-LINE_CAL = "/qtr_line.cal"
-BRANCH_CAL = "/qtr_branch.cal"
+LEFT_CAL = "/qtr_left.cal"
+RIGHT_CAL = "/qtr_right.cal"
 
-qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
-branch = QTRChannel(pin=BRANCH_PIN)
-qtr.load_calibration(LINE_CAL)
-branch.load_calibration(BRANCH_CAL)
+left_qtr = QTRArray(pins=LEFT_PINS, pitch_mm=PITCH_MM)
+right_qtr = QTRArray(pins=RIGHT_PINS, pitch_mm=PITCH_MM)
+left_qtr.load_calibration(LEFT_CAL)
+right_qtr.load_calibration(RIGHT_CAL)
 
-left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41,
                          invert=True)
-right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
 db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
 print("following. Intersection stops the run.")
 while True:
-    reading = qtr.read()
-    branch_dark = branch.dark()
+    reading = left_qtr.read()
+    branch_dark = right_qtr.read().dark_count() > 0
     speeds = get_wheel_speeds(reading, branch_dark)
     if speeds is None:
         db.stop()

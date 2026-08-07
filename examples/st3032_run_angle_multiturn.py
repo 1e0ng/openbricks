@@ -35,7 +35,7 @@ from openbricks.drivers.st3032 import ST3032Motor
 SPEED_DPS = 120
 TOL_DEG   = 3.0
 
-m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
 
 
 def probe(label, target_deg, then="hold"):

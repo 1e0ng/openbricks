@@ -3,35 +3,37 @@
 
     openbricks run -n <hub> examples/qtr_calibrate.py
 
-Slide the robot so the array crosses the line several times while
-this runs. Recalibrate when mounting, mat, or lighting changes.
+Split rig: 5 channels on the left cluster, 5 on the right. Slide
+the robot so BOTH clusters cross the line several times while this
+runs. Recalibrate when mounting, mat, or lighting changes.
 """
 
-from openbricks.drivers.qtr import QTRArray, QTRChannel
+from openbricks.drivers.qtr import QTRArray
 
-QTR_PINS = (1, 2, 3, 7, 8, 9, 10)
+LEFT_PINS = (1, 2, 3, 4, 5)
+RIGHT_PINS = (6, 7, 8, 9, 10)
 PITCH_MM = 4.0
-BRANCH_PIN = 5
 
-LINE_CAL = "/qtr_line.cal"
-BRANCH_CAL = "/qtr_branch.cal"
+LEFT_CAL = "/qtr_left.cal"
+RIGHT_CAL = "/qtr_right.cal"
 
-qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
-branch = QTRChannel(pin=BRANCH_PIN)
+left = QTRArray(pins=LEFT_PINS, pitch_mm=PITCH_MM)
+right = QTRArray(pins=RIGHT_PINS, pitch_mm=PITCH_MM)
 
-print("calibrating for 5 s — sweep the array (and the branch "
-      "channel) across the line NOW")
-qtr.calibrate(duration_ms=5000)
-branch.calibrate(duration_ms=5000)
+print("calibrating left cluster for 5 s — sweep it across the line NOW")
+left.calibrate(duration_ms=5000)
+print("calibrating right cluster for 5 s — sweep it across the line NOW")
+right.calibrate(duration_ms=5000)
 
-qtr.save_calibration(LINE_CAL)
-branch.save_calibration(BRANCH_CAL)
+left.save_calibration(LEFT_CAL)
+right.save_calibration(RIGHT_CAL)
 
 print("saved %s and %s. Per-element spans (bigger = better contrast):"
-      % (LINE_CAL, BRANCH_CAL))
-for i in range(len(qtr._cal_min)):
-    print("  line[%d]: %5d .. %5d" % (i, qtr._cal_min[i],
-                                      qtr._cal_max[i]))
-print("  branch : %5d .. %5d" % (branch._cal_min[0],
-                                 branch._cal_max[0]))
+      % (LEFT_CAL, RIGHT_CAL))
+for i in range(len(left._cal_min)):
+    print("  left[%d] : %5d .. %5d" % (i, left._cal_min[i],
+                                       left._cal_max[i]))
+for i in range(len(right._cal_min)):
+    print("  right[%d]: %5d .. %5d" % (i, right._cal_min[i],
+                                       right._cal_max[i]))
 print("done — qtr_probe.py / qtr_line_follow.py will load these.")

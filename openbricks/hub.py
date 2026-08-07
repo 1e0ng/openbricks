@@ -18,7 +18,7 @@ GPIO and GND:
   short-press toggles BLE on/off. Watched by
   :class:`openbricks.bluetooth_button.BluetoothToggleButton` which
   the hub auto-wires when ``bluetooth=True`` (the default).
-* The **program button** (default **GPIO 4**) — short-press starts
+* The **program button** (default **GPIO 39**) — short-press starts
   or stops ``/program.py``. Watched by
   :mod:`openbricks.launcher` directly, which the frozen default
   ``main.py`` starts via ``launcher.run()``.

@@ -20,7 +20,7 @@ Pybricks-style workflow:
 * Platform hub constructed to wire the BLE-toggle **short-press**
   button on GPIO 5 (flashes the LED blue/yellow for on/off feedback
   on RGB-capable hubs).
-* The program-button watcher on GPIO 4 (short-press = run/stop) is
+* The program-button watcher on GPIO 39 (short-press = run/stop) is
   started via ``launcher.run()``, which also blocks here forever.
 
 Defensive structure (since 1.0.5): the entire body is wrapped in a

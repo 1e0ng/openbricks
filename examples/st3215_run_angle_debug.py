@@ -20,8 +20,8 @@ is right.
 from openbricks.drivers.st3215 import ST3215Motor
 
 
-left  = ST3215Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-right = ST3215Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+left  = ST3215Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+right = ST3215Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
 
 print("\n========== LEFT (id=1, no invert) ==========")
 left.run_angle(60, 90, debug=True)

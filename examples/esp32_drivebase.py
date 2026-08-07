@@ -10,11 +10,11 @@ Hardware:
 
 Wiring (edit the GPIOs to match your board; defaults are for the
 ESP32-S3 DevKitC-1 — avoid GPIO 19/20 = USB, 26-37 = flash/PSRAM,
-0/3/45/46 = strapping, 4/5 = the firmware's default program / BLE
-buttons, 15/16 = the I2C convention, 14/6 = the serial-bus UART
-convention. The launcher polls GPIO 4 as an input, so a motor driver
-toggling it would read as button presses and stop your program.
-On a classic ESP32, remap to that board's pins):
+0/3/45/46 = strapping, 39/38 = the firmware's default program / BLE
+buttons, 15/16 = the I2C convention, 14/41 = the serial-bus UART
+convention. The launcher polls GPIO 39 as an input, so a motor
+driver toggling it would read as button presses and stop your
+program. On a classic ESP32, remap to that board's pins):
 
     Left motor  (L298N channel A)
         IN1  -> GPIO 1
