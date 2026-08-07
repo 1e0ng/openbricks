@@ -2684,6 +2684,55 @@ class HardStartLatchTests(unittest.TestCase):
         _tick_debounced(launch)
         self.assertEqual(launch._pending, "start")
 
+    def test_bench_timeline_one_press_exactly_one_run(self):
+        # The 2026-08-07 phantom-restart timeline, END TO END, with
+        # the exact detector ordering that produced it:
+        #   t=0        press edge lands in the PCNT counter (silicon)
+        #   t=+5 ms    soft tick dispatches the start from the count;
+        #              the hard sampler's latch does not exist yet
+        #   t=+15 ms   the sampler's debounced edge latches the SAME
+        #              press — still unarmed, exec not drained yet
+        #   t=+50 ms   idle loop drains: the program runs (and arms)
+        #   t=+30 s    the program ends ITSELF (intersection stop) —
+        #              clean exit, no stop press, no lockout
+        # One press must mean exactly one execution, however long the
+        # gates' same-press windows have been expired by then.
+        marker = "/tmp/_openbricks_phantom_marker"
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        self.addCleanup(lambda: os.remove(marker)
+                        if _path_exists(marker) else None)
+        path = _write_program(
+            "f = open(%r, 'a')\nf.write('x')\nf.close()\n" % marker)
+        launch = launcher.Launcher(_make_button(), program_path=path)
+        pcnt = _FakePressCounter()
+        launch._press_pcnt = pcnt
+        launch._sync_press_counter()
+        launch._mark_idle_alive()
+
+        pcnt.count += 1                    # t=0: edge in silicon
+        launch._tick()                     # t=+5 ms: dispatch via PCNT
+        self.assertEqual(launch._pending, "start")
+        self.mp.start_pending[0] = True    # t=+15 ms: late hard latch
+        advance_ms(50)
+        launch._drain_pending()            # the run; ends itself
+        self.assertFalse(launch._running)
+
+        advance_ms(30_000)                 # every same-press gate long
+                                           # expired, like the bench
+        for _ in range(10):                # idle: ticks + drains
+            launch._tick()
+            launch._mark_idle_alive()
+            launch._drain_pending()
+            advance_ms(50)
+        with open(marker) as f:
+            self.assertEqual(f.read(), "x",
+                             "one press must run the program exactly "
+                             "once — a second 'x' is the phantom "
+                             "restart")
+
 
 class ProgramRunningFlagTests(unittest.TestCase):
     """``launcher.program_running()`` — the hub-wide "robot is
