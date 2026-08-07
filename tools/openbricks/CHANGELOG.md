@@ -3,12 +3,11 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
-## 1.67.2 — QTR examples: bare code, right-branch only
+## 1.67.2 — examples: bare code, right-branch only
 
-- The three QTR examples (`qtr_calibrate.py`, `qtr_probe.py`,
-  `qtr_line_follow.py`) are stripped to bare code: a short module
-  docstring and nothing else. The only comments left are the
-  control-law markers the law tests extract by.
+- EVERY file in `examples/` is stripped to bare code: docstring
+  plus code, no comments. The only comments left are SPDX headers
+  and the control-law markers the law tests extract by.
 - The branch policy covers exactly the bench layout (it's an
   example, not a framework): flag on the right; while it is dark
   the law steers on the LEFTMOST cluster (the pin-15 end).
