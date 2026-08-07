@@ -226,6 +226,37 @@ class QTRArray:
             out.append(n)
         return out
 
+    def dark(self, index, readings=None):
+        """Is element ``index`` (left = 0) over the line? Same
+        threshold semantics as :meth:`QTRChannel.dark`.
+
+        Why this lives on the array rather than on the values
+        ``read()`` returns: readings must stay plain ints —
+        MicroPython cannot reflect-compare ``int`` against an int
+        subclass, so value objects with methods would break
+        ``max(readings)`` and friends on the hub while working on
+        the desktop."""
+        if readings is None:
+            readings = self.read()
+        return readings[index] >= self._threshold
+
+    def white(self, index, readings=None):
+        """Complement of :meth:`dark` for element ``index``."""
+        return not self.dark(index, readings)
+
+    def darks(self, readings=None):
+        """Per-element ``dark`` as a list of bools, left to right —
+        the iterable form: ``for i, d in enumerate(qtr.darks(r))``."""
+        if readings is None:
+            readings = self.read()
+        return [r >= self._threshold for r in readings]
+
+    def whites(self, readings=None):
+        """Per-element ``white`` as a list of bools, left to right."""
+        if readings is None:
+            readings = self.read()
+        return [r < self._threshold for r in readings]
+
     def dark_count(self, readings=None):
         """How many elements are over the line — the intersection /
         stop-bar signal (a full-width bar darkens most of the array,
@@ -355,3 +386,7 @@ class QTRChannel(QTRArray):
     def dark(self):
         """True when the element is over a marker/line."""
         return self.value() >= self._threshold
+
+    def white(self):
+        """True when the element is over the mat."""
+        return not self.dark()

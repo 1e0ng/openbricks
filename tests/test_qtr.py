@@ -272,6 +272,37 @@ class ReadingTests(unittest.TestCase):
         self.assertIsNone(self.qtr.leftmost_position())
         self.assertIsNone(self.qtr.rightmost_position())
 
+    def test_per_element_dark_and_white(self):
+        # The element-wise form of QTRChannel.dark()/white(). On the
+        # ARRAY, not on the values: readings stay plain ints because
+        # MicroPython cannot reflect-compare int against an int
+        # subclass — value objects with methods would break
+        # max(readings) on the hub while passing on the desktop.
+        _script(dark_pins=(5, 6))
+        r = self.qtr.read()
+        self.assertTrue(self.qtr.dark(4, r))       # element 4 = pin 5
+        self.assertFalse(self.qtr.white(4, r))
+        self.assertTrue(self.qtr.white(0, r))
+        self.assertFalse(self.qtr.dark(0, r))
+        self.assertEqual(self.qtr.darks(r),
+                         [False, False, False, False, True, True,
+                          False, False, False])
+        self.assertEqual(self.qtr.whites(r),
+                         [not d for d in self.qtr.darks(r)])
+        # And without pre-read readings they read for themselves.
+        self.assertTrue(self.qtr.dark(4))
+        self.assertEqual(sum(self.qtr.darks()), 2)
+
+    def test_channel_white_mirrors_dark(self):
+        from openbricks.drivers.qtr import QTRChannel
+        ADC.reads = {9: _swing()}
+        ch = QTRChannel(pin=9)
+        ch.calibrate(duration_ms=100)
+        ADC.reads = {9: _LINE}
+        self.assertTrue(ch.dark()); self.assertFalse(ch.white())
+        ADC.reads = {9: _MAT}
+        self.assertTrue(ch.white()); self.assertFalse(ch.dark())
+
     def test_dark_count_is_the_intersection_signal(self):
         _script(dark_pins=(3, 4, 5, 6, 7, 8, 9))    # stop bar
         self.assertEqual(self.qtr.dark_count(), 7)

@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.7 — per-element dark()/white()
+
+`QTRArray.dark(i)` / `white(i)` and the iterable `darks()` /
+`whites()` — the element-wise form of `QTRChannel.dark()`, with the
+complement spelled out. `QTRChannel` gains `white()` for symmetry.
+
+Deliberately on the ARRAY, not on the values `read()` returns:
+readings must stay plain ints, because MicroPython cannot
+reflect-compare `int` against an int subclass — value objects with
+methods would break `max(readings)` on the hub while passing on the
+desktop.
+
 ## 1.66.6 — forks: the branch flag now picks the left line
 
 At a branch the array sees TWO dark clusters and the global
