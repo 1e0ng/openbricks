@@ -40,18 +40,12 @@ LEFT_ID, RIGHT_ID = 2, 1
 UART_ID, TX, RX   = 1, 14, 6
 
 I2C_SDA, I2C_SCL  = 15, 16
-IMU_MUX_CHANNEL   = 3      # EDIT — set to None to skip the mux entirely
-IMU_ADDRESS       = 0x29   # EDIT — 0x28 is the driver default
+IMU_MUX_CHANNEL   = 3
+IMU_ADDRESS       = 0x29
 
-WHEEL_DIAMETER_MM = 88     # EDIT to your wheels
-AXLE_TRACK_MM     = 138    # EDIT to your chassis
+WHEEL_DIAMETER_MM = 88
+AXLE_TRACK_MM     = 138
 
-# Cruise speeds in WHEEL-deg/s (``DriveBase.settings`` units — on an
-# 88 mm wheel, 200 wheel-deg/s ~= 154 mm/s of ground speed). The
-# original 80 was very conservative; through the ST-3032's 1:205
-# gearbox that low a speed sits in the stick-slip-prone regime under
-# real chassis load and can feel non-continuous. 200/150 is still
-# gentle — drop back down if your chassis slips.
 STRAIGHT_SPEED_DPS = 200
 TURN_RATE_DPS      = 150
 

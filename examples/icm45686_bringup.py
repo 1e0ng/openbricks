@@ -26,7 +26,7 @@ import time
 
 from openbricks.drivers.icm45686 import ICM45686
 
-SCK, MOSI, MISO, CS = 8, 9, 17, 18      # EDIT to your wiring
+SCK, MOSI, MISO, CS = 8, 9, 17, 18
 
 imu = ICM45686(sck=SCK, mosi=MOSI, miso=MISO, cs=CS)
 print("WHO_AM_I ok (construction verified it)")

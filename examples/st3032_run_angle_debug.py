@@ -27,9 +27,7 @@ with chunk count.
 from openbricks.drivers.st3032 import ST3032Motor
 
 
-SPEED_DPS = 600   # ST-3032 driver cap (no-load datasheet figure is
-                  # 148 RPM = 888 °/s; pass max_dps=900 to instance to
-                  # uncap). See docs/datasheets/feetech_sts3032.pdf §5-3.
+SPEED_DPS = 600
 
 left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
 right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)

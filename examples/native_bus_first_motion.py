@@ -19,24 +19,22 @@ import time
 
 from openbricks._native import motor_process, st_bus
 
-# Bench mapping (see the drivebase examples): left id=2 inverted,
-# right id=1, URT-2 on UART1 tx=14 rx=6 at 1 Mbps.
 LEFT_SLOT, LEFT_ID   = 0, 2
 RIGHT_SLOT, RIGHT_ID = 1, 1
 UART_ID, BAUD, TX, RX = 1, 1_000_000, 14, 6
 
-STEPS_PER_DPS = 4096 / 360.0        # servo native unit
-TEST_DPS      = 100                 # <= 120 bench cap
-GOAL_ACC      = 45                  # ~400 dps^2, the driver default ballpark
+STEPS_PER_DPS = 4096 / 360.0
+TEST_DPS      = 100
+GOAL_ACC      = 45
 
 
 def main():
-    motor_process.hard_tick_selftest()          # dispatcher on
+    motor_process.hard_tick_selftest()
     if not st_bus.attach_uart(UART_ID, BAUD, TX, RX):
         raise RuntimeError("attach_uart failed")
     assert st_bus.servo_attach(LEFT_SLOT, LEFT_ID, True, GOAL_ACC)
     assert st_bus.servo_attach(RIGHT_SLOT, RIGHT_ID, False, GOAL_ACC)
-    time.sleep_ms(200)                          # config sequence flushes
+    time.sleep_ms(200)
 
     steps = int(TEST_DPS * STEPS_PER_DPS)
     print("forward %d dps (%d steps/s) for 2 s ..." % (TEST_DPS, steps))
@@ -50,7 +48,7 @@ def main():
     c1 = (st_bus.servo_counts(LEFT_SLOT), st_bus.servo_counts(RIGHT_SLOT))
 
     moved = (c1[0] - c0[0], c1[1] - c0[1])
-    expect = int(TEST_DPS * STEPS_PER_DPS * 2)   # counts in 2 s
+    expect = int(TEST_DPS * STEPS_PER_DPS * 2)
     print("moved counts: L=%+d R=%+d (expect ~%d each, +/- ramp)"
           % (moved[0], moved[1], expect))
     print("read stats:  L=%s R=%s" % (st_bus.servo_stats(LEFT_SLOT),

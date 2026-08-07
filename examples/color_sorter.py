@@ -23,9 +23,6 @@ best results, print ``sensor.rgb()`` while holding each of your own
 bricks under the sensor and paste the numbers into ``PALETTE``.
 """
 
-# name -> reference (r, g, b), each 0..255 as returned by
-# TCS34725.rgb() (clear-normalised, so a white surface reads
-# roughly (255, 255, 255) at any brightness in range).
 PALETTE = (
     ("red",    (200,  45,  40)),
     ("green",  ( 55, 175,  70)),
@@ -58,7 +55,7 @@ def main():
     from openbricks.drivers.tcs34725 import TCS34725
     from openbricks.tools import wait
 
-    i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
+    i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
     sensor = TCS34725(i2c, integration_ms=50, gain=4)
 
     print("Hold a coloured brick under the sensor (Ctrl-C to stop)...")

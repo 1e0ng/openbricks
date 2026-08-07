@@ -28,7 +28,7 @@ LEFT_ID, RIGHT_ID = 2, 1
 UART_ID, TX, RX   = 1, 14, 6
 WHEEL_MM, AXLE_MM = 88, 138
 
-WAIT_S = 30          # per interactive phase; advances early on contact
+WAIT_S = 30
 
 
 def check_free(motor, label):
@@ -44,8 +44,6 @@ def check_free(motor, label):
         if abs(moved) > 60:
             break
         if i % 50 == 49:
-            # Heartbeat: the BLE stream times out after 30 s of
-            # silence, so a quiet wait must not be silent.
             print("  ... waiting (%ds left)" % (WAIT_S - (i + 1) // 10))
     if abs(moved) > 60:
         print("  [%s] wheel turned %+.0f deg by hand -> FREE, PASS"
@@ -74,7 +72,6 @@ def check_hold(m, label):
             peak = dev
         if disturbed_at is None and abs(dev) > 5:
             disturbed_at = i
-        # Once disturbed, watch 5 more seconds then settle-check.
         if disturbed_at is not None and i - disturbed_at >= 50:
             break
         if i % 50 == 49 and disturbed_at is None:
@@ -154,7 +151,7 @@ def main():
     db.stop(then="hold")
     check_hold(right, "db stop-hold")
 
-    db.stop()   # coast out
+    db.stop()
     print("--- done. Paste this whole output back. ---")
 
 

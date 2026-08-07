@@ -54,23 +54,20 @@ import time
 from openbricks.drivers.st3032 import ST3032Motor
 
 
-# --- the move under investigation (the user's actual call) ---
 SERVO_ID   = 4
 UART_ID, TX, RX = 1, 14, 6
 DEG_PER_S  = 200
 ANGLE      = -145
 REPS       = 6
-SETTLE_MS  = 700      # pause between reps, so each starts at rest
+SETTLE_MS  = 700
 
-# Feetech STS register map (the driver's private names, spelled out
-# here so this script stays readable on its own).
 REG_MIN_ANGLE   = 0x09
 REG_MAX_ANGLE   = 0x0B
 REG_OP_MODE     = 0x21
 REG_GOAL_ACC    = 0x29
 REG_GOAL_SPEED  = 0x2E
-REG_VOLTAGE     = 0x3E     # 0.1 V per count
-REG_TEMPERATURE = 0x3F     # degrees C
+REG_VOLTAGE     = 0x3E
+REG_TEMPERATURE = 0x3F
 
 
 def _u8(motor, reg):
@@ -108,9 +105,6 @@ def sweep(motor, label, angles, commanded):
         travelled = motor.angle() - start
         dps = (abs(travelled) * 1000.0 / elapsed) if elapsed else 0.0
         verdict = "FAST" if dps > commanded * 1.5 else "ok  "
-        # ``start`` is the shaft position this move began from. If the
-        # fast/slow split tracks position rather than move number,
-        # this column is where it shows.
         print("  %d: %s %4d ms  %+7.1f deg from %+8.1f  -> %3.0f dps"
               % (i, verdict, elapsed, travelled, start, dps))
         time.sleep_ms(SETTLE_MS)
@@ -119,8 +113,6 @@ def sweep(motor, label, angles, commanded):
 def main():
     motor = ST3032Motor(servo_id=SERVO_ID, uart_id=UART_ID, tx=TX, rx=RX)
 
-    # What the driver INTENDS to write, from its own arithmetic — the
-    # number every readback below should match.
     commanded = int(round(min(DEG_PER_S, motor._max_dps)
                           * motor._steps_per_dps))
     print("commanded goal_speed = %d steps/s (%d dps)"
@@ -128,21 +120,6 @@ def main():
     print("commanded goal_acc   = %d" % motor._encode_goal_acc())
     print("")
 
-    # The first theory — "only the first move is fast, because only it
-    # writes the EEPROM angle limits" — died when a second run showed
-    # TWO fast moves, the second of which writes no EEPROM at all. So
-    # stop guessing and separate the variables.
-    #
-    # A: same direction every time, so the shaft walks steadily away
-    #    from where it started. Move number and accumulated position
-    #    advance together — this is the original reproduction.
-    # B: alternating direction, so the shaft stays near where it
-    #    began while the move number keeps climbing. If the fast moves
-    #    follow the MOVE NUMBER, A and B look alike. If they follow
-    #    the POSITION, B's pattern breaks.
-    # C: half speed. If "fast" is really "unlimited", it lands near
-    #    the same ~700 dps no matter what was asked; if it scales with
-    #    the command, it is a units/scale problem instead.
     sweep(motor, "A: same direction (walks away)",
           [ANGLE] * 6, DEG_PER_S)
     sweep(motor, "B: alternating (stays near start)",

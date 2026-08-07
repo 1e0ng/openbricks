@@ -28,18 +28,12 @@ from openbricks.robotics import DriveBase
 LEFT_ID, RIGHT_ID = 2, 1
 UART_ID, TX, RX   = 1, 14, 6
 
-WHEEL_DIAMETER_MM = 88    # EDIT to your wheels
-AXLE_TRACK_MM     = 136   # EDIT to your chassis
+WHEEL_DIAMETER_MM = 88
+AXLE_TRACK_MM     = 136
 
-# Geometry of the square. SIDE_MM 200 traces a 20 cm × 20 cm square —
-# fits comfortably on a small mat. Bump for a larger arena.
 SIDE_MM   = 200
 NUM_LAPS  = 1
 
-# Conservative chassis speeds for a small bench robot — well below
-# the ST-3032 mechanical limit (datasheet no-load 888 dps at 12 V,
-# loaded working point ~600 dps; see ``docs/datasheets/feetech_sts3032.pdf``).
-# Dial down further if the chassis slips or the bus drops packets.
 STRAIGHT_SPEED_MM = 150
 TURN_RATE_DPS     = 200
 

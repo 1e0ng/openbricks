@@ -32,9 +32,8 @@ import time
 from openbricks.drivers.st3032 import ST3032Motor
 
 
-SPEED_DPS = 120   # gentle — this probe checks rotation AMOUNT, not speed.
-                  # Raise toward the 888 °/s no-load figure once verified.
-TOL_DEG   = 3.0   # pass threshold for |commanded − measured|
+SPEED_DPS = 120
+TOL_DEG   = 3.0
 
 m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
 
@@ -44,7 +43,7 @@ def probe(label, target_deg, then="hold"):
     time.sleep_ms(50)
     start = m.angle()
     m.run_angle(SPEED_DPS, target_deg, then=then)
-    time.sleep_ms(150)          # let it settle before the readback
+    time.sleep_ms(150)
     end = m.angle()
     if start is None or end is None:
         print("  %-28s BUS SILENT (start=%s end=%s)" % (label, start, end))
@@ -59,7 +58,6 @@ def probe(label, target_deg, then="hold"):
 print("\n=== run_angle multi-turn probe (step mode) ===")
 print("  servo_id=1  speed=%d dps  tol=%.1f deg\n" % (SPEED_DPS, TOL_DEG))
 
-# Each case ends in hold so the readback reflects the parked position.
 probe("[1] +90  (sub-turn)",      +90)
 probe("[2] -90  (sub-turn)",      -90)
 probe("[3] +270 (was capped!)",  +270)

@@ -21,13 +21,13 @@ import time
 
 from openbricks._native import motor_process, st_bus
 
-LEFT_SLOT, LEFT_ID   = 0, 2      # bench mapping
+LEFT_SLOT, LEFT_ID   = 0, 2
 RIGHT_SLOT, RIGHT_ID = 1, 1
 UART_ID, BAUD, TX, RX = 1, 1_000_000, 14, 6
 
 WHEEL_MM, AXLE_MM = 88.0, 138.0
 SIDE_MM      = 150.0
-SPEED_MM_S   = 60.0              # <= bench cap
+SPEED_MM_S   = 60.0
 TURN_DPS     = 45.0
 ACCEL_DPS2   = 400.0
 
@@ -64,9 +64,6 @@ def main():
     time.sleep_ms(300)
     dl = (st_bus.servo_counts(LEFT_SLOT) - l0) * mm
     dr = (st_bus.servo_counts(RIGHT_SLOT) - r0) * mm
-    # A closed square: each wheel's net distance = 4 sides + 4 quarter
-    # turns; the turns cancel between wheels, so dl - dr ~= 2 * full
-    # turn arc and dl + dr ~= 2 * 4 * SIDE.
     print("net wheel travel: L=%.1f mm R=%.1f mm" % (dl, dr))
     print("closure (sum vs 4 sides x2): %.1f mm vs %.1f mm"
           % (dl + dr, 2 * 4 * SIDE_MM))

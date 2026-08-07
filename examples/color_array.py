@@ -29,17 +29,11 @@ distance, and surface gloss. The thresholds below are starting points
 own surfaces and adjust.
 """
 
-# Below this ambient the surface is too dark to trust the normalised
-# hue (the clear channel is mostly noise): call it black outright.
 BLACK_AMBIENT = 12
 
-# Channel spread (max - min of r, g, b) below which the surface is
-# achromatic — grey-ish. Bright grey is white; dim grey is black.
 NEUTRAL_SPREAD = 45
 WHITE_AMBIENT = 35
 
-# Yellow is "red AND green both strong"; a green channel at least
-# this fraction of red separates it from pure red.
 YELLOW_G_OVER_R = 0.6
 
 
@@ -61,7 +55,6 @@ def classify(ambient, rgb):
         return "blue"
     if g >= r:
         return "green"
-    # Red-dominant: yellow when green rides high alongside red.
     if g >= r * YELLOW_G_OVER_R:
         return "yellow"
     return "red"
@@ -74,8 +67,8 @@ def main():
     from openbricks.drivers.tcs34725 import TCS34725
     from openbricks.tools import wait
 
-    i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
-    mux = TCA9548A(i2c)                                    # 0x70 default
+    i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
+    mux = TCA9548A(i2c)
     sensors = [TCS34725(mux[ch]) for ch in range(2)]
 
     print("Hold surfaces under both sensors (Ctrl-C to stop)...")

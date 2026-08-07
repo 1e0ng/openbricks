@@ -27,7 +27,7 @@ import time
 from openbricks.drivers.ws2812 import WS2812
 
 
-DATA_PIN = 21     # EDIT to your wiring
+DATA_PIN = 21
 NUM_LEDS = 8
 
 

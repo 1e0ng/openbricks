@@ -3,23 +3,15 @@
 
     openbricks run -n <hub> examples/qtr_calibrate.py
 
-Slide or rotate the robot so the array crosses the line several
-times while this runs (5 seconds). The per-element extremes are
-saved on the hub's filesystem; ``qtr_probe.py`` and
-``qtr_line_follow.py`` load them instead of resweeping on every run.
-
-Recalibrate when anything the readings depend on changes: mounting
-height, a different mat, very different lighting.
-
-A channel that never sees line/mat contrast during the sweep is
-named by index (left = 0) — that is the unwired or mis-mounted one.
+Slide the robot so the array crosses the line several times while
+this runs. Recalibrate when mounting, mat, or lighting changes.
 """
 
 from openbricks.drivers.qtr import QTRArray, QTRChannel
 
-QTR_PINS = (1, 2, 3, 7, 8, 9, 10)  # channels 15..9, left -> right
+QTR_PINS = (1, 2, 3, 7, 8, 9, 10)
 PITCH_MM = 4.0
-BRANCH_PIN = 5                     # channel 1, far right
+BRANCH_PIN = 5
 
 LINE_CAL = "/qtr_line.cal"
 BRANCH_CAL = "/qtr_branch.cal"

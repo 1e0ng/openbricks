@@ -34,9 +34,8 @@ from machine import I2C, Pin
 from openbricks.drivers.ssd1306 import SSD1306
 from openbricks.hub import ESP32DevkitHub
 
-# ----- wiring -----
-SDA_PIN = 15     # ESP32-S3 DevKitC-1 default; use 21 on classic ESP32 DevKitC-V4
-SCL_PIN = 16     # ESP32-S3 DevKitC-1 default; use 22 on classic ESP32 DevKitC-V4
+SDA_PIN = 15
+SCL_PIN = 16
 OLED_ADDR = 0x3C
 
 
@@ -52,13 +51,9 @@ def init_display(sda_pin, scl_pin, addr=OLED_ADDR, width=128, height=64,
     return SSD1306(i2c, addr=addr, width=width, height=height)
 
 
-# ----- init -----
-# The display is an I2C component, separate from the hub's board-level
-# peripherals (LED, button). Instantiate it directly and use it directly.
 display = init_display(SDA_PIN, SCL_PIN)
 hub = ESP32DevkitHub()
 
-# ----- main loop -----
 seconds = 0
 while True:
     if hub.button.pressed():

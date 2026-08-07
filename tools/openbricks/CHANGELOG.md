@@ -3,6 +3,19 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.67.2 — examples: bare code, right-branch only
+
+- EVERY file in `examples/` is stripped to bare code: docstring
+  plus code, no comments. The only comments left are SPDX headers
+  and the control-law markers the law tests extract by.
+- The follower always steers on the LEFTMOST dark cluster (the
+  pin-15 end) — with a single line under the array that is the
+  line's centre, and at a right-side branch it is the main line,
+  so no per-tick source switching at all. The branch flag now only
+  gates the stop. `BRANCH_SIDE` is gone; the intersection stop
+  (whole array AND flag dark, immediate) is unchanged.
+- `db.stop()` at the intersection coasts (no brake).
+
 ## 1.67.1 — qtr_line_follow: minimal law
 
 The line-follow example is stripped to its essentials:

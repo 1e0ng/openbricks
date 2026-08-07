@@ -63,59 +63,28 @@ from openbricks.robotics import DriveBase
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
 right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-# ``db.move_wheels(left, right)`` drives each wheel at its own speed
-# and puts both setpoints in ONE sync-write packet, so they take
-# effect at the same packet boundary. The chassis dimensions below
-# are only used by straight()/turn(); this loop steers by wheel
-# speeds, so they don't affect its behaviour — measure your own if
-# you add distance-based moves (see docs/measuring).
 db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux = TCA9548A(i2c)
-# The driver defaults (gain=16, 2.4 ms integration — one cycle, the
-# chip minimum) ARE this loop's configuration: 2.4 ms sensor latency
-# is the enabler for the D term below, and gain=16 keeps the signal
-# budget healthy at that short window.
 left_sensor = TCS34725(mux[1])
 right_sensor = TCS34725(mux[0])
 
 
 # --- control law (pure logic, unit-tested in tests/test_line_follow.py) ---
 
-# Below this ambient (0..100) the surface counts as the line. Used
-# for the INTERSECTION stop and for branch detection — the steering
-# itself runs on the gradient above this threshold.
 LINE_AMBIENT = 12
 
-CRUISE_DPS = 400   # wheel speed when perfectly centred
+CRUISE_DPS = 400
 
-# PID gains on the ambient-difference error (units: dps of steering
-# per ambient-unit; KI per ambient-unit-second; KD per
-# ambient-unit/second). PID is sound here BECAUSE the sensors run
-# at 2.4 ms integration (the driver default).
-#   KP: the workhorse. Same value as the P-only version.
-#   KD: damping — lets you raise KP without oscillating. Tune by
-#       raising KP until the robot wiggles on a straight, then
-#       raising KD until the wiggle dies.
-#   KI: trims steady-state drift on long constant-curvature arcs.
-#       Leave 0 unless you see persistent one-sided offset; wind-up
-#       is clamped either way.
 KP = 0.3
 KI = 0.0
 KD = 0.02
-INTEGRAL_LIMIT = 50.0   # anti-windup: |integral| cap, ambient-units*s
+INTEGRAL_LIMIT = 50.0
 
-# Never reverse; cap well above CRUISE_DPS + max steering so the
-# clamp bounds runaway values without eating the differential.
-# (Retuned 400 -> 800 when CRUISE_DPS moved to 400: at cap == cruise
-# the outer wheel could never exceed cruise, halving the steering
-# authority. 800 stays under the ST-3032's 888 no-load ceiling.)
 MAX_DPS = 800
 
-# Initial PID state: (integral, previous-error-or-None). Thread the
-# state returned by each _pid_wheel_speeds call into the next.
 PID_STATE0 = (0.0, None)
 
 
@@ -164,9 +133,6 @@ def _pid_wheel_speeds(left_ambient, right_ambient, state, dt_s):
 
 
 def follow_line():
-    # No print() inside the poll loop (the line_align lesson): each
-    # one streams over the BLE console and stretches a 10 ms tick to
-    # many times that, turning crisp corrections into wobble.
 
     state = PID_STATE0
     prev_ms = time.ticks_ms()
@@ -183,10 +149,7 @@ def follow_line():
             print("intersection reached — stopping.")
             break
         db.move_wheels(speeds[0], speeds[1])
-        wait(10) # ms
-    # Default then="coast" = Pybricks semantics: coast and let
-    # friction settle it. Use then="brake" for a firmer stop that
-    # holds zero speed. Either way both wheels release together.
+        wait(10)
     db.stop()
 
 
