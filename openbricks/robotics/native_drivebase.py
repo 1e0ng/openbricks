@@ -415,6 +415,24 @@ class _SerialNativeEngine:
         self.arm_turn(angle_deg)
         self._wait()
 
+    def arm_curve(self, radius_mm, angle_deg):
+        """Pybricks ``curve()``: arc of ``|radius_mm|`` changing
+        heading by ``angle_deg`` (CW-positive). Centre speed is the
+        straight_speed setting scaled by |R|/(|R| + track/2) so the
+        OUTER wheel never exceeds it; radius 0 degrades to a turn in
+        place at the rim speed."""
+        estop.check()
+        mm_s = self._straight_speed_dps * self._wheel_circumference / 360.0
+        r = abs(float(radius_mm))
+        if r > 0:
+            mm_s = mm_s * r / (r + self._axle_track / 2.0)
+        self._sb.db_curve(float(radius_mm), float(angle_deg), float(mm_s))
+        self._arm_deadline()
+
+    def curve(self, radius_mm, angle_deg):
+        self.arm_curve(radius_mm, angle_deg)
+        self._wait()
+
     def move_wheels(self, left_wheel_speed, right_wheel_speed):
         """Independent per-wheel speeds (wheel-deg/s), both staged in
         one C critical section so they leave in a single sync-write

@@ -531,6 +531,28 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
                            "serial-bus drivebase.straight should have "
                            "moved the chassis +X (got x=%.1f mm)" % x_mm)
 
+    def test_st3032_drivebase_curve_quarter_circle(self):
+        # curve(150, 90): a forward quarter-circle to the right.
+        # Start facing +X (world yaw 0, CCW-positive): forward AND
+        # rightward (-Y) displacement with a substantial CW yaw.
+        # Tolerances match the suite's other chassis assertions —
+        # this sim rig under-rotates the chassis relative to the
+        # encoder frame (a plain turn(90) lands at ~-65 deg here
+        # too), so exact pose is the C-level tests' job
+        # (tests/test_st_drivebase.py pins the wheel geometry
+        # precisely); THIS test pins the end-to-end wiring and the
+        # arc's shape.
+        db, _, _ = self._serial_db()
+        db.settings(straight_speed=150, acceleration=360)
+        db.curve(150, 90)
+        x_mm, y_mm, yaw_deg = self.robot.chassis_pose()
+        self.assertTrue(x_mm > 80,
+                        "expected forward motion, got x=%.1f" % x_mm)
+        self.assertTrue(y_mm < -60,
+                        "expected rightward arc (-Y), got y=%.1f" % y_mm)
+        self.assertTrue(yaw_deg < -45,
+                        "expected substantial CW yaw, got %.1f" % yaw_deg)
+
     def test_settings_acceleration_reaches_the_sim_core(self):
         # The knob a user sets in firmware code (settings(acceleration=…))
         # must land in the sim's C core through wrapper → ShimDriveBase →

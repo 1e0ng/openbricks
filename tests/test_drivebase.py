@@ -200,6 +200,15 @@ class TestDriveBaseNoPythonLoop(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             db.turn(90)
 
+    def test_curve_raises(self):
+        # Same contract as straight/turn: an arc by geometry needs
+        # feedback; open-loop pairs use drive().
+        db, _, _ = self._db()
+        with self.assertRaises(RuntimeError):
+            db.curve(150, 90)
+        with self.assertRaises(ValueError):
+            db.curve(150, 90, then="drift")
+
     def test_straight_wait_false_raises_too(self):
         # The raise sits at the arm site, so wait=False can't sneak a
         # move past the contract either.

@@ -253,6 +253,85 @@ class _DeadRightWheel(_PerfectWheels):
             i += 4 + ln
 
 
+class CurveTests(_Base):
+    """db_curve — Pybricks arc semantics on the 88/136 bench
+    geometry. curve(150, 90): centre travels 150 * pi/2 = 235.6 mm,
+    outer wheel (150+68) * pi/2 = 342.4 mm, inner (150-68) * pi/2 =
+    128.8 mm. Positive angle = CW/right (left wheel outer); the
+    radius SIGN picks travel direction."""
+
+    S_MM = 235.6
+    OUTER_MM = 342.4
+    INNER_MM = 128.8
+    DIFF_MM = 106.8
+
+    def test_quarter_circle_right_forward(self):
+        sb.db_curve(150.0, 90.0, 150.0)
+        self.assertFalse(sb.db_done())
+        self.w.advance(4500)
+        self.assertTrue(sb.db_done())
+        dl, dr = self._mm(0), self._mm(1)
+        self.assertTrue(abs(dl - self.OUTER_MM) < 10, dl)
+        self.assertTrue(abs(dr - self.INNER_MM) < 10, dr)
+
+    def test_quarter_circle_left_mirrors(self):
+        sb.db_curve(150.0, -90.0, 150.0)
+        self.w.advance(4500)
+        self.assertTrue(sb.db_done())
+        dl, dr = self._mm(0), self._mm(1)
+        self.assertTrue(abs(dl - self.INNER_MM) < 10, dl)
+        self.assertTrue(abs(dr - self.OUTER_MM) < 10, dr)
+
+    def test_negative_radius_drives_the_arc_backward(self):
+        # Heading still goes CW (+90) but the robot backs along the
+        # circle: centre -235.6 mm, so left = -235.6 + 106.8, right =
+        # -235.6 - 106.8.
+        sb.db_curve(-150.0, 90.0, 150.0)
+        self.w.advance(4500)
+        self.assertTrue(sb.db_done())
+        dl, dr = self._mm(0), self._mm(1)
+        self.assertTrue(abs(dl + self.INNER_MM) < 10, dl)
+        self.assertTrue(abs(dr + self.OUTER_MM) < 10, dr)
+
+    def test_heading_tracks_distance_through_the_ramps(self):
+        # THE circle property: heading fraction == distance fraction
+        # at every instant, accel ramp included — that is what the
+        # proportional cruise+accel scaling buys. Sample mid-ramp and
+        # mid-cruise.
+        sb.db_curve(150.0, 90.0, 150.0)
+        for at_ms in (300, 1200):
+            self.w.advance(at_ms if at_ms == 300 else 900)
+            dl, dr = self._mm(0), self._mm(1)
+            dist_frac = ((dl + dr) / 2.0) / self.S_MM
+            head_frac = ((dl - dr) / 2.0) / self.DIFF_MM
+            self.assertTrue(dist_frac > 0.02, (at_ms, dist_frac))
+            self.assertTrue(abs(dist_frac - head_frac) < 0.05,
+                            (at_ms, dist_frac, head_frac))
+
+    def test_zero_radius_is_a_turn_in_place(self):
+        sb.db_curve(0.0, 90.0, 150.0)
+        self.w.advance(4000)
+        self.assertTrue(sb.db_done())
+        dl, dr = self._mm(0), self._mm(1)
+        self.assertTrue(abs(dl - self.DIFF_MM) < 8, dl)
+        self.assertTrue(abs(dr + self.DIFF_MM) < 8, dr)
+
+    def test_zero_angle_completes_immediately_without_motion(self):
+        sb.db_curve(150.0, 0.0, 150.0)
+        self.w.advance(200)
+        self.assertTrue(sb.db_done())
+        self.assertTrue(abs(self._mm(0)) < 2, self._mm(0))
+        self.assertTrue(abs(self._mm(1)) < 2, self._mm(1))
+
+    def test_curve_before_config_raises(self):
+        sb.test_reset()
+        try:
+            sb.db_curve(150.0, 90.0, 150.0)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("db_config" in str(e), e)
+
+
 class ProgramBoundaryTests(_Base):
     """``reset_runtime`` runs between programs. A transaction the
     previous one left in flight must not survive it.

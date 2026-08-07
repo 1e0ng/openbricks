@@ -3,6 +3,31 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.70.0 — DriveBase.curve()
+
+Pybricks `DriveBase.curve(radius, angle, then, wait)` lands on every
+engine: the serial hard-tick path (the bench's four ST-3032s), the
+PWM/encoder native path, and the sim.
+
+- Semantics match Pybricks: drive an arc along a circle of
+  `|radius|` mm, changing heading by `angle` degrees (positive =
+  CW/right, same as `turn()`); the SIGN of the radius picks the
+  travel direction (positive forward, negative backward).
+  `curve(0, angle)` degrades to a turn in place; `curve(r, 0)` is a
+  no-op.
+- ONE implementation in `drivebase_core`: both trajectories run
+  simultaneously with the turn profile's cruise AND accel scaled by
+  the turn/forward target ratio — the two trapezoids share their
+  exact time shape, so heading stays proportional to distance at
+  every instant and the path is a true circle through the ramps
+  (pinned by a mid-ramp test on the perfect-wheel harness).
+- The centre speed is the `straight_speed` setting scaled by
+  `|R| / (|R| + track/2)` so the OUTER wheel never exceeds it.
+- Quantitative gates: quarter-circle endpoints (both mirrors and
+  the backward arc) on the serial engine, the same geometry on the
+  PWM engine, arc-shaped chassis motion in MuJoCo, and the
+  open-loop refusal on the classic path.
+
 ## 1.69.2 — qtr_line_follow: P-only, faster
 
 The follower is now a STATELESS pure P controller

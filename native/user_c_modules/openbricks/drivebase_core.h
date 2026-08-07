@@ -129,6 +129,31 @@ void ob_drivebase_turn(ob_drivebase_t *db,
                        ob_float_t rate_dps);
 
 
+// Kick off an arc — Pybricks ``DriveBase.curve(radius, angle)``
+// semantics: drive along a circle of |radius_mm|, changing heading
+// by ``angle_deg`` (positive = CW / right, the system-wide 1.24.0
+// convention). The travel direction is the SIGN of ``radius_mm``:
+// positive drives forward along the arc, negative backward. The
+// centre of the robot covers ``|radians(angle)| * radius`` mm at
+// ``speed_mm_s``.
+//
+// Implementation: BOTH trajectories run simultaneously, with the
+// turn profile's cruise AND accel scaled by the turn/forward target
+// ratio — proportional speed and accel means the two trapezoids
+// have identical time shape (equal ramp times, equal totals), so
+// the heading is proportional to distance at EVERY instant and the
+// path is a true circle through the ramps, not just at endpoints.
+//
+// Degenerate inputs: radius 0 arms a pure turn (wheel rate =
+// speed_mm_s at the rim); angle 0 covers zero distance and
+// completes immediately.
+void ob_drivebase_curve(ob_drivebase_t *db,
+                        long now_ms,
+                        ob_float_t radius_mm,
+                        ob_float_t angle_deg,
+                        ob_float_t speed_mm_s);
+
+
 // Cancel any active move. Servo target_dps is left at zero; the
 // individual servos still hold their last position via their own
 // hold logic.

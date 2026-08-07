@@ -108,6 +108,10 @@ class _FakeBus:
         self.calls.append(("db_turn", deg, dps))
         self._left = self.done_after
 
+    def db_curve(self, radius_mm, deg, mm_s):
+        self.calls.append(("db_curve", radius_mm, deg, mm_s))
+        self._left = self.done_after
+
     def servo_stats(self, slot):
         # (reads_ok, reads_failed, stale). ``dead_slots`` marks wheels
         # that never answered — the unplugged / wrong-id / no-power
@@ -340,6 +344,38 @@ class UnitConversionTests(_Base):
         self.assertEqual(call[1], 150.0)
         expect = 200 * (math.pi * 88) / 360.0     # 153.6 mm/s
         self.assertTrue(abs(call[2] - expect) < 0.01, call)
+
+    def test_curve_caps_the_outer_wheel_at_straight_speed(self):
+        # curve(150, 90) on the 88/136 geometry: straight_speed 200
+        # wheel-dps = 153.6 mm/s at the rim; the centre speed is
+        # scaled by R/(R + track/2) = 150/218 so the OUTER wheel
+        # (at R + 68) runs exactly at the setting, never above.
+        db = self._db()
+        db.settings(straight_speed=200)
+        db.curve(150, 90)
+        call = [c for c in self.bus.calls if c[0] == "db_curve"][0]
+        self.assertEqual(call[1], 150.0)
+        self.assertEqual(call[2], 90.0)
+        rim = 200 * (math.pi * 88) / 360.0
+        expect = rim * 150.0 / (150.0 + 136.0 / 2.0)
+        self.assertTrue(abs(call[3] - expect) < 0.01, call)
+        outer = call[3] * (150.0 + 68.0) / 150.0
+        self.assertTrue(abs(outer - rim) < 0.01, outer)
+
+    def test_curve_zero_radius_passes_rim_speed_uncapped(self):
+        db = self._db()
+        db.settings(straight_speed=200)
+        db.curve(0, 90)
+        call = [c for c in self.bus.calls if c[0] == "db_curve"][0]
+        rim = 200 * (math.pi * 88) / 360.0
+        self.assertTrue(abs(call[3] - rim) < 0.01, call)
+
+    def test_curve_negative_radius_keeps_its_sign(self):
+        db = self._db()
+        db.curve(-150, 90)
+        call = [c for c in self.bus.calls if c[0] == "db_curve"][0]
+        self.assertEqual(call[1], -150.0)
+        self.assertTrue(call[3] > 0, call)     # speed stays magnitude
 
     def test_turn_converts_wheel_dps_to_body_dps(self):
         db = self._db()

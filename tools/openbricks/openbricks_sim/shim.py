@@ -352,6 +352,14 @@ class _SimStBus:
         self._db_writing = True
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
 
+    def db_curve(self, radius_mm, deg, mm_s):
+        for m in self._moves.values():
+            m.stop()
+        self._sync_bridges()
+        self._db_writing = True
+        self._raw.curve(self._rt.now_ms, float(radius_mm), float(deg),
+                        float(mm_s))
+
     def db_move_wheels(self, left_steps_per_s, right_steps_per_s):
         # Firmware parity (st_bus.c sb_db_move_wheels): independent
         # per-wheel speeds, the db yields, per-slot moves cancelled.
@@ -996,6 +1004,10 @@ class ShimDriveBase:
 
     def turn(self, angle_deg, rate_dps):
         self._db.turn(float(angle_deg), float(rate_dps))
+
+    def curve(self, radius_mm, angle_deg, speed_mm_s):
+        self._db.curve(float(radius_mm), float(angle_deg),
+                       float(speed_mm_s))
 
     def move_wheels(self, left_dps, right_dps):
         # Firmware parity (drivebase.c db_move_wheels): the coupled

@@ -392,12 +392,12 @@ class DriveBase:
         if self._pending is None:
             return True
         mode = self._pending["mode"]
-        if mode == "straight_native" or mode == "turn_native":
+        if mode in ("straight_native", "turn_native", "curve_native"):
             if self._native.is_done():
                 self.stop(then=self._pending["then"])
                 return True
             return False
-        if mode == "straight_serial" or mode == "turn_serial":
+        if mode in ("straight_serial", "turn_serial", "curve_serial"):
             if self._serial_engine.tick_done():
                 self.stop(then=self._pending["then"])
                 return True
@@ -448,6 +448,36 @@ class DriveBase:
             while not self.done():
                 time.sleep_ms(10)
 
+    def curve(self, radius_mm, angle_deg, then="coast", wait=True):
+        """Drive an arc along a circle of ``|radius_mm|``, changing
+        heading by ``angle_deg`` — Pybricks ``DriveBase.curve()``.
+
+        Positive ``angle_deg`` turns right (clockwise from above,
+        the system-wide sign convention, same as ``turn()``); the
+        SIGN of ``radius_mm`` picks the travel direction along the
+        arc (positive = forward, negative = backward).
+        ``curve(150, 90)`` sweeps a forward quarter-circle to the
+        right around a centre 150 mm to the robot's right;
+        ``curve(150, -90)`` the mirror to the left.
+
+        The forward and turn profiles run simultaneously with
+        proportional speed AND acceleration, so heading stays
+        proportional to distance at every instant — the path is a
+        true circle through the accel/decel ramps, not just at the
+        endpoints. The centre speed is the ``straight_speed``
+        setting scaled by ``|R| / (|R| + track/2)`` so the OUTER
+        wheel never exceeds ``straight_speed``. ``curve(0, angle)``
+        degrades to a turn in place.
+
+        Same ``then`` / ``wait`` semantics as ``straight()``."""
+        if then not in ("coast", "brake", "hold"):
+            raise ValueError(
+                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        self._arm_curve(radius_mm, angle_deg, then)
+        if wait:
+            while not self.done():
+                time.sleep_ms(10)
+
     # ---- arm: stash pending state, kick off motion ----
     def _arm_straight(self, distance_mm, then):
         if self._serial_engine is not None:
@@ -480,6 +510,31 @@ class DriveBase:
             return
         raise RuntimeError(
             "turn() needs closed-loop motors (encoder servos or "
+            "serial-bus motors); open-loop pairs use drive()/stop()")
+
+    def _curve_speed_mm_s(self, radius_mm):
+        """Centre speed for an arc: straight_speed scaled so the
+        OUTER wheel (radius |R| + track/2) never exceeds it."""
+        mm_s = self._straight_speed_dps * self._wheel_circumference / 360
+        r = abs(float(radius_mm))
+        if r > 0:
+            mm_s = mm_s * r / (r + self._axle_track / 2.0)
+        return mm_s
+
+    def _arm_curve(self, radius_mm, angle_deg, then):
+        if self._serial_engine is not None:
+            self._serial_engine.arm_curve(float(radius_mm),
+                                          float(angle_deg))
+            self._pending = {"mode": "curve_serial", "then": then}
+            return
+        if self._native is not None:
+            estop.check()       # see _arm_straight
+            self._native.curve(float(radius_mm), float(angle_deg),
+                               float(self._curve_speed_mm_s(radius_mm)))
+            self._pending = {"mode": "curve_native", "then": then}
+            return
+        raise RuntimeError(
+            "curve() needs closed-loop motors (encoder servos or "
             "serial-bus motors); open-loop pairs use drive()/stop()")
 
     # ---- helpers ----
