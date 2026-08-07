@@ -4,8 +4,9 @@
 Same extract-and-exec trick as ``tests/test_line_follow.py``: the
 example wires hardware at module level, so the pure control-law
 block is pulled out by its markers. What is pinned here is the
-CONTRACT the bench relies on: sign conventions, intersection
-priority, recovery direction, and the clamp.
+CONTRACT the bench relies on: sign conventions, the immediate
+whole-array-AND-flag stop, the fork policy, real-dt derivative
+scaling, hold-on-lost-line, and the clamp.
 """
 
 import tests._fakes  # noqa: F401
@@ -27,19 +28,40 @@ def _load():
     return ns
 
 
+class _Reading:
+    """``QTRReading`` stand-in: the law consumes exactly these four
+    methods of the snapshot, nothing else."""
+
+    def __init__(self, pos=None, left=None, right=None,
+                 all_dark=False):
+        self._pos = pos
+        self._left = left if left is not None else pos
+        self._right = right if right is not None else pos
+        self._all = all_dark
+
+    def position(self):
+        return self._pos
+
+    def leftmost_position(self):
+        return self._left
+
+    def rightmost_position(self):
+        return self._right
+
+    def all_dark(self):
+        return self._all
+
+
 class QTRLawTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.ns = _load()
 
-    def _tick(self, pos, fork=None, peak=900, branch=False,
-              all_dark=False, side=0, state=None, dt=0.01):
-        if state is None:
-            state = self.ns["PD_STATE0"]
-        if fork is None:
-            fork = pos
-        return self.ns["_pd_wheel_speeds"](pos, fork, peak, branch,
-                                           all_dark, side, state, dt)
+    def _tick(self, pos, left=None, right=None, branch=False,
+              all_dark=False, prev=None, dt=0.01):
+        reading = _Reading(pos=pos, left=left, right=right,
+                           all_dark=all_dark)
+        return self.ns["_pd_wheel_speeds"](reading, branch, prev, dt)
 
     def test_centred_line_drives_straight(self):
         speeds, _ = self._tick(0.0)
@@ -55,110 +77,94 @@ class QTRLawTests(unittest.TestCase):
 
     def test_derivative_damps_a_closing_error(self):
         # Error shrinking fast: KD subtracts from the P steering.
-        (l_p, r_p), _ = self._tick(+10.0)                  # no history
-        (l_d, r_d), _ = self._tick(+10.0, state=(20.0, 0))  # was worse
+        (l_p, r_p), _ = self._tick(+10.0)              # no history
+        (l_d, r_d), _ = self._tick(+10.0, prev=20.0)   # was worse
         self.assertTrue(l_d - r_d < l_p - r_p,
                         ((l_p, r_p), (l_d, r_d)))
 
-    def test_intersection_needs_consecutive_ticks(self):
-        # Bench 2026-08-07: all 7 elements crossed the threshold for
-        # ONE tick during a plain line crossing — stopping without
-        # the debounce halts the robot mid-corner. A real crossing
-        # persists.
-        state = self.ns["PD_STATE0"]
-        speeds, state = self._tick(+2.0, branch=True, all_dark=True,
-                                   state=state)
+    def test_derivative_uses_the_measured_dt(self):
+        # The same error change over twice the time is HALF the
+        # rate: the slow tick must damp less. This is what pins
+        # "dt is measured, not assumed" — with a hardcoded dt both
+        # calls would return identical speeds.
+        (l_fast, r_fast), _ = self._tick(+10.0, prev=20.0, dt=0.01)
+        (l_slow, r_slow), _ = self._tick(+10.0, prev=20.0, dt=0.02)
+        self.assertTrue(l_slow - r_slow > l_fast - r_fast,
+                        ((l_fast, r_fast), (l_slow, r_slow)))
+
+    def test_zero_dt_skips_the_derivative(self):
+        # First loop iteration can measure dt == 0; pure P, no
+        # ZeroDivisionError.
+        (l, r), _ = self._tick(+10.0, prev=20.0, dt=0)
+        (l_p, r_p), _ = self._tick(+10.0)
+        self.assertEqual((l, r), (l_p, r_p))
+
+    def test_intersection_stops_immediately(self):
+        # Whole array dark AND flag dark in one snapshot: stop NOW —
+        # no debounce, no streak.
+        speeds, _ = self._tick(+2.0, branch=True, all_dark=True)
+        self.assertIsNone(speeds)
+
+    def test_either_signal_alone_never_stops(self):
+        # Flag alone (fork mode) or all-dark alone (a bar the flag
+        # straddles, a wide blob): both keep driving.
+        speeds, _ = self._tick(0.0, branch=True, all_dark=False)
         # assertTrue, not assertIsNotNone: MP's unittest %-formats
         # the default message and a TUPLE value spreads its args.
-        self.assertTrue(speeds is not None)   # 1 tick: keep driving
-        for _ in range(self.ns["INTERSECTION_TICKS"] - 1):
-            speeds, state = self._tick(+2.0, branch=True,
-                                       all_dark=True, state=state)
-        self.assertIsNone(speeds)             # persisted: stop
+        self.assertTrue(speeds is not None)
+        speeds, _ = self._tick(0.0, branch=False, all_dark=True)
+        self.assertTrue(speeds is not None)
 
-    def test_intersection_streak_resets_on_a_clean_tick(self):
-        state = self.ns["PD_STATE0"]
-        _, state = self._tick(+2.0, branch=True, all_dark=True,
-                              state=state)
-        _, state = self._tick(+2.0, state=state)           # transient
-        speeds, state = self._tick(+2.0, branch=True, all_dark=True,
-                                   state=state)
-        self.assertTrue(speeds is not None,
-                        "a broken streak must start over")
-
-    def test_weak_peak_is_off_mat_not_a_line(self):
-        # Lifted / mat-edge mush: uniform ~300 readings can cross the
-        # dark threshold and yield a centroid — bench 2026-08-07
-        # recorded steered positions from it. A weak peak falls to
-        # recovery, steering toward last_side, not the phantom.
-        (l, r), _ = self._tick(-2.0, peak=350, side=+1)
-        self.assertTrue(l > r, (l, r))        # recovery right, not
-                                              # the phantom's left
-
-    def test_lost_line_recovers_toward_last_side(self):
-        (l, r), _ = self._tick(None, side=+1)     # escaped right
+    def test_lost_line_holds_the_previous_correction(self):
+        # Nothing dark: keep steering as before — no recovery mode.
+        (l, r), err = self._tick(None, prev=+10.0)
         self.assertTrue(l > r, (l, r))
-        (l, r), _ = self._tick(None, side=-1)
+        self.assertEqual(err, 10.0)
+        (l, r), err = self._tick(None, prev=-10.0)
         self.assertTrue(l < r, (l, r))
+
+    def test_lost_line_with_no_history_drives_straight(self):
+        speeds, err = self._tick(None)
+        self.assertEqual(speeds, (self.ns["CRUISE_DPS"],
+                                  self.ns["CRUISE_DPS"]))
+        self.assertEqual(err, 0.0)
 
     def test_clamp_never_reverses_a_wheel(self):
         (l, r), _ = self._tick(+1000.0)
         self.assertEqual(r, 0)                    # clamped at zero
         self.assertEqual(l, self.ns["MAX_DPS"])
 
-    def test_branch_steers_on_the_chosen_fork(self):
+    def test_branch_steers_on_the_opposite_side_cluster(self):
         # At a fork the centroid points between the lines (+2 here);
-        # with the branch flag dark the law must steer on the fork
-        # cluster the caller chose (-6, the side opposite the flag):
-        # expect a left turn, not the gap's slight right. The side
-        # SELECTION is the caller's (BRANCH_SIDE) — the law is
-        # side-agnostic, which is what lets the flag be rewired to
-        # either end of the array.
-        (l, r), _ = self._tick(+2.0, fork=-6.0, branch=True)
+        # with the flag dark and BRANCH_SIDE == "right" the law
+        # steers on the LEFTMOST cluster (-6): expect a left turn,
+        # not the gap's slight right.
+        self.assertEqual(self.ns["BRANCH_SIDE"], "right")
+        (l, r), _ = self._tick(+2.0, left=-6.0, branch=True)
         self.assertTrue(l < r, (l, r))
-        # Mirrored wiring (flag left, fork right): same law, other
-        # sign.
-        (l, r), _ = self._tick(-2.0, fork=+6.0, branch=True)
-        self.assertTrue(l > r, (l, r))
+
+    def test_branch_side_left_mirrors_the_fork(self):
+        # Rewired flag (BRANCH_SIDE = "left"): same law, rightmost
+        # cluster.
+        self.ns["BRANCH_SIDE"] = "left"
+        try:
+            (l, r), _ = self._tick(-2.0, right=+6.0, branch=True)
+            self.assertTrue(l > r, (l, r))
+        finally:
+            self.ns["BRANCH_SIDE"] = "right"
 
     def test_no_branch_ignores_the_fork_split(self):
         # Same geometry without the flag: steer on the centroid.
-        (l, r), _ = self._tick(+2.0, fork=-6.0, branch=False)
+        (l, r), _ = self._tick(+2.0, left=-6.0, branch=False)
         self.assertTrue(l > r, (l, r))
 
-    def test_branch_with_nothing_dark_still_recovers(self):
-        (l, r), _ = self._tick(None, fork=None, branch=True, side=+1)
-        self.assertTrue(l > r, (l, r))        # recovery, not a crash
+    def test_branch_with_nothing_dark_holds_course(self):
+        (l, r), _ = self._tick(None, branch=True, prev=+10.0)
+        self.assertTrue(l > r, (l, r))            # hold, not a crash
 
-    def test_stop_requires_all_dark_AND_branch(self):
-        # The user's stop rule: only the whole array dark together
-        # with the branch flag stops the run — held for the
-        # debounce.
-        state = self.ns["PD_STATE0"]
-        speeds = ()
-        for _ in range(self.ns["INTERSECTION_TICKS"]):
-            speeds, state = self._tick(0.0, branch=True,
-                                       all_dark=True, state=state)
-        self.assertIsNone(speeds)
-
-    def test_either_signal_alone_never_stops(self):
-        # Flag alone (fork mode) or all-dark alone (a bar the flag
-        # straddles, a wide blob): both keep driving, however long
-        # they persist.
-        state = self.ns["PD_STATE0"]
-        for _ in range(self.ns["INTERSECTION_TICKS"] * 3):
-            speeds, state = self._tick(0.0, branch=True,
-                                       all_dark=False, state=state)
-            self.assertTrue(speeds is not None)
-        state = self.ns["PD_STATE0"]
-        for _ in range(self.ns["INTERSECTION_TICKS"] * 3):
-            speeds, state = self._tick(0.0, branch=False,
-                                       all_dark=True, state=state)
-            self.assertTrue(speeds is not None)
-
-    def test_state_threads_the_error(self):
-        _, state = self._tick(+7.5)
-        self.assertEqual(state[0], 7.5)
+    def test_returned_error_threads_the_state(self):
+        _, err = self._tick(+7.5)
+        self.assertEqual(err, 7.5)
 
 
 if __name__ == "__main__":
