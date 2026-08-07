@@ -51,7 +51,7 @@ class QTRLawTests(unittest.TestCase):
 
     def _tick(self, left, branch=False, all_dark=False):
         reading = _Reading(left=left, all_dark=all_dark)
-        return self.ns["_p_wheel_speeds"](reading, branch)
+        return self.ns["get_wheel_speeds"](reading, branch)
 
     def _cruise(self):
         c = self.ns["CRUISE_DPS"]

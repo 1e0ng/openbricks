@@ -24,7 +24,7 @@ def _clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def _p_wheel_speeds(reading, branch_dark):
+def get_wheel_speeds(reading, branch_dark):
     if branch_dark and reading.all_dark():
         return None
     steer = KP * reading.left_edge_position()
@@ -56,7 +56,7 @@ print("following. Intersection stops the run.")
 while True:
     reading = qtr.read()
     branch_dark = branch.dark()
-    speeds = _p_wheel_speeds(reading, branch_dark)
+    speeds = get_wheel_speeds(reading, branch_dark)
     if speeds is None:
         db.stop()
         print("intersection - stopped")
