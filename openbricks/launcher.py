@@ -1118,6 +1118,20 @@ def _exec_program(program_path, origin=None):
 _singleton = None
 
 
+def program_running():
+    """True while a user program is executing — whatever started it
+    (button press, ``openbricks run``, or a scheduled start; all
+    paths maintain the same flag).
+
+    This is the hub-wide "robot is running" signal. The BLE toggle
+    watcher polls it from its 50 ms tick to flash the status LED
+    while a program runs (``openbricks.bluetooth_button``), which is
+    why it must stay cheap: one attribute read, no allocation.
+    """
+    inst = _singleton
+    return inst is not None and inst._running
+
+
 def _ensure_launcher(button_pin=DEFAULT_BUTTON_PIN,
                      poll_ms=DEFAULT_POLL_MS,
                      timer_id=0):

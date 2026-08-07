@@ -127,6 +127,19 @@ class _FakeTime:
     sleep = _real_time.sleep
     gmtime = _real_time.gmtime
     time_ns = _real_time.time_ns
+    # CPython's unittest runner times each run with
+    # ``time.perf_counter()`` — and it sees this fake because the
+    # ``sys.modules`` swap below happens before ``unittest.runner``
+    # first imports ``time``. Recent CPython point releases moved the
+    # call to where every module run hits it, so without this shim
+    # every CPython worker dies with AttributeError before running a
+    # single test. Pass through to the real clock: it only feeds
+    # duration display, so virtualising it would just misreport.
+    # MicroPython's time module has no perf_counter — and its
+    # unittest never calls it, so the shim only exists where the
+    # real attribute does.
+    if hasattr(_real_time, "perf_counter"):
+        perf_counter = _real_time.perf_counter
 
 
 sys.modules["time"] = _FakeTime

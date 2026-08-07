@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.67.0 — the status LED flashes while a program runs
+
+While a user program executes, the hub's status LED flashes its
+BLE-state colour at 1 Hz — blue when Bluetooth is on, yellow when
+it's off — and returns to the solid idle colour when the program
+stops. One glance now answers both "is the robot running?" and "is
+BLE on?". On the classic ESP32's single-colour LED the indicator is
+a plain on/off blink (dark at idle).
+
+Wiring: every program path (button press, `openbricks run`,
+scheduled start) already maintained the launcher's running flag; it
+is now exposed as `launcher.program_running()`, and the BLE toggle
+watcher's existing 50 ms poll drives the blink from it — no new
+timer, and toggling BLE mid-run recolours the blink within one
+phase.
+
 ## 1.66.7 — read() returns a snapshot object
 
 `QTRArray.read()` now returns a `QTRReading`: list-like (index —

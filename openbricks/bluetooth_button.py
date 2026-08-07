@@ -7,6 +7,13 @@ Wires a ``machine.Timer``-driven poll loop (default 50 ms) against a
 once per press-release cycle. State is persisted via NVS by the
 ``bluetooth`` module, so the new value survives reboots.
 
+The same poll loop doubles as the **run indicator**: while a user
+program is executing (``launcher.program_running()``), the status LED
+flashes at 1 Hz instead of holding a solid colour — blue when BLE is
+on, yellow when it's off, plain on/off blinking on single-colour
+LEDs. When the program stops, the LED returns to its idle state
+(solid state colour on RGB hubs, dark on single-colour hubs).
+
 This is a different physical button from the one ``openbricks.launcher``
 watches for program start/stop — the BLE toggle lives on its own
 GPIO (default 5, see :class:`openbricks.hub.Hub`) while the program
@@ -40,6 +47,21 @@ DEFAULT_POLL_MS = 50
 DEFAULT_COLOR_ON  = (0, 0, 255)       # blue
 DEFAULT_COLOR_OFF = (255, 200, 0)     # yellow
 
+# Run-indicator blink: while a program runs the LED alternates
+# state-colour / off, switching phase every RUN_BLINK_MS. 500 ms per
+# phase = 1 Hz — slow enough to read as "deliberate heartbeat", fast
+# enough to be obviously different from the solid idle colour.
+RUN_BLINK_MS = 500
+
+
+def _launcher_program_running():
+    """Default run-state probe: the launcher's module-level flag.
+
+    Imported lazily so constructing a ``BluetoothToggleButton`` never
+    drags the launcher in on hosts/tests that don't use it."""
+    from openbricks import launcher
+    return launcher.program_running()
+
 
 class BluetoothToggleButton:
     """Polls a button and toggles BLE on each press-release cycle.
@@ -52,7 +74,8 @@ class BluetoothToggleButton:
     def __init__(self, button, led=None,
                  poll_ms=DEFAULT_POLL_MS, timer_id=1,
                  color_on=DEFAULT_COLOR_ON,
-                 color_off=DEFAULT_COLOR_OFF):
+                 color_off=DEFAULT_COLOR_OFF,
+                 program_running=None):
         """
         Args:
             button: any object with a ``.pressed() -> bool`` method
@@ -76,6 +99,11 @@ class BluetoothToggleButton:
                 Timer number`` on the v1.27+ MP we vendor.
             color_on, color_off: ``(r, g, b)`` tuples the LED is set to
                 when BLE is enabled / disabled. Defaults: blue / yellow.
+            program_running: zero-arg callable returning True while a
+                user program executes — drives the 1 Hz run-indicator
+                blink. Defaults to ``launcher.program_running`` (the
+                flag every exec path maintains); tests inject their
+                own probe.
         """
         self._button = button
         self._led    = led
@@ -84,6 +112,15 @@ class BluetoothToggleButton:
         self._color_on      = tuple(color_on)
         self._color_off     = tuple(color_off)
         self._timer         = None
+        self._program_running = (program_running if program_running
+                                 is not None else _launcher_program_running)
+        # Run-indicator blink state. ``_blink_ticks`` converts the
+        # wall-clock phase length into poll ticks (≥1 so a huge
+        # poll_ms still blinks rather than dividing to zero).
+        self._blink_ticks  = max(1, RUN_BLINK_MS // self._poll_ms)
+        self._blink_count  = 0
+        self._blink_lit    = True
+        self._running_seen = False
         # Stable callback object for bluetooth.add/remove_state_listener.
         # A bound method (``self._on_state_change``) is a fresh object on
         # every attribute access under MicroPython, where bound methods
@@ -129,6 +166,9 @@ class BluetoothToggleButton:
         self._timer.deinit()
         self._timer = None
         self._was_pressed = False
+        self._blink_count  = 0
+        self._blink_lit    = True
+        self._running_seen = False
 
     # ---- tick body ----
 
@@ -145,11 +185,73 @@ class BluetoothToggleButton:
     def _on_tick_body(self):
         if self._button.pressed():
             self._was_pressed = True
-            return
-        if self._was_pressed:
+        elif self._was_pressed:
             # Release after a press — fire once.
             self._was_pressed = False
             self._fire()
+        # The run indicator rides every tick — including ticks where
+        # the button is held, so a press mid-run doesn't freeze the
+        # blink.
+        self._run_indicator_tick()
+
+    # ---- run indicator (1 Hz blink while a program executes) ----
+
+    def _run_indicator_tick(self):
+        """Blink the LED while a user program runs; restore the idle
+        state when it stops.
+
+        Lit phase re-reads the BLE state each time, so toggling BLE
+        mid-run switches the blink colour within one phase. On
+        single-colour LEDs the blink is plain on/off and idle is dark
+        (matching their existing idle state — ``_paint`` never touches
+        them)."""
+        if self._led is None:
+            return
+        if not self._program_running():
+            if self._running_seen:
+                self._running_seen = False
+                self._restore_idle_led()
+            return
+        if not self._running_seen:
+            # Program just started: begin the lit phase immediately so
+            # the indicator reacts within one poll tick.
+            self._running_seen = True
+            self._blink_count = 0
+            self._blink_lit = True
+            self._blink_show()
+            return
+        self._blink_count += 1
+        if self._blink_count >= self._blink_ticks:
+            self._blink_count = 0
+            self._blink_lit = not self._blink_lit
+            self._blink_show()
+
+    def _blink_show(self):
+        """Render the current blink phase: state colour (or plain on)
+        when lit, off when dark."""
+        if not self._blink_lit:
+            self._led.off()
+            return
+        from openbricks import bluetooth
+        color = (self._color_on if bluetooth.is_enabled()
+                 else self._color_off)
+        try:
+            self._led.rgb(*color)
+        except NotImplementedError:
+            self._led.on()
+
+    def _restore_idle_led(self):
+        """Program ended: back to the idle presentation. RGB hubs show
+        the solid BLE-state colour; single-colour LEDs go dark (their
+        idle state — ``_paint`` no-ops on them, so ``off`` is the only
+        way a stale lit phase gets cleaned up)."""
+        from openbricks import bluetooth
+        color = (self._color_on if bluetooth.is_enabled()
+                 else self._color_off)
+        try:
+            self._led.rgb(*color)
+        except NotImplementedError:
+            self._led.off()
 
     def _fire(self):
         # Imported inside the method so tests that don't install the BLE
