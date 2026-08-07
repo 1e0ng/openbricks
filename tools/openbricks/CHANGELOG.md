@@ -3,17 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
-## 1.66.7 — per-element dark()/white()
+## 1.66.7 — read() returns a snapshot object
 
-`QTRArray.dark(i)` / `white(i)` and the iterable `darks()` /
-`whites()` — the element-wise form of `QTRChannel.dark()`, with the
-complement spelled out. `QTRChannel` gains `white()` for symmetry.
+`QTRArray.read()` now returns a `QTRReading`: list-like (index —
+negative too — iterate, `len`) over `QTRElement` objects, each with
+`.value` and `QTRChannel`-style `.dark()`/`.white()`, plus every
+aggregate view computed from exactly that sample::
 
-Deliberately on the ARRAY, not on the values `read()` returns:
-readings must stay plain ints, because MicroPython cannot
-reflect-compare `int` against an int subclass — value objects with
-methods would break `max(readings)` on the hub while passing on the
-desktop.
+    reading = qtr.read()
+    reading.max()             # brightest value
+    reading.position()        # centroid, mm
+    reading[0].dark()
+    reading[-1].dark()
+    reading.dark_count(); reading.leftmost_position(); ...
+
+Elements are deliberately not int subclasses — MicroPython cannot
+reflect-compare `int` against one, so `max(reading)` would raise on
+the hub while passing on the desktop; numeric code uses `.value` /
+`.values()` / `.max()`. The examples read once per control tick and
+derive everything from the one snapshot. `QTRChannel` gains
+`white()`.
 
 ## 1.66.6 — forks: the branch flag now picks the left line
 

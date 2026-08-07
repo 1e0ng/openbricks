@@ -162,7 +162,7 @@ class CalibrationPersistenceTests(unittest.TestCase):
         fresh = QTRArray(pins=_PINS, pitch_mm=8.0)
         fresh.load_calibration(self._PATH)
         _script(dark_pins=(5,))
-        self.assertEqual(fresh.read()[4], 1000)
+        self.assertEqual(fresh.read()[4].value, 1000)
         self.assertEqual(fresh.position(), 0.0)
 
     def test_missing_file_names_the_calibrate_script(self):
@@ -219,9 +219,9 @@ class ReadingTests(unittest.TestCase):
     def test_read_normalizes_to_full_scale(self):
         _script(dark_pins=(5,))
         r = self.qtr.read()
-        self.assertEqual(r[4], 1000)            # the dark element
-        self.assertTrue(all(v == 0 for i, v in enumerate(r) if i != 4),
-                        r)
+        self.assertEqual(r[4].value, 1000)      # the dark element
+        self.assertTrue(all(e.value == 0
+                            for i, e in enumerate(r) if i != 4), r)
 
     def test_centred_line_reads_zero_mm(self):
         _script(dark_pins=(5,))                 # pin 5 = middle of 9
@@ -272,26 +272,32 @@ class ReadingTests(unittest.TestCase):
         self.assertIsNone(self.qtr.leftmost_position())
         self.assertIsNone(self.qtr.rightmost_position())
 
-    def test_per_element_dark_and_white(self):
-        # The element-wise form of QTRChannel.dark()/white(). On the
-        # ARRAY, not on the values: readings stay plain ints because
-        # MicroPython cannot reflect-compare int against an int
-        # subclass — value objects with methods would break
-        # max(readings) on the hub while passing on the desktop.
+    def test_reading_is_the_user_facing_snapshot(self):
+        # THE call-site contract, verbatim from the user:
+        #   reading = qtr.read()
+        #   reading.max(); reading.position()
+        #   reading[0].dark(); reading[1].white(); reading[-1].dark()
         _script(dark_pins=(5, 6))
-        r = self.qtr.read()
-        self.assertTrue(self.qtr.dark(4, r))       # element 4 = pin 5
-        self.assertFalse(self.qtr.white(4, r))
-        self.assertTrue(self.qtr.white(0, r))
-        self.assertFalse(self.qtr.dark(0, r))
-        self.assertEqual(self.qtr.darks(r),
+        reading = self.qtr.read()
+        self.assertEqual(reading.max(), 1000)
+        self.assertEqual(reading.position(), 4.0)
+        self.assertFalse(reading[0].dark())
+        self.assertTrue(reading[1].white())
+        self.assertFalse(reading[-1].dark())
+        self.assertTrue(reading[4].dark())      # element 4 = pin 5
+        # List-like: len, iterate, negative index; elements are NOT
+        # int subclasses (MicroPython cannot reflect-compare int
+        # against one — max(reading) would raise on the hub), so
+        # numeric code uses .value / .values() / .max().
+        self.assertEqual(len(reading), 9)
+        self.assertEqual([e.dark() for e in reading],
                          [False, False, False, False, True, True,
                           False, False, False])
-        self.assertEqual(self.qtr.whites(r),
-                         [not d for d in self.qtr.darks(r)])
-        # And without pre-read readings they read for themselves.
-        self.assertTrue(self.qtr.dark(4))
-        self.assertEqual(sum(self.qtr.darks()), 2)
+        self.assertEqual(reading.values()[4], 1000)
+        self.assertEqual(reading.dark_count(), 2)
+        self.assertEqual(reading.leftmost_position(),
+                         reading.rightmost_position())
+        self.assertTrue("dark" in repr(reading[4]), repr(reading[4]))
 
     def test_channel_white_mirrors_dark(self):
         from openbricks.drivers.qtr import QTRChannel

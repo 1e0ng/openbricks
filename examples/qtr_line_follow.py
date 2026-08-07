@@ -176,21 +176,21 @@ db = DriveBase(left_motor, right_motor,
 print("following. Intersection stops the run.")
 state = PD_STATE0
 while True:
-    readings = qtr.read()
+    reading = qtr.read()
     branch_dark = branch.dark()
     if BRANCH_SIDE == "right":
-        fork_pos = qtr.leftmost_position(readings)
-        far_edge_dark = readings[0] >= 300     # leftmost element
+        fork_pos = reading.leftmost_position()
+        far_edge_dark = reading[0].dark()      # leftmost element
     else:
-        fork_pos = qtr.rightmost_position(readings)
-        far_edge_dark = readings[-1] >= 300    # rightmost element
-    speeds, state = _pd_wheel_speeds(qtr.position(readings),
+        fork_pos = reading.rightmost_position()
+        far_edge_dark = reading[-1].dark()     # rightmost element
+    speeds, state = _pd_wheel_speeds(reading.position(),
                                      fork_pos,
-                                     max(readings),
+                                     reading.max(),
                                      branch_dark,
                                      far_edge_dark,
                                      qtr.last_side(),
-                                     qtr.dark_count(readings),
+                                     reading.dark_count(),
                                      state, 0.010)
     if speeds is None:
         db.stop(then="brake")
