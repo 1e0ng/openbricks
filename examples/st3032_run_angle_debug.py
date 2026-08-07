@@ -29,8 +29,8 @@ from openbricks.drivers.st3032 import ST3032Motor
 
 SPEED_DPS = 600
 
-left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
 
 print("\n========== [1] right +90° (was [6c], passed on ST-3215) ==========")
 right.run_angle(SPEED_DPS, +90, debug=True)

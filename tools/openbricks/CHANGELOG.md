@@ -3,6 +3,29 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.71.0 — split 5+5 QTR rig; the whole ADC1 bank goes analog
+
+The QTR examples now model a split rig: 5 channels on the left
+cluster (line following via the left edge) and 5 on the right (the
+branch / intersection flag bank) — two independent `QTRArray`s, no
+driver changes needed. Stop rule: left cluster fully dark AND the
+right cluster seeing dark.
+
+That takes all ten ADC1 pins (GPIO 1–10), so the two non-analog
+squatters moved out:
+
+- **Program button default: GPIO 39** (was 4). Same rationale as
+  the BLE button's move to 38 in 1.66.3 — buttons need no ADC. On a
+  classic ESP32 pass `button_pin=` explicitly (GPIO 39 has no
+  internal pull-up there).
+- **Serial-bus RX convention: GPIO 41** (was 6) — every example
+  updated (`ST3032Motor(tx=14, rx=41)`). UART RX routes through the
+  GPIO matrix, so this is wiring only.
+
+Calibration files are per-cluster now: `/qtr_left.cal` +
+`/qtr_right.cal` (re-run `examples/qtr_calibrate.py`). Docs GPIO
+map updated, including two stale entries from before 1.66.3.
+
 ## 1.70.0 — DriveBase.curve()
 
 Pybricks `DriveBase.curve(radius, angle, then, wait)` lands on every

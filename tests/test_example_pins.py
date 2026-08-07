@@ -28,12 +28,12 @@ _EXAMPLE = (_here[:_idx] if _idx >= 0 else ".") + "/../examples/esp32_drivebase.
 # S3; 26-37 are flash/PSRAM on the DevKitC-1 modules.
 _RESERVED = {
     launcher.DEFAULT_BUTTON_PIN: "program button (launcher default)",
-    5: "BLE-toggle button (hub default)",
+    38: "BLE-toggle button (hub default)",
     0: "strapping", 3: "strapping", 45: "strapping", 46: "strapping",
     19: "native USB D-", 20: "native USB D+",
     15: "I2C SDA convention", 16: "I2C SCL convention",
     14: "serial-bus UART TX convention",
-    6: "serial-bus UART RX convention",
+    41: "serial-bus UART RX convention",
     48: "onboard WS2812 LED",
 }
 for _p in range(22, 38):

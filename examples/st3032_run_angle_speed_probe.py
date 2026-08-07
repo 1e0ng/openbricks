@@ -43,7 +43,7 @@ So this round separates the variables instead of guessing again:
 The ``from`` column is the shaft position each move started at —
 that is where a position-dependent effect shows up.
 
-Hardware: one ST-3032 on the bench UART (id 4, UART1 tx=14 rx=6 —
+Hardware: one ST-3032 on the bench UART (id 4, UART1 tx=14 rx=41 —
 edit below to match). Nothing else should be running: a drivebase
 script left resident in the same power session keeps its own bus
 traffic going, which would muddy every reading here.

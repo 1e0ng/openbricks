@@ -13,7 +13,7 @@ moment it sees your hand, and prints its own verdict — so there is
 no pause to race against. Wheels-up is best.
 
 Bench hardware (edit if yours differs): 2x ST-3032, left id=2
-inverted / right id=1, UART1 tx=14 rx=6, 88 mm wheels, 138 mm track.
+inverted / right id=1, UART1 tx=14 rx=41, 88 mm wheels, 138 mm track.
 
 Run:
     openbricks run -n ls examples/st3032_step_mode_test.py

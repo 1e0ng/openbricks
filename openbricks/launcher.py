@@ -12,10 +12,10 @@ Pybricks-style workflow:
   terminal exits.
 
 Each press is a full press-release cycle. The program button has its
-own GPIO (default ``4``), separate from the BLE-toggle button watched
-by :mod:`openbricks.bluetooth_button` (default ``5``). Two pins → no
-duration-based dispatch — every press on the program pin means
-start-or-stop, and every press on the BLE pin means toggle-BLE.
+own GPIO (default ``39``), separate from the BLE-toggle button
+watched by :mod:`openbricks.bluetooth_button` (default ``38``). Two
+pins → no duration-based dispatch — every press on the program pin
+means start-or-stop, and every press on the BLE pin means toggle-BLE.
 
 Wiring:
 
@@ -42,7 +42,13 @@ import sys
 import time
 
 
-DEFAULT_BUTTON_PIN   = 4
+# GPIO 39 since 1.71.0 (was 4): the S3 has exactly ten
+# analog-capable pins (ADC1, GPIO 1-10) and a button needs none of
+# them — parking the default on GPIO 4 cost an analog channel the
+# moment a ten-channel sensor array arrived (same rationale as the
+# BLE button's move to 38 in 1.66.3). On a classic ESP32, GPIO 39
+# has no internal pull-up — pass ``button_pin=`` explicitly there.
+DEFAULT_BUTTON_PIN   = 39
 
 # PCNT unit for the hardware press latch. Encoder motors claim units
 # 0/1 (one unit per PCNTEncoder, see drivers/mg370.py); unit 3 exists

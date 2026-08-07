@@ -1,41 +1,44 @@
 # SPDX-License-Identifier: MIT
-"""QTR array bring-up probe — verify wiring before trusting control.
+"""QTR bring-up probe for the split 5+5 rig — verify wiring before
+trusting control.
 
 Run ``examples/qtr_calibrate.py`` once first, then push the robot
-across the line by hand and watch the bars:
+across the line by hand and watch both clusters:
 
     openbricks run -n <hub> examples/qtr_probe.py
 """
 
 import time
 
-from openbricks.drivers.qtr import QTRArray, QTRChannel
+from openbricks.drivers.qtr import QTRArray
 
-QTR_PINS = (1, 2, 3, 7, 8, 9, 10)
+LEFT_PINS = (1, 2, 3, 4, 5)
+RIGHT_PINS = (6, 7, 8, 9, 10)
 PITCH_MM = 4.0
-BRANCH_PIN = 5
 
-LINE_CAL = "/qtr_line.cal"
-BRANCH_CAL = "/qtr_branch.cal"
+LEFT_CAL = "/qtr_left.cal"
+RIGHT_CAL = "/qtr_right.cal"
 
-qtr = QTRArray(pins=QTR_PINS, pitch_mm=PITCH_MM)
-branch = QTRChannel(pin=BRANCH_PIN)
-qtr.load_calibration(LINE_CAL)
-branch.load_calibration(BRANCH_CAL)
+left = QTRArray(pins=LEFT_PINS, pitch_mm=PITCH_MM)
+right = QTRArray(pins=RIGHT_PINS, pitch_mm=PITCH_MM)
+left.load_calibration(LEFT_CAL)
+right.load_calibration(RIGHT_CAL)
 print("loaded calibration. streaming (Ctrl-C to stop):")
 
 _BARS = " .:-=+*#%@"
 
-while True:
-    r = qtr.read()
-    bars = "".join(_BARS[min(e.value * (len(_BARS) - 1) // 1000,
+
+def _bars(r):
+    return "".join(_BARS[min(e.value * (len(_BARS) - 1) // 1000,
                              len(_BARS) - 1)] for e in r)
-    pos = r.position()
-    edge = r.left_edge_position()
-    print("[%s]  pos=%s  edge=%s  dark=%d  branch=%s" % (
-        bars,
-        "----" if pos is None else "%+6.1fmm" % pos,
+
+
+while True:
+    lr = left.read()
+    rr = right.read()
+    edge = lr.left_edge_position()
+    print("[%s|%s]  edge=%s  ldark=%d  rdark=%d" % (
+        _bars(lr), _bars(rr),
         "----" if edge is None else "%+6.1fmm" % edge,
-        r.dark_count(),
-        "DARK" if branch.dark() else "-"))
+        lr.dark_count(), rr.dark_count()))
     time.sleep_ms(100)

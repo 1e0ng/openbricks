@@ -57,8 +57,11 @@ The serial-bus build needs very few pins — that's most of its charm:
 
 | Function          | GPIO(s) | Devices on this line |
 |-------------------|---------|----------------------|
+| Analog sensors    | 1–10    | The FULL ADC1 bank — e.g. a split QTR reflectance rig (5 left + 5 right, see `examples/qtr_line_follow.py`). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable |
 | I2C0 (SDA, SCL)   | 15, 16  | TCA9548A mux (0x70) + colour sensors behind it, IMU (BNO055, 0x28), shared bus |
-| UART1 (TX, RX)    | 14, 6   | URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained |
+| UART1 (TX, RX)    | 14, 41  | URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained (RX was GPIO 6 until 1.71.0; it moved so the analog bank stays whole) |
+| Program button    | 39      | Start/stop, polled with an internal pull-up (was GPIO 4 until 1.71.0) |
+| BLE-toggle button | 38      | Bluetooth on/off (was GPIO 5 until 1.66.3) |
 | WS2812 data       | 21      | Addressable RGB LED strip / ×8 stick DIN ({mod}`openbricks.drivers.ws2812`) — on boards that break out the header corner next to 5 V/GND, this is the free pin beside the reserved 19/20 USB pair |
 
 Pin gotchas on the ESP32-S3:
@@ -252,13 +255,13 @@ assignments; the classic-ESP32 equivalents are in git history):
 | Right motor PWM   | 11               | L298N / TB6612 ENB |
 | Right encoder A, B| 12, 13           | JGB37-520 encoder channels |
 
-The map deliberately leaves GPIO **4 and 5** free — those are the
+The map deliberately leaves GPIO **39 and 38** free — those are the
 firmware's default **program button** and **BLE-toggle button** (see
-{class}`openbricks.hub.ESP32S3DevkitHub`). The launcher polls GPIO 4
+{class}`openbricks.hub.ESP32S3DevkitHub`). The launcher polls GPIO 39
 as an input, so a motor driver toggling it would read as button
-presses and stop your program. GPIO 15/16 (I2C) and 14/6 (serial-bus
-UART) are also kept free so sensors and a serial-servo arm can join
-the same build unchanged.
+presses and stop your program. GPIO 15/16 (I2C) and 14/41
+(serial-bus UART) are also kept free so sensors and a serial-servo
+arm can join the same build unchanged.
 
 ### Calibrating encoder counts
 

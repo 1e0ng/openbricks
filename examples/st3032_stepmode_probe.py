@@ -46,7 +46,7 @@ _REG_PRESENT   = 0x38
 
 SID = 1
 
-m = ST3032Motor(servo_id=SID, uart_id=1, tx=14, rx=6)
+m = ST3032Motor(servo_id=SID, uart_id=1, tx=14, rx=41)
 bus = m._bus
 
 

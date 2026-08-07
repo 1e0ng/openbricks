@@ -35,8 +35,8 @@ from openbricks.drivers.tcs34725 import TCS34725
 from openbricks.robotics import DriveBase
 
 
-left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
-right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6, invert=True)
+left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41)
+right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41, invert=True)
 db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
