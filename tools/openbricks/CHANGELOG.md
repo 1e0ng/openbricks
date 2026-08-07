@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.69.1 — a self-ending program no longer phantom-restarts
+
+Bench 2026-08-07: press start once, the line follower runs, stops
+itself at the intersection — and a second run auto-starts.
+
+The start press's edge reaches the PCNT counter in silicon at t=0,
+so the launcher can dispatch the start on a soft tick that runs
+BEFORE the hard-button sampler's ~15 ms debounced edge. The sampler
+then latches the same press as "start pending" — still unarmed,
+the run's exec on its way — and nothing polls that latch while a
+program runs. A program that ended ITSELF handed it to the first
+idle tick as a fresh press: phantom restart at completion. Runs
+ended by a stop press never showed it, because the post-stop
+lockout swallowed the stale latch — self-terminating programs
+(the intersection stop) exposed it.
+
+Arming the button for a run now drains the hard-start latch — the
+exact analogue of the PCNT edge-consume that already ran at run
+start. A real press after the run still starts the next one.
+
 ## 1.69.0 — duty_limit on run_until_stalled
 
 `Motor.run_until_stalled(speed, then, duty_limit=None)` now honours

@@ -892,6 +892,22 @@ def _arm_stop_button(armed):
     try:
         from _openbricks_native import motor_process
         motor_process.hard_button_arm(bool(armed))
+        if armed:
+            # Drain a start latched BEFORE arming: it is the press
+            # that started THIS run (or older), never new input. The
+            # PCNT counter sees a press's edge in silicon at t=0, so
+            # a soft tick landing in the ~15 ms before the hard
+            # sampler's debounced edge dispatches the start FIRST —
+            # the sampler then latches the same press, unarmed, and
+            # nothing consumes the latch while the program runs (the
+            # tick's running branch never polls it). A program that
+            # ended ITSELF handed that latch to the first idle tick:
+            # phantom restart at completion (bench 2026-08-07, run
+            # 15 auto-started at run 14's clean intersection stop).
+            # Stop-press endings masked it — the post-stop lockout
+            # swallowed the stale latch. The exact analogue of
+            # _sync_press_counter's edge-consume at run start.
+            motor_process.hard_button_take_start()
     except (ImportError, AttributeError):
         pass
 

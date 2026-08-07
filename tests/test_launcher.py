@@ -2597,6 +2597,94 @@ class StopInterruptRelayTests(unittest.TestCase):
         self.assertEqual(self.resignals, [])
 
 
+class HardStartLatchTests(unittest.TestCase):
+    """The C hard sampler's start latch across the run lifecycle.
+
+    The press that starts a run can latch in the sampler AFTER the
+    soft tick already dispatched it via PCNT (silicon edge at t=0,
+    debounced edge ~15 ms later) and BEFORE exec arms the button.
+    Nothing polls the latch while the program runs, so a program
+    that ended ITSELF handed it to the first idle tick — phantom
+    restart at completion (bench 2026-08-07: run 15 auto-started at
+    run 14's clean intersection stop; stop-press endings were masked
+    by the post-stop lockout). Arming now drains the latch."""
+
+    def setUp(self):
+        import sys
+        self.addCleanup(_cleanup_program)
+
+        class _MP:
+            armed = []
+            start_pending = [False]
+
+            @staticmethod
+            def hard_button_arm(on):
+                _MP.armed.append(bool(on))
+
+            @staticmethod
+            def hard_button_take_start():
+                pending = _MP.start_pending[0]
+                _MP.start_pending[0] = False
+                return pending
+
+            @staticmethod
+            def stop():
+                pass
+
+        # A plain object stands in for the module: MP's ``from X
+        # import Y`` getattrs whatever sits in sys.modules, and
+        # MicroPython cannot instantiate the module type directly.
+        class _Mod:
+            pass
+        mod = _Mod()
+        mod.motor_process = _MP
+        self.mp = _MP
+        had = "_openbricks_native" in sys.modules
+        old = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = mod
+
+        def restore():
+            if had:
+                sys.modules["_openbricks_native"] = old
+            else:
+                del sys.modules["_openbricks_native"]
+        self.addCleanup(restore)
+
+    def _run_program_once(self, launch):
+        launch._pending = "start"
+        launch._drain_pending()
+        self.assertFalse(launch._running)
+
+    def test_stale_start_latch_is_drained_at_run_start(self):
+        path = _write_program("pass\n")
+        launch = launcher.Launcher(_make_button(), program_path=path)
+        # The run's own start press, latched before exec armed.
+        self.mp.start_pending[0] = True
+        self._run_program_once(launch)
+        # Back at idle: the tick must NOT find a pending hard start.
+        _tick_debounced(launch)
+        self.assertTrue(launch._pending is None,
+                        "stale hard-start latch restarted a program "
+                        "that ended itself")
+
+    def test_arm_sequence_wraps_the_run(self):
+        path = _write_program("pass\n")
+        launch = launcher.Launcher(_make_button(), program_path=path)
+        self._run_program_once(launch)
+        self.assertEqual(self.mp.armed[0], True)
+        self.assertEqual(self.mp.armed[-1], False)
+
+    def test_press_after_the_run_still_starts(self):
+        # The drain must consume only what was latched BEFORE the
+        # run — a real press at idle afterwards dispatches normally.
+        path = _write_program("pass\n")
+        launch = launcher.Launcher(_make_button(), program_path=path)
+        self._run_program_once(launch)
+        self.mp.start_pending[0] = True
+        _tick_debounced(launch)
+        self.assertEqual(launch._pending, "start")
+
+
 class ProgramRunningFlagTests(unittest.TestCase):
     """``launcher.program_running()`` — the hub-wide "robot is
     running" signal the BLE watcher's run-indicator blink polls."""
