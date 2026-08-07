@@ -24,15 +24,12 @@ def _clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def _p_wheel_speeds(reading, branch_dark, prev_error):
+def _p_wheel_speeds(reading, branch_dark):
     if branch_dark and reading.all_dark():
-        return None, prev_error
-    error = reading.left_edge_position()
-    if error is None:
-        error = prev_error if prev_error is not None else 0.0
-    steer = KP * error
+        return None
+    steer = KP * reading.left_edge_position()
     return (_clamp(CRUISE_DPS + steer),
-            _clamp(CRUISE_DPS - steer)), error
+            _clamp(CRUISE_DPS - steer))
 
 # --- end control law ---
 
@@ -56,12 +53,10 @@ db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
 print("following. Intersection stops the run.")
-prev_error = None
 while True:
     reading = qtr.read()
     branch_dark = branch.dark()
-    speeds, prev_error = _p_wheel_speeds(reading, branch_dark,
-                                         prev_error)
+    speeds = _p_wheel_speeds(reading, branch_dark)
     if speeds is None:
         db.stop()
         print("intersection - stopped")
