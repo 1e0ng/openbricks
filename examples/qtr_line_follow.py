@@ -73,7 +73,7 @@ while True:
     speeds, prev_error = _pd_wheel_speeds(reading, branch_dark,
                                           prev_error, dt_s)
     if speeds is None:
-        db.stop(then="brake")
+        db.stop()
         print("intersection - stopped")
         break
     if branch_dark:
