@@ -163,6 +163,84 @@ void ob_drivebase_turn(ob_drivebase_t *db,
 }
 
 
+void ob_drivebase_curve(ob_drivebase_t *db,
+                        long now_ms,
+                        ob_float_t radius_mm,
+                        ob_float_t angle_deg,
+                        ob_float_t speed_mm_s) {
+    // Forward component: the CENTRE of the robot travels
+    // |radians(angle)| * radius mm, signed by the radius (Pybricks:
+    // negative radius drives the arc backward).
+    ob_float_t theta_abs = (ob_float_t)fabs((double)angle_deg) *
+                           ((ob_float_t)M_PI / (ob_float_t)180.0);
+    ob_float_t distance_mm  = radius_mm * theta_abs;
+    ob_float_t distance_deg = distance_mm /
+                              db->wheel_circumference_mm * (ob_float_t)360.0;
+    ob_float_t speed_dps    = (ob_float_t)fabs((double)speed_mm_s) /
+                              db->wheel_circumference_mm * (ob_float_t)360.0;
+
+    // Turn component: same mapping as ob_drivebase_turn.
+    ob_float_t arc_mm    = (ob_float_t)fabs((double)angle_deg) *
+                           ((ob_float_t)M_PI / (ob_float_t)180.0) *
+                           (db->axle_track_mm / (ob_float_t)2.0);
+    ob_float_t wheel_deg = arc_mm / db->wheel_circumference_mm *
+                           (ob_float_t)360.0;
+    ob_float_t turn_delta = (angle_deg >= 0.0 ? wheel_deg : -wheel_deg);
+
+    ob_float_t sum_pos = db_sum_pos(db);
+    // Same gyro-frame rule as straight/turn: absolute frame when the
+    // gyro drives heading, encoder diff otherwise.
+    ob_float_t diff_pos;
+    if (db->use_gyro) {
+        diff_pos = db->turn_hold;
+    } else {
+        diff_pos = db_diff_pos_encoder(db);
+    }
+
+    ob_float_t fwd_abs  = (distance_deg < 0) ? -distance_deg : distance_deg;
+    ob_float_t turn_abs = (turn_delta < 0) ? -turn_delta : turn_delta;
+
+    if (turn_abs < (ob_float_t)1e-9) {
+        // angle 0: zero arc length whatever the radius — complete.
+        ob_drivebase_stop(db);
+        db->fwd_hold  = sum_pos;
+        db->turn_hold = diff_pos;
+        return;
+    }
+    if (fwd_abs < (ob_float_t)1e-9) {
+        // radius 0: a turn in place, wheels at the rim speed.
+        ob_trajectory_init(&db->turn, diff_pos, diff_pos + turn_delta,
+                           speed_dps, db->accel_dps2);
+        db->turn_start_ms = now_ms;
+        db->turn_active   = true;
+        db->fwd_hold      = sum_pos;
+        db->fwd_active    = false;
+        db->done          = false;
+        return;
+    }
+
+    // Both components live: scale the turn profile's cruise AND
+    // accel by the target ratio so the two trapezoids share their
+    // exact time shape — heading stays proportional to distance at
+    // every instant (a true circle), ramps included.
+    ob_float_t ratio      = turn_abs / fwd_abs;
+    ob_float_t turn_speed = speed_dps * ratio;
+    ob_float_t turn_accel = db->accel_dps2 * ratio;
+
+    ob_trajectory_init(&db->fwd, sum_pos, sum_pos + distance_deg,
+                       speed_dps, db->accel_dps2);
+    db->fwd_start_ms = now_ms;
+    db->fwd_active   = true;
+
+    ob_trajectory_init(&db->turn, diff_pos, diff_pos + turn_delta,
+                       turn_speed, turn_accel);
+    db->turn_start_ms = now_ms;
+    db->turn_active   = true;
+
+    db->done = false;
+}
+
+
 void ob_drivebase_stop(ob_drivebase_t *db) {
     db->fwd_active  = false;
     db->turn_active = false;

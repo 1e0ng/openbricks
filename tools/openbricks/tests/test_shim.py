@@ -531,6 +531,28 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
                            "serial-bus drivebase.straight should have "
                            "moved the chassis +X (got x=%.1f mm)" % x_mm)
 
+    def test_st3032_drivebase_curve_quarter_circle(self):
+        # curve(150, 90): a forward quarter-circle to the right.
+        # Start facing +X (world yaw 0, CCW-positive): forward AND
+        # rightward (-Y) displacement with a substantial CW yaw.
+        # Tolerances match the suite's other chassis assertions —
+        # this sim rig under-rotates the chassis relative to the
+        # encoder frame (a plain turn(90) lands at ~-65 deg here
+        # too), so exact pose is the C-level tests' job
+        # (tests/test_st_drivebase.py pins the wheel geometry
+        # precisely); THIS test pins the end-to-end wiring and the
+        # arc's shape.
+        db, _, _ = self._serial_db()
+        db.settings(straight_speed=150, acceleration=360)
+        db.curve(150, 90)
+        x_mm, y_mm, yaw_deg = self.robot.chassis_pose()
+        self.assertTrue(x_mm > 80,
+                        "expected forward motion, got x=%.1f" % x_mm)
+        self.assertTrue(y_mm < -60,
+                        "expected rightward arc (-Y), got y=%.1f" % y_mm)
+        self.assertTrue(yaw_deg < -45,
+                        "expected substantial CW yaw, got %.1f" % yaw_deg)
+
     def test_settings_acceleration_reaches_the_sim_core(self):
         # The knob a user sets in firmware code (settings(acceleration=…))
         # must land in the sim's C core through wrapper → ShimDriveBase →
@@ -576,6 +598,33 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
         self.assertGreater(x_mm, 5.0,
                             "drivebase.straight should have moved the "
                             "chassis +X (got x=%.1f mm)" % x_mm)
+
+    def test_jgb37_drivebase_curve_arcs_right(self):
+        # The PWM sim path (ShimDriveBase -> SimDriveBase -> the C
+        # extension's DriveBase.curve): a CW arc moves the chassis
+        # forward and rightward with CW yaw — the serial path's curve
+        # is covered by test_st3032_drivebase_curve_quarter_circle.
+        from openbricks.drivers.jgb37_520 import JGB37Motor
+        from openbricks.robotics.drivebase import DriveBase
+
+        m_left  = JGB37Motor(in1=12, in2=14, pwm=27,
+                              encoder_a=18, encoder_b=19)
+        m_right = JGB37Motor(in1=13, in2=15, pwm=26,
+                              encoder_a=20, encoder_b=21)
+        db = DriveBase(m_left, m_right,
+                        wheel_diameter_mm=60, axle_track_mm=150)
+        db.settings(straight_speed=180, turn_rate=120)
+        db.curve(150, 90)
+        x_mm, y_mm, yaw_deg = self.robot.chassis_pose()
+        self.assertGreater(x_mm, 30.0,
+                           "curve should move the chassis +X "
+                           "(got x=%.1f mm)" % x_mm)
+        self.assertLess(y_mm, -20.0,
+                        "CW curve should move the chassis -Y "
+                        "(got y=%.1f mm)" % y_mm)
+        self.assertLess(yaw_deg, -30.0,
+                        "CW curve should yaw negative "
+                        "(got %.1f deg)" % yaw_deg)
 
     @unittest.expectedFailure
     def test_jgb37_drivebase_straight_lands_near_target(self):

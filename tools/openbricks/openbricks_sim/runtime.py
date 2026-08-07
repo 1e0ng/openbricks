@@ -801,6 +801,12 @@ class SimDriveBase:
                       float(angle_deg), float(rate_dps))
         self._attach()
 
+    def curve(self, radius_mm: float, angle_deg: float,
+              speed_mm_s: float) -> None:
+        self.db.curve(self.runtime.now_ms, float(radius_mm),
+                      float(angle_deg), float(speed_mm_s))
+        self._attach()
+
     def stop(self) -> None:
         self.db.stop()
         self._detach()

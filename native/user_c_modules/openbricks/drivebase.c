@@ -161,6 +161,20 @@ static mp_obj_t db_turn(mp_obj_t self_in, mp_obj_t angle_in,
 static MP_DEFINE_CONST_FUN_OBJ_3(db_turn_obj, db_turn);
 
 
+static mp_obj_t db_curve(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    drivebase_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    ob_drivebase_curve(&self->core,
+                       (long)openbricks_motor_process_now_ms(),
+                       (ob_float_t)mp_obj_get_float(args[1]),
+                       (ob_float_t)mp_obj_get_float(args[2]),
+                       (ob_float_t)mp_obj_get_float(args[3]));
+    drivebase_register(self);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(db_curve_obj, 4, 4, db_curve);
+
+
 // db.stop([mode]) — without the arg: halt the controller and drop
 // the drivebase tick only, leaving the servos subscribed (``drive()``
 // uses this to clear a trajectory before writing its own per-wheel
@@ -324,6 +338,7 @@ static mp_obj_t db_make_new(const mp_obj_type_t *type,
 static const mp_rom_map_elem_t db_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_straight), MP_ROM_PTR(&db_straight_obj) },
     { MP_ROM_QSTR(MP_QSTR_turn),     MP_ROM_PTR(&db_turn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_curve),    MP_ROM_PTR(&db_curve_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop),     MP_ROM_PTR(&db_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_move_wheels), MP_ROM_PTR(&db_move_wheels_obj) },
     { MP_ROM_QSTR(MP_QSTR_is_done),  MP_ROM_PTR(&db_is_done_obj) },

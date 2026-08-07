@@ -1122,6 +1122,29 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_turn_obj, sb_db_turn);
 
+static mp_obj_t sb_db_curve(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    ob_float_t radius = (ob_float_t)mp_obj_get_float(args[1]);
+    ob_float_t angle  = (ob_float_t)mp_obj_get_float(args[2]);
+    ob_float_t mm_s   = (ob_float_t)mp_obj_get_float(args[3]);
+    bus_take();
+    if (st_db_slot_l < 0 || st_db_slot_r < 0) {
+        bus_release();
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("db_curve before db_config"));
+    }
+    st_db_sync_bridges_locked();
+    ob_smove_stop(&st_moves[st_db_slot_l]);
+    ob_smove_stop(&st_moves[st_db_slot_r]);
+    st_db_fault = 0;      // retry re-detects within ~200 ms
+    st_db_writing = true;
+    ob_drivebase_curve(&st_db, (long)st_db_now_ms, radius, angle, mm_s);
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_db_curve_obj, 4, 4,
+                                           sb_db_curve);
+
 // Take the wheels away from the coupled controller: capture the
 // frame if a move was aborted mid-flight, halt the profiles, and
 // yield so the tick stops re-asserting the db's own hold. Shared by
@@ -1422,6 +1445,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_disable),       MP_ROM_PTR(&sb_db_disable_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_straight),      MP_ROM_PTR(&sb_db_straight_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_turn),          MP_ROM_PTR(&sb_db_turn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_curve),         MP_ROM_PTR(&sb_db_curve_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_stop),          MP_ROM_PTR(&sb_db_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_move_wheels),   MP_ROM_PTR(&sb_db_move_wheels_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_fault),         MP_ROM_PTR(&sb_db_fault_obj) },

@@ -540,6 +540,21 @@ static PyObject *DriveBase_turn(DriveBaseObject *self, PyObject *args) {
 }
 
 
+static PyObject *DriveBase_curve(DriveBaseObject *self, PyObject *args) {
+    long   now_ms;
+    double radius_mm, angle_deg, speed_mm_s;
+    if (!PyArg_ParseTuple(args, "lddd", &now_ms, &radius_mm, &angle_deg,
+                          &speed_mm_s)) {
+        return NULL;
+    }
+    ob_drivebase_curve(&self->core, now_ms,
+                       (ob_float_t)radius_mm,
+                       (ob_float_t)angle_deg,
+                       (ob_float_t)speed_mm_s);
+    Py_RETURN_NONE;
+}
+
+
 static PyObject *DriveBase_stop(DriveBaseObject *self, PyObject *Py_UNUSED(ignored)) {
     ob_drivebase_stop(&self->core);
     Py_RETURN_NONE;
@@ -625,6 +640,8 @@ static PyObject *DriveBase_set_accel(DriveBaseObject *self, PyObject *arg) {
 static PyMethodDef DriveBase_methods[] = {
     {"straight",             (PyCFunction)DriveBase_straight,             METH_VARARGS,
      "straight(now_ms, distance_mm, speed_mm_s). Kick off a straight move."},
+    {"curve",                (PyCFunction)DriveBase_curve,                METH_VARARGS,
+     "curve(now_ms, radius_mm, angle_deg, speed_mm_s)."},
     {"turn",                 (PyCFunction)DriveBase_turn,                 METH_VARARGS,
      "turn(now_ms, angle_deg, rate_dps). Kick off a turn-in-place."},
     {"stop",                 (PyCFunction)DriveBase_stop,                 METH_NOARGS,
@@ -767,6 +784,22 @@ static PyObject *RawDriveBase_turn(RawDriveBaseObject *self, PyObject *args) {
 }
 
 
+static PyObject *RawDriveBase_curve(RawDriveBaseObject *self,
+                                    PyObject *args) {
+    long   now_ms;
+    double radius_mm, angle_deg, speed_mm_s;
+    if (!PyArg_ParseTuple(args, "lddd", &now_ms, &radius_mm, &angle_deg,
+                          &speed_mm_s)) {
+        return NULL;
+    }
+    ob_drivebase_curve(&self->core, now_ms,
+                       (ob_float_t)radius_mm,
+                       (ob_float_t)angle_deg,
+                       (ob_float_t)speed_mm_s);
+    Py_RETURN_NONE;
+}
+
+
 static PyObject *RawDriveBase_stop(RawDriveBaseObject *self,
                                    PyObject *Py_UNUSED(ignored)) {
     /* Same rule as the firmware binding: capture measured pose ONLY
@@ -849,6 +882,8 @@ static PyMethodDef RawDriveBase_methods[] = {
      "straight(now_ms, distance_mm, speed_mm_s)."},
     {"turn",                 (PyCFunction)RawDriveBase_turn,                 METH_VARARGS,
      "turn(now_ms, angle_deg, rate_dps)."},
+    {"curve",                (PyCFunction)RawDriveBase_curve,                METH_VARARGS,
+     "curve(now_ms, radius_mm, angle_deg, speed_mm_s) — Pybricks arc."},
     {"stop",                 (PyCFunction)RawDriveBase_stop,                 METH_NOARGS,
      "Capture pose holds + cancel any active move."},
     {"is_done",              (PyCFunction)RawDriveBase_is_done,              METH_NOARGS,

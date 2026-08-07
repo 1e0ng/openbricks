@@ -98,6 +98,28 @@ class TestDriveBaseNative2DOF(unittest.TestCase):
         diff = (left.angle() - right.angle()) / 2.0
         self.assertLess(abs(abs(diff) - expected_diff), expected_diff * 0.1)
 
+    def test_curve_converges_on_the_arc_geometry(self):
+        # curve(150, 90) on 56/114 geometry: centre 150*pi/2 mm,
+        # wheels at (150 +/- 57)*pi/2 mm — the PWM-native path runs
+        # the same drivebase_core as the serial engine, through its
+        # own binding.
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
+        _install_asymmetric_sim(left, right)
+
+        db = DriveBase(left, right, wheel_diameter_mm=56,
+                       axle_track_mm=114)
+        db.settings(straight_speed=200)
+        db.curve(150, 90)
+
+        deg_per_mm = 360 / (math.pi * 56)
+        outer = math.radians(90) * (150 + 57) * deg_per_mm
+        inner = math.radians(90) * (150 - 57) * deg_per_mm
+        self.assertLess(abs(left.angle() - outer), outer * 0.05,
+                        (left.angle(), outer))
+        self.assertLess(abs(right.angle() - inner), inner * 0.05,
+                        (right.angle(), inner))
+
 
 if __name__ == "__main__":
     unittest.main()
