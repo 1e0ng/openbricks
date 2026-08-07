@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.67.1 — qtr_line_follow: minimal law
+
+The line-follow example is stripped to its essentials:
+
+- **Immediate stop** — whole array dark AND branch flag dark in the
+  same snapshot stops the run right away; the 3-tick debounce is
+  gone. Either signal alone still never stops.
+- **No lost-line recovery** — the `last_side` steer, the synthetic
+  recovery error, and the off-mat `PEAK_MIN` guard are removed. If
+  nothing on the array is dark, the previous correction is simply
+  held (straight on the very first tick).
+- **Real dt** — the derivative uses the measured time between loop
+  iterations (`ticks_ms`/`ticks_diff`) instead of an assumed 10 ms;
+  `dt <= 0` skips the derivative.
+- **`_pd_wheel_speeds(reading, branch_dark, prev_error, dt_s)`** —
+  the law takes the whole `QTRReading` snapshot and picks the fork
+  cluster itself (`BRANCH_SIDE` lives in the law block); state is
+  just the previous error.
+
+Firmware behaviour is unchanged — this is the example + its law
+tests only.
+
 ## 1.67.0 — the status LED flashes while a program runs
 
 While a user program executes, the hub's status LED flashes its
