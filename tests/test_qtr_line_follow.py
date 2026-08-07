@@ -5,8 +5,8 @@ Same extract-and-exec trick as ``tests/test_line_follow.py``: the
 example wires hardware at module level, so the pure control-law
 block is pulled out by its markers. What is pinned here is the
 CONTRACT the bench relies on: sign conventions, the immediate
-whole-array-AND-flag stop, the fork policy, real-dt derivative
-scaling, hold-on-lost-line, and the clamp.
+whole-array-AND-flag stop, branch-steers-on-the-leftmost-cluster,
+real-dt derivative scaling, hold-on-lost-line, and the clamp.
 """
 
 import tests._fakes  # noqa: F401
@@ -29,14 +29,12 @@ def _load():
 
 
 class _Reading:
-    """``QTRReading`` stand-in: the law consumes exactly these four
+    """``QTRReading`` stand-in: the law consumes exactly these three
     methods of the snapshot, nothing else."""
 
-    def __init__(self, pos=None, left=None, right=None,
-                 all_dark=False):
+    def __init__(self, pos=None, left=None, all_dark=False):
         self._pos = pos
         self._left = left if left is not None else pos
-        self._right = right if right is not None else pos
         self._all = all_dark
 
     def position(self):
@@ -44,9 +42,6 @@ class _Reading:
 
     def leftmost_position(self):
         return self._left
-
-    def rightmost_position(self):
-        return self._right
 
     def all_dark(self):
         return self._all
@@ -57,16 +52,18 @@ class QTRLawTests(unittest.TestCase):
     def setUpClass(cls):
         cls.ns = _load()
 
-    def _tick(self, pos, left=None, right=None, branch=False,
-              all_dark=False, prev=None, dt=0.01):
-        reading = _Reading(pos=pos, left=left, right=right,
-                           all_dark=all_dark)
+    def _tick(self, pos, left=None, branch=False, all_dark=False,
+              prev=None, dt=0.01):
+        reading = _Reading(pos=pos, left=left, all_dark=all_dark)
         return self.ns["_pd_wheel_speeds"](reading, branch, prev, dt)
+
+    def _cruise(self):
+        c = self.ns["CRUISE_DPS"]
+        return (c, c)
 
     def test_centred_line_drives_straight(self):
         speeds, _ = self._tick(0.0)
-        self.assertEqual(speeds, (self.ns["CRUISE_DPS"],
-                                  self.ns["CRUISE_DPS"]))
+        self.assertEqual(speeds, self._cruise())
 
     def test_line_right_steers_right(self):
         # +position = line right of centre -> left wheel faster.
@@ -105,13 +102,32 @@ class QTRLawTests(unittest.TestCase):
         speeds, _ = self._tick(+2.0, branch=True, all_dark=True)
         self.assertIsNone(speeds)
 
-    def test_either_signal_alone_never_stops(self):
-        # Flag alone (fork mode) or all-dark alone (a bar the flag
-        # straddles, a wide blob): both keep driving.
-        speeds, _ = self._tick(0.0, branch=True, all_dark=False)
+    def test_branch_steers_on_the_leftmost_cluster(self):
+        # At a fork the centroid points between the lines (+2 here);
+        # with the flag dark the law steers on the LEFTMOST cluster
+        # (-6, the pin-15 end): expect a left turn, not the gap's
+        # slight right.
+        (l, r), err = self._tick(+2.0, left=-6.0, branch=True)
+        self.assertTrue(l < r, (l, r))
+        self.assertEqual(err, -6.0)
+
+    def test_no_branch_ignores_the_leftmost_split(self):
+        # Same geometry without the flag: steer on the centroid.
+        (l, r), _ = self._tick(+2.0, left=-6.0, branch=False)
+        self.assertTrue(l > r, (l, r))
+
+    def test_branch_with_nothing_dark_holds_course(self):
+        # Flag dark but no cluster on the array: hold the previous
+        # correction, no crash.
         # assertTrue, not assertIsNotNone: MP's unittest %-formats
         # the default message and a TUPLE value spreads its args.
-        self.assertTrue(speeds is not None)
+        (l, r), err = self._tick(None, branch=True, prev=+10.0)
+        self.assertTrue(l > r, (l, r))
+        self.assertEqual(err, 10.0)
+
+    def test_all_dark_alone_never_stops(self):
+        # A bar without the flag (a wide blob, a bar the flag
+        # missed): keep driving on the centroid.
         speeds, _ = self._tick(0.0, branch=False, all_dark=True)
         self.assertTrue(speeds is not None)
 
@@ -125,42 +141,13 @@ class QTRLawTests(unittest.TestCase):
 
     def test_lost_line_with_no_history_drives_straight(self):
         speeds, err = self._tick(None)
-        self.assertEqual(speeds, (self.ns["CRUISE_DPS"],
-                                  self.ns["CRUISE_DPS"]))
+        self.assertEqual(speeds, self._cruise())
         self.assertEqual(err, 0.0)
 
     def test_clamp_never_reverses_a_wheel(self):
         (l, r), _ = self._tick(+1000.0)
         self.assertEqual(r, 0)                    # clamped at zero
         self.assertEqual(l, self.ns["MAX_DPS"])
-
-    def test_branch_steers_on_the_opposite_side_cluster(self):
-        # At a fork the centroid points between the lines (+2 here);
-        # with the flag dark and BRANCH_SIDE == "right" the law
-        # steers on the LEFTMOST cluster (-6): expect a left turn,
-        # not the gap's slight right.
-        self.assertEqual(self.ns["BRANCH_SIDE"], "right")
-        (l, r), _ = self._tick(+2.0, left=-6.0, branch=True)
-        self.assertTrue(l < r, (l, r))
-
-    def test_branch_side_left_mirrors_the_fork(self):
-        # Rewired flag (BRANCH_SIDE = "left"): same law, rightmost
-        # cluster.
-        self.ns["BRANCH_SIDE"] = "left"
-        try:
-            (l, r), _ = self._tick(-2.0, right=+6.0, branch=True)
-            self.assertTrue(l > r, (l, r))
-        finally:
-            self.ns["BRANCH_SIDE"] = "right"
-
-    def test_no_branch_ignores_the_fork_split(self):
-        # Same geometry without the flag: steer on the centroid.
-        (l, r), _ = self._tick(+2.0, left=-6.0, branch=False)
-        self.assertTrue(l > r, (l, r))
-
-    def test_branch_with_nothing_dark_holds_course(self):
-        (l, r), _ = self._tick(None, branch=True, prev=+10.0)
-        self.assertTrue(l > r, (l, r))            # hold, not a crash
 
     def test_returned_error_threads_the_state(self):
         _, err = self._tick(+7.5)
