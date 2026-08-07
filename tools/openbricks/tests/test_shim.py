@@ -599,6 +599,33 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
                             "drivebase.straight should have moved the "
                             "chassis +X (got x=%.1f mm)" % x_mm)
 
+    def test_jgb37_drivebase_curve_arcs_right(self):
+        # The PWM sim path (ShimDriveBase -> SimDriveBase -> the C
+        # extension's DriveBase.curve): a CW arc moves the chassis
+        # forward and rightward with CW yaw — the serial path's curve
+        # is covered by test_st3032_drivebase_curve_quarter_circle.
+        from openbricks.drivers.jgb37_520 import JGB37Motor
+        from openbricks.robotics.drivebase import DriveBase
+
+        m_left  = JGB37Motor(in1=12, in2=14, pwm=27,
+                              encoder_a=18, encoder_b=19)
+        m_right = JGB37Motor(in1=13, in2=15, pwm=26,
+                              encoder_a=20, encoder_b=21)
+        db = DriveBase(m_left, m_right,
+                        wheel_diameter_mm=60, axle_track_mm=150)
+        db.settings(straight_speed=180, turn_rate=120)
+        db.curve(150, 90)
+        x_mm, y_mm, yaw_deg = self.robot.chassis_pose()
+        self.assertGreater(x_mm, 30.0,
+                           "curve should move the chassis +X "
+                           "(got x=%.1f mm)" % x_mm)
+        self.assertLess(y_mm, -20.0,
+                        "CW curve should move the chassis -Y "
+                        "(got y=%.1f mm)" % y_mm)
+        self.assertLess(yaw_deg, -30.0,
+                        "CW curve should yaw negative "
+                        "(got %.1f deg)" % yaw_deg)
+
     @unittest.expectedFailure
     def test_jgb37_drivebase_straight_lands_near_target(self):
         # Tighter version of ``test_jgb37_drivebase_straight``: pin

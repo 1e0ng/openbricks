@@ -224,6 +224,31 @@ class TestDriveBaseUseGyro(unittest.TestCase):
                            "corrected on the next move")
         ndb.stop()
 
+    def test_gyro_curve_arms_in_the_absolute_frame(self):
+        """curve() takes the same gyro-frame branch as straight/turn:
+        the turn trajectory starts from turn_hold (the ABSOLUTE
+        target frame), not the encoder diff. With the gyro reading
+        pinned at 0 and a curve armed, the heading-error term must
+        steer toward the arc's growing heading target — left wheel
+        above right for a CW arc — proving the turn trajectory is
+        live in the gyro frame."""
+        imu = _FakeIMU(heading=0.0)
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
+        ndb = NativeDB(
+            left=left._servo, right=right._servo,
+            wheel_diameter_mm=56, axle_track_mm=114,
+            imu=imu,
+        )
+        left.run_speed(0)
+        right.run_speed(0)
+        ndb.use_gyro(True)
+        ndb.curve(150.0, 90.0, 100.0)
+        time.sleep_ms(200)     # into the profile, heading target > 0
+        self.assertGreater(left._servo.target_dps(),
+                           right._servo.target_dps())
+        ndb.stop()
+
     def test_use_gyro_false_reverts_to_encoder_feedback(self):
         """Toggling use_gyro off makes the controller ignore the IMU."""
         imu = _FakeIMU(heading=0.0)
