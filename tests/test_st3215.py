@@ -1394,6 +1394,26 @@ class TestDutyLimit(unittest.TestCase):
             self.assertTrue("0x30" in str(e), e)
             self.assertTrue("servo id 1" in str(e), e)
 
+    def test_pop_of_a_zero_previous_assumes_full_scale(self):
+        # A register that read 0 before the run would leave the servo
+        # torqueless forever; the shadow used by stalled() falls back
+        # to full scale (the write itself still restores the 0 the
+        # servo had — hardware state is never invented).
+        m = self._motor({_REG_TORQUE_LIMIT: 0})
+        m._duty_limit_pop(0)
+        self.assertEqual(m._duty_limit_raw, 1000)
+        writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE_LIMIT)
+        self.assertEqual(writes[-1][1], bytes([0, 0]))
+
+    def test_single_byte_register_helpers(self):
+        # The nbytes=1 paths of the raw helpers (torque enable and
+        # friends are one-byte registers).
+        m = self._motor({_REG_TORQUE: 1})
+        self.assertEqual(m._reg_read_u16(_REG_TORQUE, nbytes=1), 1)
+        m._reg_write_u16(_REG_TORQUE, 1, nbytes=1)
+        writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
+        self.assertEqual(writes[-1][1], bytes([1]))
+
 
 if __name__ == "__main__":
     # Keep the linter quiet about the unused module import used for reloading.

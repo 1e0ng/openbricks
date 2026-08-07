@@ -1340,6 +1340,18 @@ class AdoptedDutyLimitTests(_Base):
         except OSError as e:
             self.assertTrue("could not stage" in str(e), e)
 
+    def test_vanished_transaction_raises_staging_bug(self):
+        # Poll answering "nothing staged" right after a successful
+        # stage is an internal inconsistency — surfaced, not looped
+        # on until the timeout hides it.
+        task = self._adopted_task_motor()
+        self.bus.servo_user_poll = lambda slot: (-2, 0)
+        try:
+            task._duty_limit_push(30)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("staging bug" in str(e), e)
+
     def test_hung_transaction_times_out(self):
         # A poll that never resolves must not spin forever — the
         # virtual clock drives the deadline.

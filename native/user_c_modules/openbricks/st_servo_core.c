@@ -463,13 +463,11 @@ void ob_sservo_write_result(ob_sservo_t *s, int ok) {
 void ob_sservo_user_write_result(ob_sservo_t *s, int ok) {
     int slot = s->user_in_flight;
     s->user_in_flight = -1;
-    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
-        return;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS
+        || !s->slots[slot].in_use || s->slots[slot].user_kind != 1) {
+        return;                 // detached/abandoned mid-flight
     }
     ob_sservo_slot_t *sl = &s->slots[slot];
-    if (!sl->in_use || sl->user_kind != 1) {
-        return;                 // detached mid-flight, or stale routing
-    }
     if (!ok) {
         sl->writes_failed++;
         if (++sl->user_fails >= OB_SSERVO_CONFIG_TRIES) {
@@ -486,13 +484,11 @@ void ob_sservo_user_read_result(ob_sservo_t *s, int ok,
                                 const uint8_t *payload, uint8_t len) {
     int slot = s->user_in_flight;
     s->user_in_flight = -1;
-    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
-        return;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS
+        || !s->slots[slot].in_use || s->slots[slot].user_kind != 2) {
+        return;                 // detached/abandoned mid-flight
     }
     ob_sservo_slot_t *sl = &s->slots[slot];
-    if (!sl->in_use || sl->user_kind != 2) {
-        return;
-    }
     if (!ok || len < sl->user_len) {
         if (++sl->user_fails >= OB_SSERVO_CONFIG_TRIES) {
             sl->user_failed = 1;

@@ -470,6 +470,64 @@ class UserRegisterTxnTests(_Base):
                         > regs_in_order.index(0x21),
                         regs_in_order)
 
+    def test_poll_on_unattached_slot(self):
+        st, _ = sb.servo_user_poll(3)
+        self.assertEqual(st, -2)
+
+    def test_poll_while_pending_reports_pending(self):
+        self._configured()
+        self.assertTrue(sb.servo_user_write(0, self.REG, 300, 2))
+        st, _ = sb.servo_user_poll(0)     # staged, not yet on the wire
+        self.assertEqual(st, 0)
+
+    def test_lost_read_retries_until_it_lands(self):
+        self._configured()
+        self.wire.regs[self.REG] = 640
+        self.wire.mute = 2
+        self.assertTrue(sb.servo_user_read(0, self.REG, 2))
+        self.wire.settle(40)
+        st, val = sb.servo_user_poll(0)
+        self.assertEqual(st, 1)
+        self.assertEqual(val, 640)
+
+    def test_dead_servo_latches_read_failure(self):
+        self._configured()
+        self.wire.mute = 10 ** 6
+        self.assertTrue(sb.servo_user_read(0, self.REG, 2))
+        self.wire.settle(120)
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, -1)
+
+    def test_detach_mid_flight_drops_the_result(self):
+        # Detach while the user WRITE's status is still on the wire:
+        # the in-flight routing is cleared, and the late reply must
+        # not be attributed to whatever reuses the slot.
+        self._configured()
+        self.assertTrue(sb.servo_user_write(0, self.REG, 300, 2))
+        sb.servo_pump()                    # txn goes on the wire
+        tx = sb.take_tx()
+        self.assertTrue(len(tx) > 0)
+        sb.servo_detach(0)
+        sb.feed_rx(_reply(2, 0))           # the late status arrives
+        self.wire.settle(5)                # consumed, routed nowhere
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, -2)           # slot empty, nothing staged
+
+    def test_detach_mid_flight_read_drops_too(self):
+        self._configured()
+        self.wire.regs[self.REG] = 500
+        self.assertTrue(sb.servo_user_read(0, self.REG, 2))
+        sb.servo_pump()
+        self.assertTrue(len(sb.take_tx()) > 0)
+        sb.servo_detach(0)
+        sb.feed_rx(_reply(2, 0, bytes([0xF4, 0x01])))
+        self.wire.settle(5)
+        # Reattaching works and the slot is clean.
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        self.wire.settle()
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, -2)
+
     def test_user_txn_outranks_speed_syncs(self):
         self._configured()
         sb.servo_run(0, 1000)                # torque + speed staged
