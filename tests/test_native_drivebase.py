@@ -205,6 +205,27 @@ class _FakeBus:
     def reset_runtime(self):
         self.calls.append(("reset_runtime",))
 
+    # ---- user register transactions (duty_limit) ----
+    # The fake resolves instantly: a stage records the value and the
+    # next poll answers done. Tests shadow ``servo_user_poll`` on the
+    # instance for the loss/timeout paths.
+
+    def servo_user_write(self, slot, reg, val, length):
+        self.calls.append(("servo_user_write", slot, reg, val, length))
+        self.user_regs = getattr(self, "user_regs", {})
+        self.user_regs[reg] = val
+        self.user_result = (1, val)
+        return True
+
+    def servo_user_read(self, slot, reg, length):
+        self.calls.append(("servo_user_read", slot, reg, length))
+        regs = getattr(self, "user_regs", {})
+        self.user_result = (1, regs.get(reg, 1000))
+        return True
+
+    def servo_user_poll(self, slot):
+        return getattr(self, "user_result", (-2, 0))
+
 
 class _FakeMP:
     @staticmethod
@@ -1248,6 +1269,99 @@ class EStopGateTests(_Base):
                 db.straight(100)
         finally:
             estop.clear()
+
+
+class AdoptedDutyLimitTests(_Base):
+    """duty_limit on a natively-adopted task motor: the torque-cap
+    register transaction must ride the native pump's staged user ops
+    — Python never talks on a natively-owned UART — and every
+    outcome (done / lost / refused / hung) surfaces loudly."""
+
+    def setUp(self):
+        _Base.setUp(self)
+        from openbricks.drivers.st3215 import ST3215
+        ST3215._buses.clear()
+        self.bus.uart_num = lambda: -1
+
+    def _adopted_task_motor(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics import DriveBase
+        left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+                           invert=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        DriveBase(left, right, wheel_diameter_mm=88,
+                  axle_track_mm=138)
+        self.bus.uart_num = lambda: 1     # native bus owns UART 1 now
+        task = ST3032Motor(servo_id=4, uart_id=1, tx=14, rx=6)
+        self.assertTrue(task._native_slot is not None)
+        return task
+
+    def test_push_rides_the_native_user_ops(self):
+        task = self._adopted_task_motor()
+        prev = task._duty_limit_push(30)
+        self.assertEqual(prev, 1000)      # the fake's register default
+        reads = [c for c in self.bus.calls
+                 if c[0] == "servo_user_read"]
+        writes = [c for c in self.bus.calls
+                  if c[0] == "servo_user_write"]
+        self.assertEqual(reads[-1],
+                         ("servo_user_read", task._native_slot,
+                          0x30, 2))
+        self.assertEqual(writes[-1],
+                         ("servo_user_write", task._native_slot,
+                          0x30, 300, 2))
+        self.assertEqual(task._duty_limit_raw, 300)
+
+    def test_pop_restores_via_the_native_path(self):
+        task = self._adopted_task_motor()
+        prev = task._duty_limit_push(30)
+        task._duty_limit_pop(prev)
+        write = [c for c in self.bus.calls
+                 if c[0] == "servo_user_write"][-1]
+        self.assertEqual(write[2:], (0x30, 1000, 2))
+        self.assertEqual(task._duty_limit_raw, 1000)
+
+    def test_lost_transaction_raises_named(self):
+        task = self._adopted_task_motor()
+        self.bus.servo_user_poll = lambda slot: (-1, 0)
+        try:
+            task._duty_limit_push(30)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("0x30" in str(e), e)
+            self.assertTrue("servo id 4" in str(e), e)
+
+    def test_stage_refusal_raises(self):
+        task = self._adopted_task_motor()
+        self.bus.servo_user_read = lambda slot, reg, n: False
+        try:
+            task._duty_limit_push(30)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("could not stage" in str(e), e)
+
+    def test_vanished_transaction_raises_staging_bug(self):
+        # Poll answering "nothing staged" right after a successful
+        # stage is an internal inconsistency — surfaced, not looped
+        # on until the timeout hides it.
+        task = self._adopted_task_motor()
+        self.bus.servo_user_poll = lambda slot: (-2, 0)
+        try:
+            task._duty_limit_push(30)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("staging bug" in str(e), e)
+
+    def test_hung_transaction_times_out(self):
+        # A poll that never resolves must not spin forever — the
+        # virtual clock drives the deadline.
+        task = self._adopted_task_motor()
+        self.bus.servo_user_poll = lambda slot: (0, 0)
+        try:
+            task._duty_limit_push(30)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("timed out" in str(e), e)
 
 
 if __name__ == "__main__":

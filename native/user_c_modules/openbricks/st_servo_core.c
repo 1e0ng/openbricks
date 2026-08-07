@@ -14,6 +14,7 @@ void ob_sservo_init(ob_sservo_t *s) {
     memset(s, 0, sizeof(*s));
     s->read_in_flight = -1;
     s->write_in_flight = -1;
+    s->user_in_flight = -1;
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         s->slots[i].torque_cmd = -1;
     }
@@ -51,8 +52,57 @@ void ob_sservo_detach(ob_sservo_t *s, int slot) {
     if (s->write_in_flight == slot) {
         s->write_in_flight = -1;
     }
+    if (s->user_in_flight == slot) {
+        s->user_in_flight = -1;
+    }
     memset(&s->slots[slot], 0, sizeof(s->slots[slot]));
     s->slots[slot].torque_cmd = -1;
+}
+
+
+int ob_sservo_user_stage(ob_sservo_t *s, int slot, int kind,
+                         uint8_t reg, uint16_t val, uint8_t len) {
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS || !s->slots[slot].in_use) {
+        return -1;
+    }
+    if ((kind != 1 && kind != 2) || len < 1 || len > 2) {
+        return -1;
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    if (sl->user_kind != 0) {
+        return -2;              // unresolved transaction; poll it first
+    }
+    sl->user_kind   = (uint8_t)kind;
+    sl->user_reg    = reg;
+    sl->user_len    = len;
+    sl->user_val    = val;
+    sl->user_done   = 0;
+    sl->user_failed = 0;
+    sl->user_fails  = 0;
+    return 0;
+}
+
+
+int ob_sservo_user_poll(ob_sservo_t *s, int slot, uint16_t *val_out) {
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS || !s->slots[slot].in_use) {
+        return -2;
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    if (sl->user_kind == 0) {
+        return -2;
+    }
+    if (sl->user_failed) {
+        sl->user_kind = 0;      // latch consumed: a new stage may follow
+        return -1;
+    }
+    if (!sl->user_done) {
+        return 0;
+    }
+    if (val_out != NULL) {
+        *val_out = sl->user_val;
+    }
+    sl->user_kind = 0;
+    return 1;
 }
 
 
@@ -197,6 +247,33 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
         return;
     }
 
+    // 2.5 User register transactions (run_until_stalled's duty_limit
+    //     cap and its restore) — rare one-shots staged by Python,
+    //     which is blocked polling for the outcome. After config (a
+    //     half-configured servo must finish its init first); before
+    //     the speed syncs, because a drivebase re-staging speeds
+    //     every tick plus rule 3's sync/read fairness dance would
+    //     otherwise starve the transaction indefinitely.
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        ob_sservo_slot_t *sl = &s->slots[i];
+        if (!sl->in_use || sl->config_step < 3 || sl->user_kind == 0
+            || sl->user_done || sl->user_failed) {
+            continue;
+        }
+        op->slot = i;
+        op->id = sl->id;
+        op->reg = sl->user_reg;
+        op->data_len = sl->user_len;
+        if (sl->user_kind == 1) {
+            op->kind = OB_SOP_USER_WRITE;
+            op->data[0] = (uint8_t)(sl->user_val & 0xFF);
+            op->data[1] = (uint8_t)(sl->user_val >> 8);
+        } else {
+            op->kind = OB_SOP_USER_READ;
+        }
+        return;
+    }
+
     // 3. Dirty speeds — one sync-write covers every dirty slot, so
     //    both wheels of a drivebase get their setpoints at the same
     //    packet boundary (the Python driver's SyncServoGroup lesson).
@@ -264,6 +341,10 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
             // op_mode write mark a servo "configured" while it was
             // still in position mode, receiving speed sync-writes.
             s->write_in_flight = op->slot;
+            break;
+        case OB_SOP_USER_WRITE:
+        case OB_SOP_USER_READ:
+            s->user_in_flight = op->slot;
             break;
         case OB_SOP_SYNC_SPEED:
             s->last_was_sync = 1;
@@ -376,6 +457,50 @@ void ob_sservo_write_result(ob_sservo_t *s, int ok) {
     }
     sl->config_step++;
     sl->config_fails = 0;
+}
+
+
+void ob_sservo_user_write_result(ob_sservo_t *s, int ok) {
+    int slot = s->user_in_flight;
+    s->user_in_flight = -1;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS
+        || !s->slots[slot].in_use || s->slots[slot].user_kind != 1) {
+        return;                 // detached/abandoned mid-flight
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    if (!ok) {
+        sl->writes_failed++;
+        if (++sl->user_fails >= OB_SSERVO_CONFIG_TRIES) {
+            sl->user_failed = 1;
+        }
+        return;                 // still staged: next_op reissues it
+    }
+    sl->user_done = 1;
+    sl->user_fails = 0;
+}
+
+
+void ob_sservo_user_read_result(ob_sservo_t *s, int ok,
+                                const uint8_t *payload, uint8_t len) {
+    int slot = s->user_in_flight;
+    s->user_in_flight = -1;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS
+        || !s->slots[slot].in_use || s->slots[slot].user_kind != 2) {
+        return;                 // detached/abandoned mid-flight
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    if (!ok || len < sl->user_len) {
+        if (++sl->user_fails >= OB_SSERVO_CONFIG_TRIES) {
+            sl->user_failed = 1;
+        }
+        return;
+    }
+    sl->user_val = payload[0];
+    if (sl->user_len > 1) {
+        sl->user_val |= (uint16_t)(payload[1] << 8);
+    }
+    sl->user_done = 1;
+    sl->user_fails = 0;
 }
 
 

@@ -168,10 +168,54 @@ class TestCompositeManeuvers(unittest.TestCase):
         self.assertEqual(m.calls, [("run_speed", 150), ("coast",)])
         self.assertEqual(got, 42.0)
 
-    def test_run_until_stalled_rejects_duty_limit(self):
+    def test_run_until_stalled_duty_limit_needs_driver_support(self):
+        # The base hooks raise: only drivers with a torque-limiting
+        # mechanism (the ST serial servos) opt in. The refusal names
+        # them, and fires BEFORE any motion command.
         m = _ScriptedMotor(stalled_seq=[True])
-        with self.assertRaises(NotImplementedError):
+        try:
             m.run_until_stalled(150, duty_limit=50)
+            self.fail("expected NotImplementedError")
+        except NotImplementedError as e:
+            self.assertTrue("ST3215" in str(e), e)
+        self.assertEqual(m.calls, [])
+
+    def test_run_until_stalled_duty_limit_pushes_and_pops(self):
+        pushes = []
+        pops = []
+
+        class _CappedMotor(_ScriptedMotor):
+            def _duty_limit_push(self, duty_limit):
+                pushes.append(duty_limit)
+                return 987          # driver's restore token
+            def _duty_limit_pop(self, restore):
+                pops.append(restore)
+
+        m = _CappedMotor(angles=[42.0], stalled_seq=[False, True])
+        got = m.run_until_stalled(150, duty_limit=30)
+        self.assertEqual(got, 42.0)
+        self.assertEqual(pushes, [30])
+        self.assertEqual(pops, [987],
+                         "pop must receive push's token")
+
+    def test_run_until_stalled_duty_limit_pops_on_error(self):
+        # The cap must not outlive the call — a stop-button
+        # KeyboardInterrupt or a silent-bus OSError mid-run still
+        # restores the previous limit.
+        pops = []
+
+        class _BoomMotor(_ScriptedMotor):
+            def _duty_limit_push(self, duty_limit):
+                return 555
+            def _duty_limit_pop(self, restore):
+                pops.append(restore)
+            def stalled(self):
+                raise OSError("bus silent")
+
+        m = _BoomMotor()
+        with self.assertRaises(OSError):
+            m.run_until_stalled(150, duty_limit=30)
+        self.assertEqual(pops, [555])
 
     def test_speed_load_stalled_default_not_implemented(self):
         for call in (lambda: Motor().speed(),

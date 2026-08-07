@@ -72,6 +72,8 @@ typedef enum {
                             // both drivebase wheels coast at the same
                             // packet boundary, not one write apart
     OB_SOP_READ_POS,        // read present-position of one slot
+    OB_SOP_USER_WRITE,      // user-staged register write (duty_limit)
+    OB_SOP_USER_READ,       // user-staged register read (limit restore)
 } ob_sservo_op_kind_t;
 
 typedef struct {
@@ -128,6 +130,19 @@ typedef struct {
     // evenly — which halved the drivebase's feedback rate the moment
     // two task motors joined the bus. Set by the pump each tick.
     uint8_t  hot;
+    // One-deep user register transaction (run_until_stalled's
+    // duty_limit torque cap and its read-back/restore, on a bus the
+    // native pump owns). Python stages it, the planner ships it once
+    // config is done, and the verified result — or CONFIG_TRIES
+    // consecutive losses — resolves it. Python polls the outcome; a
+    // loss is a latched failure, never a silent shrug.
+    uint8_t  user_kind;     // 0 none, 1 write, 2 read
+    uint8_t  user_reg;
+    uint8_t  user_len;      // 1 or 2 bytes
+    uint16_t user_val;      // write value in / read result out
+    uint8_t  user_done;     // result ready, waiting for Python's poll
+    uint8_t  user_failed;   // latched after CONFIG_TRIES losses
+    uint8_t  user_fails;    // consecutive losses of the current txn
 } ob_sservo_slot_t;
 
 typedef struct {
@@ -140,6 +155,7 @@ typedef struct {
     int      write_in_flight; // slot whose config WRITE is on the bus,
                               // or -1 — its step advances only when
                               // the verified ACK comes back
+    int      user_in_flight;  // slot whose USER txn is on the bus, or -1
     // Cold slots still get an occasional turn: skipping them
     // entirely would let angle()/speed() drift arbitrarily stale
     // while still reporting themselves fresh.
@@ -198,6 +214,25 @@ void ob_sservo_write_result(ob_sservo_t *s, int ok);
 // config_step advances even later, at write_result, so a LOST config
 // write retries too).
 void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op);
+
+// Stage a user register transaction on a configured slot (call under
+// the bus lock). kind: 1 = write ``val``, 2 = read. len: 1 or 2
+// bytes. Returns 0; -1 on bad args / unconfigured slot; -2 when a
+// previous transaction is still unresolved (poll it first).
+int ob_sservo_user_stage(ob_sservo_t *s, int slot, int kind,
+                         uint8_t reg, uint16_t val, uint8_t len);
+
+// Poll the staged transaction: 1 = done (read value in *val_out; the
+// stage is cleared, a new one may be staged), 0 = still pending,
+// -1 = failed after CONFIG_TRIES losses (latched; cleared by this
+// poll), -2 = nothing staged / bad slot.
+int ob_sservo_user_poll(ob_sservo_t *s, int slot, uint16_t *val_out);
+
+// Result routing for user transactions (mirrors write_result /
+// read_result: verified outcome only, retries ride next_op).
+void ob_sservo_user_write_result(ob_sservo_t *s, int ok);
+void ob_sservo_user_read_result(ob_sservo_t *s, int ok,
+                                const uint8_t *payload, uint8_t len);
 
 // Signed unwrapped position in encoder counts.
 int32_t ob_sservo_counts(const ob_sservo_t *s, int slot);

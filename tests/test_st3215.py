@@ -20,6 +20,7 @@ _REG_PRESENT_SPEED = 0x3A
 _REG_PRESENT_LOAD  = 0x3C
 _REG_GOAL_SPEED    = 0x2E
 _REG_PRESENT_POS   = 0x38
+_REG_TORQUE_LIMIT  = 0x30
 _HEADER            = b"\xFF\xFF"
 
 _MODE_WHEEL = 1
@@ -1294,6 +1295,124 @@ class TestSyncServoGroup(unittest.TestCase):
         before = rx_calls[0]
         group.set_goal_speeds([100, 100])
         self.assertEqual(rx_calls[0], before)
+
+
+class TestDutyLimit(unittest.TestCase):
+    """run_until_stalled(duty_limit=...) — a temporary cap written to
+    the RAM torque-limit register (0x30), restored afterwards (stall,
+    error, or Ctrl-C alike), with stall detection scaled to the cap:
+    under a 30 % cap the load can never reach 80 % of FULL stall, so
+    the unscaled threshold would spin forever."""
+
+    def setUp(self):
+        ST3215._buses = {}
+
+    def _motor(self, reads=None, **kw):
+        kw.setdefault("steps_per_dps", 10.0)
+        m = ST3215Motor(servo_id=1, **kw)
+        reads = dict(reads or {})
+
+        def fake_read(servo_id, register, nbytes):
+            v = reads.get(register)
+            if v is None:
+                return None
+            return bytes([v & 0xFF, (v >> 8) & 0xFF])
+        m._bus.read = fake_read
+        return m
+
+    def test_push_caps_and_returns_previous(self):
+        m = self._motor({_REG_TORQUE_LIMIT: 800})
+        prev = m._duty_limit_push(30)
+        self.assertEqual(prev, 800)
+        writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE_LIMIT)
+        self.assertEqual(writes[-1], (1, bytes([0x2C, 0x01])))  # 300
+        self.assertEqual(m._duty_limit_raw, 300)
+
+    def test_pop_restores_exactly_what_push_read(self):
+        # A servo with a custom cap (800, not the factory 1000) gets
+        # its own cap back — not a hardcoded "full torque".
+        m = self._motor({_REG_TORQUE_LIMIT: 800})
+        prev = m._duty_limit_push(30)
+        m._duty_limit_pop(prev)
+        writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE_LIMIT)
+        self.assertEqual(writes[-1], (1, bytes([0x20, 0x03])))  # 800
+        self.assertEqual(m._duty_limit_raw, 800)
+
+    def test_duty_limit_validation(self):
+        m = self._motor({_REG_TORQUE_LIMIT: 1000})
+        for bad in (0, -5, 150, "abc", None):
+            try:
+                m._duty_limit_push(bad)
+                self.fail("expected ValueError for %r" % (bad,))
+            except ValueError:
+                pass
+        # Validation fires BEFORE any bus traffic.
+        self.assertEqual(
+            _writes_to(m._bus._uart._tx_log, _REG_TORQUE_LIMIT), [])
+
+    def test_stalled_threshold_scales_with_the_cap(self):
+        # 26 % of stall, barely moving: not stalled at full torque
+        # (threshold 80 %), stalled under a 30 % cap (threshold 24 %).
+        m = self._motor({_REG_PRESENT_LOAD: 260 | 0x400,
+                         _REG_PRESENT_SPEED: 50})
+        self.assertFalse(m.stalled())
+        m._duty_limit_raw = 300
+        self.assertTrue(m.stalled())
+
+    def test_run_until_stalled_caps_runs_and_restores(self):
+        m = self._motor({_REG_TORQUE_LIMIT: 1000,
+                         _REG_PRESENT_LOAD: 280 | 0x400,   # 28 %
+                         _REG_PRESENT_SPEED: 30,           # 3 dps
+                         _REG_PRESENT_POS: 1000})
+        got = m.run_until_stalled(200, duty_limit=30)
+        self.assertTrue(got is not None)
+        writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE_LIMIT)
+        self.assertEqual(writes[0][1], bytes([0x2C, 0x01]))   # cap 300
+        self.assertEqual(writes[-1][1], bytes([0xE8, 0x03]))  # back to 1000
+        self.assertEqual(m._duty_limit_raw, 1000)
+        # Default then="coast": the last torque write is off.
+        torque = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
+        self.assertEqual(torque[-1][1], bytes([0]))
+
+    def test_cap_is_restored_when_the_run_dies(self):
+        # Silent bus mid-run: stalled() raises, and the finally still
+        # writes the previous limit back — the cap must never outlive
+        # the call.
+        m = self._motor({_REG_TORQUE_LIMIT: 700})
+        with self.assertRaises(OSError):
+            m.run_until_stalled(200, duty_limit=50)
+        writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE_LIMIT)
+        self.assertEqual(writes[-1][1], bytes([0xBC, 0x02]))  # 700
+        self.assertEqual(m._duty_limit_raw, 700)
+
+    def test_silent_bus_on_the_limit_read_raises_named(self):
+        m = self._motor({})
+        try:
+            m._duty_limit_push(30)
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("0x30" in str(e), e)
+            self.assertTrue("servo id 1" in str(e), e)
+
+    def test_pop_of_a_zero_previous_assumes_full_scale(self):
+        # A register that read 0 before the run would leave the servo
+        # torqueless forever; the shadow used by stalled() falls back
+        # to full scale (the write itself still restores the 0 the
+        # servo had — hardware state is never invented).
+        m = self._motor({_REG_TORQUE_LIMIT: 0})
+        m._duty_limit_pop(0)
+        self.assertEqual(m._duty_limit_raw, 1000)
+        writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE_LIMIT)
+        self.assertEqual(writes[-1][1], bytes([0, 0]))
+
+    def test_single_byte_register_helpers(self):
+        # The nbytes=1 paths of the raw helpers (torque enable and
+        # friends are one-byte registers).
+        m = self._motor({_REG_TORQUE: 1})
+        self.assertEqual(m._reg_read_u16(_REG_TORQUE, nbytes=1), 1)
+        m._reg_write_u16(_REG_TORQUE, 1, nbytes=1)
+        writes = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
+        self.assertEqual(writes[-1][1], bytes([1]))
 
 
 if __name__ == "__main__":

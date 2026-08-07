@@ -3,6 +3,29 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.69.0 — duty_limit on run_until_stalled
+
+`Motor.run_until_stalled(speed, then, duty_limit=None)` now honours
+`duty_limit` (percent) on the ST3215/ST3032 serial servos — the
+Pybricks gripper-homing pattern: drive gently into the end stop
+without crushing it.
+
+- The cap is a temporary write to the servo's RAM torque-limit
+  register (0x30, SMS_STS `TORQUE_LIMIT`), applied before the
+  motion and restored afterwards — stall, error, or Ctrl-C alike —
+  to exactly the value read before the run (a servo with a custom
+  cap keeps it).
+- `stalled()` scales its load threshold to the active cap: under a
+  30 % cap the load can never reach 80 % of FULL stall, so the
+  unscaled threshold would spin forever. At full torque nothing
+  changes.
+- On natively-adopted motors (all four bench motors) the register
+  transaction rides new staged user ops in the C bus planner —
+  Python never talks on a natively-owned UART. Verified ACK or a
+  latched, named failure after 8 losses; never silent.
+- Motors without a torque-limiting mechanism keep refusing
+  `duty_limit` with a clear error naming the ones that support it.
+
 ## 1.68.0 — edge following
 
 `QTRArray` / `QTRReading` gain `left_edge_position()`: the line's
