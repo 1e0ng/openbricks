@@ -345,5 +345,143 @@ class EStopIntegrationTests(_Base):
             estop.clear()
 
 
+class _RegWire(_Wire):
+    """A servo with real registers: WRITEs land in ``regs``, READs of
+    any register answer from it (position reads keep the widened
+    6-byte reply the pump expects)."""
+
+    def __init__(self):
+        _Wire.__init__(self)
+        self.regs = {}
+        self.mute = 0        # swallow this many replies (lost on wire)
+
+    def pump(self):
+        sb.servo_pump()
+        tx = sb.take_tx()
+        self.tx_log += tx
+        if not tx:
+            return
+        if self.mute > 0:
+            self.mute -= 1
+            return
+        if len(tx) >= 8 and tx[4] == 0x02:               # READ reg n
+            reg, n = tx[5], tx[6]
+            if reg == 0x38:
+                sb.feed_rx(_pos_reply(tx[2], self.raw))
+            else:
+                v = self.regs.get(reg, 0)
+                payload = bytes([(v >> (8 * i)) & 0xFF
+                                 for i in range(n)])
+                sb.feed_rx(_reply(tx[2], 0, payload))
+        elif len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE:  # WRITE
+            reg = tx[5]
+            v = 0
+            for i, b in enumerate(tx[6:-1]):
+                v |= b << (8 * i)
+            self.regs[reg] = v
+            sb.feed_rx(_reply(tx[2], 0))
+
+
+class UserRegisterTxnTests(_Base):
+    """servo_user_write / servo_user_read / servo_user_poll — the
+    duty_limit path: one-deep staged transactions shipped by the pump
+    once config is done, resolved by verified ACK or a latched
+    failure after CONFIG_TRIES losses (a loss is never silent)."""
+
+    REG = 0x30    # torque limit — what the feature exists for
+
+    def setUp(self):
+        _Base.setUp(self)
+        self.wire = _RegWire()
+
+    def _configured(self, slot=0, sid=2):
+        sb.servo_attach(slot, sid, False, 45)
+        self.wire.settle()
+
+    def test_write_lands_and_polls_done(self):
+        self._configured()
+        self.assertTrue(sb.servo_user_write(0, self.REG, 300, 2))
+        self.wire.settle(10)
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, 1)
+        self.assertEqual(self.wire.regs[self.REG], 300)
+
+    def test_read_returns_the_register_value(self):
+        self._configured()
+        self.wire.regs[self.REG] = 777
+        self.assertTrue(sb.servo_user_read(0, self.REG, 2))
+        self.wire.settle(10)
+        st, val = sb.servo_user_poll(0)
+        self.assertEqual(st, 1)
+        self.assertEqual(val, 777)
+
+    def test_poll_with_nothing_staged(self):
+        self._configured()
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, -2)
+
+    def test_stage_on_unattached_slot_rejected(self):
+        self.assertFalse(sb.servo_user_write(1, self.REG, 300, 2))
+
+    def test_second_stage_while_pending_rejected(self):
+        self._configured()
+        self.assertTrue(sb.servo_user_write(0, self.REG, 300, 2))
+        self.assertFalse(sb.servo_user_write(0, self.REG, 400, 2))
+
+    def test_lost_ack_retries_until_it_lands(self):
+        self._configured()
+        self.wire.mute = 2                   # first two acks lost
+        self.assertTrue(sb.servo_user_write(0, self.REG, 300, 2))
+        self.wire.settle(40)                 # timeouts + retries
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, 1)
+        self.assertEqual(self.wire.regs[self.REG], 300)
+
+    def test_dead_servo_latches_failure_then_allows_restage(self):
+        self._configured()
+        self.wire.mute = 10 ** 6             # never answers again
+        self.assertTrue(sb.servo_user_write(0, self.REG, 300, 2))
+        self.wire.settle(120)                # 8 tries x timeout window
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, -1)
+        # The latch is consumed: a new transaction may be staged.
+        self.wire.mute = 0
+        self.assertTrue(sb.servo_user_write(0, self.REG, 500, 2))
+        self.wire.settle(10)
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, 1)
+
+    def test_user_txn_waits_for_config(self):
+        # Staged before the config sequence finishes: the wire must
+        # see op_mode/torque/goal_acc first, the user write after.
+        sb.servo_attach(0, 2, False, 45)
+        self.assertTrue(sb.servo_user_write(0, self.REG, 300, 2))
+        self.wire.settle(20)
+        regs_in_order = []
+        log, i = self.wire.tx_log, 0
+        while i + 6 <= len(log):
+            if log[i] == 0xFF and log[i + 1] == 0xFF and log[i + 4] == 0x03:
+                regs_in_order.append(log[i + 5])
+                i += 6
+            else:
+                i += 1
+        self.assertIn(self.REG, regs_in_order)
+        self.assertTrue(regs_in_order.index(self.REG)
+                        > regs_in_order.index(0x21),
+                        regs_in_order)
+
+    def test_user_txn_outranks_speed_syncs(self):
+        self._configured()
+        sb.servo_run(0, 1000)                # torque + speed staged
+        self.assertTrue(sb.servo_user_write(0, self.REG, 300, 2))
+        self.wire.settle(10)
+        log = self.wire.tx_log
+        user_at = log.find(bytes([0x03, self.REG]))
+        speed_at = log.find(bytes([0x83, 0x2E]))
+        self.assertTrue(user_at >= 0, "user write never shipped")
+        self.assertTrue(speed_at < 0 or user_at < speed_at,
+                        (user_at, speed_at))
+
+
 if __name__ == "__main__":
     unittest.main()

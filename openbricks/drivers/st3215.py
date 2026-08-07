@@ -84,6 +84,11 @@ _REG_GOAL_SPEED    = 0x2E
 _REG_PRESENT_POS   = 0x38
 _REG_PRESENT_SPEED = 0x3A
 _REG_PRESENT_LOAD  = 0x3C
+# RAM torque cap, 0..1000 = 0..100 % of stall (SMS_STS SDK
+# ``TORQUE_LIMIT_L`` = 48). The servo loads it from the EPROM
+# max-torque register at power-on; run_until_stalled's duty_limit
+# writes it for the duration of the run and restores what it read.
+_REG_TORQUE_LIMIT  = 0x30
 
 _MODE_POSITION = 0   # single-turn absolute position (0..4095 = 0..360°)
 _MODE_WHEEL    = 1   # continuous velocity (wheel)
@@ -514,6 +519,13 @@ class ST3215Motor(Motor):
         # stuck. Independent of the total budget: a loaded move that
         # keeps inching is fine, a still one is not.
         self._stall_idle_ms = int(stall_idle_ms)
+        # The torque cap currently on the wire, in the register's
+        # 0..1000 raw units. Assumed full until run_until_stalled's
+        # duty_limit writes a lower one; stalled() scales its load
+        # threshold by this — under a 30 % cap the load can never
+        # reach 80 % of FULL stall, so the unscaled threshold would
+        # spin run_until_stalled forever.
+        self._duty_limit_raw = 1000
         # ONE BUS, ONE OWNER. If the native C bus already drives this
         # UART — because a DriveBase adopted its wheels onto it — then
         # opening a MicroPython UART here would put two drivers on one
@@ -928,12 +940,17 @@ class ST3215Motor(Motor):
         ``Motor.stalled()`` contract, from the servo's own feedback
         registers. Raises ``OSError`` if the bus is silent (a silent
         bus must not read as "not stalled")."""
+        # Threshold in raw 0.1 %-of-stall units, scaled by the active
+        # torque cap: at full torque this is STALL_LOAD_PCT * 10
+        # (unchanged), under a duty_limit it is the same fraction of
+        # what the servo is ALLOWED to push.
+        threshold = self.STALL_LOAD_PCT * self._duty_limit_raw // 100
         if self._native_slot is not None:
             steps, load_raw, fresh = self._native_sb.servo_feedback(
                 self._native_slot)
             if not fresh:
                 raise OSError("bus silent while reading stall state")
-            return (abs(load_raw) >= self.STALL_LOAD_PCT * 10
+            return (abs(load_raw) >= threshold
                     and abs(steps / self._steps_per_dps)
                         <= self.STALL_SPEED_DPS)
         data = self._bus.read(self._id, _REG_PRESENT_LOAD, 2)
@@ -941,8 +958,105 @@ class ST3215Motor(Motor):
         if data is None or spd is None:
             raise OSError("bus silent while reading stall state")
         load_magnitude = (data[0] | (data[1] << 8)) & 0x3FF
-        return (load_magnitude >= self.STALL_LOAD_PCT * 10
+        return (load_magnitude >= threshold
                 and abs(spd) <= self.STALL_SPEED_DPS)
+
+    # ---- duty_limit (run_until_stalled's temporary torque cap) ----
+
+    _USER_TXN_TIMEOUT_MS = 500
+
+    def _reg_read_u16(self, reg, nbytes=2):
+        """Read a raw register value, adopted or not. On an adopted
+        motor the read is staged into the native pump (Python must
+        not talk on a natively-owned UART) and polled to its
+        verified result; a loss raises, naming servo and register."""
+        if self._native_slot is not None:
+            if not self._native_sb.servo_user_read(
+                    self._native_slot, reg, nbytes):
+                raise OSError(
+                    "servo id %s: could not stage read of register "
+                    "0x%02X (another register transaction is "
+                    "unresolved)" % (self._id, reg))
+            return self._native_user_wait(reg, "read")
+        data = self._bus.read(self._id, reg, nbytes)
+        if data is None:
+            raise OSError(
+                "servo id %s: no reply reading register 0x%02X"
+                % (self._id, reg))
+        value = data[0]
+        if nbytes > 1:
+            value |= data[1] << 8
+        return value
+
+    def _reg_write_u16(self, reg, value, nbytes=2):
+        """Write a raw register value, adopted or not — verified
+        either way (the Python bus raises on a lost ACK; the native
+        pump retries then latches, surfaced by the poll)."""
+        if self._native_slot is not None:
+            if not self._native_sb.servo_user_write(
+                    self._native_slot, reg, value, nbytes):
+                raise OSError(
+                    "servo id %s: could not stage write of register "
+                    "0x%02X (another register transaction is "
+                    "unresolved)" % (self._id, reg))
+            self._native_user_wait(reg, "write")
+            return
+        if nbytes == 1:
+            payload = bytes([value & 0xFF])
+        else:
+            payload = bytes([value & 0xFF, (value >> 8) & 0xFF])
+        self._bus.write(self._id, reg, payload)
+
+    def _native_user_wait(self, reg, what):
+        import time
+        deadline = time.ticks_add(time.ticks_ms(),
+                                  self._USER_TXN_TIMEOUT_MS)
+        while True:
+            status, value = self._native_sb.servo_user_poll(
+                self._native_slot)
+            if status == 1:
+                return value
+            if status == -1:
+                raise OSError(
+                    "servo id %s: %s of register 0x%02X lost on the "
+                    "wire after retries — check power and the servo "
+                    "bus wiring" % (self._id, what, reg))
+            if status == -2:
+                raise OSError(
+                    "servo id %s: no register transaction pending "
+                    "for %s of 0x%02X (internal staging bug)"
+                    % (self._id, what, reg))
+            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                raise OSError(
+                    "servo id %s: %s of register 0x%02X timed out "
+                    "after %d ms" % (self._id, what, reg,
+                                     self._USER_TXN_TIMEOUT_MS))
+            time.sleep_ms(2)
+
+    def _duty_limit_push(self, duty_limit):
+        """Cap torque at ``duty_limit`` percent for the duration of a
+        run_until_stalled. Returns the previous register value so
+        ``_duty_limit_pop`` restores exactly what was there — a servo
+        with a custom cap keeps it."""
+        try:
+            duty = float(duty_limit)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "duty_limit must be a number in (0, 100], got %r"
+                % (duty_limit,))
+        if not 0 < duty <= 100:
+            raise ValueError(
+                "duty_limit must be in (0, 100] percent, got %r"
+                % (duty_limit,))
+        raw = max(1, min(1000, int(duty * 10)))
+        previous = self._reg_read_u16(_REG_TORQUE_LIMIT)
+        self._reg_write_u16(_REG_TORQUE_LIMIT, raw)
+        self._duty_limit_raw = raw
+        return previous
+
+    def _duty_limit_pop(self, previous):
+        self._reg_write_u16(_REG_TORQUE_LIMIT, previous)
+        self._duty_limit_raw = previous if previous > 0 else 1000
 
     def run_speed(self, deg_per_s):
         """Set continuous wheel velocity in degrees per second."""

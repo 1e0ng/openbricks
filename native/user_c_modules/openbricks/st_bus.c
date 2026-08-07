@@ -115,6 +115,8 @@ static uint8_t tick_txn_is_swrite;  // single-servo write (config) —
                                     // completion there would
                                     // misattribute it to whatever
                                     // write_in_flight last held
+static uint8_t tick_txn_is_uwrite;  // user-staged register write
+static uint8_t tick_txn_is_uread;   // user-staged register read
 
 static ob_sservo_t *sservo_get(void) {
     if (!sservo_inited) {
@@ -304,10 +306,17 @@ static void servo_pump_locked(ob_bus_t *b) {
                                   payload, plen);
         } else if (tick_txn_is_swrite) {
             ob_sservo_write_result(sservo_get(), st == OB_BUS_DONE);
+        } else if (tick_txn_is_uwrite) {
+            ob_sservo_user_write_result(sservo_get(), st == OB_BUS_DONE);
+        } else if (tick_txn_is_uread) {
+            ob_sservo_user_read_result(sservo_get(), st == OB_BUS_DONE,
+                                       payload, plen);
         }
         tick_txn = 0;
         tick_txn_is_read = 0;
         tick_txn_is_swrite = 0;
+        tick_txn_is_uwrite = 0;
+        tick_txn_is_uread = 0;
     }
     if (b->state != OB_BUS_IDLE) {
         return;
@@ -335,6 +344,14 @@ static void servo_pump_locked(ob_bus_t *b) {
                                          OB_SSERVO_FEEDBACK_LEN,
                                          OB_SSERVO_READ_TICKS) == 0);
             break;
+        case OB_SOP_USER_WRITE:
+            started = (ob_bus_start_write(b, op.id, op.reg,
+                                          op.data, op.data_len) == 0);
+            break;
+        case OB_SOP_USER_READ:
+            started = (ob_bus_start_read(b, op.id, op.reg, op.data_len,
+                                         OB_SSERVO_READ_TICKS) == 0);
+            break;
         default:
             return;
     }
@@ -342,6 +359,8 @@ static void servo_pump_locked(ob_bus_t *b) {
         tick_txn = 1;
         tick_txn_is_read = (op.kind == OB_SOP_READ_POS);
         tick_txn_is_swrite = (op.kind == OB_SOP_WRITE);
+        tick_txn_is_uwrite = (op.kind == OB_SOP_USER_WRITE);
+        tick_txn_is_uread = (op.kind == OB_SOP_USER_READ);
         ob_sservo_op_started(sservo_get(), &op);
     }
 }
@@ -393,9 +412,12 @@ void ob_st_bus_estop_from_tick(void) {
         tick_txn = 0;
         tick_txn_is_read = 0;
         tick_txn_is_swrite = 0;
+        tick_txn_is_uwrite = 0;
+        tick_txn_is_uread = 0;
         // The abandoned transaction's slot must not soak up the NEXT
         // single-write's result.
         sservo_get()->write_in_flight = -1;
+        sservo_get()->user_in_flight = -1;
     }
     uint8_t off = 0;
     if (ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1) == 0) {
@@ -456,6 +478,9 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     sservo_inited = false;
     tick_txn = 0;
     tick_txn_is_read = 0;
+    tick_txn_is_swrite = 0;
+    tick_txn_is_uwrite = 0;
+    tick_txn_is_uread = 0;
     st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
@@ -728,6 +753,50 @@ static mp_obj_t sb_servo_run(mp_obj_t self_in, mp_obj_t slot_in,
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(sb_servo_run_obj, sb_servo_run);
 
+// ---- user register transactions (run_until_stalled's duty_limit) ----
+//
+// One-deep per slot: stage, then poll until the verified outcome.
+// Conversions happen OUTSIDE the lock (see sb_start_read's rule).
+
+static mp_obj_t sb_servo_user_write(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    int slot     = mp_obj_get_int(args[1]);
+    uint8_t reg  = (uint8_t)mp_obj_get_int(args[2]);
+    uint16_t val = (uint16_t)mp_obj_get_int(args[3]);
+    uint8_t len  = (uint8_t)mp_obj_get_int(args[4]);
+    bus_take();
+    int r = ob_sservo_user_stage(sservo_get(), slot, 1, reg, val, len);
+    bus_release();
+    return mp_obj_new_bool(r == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_user_write_obj, 5, 5,
+                                           sb_servo_user_write);
+
+static mp_obj_t sb_servo_user_read(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    int slot    = mp_obj_get_int(args[1]);
+    uint8_t reg = (uint8_t)mp_obj_get_int(args[2]);
+    uint8_t len = (uint8_t)mp_obj_get_int(args[3]);
+    bus_take();
+    int r = ob_sservo_user_stage(sservo_get(), slot, 2, reg, 0, len);
+    bus_release();
+    return mp_obj_new_bool(r == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_user_read_obj, 4, 4,
+                                           sb_servo_user_read);
+
+static mp_obj_t sb_servo_user_poll(mp_obj_t self_in, mp_obj_t slot_in) {
+    (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
+    uint16_t val = 0;
+    bus_take();
+    int st = ob_sservo_user_poll(sservo_get(), slot, &val);
+    bus_release();
+    mp_obj_t items[2] = { mp_obj_new_int(st), mp_obj_new_int(val) };
+    return mp_obj_new_tuple(2, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_user_poll_obj, sb_servo_user_poll);
+
 static mp_obj_t sb_servo_coast(mp_obj_t self_in, mp_obj_t slot_in) {
     (void)self_in;
     int slot = mp_obj_get_int(slot_in);
@@ -926,6 +995,9 @@ static mp_obj_t sb_torque_off_all(mp_obj_t self_in) {
         b->state = OB_BUS_IDLE;   // abandon; flush-before-TX re-frames
         tick_txn = 0;
         tick_txn_is_read = 0;
+        tick_txn_is_swrite = 0;
+        tick_txn_is_uwrite = 0;
+        tick_txn_is_uread = 0;
     }
     int r = ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1);
     // Broadcast completes immediately; consume so the pump can go on.
@@ -1272,6 +1344,8 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     tick_txn = 0;
     tick_txn_is_read = 0;
     tick_txn_is_swrite = 0;
+    tick_txn_is_uwrite = 0;
+    tick_txn_is_uread = 0;
     // ABANDON any transaction the previous program left in flight.
     //
     // The hard tick pumps right up to the instant a program ends, so
@@ -1329,6 +1403,9 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_detach),     MP_ROM_PTR(&sb_servo_detach_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_slot_of),    MP_ROM_PTR(&sb_servo_slot_of_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_run),        MP_ROM_PTR(&sb_servo_run_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_user_write), MP_ROM_PTR(&sb_servo_user_write_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_user_read),  MP_ROM_PTR(&sb_servo_user_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_user_poll),  MP_ROM_PTR(&sb_servo_user_poll_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_coast),      MP_ROM_PTR(&sb_servo_coast_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_move),       MP_ROM_PTR(&sb_servo_move_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_hold),       MP_ROM_PTR(&sb_servo_hold_obj) },

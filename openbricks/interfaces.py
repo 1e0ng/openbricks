@@ -172,19 +172,43 @@ class Motor:
         """Run at ``speed`` deg/s until ``stalled()``, apply the
         ``then`` flavour, and return the angle where it stalled —
         Pybricks ``Motor.run_until_stalled()`` (its default ``then``
-        is Stop.COAST). ``duty_limit`` is not supported — the serial
-        servos' torque limiting is a per-servo register, not a
-        per-call parameter; pass ``None``."""
-        if duty_limit is not None:
-            raise NotImplementedError(
-                "duty_limit is not supported; configure the servo's "
-                "torque limit instead")
+        is Stop.COAST).
+
+        ``duty_limit`` (percent, 0 < limit <= 100) caps the motor's
+        torque for the duration of the run — the Pybricks gripper-
+        homing pattern: drive gently into the end stop without
+        crushing it. The cap is applied before the motion starts and
+        restored afterwards, stall or not. Drivers opt in via
+        ``_duty_limit_push`` / ``_duty_limit_pop`` (the ST3215/
+        ST3032 serial servos implement it as a temporary torque-
+        limit register write; their stall detection scales to the
+        cap)."""
         import time
-        self.run_speed(speed)
-        while not self.stalled():
-            time.sleep_ms(20)
-        self._apply_then(then)
-        return self.angle()
+        restore = None
+        if duty_limit is not None:
+            restore = self._duty_limit_push(duty_limit)
+        try:
+            self.run_speed(speed)
+            while not self.stalled():
+                time.sleep_ms(20)
+            self._apply_then(then)
+            return self.angle()
+        finally:
+            if duty_limit is not None:
+                self._duty_limit_pop(restore)
+
+    def _duty_limit_push(self, duty_limit):
+        """Apply a temporary torque cap of ``duty_limit`` percent;
+        return the token ``_duty_limit_pop`` needs to undo it.
+        Drivers with a torque-limiting mechanism override both."""
+        raise NotImplementedError(
+            "duty_limit is not supported on this motor type (the "
+            "ST3215/ST3032 serial servos support it)")
+
+    def _duty_limit_pop(self, restore):
+        raise NotImplementedError(
+            "duty_limit is not supported on this motor type (the "
+            "ST3215/ST3032 serial servos support it)")
 
 
 class Servo:
