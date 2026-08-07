@@ -489,7 +489,13 @@ jobs:
     # ``continue-on-error: true`` while we shake out the exact
     # qemu-system-xtensa flags. Flip to false once it's stable.
     needs: [firmware]
-    if: ${{ !startsWith(github.ref, 'refs/tags/cli/') &&
+    # Same doctrine as the test job (#345): already proven on the
+    # pull request that produced this commit, so a main push does
+    # not re-run it. Firmware tags still smoke-test — that is part
+    # of what gates a release. CLI-namespace tags never did.
+    if: ${{ (github.event_name != 'push'
+             || startsWith(github.ref, 'refs/tags/')) &&
+            !startsWith(github.ref, 'refs/tags/cli/') &&
             !startsWith(github.ref, 'refs/tags/openbricks-dev/') }}
     runs-on: ubuntu-latest
     continue-on-error: true
