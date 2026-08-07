@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.68.0 — edge following
+
+`QTRArray` / `QTRReading` gain `left_edge_position()`: the line's
+LEFT edge — the white→black boundary of the leftmost dark cluster
+— interpolated between the last white element and the first dark
+one at the `dark_threshold` crossing. An edge follower keeps this
+at 0, straddling the boundary with half the array over mat and
+half over line, which also makes line width irrelevant to
+steering. `None` when nothing is dark; a dark leftmost element
+saturates the estimate half a pitch off-array so the error keeps
+its sign.
+
+`qtr_line_follow.py` now steers on the edge instead of the cluster
+centre (same PD, same stop rule), and `qtr_probe.py` streams
+`edge=` for bench verification.
+
 ## 1.67.2 — examples: bare code, right-branch only
 
 - EVERY file in `examples/` is stripped to bare code: docstring

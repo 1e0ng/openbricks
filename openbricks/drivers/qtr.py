@@ -79,6 +79,7 @@ class QTRReading:
         r = qtr.read()
         r[0].dark()             # per element
         r.position()            # global centroid, mm
+        r.left_edge_position()  # white→black boundary, mm
         r.leftmost_position()   # fork clusters
         r.rightmost_position()
         r.dark_count()          # how many elements on the line
@@ -126,6 +127,9 @@ class QTRReading:
 
     def position(self):
         return self._array.position(self)
+
+    def left_edge_position(self):
+        return self._array.left_edge_position(self)
 
     def leftmost_position(self):
         return self._array.leftmost_position(self)
@@ -396,6 +400,44 @@ class QTRArray:
             weight_sum += readings[i].value
             moment += readings[i].value * self._x_mm[i]
         return moment / weight_sum
+
+    def left_edge_position(self, readings=None):
+        """Millimetre position of the line's LEFT edge — the
+        white→black boundary on the left side of the leftmost dark
+        cluster, in the same frame as :meth:`position` (positive =
+        right of the array centre). ``None`` when nothing is dark.
+
+        The crossing is interpolated between the last white element
+        and the first dark one: the point where the calibrated value
+        passes ``dark_threshold``. An edge follower keeps THIS at 0,
+        so the robot straddles the boundary — half the array over
+        mat, half over line — instead of centring on the line
+        itself. That also makes line width irrelevant to steering.
+
+        When the leftmost element is itself dark the true edge is
+        off-array to the left; the estimate saturates half a pitch
+        beyond that element, so the error keeps its sign and
+        magnitude instead of vanishing.
+        """
+        if len(self._adcs) < 2:
+            raise RuntimeError(
+                "left_edge_position() needs at least 2 elements — a "
+                "single detector channel has no edge to interpolate "
+                "(use QTRChannel.dark() for a flag)")
+        readings = self.read() if readings is None else readings
+        first = None
+        for i, r in enumerate(readings):
+            if r.dark():
+                first = i
+                break
+        if first is None:
+            return None
+        if first == 0:
+            return self._x_mm[0] - self._pitch / 2
+        v0 = readings[first - 1].value
+        v1 = readings[first].value
+        frac = (self._threshold - v0) / (v1 - v0)
+        return self._x_mm[first - 1] + frac * self._pitch
 
     def leftmost_position(self, readings=None):
         """Centroid of the LEFTMOST contiguous dark cluster, in mm

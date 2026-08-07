@@ -5,7 +5,7 @@ Same extract-and-exec trick as ``tests/test_line_follow.py``: the
 example wires hardware at module level, so the pure control-law
 block is pulled out by its markers. What is pinned here is the
 CONTRACT the bench relies on: sign conventions, the immediate
-whole-array-AND-flag stop, always-steer-on-the-leftmost-cluster,
+whole-array-AND-flag stop, always-steer-on-the-left-edge,
 real-dt derivative scaling, hold-on-lost-line, and the clamp.
 """
 
@@ -36,7 +36,7 @@ class _Reading:
         self._left = left
         self._all = all_dark
 
-    def leftmost_position(self):
+    def left_edge_position(self):
         return self._left
 
     def all_dark(self):
