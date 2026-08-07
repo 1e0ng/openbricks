@@ -295,6 +295,9 @@ class ReadingTests(unittest.TestCase):
                           False, False, False])
         self.assertEqual(reading.values()[4], 1000)
         self.assertEqual(reading.dark_count(), 2)
+        self.assertFalse(reading.all_dark())
+        _script(dark_pins=_PINS)                # everything on line
+        self.assertTrue(self.qtr.read().all_dark())
         self.assertEqual(reading.leftmost_position(),
                          reading.rightmost_position())
         self.assertTrue("dark" in repr(reading[4]), repr(reading[4]))

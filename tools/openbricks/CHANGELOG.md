@@ -24,6 +24,11 @@ the hub while passing on the desktop; numeric code uses `.value` /
 derive everything from the one snapshot. `QTRChannel` gains
 `white()`.
 
+The snapshot also answers `all_dark()`, and the follower's stop
+rule is now exactly: the WHOLE array dark AND the branch flag dark
+(debounced) — the full crossing under the robot. Either signal
+alone never stops, however long it persists.
+
 ## 1.66.6 — forks: the branch flag now picks the left line
 
 At a branch the array sees TWO dark clusters and the global

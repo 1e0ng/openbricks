@@ -81,7 +81,8 @@ class QTRReading:
         r.position()            # global centroid, mm
         r.leftmost_position()   # fork clusters
         r.rightmost_position()
-        r.dark_count()          # intersection signal
+        r.dark_count()          # how many elements on the line
+        r.all_dark()            # whole array on the line
         r.max()                 # brightest value (phantom gate)
     """
 
@@ -113,6 +114,15 @@ class QTRReading:
 
     def dark_count(self):
         return self._array.dark_count(self)
+
+    def all_dark(self):
+        """Every element over the line — with the branch flag dark
+        too, the whole crossing is under the robot (the follower's
+        stop condition)."""
+        for e in self.elements:
+            if not e.dark():
+                return False
+        return True
 
     def position(self):
         return self._array.position(self)

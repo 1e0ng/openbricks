@@ -33,14 +33,13 @@ class QTRLawTests(unittest.TestCase):
         cls.ns = _load()
 
     def _tick(self, pos, fork=None, peak=900, branch=False,
-              far_edge=False, side=0, dark=1, state=None, dt=0.01):
+              all_dark=False, side=0, state=None, dt=0.01):
         if state is None:
             state = self.ns["PD_STATE0"]
         if fork is None:
             fork = pos
         return self.ns["_pd_wheel_speeds"](pos, fork, peak, branch,
-                                           far_edge, side, dark,
-                                           state, dt)
+                                           all_dark, side, state, dt)
 
     def test_centred_line_drives_straight(self):
         speeds, _ = self._tick(0.0)
@@ -63,24 +62,27 @@ class QTRLawTests(unittest.TestCase):
 
     def test_intersection_needs_consecutive_ticks(self):
         # Bench 2026-08-07: all 7 elements crossed the threshold for
-        # ONE tick during a plain line crossing — stopping on the
-        # count alone halts the robot mid-corner. A real bar persists.
-        n = self.ns["INTERSECTION_COUNT"]
+        # ONE tick during a plain line crossing — stopping without
+        # the debounce halts the robot mid-corner. A real crossing
+        # persists.
         state = self.ns["PD_STATE0"]
-        speeds, state = self._tick(+2.0, dark=n, state=state)
+        speeds, state = self._tick(+2.0, branch=True, all_dark=True,
+                                   state=state)
         # assertTrue, not assertIsNotNone: MP's unittest %-formats
         # the default message and a TUPLE value spreads its args.
         self.assertTrue(speeds is not None)   # 1 tick: keep driving
         for _ in range(self.ns["INTERSECTION_TICKS"] - 1):
-            speeds, state = self._tick(+2.0, dark=n, state=state)
+            speeds, state = self._tick(+2.0, branch=True,
+                                       all_dark=True, state=state)
         self.assertIsNone(speeds)             # persisted: stop
 
     def test_intersection_streak_resets_on_a_clean_tick(self):
-        n = self.ns["INTERSECTION_COUNT"]
         state = self.ns["PD_STATE0"]
-        _, state = self._tick(+2.0, dark=n, state=state)
-        _, state = self._tick(+2.0, dark=1, state=state)   # transient
-        speeds, state = self._tick(+2.0, dark=n, state=state)
+        _, state = self._tick(+2.0, branch=True, all_dark=True,
+                              state=state)
+        _, state = self._tick(+2.0, state=state)           # transient
+        speeds, state = self._tick(+2.0, branch=True, all_dark=True,
+                                   state=state)
         self.assertTrue(speeds is not None,
                         "a broken streak must start over")
 
@@ -128,36 +130,31 @@ class QTRLawTests(unittest.TestCase):
         (l, r), _ = self._tick(None, fork=None, branch=True, side=+1)
         self.assertTrue(l > r, (l, r))        # recovery, not a crash
 
-    def test_branches_on_both_sides_stop(self):
-        # THE intersection definition: flag dark (line under the
-        # flag side) AND the far-edge element dark (line past the
-        # opposite end) — held for the debounce.
+    def test_stop_requires_all_dark_AND_branch(self):
+        # The user's stop rule: only the whole array dark together
+        # with the branch flag stops the run — held for the
+        # debounce.
         state = self.ns["PD_STATE0"]
         speeds = ()
         for _ in range(self.ns["INTERSECTION_TICKS"]):
             speeds, state = self._tick(0.0, branch=True,
-                                       far_edge=True, state=state)
+                                       all_dark=True, state=state)
         self.assertIsNone(speeds)
 
-    def test_a_branch_on_one_side_never_stops(self):
-        # Flag alone (fork mode) or far edge alone (left spur): both
-        # keep driving, however long they persist.
+    def test_either_signal_alone_never_stops(self):
+        # Flag alone (fork mode) or all-dark alone (a bar the flag
+        # straddles, a wide blob): both keep driving, however long
+        # they persist.
         state = self.ns["PD_STATE0"]
         for _ in range(self.ns["INTERSECTION_TICKS"] * 3):
             speeds, state = self._tick(0.0, branch=True,
-                                       far_edge=False, state=state)
+                                       all_dark=False, state=state)
             self.assertTrue(speeds is not None)
         state = self.ns["PD_STATE0"]
         for _ in range(self.ns["INTERSECTION_TICKS"] * 3):
             speeds, state = self._tick(0.0, branch=False,
-                                       far_edge=True, state=state)
+                                       all_dark=True, state=state)
             self.assertTrue(speeds is not None)
-
-    def test_both_sides_transient_is_debounced(self):
-        state = self.ns["PD_STATE0"]
-        speeds, state = self._tick(0.0, branch=True, far_edge=True,
-                                   state=state)
-        self.assertTrue(speeds is not None)   # one tick: drive on
 
     def test_state_threads_the_error(self):
         _, state = self._tick(+7.5)
