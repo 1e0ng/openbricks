@@ -48,14 +48,14 @@ _BARS = " .:-=+*#%@"
 
 while True:
     r = qtr.read()
-    bars = "".join(_BARS[min(v * (len(_BARS) - 1) // 1000,
-                             len(_BARS) - 1)] for v in r)
-    pos = qtr.position(r)
-    left = qtr.leftmost_position(r)
+    bars = "".join(_BARS[min(e.value * (len(_BARS) - 1) // 1000,
+                             len(_BARS) - 1)] for e in r)
+    pos = r.position()
+    left = r.leftmost_position()
     print("[%s]  pos=%s  left=%s  dark=%d  branch=%s" % (
         bars,
         "----" if pos is None else "%+6.1fmm" % pos,
         "----" if left is None else "%+6.1fmm" % left,
-        qtr.dark_count(r),
+        r.dark_count(),
         "DARK" if branch.dark() else "-"))
     time.sleep_ms(100)

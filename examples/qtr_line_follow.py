@@ -58,18 +58,15 @@ MAX_DPS = 300          # never reverse. Cap scaled with the gentle
                        # cruise: it bounds steering AND the recovery
                        # pivot, so nothing spins fast on a slow run.
 
-# An INTERSECTION is branches on BOTH sides at once: the branch
-# flag dark (line under the flag's side) AND the array's far-edge
-# element dark (line extending past the opposite end) — or the
-# whole array dark (a perpendicular bar, which is also both-sides
-# and catches bars the flag straddles). Either way the condition
-# must hold for INTERSECTION_TICKS CONSECUTIVE polls: bench
-# 2026-08-07 recorded all 7 elements crossing the threshold for a
-# single tick during a plain line crossing ([:*#%%#-] dark=7) — a
-# real intersection stays under the array for many polls (~20 mm of
-# travel), a transient for one or two. A branch on ONE side never
-# stops: it routes through the fork policy below.
-INTERSECTION_COUNT = 7
+# An INTERSECTION is the WHOLE array dark AND the branch flag dark
+# at the same time — the full crossing is under the robot. The
+# condition must hold for INTERSECTION_TICKS CONSECUTIVE polls:
+# bench 2026-08-07 recorded all 7 elements crossing the threshold
+# for a single tick during a plain line crossing ([:*#%%#-]
+# dark=7) — a real intersection stays under the array for many
+# polls (~20 mm of travel), a transient for one or two. A branch on
+# ONE side (flag alone, or a wide array reading alone) never stops:
+# it routes through the fork policy below.
 INTERSECTION_TICKS = 3
 
 # A real line is a strong LOCALIZED peak; lifted off the mat (or
@@ -95,8 +92,7 @@ def _clamp(dps):
 
 
 def _pd_wheel_speeds(position_mm, fork_mm, peak, branch_dark,
-                     far_edge_dark, last_side, dark_count, state,
-                     dt_s):
+                     all_dark, last_side, state, dt_s):
     """One control tick: ``(decision, state)``.
 
     ``decision`` is ``None`` (intersection: stop) or
@@ -109,15 +105,14 @@ def _pd_wheel_speeds(position_mm, fork_mm, peak, branch_dark,
     which end (see BRANCH_SIDE), the law only knows that during a
     branch the global centroid points between the two lines and the
     chosen cluster is the real one. Both + = right of centre,
-    ``None`` when nothing is dark. ``far_edge_dark`` is the array
-    element FARTHEST from the flag: dark together with the flag =
-    branches on both sides = an intersection. ``peak`` is the
+    ``None`` when nothing is dark. ``all_dark`` is the whole array
+    over the line: together with the flag dark, the full crossing
+    is under the robot — the intersection. ``peak`` is the
     brightest calibrated reading — a weak peak is off-mat mush and
     falls to the ``last_side`` (+1/-1) recovery steer.
     """
     prev_error, streak = state
-    if (dark_count >= INTERSECTION_COUNT
-            or (branch_dark and far_edge_dark)):
+    if branch_dark and all_dark:
         streak += 1
         if streak >= INTERSECTION_TICKS:
             return None, (prev_error, streak)
@@ -176,21 +171,18 @@ db = DriveBase(left_motor, right_motor,
 print("following. Intersection stops the run.")
 state = PD_STATE0
 while True:
-    readings = qtr.read()
+    reading = qtr.read()
     branch_dark = branch.dark()
     if BRANCH_SIDE == "right":
-        fork_pos = qtr.leftmost_position(readings)
-        far_edge_dark = readings[0] >= 300     # leftmost element
+        fork_pos = reading.leftmost_position()
     else:
-        fork_pos = qtr.rightmost_position(readings)
-        far_edge_dark = readings[-1] >= 300    # rightmost element
-    speeds, state = _pd_wheel_speeds(qtr.position(readings),
+        fork_pos = reading.rightmost_position()
+    speeds, state = _pd_wheel_speeds(reading.position(),
                                      fork_pos,
-                                     max(readings),
+                                     reading.max(),
                                      branch_dark,
-                                     far_edge_dark,
+                                     reading.all_dark(),
                                      qtr.last_side(),
-                                     qtr.dark_count(readings),
                                      state, 0.010)
     if speeds is None:
         db.stop(then="brake")

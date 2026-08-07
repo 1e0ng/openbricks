@@ -38,6 +38,106 @@ import time
 from openbricks import pins as _pins
 
 
+class QTRElement:
+    """One calibrated element reading, as returned by
+    :meth:`QTRArray.read`.
+
+    ``value`` is the 0 (mat) .. 1000 (line) int; ``dark()`` /
+    ``white()`` answer per element exactly like
+    :meth:`QTRChannel.dark`. Deliberately NOT an int subclass:
+    MicroPython cannot reflect-compare ``int`` against one, so
+    ``max()`` over such readings raises on the hub while passing on
+    the desktop — numeric code uses ``.value`` instead
+    (``max(e.value for e in readings)``)."""
+
+    def __init__(self, value, threshold):
+        self.value = value
+        self._threshold = threshold
+
+    def dark(self):
+        """True when this element is over the line."""
+        return self.value >= self._threshold
+
+    def white(self):
+        """True when this element is over the mat."""
+        return self.value < self._threshold
+
+    def __repr__(self):
+        return "QTRElement(%d, %s)" % (
+            self.value, "dark" if self.dark() else "white")
+
+
+class QTRReading:
+    """One snapshot of the whole array, as returned by
+    :meth:`QTRArray.read`.
+
+    Behaves like the list of :class:`QTRElement` it holds (index,
+    iterate, ``len``) and carries every aggregate view of exactly
+    this snapshot — so a control tick reads once and derives
+    everything from the same coherent sample::
+
+        r = qtr.read()
+        r[0].dark()             # per element
+        r.position()            # global centroid, mm
+        r.leftmost_position()   # fork clusters
+        r.rightmost_position()
+        r.dark_count()          # how many elements on the line
+        r.all_dark()            # whole array on the line
+        r.max()                 # brightest value (phantom gate)
+    """
+
+    def __init__(self, elements, array):
+        self.elements = elements
+        self._array = array
+
+    def __len__(self):
+        return len(self.elements)
+
+    def __getitem__(self, i):
+        return self.elements[i]
+
+    def __iter__(self):
+        return iter(self.elements)
+
+    def values(self):
+        """The plain 0..1000 ints, left to right."""
+        return [e.value for e in self.elements]
+
+    def max(self):
+        """The brightest calibrated value in this snapshot — the
+        follower's off-mat phantom gate."""
+        best = 0
+        for e in self.elements:
+            if e.value > best:
+                best = e.value
+        return best
+
+    def dark_count(self):
+        return self._array.dark_count(self)
+
+    def all_dark(self):
+        """Every element over the line — with the branch flag dark
+        too, the whole crossing is under the robot (the follower's
+        stop condition)."""
+        for e in self.elements:
+            if not e.dark():
+                return False
+        return True
+
+    def position(self):
+        return self._array.position(self)
+
+    def leftmost_position(self):
+        return self._array.leftmost_position(self)
+
+    def rightmost_position(self):
+        return self._array.rightmost_position(self)
+
+    def __repr__(self):
+        return "QTRReading(%s)" % ",".join(
+            str(e.value) for e in self.elements)
+
+
 class QTRArray:
     """Analog QTR/QTRX reflectance array on ESP32 ADC pins.
 
@@ -212,8 +312,12 @@ class QTRArray:
     # ---- reading -----------------------------------------------------
 
     def read(self):
-        """Calibrated readings, one per element, 0 (mat) .. 1000
-        (line), left to right."""
+        """One calibrated snapshot: a :class:`QTRReading` holding a
+        :class:`QTRElement` per array element, left to right —
+        ``r[i].value`` 0 (mat) .. 1000 (line), ``r[i].dark()`` /
+        ``r[i].white()``, and the aggregate views (``r.position()``,
+        ``r.dark_count()``, ...) computed from exactly this
+        sample."""
         self._check_calibration()
         out = []
         for i, v in enumerate(self._read_u16()):
@@ -223,8 +327,8 @@ class QTRArray:
                 n = 0
             elif n > self._FULL_SCALE:
                 n = self._FULL_SCALE
-            out.append(n)
-        return out
+            out.append(QTRElement(n, self._threshold))
+        return QTRReading(out, self)
 
     def dark_count(self, readings=None):
         """How many elements are over the line — the intersection /
@@ -232,7 +336,7 @@ class QTRArray:
         a branch stub only one side)."""
         if readings is None:
             readings = self.read()
-        return sum(1 for r in readings if r >= self._threshold)
+        return sum(1 for r in readings if r.dark())
 
     def position(self, readings=None):
         """Line centre in mm relative to the array centre; positive =
@@ -249,10 +353,10 @@ class QTRArray:
         moment = 0.0
         seen = False
         for r, x in zip(readings, self._x_mm):
-            if r >= self._threshold:
+            if r.dark():
                 seen = True
-            weight_sum += r
-            moment += r * x
+            weight_sum += r.value
+            moment += r.value * x
         if not seen:
             return None
         pos = moment / weight_sum
@@ -274,15 +378,14 @@ class QTRArray:
         order = range(n - 1, -1, -1) if rightmost else range(n)
         first = None
         for i in order:
-            if readings[i] >= self._threshold:
+            if readings[i].dark():
                 first = i
                 break
         if first is None:
             return None
         last = first
         step = -1 if rightmost else 1
-        while 0 <= last + step < n and \
-                readings[last + step] >= self._threshold:
+        while 0 <= last + step < n and readings[last + step].dark():
             last += step
         i0, i1 = (last, first) if rightmost else (first, last)
         lo = i0 - 1 if i0 > 0 else 0
@@ -290,8 +393,8 @@ class QTRArray:
         weight_sum = 0
         moment = 0.0
         for i in range(lo, hi + 1):
-            weight_sum += readings[i]
-            moment += readings[i] * self._x_mm[i]
+            weight_sum += readings[i].value
+            moment += readings[i].value * self._x_mm[i]
         return moment / weight_sum
 
     def leftmost_position(self, readings=None):
@@ -350,8 +453,12 @@ class QTRChannel(QTRArray):
 
     def value(self):
         """Calibrated reading, 0 (mat) .. 1000 (marker/line)."""
-        return self.read()[0]
+        return self.read()[0].value
 
     def dark(self):
         """True when the element is over a marker/line."""
         return self.value() >= self._threshold
+
+    def white(self):
+        """True when the element is over the mat."""
+        return not self.dark()

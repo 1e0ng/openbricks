@@ -162,7 +162,7 @@ class CalibrationPersistenceTests(unittest.TestCase):
         fresh = QTRArray(pins=_PINS, pitch_mm=8.0)
         fresh.load_calibration(self._PATH)
         _script(dark_pins=(5,))
-        self.assertEqual(fresh.read()[4], 1000)
+        self.assertEqual(fresh.read()[4].value, 1000)
         self.assertEqual(fresh.position(), 0.0)
 
     def test_missing_file_names_the_calibrate_script(self):
@@ -219,9 +219,9 @@ class ReadingTests(unittest.TestCase):
     def test_read_normalizes_to_full_scale(self):
         _script(dark_pins=(5,))
         r = self.qtr.read()
-        self.assertEqual(r[4], 1000)            # the dark element
-        self.assertTrue(all(v == 0 for i, v in enumerate(r) if i != 4),
-                        r)
+        self.assertEqual(r[4].value, 1000)      # the dark element
+        self.assertTrue(all(e.value == 0
+                            for i, e in enumerate(r) if i != 4), r)
 
     def test_centred_line_reads_zero_mm(self):
         _script(dark_pins=(5,))                 # pin 5 = middle of 9
@@ -271,6 +271,46 @@ class ReadingTests(unittest.TestCase):
         _script(dark_pins=())
         self.assertIsNone(self.qtr.leftmost_position())
         self.assertIsNone(self.qtr.rightmost_position())
+
+    def test_reading_is_the_user_facing_snapshot(self):
+        # THE call-site contract, verbatim from the user:
+        #   reading = qtr.read()
+        #   reading.max(); reading.position()
+        #   reading[0].dark(); reading[1].white(); reading[-1].dark()
+        _script(dark_pins=(5, 6))
+        reading = self.qtr.read()
+        self.assertEqual(reading.max(), 1000)
+        self.assertEqual(reading.position(), 4.0)
+        self.assertFalse(reading[0].dark())
+        self.assertTrue(reading[1].white())
+        self.assertFalse(reading[-1].dark())
+        self.assertTrue(reading[4].dark())      # element 4 = pin 5
+        # List-like: len, iterate, negative index; elements are NOT
+        # int subclasses (MicroPython cannot reflect-compare int
+        # against one — max(reading) would raise on the hub), so
+        # numeric code uses .value / .values() / .max().
+        self.assertEqual(len(reading), 9)
+        self.assertEqual([e.dark() for e in reading],
+                         [False, False, False, False, True, True,
+                          False, False, False])
+        self.assertEqual(reading.values()[4], 1000)
+        self.assertEqual(reading.dark_count(), 2)
+        self.assertFalse(reading.all_dark())
+        _script(dark_pins=_PINS)                # everything on line
+        self.assertTrue(self.qtr.read().all_dark())
+        self.assertEqual(reading.leftmost_position(),
+                         reading.rightmost_position())
+        self.assertTrue("dark" in repr(reading[4]), repr(reading[4]))
+
+    def test_channel_white_mirrors_dark(self):
+        from openbricks.drivers.qtr import QTRChannel
+        ADC.reads = {9: _swing()}
+        ch = QTRChannel(pin=9)
+        ch.calibrate(duration_ms=100)
+        ADC.reads = {9: _LINE}
+        self.assertTrue(ch.dark()); self.assertFalse(ch.white())
+        ADC.reads = {9: _MAT}
+        self.assertTrue(ch.white()); self.assertFalse(ch.dark())
 
     def test_dark_count_is_the_intersection_signal(self):
         _script(dark_pins=(3, 4, 5, 6, 7, 8, 9))    # stop bar

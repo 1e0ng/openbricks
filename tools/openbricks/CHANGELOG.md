@@ -3,6 +3,32 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.66.7 — read() returns a snapshot object
+
+`QTRArray.read()` now returns a `QTRReading`: list-like (index —
+negative too — iterate, `len`) over `QTRElement` objects, each with
+`.value` and `QTRChannel`-style `.dark()`/`.white()`, plus every
+aggregate view computed from exactly that sample::
+
+    reading = qtr.read()
+    reading.max()             # brightest value
+    reading.position()        # centroid, mm
+    reading[0].dark()
+    reading[-1].dark()
+    reading.dark_count(); reading.leftmost_position(); ...
+
+Elements are deliberately not int subclasses — MicroPython cannot
+reflect-compare `int` against one, so `max(reading)` would raise on
+the hub while passing on the desktop; numeric code uses `.value` /
+`.values()` / `.max()`. The examples read once per control tick and
+derive everything from the one snapshot. `QTRChannel` gains
+`white()`.
+
+The snapshot also answers `all_dark()`, and the follower's stop
+rule is now exactly: the WHOLE array dark AND the branch flag dark
+(debounced) — the full crossing under the robot. Either signal
+alone never stops, however long it persists.
+
 ## 1.66.6 — forks: the branch flag now picks the left line
 
 At a branch the array sees TWO dark clusters and the global
