@@ -2597,5 +2597,48 @@ class StopInterruptRelayTests(unittest.TestCase):
         self.assertEqual(self.resignals, [])
 
 
+class ProgramRunningFlagTests(unittest.TestCase):
+    """``launcher.program_running()`` — the hub-wide "robot is
+    running" signal the BLE watcher's run-indicator blink polls."""
+
+    def setUp(self):
+        launcher._singleton = None
+        self.addCleanup(setattr, launcher, "_singleton", None)
+        self.addCleanup(_cleanup_program)
+
+    def test_false_with_no_launcher(self):
+        self.assertFalse(launcher.program_running())
+
+    def test_false_while_idle(self):
+        launcher._singleton = launcher.Launcher(
+            _make_button(), program_path="/x.py")
+        self.assertFalse(launcher.program_running())
+
+    def test_tracks_the_running_flag(self):
+        inst = launcher.Launcher(_make_button(), program_path="/x.py")
+        launcher._singleton = inst
+        inst._running = True
+        self.assertTrue(launcher.program_running())
+        inst._running = False
+        self.assertFalse(launcher.program_running())
+
+    def test_true_while_the_program_executes(self):
+        # The exec'd program itself observes the flag — proves the
+        # button-start path raises it before user code runs and
+        # lowers it after.
+        path = _write_program(
+            "from openbricks import launcher\n"
+            "launcher._observed_running = launcher.program_running()\n")
+        launch = launcher.Launcher(_make_button(), program_path=path)
+        launcher._singleton = launch
+        self.addCleanup(lambda: (delattr(launcher, "_observed_running")
+                                 if hasattr(launcher, "_observed_running")
+                                 else None))
+        launch._pending = "start"
+        launch._drain_pending()
+        self.assertTrue(launcher._observed_running)
+        self.assertFalse(launcher.program_running())
+
+
 if __name__ == "__main__":
     unittest.main()

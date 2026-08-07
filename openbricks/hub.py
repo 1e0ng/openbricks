@@ -34,7 +34,11 @@ into a flash-mode drop.
 Both hubs auto-wire the BLE toggle button by default (``bluetooth=True``):
 **constructing a hub** restores the persisted BLE state, installs a
 short-press handler on the ``bluetooth_button_pin``, and — on the S3 —
-paints the WS2812 blue (BLE on) or yellow (BLE off). Put
+paints the WS2812 blue (BLE on) or yellow (BLE off). While a user
+program runs, the same LED **flashes** its state colour at 1 Hz as a
+"robot is running" indicator (plain on/off blink on the classic
+ESP32's single-colour LED), returning to the solid idle colour when
+the program stops. Put
 ``hub = ESP32S3DevkitHub()`` in your ``main.py`` to turn that on;
 omit the call (or pass ``bluetooth=False``) to keep the button free
 for your own use.
@@ -161,7 +165,8 @@ class ESP32DevkitHub(Hub):
     ``bluetooth`` default True wires the button to a short-press BLE
     toggle and restores the persisted state at boot (see
     ``openbricks.bluetooth_button`` / ``openbricks.bluetooth``). The
-    onboard LED is single-colour so no colour feedback, just the toggle.
+    onboard LED is single-colour so no colour feedback on toggle, but
+    it still blinks at 1 Hz while a user program runs (dark at idle).
     Pass ``bluetooth=False`` to skip the wiring entirely, or
     ``bluetooth_button_pin=<N>`` to use a different GPIO. Wire the
     button between the chosen GPIO and GND; an internal pull-up is
@@ -227,7 +232,9 @@ class ESP32S3DevkitHub(Hub):
 # Restores the persisted BLE state (default on for a fresh board),
 # installs a short-press handler on the BLE-toggle button that flips it,
 # and — if the hub has an RGB-capable LED — paints the LED to match
-# the current state (blue = on, yellow = off).
+# the current state (blue = on, yellow = off). The watcher's poll loop
+# also flashes the LED at 1 Hz while a user program runs (the run
+# indicator — see ``openbricks.bluetooth_button``).
 #
 # Kept out of the hub classes' namespace so the hub doesn't statically
 # depend on ``openbricks.bluetooth`` — the imports happen at the first
