@@ -81,12 +81,9 @@ def step_and_trace(label, counts, settle_ms=2000, poll_ms=100):
 
 print("\n========== ST3032 step-mode raw-register probe ==========")
 
-# Read present in the servo's BOOT mode first (wheel mode, stock limits)
-# to see the baseline format before we touch anything.
 print("\n--- present-position in wheel mode (stock limits) ---")
 print("  ", fmt(read_raw()))
 
-# Enable multi-turn step mode exactly as run_angle does.
 bus.write(SID, _REG_TORQUE, bytes([1]))
 bus.write(SID, _REG_MIN_ANGLE, bytes([0, 0]))
 bus.write(SID, _REG_MAX_ANGLE, bytes([0, 0]))
@@ -95,7 +92,6 @@ time.sleep_ms(100)
 print("\n--- present-position just after entering step mode ---")
 print("  ", fmt(read_raw()))
 
-# Modest speed cap (≈120 dps × 11.378 steps/dps).
 sp = 1365
 bus.write(SID, _REG_GOAL_SPEED, bytes([sp & 0xFF, (sp >> 8) & 0xFF]))
 
@@ -104,6 +100,5 @@ step_and_trace("B  +1024  (again — cumulative?)", 1024)
 step_and_trace("C  -2048  (half turn back)",    -2048)
 step_and_trace("D  +8192  (two full turns fwd)", 8192, settle_ms=4000)
 
-# Park: cut torque so the shaft is free.
 bus.write(SID, _REG_TORQUE, bytes([0]))
 print("\n--- done (torque off) ---")

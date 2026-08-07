@@ -31,6 +31,6 @@ print("looping in the MAIN THREAD via openbricks run.")
 print("Press the GPIO-4 stop button now...")
 while True:
     i += 1
-    if i % 20 == 0:                       # ~once a second
+    if i % 20 == 0:
         print("still looping, i =", i)
     time.sleep_ms(50)

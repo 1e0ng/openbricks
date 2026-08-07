@@ -25,11 +25,7 @@ from openbricks.drivers.st3215 import ST3215
 from openbricks.drivers.tcs34725 import TCS34725
 from openbricks.robotics import DriveBase
 
-# ----- wiring -----
 
-# Pins below are for the ESP32-S3 DevKitC-1 (avoid GPIO 19/20 = USB,
-# 26-37 = flash/PSRAM, 0/3/45/46 = strapping). On a classic ESP32
-# DevKitC-V4 use I2C 21/22 and remap the rest to that board's pins.
 I2C_SDA  = 15
 I2C_SCL  = 16
 
@@ -45,7 +41,6 @@ SERVO_ID = 1
 WHEEL_DIAMETER_MM = 56
 AXLE_TRACK_MM     = 114
 
-# ----- init -----
 
 i2c   = I2C(0, sda=Pin(I2C_SDA), scl=Pin(I2C_SCL), freq=400_000)
 imu   = BNO055(i2c)
@@ -60,7 +55,6 @@ drivebase = DriveBase(left, right,
                       wheel_diameter_mm=WHEEL_DIAMETER_MM,
                       axle_track_mm=AXLE_TRACK_MM)
 
-# Optional: a serial bus servo on a second UART.
 try:
     uart = UART(1, baudrate=1_000_000, tx=SERVO_TX, rx=SERVO_RX)
     arm  = ST3215(uart, servo_id=SERVO_ID)
@@ -68,7 +62,6 @@ except Exception as e:
     print("no servo attached:", e)
     arm = None
 
-# ----- main loop: drive until red -----
 
 while True:
     r, g, b = color.rgb()
@@ -84,7 +77,6 @@ while True:
     drivebase.drive(speed_mm_s=150, turn_rate_dps=0)
     time.sleep_ms(50)
 
-# Wave the arm once if present.
 if arm is not None:
     arm.move_to(180, speed=500)
     time.sleep_ms(500)

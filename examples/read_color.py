@@ -14,7 +14,7 @@ from openbricks.drivers.tcs34725 import TCS34725
 from openbricks.tools import wait
 
 
-i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3; 21/22 on classic ESP32
+i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 color = TCS34725(i2c, integration_ms=50, gain=4)
 
 

@@ -19,10 +19,9 @@ TX_PIN = 14
 RX_PIN = 6
 UART_ID = 1
 
-# FeeTech SCS bauds, most-likely-default first.
 BAUDS = [1_000_000, 500_000, 250_000, 115_200, 57_600, 38_400]
 
-ID_RANGE = range(1, 31)   # factory default is 1; users rarely go beyond 30.
+ID_RANGE = range(1, 31)
 
 
 def _checksum(parts):
@@ -33,14 +32,12 @@ def _checksum(parts):
 
 
 def ping_at(uart, servo_id):
-    body = bytes([servo_id, 2, 0x01])             # PING
+    body = bytes([servo_id, 2, 0x01])
     pkt  = b"\xFF\xFF" + body + bytes([_checksum(body)])
-    # Drain anything stale before TX.
     while uart.any():
         uart.read(uart.any())
     uart.write(pkt)
 
-    # Reply: FF FF ID LEN ERR CHK  →  6 bytes.
     deadline = time.ticks_ms() + 50
     buf = b""
     while len(buf) < 6 and time.ticks_diff(deadline, time.ticks_ms()) > 0:
@@ -50,8 +47,6 @@ def ping_at(uart, servo_id):
         else:
             time.sleep_ms(2)
 
-    # Reject 6 bytes of noise: must start with the SCS header AND
-    # echo the ID we pinged.
     if len(buf) != 6:
         return False
     if not buf.startswith(b"\xFF\xFF"):
@@ -66,7 +61,6 @@ def main():
     found_any = False
     for baud in BAUDS:
         uart = UART(UART_ID, baudrate=baud, tx=TX_PIN, rx=RX_PIN, timeout=50)
-        # Settle.
         time.sleep_ms(20)
         hits = []
         for sid in ID_RANGE:

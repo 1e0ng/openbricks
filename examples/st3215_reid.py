@@ -31,14 +31,11 @@ import time
 from openbricks.drivers.st3215 import _SCServoBus
 
 
-CURRENT_ID = 1     # the ID the servo answers on right now (factory = 1)
-NEW_ID     = 2     # the ID you want it to use (e.g. 2 for the right wheel)
+CURRENT_ID = 1
+NEW_ID     = 2
 
 UART_ID, TX_PIN, RX_PIN = 1, 14, 6
 
-# SCS register addresses we use:
-#   0x37  Lock — 0 = unlocked (allow EEPROM writes), 1 = locked
-#   0x05  ID
 _REG_LOCK = 0x37
 _REG_ID   = 0x05
 
@@ -51,30 +48,22 @@ def main():
 
     bus = _SCServoBus(UART_ID, TX_PIN, RX_PIN)
 
-    # Verify the source servo is actually there.
     if not bus.ping(CURRENT_ID):
         print("No servo replied at ID %d. Aborting." % CURRENT_ID)
         print("Check: only one servo plugged in? 12 V present? cable seated?")
         return
     print("[1] found servo at ID %d" % CURRENT_ID)
 
-    # Unlock EEPROM writes. Required by SCS firmware before any
-    # EEPROM register (lock=0x37, id=0x05, baud=0x06, ...) accepts a write.
     bus.write(CURRENT_ID, _REG_LOCK, bytes([0]))
     print("[2] EEPROM unlocked")
 
-    # Write the new ID. After this packet, the servo IMMEDIATELY
-    # starts replying at NEW_ID — any further writes to CURRENT_ID
-    # are ignored.
     bus.write(CURRENT_ID, _REG_ID, bytes([NEW_ID]))
     print("[3] new ID written (servo is now ID=%d)" % NEW_ID)
     time.sleep_ms(50)
 
-    # Re-lock so the new ID survives accidental writes.
     bus.write(NEW_ID, _REG_LOCK, bytes([1]))
     print("[4] EEPROM re-locked")
 
-    # Verify by pinging the new ID.
     if bus.ping(NEW_ID):
         print("[5] confirmed: servo now answers at ID %d." % NEW_ID)
     else:

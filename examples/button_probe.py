@@ -39,9 +39,6 @@ import time
 
 from machine import Pin
 
-# Curated, board-safe candidates for a button on ESP32-S3. Skips the
-# servo UART (6, 7, 14), USB (19, 20) and the SPI flash / PSRAM range
-# (26-37, 43-44) which must not be reconfigured at runtime.
 _CANDIDATES = [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18,
                21, 38, 39, 40, 41, 42, 45, 47, 48]
 
@@ -74,6 +71,6 @@ while True:
             last[g] = v
     time.sleep_ms(5)
     beat += 1
-    if beat % 1000 == 0:    # ~5 s heartbeat so you know it's alive
+    if beat % 1000 == 0:
         print("t=%6dms  ...watching, no change since last beat" %
               time.ticks_diff(time.ticks_ms(), t0))

@@ -46,7 +46,6 @@ def _buffered():
 
 
 def _committed():
-    # What the old code did: commit to flash on every single line.
     for i in range(N):
         print(LINE % i)
         log.flush()
@@ -59,15 +58,12 @@ def main():
               "print() is not tee'd and there is nothing to measure.")
         return
 
-    # Warm up: the first write of a session can pay for directory
-    # metadata that has nothing to do with per-line cost.
     print("warming up")
     log.flush()
 
     buffered_us  = _timed(_buffered)
     committed_us = _timed(_committed)
 
-    # Summary last, so its own prints are outside both measurements.
     print("")
     print("--- run-log write cost, %d lines each ---" % N)
     print("buffered print (current):  %7.1f us/line  (%d us total)"

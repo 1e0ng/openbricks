@@ -39,13 +39,13 @@ from openbricks.tools import wait
 left = JGB37Motor(
     in1=1, in2=2, pwm=17,
     encoder_a=7, encoder_b=8,
-    counts_per_output_rev=1320,  # 11 CPR * 30:1 gearbox * 4 (quadrature)
+    counts_per_output_rev=1320,
 )
 right = JGB37Motor(
     in1=9, in2=10, pwm=11,
     encoder_a=12, encoder_b=13,
     counts_per_output_rev=1320,
-    invert=True,  # mirror image of the left motor
+    invert=True,
 )
 
 db = DriveBase(left, right, wheel_diameter_mm=65, axle_track_mm=120)

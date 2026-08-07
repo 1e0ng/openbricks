@@ -22,7 +22,7 @@ from machine import Pin
 
 from _openbricks_native import motor_process as m
 
-BUTTON_PIN = 4      # launcher default (program button)
+BUTTON_PIN = 4
 
 print("hard_tick_available:", m.hard_tick_available())
 t0 = m.hard_tick_count()
@@ -32,14 +32,10 @@ print("hard ticks in 500 ms:", t1 - t0, "(want ~500)")
 print("hard_button_config(%d) ->" % BUTTON_PIN,
       m.hard_button_config(BUTTON_PIN))
 print("stats now:", m.hard_button_stats())
-# No mode args: reads the pad without reconfiguring it.
 print("raw Pin(%d).value() while NOT pressed (want 1):" % BUTTON_PIN,
       Pin(BUTTON_PIN).value())
 probe = getattr(m, "hard_button_probe", None)
 if probe:
-    # (pin, ob_gpio_read, raw_last, raw_count, stable_pressed) —
-    # unpressed want (4, 1, 0, big, 0). ob_gpio_read=0 here while
-    # Pin reads 1 = shim/pad disagreement.
     print("sampler view (pin, shim_read, raw_last, raw_count, "
           "stable):", probe())
 print()

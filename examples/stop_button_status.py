@@ -21,9 +21,9 @@ print("debug = (stop_tick_ticks, fires, armed, requested)")
 print(">>> PRESS the GPIO-4 button — the loop should stop. <<<")
 i = 0
 try:
-    while i < 600:                      # ~30 s
+    while i < 600:
         i += 1
-        if i % 20 == 0:                 # ~once a second
+        if i % 20 == 0:
             print("debug:", n.stop_button_debug())
         time.sleep_ms(50)
 except KeyboardInterrupt:

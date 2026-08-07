@@ -37,13 +37,6 @@ from openbricks.robotics import DriveBase
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
 right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6, invert=True)
-# ``db.move_wheels(left, right)`` puts both setpoints in ONE
-# sync-write packet, so the wheels change together. It replaces the
-# SyncServoGroup this example used to build: adopting wheels into a
-# DriveBase hands their UART to the native driver, and a
-# SyncServoGroup writes through the MicroPython one — two drivers on
-# a single wire. The chassis dimensions matter only to
-# straight()/turn(); this routine steers by wheel speeds.
 db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
@@ -53,23 +46,10 @@ left_sensor = TCS34725(mux[1])
 right_sensor = TCS34725(mux[0])
 
 
-# Below this ambient (0..100) the surface counts as the line. Between
-# a typical mat (~30+) and a matte black line (~5-10); calibrate on
-# your own surfaces.
-# Retuned 5 -> 20 when the driver defaults moved to gain=16 /
-# integration_ms=2.4: normalized ambient() reads ~4x higher
-# (gain x4, full scale /10). 20 matches line_follow.py's
-# threshold under the same configuration.
 LINE_AMBIENT = 20
 
 
 def align_on_line():
-    # Drive forward until each sensor sees the line; brake that side.
-    #
-    # No print() inside the poll loop: each one streams over the BLE
-    # console and stretches a 10 ms tick to many times that, so the
-    # wheel brakes long after its sensor crossed the line. Readings
-    # are collected and reported after each wheel stops instead.
 
     approach_dps = 100
     poll_ms = 10
@@ -79,10 +59,6 @@ def align_on_line():
     right_done = False
     left_ambient = None
     right_ambient = None
-    # Per-wheel speeds, updated as each side arrives. Zeroing one
-    # side stops that wheel while the other keeps creeping — same
-    # independent-stop behaviour as the old per-motor brake(), but
-    # every change still leaves in a single packet.
     speeds = [approach_dps, approach_dps]
     db.move_wheels(speeds[0], speeds[1])
     try:
@@ -106,8 +82,6 @@ def align_on_line():
                 return
             wait(poll_ms)
     finally:
-        # Whatever ends the loop — success, timeout, Ctrl-C — no
-        # wheel keeps creeping. One call, both wheels.
         db.stop(then="brake")
     raise RuntimeError(
         "no line found within %d ms (last ambient: left=%r right=%r) — "

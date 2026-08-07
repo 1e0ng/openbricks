@@ -26,7 +26,7 @@ import time
 
 from machine import I2C, Pin
 
-I2C_SDA, I2C_SCL = 15, 16     # ESP32-S3 convention (21/22 on classic)
+I2C_SDA, I2C_SCL = 15, 16
 
 i2c = I2C(0, sda=Pin(I2C_SDA), scl=Pin(I2C_SCL), freq=400_000)
 print("hammering i2c.scan() — press the STOP button whenever you like")
