@@ -15,26 +15,22 @@ from openbricks.robotics import DriveBase
 
 # --- control law (pure logic, unit-tested in tests/test_qtr_line_follow.py) ---
 
-CRUISE_DPS = 100
-KP = 14.0
-KD = 0.6
-MAX_DPS = 300
+CRUISE_DPS = 200
+KP = 5.0
+MAX_DPS = 400
 
 
 def _clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def _pd_wheel_speeds(reading, branch_dark, prev_error, dt_s):
+def _p_wheel_speeds(reading, branch_dark, prev_error):
     if branch_dark and reading.all_dark():
         return None, prev_error
     error = reading.left_edge_position()
     if error is None:
         error = prev_error if prev_error is not None else 0.0
-    derivative = 0.0
-    if prev_error is not None and dt_s > 0:
-        derivative = (error - prev_error) / dt_s
-    steer = KP * error + KD * derivative
+    steer = KP * error
     return (_clamp(CRUISE_DPS + steer),
             _clamp(CRUISE_DPS - steer)), error
 
@@ -61,15 +57,11 @@ db = DriveBase(left_motor, right_motor,
 
 print("following. Intersection stops the run.")
 prev_error = None
-last_ms = time.ticks_ms()
 while True:
     reading = qtr.read()
     branch_dark = branch.dark()
-    now_ms = time.ticks_ms()
-    dt_s = time.ticks_diff(now_ms, last_ms) / 1000
-    last_ms = now_ms
-    speeds, prev_error = _pd_wheel_speeds(reading, branch_dark,
-                                          prev_error, dt_s)
+    speeds, prev_error = _p_wheel_speeds(reading, branch_dark,
+                                         prev_error)
     if speeds is None:
         db.stop()
         print("intersection - stopped")
@@ -77,4 +69,4 @@ while True:
     if branch_dark:
         print("branch marker")
     db.move_wheels(speeds[0], speeds[1])
-    time.sleep_ms(10)
+    time.sleep_ms(5)

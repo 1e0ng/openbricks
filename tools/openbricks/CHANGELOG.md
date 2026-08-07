@@ -3,6 +3,14 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.69.2 — qtr_line_follow: P-only, faster
+
+The follower is now a pure P controller (`_p_wheel_speeds`): `KD`,
+the derivative, and the measured-dt machinery are gone — dt existed
+only for the derivative. `KP` = 5.0, `CRUISE_DPS` = 200,
+`MAX_DPS` = 400, loop sleep 5 ms. Stop rule, left-edge steering,
+and the lost-line hold are unchanged.
+
 ## 1.69.1 — a self-ending program no longer phantom-restarts
 
 Bench 2026-08-07: press start once, the line follower runs, stops

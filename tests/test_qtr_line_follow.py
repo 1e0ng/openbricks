@@ -6,7 +6,8 @@ example wires hardware at module level, so the pure control-law
 block is pulled out by its markers. What is pinned here is the
 CONTRACT the bench relies on: sign conventions, the immediate
 whole-array-AND-flag stop, always-steer-on-the-left-edge,
-real-dt derivative scaling, hold-on-lost-line, and the clamp.
+hold-on-lost-line, and the clamp. P-only since 1.69.2 — no
+derivative, no dt.
 """
 
 import tests._fakes  # noqa: F401
@@ -48,10 +49,9 @@ class QTRLawTests(unittest.TestCase):
     def setUpClass(cls):
         cls.ns = _load()
 
-    def _tick(self, left, branch=False, all_dark=False, prev=None,
-              dt=0.01):
+    def _tick(self, left, branch=False, all_dark=False, prev=None):
         reading = _Reading(left=left, all_dark=all_dark)
-        return self.ns["_pd_wheel_speeds"](reading, branch, prev, dt)
+        return self.ns["_p_wheel_speeds"](reading, branch, prev)
 
     def _cruise(self):
         c = self.ns["CRUISE_DPS"]
@@ -75,29 +75,12 @@ class QTRLawTests(unittest.TestCase):
         without, _ = self._tick(+10.0, branch=False)
         self.assertEqual(with_flag, without)
 
-    def test_derivative_damps_a_closing_error(self):
-        # Error shrinking fast: KD subtracts from the P steering.
-        (l_p, r_p), _ = self._tick(+10.0)              # no history
-        (l_d, r_d), _ = self._tick(+10.0, prev=20.0)   # was worse
-        self.assertTrue(l_d - r_d < l_p - r_p,
-                        ((l_p, r_p), (l_d, r_d)))
-
-    def test_derivative_uses_the_measured_dt(self):
-        # The same error change over twice the time is HALF the
-        # rate: the slow tick must damp less. This is what pins
-        # "dt is measured, not assumed" — with a hardcoded dt both
-        # calls would return identical speeds.
-        (l_fast, r_fast), _ = self._tick(+10.0, prev=20.0, dt=0.01)
-        (l_slow, r_slow), _ = self._tick(+10.0, prev=20.0, dt=0.02)
-        self.assertTrue(l_slow - r_slow > l_fast - r_fast,
-                        ((l_fast, r_fast), (l_slow, r_slow)))
-
-    def test_zero_dt_skips_the_derivative(self):
-        # First loop iteration can measure dt == 0; pure P, no
-        # ZeroDivisionError.
-        (l, r), _ = self._tick(+10.0, prev=20.0, dt=0)
-        (l_p, r_p), _ = self._tick(+10.0)
-        self.assertEqual((l, r), (l_p, r_p))
+    def test_pure_p_history_does_not_change_steering(self):
+        # P-only law: prev_error exists ONLY for the lost-line hold —
+        # with a visible line, steering depends on the error alone.
+        a, _ = self._tick(+10.0)
+        b, _ = self._tick(+10.0, prev=50.0)
+        self.assertEqual(a, b)
 
     def test_intersection_stops_immediately(self):
         # Whole array dark AND flag dark in one snapshot: stop NOW —
