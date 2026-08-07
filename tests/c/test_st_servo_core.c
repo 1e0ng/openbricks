@@ -501,6 +501,139 @@ TEST(failed_read_marks_feedback_stale) {
     CHECK_EQ_INT(ob_sservo_speed_steps(&sv, 0), 0x10);
 }
 
+TEST(user_txn_write_and_read_full_cycle) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    sv.slots[0].config_step = 3;
+    ob_sservo_op_t op;
+    uint16_t val = 0;
+
+    // Nothing staged / bad args.
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), -2);
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 1, 1, 0x30, 300, 2), -1);
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 3, 0x30, 300, 2), -1);
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 3), -1);
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 0), -1);
+
+    // Write: staged once (second refused), pending until the ACK.
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 2), 0);
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 400, 2), -2);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), 0);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_USER_WRITE);
+    CHECK_EQ_INT(op.id, 7);
+    CHECK_EQ_INT(op.reg, 0x30);
+    CHECK_EQ_INT(op.data_len, 2);
+    CHECK_EQ_INT(op.data[0], 0x2C);          // 300 little-endian
+    CHECK_EQ_INT(op.data[1], 0x01);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_user_write_result(&sv, 1);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), 1);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), -2);  // consumed
+
+    // Read: ships as USER_READ, payload comes back little-endian.
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 2, 0x30, 0, 2), 0);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_USER_READ);
+    CHECK_EQ_INT(op.reg, 0x30);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t pl[2] = { 0x20, 0x03 };
+    ob_sservo_user_read_result(&sv, 1, pl, 2);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), 1);
+    CHECK_EQ_INT(val, 800);
+}
+
+TEST(user_txn_waits_for_config_and_outranks_speed) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_op_t op;
+
+    // Config unfinished: the user write must NOT ship yet.
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 2), 0);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_WRITE);           // config first
+    sv.slots[0].config_step = 3;
+
+    // Configured, with a dirty speed: user txn ships first.
+    ob_sservo_set_speed(&sv, 0, 1000);
+    sv.slots[0].torque_cmd = -1;                   // torque already on
+    sv.slots[0].torque_on = 1;
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_USER_WRITE);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_user_write_result(&sv, 1);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_SPEED);      // then the speed
+}
+
+TEST(user_txn_losses_retry_then_latch) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    sv.slots[0].config_step = 3;
+    ob_sservo_op_t op;
+    uint16_t val = 0;
+
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 2), 0);
+    // Every loss reissues the same op, until the latch.
+    for (int i = 0; i < OB_SSERVO_CONFIG_TRIES; i++) {
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_USER_WRITE);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_user_write_result(&sv, 0);
+    }
+    // Latched: no further ops issued for it...
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind == OB_SOP_USER_WRITE, 0);
+    // ...poll surfaces the failure ONCE, then the slot is clean.
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), -1);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), -2);
+    // A fresh stage starts a clean transaction.
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 500, 2), 0);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_USER_WRITE);
+}
+
+TEST(user_read_short_reply_counts_as_a_loss) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    sv.slots[0].config_step = 3;
+    ob_sservo_op_t op;
+    uint16_t val = 0;
+
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 2, 0x30, 0, 2), 0);
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t one = 0x55;
+    ob_sservo_user_read_result(&sv, 1, &one, 1);   // shorter than asked
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), 0);   // retrying
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_USER_READ);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t pl[2] = { 0x2C, 0x01 };
+    ob_sservo_user_read_result(&sv, 1, pl, 2);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), 1);
+    CHECK_EQ_INT(val, 300);
+}
+
+TEST(detach_mid_flight_clears_user_routing) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    sv.slots[0].config_step = 3;
+    ob_sservo_op_t op;
+
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 2), 0);
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.user_in_flight, 0);
+    ob_sservo_detach(&sv, 0);
+    CHECK_EQ_INT(sv.user_in_flight, -1);
+    // The late result routes nowhere and corrupts nothing (ASan).
+    ob_sservo_user_write_result(&sv, 1);
+    uint8_t pl[2] = { 0, 0 };
+    sv.user_in_flight = -1;
+    ob_sservo_user_read_result(&sv, 1, pl, 2);
+}
+
 int main(void) {
     RUN(widened_feedback_decodes_speed_and_load);
     RUN(inverted_slot_flips_feedback_to_user_frame);
@@ -525,5 +658,10 @@ int main(void) {
     RUN(dead_servo_latches_config_failed_and_frees_the_bus);
     RUN(write_result_with_nothing_in_flight_is_inert);
     RUN(bounds_are_guarded);
+    RUN(user_txn_write_and_read_full_cycle);
+    RUN(user_txn_waits_for_config_and_outranks_speed);
+    RUN(user_txn_losses_retry_then_latch);
+    RUN(user_read_short_reply_counts_as_a_loss);
+    RUN(detach_mid_flight_clears_user_routing);
     return harness_exit("st_servo_core");
 }

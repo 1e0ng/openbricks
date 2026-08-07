@@ -358,18 +358,18 @@ jobs:
       - name: Stage openbricks gcov output for Codecov
         # Copy just our .gcov files to a dedicated directory — keeps
         # Codecov from indexing hundreds of MicroPython-core reports
-        # that got generated alongside ours. Matches the gcov files
-        # produced above 1:1.
+        # that got generated alongside ours. The list is DERIVED from
+        # the same source glob the gcov step iterates, so it cannot
+        # drift: a hand-maintained list here silently dropped every
+        # serial-bus core (st_bus, st_servo_core, ...) for months —
+        # codecov saw only the narrow c-unit view of those files, and
+        # a fully-tested PR failed patch coverage on lines the MP
+        # suite demonstrably executes.
         run: |
           mkdir -p coverage-out
-          for f in drivebase drivebase_core \
-                   encoder \
-                   motor_process motor_process_core \
-                   observer observer_core \
-                   pcnt_encoder \
-                   servo servo_core \
-                   trajectory trajectory_core; do
-            cp "native/micropython/ports/unix/${f}.c.gcov" "coverage-out/" || true
+          for src in "$GITHUB_WORKSPACE"/native/user_c_modules/openbricks/*.c; do
+            cp "native/micropython/ports/unix/$(basename "$src").gcov" \
+               "coverage-out/" || true
           done
           ls coverage-out/
 
