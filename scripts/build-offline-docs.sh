@@ -42,10 +42,16 @@ trap 'rm -rf "$WORK"' EXIT
 "${PYTHON:-python3}" -m sphinx -b html -E -q "$ROOT/docs" "$WORK/html"
 
 rm -rf "$WORK/html/.doctrees" "$WORK/html/_modules"
-find "$WORK/html/_static" -type d -name fonts -prune -exec rm -rf {} + 2>/dev/null || true
+# Strip the TEXT fonts (Lato / Roboto Slab — custom.css falls back
+# to the system stack) and every legacy format, but KEEP the icon
+# font: the theme's UI glyphs (menu, chevrons, search, links) are
+# Font Awesome characters, and stripping it rendered every icon as
+# a missing-glyph box in `openbricks docs` (bench 2026-08-08).
+# woff2 alone covers every browser the bundle targets (~77 KB).
 find "$WORK/html/_static" -type f \
      \( -name '*.ttf' -o -name '*.eot' -o -name '*.svg' \
-        -o -name '*.woff' -o -name '*.woff2' \) -delete
+        -o -name '*.woff' -o -name '*.woff2' \) \
+     ! -name 'fontawesome-webfont.woff2' -delete
 
 # Record a fingerprint of the SOURCES this bundle was built from —
 # CI compares it against the checkout, so editing a docs/ page
