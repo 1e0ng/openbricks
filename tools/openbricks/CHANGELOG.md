@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.73.1 — `openbricks docs` icons render again
+
+The offline bundle stripped ALL font files on the theory that
+nothing reads them — true for the text fonts (custom.css falls
+back to the system stack), wrong for the theme's UI icons (menu,
+chevrons, search, external-link markers), which are Font Awesome
+glyphs and rendered as missing-glyph boxes. The bundle now keeps
+exactly `fontawesome-webfont.woff2` (~77 KB — woff2 covers every
+browser the docs target); text fonts and legacy formats stay
+stripped.
+
 ## 1.73.0 — one 10-channel window, two switchable modes
 
 The two clusters merge into ONE array: QTRX channels
