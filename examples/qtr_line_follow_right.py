@@ -1,14 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Line following on ONE 10-channel QTR window — two switchable modes.
+"""Line following on the 10-channel QTR window — right mode.
 
-Run ``examples/qtr_calibrate.py`` once first. Channels
-15,13,12,11,9,7,5,4,3,1 span a 56 mm window; MODE picks the track
-discipline:
-
-* ``"left"``  — hold the line's LEFT edge under channel 12
-* ``"right"`` — hold the line's RIGHT edge under channel 4
-
-The whole window going dark ends the run.
+Run ``examples/qtr_calibrate.py`` once first. Holds the line's
+RIGHT edge under channel 4; switch to ``examples/qtr_line_follow_left.py`` for the
+mirror discipline (the law is shared — MODE can also be flipped per
+call mid-run). The whole window going dark ends the run.
 """
 
 import time
@@ -19,7 +15,7 @@ from openbricks.robotics import DriveBase
 
 # --- control law (pure logic, unit-tested in tests/test_qtr_line_follow.py) ---
 
-MODE = "left"
+MODE = "right"
 
 CRUISE_DPS = 200
 KP = 5.0

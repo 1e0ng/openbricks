@@ -25,4 +25,4 @@ qtr.save_calibration(CAL)
 print("saved %s. Per-element spans (bigger = better contrast):" % CAL)
 for i in range(len(qtr._cal_min)):
     print("  [%d]: %5d .. %5d" % (i, qtr._cal_min[i], qtr._cal_max[i]))
-print("done — qtr_probe.py / qtr_line_follow.py will load this.")
+print("done — qtr_probe.py / the qtr_line_follow_* examples will load this.")

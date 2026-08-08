@@ -2,8 +2,9 @@
 """The QTR line-follow control law, arithmetic only.
 
 Same extract-and-exec trick as ``tests/test_line_follow.py``: the
-example wires hardware at module level, so the pure control-law
-block is pulled out by its markers. ONE law, TWO switchable modes:
+examples wire hardware at module level, so the pure control-law
+block is pulled out by its markers. TWO example files carry ONE
+IDENTICAL law with two switchable modes:
 "left" holds the line's LEFT edge at LEFT_SETPOINT_MM (channel 12),
 "right" holds the RIGHT edge at RIGHT_SETPOINT_MM (channel 4). The
 whole window dark ends the run; the far-side FLAG_COUNT elements
@@ -15,15 +16,15 @@ import tests._fakes  # noqa: F401
 import unittest
 
 
-def _load():
-    with open("examples/qtr_line_follow.py") as f:
+def _load(path):
+    with open(path) as f:
         src = f.read()
     begin = "# --- control law"
     end = "# --- end control law ---"
     if begin not in src or end not in src:
         raise AssertionError(
-            "control-law markers not found in examples/"
-            "qtr_line_follow.py — they are load-bearing here")
+            "control-law markers not found in %s — they are "
+            "load-bearing here" % path)
     ns = {}
     exec(src[src.index(begin):src.index(end)], ns)
     return ns
@@ -59,10 +60,16 @@ class _Reading:
         return self._all
 
 
-class QTRLawTests(unittest.TestCase):
+class _LawContract:
+    """The shared battery — the law body must be identical in both
+    example files, so every assertion runs against each."""
+
+    EXAMPLE = None          # subclasses set the path
+    FILE_MODE = None        # the file's own MODE constant
+
     @classmethod
     def setUpClass(cls):
-        cls.ns = _load()
+        cls.ns = _load(cls.EXAMPLE)
 
     def _tick(self, edge, mode="left", all_dark=False):
         # The mode's setpoint is added so ``edge`` is the ERROR the
@@ -151,6 +158,22 @@ class QTRLawTests(unittest.TestCase):
         self.assertFalse(branch_seen(r, "left"))
         # No dark anywhere: no branch.
         self.assertFalse(branch_seen(_Reading(), "left"))
+
+
+    def test_file_mode_constant(self):
+        # Each example ships pinned to its own discipline; the law
+        # itself stays switchable per call.
+        self.assertEqual(self.ns["MODE"], self.FILE_MODE)
+
+
+class LeftFollowerTests(_LawContract, unittest.TestCase):
+    EXAMPLE = "examples/qtr_line_follow_left.py"
+    FILE_MODE = "left"
+
+
+class RightFollowerTests(_LawContract, unittest.TestCase):
+    EXAMPLE = "examples/qtr_line_follow_right.py"
+    FILE_MODE = "right"
 
 
 if __name__ == "__main__":

@@ -13,8 +13,10 @@ coordinates; both edge interpolations now span the ACTUAL local gap
 between the straddling elements — identical results on uniform
 arrays, which stay byte-for-byte unchanged).
 
-`qtr_line_follow.py` replaces the left/right pair with one example
-and a MODE switch, passable per call for mid-run switching:
+`qtr_line_follow_left.py` / `qtr_line_follow_right.py` both carry
+the SAME switchable law (`get_wheel_speeds(reading, mode)` — the
+mode is per-call, so a mission program can flip disciplines
+mid-run); each file ships pinned to its own MODE:
 
 * `"left"`  — hold the line's LEFT edge under channel 12 (-16 mm)
 * `"right"` — hold the line's RIGHT edge under channel 4 (+16 mm)
