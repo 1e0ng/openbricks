@@ -57,7 +57,7 @@ The serial-bus build needs very few pins — that's most of its charm:
 
 | Function          | GPIO(s) | Devices on this line |
 |-------------------|---------|----------------------|
-| Analog sensors    | 1–10    | The FULL ADC1 bank — e.g. a 10-channel QTR reflectance window (see `examples/qtr_line_follow_left.py`). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable |
+| Analog sensors    | 1–10    | The FULL ADC1 bank — the {class}`openbricks.drivers.qtr.QTRLineSensor` window (wiring below). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable |
 | I2C0 (SDA, SCL)   | 15, 16  | TCA9548A mux (0x70) + colour sensors behind it, IMU (BNO055, 0x28), shared bus |
 | UART1 (TX, RX)    | 14, 41  | URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained (RX was GPIO 6 until 1.71.0; it moved so the analog bank stays whole) |
 | Program button    | 39      | Start/stop, polled with an internal pull-up (was GPIO 4 until 1.71.0) |
@@ -82,6 +82,53 @@ already owns, like the program button — raises
 {class}`openbricks.pins.ReservedPinError` naming the pin, the role,
 and the reason, instead of failing somewhere far from the mistake.
 See {mod}`openbricks.pins`.
+
+
+### QTRLineSensor wiring (the standard line-follow window)
+
+{class}`openbricks.drivers.qtr.QTRLineSensor` bakes the whole rig
+geometry into the firmware — pins, element positions, and both mode
+setpoints — so programs just construct it and pick a discipline:
+
+```python
+from openbricks.drivers.qtr import QTRLineSensor
+qtr = QTRLineSensor()
+qtr.set_mode("left")            # or "right"; switchable mid-run
+error = qtr.read().edge_error()
+```
+
+Ten channels of a QTRX-HD-15A (4 mm pitch) in a skip pattern, left
+to right as mounted, onto GPIO 1..10 **in order**:
+
+| QTR channel | 15 | 13 | 12 | 11 | 9 | 7 | 5 | 4 | 3 | 1 |
+|-------------|----|----|----|----|---|---|---|---|---|---|
+| GPIO        | 1  | 2  | 3  | 4  | 5 | 6 | 7 | 8 | 9 | 10 |
+| x (mm)      | −28 | −20 | −16 | −12 | −4 | +4 | +12 | +16 | +20 | +28 |
+
+That spans a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm (the
+driver's `positions_mm` carries the true coordinates, so edge
+interpolation is exact across the unequal gaps). The two modes:
+
+- **`"left"`** — holds the line's LEFT edge under **channel 12**
+  (x = −16 mm)
+- **`"right"`** — holds the line's RIGHT edge under **channel 4**
+  (x = +16 mm)
+
+Either way the ~20 mm line sits inside the middle of the window
+with ≥3 channels of mat visible on the far side — those far-side
+elements are the branch watch in the bundled followers, and the
+whole window going dark is the intersection/ending signal.
+
+One board-level note: **GPIO 3 (= channel 12, the left-mode
+setpoint channel) is a strapping pin**, and on the
+ESP32-S3-COREBOARD V1.4 it optionally carries a 10 kΩ pull-up
+through the `USB-JTAG` 0 Ω link. Harmless (per-element calibration
+absorbs the bias), but if `qtr_calibrate.py` shows element `[2]`
+with a conspicuously narrower span than its neighbours, that link
+is populated — desoldering it is safe if you never use pin-JTAG.
+
+The QTRX board's CTRL (emitter enable) can stay tied high; VCC to
+3V3, GND to GND.
 
 ### If the status LED never lights
 

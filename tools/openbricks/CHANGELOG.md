@@ -13,10 +13,16 @@ coordinates; both edge interpolations now span the ACTUAL local gap
 between the straddling elements — identical results on uniform
 arrays, which stay byte-for-byte unchanged).
 
-`qtr_line_follow_left.py` / `qtr_line_follow_right.py` both carry
-the SAME switchable law (`get_wheel_speeds(reading, mode)` — the
-mode is per-call, so a mission program can flip disciplines
-mid-run); each file ships pinned to its own MODE:
+The rig geometry now lives IN THE FIRMWARE:
+`QTRLineSensor()` carries the pins, the element positions, and
+both mode setpoints (derived from the positions table, not
+repeated by hand); `set_mode("left"/"right")` selects the
+discipline — switchable mid-run — and `reading.edge_error()`
+returns the setpoint-relative steering error. User code never
+touches the numbers; the detailed wiring table lives in
+docs/hardware.md. `qtr_line_follow_left.py` /
+`qtr_line_follow_right.py` both carry the same minimal law, each
+pinned to its own MODE:
 
 * `"left"`  — hold the line's LEFT edge under channel 12 (-16 mm)
 * `"right"` — hold the line's RIGHT edge under channel 4 (+16 mm)
