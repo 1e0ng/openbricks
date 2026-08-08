@@ -2,7 +2,7 @@
 """Line following on the QTRLineSensor window — right mode.
 
 Run ``examples/qtr_calibrate.py`` once first. Holds the line's
-RIGHT edge under channel 4 (the geometry lives in the firmware's QTRLineSensor; wiring
+RIGHT edge under channel 12 (the geometry lives in the firmware's QTRLineSensor; wiring
 table in docs/hardware.md). Switch to
 ``examples/qtr_line_follow_left.py`` for the mirror discipline —
 or call ``qtr.set_mode(...)`` mid-run. The whole window going
