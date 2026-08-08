@@ -36,9 +36,11 @@ def _bars(r):
 while True:
     lr = left.read()
     rr = right.read()
-    edge = lr.left_edge_position()
-    print("[%s|%s]  edge=%s  ldark=%d  rdark=%d" % (
+    ledge = lr.left_edge_position()
+    redge = rr.right_edge_position()
+    print("[%s|%s]  ledge=%s  redge=%s  ldark=%d  rdark=%d" % (
         _bars(lr), _bars(rr),
-        "----" if edge is None else "%+6.1fmm" % edge,
+        "----" if ledge is None else "%+6.1fmm" % ledge,
+        "----" if redge is None else "%+6.1fmm" % redge,
         lr.dark_count(), rr.dark_count()))
     time.sleep_ms(100)

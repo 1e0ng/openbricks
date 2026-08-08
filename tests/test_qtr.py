@@ -105,6 +105,8 @@ class ConstructionTests(unittest.TestCase):
             ch.position()
         with self.assertRaises(RuntimeError):
             ch.left_edge_position()
+        with self.assertRaises(RuntimeError):
+            ch.right_edge_position()
         ch.calibrate(duration_ms=100)
         ADC.reads = {9: _LINE}
         self.assertEqual(ch.value(), 1000)
@@ -325,6 +327,44 @@ class ReadingTests(unittest.TestCase):
         reading = self.qtr.read()
         self.assertEqual(reading.left_edge_position(),
                          self.qtr.left_edge_position(reading))
+
+    def test_right_edge_mirrors_the_interpolation(self):
+        # Pins 3,4,5 dark, pin 6 white: the black→white crossing
+        # sits 30% of the way from element index 5 (x=+8) back
+        # toward index 4 — the exact mirror of the left-edge case.
+        _script(dark_pins=(3, 4, 5))
+        edge = self.qtr.right_edge_position()
+        self.assertAlmostEqual(edge, 8.0 - 0.3 * 8.0, places=6)
+
+    def test_right_edge_is_right_of_the_cluster_centre(self):
+        _script(dark_pins=(3, 4, 5))
+        self.assertTrue(self.qtr.right_edge_position()
+                        > self.qtr.rightmost_position())
+
+    def test_right_edge_none_when_nothing_is_dark(self):
+        _script(dark_pins=())
+        self.assertIsNone(self.qtr.right_edge_position())
+
+    def test_right_edge_saturates_off_array(self):
+        # Rightmost element dark: the true edge is beyond the array;
+        # half a pitch past it keeps the error's sign and magnitude.
+        _script(dark_pins=(8, 9))
+        self.assertEqual(self.qtr.right_edge_position(),
+                         4 * 8.0 + 4.0)
+
+    def test_right_edge_ignores_a_left_branch(self):
+        # Two clusters: the right line's edge must not move when a
+        # branch appears under the left side.
+        _script(dark_pins=(8,))
+        alone = self.qtr.right_edge_position()
+        _script(dark_pins=(2, 8))
+        self.assertEqual(self.qtr.right_edge_position(), alone)
+
+    def test_right_edge_rides_the_reading_snapshot(self):
+        _script(dark_pins=(5, 6))
+        reading = self.qtr.read()
+        self.assertEqual(reading.right_edge_position(),
+                         self.qtr.right_edge_position(reading))
 
     def test_reading_is_the_user_facing_snapshot(self):
         # THE call-site contract, verbatim from the user:
