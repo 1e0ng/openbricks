@@ -21,7 +21,7 @@ from openbricks._native import motor_process, st_bus
 
 LEFT_SLOT, LEFT_ID   = 0, 2
 RIGHT_SLOT, RIGHT_ID = 1, 1
-UART_ID, BAUD, TX, RX = 1, 1_000_000, 14, 6
+UART_ID, BAUD, TX, RX = 1, 1_000_000, 14, 41
 
 STEPS_PER_DPS = 4096 / 360.0
 TEST_DPS      = 100

@@ -26,7 +26,7 @@ from openbricks.robotics import DriveBase
 
 
 LEFT_ID, RIGHT_ID = 2, 1
-UART_ID, TX, RX   = 1, 14, 6
+UART_ID, TX, RX   = 1, 14, 41
 
 WHEEL_DIAMETER_MM = 88
 AXLE_TRACK_MM     = 136

@@ -25,7 +25,7 @@ from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
 
 LEFT_ID, RIGHT_ID = 2, 1
-UART_ID, TX, RX   = 1, 14, 6
+UART_ID, TX, RX   = 1, 14, 41
 WHEEL_MM, AXLE_MM = 88, 138
 
 WAIT_S = 30

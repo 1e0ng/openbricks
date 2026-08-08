@@ -37,7 +37,7 @@ from openbricks.robotics import DriveBase
 
 
 LEFT_ID, RIGHT_ID = 2, 1
-UART_ID, TX, RX   = 1, 14, 6
+UART_ID, TX, RX   = 1, 14, 41
 
 I2C_SDA, I2C_SCL  = 15, 16
 IMU_MUX_CHANNEL   = 3

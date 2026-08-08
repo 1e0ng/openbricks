@@ -16,7 +16,7 @@ from machine import UART, Pin
 
 
 TX_PIN = 14
-RX_PIN = 6
+RX_PIN = 41
 UART_ID = 1
 
 BAUDS = [1_000_000, 500_000, 250_000, 115_200, 57_600, 38_400]

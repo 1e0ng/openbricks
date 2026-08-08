@@ -55,7 +55,7 @@ from openbricks.drivers.st3032 import ST3032Motor
 
 
 SERVO_ID   = 4
-UART_ID, TX, RX = 1, 14, 6
+UART_ID, TX, RX = 1, 14, 41
 DEG_PER_S  = 200
 ANGLE      = -145
 REPS       = 6

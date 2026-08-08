@@ -448,13 +448,18 @@ class DriveBase:
             while not self.done():
                 time.sleep_ms(10)
 
-    def curve(self, radius_mm, angle_deg, then="coast", wait=True):
-        """Drive an arc along a circle of ``|radius_mm|``, changing
-        heading by ``angle_deg`` — Pybricks ``DriveBase.curve()``.
+    def curve(self, radius, angle, then="coast", wait=True):
+        """Drive an arc along a circle of ``|radius|`` mm, changing
+        heading by ``angle`` degrees — Pybricks ``DriveBase.curve()``,
+        including the parameter names, so Pybricks-style keyword
+        calls (``curve(radius=150, angle=90)``) work verbatim. The
+        one deviation: our ``then`` defaults to ``"coast"`` like
+        every openbricks move (Pybricks defaults to hold) — pass
+        ``then="hold"`` for the Pybricks end state.
 
-        Positive ``angle_deg`` turns right (clockwise from above,
+        Positive ``angle`` turns right (clockwise from above,
         the system-wide sign convention, same as ``turn()``); the
-        SIGN of ``radius_mm`` picks the travel direction along the
+        SIGN of ``radius`` picks the travel direction along the
         arc (positive = forward, negative = backward).
         ``curve(150, 90)`` sweeps a forward quarter-circle to the
         right around a centre 150 mm to the robot's right;
@@ -473,7 +478,7 @@ class DriveBase:
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
-        self._arm_curve(radius_mm, angle_deg, then)
+        self._arm_curve(radius, angle, then)
         if wait:
             while not self.done():
                 time.sleep_ms(10)

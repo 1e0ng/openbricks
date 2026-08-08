@@ -20,6 +20,23 @@ Two representative ones are reproduced below.
    :language: python
 ```
 
+## Rounded square (DriveBase.curve)
+
+`curve(radius, angle)` follows the Pybricks contract — positional
+order, parameter names, and sign semantics: positive `angle` arcs
+right (clockwise), a negative `radius` drives the arc backward, and
+`curve(0, angle)` degrades to a turn in place. The forward and turn
+profiles run with proportionally scaled speed *and* acceleration, so
+the path is a true circle even through the ramps, and the outer
+wheel is automatically capped at the `straight_speed` setting.
+(One deviation: `then` defaults to `"coast"` like every openbricks
+move; pass `then="hold"` for the Pybricks end state.)
+
+```{eval-rst}
+.. literalinclude:: ../examples/st3032_drivebase_curve.py
+   :language: python
+```
+
 ## Square up on a line (two color sensors)
 
 ```{eval-rst}
