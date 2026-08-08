@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.74.0 — curve() parameter parity + a rounded-square example
+
+`DriveBase.curve(radius, angle, then, wait)` — the parameter NAMES
+now match Pybricks, so keyword calls (`curve(radius=150,
+angle=90)`) work verbatim; semantics were already parity. The one
+deviation stays and is documented: `then` defaults to `"coast"`
+like every openbricks move (Pybricks defaults to hold) — pass
+`then="hold"` for the Pybricks end state.
+
+New `examples/st3032_drivebase_curve.py`: a rounded square — four
+straights joined by quarter-circle arcs, no pivot stops — included
+on the docs Examples page. Also swept nine examples whose
+constant-style `RX = ... 6` assignments the 1.71.0 RX→41 move
+missed.
+
 ## 1.73.1 — `openbricks docs` icons render again
 
 The offline bundle stripped ALL font files on the theory that
