@@ -57,7 +57,7 @@ The serial-bus build needs very few pins — that's most of its charm:
 
 | Function          | GPIO(s) | Devices on this line |
 |-------------------|---------|----------------------|
-| Analog sensors    | 1–10    | The FULL ADC1 bank — e.g. a split QTR reflectance rig (5 left + 5 right, see `examples/qtr_line_follow_left.py`). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable |
+| Analog sensors    | 1–10    | The FULL ADC1 bank — e.g. a 10-channel QTR reflectance window (see `examples/qtr_line_follow.py`). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable |
 | I2C0 (SDA, SCL)   | 15, 16  | TCA9548A mux (0x70) + colour sensors behind it, IMU (BNO055, 0x28), shared bus |
 | UART1 (TX, RX)    | 14, 41  | URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained (RX was GPIO 6 until 1.71.0; it moved so the analog bank stays whole) |
 | Program button    | 39      | Start/stop, polled with an internal pull-up (was GPIO 4 until 1.71.0) |

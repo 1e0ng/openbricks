@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.73.0 — one 10-channel window, two switchable modes
+
+The two clusters merge into ONE array: QTRX channels
+15,13,12,11,9,7,5,4,3,1 on GPIO 1-10 — a 56 mm window with
+non-uniform spacing (8/4/4/8/8/8/4/4/8 mm), expressed through the
+new `QTRArray(positions_mm=...)` parameter (explicit per-element
+coordinates; both edge interpolations now span the ACTUAL local gap
+between the straddling elements — identical results on uniform
+arrays, which stay byte-for-byte unchanged).
+
+`qtr_line_follow.py` replaces the left/right pair with one example
+and a MODE switch, passable per call for mid-run switching:
+
+* `"left"`  — hold the line's LEFT edge under channel 12 (-16 mm)
+* `"right"` — hold the line's RIGHT edge under channel 4 (+16 mm)
+
+The whole window going dark ends the run; the far-side FLAG_COUNT
+elements are the branch watch (rightmost 3 in left mode, leftmost 3
+in right mode). One calibration file (`/qtr.cal`) — re-run
+`examples/qtr_calibrate.py`. Wiring: ch 15,13,12,11,9,7,5,4,3,1 →
+GPIO 1..10 in order.
+
 ## 1.72.0 — two edge-following examples + right_edge_position()
 
 The follower splits into two mirrored examples:

@@ -422,5 +422,86 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(qtr._ctrl.value(), 1)
 
 
+class PositionsMmTests(unittest.TestCase):
+    """positions_mm — non-uniform element spacing. The bench case: the
+    10-pin skip pattern (QTRX ch 15,13,12,11,9,7,5,4,3,1 at spacings
+    8/4/4/8/8/8/4/4/8 mm) spans a 56 mm window; the geometry must
+    come from the ACTUAL coordinates, not a pitch."""
+
+    PINS = (1, 2, 3, 4, 5)
+    POS = (-12.0, -4.0, 0.0, 4.0, 12.0)
+
+    def setUp(self):
+        _pins._claims_reset()
+        ADC.reads = {p: _swing() for p in self.PINS}
+        self.qtr = QTRArray(pins=self.PINS, positions_mm=self.POS)
+        self.qtr.calibrate(duration_ms=100, poll_ms=5)
+
+    def tearDown(self):
+        ADC.reads = {}
+        _pins._claims_reset()
+
+    def _script(self, dark_pins):
+        ADC.reads = {p: (_LINE if p in dark_pins else _MAT)
+                     for p in self.PINS}
+
+    def test_single_dark_element_reads_its_own_coordinate(self):
+        self._script((1,))
+        self.assertEqual(self.qtr.position(), -12.0)
+        self._script((5,))
+        self.assertEqual(self.qtr.position(), 12.0)
+        self._script((3,))
+        self.assertEqual(self.qtr.position(), 0.0)
+
+    def test_left_edge_interpolates_the_local_gap(self):
+        # First dark at x=-4 with its white neighbour at x=-12: the
+        # threshold crossing sits 30% into an 8 mm gap...
+        self._script((2, 3, 4, 5))
+        self.assertAlmostEqual(self.qtr.left_edge_position(),
+                               -12.0 + 0.3 * 8.0, places=6)
+        # ...but 30% into a 4 mm gap one element over. A uniform
+        # pitch would get one of these wrong.
+        self._script((3, 4, 5))
+        self.assertAlmostEqual(self.qtr.left_edge_position(),
+                               -4.0 + 0.3 * 4.0, places=6)
+
+    def test_right_edge_interpolates_the_local_gap(self):
+        self._script((1, 2, 3, 4))
+        self.assertAlmostEqual(self.qtr.right_edge_position(),
+                               12.0 - 0.3 * 8.0, places=6)
+        self._script((1, 2, 3))
+        self.assertAlmostEqual(self.qtr.right_edge_position(),
+                               4.0 - 0.3 * 4.0, places=6)
+
+    def test_off_array_edges_saturate_by_mean_spacing(self):
+        # Mean spacing = 24/4 = 6 -> half = 3 beyond the end element.
+        self._script((1, 2))
+        self.assertEqual(self.qtr.left_edge_position(), -15.0)
+        self._script((4, 5))
+        self.assertEqual(self.qtr.right_edge_position(), 15.0)
+
+    def test_positions_must_match_pins(self):
+        _pins._claims_reset()
+        try:
+            QTRArray(pins=(1, 2, 3), positions_mm=(0.0, 4.0))
+            self.fail("expected ValueError")
+        except ValueError as e:
+            self.assertTrue("2 entries for 3 pins" in str(e), e)
+
+    def test_positions_must_increase(self):
+        _pins._claims_reset()
+        try:
+            QTRArray(pins=(1, 2, 3), positions_mm=(0.0, 4.0, 4.0))
+            self.fail("expected ValueError")
+        except ValueError as e:
+            self.assertTrue("strictly increasing" in str(e), e)
+
+    def test_uniform_default_is_unchanged(self):
+        _pins._claims_reset()
+        ADC.reads = {p: _swing() for p in self.PINS}
+        q = QTRArray(pins=self.PINS, pitch_mm=4.0)
+        self.assertEqual(q._x_mm, [-8.0, -4.0, 0.0, 4.0, 8.0])
+
+
 if __name__ == "__main__":
     unittest.main()
