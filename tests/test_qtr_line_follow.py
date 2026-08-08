@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""The QTR line-follow control laws, arithmetic only.
+"""The QTR line-follow control law, arithmetic only.
 
 Same extract-and-exec trick as ``tests/test_line_follow.py``: the
 examples wire hardware at module level, so the pure control-law
-block is pulled out by its markers. TWO mirrored examples share one
-contract (the P law is symmetric between edge disciplines): sign
-conventions, the immediate all-dark-AND-flag stop, and the clamp —
-plus a per-file pin that each steers on ITS OWN edge (left file =
-left edge, right file = right edge).
+block is pulled out by its markers. TWO example files carry ONE
+IDENTICAL law; the mode geometry (setpoints, positions, pins)
+lives in the firmware's QTRLineSensor, so the law consumes only
+``edge_error()``. The whole window dark ends the run; the far-side
+FLAG_COUNT elements are the branch watch.
 """
 
 import tests._fakes  # noqa: F401
@@ -29,69 +29,61 @@ def _load(path):
     return ns
 
 
+class _Element:
+    def __init__(self, dark):
+        self._dark = dark
+
+    def dark(self):
+        return self._dark
+
+
 class _Reading:
-    """``QTRReading`` stand-in: the laws consume exactly these three
-    methods. Distinct left/right edge values let a test prove which
-    edge a law actually steers on."""
+    """``QTRReading`` stand-in: the law consumes ``edge_error()``,
+    ``all_dark()``, and ``elements`` (the branch watch)."""
 
-    def __init__(self, left=None, right=None, all_dark=False):
-        self._left = left
-        self._right = right
+    def __init__(self, error=None, all_dark=False, dark_flags=()):
+        self._error = error
         self._all = all_dark
+        # 10 elements; the indices in dark_flags read dark.
+        self.elements = [_Element(i in dark_flags) for i in range(10)]
 
-    def left_edge_position(self):
-        return self._left
-
-    def right_edge_position(self):
-        return self._right
+    def edge_error(self):
+        return self._error
 
     def all_dark(self):
         return self._all
 
 
 class _LawContract:
-    """The shared battery — run against each example's extracted law.
-    ``_tick`` feeds the SAME value to both edge methods, so the
-    assertions hold for either discipline."""
+    """The shared battery — the law body must be identical in both
+    example files, so every assertion runs against each."""
 
     EXAMPLE = None          # subclasses set the path
+    FILE_MODE = None        # the file's own MODE constant
 
     @classmethod
     def setUpClass(cls):
         cls.ns = _load(cls.EXAMPLE)
 
-    def _tick(self, edge, branch=False, all_dark=False):
-        reading = _Reading(left=edge, right=edge, all_dark=all_dark)
-        return self.ns["get_wheel_speeds"](reading, branch)
+    def _tick(self, error, all_dark=False):
+        reading = _Reading(error=error, all_dark=all_dark)
+        return self.ns["get_wheel_speeds"](reading)
 
     def _cruise(self):
         c = self.ns["CRUISE_DPS"]
         return (c, c)
 
-    def test_centred_edge_drives_straight(self):
+    def test_zero_error_drives_straight(self):
         self.assertEqual(self._tick(0.0), self._cruise())
 
-    def test_edge_right_steers_right(self):
-        # +edge = boundary right of centre -> left wheel faster.
+    def test_error_sign_steers_toward_the_setpoint(self):
         l, r = self._tick(+10.0)
         self.assertTrue(l > r, (l, r))
         l, r = self._tick(-10.0)
         self.assertTrue(l < r, (l, r))
 
-    def test_steering_ignores_the_branch_flag(self):
-        self.assertEqual(self._tick(+10.0, branch=True),
-                         self._tick(+10.0, branch=False))
-
-    def test_intersection_stops_immediately(self):
-        self.assertIsNone(self._tick(+2.0, branch=True, all_dark=True))
-
-    def test_branch_alone_never_stops(self):
-        # assertTrue, not assertIsNotNone: MP's unittest %-formats
-        # the default message and a TUPLE value spreads its args.
-        self.assertTrue(self._tick(0.0, branch=True) is not None)
-
-    def test_all_dark_alone_never_stops(self):
-        self.assertTrue(self._tick(0.0, all_dark=True) is not None)
+    def test_full_window_dark_stops_immediately(self):
+        self.assertIsNone(self._tick(0.0, all_dark=True))
 
     def test_lost_line_raises_visibly(self):
         # Deliberately unhandled: nothing dark means the rig or the
@@ -107,25 +99,41 @@ class _LawContract:
         self.assertEqual(r, 0)                    # clamped at zero
         self.assertEqual(l, self.ns["MAX_DPS"])
 
+    def test_branch_watch_is_the_far_side(self):
+        branch_seen = self.ns["branch_seen"]
+        n_flags = self.ns["FLAG_COUNT"]
+        # Left mode watches the RIGHTMOST elements...
+        r = _Reading(dark_flags=(9,))
+        self.assertTrue(branch_seen(r, "left"))
+        self.assertFalse(branch_seen(r, "right"))
+        # ...right mode the LEFTMOST.
+        r = _Reading(dark_flags=(0,))
+        self.assertTrue(branch_seen(r, "right"))
+        self.assertFalse(branch_seen(r, "left"))
+        # An element just inside the watch band counts; one outside
+        # does not.
+        r = _Reading(dark_flags=(10 - n_flags,))
+        self.assertTrue(branch_seen(r, "left"))
+        r = _Reading(dark_flags=(10 - n_flags - 1,))
+        self.assertFalse(branch_seen(r, "left"))
+        # No dark anywhere: no branch.
+        self.assertFalse(branch_seen(_Reading(), "left"))
+
+
+    def test_file_mode_constant(self):
+        # Each example ships pinned to its own discipline; the law
+        # itself stays switchable per call.
+        self.assertEqual(self.ns["MODE"], self.FILE_MODE)
+
 
 class LeftFollowerTests(_LawContract, unittest.TestCase):
     EXAMPLE = "examples/qtr_line_follow_left.py"
-
-    def test_steers_on_the_left_edge_only(self):
-        # Distinct edge values: only the LEFT edge may move the
-        # wheels for this discipline.
-        reading = _Reading(left=+10.0, right=-99.0)
-        l, r = self.ns["get_wheel_speeds"](reading, False)
-        self.assertTrue(l > r, (l, r))
+    FILE_MODE = "left"
 
 
 class RightFollowerTests(_LawContract, unittest.TestCase):
     EXAMPLE = "examples/qtr_line_follow_right.py"
-
-    def test_steers_on_the_right_edge_only(self):
-        reading = _Reading(left=-99.0, right=+10.0)
-        l, r = self.ns["get_wheel_speeds"](reading, False)
-        self.assertTrue(l > r, (l, r))
+    FILE_MODE = "right"
 
 
 if __name__ == "__main__":

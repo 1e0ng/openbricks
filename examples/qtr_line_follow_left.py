@@ -1,50 +1,60 @@
 # SPDX-License-Identifier: MIT
-"""Line following on the split 5+5 QTR rig — LEFT-edge discipline.
+"""Line following on the QTRLineSensor window — left mode.
 
-Run ``examples/qtr_calibrate.py`` once first. The LEFT cluster
-follows the line's LEFT edge; the RIGHT cluster is the branch /
-ending flag bank. Left cluster fully dark AND the right cluster
-seeing dark in the same instant ends the run.
+Run ``examples/qtr_calibrate.py`` once first. Holds the line's
+LEFT edge under channel 12 (the geometry lives in the firmware's QTRLineSensor; wiring
+table in docs/hardware.md). Switch to
+``examples/qtr_line_follow_right.py`` for the mirror discipline —
+or call ``qtr.set_mode(...)`` mid-run. The whole window going
+dark ends the run.
 """
 
 import time
 
-from openbricks.drivers.qtr import QTRArray
+from openbricks.drivers.qtr import QTRLineSensor
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
 
 # --- control law (pure logic, unit-tested in tests/test_qtr_line_follow.py) ---
 
+MODE = "left"
+
 CRUISE_DPS = 200
 KP = 5.0
 MAX_DPS = 400
+FLAG_COUNT = 3
 
 
 def _clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def get_wheel_speeds(reading, branch_dark):
-    if branch_dark and reading.all_dark():
+def get_wheel_speeds(reading):
+    if reading.all_dark():
         return None
-    steer = KP * reading.left_edge_position()
+    steer = KP * reading.edge_error()
     return (_clamp(CRUISE_DPS + steer),
             _clamp(CRUISE_DPS - steer))
+
+
+def branch_seen(reading, mode):
+    if mode == "left":
+        flags = reading.elements[-FLAG_COUNT:]
+    else:
+        flags = reading.elements[:FLAG_COUNT]
+    for e in flags:
+        if e.dark():
+            return True
+    return False
 
 # --- end control law ---
 
 
-LEFT_PINS = (1, 2, 3, 4, 5)
-RIGHT_PINS = (6, 7, 8, 9, 10)
-PITCH_MM = 4.0
+CAL = "/qtr.cal"
 
-LEFT_CAL = "/qtr_left.cal"
-RIGHT_CAL = "/qtr_right.cal"
-
-left_qtr = QTRArray(pins=LEFT_PINS, pitch_mm=PITCH_MM)
-right_qtr = QTRArray(pins=RIGHT_PINS, pitch_mm=PITCH_MM)
-left_qtr.load_calibration(LEFT_CAL)
-right_qtr.load_calibration(RIGHT_CAL)
+qtr = QTRLineSensor()
+qtr.set_mode(MODE)
+qtr.load_calibration(CAL)
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41,
                          invert=True)
@@ -52,16 +62,15 @@ right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
 db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
-print("following the LEFT edge. Intersection stops the run.")
+print("following (%s mode). Full-window dark stops the run." % MODE)
 while True:
-    reading = left_qtr.read()
-    branch_dark = right_qtr.read().dark_count() > 0
-    speeds = get_wheel_speeds(reading, branch_dark)
+    reading = qtr.read()
+    speeds = get_wheel_speeds(reading)
     if speeds is None:
         db.stop()
         print("intersection - stopped")
         break
-    if branch_dark:
+    if branch_seen(reading, MODE):
         print("branch marker")
     db.move_wheels(speeds[0], speeds[1])
     time.sleep_ms(5)

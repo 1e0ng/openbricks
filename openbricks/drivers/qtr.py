@@ -81,6 +81,7 @@ class QTRReading:
         r.position()            # global centroid, mm
         r.left_edge_position()  # the line's left edge, mm
         r.right_edge_position() # the line's right edge, mm
+        r.edge_error()          # followed edge minus the mode setpoint
         r.leftmost_position()   # fork clusters
         r.rightmost_position()
         r.dark_count()          # how many elements on the line
@@ -135,6 +136,9 @@ class QTRReading:
     def right_edge_position(self):
         return self._array.right_edge_position(self)
 
+    def edge_error(self):
+        return self._array.edge_error(self)
+
     def leftmost_position(self):
         return self._array.leftmost_position(self)
 
@@ -162,14 +166,23 @@ class QTRArray:
     _FULL_SCALE = 1000
 
     def __init__(self, pins, pitch_mm=4.0, ctrl=None,
-                 dark_threshold=300):
+                 dark_threshold=300, positions_mm=None):
+        """``positions_mm`` (optional): explicit per-element x
+        coordinates in mm, left to right, strictly increasing — for
+        wirings whose channels are NOT evenly spaced (e.g. the skip
+        pattern QTRX ch 15,13,12,11,9,7,5,4,3,1: spacings
+        8/4/4/8/8/8/4/4/8 mm span a 56 mm window on ten pins). The
+        origin is wherever the caller puts it; centring the tuple on
+        0 keeps ``position()`` symmetric. When given, ``pitch_mm``
+        only seeds the secondary uses (the last-side hysteresis band
+        and the off-array edge saturation) via the MEAN spacing; all
+        real geometry comes from the positions."""
         if len(pins) < 1:
             raise ValueError("at least one element required")
         for p in pins:
             _pins.check(p, "QTR analog input", output=False)
             self._check_adc_capable(p)
         self._pins = tuple(int(p) for p in pins)
-        self._pitch = float(pitch_mm)
         self._threshold = int(dark_threshold)
         self._adcs = [self._make_adc(p) for p in pins]
         self._ctrl = None
@@ -177,9 +190,25 @@ class QTRArray:
             from machine import Pin
             self._ctrl = Pin(ctrl, Pin.OUT, value=1)   # emitters on
         n = len(self._adcs)
-        # Element x-positions in mm, centre of the wired span at 0.
-        self._x_mm = [(i - (n - 1) / 2.0) * self._pitch
-                      for i in range(n)]
+        if positions_mm is not None:
+            if len(positions_mm) != n:
+                raise ValueError(
+                    "positions_mm has %d entries for %d pins"
+                    % (len(positions_mm), n))
+            xs = [float(x) for x in positions_mm]
+            for i in range(1, n):
+                if xs[i] <= xs[i - 1]:
+                    raise ValueError(
+                        "positions_mm must be strictly increasing "
+                        "left to right, got %r" % (positions_mm,))
+            self._x_mm = xs
+            self._pitch = ((xs[-1] - xs[0]) / (n - 1) if n > 1
+                           else float(pitch_mm))
+        else:
+            self._pitch = float(pitch_mm)
+            # Element x-positions in mm, centre of the wired span at 0.
+            self._x_mm = [(i - (n - 1) / 2.0) * self._pitch
+                          for i in range(n)]
         self._cal_min = None
         self._cal_max = None
         # Which side the line last left through (+1 right, -1 left):
@@ -187,6 +216,8 @@ class QTRArray:
         # and this is the only information left. Follower logic uses
         # it to steer back instead of guessing.
         self._last_side = 0
+        # Edge-following discipline, selected via set_mode().
+        self._mode = None
 
     @staticmethod
     def _check_adc_capable(pin):
@@ -441,7 +472,11 @@ class QTRArray:
         v0 = readings[first - 1].value
         v1 = readings[first].value
         frac = (self._threshold - v0) / (v1 - v0)
-        return self._x_mm[first - 1] + frac * self._pitch
+        # Interpolate over the ACTUAL spacing between these two
+        # elements — the pitch on a uniform array, the local gap on
+        # a positions_mm one.
+        span = self._x_mm[first] - self._x_mm[first - 1]
+        return self._x_mm[first - 1] + frac * span
 
     def right_edge_position(self, readings=None):
         """Mirror of :meth:`left_edge_position`: the line's RIGHT
@@ -472,7 +507,8 @@ class QTRArray:
         v0 = readings[last + 1].value
         v1 = readings[last].value
         frac = (self._threshold - v0) / (v1 - v0)
-        return self._x_mm[last + 1] - frac * self._pitch
+        span = self._x_mm[last + 1] - self._x_mm[last]
+        return self._x_mm[last + 1] - frac * span
 
     def leftmost_position(self, readings=None):
         """Centroid of the LEFTMOST contiguous dark cluster, in mm
@@ -494,6 +530,50 @@ class QTRArray:
         route policy that takes it."""
         readings = self.read() if readings is None else readings
         return self._cluster_position(readings, rightmost=True)
+
+    # Edge-following setpoints, mm in the array frame — where each
+    # discipline HOLDS its boundary. 0 on a plain array (edge under
+    # the array centre); rig classes like :class:`QTRLineSensor`
+    # override with their geometry so user code never carries the
+    # numbers.
+    LEFT_SETPOINT_MM = 0.0
+    RIGHT_SETPOINT_MM = 0.0
+
+    def set_mode(self, mode):
+        """Select the edge-following discipline: ``"left"`` holds
+        the line's LEFT edge at ``LEFT_SETPOINT_MM``, ``"right"``
+        the RIGHT edge at ``RIGHT_SETPOINT_MM``. Takes effect on the
+        next :meth:`edge_error` — call it again any time to switch
+        disciplines mid-run."""
+        if mode not in ("left", "right"):
+            raise ValueError(
+                "mode must be 'left' or 'right', got %r" % (mode,))
+        self._mode = mode
+
+    def mode(self):
+        """The selected discipline, or ``None`` before set_mode."""
+        return self._mode
+
+    def edge_error(self, readings=None):
+        """Signed steering error for the discipline selected with
+        :meth:`set_mode`: the followed edge's position minus that
+        mode's setpoint. Positive = steer right, same sign
+        convention as :meth:`position`. ``None`` when nothing is
+        dark — a follower multiplying by a gain then fails loudly
+        instead of driving blind."""
+        if self._mode == "left":
+            edge = self.left_edge_position(readings)
+            offset = self.LEFT_SETPOINT_MM
+        elif self._mode == "right":
+            edge = self.right_edge_position(readings)
+            offset = self.RIGHT_SETPOINT_MM
+        else:
+            raise RuntimeError(
+                "no edge-following mode selected — call "
+                "set_mode('left') or set_mode('right') first")
+        if edge is None:
+            return None
+        return edge - offset
 
     def last_side(self):
         """+1 if the line was last seen right of centre, -1 left,
@@ -539,3 +619,35 @@ class QTRChannel(QTRArray):
     def white(self):
         """True when the element is over the mat."""
         return not self.dark()
+
+
+class QTRLineSensor(QTRArray):
+    """THE bench line sensor: one QTRX-HD-15A window of ten skip-
+    pattern channels, pre-wired geometry included — construct it,
+    pick a discipline, follow::
+
+        qtr = QTRLineSensor()
+        qtr.set_mode("left")            # or "right", any time
+        error = qtr.read().edge_error()
+
+    Wiring (detailed table in docs/hardware.md): QTRX channels
+    15, 13, 12, 11, 9, 7, 5, 4, 3, 1 left-to-right onto GPIO 1..10
+    in order — a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm.
+    ``"left"`` mode holds the line's LEFT edge under channel 12
+    (-16 mm); ``"right"`` holds the RIGHT edge under channel 4
+    (+16 mm) — both derived from the positions table, not repeated
+    by hand. Different wiring: use :class:`QTRArray` directly with
+    your own pins/positions/setpoints.
+    """
+
+    PINS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+    POSITIONS_MM = (-28.0, -20.0, -16.0, -12.0, -4.0,
+                    4.0, 12.0, 16.0, 20.0, 28.0)
+    # Channel 12 is index 2 of the window, channel 4 is index 7.
+    LEFT_SETPOINT_MM = POSITIONS_MM[2]
+    RIGHT_SETPOINT_MM = POSITIONS_MM[7]
+
+    def __init__(self, dark_threshold=300):
+        QTRArray.__init__(self, pins=self.PINS,
+                          positions_mm=self.POSITIONS_MM,
+                          dark_threshold=dark_threshold)

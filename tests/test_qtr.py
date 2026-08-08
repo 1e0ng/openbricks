@@ -422,5 +422,204 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(qtr._ctrl.value(), 1)
 
 
+class PositionsMmTests(unittest.TestCase):
+    """positions_mm — non-uniform element spacing. The bench case: the
+    10-pin skip pattern (QTRX ch 15,13,12,11,9,7,5,4,3,1 at spacings
+    8/4/4/8/8/8/4/4/8 mm) spans a 56 mm window; the geometry must
+    come from the ACTUAL coordinates, not a pitch."""
+
+    PINS = (1, 2, 3, 4, 5)
+    POS = (-12.0, -4.0, 0.0, 4.0, 12.0)
+
+    def setUp(self):
+        _pins._claims_reset()
+        ADC.reads = {p: _swing() for p in self.PINS}
+        self.qtr = QTRArray(pins=self.PINS, positions_mm=self.POS)
+        self.qtr.calibrate(duration_ms=100, poll_ms=5)
+
+    def tearDown(self):
+        ADC.reads = {}
+        _pins._claims_reset()
+
+    def _script(self, dark_pins):
+        ADC.reads = {p: (_LINE if p in dark_pins else _MAT)
+                     for p in self.PINS}
+
+    def test_single_dark_element_reads_its_own_coordinate(self):
+        self._script((1,))
+        self.assertEqual(self.qtr.position(), -12.0)
+        self._script((5,))
+        self.assertEqual(self.qtr.position(), 12.0)
+        self._script((3,))
+        self.assertEqual(self.qtr.position(), 0.0)
+
+    def test_left_edge_interpolates_the_local_gap(self):
+        # First dark at x=-4 with its white neighbour at x=-12: the
+        # threshold crossing sits 30% into an 8 mm gap...
+        self._script((2, 3, 4, 5))
+        self.assertAlmostEqual(self.qtr.left_edge_position(),
+                               -12.0 + 0.3 * 8.0, places=6)
+        # ...but 30% into a 4 mm gap one element over. A uniform
+        # pitch would get one of these wrong.
+        self._script((3, 4, 5))
+        self.assertAlmostEqual(self.qtr.left_edge_position(),
+                               -4.0 + 0.3 * 4.0, places=6)
+
+    def test_right_edge_interpolates_the_local_gap(self):
+        self._script((1, 2, 3, 4))
+        self.assertAlmostEqual(self.qtr.right_edge_position(),
+                               12.0 - 0.3 * 8.0, places=6)
+        self._script((1, 2, 3))
+        self.assertAlmostEqual(self.qtr.right_edge_position(),
+                               4.0 - 0.3 * 4.0, places=6)
+
+    def test_off_array_edges_saturate_by_mean_spacing(self):
+        # Mean spacing = 24/4 = 6 -> half = 3 beyond the end element.
+        self._script((1, 2))
+        self.assertEqual(self.qtr.left_edge_position(), -15.0)
+        self._script((4, 5))
+        self.assertEqual(self.qtr.right_edge_position(), 15.0)
+
+    def test_positions_must_match_pins(self):
+        _pins._claims_reset()
+        try:
+            QTRArray(pins=(1, 2, 3), positions_mm=(0.0, 4.0))
+            self.fail("expected ValueError")
+        except ValueError as e:
+            self.assertTrue("2 entries for 3 pins" in str(e), e)
+
+    def test_positions_must_increase(self):
+        _pins._claims_reset()
+        try:
+            QTRArray(pins=(1, 2, 3), positions_mm=(0.0, 4.0, 4.0))
+            self.fail("expected ValueError")
+        except ValueError as e:
+            self.assertTrue("strictly increasing" in str(e), e)
+
+    def test_uniform_default_is_unchanged(self):
+        _pins._claims_reset()
+        ADC.reads = {p: _swing() for p in self.PINS}
+        q = QTRArray(pins=self.PINS, pitch_mm=4.0)
+        self.assertEqual(q._x_mm, [-8.0, -4.0, 0.0, 4.0, 8.0])
+
+
+class ModeAndLineSensorTests(unittest.TestCase):
+    """set_mode / edge_error and the firmware-configured
+    QTRLineSensor: the geometry (pins, positions, setpoints) lives
+    in the driver so user code never carries the numbers."""
+
+    def setUp(self):
+        _pins._claims_reset()
+
+    def tearDown(self):
+        ADC.reads = {}
+        _pins._claims_reset()
+
+    def _base_array(self):
+        ADC.reads = {p: _swing() for p in _PINS}
+        qtr = QTRArray(pins=_PINS, pitch_mm=8.0)
+        qtr.calibrate(duration_ms=100, poll_ms=5)
+        return qtr
+
+    def test_set_mode_validates(self):
+        qtr = self._base_array()
+        try:
+            qtr.set_mode("center")
+            self.fail("expected ValueError")
+        except ValueError as e:
+            self.assertTrue("left" in str(e) and "right" in str(e), e)
+        self.assertTrue(qtr.mode() is None)
+
+    def test_edge_error_before_set_mode_raises_with_remedy(self):
+        qtr = self._base_array()
+        _script(dark_pins=(5,))
+        try:
+            qtr.edge_error()
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("set_mode" in str(e), e)
+
+    def test_base_array_setpoints_default_to_centre(self):
+        qtr = self._base_array()
+        _script(dark_pins=(5, 6))
+        qtr.set_mode("left")
+        self.assertEqual(qtr.edge_error(),
+                         qtr.left_edge_position())
+        qtr.set_mode("right")
+        self.assertEqual(qtr.edge_error(),
+                         qtr.right_edge_position())
+
+    def test_edge_error_none_when_nothing_dark(self):
+        qtr = self._base_array()
+        qtr.set_mode("left")
+        _script(dark_pins=())
+        self.assertTrue(qtr.edge_error() is None)
+
+    def _line_sensor(self):
+        from openbricks.drivers.qtr import QTRLineSensor
+        ADC.reads = {p: _swing() for p in QTRLineSensor.PINS}
+        qtr = QTRLineSensor()
+        qtr.calibrate(duration_ms=100, poll_ms=5)
+        return qtr
+
+    def _script10(self, dark_pins):
+        from openbricks.drivers.qtr import QTRLineSensor
+        ADC.reads = {p: (_LINE if p in dark_pins else _MAT)
+                     for p in QTRLineSensor.PINS}
+
+    def test_line_sensor_geometry_is_the_bench_window(self):
+        from openbricks.drivers.qtr import QTRLineSensor
+        qtr = self._line_sensor()
+        self.assertEqual(qtr._pins, (1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+        self.assertEqual(qtr._x_mm,
+                         [-28.0, -20.0, -16.0, -12.0, -4.0,
+                          4.0, 12.0, 16.0, 20.0, 28.0])
+        # Setpoints DERIVE from the positions table: channel 12 is
+        # window index 2, channel 4 is index 7.
+        self.assertEqual(QTRLineSensor.LEFT_SETPOINT_MM,
+                         QTRLineSensor.POSITIONS_MM[2])
+        self.assertEqual(QTRLineSensor.RIGHT_SETPOINT_MM,
+                         QTRLineSensor.POSITIONS_MM[7])
+        self.assertEqual(QTRLineSensor.LEFT_SETPOINT_MM, -16.0)
+        self.assertEqual(QTRLineSensor.RIGHT_SETPOINT_MM, 16.0)
+
+    def test_line_sensor_left_mode_error_is_setpoint_relative(self):
+        # Full-scale dark from GPIO 3 rightward: the left edge
+        # interpolates 30% into the 4 mm gap before x=-16, i.e.
+        # -20 + 1.2 = -18.8 -> error -2.8 relative to the -16
+        # setpoint.
+        qtr = self._line_sensor()
+        qtr.set_mode("left")
+        self._script10((3, 4, 5, 6, 7, 8, 9, 10))
+        err = qtr.edge_error()
+        self.assertAlmostEqual(err, (-20.0 + 0.3 * 4.0) - (-16.0),
+                               places=6)
+
+    def test_line_sensor_switches_modes_mid_run(self):
+        # Same snapshot, both disciplines: switching modes changes
+        # the error source and setpoint with no reconstruction.
+        qtr = self._line_sensor()
+        self._script10((4, 5, 6, 7))
+        reading = qtr.read()
+        qtr.set_mode("left")
+        left_err = qtr.edge_error(reading)
+        qtr.set_mode("right")
+        right_err = qtr.edge_error(reading)
+        self.assertAlmostEqual(
+            left_err,
+            qtr.left_edge_position(reading) - (-16.0), places=6)
+        self.assertAlmostEqual(
+            right_err,
+            qtr.right_edge_position(reading) - 16.0, places=6)
+
+    def test_reading_edge_error_delegates(self):
+        qtr = self._line_sensor()
+        qtr.set_mode("left")
+        self._script10((4, 5, 6))
+        reading = qtr.read()
+        self.assertEqual(reading.edge_error(),
+                         qtr.edge_error(reading))
+
+
 if __name__ == "__main__":
     unittest.main()
