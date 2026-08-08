@@ -209,6 +209,14 @@ class TestDriveBaseNoPythonLoop(unittest.TestCase):
         with self.assertRaises(ValueError):
             db.curve(150, 90, then="drift")
 
+    def test_curve_accepts_pybricks_keyword_names(self):
+        # Parameter-name parity: Pybricks-style keyword calls bind.
+        # (The RuntimeError is the open-loop refusal — the kwargs
+        # made it through the signature.)
+        db, _, _ = self._db()
+        with self.assertRaises(RuntimeError):
+            db.curve(radius=150, angle=90, then="hold", wait=True)
+
     def test_straight_wait_false_raises_too(self):
         # The raise sits at the arm site, so wait=False can't sneak a
         # move past the contract either.

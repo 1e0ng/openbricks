@@ -23,7 +23,7 @@ from openbricks.drivers.st3215 import ST3215Motor
 
 SERVO_ID = 1
 TX_PIN   = 14
-RX_PIN   = 6
+RX_PIN   = 41
 
 
 def line(msg):

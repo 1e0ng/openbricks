@@ -34,7 +34,7 @@ from openbricks.drivers.st3215 import _SCServoBus
 CURRENT_ID = 1
 NEW_ID     = 2
 
-UART_ID, TX_PIN, RX_PIN = 1, 14, 6
+UART_ID, TX_PIN, RX_PIN = 1, 14, 41
 
 _REG_LOCK = 0x37
 _REG_ID   = 0x05
