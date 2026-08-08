@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Line following on the split 5+5 QTR rig — stateless pure P.
+"""Line following on the split 5+5 QTR rig — LEFT-edge discipline.
 
 Run ``examples/qtr_calibrate.py`` once first. The LEFT cluster
-follows the line's left edge; the RIGHT cluster is the branch /
-intersection flag bank. Left cluster fully dark AND the right
-cluster seeing dark in the same instant stops the run.
+follows the line's LEFT edge; the RIGHT cluster is the branch /
+ending flag bank. Left cluster fully dark AND the right cluster
+seeing dark in the same instant ends the run.
 """
 
 import time
@@ -52,7 +52,7 @@ right_motor = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
 db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
-print("following. Intersection stops the run.")
+print("following the LEFT edge. Intersection stops the run.")
 while True:
     reading = left_qtr.read()
     branch_dark = right_qtr.read().dark_count() > 0

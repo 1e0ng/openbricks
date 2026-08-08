@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.72.0 — two edge-following examples + right_edge_position()
+
+The follower splits into two mirrored examples:
+
+- `qtr_line_follow_left.py` — the LEFT cluster follows the line's
+  LEFT edge; the RIGHT cluster is the branch/ending flag bank
+  (the 1.71.0 behaviour, renamed).
+- `qtr_line_follow_right.py` — the RIGHT cluster follows the
+  line's RIGHT edge; the LEFT cluster is the flag bank.
+
+The P law is symmetric between the two disciplines (centring
+either boundary under the array gives the same sign convention),
+so both share an identical law body; only the error source and the
+flag bank swap. Ending check in both: follow-cluster fully dark
+AND flag-cluster seeing dark, immediate.
+
+Driver: `QTRArray`/`QTRReading` gain `right_edge_position()` — the
+exact mirror of `left_edge_position()` (black→white boundary of
+the rightmost dark cluster, half-pitch off-array saturation,
+`None` when nothing dark). `qtr_probe.py` streams both edges.
+
 ## 1.71.0 — split 5+5 QTR rig; the whole ADC1 bank goes analog
 
 The QTR examples now model a split rig: 5 channels on the left

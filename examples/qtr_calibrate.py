@@ -36,4 +36,4 @@ for i in range(len(left._cal_min)):
 for i in range(len(right._cal_min)):
     print("  right[%d]: %5d .. %5d" % (i, right._cal_min[i],
                                        right._cal_max[i]))
-print("done — qtr_probe.py / qtr_line_follow.py will load these.")
+print("done — qtr_probe.py / the qtr_line_follow_* examples will load these.")

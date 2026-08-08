@@ -79,7 +79,8 @@ class QTRReading:
         r = qtr.read()
         r[0].dark()             # per element
         r.position()            # global centroid, mm
-        r.left_edge_position()  # white→black boundary, mm
+        r.left_edge_position()  # the line's left edge, mm
+        r.right_edge_position() # the line's right edge, mm
         r.leftmost_position()   # fork clusters
         r.rightmost_position()
         r.dark_count()          # how many elements on the line
@@ -130,6 +131,9 @@ class QTRReading:
 
     def left_edge_position(self):
         return self._array.left_edge_position(self)
+
+    def right_edge_position(self):
+        return self._array.right_edge_position(self)
 
     def leftmost_position(self):
         return self._array.leftmost_position(self)
@@ -438,6 +442,37 @@ class QTRArray:
         v1 = readings[first].value
         frac = (self._threshold - v0) / (v1 - v0)
         return self._x_mm[first - 1] + frac * self._pitch
+
+    def right_edge_position(self, readings=None):
+        """Mirror of :meth:`left_edge_position`: the line's RIGHT
+        edge — the black→white boundary on the right side of the
+        rightmost dark cluster, in the same mm frame. ``None`` when
+        nothing is dark; a dark rightmost element saturates half a
+        pitch off-array to the right.
+
+        A right-edge follower keeps THIS at 0 — the mirror-image
+        track discipline of the left-edge follower, same sign
+        convention (the P law is symmetric between the two)."""
+        if len(self._adcs) < 2:
+            raise RuntimeError(
+                "right_edge_position() needs at least 2 elements — a "
+                "single detector channel has no edge to interpolate "
+                "(use QTRChannel.dark() for a flag)")
+        readings = self.read() if readings is None else readings
+        n = len(self._adcs)
+        last = None
+        for i in range(n - 1, -1, -1):
+            if readings[i].dark():
+                last = i
+                break
+        if last is None:
+            return None
+        if last == n - 1:
+            return self._x_mm[n - 1] + self._pitch / 2
+        v0 = readings[last + 1].value
+        v1 = readings[last].value
+        frac = (self._threshold - v0) / (v1 - v0)
+        return self._x_mm[last + 1] - frac * self._pitch
 
     def leftmost_position(self, readings=None):
         """Centroid of the LEFTMOST contiguous dark cluster, in mm
