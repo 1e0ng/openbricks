@@ -100,26 +100,30 @@ error = qtr.read().edge_error()
 Ten channels of a QTRX-HD-15A (4 mm pitch) in a skip pattern, left
 to right as mounted, onto GPIO 1..10 **in order**:
 
-| QTR channel | 15 | 13 | 12 | 11 | 9 | 7 | 5 | 4 | 3 | 1 |
-|-------------|----|----|----|----|---|---|---|---|---|---|
-| GPIO        | 1  | 2  | 3  | 4  | 5 | 6 | 7 | 8 | 9 | 10 |
+| QTR channel | 1 | 3 | 4 | 5 | 7 | 9 | 11 | 12 | 13 | 15 |
+|-------------|---|---|---|---|---|---|----|----|----|----|
+| GPIO        | 1 | 2 | 3 | 4 | 5 | 6 | 7  | 8  | 9  | 10 |
 | x (mm)      | −28 | −20 | −16 | −12 | −4 | +4 | +12 | +16 | +20 | +28 |
 
 That spans a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm (the
 driver's `positions_mm` carries the true coordinates, so edge
 interpolation is exact across the unequal gaps). The two modes:
 
-- **`"left"`** — holds the line's LEFT edge under **channel 12**
+- **`"left"`** — holds the line's LEFT edge under **channel 4**
   (x = −16 mm)
-- **`"right"`** — holds the line's RIGHT edge under **channel 4**
+- **`"right"`** — holds the line's RIGHT edge under **channel 12**
   (x = +16 mm)
+
+The skip pattern is a palindrome, so if the board is mounted the
+other way round, only these channel labels swap — GPIO order and
+geometry stay identical.
 
 Either way the ~20 mm line sits inside the middle of the window
 with ≥3 channels of mat visible on the far side — those far-side
 elements are the branch watch in the bundled followers, and the
 whole window going dark is the intersection/ending signal.
 
-One board-level note: **GPIO 3 (= channel 12, the left-mode
+One board-level note: **GPIO 3 (= channel 4, the left-mode
 setpoint channel) is a strapping pin**, and on the
 ESP32-S3-COREBOARD V1.4 it optionally carries a 10 kΩ pull-up
 through the `USB-JTAG` 0 Ω link. Harmless (per-element calibration

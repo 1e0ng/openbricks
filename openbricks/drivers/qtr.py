@@ -631,19 +631,21 @@ class QTRLineSensor(QTRArray):
         error = qtr.read().edge_error()
 
     Wiring (detailed table in docs/hardware.md): QTRX channels
-    15, 13, 12, 11, 9, 7, 5, 4, 3, 1 left-to-right onto GPIO 1..10
-    in order — a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm.
-    ``"left"`` mode holds the line's LEFT edge under channel 12
-    (-16 mm); ``"right"`` holds the RIGHT edge under channel 4
-    (+16 mm) — both derived from the positions table, not repeated
-    by hand. Different wiring: use :class:`QTRArray` directly with
-    your own pins/positions/setpoints.
+    1, 3, 4, 5, 7, 9, 11, 12, 13, 15 left-to-right onto GPIO 1..10
+    in order — a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm
+    (the pattern is a palindrome, so board orientation only changes
+    the channel LABELS, never the geometry). ``"left"`` mode holds
+    the line's LEFT edge under channel 4 (-16 mm); ``"right"``
+    holds the RIGHT edge under channel 12 (+16 mm) — both derived
+    from the positions table, not repeated by hand. Different
+    wiring: use :class:`QTRArray` directly with your own
+    pins/positions/setpoints.
     """
 
     PINS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     POSITIONS_MM = (-28.0, -20.0, -16.0, -12.0, -4.0,
                     4.0, 12.0, 16.0, 20.0, 28.0)
-    # Channel 12 is index 2 of the window, channel 4 is index 7.
+    # Channel 4 is index 2 of the window, channel 12 is index 7.
     LEFT_SETPOINT_MM = POSITIONS_MM[2]
     RIGHT_SETPOINT_MM = POSITIONS_MM[7]
 
