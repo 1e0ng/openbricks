@@ -158,14 +158,23 @@ class QTRArray:
     _FULL_SCALE = 1000
 
     def __init__(self, pins, pitch_mm=4.0, ctrl=None,
-                 dark_threshold=300):
+                 dark_threshold=300, positions_mm=None):
+        """``positions_mm`` (optional): explicit per-element x
+        coordinates in mm, left to right, strictly increasing — for
+        arrays whose wired channels are NOT evenly spaced (e.g. a
+        skip pattern like QTRX channels 15,13,12,11,9: spacings
+        8/4/4/8 mm widen a 5-pin cluster's window from 16 to 24 mm).
+        The origin is wherever the caller puts it; centring the
+        tuple on 0 keeps ``position()`` symmetric. When given,
+        ``pitch_mm`` only seeds the secondary uses (the last-side
+        hysteresis band and the off-array edge saturation) via the
+        MEAN spacing; all real geometry comes from the positions."""
         if len(pins) < 1:
             raise ValueError("at least one element required")
         for p in pins:
             _pins.check(p, "QTR analog input", output=False)
             self._check_adc_capable(p)
         self._pins = tuple(int(p) for p in pins)
-        self._pitch = float(pitch_mm)
         self._threshold = int(dark_threshold)
         self._adcs = [self._make_adc(p) for p in pins]
         self._ctrl = None
@@ -173,9 +182,25 @@ class QTRArray:
             from machine import Pin
             self._ctrl = Pin(ctrl, Pin.OUT, value=1)   # emitters on
         n = len(self._adcs)
-        # Element x-positions in mm, centre of the wired span at 0.
-        self._x_mm = [(i - (n - 1) / 2.0) * self._pitch
-                      for i in range(n)]
+        if positions_mm is not None:
+            if len(positions_mm) != n:
+                raise ValueError(
+                    "positions_mm has %d entries for %d pins"
+                    % (len(positions_mm), n))
+            xs = [float(x) for x in positions_mm]
+            for i in range(1, n):
+                if xs[i] <= xs[i - 1]:
+                    raise ValueError(
+                        "positions_mm must be strictly increasing "
+                        "left to right, got %r" % (positions_mm,))
+            self._x_mm = xs
+            self._pitch = ((xs[-1] - xs[0]) / (n - 1) if n > 1
+                           else float(pitch_mm))
+        else:
+            self._pitch = float(pitch_mm)
+            # Element x-positions in mm, centre of the wired span at 0.
+            self._x_mm = [(i - (n - 1) / 2.0) * self._pitch
+                          for i in range(n)]
         self._cal_min = None
         self._cal_max = None
         # Which side the line last left through (+1 right, -1 left):
@@ -437,7 +462,11 @@ class QTRArray:
         v0 = readings[first - 1].value
         v1 = readings[first].value
         frac = (self._threshold - v0) / (v1 - v0)
-        return self._x_mm[first - 1] + frac * self._pitch
+        # Interpolate over the ACTUAL spacing between these two
+        # elements — equal to the pitch on a uniform array, and the
+        # local gap on a positions_mm array.
+        span = self._x_mm[first] - self._x_mm[first - 1]
+        return self._x_mm[first - 1] + frac * span
 
     def leftmost_position(self, readings=None):
         """Centroid of the LEFTMOST contiguous dark cluster, in mm

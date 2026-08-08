@@ -36,13 +36,13 @@ def get_wheel_speeds(reading, branch_dark):
 
 LEFT_PINS = (1, 2, 3, 4, 5)
 RIGHT_PINS = (6, 7, 8, 9, 10)
-PITCH_MM = 4.0
+POSITIONS_MM = (-12.0, -4.0, 0.0, 4.0, 12.0)
 
 LEFT_CAL = "/qtr_left.cal"
 RIGHT_CAL = "/qtr_right.cal"
 
-left_qtr = QTRArray(pins=LEFT_PINS, pitch_mm=PITCH_MM)
-right_qtr = QTRArray(pins=RIGHT_PINS, pitch_mm=PITCH_MM)
+left_qtr = QTRArray(pins=LEFT_PINS, positions_mm=POSITIONS_MM)
+right_qtr = QTRArray(pins=RIGHT_PINS, positions_mm=POSITIONS_MM)
 left_qtr.load_calibration(LEFT_CAL)
 right_qtr.load_calibration(RIGHT_CAL)
 

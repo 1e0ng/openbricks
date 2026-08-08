@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.72.0 — non-uniform QTR element spacing (positions_mm)
+
+`QTRArray` accepts `positions_mm=` — explicit per-element x
+coordinates for wirings whose channels are not evenly spaced. The
+bench case: the skip pattern ch 15,13,12,11,9 (and mirrored
+7,5,4,3,1 on the right cluster) widens a 5-pin cluster's window
+from 16 to 24 mm at spacings 8/4/4/8. The centroid always used real
+coordinates; the left-edge interpolation now spans the ACTUAL local
+gap between the two straddling elements (identical result on
+uniform arrays), and the off-array saturation uses the mean
+spacing. Uniform `pitch_mm` arrays are byte-for-byte unchanged.
+
+The QTR examples wire the skip pattern:
+`positions_mm=(-12, -4, 0, 4, 12)` on both clusters.
+
 ## 1.71.0 — split 5+5 QTR rig; the whole ADC1 bank goes analog
 
 The QTR examples now model a split rig: 5 channels on the left
