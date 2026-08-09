@@ -1357,6 +1357,96 @@ class ChatterRegressionTests(unittest.TestCase):
         self.assertIn("bounce-filtered", tags)
 
 
+class StaleStartDiscardTests(unittest.TestCase):
+    """``run()`` entry discards every start signal that accumulated
+    while no idle loop was alive to drain it — a read-only BLE
+    session (``openbricks log``) must never launch the robot when
+    its session-end restore re-enters the loop (bench 2026-08-09: a
+    press parked in ``_pending`` during the session fired the
+    instant the log command finished)."""
+
+    def setUp(self):
+        import sys
+        self.btn = _make_button()
+        self.launcher = launcher.Launcher(
+            self.btn, program_path="/ignored.py", poll_ms=50)
+
+        class _MP:
+            start_pending = [False]
+
+            @staticmethod
+            def hard_button_take_start():
+                pending = _MP.start_pending[0]
+                _MP.start_pending[0] = False
+                return pending
+
+        class _Mod:
+            pass
+        mod = _Mod()
+        mod.motor_process = _MP
+        self.mp = _MP
+        had = "_openbricks_native" in sys.modules
+        old = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = mod
+
+        def restore():
+            if had:
+                sys.modules["_openbricks_native"] = old
+            else:
+                del sys.modules["_openbricks_native"]
+        self.addCleanup(restore)
+
+    def test_pending_start_is_discarded(self):
+        self.launcher._pending = "start"
+        self.launcher._discard_stale_start()
+        self.assertIsNone(self.launcher._pending)
+
+    def test_pending_stop_is_left_alone(self):
+        self.launcher._pending = "stop"
+        self.launcher._discard_stale_start()
+        self.assertEqual(self.launcher._pending, "stop")
+
+    def test_hard_latch_is_drained(self):
+        self.mp.start_pending[0] = True
+        self.launcher._discard_stale_start()
+        self.assertFalse(self.mp.start_pending[0])
+
+    def test_pcnt_edges_are_consumed(self):
+        pcnt = _FakePressCounter()
+        self.launcher._press_pcnt = pcnt
+        self.launcher._sync_press_counter()
+        pcnt.count = 7                      # edges during the session
+        self.launcher._discard_stale_start()
+        self.assertEqual(self.launcher._press_count_seen, 7)
+        # The next tick must NOT read those edges as a fresh press.
+        self.launcher._tick()
+        self.assertIsNone(self.launcher._pending)
+
+    def test_quiet_entry_discards_nothing_silently(self):
+        self.launcher._pending = None
+        self.launcher._discard_stale_start()
+        self.assertIsNone(self.launcher._pending)
+
+    def test_missing_native_module_is_harmless(self):
+        import sys
+        mod = sys.modules.pop("_openbricks_native")
+        try:
+            self.launcher._pending = "start"
+            self.launcher._discard_stale_start()
+        finally:
+            sys.modules["_openbricks_native"] = mod
+        self.assertIsNone(self.launcher._pending)
+
+    def test_pcnt_read_failure_is_harmless(self):
+        pcnt = _FakePressCounter()
+        self.launcher._press_pcnt = pcnt
+        self.launcher._sync_press_counter()
+        pcnt.raise_on_value = OSError("pcnt gone")
+        seen = self.launcher._press_count_seen
+        self.launcher._discard_stale_start()
+        self.assertEqual(self.launcher._press_count_seen, seen)
+
+
 class TickStarvationTests(unittest.TestCase):
     """_tick measures its own inter-run gap: a machine.Timer callback
     is silently DROPPED when the scheduler queue is full, and during
@@ -1400,6 +1490,35 @@ class TickStarvationTests(unittest.TestCase):
         self.assertTrue(notes[0].startswith("tick starved 400 ms"),
                         notes[0])
         self.assertEqual(self.launcher._tick_gap_max, 400)
+
+    def test_starvation_notes_are_throttled(self):
+        # Each note is a committed log write — on a slow filesystem
+        # the write itself starves the next tick, which wrote another
+        # note: the run_68 log storm (2026-08-09, ~400 ms per write,
+        # a 0.5 s program stretched to 28 s). One note per
+        # STARVE_NOTE_MS; the worst-gap tracking still sees every gap.
+        notes, log_mod, orig = self._capture_notes()
+        try:
+            self.launcher._tick()
+            for _ in range(8):           # 8 starved gaps in ~3.2 s
+                advance_ms(400)
+                self.launcher._tick()
+        finally:
+            log_mod.note = orig
+        self.assertEqual(len(notes), 1, notes)
+        self.assertEqual(self.launcher._tick_gap_max, 400)
+
+    def test_starvation_notes_resume_after_the_throttle_window(self):
+        notes, log_mod, orig = self._capture_notes()
+        try:
+            self.launcher._tick()
+            advance_ms(400)
+            self.launcher._tick()        # note 1
+            advance_ms(launcher.Launcher.STARVE_NOTE_MS + 100)
+            self.launcher._tick()        # gap > window: note 2 allowed
+        finally:
+            log_mod.note = orig
+        self.assertEqual(len(notes), 2, notes)
 
     def test_starvation_note_names_the_worst_log_write(self):
         # The note must carry its own prime suspect: if littlefs
@@ -1707,6 +1826,8 @@ class TimerIdDefaultTests(unittest.TestCase):
         def _stub(button_pin, poll_ms, timer_id):
             captured["timer_id"] = timer_id
             class _Inst:
+                def _discard_stale_start(self):
+                    pass
                 def _mark_idle_alive(self):
                     pass
                 def _drain_pending(self):

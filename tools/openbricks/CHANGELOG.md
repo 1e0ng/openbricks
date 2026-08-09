@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.81.1 — a BLE session can never start the robot; log-storm fix
+
+Two bench findings from one evening (runs 59-68):
+
+`launcher.run()` now DISCARDS every start signal that accumulated
+while no idle loop was alive to drain it — the `_pending` flag, the
+hard button's start latch, and unconsumed PCNT edges. A read-only
+BLE session (`openbricks log`, `list`, `stop`) Ctrl-C's the idle
+loop and restores it on the way out; a press parked during the
+session (schedule-full fallback under load) used to fire the
+instant the restore re-entered the loop — a log command visibly
+STARTED the robot. Discards announce themselves ("press again to
+run") and ring an event.
+
+Tick-starvation notes are throttled to one per 5 s. Each note is a
+committed log write, so on a slow filesystem the note's own write
+starved the next tick, which wrote another note — a self-sustaining
+storm that stretched a 0.5 s align program to 28 s (run_68: ~400 ms
+per write, every tick). Worst-gap tracking still sees every gap;
+only the note is throttled.
+
 ## 1.81.0 — stop presses flash green
 
 The press acknowledgment is now colour-coded by what the press
