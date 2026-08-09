@@ -24,7 +24,7 @@ from openbricks.robotics import DriveBase
 # --- control law (pure logic, unit-tested in tests/test_qtr_align.py) ---
 
 SEEK_DPS = 100
-KP = 2.0
+KP = 0.5
 EDGE_TOLERANCE = 5
 SIDE_COUNT = 5
 
