@@ -33,13 +33,6 @@ N = 50
 LINE = "benchmark line %d with a realistic amount of text to write"
 
 
-def _timed(fn):
-    """Elapsed microseconds for ``fn()``."""
-    t0 = time.ticks_us()
-    fn()
-    return time.ticks_diff(time.ticks_us(), t0)
-
-
 def _buffered():
     for i in range(N):
         print(LINE % i)
@@ -61,8 +54,13 @@ def main():
     print("warming up")
     log.flush()
 
-    buffered_us  = _timed(_buffered)
-    committed_us = _timed(_committed)
+    t0 = time.ticks_us()
+    _buffered()
+    buffered_us = time.ticks_diff(time.ticks_us(), t0)
+
+    t0 = time.ticks_us()
+    _committed()
+    committed_us = time.ticks_diff(time.ticks_us(), t0)
 
     print("")
     print("--- run-log write cost, %d lines each ---" % N)
