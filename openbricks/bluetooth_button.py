@@ -13,9 +13,10 @@ flashes at 2 Hz instead of holding a solid colour — blue when BLE is
 on, yellow when it's off, plain on/off blinking on single-colour
 LEDs. When the program stops, the LED returns to its idle state
 (solid state colour on RGB hubs, dark on single-colour hubs). And it
-renders the **press acknowledgment**: every program-button press —
-start or stop — flashes the LED red for a moment
-(``notify_press()``, called by the launcher's press detectors).
+renders the **press acknowledgment**: every program-button press
+flashes the LED for a moment — red for the press that starts a run,
+green for the press that stops one (``notify_press()``, called by
+the launcher's press detectors).
 
 This is a different physical button from the one ``openbricks.launcher``
 watches for program start/stop — the BLE toggle lives on its own
@@ -57,23 +58,28 @@ DEFAULT_COLOR_OFF = (255, 200, 0)     # yellow
 # a glance).
 RUN_BLINK_MS = 250
 
-# Press acknowledgment: every program-button press — the one that
-# starts a run AND the one that stops it — paints the LED red for
-# PRESS_FLASH_MS before the normal presentation resumes. The
-# launcher's press detectors call notify_press(); the toggle's poll
-# tick renders it, so the flash needs no timer of its own.
+# Press acknowledgment: every program-button press paints the LED
+# for PRESS_FLASH_MS before the normal presentation resumes — RED
+# for the press that starts a run, GREEN for the press that stops
+# one. The launcher's press detectors call notify_press(); the
+# toggle's poll tick renders it, so the flash needs no timer of its
+# own.
 PRESS_FLASH_MS = 200
-PRESS_COLOR = (255, 0, 0)
+PRESS_COLOR_START = (255, 0, 0)     # red
+PRESS_COLOR_STOP  = (0, 255, 0)     # green
 
 _press_events = 0
+_press_color = PRESS_COLOR_START
 
 
-def notify_press():
-    """Record a program-button press (start or stop). The active
-    :class:`BluetoothToggleButton` acknowledges it with a short red
-    flash on its next poll tick. Safe from any context — it only
-    increments a counter."""
-    global _press_events
+def notify_press(stop=False):
+    """Record a program-button press. ``stop=True`` marks it as the
+    press that stops a run (green flash); the default is a start
+    press (red). The active :class:`BluetoothToggleButton` renders
+    it on its next poll tick. Safe from any context — it only sets
+    two module variables."""
+    global _press_events, _press_color
+    _press_color = PRESS_COLOR_STOP if stop else PRESS_COLOR_START
     _press_events += 1
 
 
@@ -255,7 +261,7 @@ class BluetoothToggleButton:
 
     def _press_show(self):
         try:
-            self._led.rgb(*PRESS_COLOR)
+            self._led.rgb(*_press_color)
         except NotImplementedError:
             self._led.on()
 

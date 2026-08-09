@@ -3,6 +3,15 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.81.0 — stop presses flash green
+
+The press acknowledgment is now colour-coded by what the press
+does: RED for the press that starts a run (as in 1.80.0), GREEN
+for the press that stops one — both stop paths (the watcher's fire
+and the teardown chokepoint that covers hard stops).
+`notify_press(stop=True)` marks the stop kind; single-colour LEDs
+still blip either way.
+
 ## 1.80.1 — gentler align servo
 
 `examples/qtr_align.py` KP 2.0 -> 0.5: the edge pass tops out at

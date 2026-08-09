@@ -236,7 +236,7 @@ class Launcher:
         interrupt needed), then request the interrupt injection that
         tears the program down."""
         from openbricks import estop
-        _notify_press_feedback()
+        _notify_press_feedback(stop=True)
         self._last_stop_ms = _now_ms()
         self._stop_retry_ms = self._last_stop_ms
         self._stop_retry_count = 0
@@ -274,7 +274,7 @@ class Launcher:
         occurrence: gates in place, lockout never armed, next BLE
         session dead again). Called from the program teardown, so
         EVERY interrupt-unwound run arms the same suppression."""
-        _notify_press_feedback()
+        _notify_press_feedback(stop=True)
         now = _now_ms()
         self._last_stop_ms = now
         self._lockout_until_ms = now + self.START_LOCKOUT_MS
@@ -886,14 +886,15 @@ def _request_stop(launcher_instance):
         launcher_instance._pending = "stop"
 
 
-def _notify_press_feedback():
-    """A program-button press was recognized (start or stop) — let
-    the status LED acknowledge with its red flash. Lazy import: LED-
-    less builds and tests without the module just no-op, and a
-    feedback failure must never cost the press its action."""
+def _notify_press_feedback(stop=False):
+    """A program-button press was recognized — let the status LED
+    acknowledge: red flash for a start press, green for a stop
+    press. Lazy import: LED-less builds and tests without the
+    module just no-op, and a feedback failure must never cost the
+    press its action."""
     try:
         from openbricks import bluetooth_button
-        bluetooth_button.notify_press()
+        bluetooth_button.notify_press(stop=stop)
     except Exception:
         pass
 
