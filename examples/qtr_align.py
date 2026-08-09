@@ -29,30 +29,30 @@ EDGE_TOLERANCE = 5
 SIDE_COUNT = 5
 
 
-def _side_on_line(elements):
+def side_on_line(elements):
     for e in elements:
         if e.dark():
             return True
     return False
 
 
-def _side_ambient(elements):
+def side_ambient(elements):
     total = 0
     for e in elements:
         total += e.ambient()
     return total // len(elements)
 
 
-def _edge_dps(elements):
-    error = _side_ambient(elements) - 50
+def edge_dps(elements):
+    error = side_ambient(elements) - 50
     if abs(error) <= EDGE_TOLERANCE:
         return 0
     return int(KP * error)
 
 
 def seek_wheel_speeds(reading):
-    left_on = _side_on_line(reading.elements[:SIDE_COUNT])
-    right_on = _side_on_line(reading.elements[-SIDE_COUNT:])
+    left_on = side_on_line(reading.elements[:SIDE_COUNT])
+    right_on = side_on_line(reading.elements[-SIDE_COUNT:])
     if left_on and right_on:
         return None
     return (0 if left_on else SEEK_DPS,
@@ -60,8 +60,8 @@ def seek_wheel_speeds(reading):
 
 
 def edge_wheel_speeds(reading):
-    left = _edge_dps(reading.elements[:SIDE_COUNT])
-    right = _edge_dps(reading.elements[-SIDE_COUNT:])
+    left = edge_dps(reading.elements[:SIDE_COUNT])
+    right = edge_dps(reading.elements[-SIDE_COUNT:])
     if left == 0 and right == 0:
         return None
     return (left, right)

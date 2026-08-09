@@ -70,12 +70,12 @@ REG_VOLTAGE     = 0x3E
 REG_TEMPERATURE = 0x3F
 
 
-def _u8(motor, reg):
+def u8(motor, reg):
     raw = motor._bus.read(motor._id, reg, 1)
     return None if raw is None else raw[0]
 
 
-def _u16(motor, reg):
+def u16(motor, reg):
     raw = motor._bus.read(motor._id, reg, 2)
     return None if raw is None else (raw[0] | (raw[1] << 8))
 
@@ -83,13 +83,13 @@ def _u16(motor, reg):
 def snapshot(motor):
     """Registers as the SERVO actually holds them right now."""
     return {
-        "goal_speed": _u16(motor, REG_GOAL_SPEED),
-        "goal_acc":   _u8(motor, REG_GOAL_ACC),
-        "op_mode":    _u8(motor, REG_OP_MODE),
-        "min_angle":  _u16(motor, REG_MIN_ANGLE),
-        "max_angle":  _u16(motor, REG_MAX_ANGLE),
-        "voltage_dv": _u8(motor, REG_VOLTAGE),
-        "temp_c":     _u8(motor, REG_TEMPERATURE),
+        "goal_speed": u16(motor, REG_GOAL_SPEED),
+        "goal_acc":   u8(motor, REG_GOAL_ACC),
+        "op_mode":    u8(motor, REG_OP_MODE),
+        "min_angle":  u16(motor, REG_MIN_ANGLE),
+        "max_angle":  u16(motor, REG_MAX_ANGLE),
+        "voltage_dv": u8(motor, REG_VOLTAGE),
+        "temp_c":     u8(motor, REG_TEMPERATURE),
     }
 
 

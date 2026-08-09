@@ -24,7 +24,7 @@ BAUDS = [1_000_000, 500_000, 250_000, 115_200, 57_600, 38_400]
 ID_RANGE = range(1, 31)
 
 
-def _checksum(parts):
+def checksum(parts):
     s = 0
     for p in parts:
         s += p
@@ -33,7 +33,7 @@ def _checksum(parts):
 
 def ping_at(uart, servo_id):
     body = bytes([servo_id, 2, 0x01])
-    pkt  = b"\xFF\xFF" + body + bytes([_checksum(body)])
+    pkt  = b"\xFF\xFF" + body + bytes([checksum(body)])
     while uart.any():
         uart.read(uart.any())
     uart.write(pkt)
