@@ -9,10 +9,13 @@ once per press-release cycle. State is persisted via NVS by the
 
 The same poll loop doubles as the **run indicator**: while a user
 program is executing (``launcher.program_running()``), the status LED
-flashes at 1 Hz instead of holding a solid colour — blue when BLE is
+flashes at 2 Hz instead of holding a solid colour — blue when BLE is
 on, yellow when it's off, plain on/off blinking on single-colour
 LEDs. When the program stops, the LED returns to its idle state
-(solid state colour on RGB hubs, dark on single-colour hubs).
+(solid state colour on RGB hubs, dark on single-colour hubs). And it
+renders the **press acknowledgment**: every program-button press —
+start or stop — flashes the LED red for a moment
+(``notify_press()``, called by the launcher's press detectors).
 
 This is a different physical button from the one ``openbricks.launcher``
 watches for program start/stop — the BLE toggle lives on its own
@@ -48,10 +51,30 @@ DEFAULT_COLOR_ON  = (0, 0, 255)       # blue
 DEFAULT_COLOR_OFF = (255, 200, 0)     # yellow
 
 # Run-indicator blink: while a program runs the LED alternates
-# state-colour / off, switching phase every RUN_BLINK_MS. 500 ms per
-# phase = 1 Hz — slow enough to read as "deliberate heartbeat", fast
-# enough to be obviously different from the solid idle colour.
-RUN_BLINK_MS = 500
+# state-colour / off, switching phase every RUN_BLINK_MS. 250 ms per
+# phase = 2 Hz — visibly busier than the solid idle colour (was
+# 500 ms/1 Hz until 1.80.0; raised so "running" reads as activity at
+# a glance).
+RUN_BLINK_MS = 250
+
+# Press acknowledgment: every program-button press — the one that
+# starts a run AND the one that stops it — paints the LED red for
+# PRESS_FLASH_MS before the normal presentation resumes. The
+# launcher's press detectors call notify_press(); the toggle's poll
+# tick renders it, so the flash needs no timer of its own.
+PRESS_FLASH_MS = 200
+PRESS_COLOR = (255, 0, 0)
+
+_press_events = 0
+
+
+def notify_press():
+    """Record a program-button press (start or stop). The active
+    :class:`BluetoothToggleButton` acknowledges it with a short red
+    flash on its next poll tick. Safe from any context — it only
+    increments a counter."""
+    global _press_events
+    _press_events += 1
 
 
 def _launcher_program_running():
@@ -100,7 +123,7 @@ class BluetoothToggleButton:
             color_on, color_off: ``(r, g, b)`` tuples the LED is set to
                 when BLE is enabled / disabled. Defaults: blue / yellow.
             program_running: zero-arg callable returning True while a
-                user program executes — drives the 1 Hz run-indicator
+                user program executes — drives the 2 Hz run-indicator
                 blink. Defaults to ``launcher.program_running`` (the
                 flag every exec path maintains); tests inject their
                 own probe.
@@ -121,6 +144,10 @@ class BluetoothToggleButton:
         self._blink_count  = 0
         self._blink_lit    = True
         self._running_seen = False
+        # Press-flash state: consume notify_press() events by counter
+        # comparison (no shared flags to clear from other contexts).
+        self._press_seen       = _press_events
+        self._press_flash_left = 0
         # Stable callback object for bluetooth.add/remove_state_listener.
         # A bound method (``self._on_state_change``) is a fresh object on
         # every attribute access under MicroPython, where bound methods
@@ -169,6 +196,7 @@ class BluetoothToggleButton:
         self._blink_count  = 0
         self._blink_lit    = True
         self._running_seen = False
+        self._press_flash_left = 0
 
     # ---- tick body ----
 
@@ -189,12 +217,49 @@ class BluetoothToggleButton:
             # Release after a press — fire once.
             self._was_pressed = False
             self._fire()
-        # The run indicator rides every tick — including ticks where
-        # the button is held, so a press mid-run doesn't freeze the
-        # blink.
+        # The red press flash outranks the run indicator for its
+        # short window; the indicator rides every other tick —
+        # including ticks where the button is held, so a press
+        # mid-run doesn't freeze the blink.
+        if self._press_flash_tick():
+            return
         self._run_indicator_tick()
 
-    # ---- run indicator (1 Hz blink while a program executes) ----
+    # ---- press acknowledgment (red flash on the program button) ----
+
+    def _press_flash_tick(self):
+        """Render the red press-acknowledgment window. Returns True
+        while the flash owns the LED (the run indicator pauses
+        underneath and re-enters cleanly afterwards)."""
+        if self._press_seen != _press_events:
+            self._press_seen = _press_events
+            if self._led is None:
+                return False
+            self._press_flash_left = max(
+                1, PRESS_FLASH_MS // self._poll_ms)
+            self._press_show()
+            return True
+        if not self._press_flash_left:
+            return False
+        self._press_flash_left -= 1
+        if self._press_flash_left:
+            return True
+        # Window over: hand the LED back. Clearing _running_seen
+        # makes the run indicator re-enter with a fresh lit phase on
+        # this same tick; at idle, repaint the solid state colour.
+        if self._program_running():
+            self._running_seen = False
+        else:
+            self._restore_idle_led()
+        return False
+
+    def _press_show(self):
+        try:
+            self._led.rgb(*PRESS_COLOR)
+        except NotImplementedError:
+            self._led.on()
+
+    # ---- run indicator (2 Hz blink while a program executes) ----
 
     def _run_indicator_tick(self):
         """Blink the LED while a user program runs; restore the idle

@@ -335,12 +335,12 @@ _YELLOW = ("rgb", (255, 200, 0))
 
 class RunIndicatorTests(unittest.TestCase):
     """While a user program runs the LED flashes the BLE-state colour
-    at 1 Hz (500 ms lit / 500 ms dark); when the program stops it
+    at 2 Hz (250 ms lit / 250 ms dark); when the program stops it
     returns to the solid idle presentation.
 
-    Timing model: poll_ms=50 and RUN_BLINK_MS=500 → phase flips every
-    10 ticks. The virtual clock fires ticks on 50 ms boundaries, so
-    cumulative sleeps of 100 / 650 / 1200 ms after raising the run
+    Timing model: poll_ms=50 and RUN_BLINK_MS=250 → phase flips every
+    5 ticks. The virtual clock fires ticks on 50 ms boundaries, so
+    cumulative sleeps of 100 / 350 / 600 ms after raising the run
     flag land deterministically in lit / dark / lit phases."""
 
     def setUp(self):
@@ -373,9 +373,9 @@ class RunIndicatorTests(unittest.TestCase):
         flag[0] = True
         time.sleep_ms(100)                    # run seen → lit phase
         self.assertEqual(led.last(), _BLUE)
-        time.sleep_ms(550)                    # 650 ms → dark phase
+        time.sleep_ms(250)                    # 350 ms → dark phase
         self.assertEqual(led.last(), "off")
-        time.sleep_ms(550)                    # 1200 ms → lit again
+        time.sleep_ms(250)                    # 600 ms → lit again
         self.assertEqual(led.last(), _BLUE)
 
     def test_run_blinks_yellow_when_ble_off(self):
@@ -387,9 +387,9 @@ class RunIndicatorTests(unittest.TestCase):
         flag[0] = True
         time.sleep_ms(100)
         self.assertEqual(led.last(), _YELLOW)
-        time.sleep_ms(550)
+        time.sleep_ms(250)
         self.assertEqual(led.last(), "off")
-        time.sleep_ms(550)
+        time.sleep_ms(250)
         self.assertEqual(led.last(), _YELLOW)
 
     def test_ble_toggle_mid_run_switches_blink_color(self):
@@ -402,9 +402,9 @@ class RunIndicatorTests(unittest.TestCase):
         self.assertEqual(led.last(), _BLUE)
         # Turn BLE off mid-run: the next lit phase must be yellow.
         bluetooth.set_enabled(False)
-        time.sleep_ms(550)                    # dark phase
+        time.sleep_ms(250)                    # dark phase
         self.assertEqual(led.last(), "off")
-        time.sleep_ms(550)                    # next lit phase
+        time.sleep_ms(250)                    # next lit phase
         self.assertEqual(led.last(), _YELLOW)
 
     def test_program_end_restores_solid_state_color(self):
@@ -412,7 +412,7 @@ class RunIndicatorTests(unittest.TestCase):
         helper, flag = self._running_helper(led)
 
         flag[0] = True
-        time.sleep_ms(650)                    # land in the dark phase
+        time.sleep_ms(350)                    # land in the dark phase
         self.assertEqual(led.last(), "off")
 
         flag[0] = False
@@ -434,9 +434,9 @@ class RunIndicatorTests(unittest.TestCase):
         flag[0] = True
         time.sleep_ms(100)
         self.assertEqual(led.last(), "on")
-        time.sleep_ms(550)
+        time.sleep_ms(250)
         self.assertEqual(led.last(), "off")
-        time.sleep_ms(550)                    # lit again
+        time.sleep_ms(250)                    # lit again
         self.assertEqual(led.last(), "on")
 
         flag[0] = False
@@ -487,12 +487,102 @@ class RunIndicatorTests(unittest.TestCase):
         helper.start()
 
         inst._running = True
-        time.sleep_ms(650)
+        time.sleep_ms(350)
         self.assertEqual(led.last(), "off",
                          "default probe must see the launcher flag")
         inst._running = False
         time.sleep_ms(100)
         self.assertEqual(led.last(), _BLUE)
+
+
+_RED = ("rgb", (255, 0, 0))
+
+
+class PressFlashTests(unittest.TestCase):
+    """Every program-button press (start or stop) flashes the LED red
+    for PRESS_FLASH_MS, then the normal presentation resumes —
+    solid state colour at idle, the 2 Hz blink mid-run."""
+
+    def setUp(self):
+        from openbricks import bluetooth
+        from openbricks import launcher
+        _FakeNVS._reset_for_test()
+        _FakeBLE._reset_for_test()
+        Timer.reset_for_test()
+        del bluetooth._state_listeners[:]
+        launcher._singleton = None
+        self.addCleanup(setattr, launcher, "_singleton", None)
+        _plant_hub_name()
+
+    def _helper(self, led):
+        flag = [False]
+        helper = BluetoothToggleButton(
+            _StubButton(), led=led, poll_ms=50,
+            program_running=lambda: flag[0])
+        helper.start()
+        return helper, flag
+
+    def test_idle_press_flashes_red_then_restores_state_color(self):
+        from openbricks import bluetooth_button
+        led = _IndicatorLED()
+        helper, _flag = self._helper(led)
+        self.assertEqual(led.last(), _BLUE)      # idle paint
+        bluetooth_button.notify_press()
+        time.sleep_ms(100)                       # next tick renders red
+        self.assertEqual(led.last(), _RED)
+        time.sleep_ms(300)                       # window over → idle
+        self.assertEqual(led.last(), _BLUE)
+
+    def test_mid_run_press_overrides_blink_then_blink_resumes(self):
+        from openbricks import bluetooth_button
+        led = _IndicatorLED()
+        helper, flag = self._helper(led)
+        flag[0] = True
+        time.sleep_ms(100)                       # lit phase
+        self.assertEqual(led.last(), _BLUE)
+        bluetooth_button.notify_press()
+        time.sleep_ms(100)
+        self.assertEqual(led.last(), _RED)
+        time.sleep_ms(300)                       # flash over, re-enter lit
+        self.assertEqual(led.last(), _BLUE)
+        time.sleep_ms(300)                       # and it still blinks
+        self.assertEqual(led.last(), "off")
+
+    def test_two_presses_extend_the_flash(self):
+        from openbricks import bluetooth_button
+        led = _IndicatorLED()
+        helper, _flag = self._helper(led)
+        bluetooth_button.notify_press()
+        time.sleep_ms(100)
+        bluetooth_button.notify_press()          # e.g. fire + teardown echo
+        time.sleep_ms(150)                       # still inside window two
+        self.assertEqual(led.last(), _RED)
+        time.sleep_ms(300)
+        self.assertEqual(led.last(), _BLUE)
+
+    def test_plain_led_flashes_on_then_dark(self):
+        from openbricks import bluetooth_button
+        led = _PlainIndicatorLED()
+        helper, _flag = self._helper(led)
+        self.assertEqual(led.history, [])        # idle no-op
+        bluetooth_button.notify_press()
+        time.sleep_ms(100)
+        self.assertEqual(led.last(), "on")
+        time.sleep_ms(300)                       # idle on plain = dark
+        self.assertEqual(led.last(), "off")
+
+    def test_no_led_press_is_harmless(self):
+        from openbricks import bluetooth_button
+        helper, _flag = self._helper(None)
+        bluetooth_button.notify_press()
+        time.sleep_ms(200)                       # nothing raised
+
+    def test_launcher_helper_feeds_the_counter(self):
+        from openbricks import bluetooth_button
+        from openbricks import launcher
+        before = bluetooth_button._press_events
+        launcher._notify_press_feedback()
+        self.assertEqual(bluetooth_button._press_events, before + 1)
 
 
 class StopInterruptRelayTests(unittest.TestCase):

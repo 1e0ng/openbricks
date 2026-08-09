@@ -236,6 +236,7 @@ class Launcher:
         interrupt needed), then request the interrupt injection that
         tears the program down."""
         from openbricks import estop
+        _notify_press_feedback()
         self._last_stop_ms = _now_ms()
         self._stop_retry_ms = self._last_stop_ms
         self._stop_retry_count = 0
@@ -273,6 +274,7 @@ class Launcher:
         occurrence: gates in place, lockout never armed, next BLE
         session dead again). Called from the program teardown, so
         EVERY interrupt-unwound run arms the same suppression."""
+        _notify_press_feedback()
         now = _now_ms()
         self._last_stop_ms = now
         self._lockout_until_ms = now + self.START_LOCKOUT_MS
@@ -451,6 +453,7 @@ class Launcher:
             try:
                 from _openbricks_native import motor_process as _mpn
                 if _mpn.hard_button_take_start():
+                    _notify_press_feedback()
                     # Same gates as the PCNT path below (Part 12
                     # meta-rule: every echo of a dispatching press
                     # belongs to it). Ungated, the STOPPING press's
@@ -480,6 +483,7 @@ class Launcher:
                 except Exception:
                     n = self._press_count_seen
                 if n != self._press_count_seen:
+                    _notify_press_feedback()
                     self._press_count_seen = n
                     verdict = self._start_gate_verdict(now)
                     if verdict == "post-stop lockout":
@@ -880,6 +884,18 @@ def _request_stop(launcher_instance):
         request_stop()
     except (ImportError, AttributeError):
         launcher_instance._pending = "stop"
+
+
+def _notify_press_feedback():
+    """A program-button press was recognized (start or stop) — let
+    the status LED acknowledge with its red flash. Lazy import: LED-
+    less builds and tests without the module just no-op, and a
+    feedback failure must never cost the press its action."""
+    try:
+        from openbricks import bluetooth_button
+        bluetooth_button.notify_press()
+    except Exception:
+        pass
 
 
 def _arm_stop_button(armed):
