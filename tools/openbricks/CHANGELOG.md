@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.83.4 — align: one servo, two targets
+
+Correction to 1.83.3's shape: the `target` parameter belongs on
+`edge_dps(elements, target)`, and BOTH passes run it — seek is
+`edge_dps(half, 30)` (a proportional drive onto the line, slowing
+into arrival instead of the old constant creep; overshoot backs
+up), edge is `edge_dps(half, 50)` (ease back to the boundary).
+`SEEK_DPS` is gone; the far-white approach speed is
+`KP * 70 = 91` dps. `side_ambient(elements)` returns the plain
+mean again.
+
 ## 1.83.3 — align tuning: KP 1.3, seek arrives on solid dark
 
 `examples/qtr_align.py`: `side_ambient(elements, target)` returns
