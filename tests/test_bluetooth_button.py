@@ -496,12 +496,14 @@ class RunIndicatorTests(unittest.TestCase):
 
 
 _RED = ("rgb", (255, 0, 0))
+_GREEN = ("rgb", (0, 255, 0))
 
 
 class PressFlashTests(unittest.TestCase):
-    """Every program-button press (start or stop) flashes the LED red
-    for PRESS_FLASH_MS, then the normal presentation resumes —
-    solid state colour at idle, the 2 Hz blink mid-run."""
+    """Every program-button press flashes the LED for PRESS_FLASH_MS
+    — red for a start press, green for a stop press — then the
+    normal presentation resumes: solid state colour at idle, the
+    2 Hz blink mid-run."""
 
     def setUp(self):
         from openbricks import bluetooth
@@ -533,16 +535,26 @@ class PressFlashTests(unittest.TestCase):
         time.sleep_ms(300)                       # window over → idle
         self.assertEqual(led.last(), _BLUE)
 
-    def test_mid_run_press_overrides_blink_then_blink_resumes(self):
+    def test_stop_press_flashes_green(self):
+        from openbricks import bluetooth_button
+        led = _IndicatorLED()
+        helper, _flag = self._helper(led)
+        bluetooth_button.notify_press(stop=True)
+        time.sleep_ms(100)
+        self.assertEqual(led.last(), _GREEN)
+        time.sleep_ms(300)
+        self.assertEqual(led.last(), _BLUE)
+
+    def test_mid_run_stop_press_overrides_blink_then_blink_resumes(self):
         from openbricks import bluetooth_button
         led = _IndicatorLED()
         helper, flag = self._helper(led)
         flag[0] = True
         time.sleep_ms(100)                       # lit phase
         self.assertEqual(led.last(), _BLUE)
-        bluetooth_button.notify_press()
+        bluetooth_button.notify_press(stop=True)
         time.sleep_ms(100)
-        self.assertEqual(led.last(), _RED)
+        self.assertEqual(led.last(), _GREEN)
         time.sleep_ms(300)                       # flash over, re-enter lit
         self.assertEqual(led.last(), _BLUE)
         time.sleep_ms(300)                       # and it still blinks
@@ -552,11 +564,11 @@ class PressFlashTests(unittest.TestCase):
         from openbricks import bluetooth_button
         led = _IndicatorLED()
         helper, _flag = self._helper(led)
-        bluetooth_button.notify_press()
+        bluetooth_button.notify_press(stop=True)
         time.sleep_ms(100)
-        bluetooth_button.notify_press()          # e.g. fire + teardown echo
+        bluetooth_button.notify_press(stop=True)  # fire + teardown echo
         time.sleep_ms(150)                       # still inside window two
-        self.assertEqual(led.last(), _RED)
+        self.assertEqual(led.last(), _GREEN)
         time.sleep_ms(300)
         self.assertEqual(led.last(), _BLUE)
 
@@ -583,6 +595,12 @@ class PressFlashTests(unittest.TestCase):
         before = bluetooth_button._press_events
         launcher._notify_press_feedback()
         self.assertEqual(bluetooth_button._press_events, before + 1)
+        self.assertEqual(bluetooth_button._press_color,
+                         bluetooth_button.PRESS_COLOR_START)
+        launcher._notify_press_feedback(stop=True)
+        self.assertEqual(bluetooth_button._press_events, before + 2)
+        self.assertEqual(bluetooth_button._press_color,
+                         bluetooth_button.PRESS_COLOR_STOP)
 
 
 class StopInterruptRelayTests(unittest.TestCase):
