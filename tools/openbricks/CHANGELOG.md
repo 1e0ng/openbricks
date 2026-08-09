@@ -19,9 +19,13 @@ hard back instead of raising. The follower examples are unchanged
 in code (`steer = KP * reading.edge_error()`); their behavior now
 servos the setpoint channel onto the boundary, Pybricks-style.
 
-`examples/qtr_align.py`'s edge pass now nudges each wheel in BOTH
-directions until its half's mean ambient sits in the 40..60 band
-around 50 — parked right on the edge, not backed off it.
+`examples/qtr_align.py`'s edge pass now servos each wheel
+proportionally — the follower's KP discipline, `KP * (ambient -
+50)` per half, either direction — until both halves settle inside
+EDGE_TOLERANCE of the boundary: parked right on the edge, not
+backed off it. The two laws share the follower's naming and
+contract (`*_wheel_speeds(reading)` returning wheel speeds or
+None for done) so the QTR examples read as one family.
 
 ## 1.76.1 — simpler align example
 
