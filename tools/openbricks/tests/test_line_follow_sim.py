@@ -107,7 +107,7 @@ class LineFollowInPhysicsTests(unittest.TestCase):
         max |y| deviation, distance advanced)."""
         import time as _t
         db, left_sensor, right_sensor = self._build()
-        pid = self.ns["_pid_wheel_speeds"]
+        pid = self.ns["pid_wheel_speeds"]
         state = self.ns["PID_STATE0"]
 
         x0, y0 = self._chassis_xy()
@@ -147,7 +147,7 @@ class LineFollowInPhysicsTests(unittest.TestCase):
         # would peel the robot off the main line; the law holds
         # course instead. Pinned here against the real geometry
         # rather than synthetic readings.
-        pid = self.ns["_pid_wheel_speeds"]
+        pid = self.ns["pid_wheel_speeds"]
         cruise = self.ns["CRUISE_DPS"]
         thr = self.ns["LINE_AMBIENT"]
         speeds, _ = pid(thr - 5, thr + 40, self.ns["PID_STATE0"], 0.010)
