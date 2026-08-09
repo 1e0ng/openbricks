@@ -1916,6 +1916,42 @@ class EmergencyStopTests(unittest.TestCase):
         ST3215._buses = {}
         self.addCleanup(_cleanup_program)
 
+    def _record_motor_stops(self):
+        calls = []
+        orig = launcher._stop_all_motors
+        launcher._stop_all_motors = lambda: calls.append(1)
+        self.addCleanup(setattr, launcher, "_stop_all_motors", orig)
+        return calls
+
+    def test_natural_program_end_stops_all_motors(self):
+        # A program that returns with a motor still commanded (e.g.
+        # ``motor.run(200)`` then falls off the end) left the robot
+        # driving at its last setpoint until a stop press. EVERY way
+        # out of the exec now kills the motors, not just the button
+        # path.
+        calls = self._record_motor_stops()
+        path = _write_program("x = 1\n")
+        launcher._exec_program_raw(path, origin="test")
+        self.assertEqual(len(calls), 1)
+
+    def test_exception_program_end_stops_all_motors(self):
+        calls = self._record_motor_stops()
+        path = _write_program("raise ValueError('boom')\n")
+        launcher._exec_program_raw(path, origin="test")
+        self.assertEqual(len(calls), 1)
+
+    def test_interrupt_program_end_still_stops_motors(self):
+        # The button path calls _stop_all_motors before the log
+        # write already; with the finally added it runs twice —
+        # idempotent by design, and both exits stay covered.
+        calls = self._record_motor_stops()
+        path = _write_program("raise KeyboardInterrupt\n")
+        try:
+            launcher._exec_program_raw(path, origin="test")
+        except KeyboardInterrupt:
+            pass
+        self.assertGreaterEqual(len(calls), 1)
+
     def test_stop_tick_injects_interrupt_when_armed_and_requested(self):
         # The core mechanism: the native C-function stop_tick callback,
         # when armed + a stop was requested, injects a real
@@ -2059,7 +2095,11 @@ class EmergencyStopTests(unittest.TestCase):
                 launcher._exec_program_raw(path)
         finally:
             launcher._stop_all_motors = original
-        self.assertEqual(calls, [1])
+        # Twice since the every-exit finally (1.82.0): once in the
+        # KeyboardInterrupt handler (motors die BEFORE the log
+        # write), once in the shared finally. Idempotent by design;
+        # the pin is "motors got stopped", not the call count.
+        self.assertGreaterEqual(len(calls), 1)
 
     def test_stop_all_motors_is_safe_with_no_motors(self):
         # No buses registered, native module maybe absent — must be a

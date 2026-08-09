@@ -1196,6 +1196,13 @@ def _exec_program_raw(program_path, origin=None):
                 sess.write_text(text if text else "Exception: %r\n" % (e,))
     finally:
         _arm_stop_button(False)
+        # EVERY way out stops the motors — not just the button path.
+        # A program ending naturally (or dying on an exception) with
+        # a motor still commanded left the robot driving at its last
+        # setpoint until someone pressed stop. Same kill the e-stop
+        # uses (native scheduler halt + serial torque-off broadcast),
+        # idempotent when the KeyboardInterrupt path already ran it.
+        _stop_all_motors()
 
 
 def _exec_program(program_path, origin=None):

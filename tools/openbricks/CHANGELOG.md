@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.82.0 — motors stop when the program stops, however it stops
+
+Program teardown now stops every motor on EVERY exit path — natural
+completion and exception exits included, not just the stop button.
+A program that ended with a motor still commanded (`motor.run(200)`
+then falling off the end) left the robot driving at its last
+setpoint until someone pressed stop. The kill is the same one the
+e-stop uses: native 1 kHz scheduler halt + torque-off broadcast on
+every serial-servo bus. Note the semantic: like a button stop, this
+is a coast — a program that ends leaving a motor in `hold()`
+releases the hold.
+
 ## 1.81.1 — a BLE session can never start the robot; log-storm fix
 
 Two bench findings from one evening (runs 59-68):
