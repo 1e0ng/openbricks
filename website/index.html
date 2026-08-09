@@ -225,10 +225,8 @@ db.<span class="fn">turn</span>(<span class="nu">90</span>)       <span class="c
     </div>
     <div class="step">
       <h3>Flash a hub</h3>
-      <pre>openbricks flash --name RobotA \
-  --port /dev/ttyUSB0 \
-  --firmware openbricks-esp32s3.bin</pre>
-      <p style="font-size:14px;color:var(--fg-muted)">Prebuilt images for ESP32-S3 and ESP32 on every release.</p>
+      <pre>openbricks flash --name RobotA</pre>
+      <p style="font-size:14px;color:var(--fg-muted)">Port and chip auto-detected; the newest signed firmware downloads itself.</p>
     </div>
     <div class="step">
       <h3>Run your program</h3>
