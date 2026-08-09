@@ -157,12 +157,29 @@ class ComposeTests(unittest.TestCase):
         self.assertIn(b"launcher.run_program(", boot)
         self.assertIn(b"'/program.py'", boot)
 
+    def test_bootstrap_prints_firmware_label_first(self):
+        # ``openbricks run`` shows the hub's firmware version (with
+        # its official/customized provenance suffix) at the top of
+        # the stream, before the program launches; pre-1.79 firmware
+        # has no firmware_label and falls back to the bare version.
+        boot = run_mod._compose_runner()
+        self.assertIn(b"openbricks.firmware_label()", boot)
+        self.assertIn(b"except AttributeError", boot)
+        self.assertIn(b"openbricks.__version__", boot)
+        self.assertTrue(
+            boot.index(b"firmware_label")
+            < boot.index(b"launcher.run_program("))
+        import ast
+        ast.parse(boot.decode())
+
     def test_runner_is_fixed_size_no_payload(self):
         # The runner must not embed the script — it runs the staged
         # file, so its paste size is constant regardless of script
         # growth.
         boot = run_mod._compose_runner()
-        self.assertLess(len(boot), 600)
+        # Bound is a payload-embedding tripwire, not a byte budget:
+        # bumped 600 -> 800 for the firmware-label banner (1.79.0).
+        self.assertLess(len(boot), 800)
         self.assertNotIn(b"f.write", boot)
 
     def test_bootstrap_syncs_rtc_before_running(self):

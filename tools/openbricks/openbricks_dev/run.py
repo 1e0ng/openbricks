@@ -486,6 +486,15 @@ def _compose_runner():
     with the message that comes with an uncaught interrupt.
     """
     lines = rtc_sync_lines() + [
+        # Firmware identity first, provenance suffix included —
+        # ``firmware_label`` exists since 1.79.0; older firmware
+        # falls back to the bare version (it cannot know its own
+        # provenance).
+        "import openbricks",
+        "try:",
+        "    print('firmware ' + openbricks.firmware_label())",
+        "except AttributeError:",
+        "    print('firmware ' + openbricks.__version__)",
         "from openbricks import launcher",
         "try:",
         "    launcher.run_program(%r)" % _TARGET_PATH,

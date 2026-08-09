@@ -40,6 +40,12 @@ firmware flashes normally: the suffix is provenance, not a gate.
 After each flash the verdict is stored on the hub, which is how the
 next `openbricks flash` labels the current firmware.
 
+The suffix follows the version everywhere it reaches you: the
+`firmware 1.79.0 (official)` banner at the top of every
+`openbricks run`, the `started:` header line in every run log
+(`openbricks log`), and the flash preflight above. On the hub,
+`openbricks.firmware_label()` returns the same string.
+
 ## Reference
 
 The reference below is generated from the CLI's own argument parser, so

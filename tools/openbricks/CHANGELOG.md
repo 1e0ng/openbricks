@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.79.0 — the provenance suffix follows the version everywhere
+
+New firmware API `openbricks.firmware_label()` — the version with
+its provenance suffix (`"1.79.0 (official)"`), derived on the hub
+from the NVS marker `openbricks flash` stores. Used everywhere a
+firmware version reaches an end user: the run log's `started:`
+header (so `openbricks log` shows it), and a new
+`firmware X.Y.Z (official|customized)` banner at the top of every
+`openbricks run` stream (pre-1.79 firmware falls back to the bare
+version — it cannot know its own provenance).
+
 ## 1.78.0 — signed firmware + flash version preflight
 
 `openbricks flash` now reads the RUNNING firmware first and prints

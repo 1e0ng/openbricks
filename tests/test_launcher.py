@@ -681,6 +681,9 @@ class ButtonPressLogEntryTests(unittest.TestCase):
         self.assertIn("started: button press | firmware ", data)
         from openbricks import __version__ as fw_ver
         self.assertIn("firmware %s" % fw_ver, data)
+        # The version always carries its provenance suffix — no
+        # signature marker in the test env, so "(customized)".
+        self.assertIn("firmware %s (customized)" % fw_ver, data)
         self.assertIn("program " + prog, data)
         self.assertIn("uptime ", data)
         self.assertIn("body", data)

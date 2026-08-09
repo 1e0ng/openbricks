@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """openbricks — Pybricks-style robotics for open hardware on MicroPython."""
 
-__version__ = "1.78.0"
+__version__ = "1.79.0"
 
 # Re-export the most useful things for ergonomic imports.
 from openbricks.interfaces import Motor, Servo, IMU, ColorSensor  # noqa: F401
@@ -49,6 +49,36 @@ def _read_hub_name():
         return bytes(buf[:n]).decode()
     except OSError:
         return None
+
+
+# Provenance marker written by ``openbricks flash`` after every
+# flash: NVS blob ``"<version>:<verdict>"`` under this key. The
+# version prefix guards staleness — firmware replaced behind the
+# CLI's back no longer matches and degrades to "customized".
+_FW_SIG_NVS_KEY    = "fw_sig"
+_FW_SIG_MAX_BYTES  = 96
+
+
+def firmware_label():
+    """The firmware version with its provenance suffix — e.g.
+    ``"1.78.0 (official)"``. Official means the flashed image's
+    Ed25519 signature verified against the project key at flash
+    time; anything else (self-built image, no marker, marker from a
+    different version) reads ``(customized)``. Use this everywhere
+    a firmware version is shown to an end user."""
+    verdict = "customized"
+    try:
+        import esp32
+        nvs = esp32.NVS(_HUB_NAME_NVS_NAMESPACE)
+        buf = bytearray(_FW_SIG_MAX_BYTES)
+        n = nvs.get_blob(_FW_SIG_NVS_KEY, buf)
+        marked_version, _, marked_verdict = \
+            bytes(buf[:n]).decode().partition(":")
+        if marked_version == __version__ and marked_verdict == "official":
+            verdict = "official"
+    except Exception:
+        pass
+    return "%s (%s)" % (__version__, verdict)
 
 
 def __getattr__(name):
