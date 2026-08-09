@@ -33,12 +33,12 @@ N = 50
 LINE = "benchmark line %d with a realistic amount of text to write"
 
 
-def _buffered():
+def buffered():
     for i in range(N):
         print(LINE % i)
 
 
-def _committed():
+def committed():
     for i in range(N):
         print(LINE % i)
         log.flush()
@@ -55,11 +55,11 @@ def main():
     log.flush()
 
     t0 = time.ticks_us()
-    _buffered()
+    buffered()
     buffered_us = time.ticks_diff(time.ticks_us(), t0)
 
     t0 = time.ticks_us()
-    _committed()
+    committed()
     committed_us = time.ticks_diff(time.ticks_us(), t0)
 
     print("")

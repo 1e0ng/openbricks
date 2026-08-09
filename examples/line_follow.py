@@ -88,11 +88,11 @@ MAX_DPS = 800
 PID_STATE0 = (0.0, None)
 
 
-def _clamp(dps):
+def clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
-def _pid_wheel_speeds(left_ambient, right_ambient, state, dt_s):
+def pid_wheel_speeds(left_ambient, right_ambient, state, dt_s):
     """One control tick: ``(decision, state)``.
 
     ``decision`` is ``None`` (both sensors dark: intersection — stop)
@@ -126,7 +126,7 @@ def _pid_wheel_speeds(left_ambient, right_ambient, state, dt_s):
     else:
         derivative = 0.0
     steer = KP * error + KI * integral + KD * derivative
-    return ((_clamp(CRUISE_DPS + steer), _clamp(CRUISE_DPS - steer)),
+    return ((clamp(CRUISE_DPS + steer), clamp(CRUISE_DPS - steer)),
             (integral, error))
 
 # --- end control law ---
@@ -140,7 +140,7 @@ def follow_line():
         now_ms = time.ticks_ms()
         dt_s = time.ticks_diff(now_ms, prev_ms) / 1000.0
         prev_ms = now_ms
-        speeds, state = _pid_wheel_speeds(
+        speeds, state = pid_wheel_speeds(
             left_sensor.ambient(),
             right_sensor.ambient(),
             state, dt_s,

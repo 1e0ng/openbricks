@@ -36,7 +36,7 @@ class ControlLawTests(unittest.TestCase):
 
     def setUp(self):
         self.ns = _load_control_law()
-        self.pid = self.ns["_pid_wheel_speeds"]
+        self.pid = self.ns["pid_wheel_speeds"]
         self.state0 = self.ns["PID_STATE0"]
         self.cruise = self.ns["CRUISE_DPS"]
         self.kp = self.ns["KP"]

@@ -3,6 +3,14 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.77.1 — example functions drop the leading underscore
+
+Helper functions in `examples/*.py` are no longer `_named`
+(`clamp`, `side_ambient`, `edge_dps`, `pid_wheel_speeds`,
+`checksum`, ...). The Python privacy convention says "internal",
+but in a teaching example every function is meant to be read —
+the underscore was noise.
+
 ## 1.77.0 — edge means ambient 50, everywhere
 
 "On the edge" now means the sensor reads ambient ~50 — straddling

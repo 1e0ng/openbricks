@@ -25,7 +25,7 @@ MAX_DPS = 400
 FLAG_COUNT = 3
 
 
-def _clamp(dps):
+def clamp(dps):
     return max(0, min(MAX_DPS, int(dps)))
 
 
@@ -33,8 +33,8 @@ def get_wheel_speeds(reading):
     if reading.all_dark():
         return None
     steer = KP * reading.edge_error()
-    return (_clamp(CRUISE_DPS + steer),
-            _clamp(CRUISE_DPS - steer))
+    return (clamp(CRUISE_DPS + steer),
+            clamp(CRUISE_DPS - steer))
 
 
 def branch_seen(reading, mode):
