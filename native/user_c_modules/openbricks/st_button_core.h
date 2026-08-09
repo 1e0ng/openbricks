@@ -65,8 +65,10 @@ typedef struct {
     uint8_t  win_count;         // pressed samples in the window
     uint8_t  stable_pressed;    // debounced level (hysteresis state)
     uint8_t  raw_last;          // most recent raw sample (diagnostics)
+    uint8_t  stale_press;       // press in flight at arm time (see below)
     uint32_t n_presses;         // cumulative debounced press edges
     uint32_t n_releases;
+    uint32_t n_stale;           // press edges consumed as stale
 } ob_button_t;
 
 void ob_button_init(ob_button_t *b,
@@ -74,3 +76,27 @@ void ob_button_init(ob_button_t *b,
 
 // One hard tick: sample, vote, return the edge event (if any).
 ob_button_event_t ob_button_tick(ob_button_t *b);
+
+// Stale-press suppression: the press that STARTS a run must never
+// STOP it. The binding classifies a PRESSED edge by the armed state
+// at DEBOUNCE COMPLETION — but the completing edge can slip past
+// the arm when flash I/O at run start (log rotation + commit, NVS
+// reads) stalls the hard tick longer than exec setup takes: the
+// start press's samples then confirm on the first ticks AFTER the
+// arm, and the run dies ~1 ms in (bench 2026-08-09, run_4, worst
+// tick gap 140 ms). Call ob_button_arm_transition at every
+// disarm->arm edge: it marks any press in flight (stable-down OR
+// mid-debounce window) as stale. ob_button_event_is_stale then
+// consumes exactly that press's late edge; a release — or the
+// window decaying without ever confirming — ends the staleness, so
+// the NEXT press stops normally.
+void ob_button_arm_transition(ob_button_t *b);
+
+// Clear the stale marker (call on disarm — a fresh arm re-derives it).
+void ob_button_clear_stale(ob_button_t *b);
+
+// Returns nonzero when this tick's event is the stale start press
+// confirming late and must NOT be classified. Also retires the
+// stale marker per the rules above. Call once per tick with the
+// event ob_button_tick returned.
+int ob_button_event_is_stale(ob_button_t *b, ob_button_event_t e);

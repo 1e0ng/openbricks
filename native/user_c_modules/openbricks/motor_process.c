@@ -244,6 +244,9 @@ static void hard_button_tick(void) {
         }
     }
     ob_button_event_t e = ob_button_tick(&hard_button);
+    if (ob_button_event_is_stale(&hard_button, e)) {
+        return;   // the start press confirming late — never a stop
+    }
     if (e != OB_BUTTON_PRESSED) {
         return;
     }
@@ -501,7 +504,16 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_button_config_obj, mp_hard_button_confi
 
 static mp_obj_t mp_hard_button_arm(mp_obj_t self_in, mp_obj_t on_in) {
     (void)self_in;
-    hard_button_armed = mp_obj_is_true(on_in) ? 1 : 0;
+    uint8_t on = mp_obj_is_true(on_in) ? 1 : 0;
+    if (on && !hard_button_armed) {
+        // The press that started this run may still be in flight
+        // (held, or mid-debounce behind a flash-stalled tick); its
+        // late-confirming edge must not stop the run it started.
+        ob_button_arm_transition(&hard_button);
+    } else if (!on) {
+        ob_button_clear_stale(&hard_button);
+    }
+    hard_button_armed = on;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mp_hard_button_arm_obj, mp_hard_button_arm);

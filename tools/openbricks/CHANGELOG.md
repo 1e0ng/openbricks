@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.79.1 — the start press can no longer stop its own run
+
+Bench (run_4): a button start died 44 ms in with "stopped:
+KeyboardInterrupt (1 ms after press)" — the START press itself was
+delivered as the stop. The hard sampler classifies a debounced
+press edge by the armed state at DEBOUNCE COMPLETION; flash I/O at
+run start (log rotation + commit, NVS reads) stalled the hard tick
+140 ms, so the start press's edge confirmed on the first ticks
+AFTER the stop armed and took the armed branch. The Python PCNT
+watcher already had a start-grace guard; the hard path had none.
+
+Fix in the C core: arming marks any press in flight (held or
+mid-debounce) as STALE; exactly that press's late edge is consumed
+instead of classified, and a release — or the partial window
+decaying without confirming — retires the marker so the next press
+stops normally. Five new C-unit scenarios pin it, including the
+exact run_4 timeline (arm mid-debounce) and the
+real-stop-not-swallowed cases.
+
 ## 1.79.0 — the provenance suffix follows the version everywhere
 
 New firmware API `openbricks.firmware_label()` — the version with

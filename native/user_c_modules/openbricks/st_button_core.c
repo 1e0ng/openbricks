@@ -37,3 +37,35 @@ ob_button_event_t ob_button_tick(ob_button_t *b) {
     }
     return OB_BUTTON_NONE;
 }
+
+
+void ob_button_arm_transition(ob_button_t *b) {
+    b->stale_press = (b->stable_pressed || b->win_count != 0) ? 1 : 0;
+}
+
+
+void ob_button_clear_stale(ob_button_t *b) {
+    b->stale_press = 0;
+}
+
+
+int ob_button_event_is_stale(ob_button_t *b, ob_button_event_t e) {
+    if (!b->stale_press) {
+        return 0;
+    }
+    if (e == OB_BUTTON_PRESSED) {
+        // The hysteresis machine cannot emit a second PRESSED edge
+        // without a RELEASED in between, so consuming this one edge
+        // retires the marker: whatever presses next is new input.
+        b->stale_press = 0;
+        b->n_stale++;
+        return 1;
+    }
+    if (e == OB_BUTTON_RELEASED
+        || (!b->stable_pressed && b->win_count == 0)) {
+        // The stale press ended (released, or its partial window
+        // decayed without ever confirming) — stop suppressing.
+        b->stale_press = 0;
+    }
+    return 0;
+}
