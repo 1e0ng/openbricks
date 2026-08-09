@@ -70,17 +70,19 @@ db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
 
-def run_phase(law):
-    while True:
-        speeds = law(qtr.read())
-        if speeds is None:
-            return
-        db.move_wheels(speeds[0], speeds[1])
-        time.sleep_ms(POLL_MS)
-
-
 print("aligning on the line ...")
-run_phase(seek_speeds)
-run_phase(edge_speeds)
+while True:
+    speeds = seek_speeds(qtr.read())
+    if speeds is None:
+        break
+    db.move_wheels(speeds[0], speeds[1])
+    time.sleep_ms(POLL_MS)
+
+while True:
+    speeds = edge_speeds(qtr.read())
+    if speeds is None:
+        break
+    db.move_wheels(speeds[0], speeds[1])
+    time.sleep_ms(POLL_MS)
 db.stop(then="brake")
 print("aligned - square on the edge")
