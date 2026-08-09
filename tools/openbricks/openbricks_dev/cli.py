@@ -79,6 +79,11 @@ def _build_parser():
         "--skip-erase", action="store_true",
         help="Skip erase_flash (faster dev loop; leaves stale NVS keys).",
     )
+    p_flash.add_argument(
+        "--yes", action="store_true",
+        help="Skip the confirmation prompt when the target firmware "
+             "is the same version as (or older than) the current one.",
+    )
 
     # ---- run ----
     p_run = sub.add_parser(

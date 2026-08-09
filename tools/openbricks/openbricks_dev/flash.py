@@ -26,6 +26,14 @@ import time
 _NVS_NAMESPACE = "openbricks"
 _NVS_KEY       = "hub_name"
 
+# Provenance marker written after every flash: b"<version>:<verdict>"
+# under this key. The next ``openbricks flash`` reads it back to label
+# the CURRENT firmware (official/customized) without re-hashing flash.
+# The version prefix guards staleness: firmware replaced behind the
+# CLI's back (raw esptool, mpremote) no longer matches and degrades to
+# "customized".
+_NVS_SIG_KEY = "fw_sig"
+
 # MicroPython's makeimg.py starts the merged ``firmware.bin`` at the
 # chip's bootloader offset: 0x1000 on the classic ESP32, 0x0 on the
 # ESP32-S3. The image must be written back at that same base or the ROM
@@ -170,34 +178,14 @@ def _http_get(url):
         return resp.read()
 
 
-def _latest_firmware_for(chip):
-    """Download (or reuse from cache) the newest release's merged
-    firmware image for ``chip`` ("esp32" / "esp32s3"). Returns the
-    local path. Dies with instructions on any failure — a flash must
-    never proceed on a guessed image."""
-    import json
-    try:
-        release = json.loads(_http_get(_RELEASES_LATEST_URL))
-    except Exception as e:
-        _die("--firmware not given and the latest-release lookup "
-             "failed (%s) — offline? Pass --firmware with a local "
-             ".bin from the Releases page." % e)
-    prefix = "openbricks-%s-firmware-" % chip
-    asset = None
-    for a in release.get("assets", []):
-        if a.get("name", "").startswith(prefix):
-            asset = a
-            break
-    if asset is None:
-        _die("release %s has no asset matching %s*.bin — pass "
-             "--firmware explicitly"
-             % (release.get("tag_name", "?"), prefix))
+def _fetch_asset(asset):
+    """Download one release asset into the cache (or reuse it) and
+    return the local path."""
     path = os.path.join(_FIRMWARE_CACHE_DIR, asset["name"])
     if os.path.exists(path) and os.path.getsize(path) == asset.get("size", -1):
         print("firmware: using cached %s" % path)
         return path
-    print("firmware: downloading %s (%s) ..."
-          % (asset["name"], release.get("tag_name", "?")))
+    print("firmware: downloading %s ..." % asset["name"])
     try:
         data = _http_get(asset["browser_download_url"])
     except Exception as e:
@@ -213,6 +201,87 @@ def _latest_firmware_for(chip):
     os.replace(tmp, path)
     print("firmware: saved to %s" % path)
     return path
+
+
+def _latest_firmware_for(chip):
+    """Download (or reuse from cache) the newest release's merged
+    firmware image for ``chip`` ("esp32" / "esp32s3"), plus its
+    detached ``.sig`` when the release carries one. Returns
+    ``(bin_path, version_str)`` — the signature lands next to the
+    image in the cache where ``_read_sig_for`` finds it. Dies with
+    instructions on any failure — a flash must never proceed on a
+    guessed image."""
+    import json
+    try:
+        release = json.loads(_http_get(_RELEASES_LATEST_URL))
+    except Exception as e:
+        _die("--firmware not given and the latest-release lookup "
+             "failed (%s) — offline? Pass --firmware with a local "
+             ".bin from the Releases page." % e)
+    prefix = "openbricks-%s-firmware-" % chip
+    asset = None
+    sig_asset = None
+    for a in release.get("assets", []):
+        name = a.get("name", "")
+        if not name.startswith(prefix):
+            continue
+        if name.endswith(".sig"):
+            sig_asset = a
+        else:
+            asset = a
+    if asset is None:
+        _die("release %s has no asset matching %s*.bin — pass "
+             "--firmware explicitly"
+             % (release.get("tag_name", "?"), prefix))
+    version = _parse_version_text(release.get("tag_name", ""))
+    path = _fetch_asset(asset)
+    if sig_asset is not None:
+        _fetch_asset(sig_asset)
+    return path, version
+
+
+def _parse_version_text(text):
+    """The ``X.Y.Z`` inside ``text`` (a tag name or file name), or
+    ``None``. ``v1.2.3`` and ``...-firmware-v1.2.3.bin`` both work."""
+    m = re.search(r"v?(\d+\.\d+\.\d+)", text or "")
+    return m.group(1) if m else None
+
+
+def _version_tuple(version):
+    return tuple(int(p) for p in version.split("."))
+
+
+def _read_sig_for(firmware_path):
+    """The detached signature bytes for ``firmware_path`` (its
+    sibling ``.sig`` file), or ``None``."""
+    try:
+        with open(firmware_path + ".sig", "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _firmware_verdict(firmware_path):
+    """``"official"`` / ``"customized"`` for a local image, from its
+    sibling ``.sig`` against the baked-in public key."""
+    from openbricks_dev import _signing
+    with open(firmware_path, "rb") as f:
+        data = f.read()
+    return _signing.verdict(data, _read_sig_for(firmware_path))
+
+
+def _confirm(question, assume_yes, input_fn=input):
+    """Ask the user a yes/no question on the terminal. ``--yes``
+    short-circuits; a non-interactive stdin dies instead of hanging
+    a CI pipeline on ``input()``."""
+    if assume_yes:
+        print("%s -- proceeding (--yes)" % question)
+        return True
+    if not sys.stdin.isatty():
+        _die("%s — refusing without confirmation on a "
+             "non-interactive stdin; re-run with --yes" % question)
+    answer = input_fn("%s [y/N] " % question)
+    return answer.strip().lower() in ("y", "yes")
 
 
 def _die(msg):
@@ -271,7 +340,11 @@ def _mpremote_exec(mpremote, port, snippet):
     """
     cmd = [mpremote, "connect", port, "resume", "exec", snippet]
     print(">>> " + " ".join(cmd), flush=True)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=30)
+    except subprocess.TimeoutExpired:
+        return -1, "", "mpremote timed out after 30s"
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -338,6 +411,82 @@ def _read_hub_name(mpremote, port):
     return out.strip()
 
 
+_PROBE_SNIPPET = (
+    "try:\n"
+    "    import openbricks\n"
+    "    print('ver=' + openbricks.__version__)\n"
+    "except Exception:\n"
+    "    print('ver=')\n"
+    "try:\n"
+    "    import esp32\n"
+    "    nvs = esp32.NVS(%r)\n"
+    "    buf = bytearray(96)\n"
+    "    n = nvs.get_blob(%r, buf)\n"
+    "    print('sig=' + bytes(buf[:n]).decode())\n"
+    "except Exception:\n"
+    "    print('sig=')\n"
+) % (_NVS_NAMESPACE, _NVS_SIG_KEY)
+
+
+def _read_current_firmware(mpremote, port):
+    """The running firmware's ``(version, verdict)``, or
+    ``(None, None)`` when the chip has no reachable openbricks REPL
+    (foreign firmware, program running, bootloader mode).
+
+    The verdict comes from the provenance marker the last
+    ``openbricks flash`` stored; a marker whose version prefix does
+    not match the running version is stale (firmware replaced behind
+    the CLI's back) and degrades to "customized"."""
+    from openbricks_dev import _signing
+    rc, out, _err = _mpremote_exec(mpremote, port, _PROBE_SNIPPET)
+    if rc != 0:
+        return None, None
+    version = marker = ""
+    for line in out.splitlines():
+        if line.startswith("ver="):
+            version = line[4:].strip()
+        elif line.startswith("sig="):
+            marker = line[4:].strip()
+    if not version:
+        return None, None
+    verdict = _signing.CUSTOMIZED
+    if ":" in marker:
+        marked_version, marked_verdict = marker.split(":", 1)
+        if marked_version == version and marked_verdict == _signing.OFFICIAL:
+            verdict = _signing.OFFICIAL
+    return version, verdict
+
+
+def _write_fw_marker(mpremote, port, verdict):
+    """Store the provenance marker for the firmware just flashed.
+
+    The version half is read from the chip itself (never trusted
+    from a file name); a chip whose fresh firmware has no importable
+    ``openbricks`` is foreign — no marker, and the next flash will
+    report "unknown"."""
+    rc, out, _err = _mpremote_exec(
+        mpremote, port,
+        "import openbricks; print(openbricks.__version__)")
+    version = out.strip() if rc == 0 else ""
+    if not version:
+        print("warning: flashed image has no importable openbricks — "
+              "skipping the provenance marker", file=sys.stderr)
+        return
+    marker = "%s:%s" % (version, verdict)
+    snippet = (
+        "import esp32; "
+        "nvs = esp32.NVS(%r); "
+        "nvs.set_blob(%r, %r); "
+        "nvs.commit(); "
+        "print('marker:', %r)"
+    ) % (_NVS_NAMESPACE, _NVS_SIG_KEY, marker.encode(), marker)
+    rc, out, err = _mpremote_exec(mpremote, port, snippet)
+    if rc != 0:
+        _die("failed to write the firmware provenance marker:\n"
+             + (err or out))
+    print(out.strip())
+
+
 def _image_base_offset(firmware_path):
     """Return the flash address (as a ``"0x…"`` string) the merged image
     must be written at, derived from where the partition-table magic
@@ -401,6 +550,18 @@ def run(args):
     if args.port is None:
         args.port = _autodetect_port()
 
+    # Read the RUNNING firmware first, before esptool's probes reset
+    # the chip into the bootloader: version plus the provenance
+    # marker the last flash stored.
+    current_version, current_verdict = _read_current_firmware(
+        mpremote, args.port)
+    if current_version:
+        print("current firmware: %s (%s)"
+              % (current_version, current_verdict))
+    else:
+        print("current firmware: unknown (no reachable openbricks "
+              "REPL — foreign firmware, or a program is running)")
+
     # Identify the connected chip up front: it gates the automatic
     # firmware download and the image/chip mismatch guard.
     detected_chip = _detect_chip(esptool, args.port)
@@ -410,7 +571,29 @@ def run(args):
             _die("--firmware not given and the connected chip could "
                  "not be identified — pass --firmware (and possibly "
                  "--chip) explicitly")
-        args.firmware = _latest_firmware_for(detected_chip)
+        args.firmware, target_version = _latest_firmware_for(detected_chip)
+    else:
+        target_version = _parse_version_text(
+            os.path.basename(args.firmware))
+
+    firmware_verdict = _firmware_verdict(args.firmware)
+    print("target firmware:  %s (%s)"
+          % (target_version or "unknown version", firmware_verdict))
+
+    if current_version and target_version:
+        cur = _version_tuple(current_version)
+        tgt = _version_tuple(target_version)
+        if tgt == cur:
+            question = ("target %s is the SAME version as the current "
+                        "firmware — reinstall?" % target_version)
+        elif tgt < cur:
+            question = ("target %s is OLDER than the current %s — "
+                        "downgrade?" % (target_version, current_version))
+        else:
+            question = None
+        if question is not None and not _confirm(question, args.yes):
+            print("aborted — nothing was flashed.")
+            return 0
 
     # Resolve the write offset from the image before touching the chip,
     # so an unrecognizable image fails the flash *before* the erase.
@@ -451,6 +634,8 @@ def run(args):
     if readback != args.name:
         _die("verification failed: wrote %r, read back %r" % (args.name, readback))
     print("verified: hub name is %r" % readback)
+
+    _write_fw_marker(mpremote, args.port, firmware_verdict)
 
     # Trigger a hardware reset so the freshly-flashed chip boots into
     # the BLE-active runtime state (now that hub_name is in NVS).

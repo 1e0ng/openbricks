@@ -40,6 +40,7 @@ def _args(**overrides):
         chip="auto",
         baud="460800",
         skip_erase=False,
+        yes=False,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -186,8 +187,9 @@ class LatestFirmwareDownloadTests(unittest.TestCase):
                 return self._release_json()
             return b"BINS"
         with patch.object(flash, "_http_get", side_effect=fake_get):
-            path = flash._latest_firmware_for("esp32s3")
+            path, version = flash._latest_firmware_for("esp32s3")
         self.assertTrue(path.endswith("openbricks-esp32s3-firmware-v9.9.9.bin"))
+        self.assertEqual(version, "9.9.9")
         self.assertEqual(open(path, "rb").read(), b"BINS")
         self.assertIn("http://x/s3", fetched)
 
@@ -197,8 +199,39 @@ class LatestFirmwareDownloadTests(unittest.TestCase):
                 return self._release_json()
             return b"BINS"
         with patch.object(flash, "_http_get", side_effect=fake_get):
-            path = flash._latest_firmware_for("esp32")
+            path, _version = flash._latest_firmware_for("esp32")
         self.assertTrue(path.endswith("openbricks-esp32-firmware-v9.9.9.bin"))
+
+    def test_signature_asset_downloads_next_to_the_image(self):
+        import json
+        release = json.dumps({
+            "tag_name": "v9.9.9",
+            "assets": [
+                {"name": "openbricks-esp32s3-firmware-v9.9.9.bin",
+                 "size": 4, "browser_download_url": "http://x/s3"},
+                {"name": "openbricks-esp32s3-firmware-v9.9.9.bin.sig",
+                 "size": 3, "browser_download_url": "http://x/s3sig"},
+            ],
+        }).encode()
+
+        def fake_get(url):
+            if "releases" in url:
+                return release
+            if url.endswith("s3sig"):
+                return b"SIG"
+            return b"BINS"
+        with patch.object(flash, "_http_get", side_effect=fake_get):
+            path, _version = flash._latest_firmware_for("esp32s3")
+        self.assertEqual(flash._read_sig_for(path), b"SIG")
+
+    def test_release_without_signature_reads_none(self):
+        def fake_get(url):
+            if "releases" in url:
+                return self._release_json()
+            return b"BINS"
+        with patch.object(flash, "_http_get", side_effect=fake_get):
+            path, _version = flash._latest_firmware_for("esp32s3")
+        self.assertIsNone(flash._read_sig_for(path))
 
     def test_cached_file_skips_download(self):
         name = "openbricks-esp32s3-firmware-v9.9.9.bin"
@@ -313,6 +346,9 @@ class RunAutodetectFlowTests(unittest.TestCase):
         with patch.object(flash, "_autodetect_port",
                           return_value="/dev/cu.usbmodem42") as ad, \
              patch.object(flash, "_detect_chip", return_value=None), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")), \
              patch("subprocess.call", return_value=1):
             with self.assertRaises(flash.FlashError):
                 # erase failing (return 1) aborts right after — we only
@@ -321,7 +357,10 @@ class RunAutodetectFlowTests(unittest.TestCase):
         ad.assert_called_once()
 
     def test_firmware_none_unknown_chip_dies(self):
-        with patch.object(flash, "_detect_chip", return_value=None):
+        with patch.object(flash, "_detect_chip", return_value=None), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")):
             with self.assertRaises(flash.FlashError):
                 flash.run(_args(firmware=None, port="/dev/x"))
 
@@ -329,7 +368,10 @@ class RunAutodetectFlowTests(unittest.TestCase):
         img = self._s3_image()
         with patch.object(flash, "_detect_chip", return_value="esp32s3"), \
              patch.object(flash, "_latest_firmware_for",
-                          return_value=img) as dl, \
+                          return_value=(img, "9.9.9")) as dl, \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")), \
              patch("subprocess.call", return_value=1):
             with self.assertRaises(flash.FlashError):
                 flash.run(_args(firmware=None, port="/dev/x"))
@@ -342,9 +384,13 @@ class RunAutodetectFlowTests(unittest.TestCase):
             call_history.append(cmd)
             return 0
         run_responses = iter([
+            MagicMock(returncode=1, stdout="", stderr=""),   # preflight probe
             MagicMock(returncode=0, stdout="ok\n", stderr=""),
             MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
             MagicMock(returncode=0, stdout="RobotA\n", stderr=""),
+            MagicMock(returncode=0, stdout="9.9.9\n", stderr=""),
+            MagicMock(returncode=0, stdout="marker: 9.9.9:customized\n",
+                      stderr=""),
         ])
         with patch.object(flash, "_detect_chip",
                           return_value="esp32s3"), \
@@ -460,6 +506,22 @@ class RunHappyPathTests(unittest.TestCase):
         overrides.setdefault("firmware", self.firmware)
         return _args(**overrides)
 
+    @staticmethod
+    def _responses(readback="RobotA"):
+        """The mpremote exec sequence run() drives: the preflight
+        version probe (chip not yet running openbricks — fails),
+        wait-for-repl, name write, name readback, marker version
+        read, marker write."""
+        return iter([
+            MagicMock(returncode=1, stdout="", stderr="no repl"),
+            MagicMock(returncode=0, stdout="ok\n", stderr=""),
+            MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
+            MagicMock(returncode=0, stdout=readback + "\n", stderr=""),
+            MagicMock(returncode=0, stdout="9.9.9\n", stderr=""),
+            MagicMock(returncode=0, stdout="marker: 9.9.9:customized\n",
+                      stderr=""),
+        ])
+
     def test_full_flow_success(self):
         # subprocess.call for erase_flash / write_flash / final reset.
         call_history = []
@@ -468,16 +530,9 @@ class RunHappyPathTests(unittest.TestCase):
             call_history.append(cmd)
             return 0
 
-        # subprocess.run for every mpremote exec: first the wait-for-repl
-        # probe, then the name write, then the readback. Readback output
-        # must match the name we wrote.
-        run_responses = iter([
-            MagicMock(returncode=0, stdout="ok\n", stderr=""),
-            MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
-            MagicMock(returncode=0, stdout="RobotA\n", stderr=""),
-        ])
+        run_responses = self._responses()
 
-        def _fake_run(cmd, capture_output=True, text=True):
+        def _fake_run(cmd, capture_output=True, text=True, timeout=None):
             return next(run_responses)
 
         with patch("subprocess.call", side_effect=_fake_call), \
@@ -506,11 +561,7 @@ class RunHappyPathTests(unittest.TestCase):
 
     def test_skip_erase_drops_erase_flash(self):
         call_history = []
-        run_responses = iter([
-            MagicMock(returncode=0, stdout="ok\n", stderr=""),
-            MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
-            MagicMock(returncode=0, stdout="RobotA\n", stderr=""),
-        ])
+        run_responses = self._responses()
         with patch("subprocess.call",
                    side_effect=lambda cmd: call_history.append(cmd) or 0), \
              patch("subprocess.run", side_effect=lambda *a, **k: next(run_responses)):
@@ -519,12 +570,8 @@ class RunHappyPathTests(unittest.TestCase):
         self.assertNotIn("erase-flash", call_history[0])
 
     def test_readback_mismatch_raises(self):
-        run_responses = iter([
-            MagicMock(returncode=0, stdout="ok\n", stderr=""),
-            MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
-            # Readback returns something different: simulate flash corruption.
-            MagicMock(returncode=0, stdout="RobotB\n", stderr=""),
-        ])
+        # Readback returns something different: simulate flash corruption.
+        run_responses = self._responses(readback="RobotB")
         with patch("subprocess.call", return_value=0), \
              patch("subprocess.run", side_effect=lambda *a, **k: next(run_responses)):
             with self.assertRaises(flash.FlashError) as ctx:
@@ -548,11 +595,7 @@ class RunHappyPathTests(unittest.TestCase):
         classic = _fake_image(0x1000)
         self.addCleanup(os.unlink, classic)
         call_history = []
-        run_responses = iter([
-            MagicMock(returncode=0, stdout="ok\n", stderr=""),
-            MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
-            MagicMock(returncode=0, stdout="RobotA\n", stderr=""),
-        ])
+        run_responses = self._responses()
         with patch("subprocess.call",
                    side_effect=lambda cmd: call_history.append(cmd) or 0), \
              patch("subprocess.run", side_effect=lambda *a, **k: next(run_responses)):
@@ -637,7 +680,7 @@ class NameWriteSnippetTests(unittest.TestCase):
     def test_snippet_uses_set_blob_with_bytes_name(self):
         captured = {}
 
-        def _fake_run(cmd, capture_output=True, text=True):
+        def _fake_run(cmd, capture_output=True, text=True, timeout=None):
             # cmd ends in ``... exec <snippet>``; the chain in front
             # is mpremote-version-dependent (``connect PORT [resume]``).
             captured["snippet"] = cmd[-1]
@@ -738,6 +781,212 @@ class NvsRoundTripFailureTests(unittest.TestCase):
             self.assertIn("timed out waiting for device REPL", str(e))
         else:
             self.fail("expected FlashError")
+
+
+class VersionParseTests(unittest.TestCase):
+    def test_tag_and_filename_forms(self):
+        self.assertEqual(flash._parse_version_text("v1.77.1"), "1.77.1")
+        self.assertEqual(flash._parse_version_text("1.77.1"), "1.77.1")
+        self.assertEqual(
+            flash._parse_version_text(
+                "openbricks-esp32s3-firmware-v1.77.1.bin"),
+            "1.77.1")
+
+    def test_no_version_returns_none(self):
+        self.assertIsNone(flash._parse_version_text("firmware.bin"))
+        self.assertIsNone(flash._parse_version_text(""))
+        self.assertIsNone(flash._parse_version_text(None))
+
+    def test_version_tuple_orders_numerically(self):
+        # String comparison would put 1.9.0 above 1.10.0.
+        self.assertTrue(flash._version_tuple("1.10.0")
+                        > flash._version_tuple("1.9.0"))
+        self.assertEqual(flash._version_tuple("1.77.1"), (1, 77, 1))
+
+
+class ConfirmTests(unittest.TestCase):
+    def test_assume_yes_skips_the_prompt(self):
+        def no_input(prompt):
+            raise AssertionError("input() must not be called")
+        self.assertTrue(flash._confirm("q?", True, input_fn=no_input))
+
+    def test_tty_yes_and_no(self):
+        with patch.object(flash.sys.stdin, "isatty", return_value=True):
+            self.assertTrue(
+                flash._confirm("q?", False, input_fn=lambda p: "y"))
+            self.assertTrue(
+                flash._confirm("q?", False, input_fn=lambda p: "YES"))
+            self.assertFalse(
+                flash._confirm("q?", False, input_fn=lambda p: ""))
+            self.assertFalse(
+                flash._confirm("q?", False, input_fn=lambda p: "n"))
+
+    def test_non_interactive_stdin_dies_instead_of_hanging(self):
+        with patch.object(flash.sys.stdin, "isatty", return_value=False):
+            with self.assertRaises(flash.FlashError) as ctx:
+                flash._confirm("q?", False,
+                               input_fn=lambda p: "y")
+        self.assertIn("--yes", str(ctx.exception))
+
+
+class CurrentFirmwareProbeTests(unittest.TestCase):
+    def _patch_exec(self, rc, out=""):
+        orig = flash._mpremote_exec
+        flash._mpremote_exec = lambda m, p, s: (rc, out, "")
+        self.addCleanup(setattr, flash, "_mpremote_exec", orig)
+
+    def test_unreachable_repl_is_unknown(self):
+        self._patch_exec(1)
+        self.assertEqual(
+            flash._read_current_firmware("mpremote", "/p"),
+            (None, None))
+
+    def test_matching_official_marker(self):
+        self._patch_exec(0, "ver=1.77.1\nsig=1.77.1:official\n")
+        self.assertEqual(
+            flash._read_current_firmware("mpremote", "/p"),
+            ("1.77.1", "official"))
+
+    def test_missing_marker_is_customized(self):
+        self._patch_exec(0, "ver=1.77.1\nsig=\n")
+        self.assertEqual(
+            flash._read_current_firmware("mpremote", "/p"),
+            ("1.77.1", "customized"))
+
+    def test_stale_marker_version_is_customized(self):
+        # Firmware replaced behind the CLI's back: the marker still
+        # says an older version was official.
+        self._patch_exec(0, "ver=1.77.1\nsig=1.70.0:official\n")
+        self.assertEqual(
+            flash._read_current_firmware("mpremote", "/p"),
+            ("1.77.1", "customized"))
+
+    def test_no_openbricks_import_is_unknown(self):
+        self._patch_exec(0, "ver=\nsig=\n")
+        self.assertEqual(
+            flash._read_current_firmware("mpremote", "/p"),
+            (None, None))
+
+
+class MarkerWriteTests(unittest.TestCase):
+    def test_marker_embeds_chip_version_and_verdict(self):
+        snippets = []
+
+        def fake_exec(m, p, s):
+            snippets.append(s)
+            if "openbricks.__version__" in s:
+                return 0, "9.9.9\n", ""
+            return 0, "marker: 9.9.9:official\n", ""
+        orig = flash._mpremote_exec
+        flash._mpremote_exec = fake_exec
+        self.addCleanup(setattr, flash, "_mpremote_exec", orig)
+        flash._write_fw_marker("mpremote", "/p", "official")
+        self.assertIn("b'9.9.9:official'", snippets[-1])
+        self.assertIn("'fw_sig'", snippets[-1])
+        self.assertIn("set_blob", snippets[-1])
+        self.assertIn("commit", snippets[-1])
+
+    def test_foreign_firmware_skips_the_marker(self):
+        calls = []
+
+        def fake_exec(m, p, s):
+            calls.append(s)
+            return 1, "", "ImportError"
+        orig = flash._mpremote_exec
+        flash._mpremote_exec = fake_exec
+        self.addCleanup(setattr, flash, "_mpremote_exec", orig)
+        flash._write_fw_marker("mpremote", "/p", "customized")
+        self.assertEqual(len(calls), 1)   # only the version probe ran
+
+
+class DowngradeConfirmFlowTests(unittest.TestCase):
+    """run() with a running 9.9.9 and an older/equal target must ask
+    before touching the chip; a declined prompt flashes nothing."""
+
+    def setUp(self):
+        self._which = patch("shutil.which",
+                            side_effect=lambda name: "/usr/local/bin/" + name)
+        self._which.start()
+        self.addCleanup(self._which.stop)
+        self._sleep = patch("openbricks_dev.flash.time.sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+        self._probe = patch("openbricks_dev.flash._detect_chip",
+                            return_value=None)
+        self._probe.start()
+        self.addCleanup(self._probe.stop)
+        # A versioned firmware file name so the target version parses.
+        src = _fake_image(0x0)
+        self.firmware = os.path.join(
+            os.path.dirname(src),
+            "openbricks-esp32s3-firmware-v1.0.0-%s.bin"
+            % os.path.basename(src))
+        os.rename(src, self.firmware)
+        self.addCleanup(os.unlink, self.firmware)
+
+    def _run(self, confirm_answer):
+        calls = []
+        with patch.object(flash, "_read_current_firmware",
+                          return_value=("9.9.9", "official")), \
+             patch.object(flash, "_confirm",
+                          return_value=confirm_answer) as confirm, \
+             patch("subprocess.call",
+                   side_effect=lambda cmd: calls.append(cmd) or 0), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")):
+            rc = flash.run(_args(firmware=self.firmware, port="/dev/x"))
+        return rc, calls, confirm
+
+    def test_declined_downgrade_flashes_nothing(self):
+        rc, calls, confirm = self._run(confirm_answer=False)
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [])
+        confirm.assert_called_once()
+        self.assertIn("OLDER", confirm.call_args[0][0])
+
+    def test_accepted_downgrade_proceeds_to_esptool(self):
+        calls = []
+        with patch.object(flash, "_read_current_firmware",
+                          return_value=("9.9.9", "official")), \
+             patch.object(flash, "_confirm", return_value=True), \
+             patch.object(flash, "_wait_for_repl",
+                          side_effect=flash.FlashError("no repl")), \
+             patch("subprocess.call",
+                   side_effect=lambda cmd: calls.append(cmd) or 0), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")):
+            with self.assertRaises(flash.FlashError):
+                flash.run(_args(firmware=self.firmware, port="/dev/x"))
+        # erase + write both ran before the (stubbed) REPL wait died.
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any("write-flash" in c for c in calls[1]))
+
+    def test_same_version_asks_to_reinstall(self):
+        with patch.object(flash, "_read_current_firmware",
+                          return_value=("1.0.0", "customized")), \
+             patch.object(flash, "_confirm",
+                          return_value=False) as confirm, \
+             patch("subprocess.call", return_value=0), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")):
+            rc = flash.run(_args(firmware=self.firmware, port="/dev/x"))
+        self.assertEqual(rc, 0)
+        self.assertIn("SAME version", confirm.call_args[0][0])
+
+    def test_newer_target_does_not_prompt(self):
+        with patch.object(flash, "_read_current_firmware",
+                          return_value=("0.1.0", "official")), \
+             patch.object(flash, "_confirm") as confirm, \
+             patch("subprocess.call", return_value=1), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")):
+            with self.assertRaises(flash.FlashError):
+                flash.run(_args(firmware=self.firmware, port="/dev/x"))
+        confirm.assert_not_called()
 
 
 class MainStandaloneTests(unittest.TestCase):

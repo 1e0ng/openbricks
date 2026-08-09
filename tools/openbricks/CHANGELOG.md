@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.78.0 — signed firmware + flash version preflight
+
+`openbricks flash` now reads the RUNNING firmware first and prints
+`current firmware: X.Y.Z (official|customized)` before looking up
+the newest release. A target that is the same version or older asks
+for confirmation (`--yes` skips it; a non-interactive stdin refuses
+instead of hanging).
+
+Every firmware image CI publishes is now signed with the project's
+Ed25519 key (held only as a CI secret; the release job hard-fails
+if it's missing or doesn't match). Each release carries a
+`.bin.sig` next to each `.bin` — 16 assets instead of 8. The CLI
+ships the public key: an image whose signature verifies shows
+`(official)`, anything else — self-built, missing or wrong
+signature — shows `(customized)`. Customized firmware flashes
+normally; the suffix is provenance, not a gate. After each flash
+the verdict is stored on the hub (NVS `openbricks/fw_sig`,
+version-prefixed so firmware replaced behind the CLI's back
+degrades to customized), which is how the next flash labels the
+current firmware. New dependency: `cryptography` (already in the
+tree transitively via esptool).
+
 ## 1.77.1 — example functions drop the leading underscore
 
 Helper functions in `examples/*.py` are no longer `_named`
