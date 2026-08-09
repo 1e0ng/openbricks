@@ -23,7 +23,10 @@ except ImportError:
 
 
 BLOCK = 4096
-NBLOCKS = 256          # 1 MiB — enough to churn, small enough for CI
+# 384 KiB: enough blocks to churn (the degradation showed by cycle
+# ~12 regardless of device size), small enough that two tests'
+# devices fit MP's default heap under the suite orchestrator.
+NBLOCKS = 96
 
 
 class _CountingDev:
@@ -57,6 +60,8 @@ class SlotRotationOnLittlefsTests(unittest.TestCase):
     MOUNT = "/_obtest_lfs"
 
     def setUp(self):
+        import gc
+        gc.collect()          # the previous test's device is 384 KiB
         from openbricks import log
         self.log = log
         self.dev = _CountingDev()

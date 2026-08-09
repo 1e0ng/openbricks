@@ -268,7 +268,7 @@ class RotationTests(_LogPathPatch):
         # Files from pre-slot firmware are exactly the churn this
         # scheme removes: listed until the next run starts, removed
         # by its one-time migration.
-        os.mkdir(_TEST_LOG_DIR)
+        self._mkdir_logs()
         with open(_TEST_LOG_DIR + "/run_5.log", "w") as f:
             f.write("1783950123456 legacy line\n")
         self.assertEqual([idx for idx, _ in log.list_runs()], [5])
@@ -281,10 +281,41 @@ class RotationTests(_LogPathPatch):
         # The new run continues the numbering after the legacy run.
         self.assertEqual([idx for idx, _ in log.list_runs()], [6])
 
+    def _mkdir_logs(self):
+        try:
+            os.mkdir(_TEST_LOG_DIR)
+        except OSError:
+            pass
+
+    def test_header_with_non_numeric_index_parses_to_none(self):
+        self.assertIsNone(
+            log._parse_header_line("1783950123456 -- run_abc --"))
+
+    def test_unreadable_slot_is_skipped(self):
+        # A directory wearing a slot name: open() raises, the slot
+        # scan must skip it rather than die.
+        self._mkdir_logs()
+        os.mkdir(_TEST_LOG_DIR + "/slot_4.log")
+        self.addCleanup(os.rmdir, _TEST_LOG_DIR + "/slot_4.log")
+        self.assertEqual(log.list_runs(), [])
+        with log.session() as sess:
+            pass
+        self.assertEqual(sess.path.split("/")[-1], "slot_0.log")
+
+    def test_unremovable_legacy_file_does_not_block_the_run(self):
+        # Migration's os.remove failing (here: a directory wearing a
+        # legacy name) must not cost the run its log.
+        self._mkdir_logs()
+        os.mkdir(_TEST_LOG_DIR + "/run_1.log")
+        self.addCleanup(os.rmdir, _TEST_LOG_DIR + "/run_1.log")
+        with log.session() as sess:
+            pass
+        self.assertIsNotNone(sess.path)
+
     def test_corrupt_slot_header_is_skipped(self):
         # Crash mid-write leaves a slot without a parseable header:
         # it must not break listing, and its slot gets reused.
-        os.mkdir(_TEST_LOG_DIR)
+        self._mkdir_logs()
         with open(_TEST_LOG_DIR + "/slot_3.log", "w") as f:
             f.write("garbage without a header\n")
         self.assertEqual(log.list_runs(), [])
