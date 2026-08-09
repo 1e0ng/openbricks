@@ -3,6 +3,30 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.77.0 — edge means ambient 50, everywhere
+
+"On the edge" now means the sensor reads ambient ~50 — straddling
+the black/white boundary — in both the align example and the
+follower.
+
+`edge_error()` REDEFINED: it is now the mode's setpoint element's
+ambient (0 black .. 100 white) referenced to 50, instead of the
+interpolated edge position in mm. Range -50..+50, zero exactly on
+the boundary, positive still steers right in both modes. It never
+returns None anymore — with the line gone the error rails at the
+sign that steers back toward the line's side, so followers turn
+hard back instead of raising. The follower examples are unchanged
+in code (`steer = KP * reading.edge_error()`); their behavior now
+servos the setpoint channel onto the boundary, Pybricks-style.
+
+`examples/qtr_align.py`'s edge pass now servos each wheel
+proportionally — the follower's KP discipline, `KP * (ambient -
+50)` per half, either direction — until both halves settle inside
+EDGE_TOLERANCE of the boundary: parked right on the edge, not
+backed off it. The two laws share the follower's naming and
+contract (`*_wheel_speeds(reading)` returning wheel speeds or
+None for done) so the QTR examples read as one family.
+
 ## 1.76.1 — simpler align example
 
 `examples/qtr_align.py` drops the per-phase timeout scaffolding —

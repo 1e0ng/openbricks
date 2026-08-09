@@ -85,14 +85,12 @@ class _LawContract:
     def test_full_window_dark_stops_immediately(self):
         self.assertIsNone(self._tick(0.0, all_dark=True))
 
-    def test_lost_line_raises_visibly(self):
-        # Deliberately unhandled: nothing dark means the rig or the
-        # track is wrong, and a loud TypeError beats driving blind.
-        try:
-            self._tick(None)
-            self.fail("expected TypeError")
-        except TypeError:
-            pass
+    def test_lost_line_rails_the_steer(self):
+        # The driver's edge_error rails at +/-50 when the line is
+        # gone, so the law turns hard back toward it instead of
+        # raising — pin that a railed error saturates cleanly.
+        l, r = self._tick(+50.0)
+        self.assertEqual((l, r), (self.ns["MAX_DPS"], 0))
 
     def test_clamp_never_reverses_a_wheel(self):
         l, r = self._tick(+1000.0)
