@@ -3,6 +3,13 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.83.1 — follower branch watch reads ambient
+
+`qtr_line_follow_left/right.py`: the far-side branch watch uses
+`e.ambient() < 50` instead of `e.dark()` — the same boundary
+midpoint the edge servo targets, a stricter test than the
+calibrated dark threshold (ambient ≲70).
+
 ## 1.83.0 — the 400 ms log commit, root-caused and fixed
 
 Why every log write took ~400 ms (the run_68 storm): littlefs

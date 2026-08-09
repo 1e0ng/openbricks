@@ -36,6 +36,11 @@ class _Element:
     def dark(self):
         return self._dark
 
+    def ambient(self):
+        # The Pybricks scale the branch watch reads: dark elements
+        # sit near 0, mat elements near 100.
+        return 0 if self._dark else 100
+
 
 class _Reading:
     """``QTRReading`` stand-in: the law consumes ``edge_error()``,

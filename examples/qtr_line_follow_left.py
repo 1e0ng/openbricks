@@ -43,7 +43,7 @@ def branch_seen(reading, mode):
     else:
         flags = reading.elements[:FLAG_COUNT]
     for e in flags:
-        if e.dark():
+        if e.ambient() < 50:
             return True
     return False
 
