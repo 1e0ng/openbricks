@@ -3,6 +3,14 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.83.5 — align: one servo, one loop
+
+`seek_wheel_speeds` removed: servoing each wheel straight to the
+50 boundary does the whole job (a wheel far on the white side
+drives forward, one past the line backs up, the first to arrive
+holds while the other pivots the chassis square). One law, one
+while loop.
+
 ## 1.83.4 — align: one servo, two targets
 
 Correction to 1.83.3's shape: the `target` parameter belongs on
