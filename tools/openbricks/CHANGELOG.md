@@ -3,6 +3,12 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.80.1 — gentler align servo
+
+`examples/qtr_align.py` KP 2.0 -> 0.5: the edge pass tops out at
+25 dps instead of 100, settling onto the boundary without
+overshoot hunting.
+
 ## 1.80.0 — the LED acknowledges button presses; faster run blink
 
 Every program-button press — the one that starts a run AND the one
