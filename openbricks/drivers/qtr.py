@@ -37,6 +37,8 @@ import time
 
 from openbricks import pins as _pins
 
+_FULL_SCALE = 1000
+
 
 class QTRElement:
     """One calibrated element reading, as returned by
@@ -61,6 +63,11 @@ class QTRElement:
     def white(self):
         """True when this element is over the mat."""
         return self.value < self._threshold
+
+    def ambient(self):
+        """Reflected brightness as 0 (black) .. 100 (white) — the
+        Pybricks scale, inverted from ``value``."""
+        return (_FULL_SCALE - self.value) * 100 // _FULL_SCALE
 
     def __repr__(self):
         return "QTRElement(%d, %s)" % (
@@ -163,7 +170,6 @@ class QTRArray:
             ``dark_count()``.
     """
 
-    _FULL_SCALE = 1000
 
     def __init__(self, pins, pitch_mm=4.0, ctrl=None,
                  dark_threshold=300, positions_mm=None):
@@ -361,11 +367,11 @@ class QTRArray:
         out = []
         for i, v in enumerate(self._read_u16()):
             span = self._cal_max[i] - self._cal_min[i]
-            n = (v - self._cal_min[i]) * self._FULL_SCALE // span
+            n = (v - self._cal_min[i]) * _FULL_SCALE // span
             if n < 0:
                 n = 0
-            elif n > self._FULL_SCALE:
-                n = self._FULL_SCALE
+            elif n > _FULL_SCALE:
+                n = _FULL_SCALE
             out.append(QTRElement(n, self._threshold))
         return QTRReading(out, self)
 
