@@ -3,6 +3,36 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.83.0 — the 400 ms log commit, root-caused and fixed
+
+Why every log write took ~400 ms (the run_68 storm): littlefs
+charges directory churn FOREVER. The run-log rotation
+(delete+create a file per run) accumulated directory metadata that
+every commit's allocator traversal re-crawled in 32-byte reads —
+reproduced on unix MicroPython as 8k+ block reads per commit after
+~12 rotation cycles, vs ~40 on a fresh filesystem, never
+recovering.
+
+Two fixes, both measured on the same reproduction:
+
+* **Slot reuse** — the 10 log files are truncated in place
+  (`slot_N.log`, run index in the file's header line) instead of
+  deleted and recreated. Per-commit cost returns to
+  fresh-filesystem numbers and STAYS there. Legacy `run_N.log`
+  files are migrated away on the first new run; numbering
+  continues where they left off. A littlefs-backed regression test
+  pins commit cost flat across rotation cycles.
+* **`readsize=256` at mount** (build-time patch to the ESP32
+  port's `_boot.py`/`inisetup.py`) — metadata traversals read in
+  `readsize` chunks, and the 32-byte default costs thousands of
+  SPI transactions per traversal: 5.5x fewer reads, 4.4x fewer
+  writes overall. (`progsize` deliberately stays 32 — raising it
+  pads dir-log entries and makes churn WORSE.)
+
+`openbricks log` output is unchanged apart from paths in `--list`
+showing slot files; each dump now begins with its
+`-- run_N --` header line.
+
 ## 1.82.0 — motors stop when the program stops, however it stops
 
 Program teardown now stops every motor on EVERY exit path — natural
