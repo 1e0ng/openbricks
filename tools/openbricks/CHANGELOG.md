@@ -3,6 +3,13 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.76.1 — simpler align example
+
+`examples/qtr_align.py` drops the per-phase timeout scaffolding —
+each pass just runs until its half-states say done. Examples read
+best minimal; stop the robot with the stop button if the line
+isn't where you thought.
+
 ## 1.76.0 — QTRElement.ambient() + edge-aligned square-up
 
 `QTRElement.ambient()`: reflected brightness on the Pybricks

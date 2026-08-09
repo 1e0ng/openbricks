@@ -58,7 +58,6 @@ def edge_speeds(reading):
 
 
 CAL = "/qtr.cal"
-TIMEOUT_MS = 8000
 POLL_MS = 5
 
 qtr = QTRLineSensor()
@@ -71,22 +70,17 @@ db = DriveBase(left_motor, right_motor,
                wheel_diameter_mm=88, axle_track_mm=136)
 
 
-def run_phase(law, name):
-    for _ in range(TIMEOUT_MS // POLL_MS):
+def run_phase(law):
+    while True:
         speeds = law(qtr.read())
         if speeds is None:
             return
         db.move_wheels(speeds[0], speeds[1])
         time.sleep_ms(POLL_MS)
-    db.stop()
-    raise RuntimeError(
-        "%s phase did not finish within %d ms - is a line in "
-        "reach, and is %s calibrated for your mat?"
-        % (name, TIMEOUT_MS, CAL))
 
 
 print("aligning on the line ...")
-run_phase(seek_speeds, "seek")
-run_phase(edge_speeds, "edge")
+run_phase(seek_speeds)
+run_phase(edge_speeds)
 db.stop(then="brake")
 print("aligned - square on the edge")
