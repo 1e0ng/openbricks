@@ -3,6 +3,15 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.83.3 — align tuning: KP 1.3, seek arrives on solid dark
+
+`examples/qtr_align.py`: `side_ambient(elements, target)` returns
+the half's mean ambient minus the target and serves both passes —
+seek stops a wheel when `side_ambient(half, 30) < 0` (solidly
+dark, so a single grazed element can't fake an arrival and leave
+the chassis crooked), the edge servo keeps its 50 target through
+the same helper. KP 0.5 -> 1.3.
+
 ## 1.83.2 — examples read ambient, never dark()
 
 No `dark()` / `all_dark()` left in any example: the align seek and

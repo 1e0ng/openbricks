@@ -59,45 +59,53 @@ class _Reading:
 
 
 class SeekLawTests(unittest.TestCase):
+    """Seek stops a wheel when its half reads SOLIDLY dark — mean
+    ambient below the 30 target via ``side_ambient(half, 30)`` — so
+    a single grazed element can't fake an arrival."""
 
     @classmethod
     def setUpClass(cls):
         cls.ns = _load("examples/qtr_align.py")
 
-    def _seek(self, dark_flags=()):
-        return self.ns["seek_wheel_speeds"](_Reading(dark_flags=dark_flags))
+    def _seek(self, dark_flags=(), ambients=None):
+        return self.ns["seek_wheel_speeds"](
+            _Reading(dark_flags=dark_flags, ambients=ambients))
 
     def test_no_line_creeps_both_wheels_forward(self):
         dps = self.ns["SEEK_DPS"]
         self.assertEqual(self._seek(), (dps, dps))
 
-    def test_left_half_on_line_stops_only_the_left_wheel(self):
+    def test_solidly_dark_left_half_stops_only_the_left_wheel(self):
         dps = self.ns["SEEK_DPS"]
-        self.assertEqual(self._seek(dark_flags=(0,)), (0, dps))
+        self.assertEqual(self._seek(dark_flags=(0, 1, 2, 3, 4)),
+                         (0, dps))
 
-    def test_right_half_on_line_stops_only_the_right_wheel(self):
+    def test_solidly_dark_right_half_stops_only_the_right_wheel(self):
         dps = self.ns["SEEK_DPS"]
-        self.assertEqual(self._seek(dark_flags=(9,)), (dps, 0))
+        self.assertEqual(self._seek(dark_flags=(5, 6, 7, 8, 9)),
+                         (dps, 0))
 
     def test_both_halves_dark_ends_the_phase(self):
-        self.assertIsNone(self._seek(dark_flags=(0, 9)))
+        self.assertIsNone(self._seek(dark_flags=tuple(range(10))))
 
-    def test_half_boundary_is_five_and_five(self):
-        n = self.ns["SIDE_COUNT"]
+    def test_a_single_dark_element_is_not_an_arrival(self):
+        # Mean of one dark + four mat elements is 80 — far above the
+        # 30 target; the old any-element rule stopped here and left
+        # the chassis crooked on a grazing touch.
         dps = self.ns["SEEK_DPS"]
-        # The last element of the left half...
-        self.assertEqual(self._seek(dark_flags=(n - 1,)), (0, dps))
-        # ...and the first element of the right half.
-        self.assertEqual(self._seek(dark_flags=(n,)), (dps, 0))
+        self.assertEqual(self._seek(dark_flags=(0,)), (dps, dps))
 
-    def test_any_single_dark_element_claims_its_half(self):
+    def test_target_30_is_the_boundary(self):
         dps = self.ns["SEEK_DPS"]
-        for i in range(10):
-            l, r = self._seek(dark_flags=(i,))
-            if i < self.ns["SIDE_COUNT"]:
-                self.assertEqual((l, r), (0, dps), i)
-            else:
-                self.assertEqual((l, r), (dps, 0), i)
+        # Left half mean exactly 30: not there yet (error 0, needs
+        # < 0)...
+        self.assertEqual(
+            self._seek(ambients=[0, 0, 0, 50, 100] + [100] * 5),
+            (dps, dps))
+        # ...one count darker: arrived.
+        self.assertEqual(
+            self._seek(ambients=[0, 0, 0, 45, 100] + [100] * 5),
+            (0, dps))
 
 
 class EdgeLawTests(unittest.TestCase):
