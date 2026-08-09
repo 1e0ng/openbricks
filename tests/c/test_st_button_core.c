@@ -140,6 +140,105 @@ TEST(clean_press_latency_is_on_thresh_ticks) {
     CHECK_EQ_INT(ticks, OB_BUTTON_ON_THRESH - 1);
 }
 
+// Helper mirroring the binding's tick body: classify one tick's
+// event through the stale filter; returns 1 when a (non-stale)
+// PRESSED edge would reach the armed/unarmed dispatch.
+static int tick_classifies_press(void) {
+    ob_button_event_t e = ob_button_tick(&b);
+    if (ob_button_event_is_stale(&b, e)) {
+        return 0;
+    }
+    return e == OB_BUTTON_PRESSED;
+}
+
+// N armed ticks through the SAME path the binding runs (tick +
+// stale filter every tick); returns how many stop-classified
+// presses came out.
+static int classify_n(int n) {
+    int stops = 0;
+    for (int i = 0; i < n; i++) {
+        stops += tick_classifies_press();
+    }
+    return stops;
+}
+
+TEST(start_press_confirming_after_arm_is_not_a_stop) {
+    // Bench 2026-08-09, run_4: flash I/O at run start stalled the
+    // hard tick 140 ms, so the START press's debounced edge landed
+    // on the first ticks AFTER the stop armed — and killed the run
+    // 1 ms in. Timeline: press down, a few samples accumulate, the
+    // arm happens mid-debounce, THEN the edge confirms.
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    level = 1;
+    tick_n(5);                        // mid-debounce, no edge yet
+    ob_button_arm_transition(&b);     // exec setup arms the stop
+    CHECK_EQ_INT(classify_n(50), 0);  // the edge confirmed, but stale
+    CHECK_EQ_INT(b.n_presses, 1);     // it DID fire at the debouncer
+    CHECK_EQ_INT(b.n_stale, 1);
+    // Release, then a genuinely new press: THAT one stops.
+    level = 0;
+    classify_n(OB_BUTTON_WINDOW + 5);
+    level = 1;
+    CHECK_EQ_INT(classify_n(50), 1);
+}
+
+TEST(press_already_stable_at_arm_needs_release_before_stop) {
+    // Slow variant: the press confirmed BEFORE the arm (normal
+    // start path, the edge latched a start). Held through arming,
+    // it must produce no stop; its release then re-enables stops.
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    level = 1;
+    tick_n(50);                       // pressed edge fired, still held
+    CHECK_EQ_INT(b.stable_pressed, 1);
+    ob_button_arm_transition(&b);
+    CHECK_EQ_INT(classify_n(100), 0); // held a while longer
+    level = 0;
+    classify_n(OB_BUTTON_WINDOW + 5); // release clears staleness
+    level = 1;
+    CHECK_EQ_INT(classify_n(50), 1);
+}
+
+TEST(stale_window_decay_re_enables_stops) {
+    // The press released before arming but its samples were still
+    // draining from the window: the marker must retire on decay so
+    // a real stop press shortly after is NOT swallowed.
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    level = 1;
+    tick_n(5);                        // brief contact, never confirms
+    level = 0;
+    ob_button_arm_transition(&b);     // window still holds 5 samples
+    classify_n(OB_BUTTON_WINDOW + 1); // decays to empty -> marker off
+    level = 1;
+    CHECK_EQ_INT(classify_n(50), 1);
+    CHECK_EQ_INT(b.n_stale, 0);
+}
+
+TEST(arm_with_idle_button_suppresses_nothing) {
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    ob_button_arm_transition(&b);     // nothing in flight
+    CHECK_EQ_INT(b.stale_press, 0);
+    level = 1;
+    CHECK_EQ_INT(classify_n(50), 1);  // a real stop press works
+}
+
+TEST(clear_stale_on_disarm) {
+    ob_button_init(&b, rd, NULL);
+    level = 1;
+    tick_n(5);
+    ob_button_arm_transition(&b);
+    CHECK_EQ_INT(b.stale_press, 1);
+    ob_button_clear_stale(&b);
+    CHECK_EQ_INT(b.stale_press, 0);
+}
+
 int main(void) {
     RUN(clean_press_and_release_fire_one_edge_each);
     RUN(chattery_press_still_fires);
@@ -148,5 +247,10 @@ int main(void) {
     RUN(mid_hold_flicker_does_not_release);
     RUN(window_count_stays_consistent_over_long_runs);
     RUN(clean_press_latency_is_on_thresh_ticks);
+    RUN(start_press_confirming_after_arm_is_not_a_stop);
+    RUN(press_already_stable_at_arm_needs_release_before_stop);
+    RUN(stale_window_decay_re_enables_stops);
+    RUN(arm_with_idle_button_suppresses_nothing);
+    RUN(clear_stale_on_disarm);
     return harness_exit("st_button_core");
 }
