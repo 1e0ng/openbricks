@@ -11,10 +11,8 @@ import time
 
 from openbricks.drivers.qtr import QTRLineSensor
 
-CAL = "/qtr.cal"
-
 qtr = QTRLineSensor()
-qtr.load_calibration(CAL)
+qtr.load_calibration("/qtr.cal")
 print("loaded calibration. streaming (Ctrl-C to stop):")
 
 _BARS = " .:-=+*#%@"

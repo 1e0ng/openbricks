@@ -50,11 +50,9 @@ def branch_seen(reading, mode):
 # --- end control law ---
 
 
-CAL = "/qtr.cal"
-
 qtr = QTRLineSensor()
 qtr.set_mode(MODE)
-qtr.load_calibration(CAL)
+qtr.load_calibration("/qtr.cal")
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41,
                          invert=True)

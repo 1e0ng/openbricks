@@ -57,11 +57,8 @@ def edge_speeds(reading):
 # --- end control law ---
 
 
-CAL = "/qtr.cal"
-POLL_MS = 5
-
 qtr = QTRLineSensor()
-qtr.load_calibration(CAL)
+qtr.load_calibration("/qtr.cal")
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41,
                          invert=True)
@@ -76,13 +73,13 @@ while True:
     if speeds is None:
         break
     db.move_wheels(speeds[0], speeds[1])
-    time.sleep_ms(POLL_MS)
+    time.sleep_ms(5)
 
 while True:
     speeds = edge_speeds(qtr.read())
     if speeds is None:
         break
     db.move_wheels(speeds[0], speeds[1])
-    time.sleep_ms(POLL_MS)
+    time.sleep_ms(5)
 db.stop(then="brake")
 print("aligned - square on the edge")
