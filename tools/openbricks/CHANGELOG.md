@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.75.0 — QTR square-up example
+
+New `examples/qtr_align.py`: the classic FLL/WRO align-on-a-line
+move on the `QTRLineSensor` window. Each half of the ten-element
+bar acts as one virtual corner sensor — a wheel creeps forward
+until its half reaches the line, the other keeps rolling and
+pivots the chassis square, both halves dark ends the move. No
+mode, no calibration beyond the shared `/qtr.cal`; a timeout
+raises instead of driving forever. Included on the docs Examples
+page next to the two-color-sensor variant.
+
 ## 1.74.0 — curve() parameter parity + a rounded-square example
 
 `DriveBase.curve(radius, angle, then, wait)` — the parameter NAMES

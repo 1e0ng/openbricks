@@ -37,7 +37,25 @@ move; pass `then="hold"` for the Pybricks end state.)
    :language: python
 ```
 
+## Square up on a line (QTR sensor bar)
+
+The classic align move on the `QTRLineSensor` window: each half of
+the ten-element bar acts as one virtual corner sensor. Drive slowly
+toward the line; the wheel whose half reaches the line first stops
+while the other keeps rolling, pivoting the chassis square. Both
+halves dark ends the move. Calibrate once with
+`examples/qtr_calibrate.py` first; mount the bar ahead of the
+wheels.
+
+```{eval-rst}
+.. literalinclude:: ../examples/qtr_align.py
+   :language: python
+```
+
 ## Square up on a line (two color sensors)
+
+The same maneuver with a corner-mounted color sensor per side, for
+rigs without the QTR bar.
 
 ```{eval-rst}
 .. literalinclude:: ../examples/line_align.py
