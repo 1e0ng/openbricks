@@ -30,7 +30,7 @@ def clamp(dps):
 
 
 def get_wheel_speeds(reading):
-    if reading.all_dark():
+    if all(e.ambient() < 50 for e in reading.elements):
         return None
     steer = KP * reading.edge_error()
     return (clamp(CRUISE_DPS + steer),
