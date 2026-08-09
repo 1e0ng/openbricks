@@ -1427,6 +1427,25 @@ class StaleStartDiscardTests(unittest.TestCase):
         self.launcher._discard_stale_start()
         self.assertIsNone(self.launcher._pending)
 
+    def test_missing_native_module_is_harmless(self):
+        import sys
+        mod = sys.modules.pop("_openbricks_native")
+        try:
+            self.launcher._pending = "start"
+            self.launcher._discard_stale_start()
+        finally:
+            sys.modules["_openbricks_native"] = mod
+        self.assertIsNone(self.launcher._pending)
+
+    def test_pcnt_read_failure_is_harmless(self):
+        pcnt = _FakePressCounter()
+        self.launcher._press_pcnt = pcnt
+        self.launcher._sync_press_counter()
+        pcnt.raise_on_value = OSError("pcnt gone")
+        seen = self.launcher._press_count_seen
+        self.launcher._discard_stale_start()
+        self.assertEqual(self.launcher._press_count_seen, seen)
+
 
 class TickStarvationTests(unittest.TestCase):
     """_tick measures its own inter-run gap: a machine.Timer callback
