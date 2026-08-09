@@ -72,6 +72,10 @@ dependencies = [
     "esptool >= 4.7",
     # Serial REPL bridge used by ``flash`` after a write.
     "mpremote >= 1.23",
+    # Ed25519 verification of firmware signatures (the
+    # official/customized label). Already in the tree transitively
+    # via esptool; declared because ``_signing`` imports it.
+    "cryptography >= 3.4",
 ]
 
 [project.optional-dependencies]

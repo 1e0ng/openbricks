@@ -638,6 +638,19 @@ jobs:
           path: release-out/
           merge-multiple: true
 
+      # Every published image gets an Ed25519 signature the CLI can
+      # check against its baked-in public key — that's what makes
+      # ``openbricks flash`` label a download "(official)". The
+      # private key exists only as this repository secret; the script
+      # hard-fails on a missing key or a public-half mismatch, so a
+      # release can never quietly ship unsigned.
+      - name: Sign firmware images
+        env:
+          FIRMWARE_SIGNING_KEY: ${{ secrets.FIRMWARE_SIGNING_KEY }}
+        run: |
+          python -m pip install --quiet cryptography
+          python scripts/sign-firmware.py release-out/
+
       # A main push skips every test job ("already proven on the pull
       # request") — but a commit pushed DIRECTLY to main was never
       # proven anywhere, and the release gate above cannot tell:

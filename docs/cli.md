@@ -24,6 +24,22 @@ $ openbricks log -n RobotA           # dump the most recent run log
 $ openbricks docs hardware           # open this manual offline in your browser
 ```
 
+## Firmware versions and provenance
+
+`openbricks flash` first reports the firmware already on the chip —
+version plus an `(official)` / `(customized)` suffix — before it
+looks up the newest release. Flashing the **same version** again, or
+an **older** one, asks for confirmation first; pass `--yes` to skip
+the prompt in scripts.
+
+Every firmware image published by CI is signed (Ed25519), and the
+CLI ships the matching public key. An image whose `.bin.sig`
+verifies is labeled `(official)`; anything else — a self-built
+image, a missing or wrong signature — is `(customized)`. Customized
+firmware flashes normally: the suffix is provenance, not a gate.
+After each flash the verdict is stored on the hub, which is how the
+next `openbricks flash` labels the current firmware.
+
 ## Reference
 
 The reference below is generated from the CLI's own argument parser, so
