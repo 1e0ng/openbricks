@@ -692,7 +692,8 @@ def _run_header(program_path):
     heap. Every probe is independent — a failing one reports ? and
     must not cost the run its log."""
     try:
-        from openbricks import __version__ as _ver
+        from openbricks import firmware_label
+        _ver = firmware_label()
     except Exception:
         _ver = "?"
     try:
