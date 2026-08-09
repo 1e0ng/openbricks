@@ -3,6 +3,14 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.83.2 — examples read ambient, never dark()
+
+No `dark()` / `all_dark()` left in any example: the align seek and
+the followers' whole-window ending both compare `ambient() < 50`,
+the same boundary midpoint everything else targets. One scale
+throughout the examples; the thresholded dark API remains in the
+driver for user code that wants it.
+
 ## 1.83.1 — follower branch watch reads ambient
 
 `qtr_line_follow_left/right.py`: the far-side branch watch uses

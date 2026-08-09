@@ -43,20 +43,19 @@ class _Element:
 
 
 class _Reading:
-    """``QTRReading`` stand-in: the law consumes ``edge_error()``,
-    ``all_dark()``, and ``elements`` (the branch watch)."""
+    """``QTRReading`` stand-in: the law consumes ``edge_error()``
+    and ``elements`` (whole-window darkness and the branch watch
+    both read per-element ``ambient()``)."""
 
     def __init__(self, error=None, all_dark=False, dark_flags=()):
         self._error = error
-        self._all = all_dark
+        if all_dark:
+            dark_flags = tuple(range(10))
         # 10 elements; the indices in dark_flags read dark.
         self.elements = [_Element(i in dark_flags) for i in range(10)]
 
     def edge_error(self):
         return self._error
-
-    def all_dark(self):
-        return self._all
 
 
 class _LawContract:

@@ -31,7 +31,7 @@ SIDE_COUNT = 5
 
 def side_on_line(elements):
     for e in elements:
-        if e.dark():
+        if e.ambient() < 50:
             return True
     return False
 

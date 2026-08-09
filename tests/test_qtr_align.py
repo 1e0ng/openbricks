@@ -53,7 +53,8 @@ class _Reading:
         if ambients is None:
             ambients = [left_ambient] * 5 + [right_ambient] * 5
         self.elements = [
-            _Element(dark=(i in dark_flags), ambient=ambients[i])
+            _Element(dark=(i in dark_flags),
+                     ambient=(0 if i in dark_flags else ambients[i]))
             for i in range(10)]
 
 
