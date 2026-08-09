@@ -118,7 +118,11 @@ class TimestampTests(_LogPathPatch):
         _LogPathPatch.tearDown(self)
 
     def _read(self, sess):
+        # Every slot file opens with the run header line; the
+        # assertions here target what the session WROTE after it.
         with open(sess.path) as f:
+            first = f.readline()
+            assert log._parse_header_line(first) is not None, first
             return f.read()
 
     def test_each_line_prefixed_with_epoch_ms(self):
@@ -213,32 +217,80 @@ class NoteTests(_LogPathPatch):
 
 
 class RotationTests(_LogPathPatch):
+    """Slot reuse, not delete+create: littlefs charges directory
+    churn forever (the 400 ms commits of bench 2026-08-09), so the
+    MAX_RUNS files are truncated in place and the run index lives in
+    each file's header line."""
 
-    def test_first_run_creates_run_0(self):
+    def test_first_run_uses_slot_0_with_run_0_header(self):
         with log.session() as sess:
             print("a")
         self.assertIsNotNone(sess.path)
-        self.assertEqual(sess.path.split("/")[-1], "run_0.log")
+        self.assertEqual(sess.path.split("/")[-1], "slot_0.log")
+        with open(sess.path) as f:
+            self.assertEqual(log._parse_header_line(f.readline()), 0)
 
     def test_subsequent_runs_increment_index(self):
-        paths = []
         for _ in range(3):
-            with log.session() as sess:
-                paths.append(sess.path)
-        names = [p.split("/")[-1] for p in paths]
-        self.assertEqual(names, ["run_0.log", "run_1.log", "run_2.log"])
+            with log.session():
+                pass
+        self.assertEqual([idx for idx, _ in log.list_runs()],
+                         [0, 1, 2])
 
-    def test_run_past_capacity_evicts_oldest(self):
+    def test_run_past_capacity_reuses_the_oldest_slot(self):
         # Derived from MAX_RUNS, not a literal: the eviction contract
-        # must hold at whatever capacity ships.
+        # must hold at whatever capacity ships. Run MAX_RUNS wraps
+        # onto slot_0, overwriting run 0 — same retention as the old
+        # delete+create rotation, zero directory churn.
         for _ in range(log.MAX_RUNS + 1):
             with log.session():
                 pass
-        existing = sorted(os.listdir(_TEST_LOG_DIR),
-                          key=lambda n: int(n[4:-4]))
+        existing = os.listdir(_TEST_LOG_DIR)
         self.assertEqual(len(existing), log.MAX_RUNS)
-        self.assertEqual(existing[0], "run_1.log")   # run_0 evicted
-        self.assertEqual(existing[-1], "run_%d.log" % log.MAX_RUNS)
+        indices = [idx for idx, _ in log.list_runs()]
+        self.assertEqual(indices,
+                         list(range(1, log.MAX_RUNS + 1)))
+        with self.assertRaises(OSError):
+            log.read_run(0)                     # slot reused
+
+    def test_slot_filenames_never_change(self):
+        # THE fix: the same MAX_RUNS names forever — no
+        # create/delete churn for littlefs to charge us for.
+        for _ in range(log.MAX_RUNS * 2 + 3):
+            with log.session():
+                pass
+        names = sorted(os.listdir(_TEST_LOG_DIR))
+        self.assertEqual(
+            names,
+            sorted("slot_%d.log" % i for i in range(log.MAX_RUNS)))
+
+    def test_legacy_run_files_are_migrated_away(self):
+        # Files from pre-slot firmware are exactly the churn this
+        # scheme removes: listed until the next run starts, removed
+        # by its one-time migration.
+        os.mkdir(_TEST_LOG_DIR)
+        with open(_TEST_LOG_DIR + "/run_5.log", "w") as f:
+            f.write("1783950123456 legacy line\n")
+        self.assertEqual([idx for idx, _ in log.list_runs()], [5])
+        self.assertIn("legacy line", log.read_run(5))
+        with log.session():
+            pass
+        names = os.listdir(_TEST_LOG_DIR)
+        # MP's unittest has no assertNotIn.
+        self.assertFalse("run_5.log" in names, names)
+        # The new run continues the numbering after the legacy run.
+        self.assertEqual([idx for idx, _ in log.list_runs()], [6])
+
+    def test_corrupt_slot_header_is_skipped(self):
+        # Crash mid-write leaves a slot without a parseable header:
+        # it must not break listing, and its slot gets reused.
+        os.mkdir(_TEST_LOG_DIR)
+        with open(_TEST_LOG_DIR + "/slot_3.log", "w") as f:
+            f.write("garbage without a header\n")
+        self.assertEqual(log.list_runs(), [])
+        with log.session() as sess:
+            pass
+        self.assertEqual(sess.path.split("/")[-1], "slot_0.log")
 
     def test_capacity_survives_a_diagnostic_session(self):
         # The bench failure this bump answers: an intermittent
@@ -259,6 +311,7 @@ class RotationTests(_LogPathPatch):
         with log.session() as sess:
             print("a" * 1000)   # blow past the budget
         with open(sess.path) as f:
+            f.readline()        # the run header rides outside the budget
             data = f.read()
         # Allow a few bytes of leeway around the trailing newline.
         self.assertLessEqual(len(data), 32 + 4)

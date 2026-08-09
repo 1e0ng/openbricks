@@ -1,0 +1,42 @@
+Mount the littlefs root with readsize=256 instead of the 32-byte
+default. Every littlefs metadata traversal (allocator refills, dir
+scans) issues reads of `readsize` bytes; at 32 bytes a churned
+filesystem costs thousands of SPI transactions per commit — bench
+2026-08-09: ~400 ms per log commit on a 14 MiB partition after ~70
+log-rotation cycles, measured on unix MP as 8k+ block reads per
+flush with the default vs ~1k with readsize=256 (5.5x fewer read
+calls, 4.4x fewer writes overall; progsize deliberately stays 32 —
+raising it pads dir-log entries and makes metadata churn WORSE).
+readsize is a runtime cache parameter, not persisted by mkfs, so
+existing filesystems mount unchanged.
+
+--- a/ports/esp32/modules/_boot.py
++++ b/ports/esp32/modules/_boot.py
+@@ -1,10 +1,14 @@
+ import gc
+ import vfs
+ from flashbdev import bdev
+
+ try:
+     if bdev:
+-        vfs.mount(bdev, "/")
++        # readsize=256: littlefs metadata traversals read in
++        # readsize chunks, and the 32-byte default costs thousands
++        # of SPI transactions per commit on an aged filesystem
++        # (openbricks: 400 ms log commits, bench 2026-08-09).
++        vfs.mount(vfs.VfsLfs2(bdev, readsize=256), "/")
+ except OSError:
+     import inisetup
+
+     inisetup.setup()
+--- a/ports/esp32/modules/inisetup.py
++++ b/ports/esp32/modules/inisetup.py
+@@ -6,7 +6,7 @@ def check_bootsec():
+     print("Performing initial setup")
+     if bdev.info()[4] == "vfs":
+         vfs.VfsLfs2.mkfs(bdev)
+-        fs = vfs.VfsLfs2(bdev)
++        fs = vfs.VfsLfs2(bdev, readsize=256)
+     elif bdev.info()[4] == "ffat":
+         vfs.VfsFat.mkfs(bdev)
+         fs = vfs.VfsFat(bdev)

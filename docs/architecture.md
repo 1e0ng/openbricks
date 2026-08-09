@@ -131,9 +131,13 @@ ships:
   no-op `machine` fakes and replaces the I2C driver classes with
   sim-aware versions.
 - Per-run log capture on the hub: every program execution tee'd to
-  `/openbricks_logs/run_N.log` (10 rotating slots, 64 KB each —
-  enough that a few diagnostic `openbricks run -c` sessions don't
-  rotate away the failing run they're investigating). Each
+  `/openbricks_logs/slot_N.log` (10 slot files reused in place,
+  64 KB each; run `N` overwrites slot `N % 10` and carries its run
+  index in the file's header line — truncate-reuse instead of
+  delete+create keeps littlefs commits at fresh-filesystem cost.
+  Ten slots are enough that a few diagnostic `openbricks run -c`
+  sessions don't rotate away the failing run they're
+  investigating). Each
   line is prefixed with a raw UTC Unix-epoch-milliseconds stamp;
   `openbricks log -n NAME` reads the file back over BLE and renders
   the stamp as `[YYYY-MM-DD HH:MM:SS.mmm]` in your local timezone —

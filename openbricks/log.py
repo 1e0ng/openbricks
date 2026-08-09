@@ -12,14 +12,17 @@ nobody listening on the live channel, the file is the only record.
 Storage layout::
 
     /openbricks_logs/run_0.log
-    /openbricks_logs/run_1.log
-    /openbricks_logs/run_2.log
+    /openbricks_logs/slot_1.log
+    /openbricks_logs/slot_2.log
 
-Each run gets the next index; when the directory already holds
-``MAX_RUNS`` files we delete the oldest before opening the new one.
-Indices grow monotonically (run_9 is the tenth run ever; only the
-newest ``MAX_RUNS`` files exist at a time), so flash usage is
-bounded while filenames stay unambiguous across rotations.
+Each run gets the next index; the index lives in the file's header
+line (``"<epoch> -- run_N --"``), NOT the filename. The
+``MAX_RUNS`` slot files are reused in place (``run N`` overwrites
+``slot_(N % MAX_RUNS)``) — the earlier delete+create rotation
+churned littlefs directory metadata until every commit's allocator
+traversal cost ~400 ms (bench 2026-08-09); truncate-reuse keeps
+commits at fresh-filesystem cost. Flash usage stays bounded and
+indices grow monotonically, exactly as before.
 
 Every line is prefixed with a raw int64 **UTC Unix epoch in
 milliseconds** (e.g. ``1783950123456 left ambient: 33``). No
@@ -159,21 +162,76 @@ def _list_existing():
     return out
 
 
-def _next_run_path():
-    """Allocate a path for the next run, evicting the oldest log if
-    we'd exceed ``MAX_RUNS``. Returns the absolute path."""
+_SLOT_PREFIX = "slot_"
+
+
+def _parse_header_line(line):
+    """The run index from a slot file's header line
+    (``"<epoch> -- run_N --"``), or ``None``."""
+    parts = line.split()
+    if (len(parts) == 4 and parts[1] == "--" and parts[3] == "--"
+            and parts[2].startswith("run_")):
+        try:
+            return int(parts[2][4:])
+        except ValueError:
+            return None
+    return None
+
+
+def _slot_runs():
+    """Sorted ``(index, filename)`` for slot files carrying a valid
+    header. A truncated/corrupt slot (crash mid-write) parses to
+    nothing and is simply skipped — its slot gets reused."""
+    try:
+        entries = os.listdir(LOG_DIR)
+    except OSError:
+        return []
+    out = []
+    for name in entries:
+        if (not name.startswith(_SLOT_PREFIX)
+                or not name.endswith(".log")):
+            continue
+        try:
+            with open(LOG_DIR + "/" + name) as f:
+                idx = _parse_header_line(f.readline())
+        except (OSError, ValueError):
+            continue
+        if idx is not None:
+            out.append((idx, name))
+    out.sort()
+    return out
+
+
+def _next_run():
+    """``(path, index)`` for the next run.
+
+    The ``MAX_RUNS`` files are REUSED in place (truncate-on-open),
+    never deleted and recreated: littlefs pays for directory churn
+    forever — after ~70 delete+create rotation cycles every commit's
+    allocator traversal crawled the accumulated metadata at ~400 ms
+    per flush (bench run_68, 2026-08-09; reproduced on unix MP as
+    8k+ block reads per commit vs ~40 on a fresh filesystem, and
+    slot reuse returns it to ~40). The run INDEX keeps counting up —
+    it lives in each slot's header line, not the filename."""
     _ensure_log_dir()
-    existing = _list_existing()
-    while len(existing) >= MAX_RUNS:
-        idx, name = existing.pop(0)
+    runs = _slot_runs()
+    legacy = _list_existing()
+    next_idx = 0
+    if runs:
+        next_idx = runs[-1][0] + 1
+    if legacy:
+        # Numbering continues from pre-slot firmware's runs.
+        next_idx = max(next_idx, legacy[-1][0] + 1)
+    # One-time migration: legacy per-run files are exactly the churn
+    # this scheme removes. Logs are ephemeral diagnostics; drop them.
+    for idx, name in legacy:
         try:
             os.remove(LOG_DIR + "/" + name)
         except OSError:
-            break
-    next_idx = 0
-    if existing:
-        next_idx = existing[-1][0] + 1
-    return "%s/run_%d.log" % (LOG_DIR, next_idx)
+            pass
+    return ("%s/%s%d.log" % (LOG_DIR, _SLOT_PREFIX,
+                             next_idx % MAX_RUNS),
+            next_idx)
 
 
 # ---- public session API ---------------------------------------------
@@ -207,6 +265,7 @@ class _LogSession:
     def __init__(self):
         self._file          = None
         self._path          = None
+        self._index         = None
         self._prev_print    = None
         self._budget        = [0]
         self._at_line_start = True
@@ -319,8 +378,13 @@ class _LogSession:
 
     def __enter__(self):
         try:
-            self._path = _next_run_path()
+            self._path, self._index = _next_run()
             self._file = open(self._path, "w")
+            # Header line: carries the run index (the filename no
+            # longer does — slots are reused). Stamped like every
+            # other line so dumps render it naturally.
+            self._file.write("%d -- run_%d --\n"
+                             % (_epoch_ms(), self._index))
         except Exception:
             self._file = None
             self._path = None
@@ -432,11 +496,29 @@ def session():
 def list_runs():
     """Return a list of ``(index, full_path)`` tuples, oldest first.
     Used by the on-hub helper that ``openbricks log`` invokes via
-    raw-paste to enumerate available runs."""
-    return [(idx, LOG_DIR + "/" + name) for idx, name in _list_existing()]
+    raw-paste to enumerate available runs. Slot files are listed by
+    their header index; legacy ``run_N.log`` files (pre-slot
+    firmware) still appear until the next run's migration removes
+    them."""
+    out = [(idx, LOG_DIR + "/" + name)
+           for idx, name in _list_existing()]
+    out += [(idx, LOG_DIR + "/" + name)
+            for idx, name in _slot_runs()]
+    out.sort()
+    return out
 
 
 def read_run(index):
-    """Read a single run's log file by index. Raises ``OSError`` if
-    no such run exists."""
+    """Read a single run's log by index. Raises ``OSError`` if no
+    such run exists (the slot was reused by a newer run, or the
+    index never happened)."""
+    path = "%s/%s%d.log" % (LOG_DIR, _SLOT_PREFIX, index % MAX_RUNS)
+    try:
+        with open(path) as f:
+            first = f.readline()
+            if _parse_header_line(first) == index:
+                return first + f.read()
+    except OSError:
+        pass
+    # Legacy layout (pre-slot firmware) — or a clean OSError.
     return open("%s/run_%d.log" % (LOG_DIR, index)).read()
