@@ -2,12 +2,12 @@
 """Square up on the edge of a perpendicular line, QTRLineSensor.
 
 The classic FLL/WRO align move, on one sensor bar instead of two
-corner sensors, in two passes: drive slowly toward the line until
-each half of the window reads solidly dark (mean ambient under 30
-— the wheel whose half arrives first stops, the other pivots the
-chassis on), then servo each wheel proportionally — the follower's
-KP discipline — until its half reads ambient of about 50, the
-elements straddling the black/white boundary. Both halves end ON the edge, so the bar —
+corner sensors, in two passes of the SAME proportional servo:
+seek drives each wheel toward a mean-ambient target of 30 — well
+onto the line, the wheel whose half arrives first stops while the
+other pivots the chassis on — then the edge pass eases both back
+to a target of 50, the elements straddling the black/white
+boundary. Both halves end ON the edge, so the bar —
 and the chassis — is square right at it.
 
 Run ``examples/qtr_calibrate.py`` once first. The bar must be
@@ -23,38 +23,36 @@ from openbricks.robotics import DriveBase
 
 # --- control law (pure logic, unit-tested in tests/test_qtr_align.py) ---
 
-SEEK_DPS = 100
 KP = 1.3
 EDGE_TOLERANCE = 5
 SIDE_COUNT = 5
 
 
-def side_ambient(elements, target):
+def side_ambient(elements):
     total = 0
     for e in elements:
         total += e.ambient()
-    return total // len(elements) - target
+    return total // len(elements)
 
 
-def edge_dps(elements):
-    error = side_ambient(elements, 50)
+def edge_dps(elements, target):
+    error = side_ambient(elements) - target
     if abs(error) <= EDGE_TOLERANCE:
         return 0
     return int(KP * error)
 
 
 def seek_wheel_speeds(reading):
-    left_on = side_ambient(reading.elements[:SIDE_COUNT], 30) < 0
-    right_on = side_ambient(reading.elements[-SIDE_COUNT:], 30) < 0
-    if left_on and right_on:
+    left = edge_dps(reading.elements[:SIDE_COUNT], 30)
+    right = edge_dps(reading.elements[-SIDE_COUNT:], 30)
+    if left == 0 and right == 0:
         return None
-    return (0 if left_on else SEEK_DPS,
-            0 if right_on else SEEK_DPS)
+    return (left, right)
 
 
 def edge_wheel_speeds(reading):
-    left = edge_dps(reading.elements[:SIDE_COUNT])
-    right = edge_dps(reading.elements[-SIDE_COUNT:])
+    left = edge_dps(reading.elements[:SIDE_COUNT], 50)
+    right = edge_dps(reading.elements[-SIDE_COUNT:], 50)
     if left == 0 and right == 0:
         return None
     return (left, right)
