@@ -79,9 +79,11 @@ See {doc}`the CLI reference <cli>` for every command, and
 - **Hub doesn't show up in `openbricks list`** — BLE may be toggled
   off. Short-press the Bluetooth button (GPIO 38 on the S3, GPIO 5 on the classic ESP32); on the
   ESP32-S3 the onboard LED turns blue when BLE is on, yellow when off.
-  While a program is running the LED flashes that colour at 1 Hz
+  While a program is running the LED flashes that colour at 2 Hz
   instead of holding it solid — a flashing LED means "robot running",
-  not a different BLE state.
+  not a different BLE state. A brief **red** flash is the
+  press acknowledgment: every program-button press (start or stop)
+  shows it the moment the press is recognized.
   See {class}`openbricks.hub.ESP32S3DevkitHub`.
 - **Serial port permission errors on Linux** — add yourself to the
   `dialout` group (`sudo usermod -aG dialout $USER`) and re-login.

@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.80.0 — the LED acknowledges button presses; faster run blink
+
+Every program-button press — the one that starts a run AND the one
+that stops it — now flashes the status LED RED for ~200 ms the
+moment the press is recognized, before the normal presentation
+resumes. All press detectors feed it: the idle PCNT edge, the hard
+start latch, the watcher's stop fire, and the teardown chokepoint
+(so hard-path stops flash too). On single-colour LEDs the
+acknowledgment is a plain blip.
+
+The run indicator also speeds up: 2 Hz (250 ms phases) instead of
+1 Hz, so "running" reads as activity at a glance. Colours
+unchanged — blue = BLE on, yellow = off, solid at idle.
+
 ## 1.79.1 — the start press can no longer stop its own run
 
 Bench (run_4): a button start died 44 ms in with "stopped:
