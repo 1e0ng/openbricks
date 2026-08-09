@@ -88,7 +88,7 @@ class QTRReading:
         r.position()            # global centroid, mm
         r.left_edge_position()  # the line's left edge, mm
         r.right_edge_position() # the line's right edge, mm
-        r.edge_error()          # followed edge minus the mode setpoint
+        r.edge_error()          # setpoint element's ambient vs 50
         r.leftmost_position()   # fork clusters
         r.rightmost_position()
         r.dark_count()          # how many elements on the line
@@ -222,8 +222,19 @@ class QTRArray:
         # and this is the only information left. Follower logic uses
         # it to steer back instead of guessing.
         self._last_side = 0
-        # Edge-following discipline, selected via set_mode().
+        # Edge-following discipline, selected via set_mode(), and
+        # the element each mode holds on the edge: the one nearest
+        # its setpoint x.
         self._mode = None
+        self._left_idx = self._nearest_index(self.LEFT_SETPOINT_MM)
+        self._right_idx = self._nearest_index(self.RIGHT_SETPOINT_MM)
+
+    def _nearest_index(self, x_mm):
+        best = 0
+        for i in range(1, len(self._x_mm)):
+            if abs(self._x_mm[i] - x_mm) < abs(self._x_mm[best] - x_mm):
+                best = i
+        return best
 
     @staticmethod
     def _check_adc_capable(pin):
@@ -562,24 +573,22 @@ class QTRArray:
 
     def edge_error(self, readings=None):
         """Signed steering error for the discipline selected with
-        :meth:`set_mode`: the followed edge's position minus that
-        mode's setpoint. Positive = steer right, same sign
-        convention as :meth:`position`. ``None`` when nothing is
-        dark — a follower multiplying by a gain then fails loudly
-        instead of driving blind."""
+        :meth:`set_mode`: how far the mode's setpoint element sits
+        from the black/white boundary, as its ambient (0 black ..
+        100 white) referenced to 50. Zero exactly when that element
+        straddles the edge; range -50 .. +50. Positive = steer
+        right, same sign convention as :meth:`position` — drifting
+        onto the mat side pushes the error toward the line, and
+        vice versa, in both modes."""
+        if readings is None:
+            readings = self.read()
         if self._mode == "left":
-            edge = self.left_edge_position(readings)
-            offset = self.LEFT_SETPOINT_MM
-        elif self._mode == "right":
-            edge = self.right_edge_position(readings)
-            offset = self.RIGHT_SETPOINT_MM
-        else:
-            raise RuntimeError(
-                "no edge-following mode selected — call "
-                "set_mode('left') or set_mode('right') first")
-        if edge is None:
-            return None
-        return edge - offset
+            return readings[self._left_idx].ambient() - 50
+        if self._mode == "right":
+            return 50 - readings[self._right_idx].ambient()
+        raise RuntimeError(
+            "no edge-following mode selected — call "
+            "set_mode('left') or set_mode('right') first")
 
     def last_side(self):
         """+1 if the line was last seen right of centre, -1 left,

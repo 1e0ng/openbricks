@@ -572,20 +572,27 @@ class ModeAndLineSensorTests(unittest.TestCase):
             self.assertTrue("set_mode" in str(e), e)
 
     def test_base_array_setpoints_default_to_centre(self):
+        # Setpoint 0.0 on the 9-pin rig picks the middle element
+        # (pin 5, index 4) for both modes; fully dark there means
+        # ambient 0 -> full-scale error, mode-signed.
         qtr = self._base_array()
-        _script(dark_pins=(5, 6))
+        _script(dark_pins=(5,))
         qtr.set_mode("left")
-        self.assertEqual(qtr.edge_error(),
-                         qtr.left_edge_position())
+        self.assertEqual(qtr.edge_error(), -50)
         qtr.set_mode("right")
-        self.assertEqual(qtr.edge_error(),
-                         qtr.right_edge_position())
+        self.assertEqual(qtr.edge_error(), 50)
 
-    def test_edge_error_none_when_nothing_dark(self):
+    def test_edge_error_rails_toward_the_line_when_all_white(self):
+        # Nothing dark: the setpoint element reads ambient 100 and
+        # the error rails at the sign that steers back toward the
+        # line's side (right of the edge in left mode, left of it
+        # in right mode).
         qtr = self._base_array()
-        qtr.set_mode("left")
         _script(dark_pins=())
-        self.assertTrue(qtr.edge_error() is None)
+        qtr.set_mode("left")
+        self.assertEqual(qtr.edge_error(), 50)
+        qtr.set_mode("right")
+        self.assertEqual(qtr.edge_error(), -50)
 
     def _line_sensor(self):
         from openbricks.drivers.qtr import QTRLineSensor
@@ -614,35 +621,35 @@ class ModeAndLineSensorTests(unittest.TestCase):
                          QTRLineSensor.POSITIONS_MM[7])
         self.assertEqual(QTRLineSensor.LEFT_SETPOINT_MM, -16.0)
         self.assertEqual(QTRLineSensor.RIGHT_SETPOINT_MM, 16.0)
+        # The setpoint ELEMENTS resolve to those indices too.
+        self.assertEqual(qtr._left_idx, 2)
+        self.assertEqual(qtr._right_idx, 7)
 
-    def test_line_sensor_left_mode_error_is_setpoint_relative(self):
-        # Full-scale dark from GPIO 3 rightward: the left edge
-        # interpolates 30% into the 4 mm gap before x=-16, i.e.
-        # -20 + 1.2 = -18.8 -> error -2.8 relative to the -16
-        # setpoint.
+    def test_line_sensor_error_is_the_setpoint_elements_ambient(self):
+        # Left mode watches GPIO 3 (window index 2): fully dark
+        # there -> ambient 0 -> error -50; a raw reading midway
+        # between the calibration extremes -> ambient 50 -> error 0
+        # (the element straddles the edge).
         qtr = self._line_sensor()
         qtr.set_mode("left")
-        self._script10((3, 4, 5, 6, 7, 8, 9, 10))
-        err = qtr.edge_error()
-        self.assertAlmostEqual(err, (-20.0 + 0.3 * 4.0) - (-16.0),
-                               places=6)
+        self._script10((3,))
+        self.assertEqual(qtr.edge_error(), -50)
+        self._script10(())
+        ADC.reads[3] = (_MAT + _LINE) // 2
+        self.assertEqual(qtr.edge_error(), 0)
 
     def test_line_sensor_switches_modes_mid_run(self):
-        # Same snapshot, both disciplines: switching modes changes
-        # the error source and setpoint with no reconstruction.
+        # Same snapshot, both disciplines: dark under both setpoint
+        # elements (GPIO 3 and GPIO 8) reads as "onto the line" in
+        # left mode and "onto the line" from the other side in
+        # right mode — opposite signs, no reconstruction.
         qtr = self._line_sensor()
-        self._script10((4, 5, 6, 7))
+        self._script10((3, 8))
         reading = qtr.read()
         qtr.set_mode("left")
-        left_err = qtr.edge_error(reading)
+        self.assertEqual(qtr.edge_error(reading), -50)
         qtr.set_mode("right")
-        right_err = qtr.edge_error(reading)
-        self.assertAlmostEqual(
-            left_err,
-            qtr.left_edge_position(reading) - (-16.0), places=6)
-        self.assertAlmostEqual(
-            right_err,
-            qtr.right_edge_position(reading) - 16.0, places=6)
+        self.assertEqual(qtr.edge_error(reading), 50)
 
     def test_reading_edge_error_delegates(self):
         qtr = self._line_sensor()

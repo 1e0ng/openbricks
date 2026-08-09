@@ -114,6 +114,12 @@ interpolation is exact across the unequal gaps). The two modes:
 - **`"right"`** — holds the line's RIGHT edge under **channel 12**
   (x = +16 mm)
 
+`edge_error()` is how far the mode's channel sits from the
+black/white boundary: that element's ambient (0 black .. 100
+white) referenced to 50, so it reads 0 exactly when the channel
+straddles the edge, and is signed so positive steers right in
+both modes.
+
 The skip pattern is a palindrome, so if the board is mounted the
 other way round, only these channel labels swap — GPIO order and
 geometry stay identical.

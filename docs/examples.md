@@ -43,8 +43,9 @@ The classic align move on the `QTRLineSensor` window: each half of
 the ten-element bar acts as one virtual corner sensor, in two
 passes. Seek: drive slowly toward the line — the wheel whose half
 reaches it first stops while the other keeps rolling, pivoting the
-chassis square. Edge: back each wheel off until its half turns
-white again, parking the bar right on the line's near edge.
+chassis square. Edge: nudge each wheel until its half reads
+ambient of about 50 — the elements straddling the black/white
+boundary, parked right ON the line's edge.
 Calibrate once with `examples/qtr_calibrate.py` first; mount the
 bar ahead of the wheels.
 
