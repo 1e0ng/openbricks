@@ -107,6 +107,7 @@ class Launcher:
         self._stop_retry_count = 0         # injections re-requested this stop
         self._tick_last_ms   = None        # last _tick run (starvation detect)
         self._tick_gap_max   = 0           # worst inter-tick gap seen
+        self._starve_note_ms = None        # last starvation NOTE (throttle)
         self._press_pcnt     = None        # hardware falling-edge counter
         self._press_count_seen = 0         # counter value already consumed
         self._raw_last       = False       # last raw sample (debounce)
@@ -128,6 +129,44 @@ class Launcher:
         # works) or whether it must fall back to the degraded
         # schedule-exec path (see ``_scheduled_start``).
         self._idle_drain_ms  = None
+
+    def _discard_stale_start(self):
+        """Drop every start signal accumulated while NO idle loop was
+        alive to drain it: the ``_pending`` flag, the hard button's
+        start latch, and un-consumed PCNT edges.
+
+        Called on (re)entry to ``run()``. The re-entry case is a BLE
+        session ending — ``openbricks log`` / ``list`` / ``stop``
+        Ctrl-C the idle loop and restore it on the way out, and a
+        press parked during the session (schedule-full fallback under
+        load) used to fire the instant the restore re-entered the
+        loop: a read-only log command visibly STARTED the robot
+        (bench 2026-08-09). A start with no live loop to serve it is
+        stale by definition — the user presses again."""
+        discarded = False
+        if self._pending == "start":
+            self._pending = None
+            discarded = True
+            _event("stale-start-discarded", "pending")
+        try:
+            from _openbricks_native import motor_process as _mpn
+            if _mpn.hard_button_take_start():
+                discarded = True
+                _event("stale-start-discarded", "hard-latch")
+        except (ImportError, AttributeError):
+            pass
+        if self._press_pcnt is not None:
+            try:
+                n = self._press_pcnt.value()
+            except Exception:
+                n = self._press_count_seen
+            if n != self._press_count_seen:
+                self._press_count_seen = n
+                discarded = True
+                _event("stale-start-discarded", "pcnt")
+        if discarded:
+            print("openbricks: discarded a start queued while the "
+                  "idle loop was down — press again to run.")
 
     def _sync_press_counter(self):
         """Mark the hardware press counter's current value as
@@ -178,6 +217,11 @@ class Launcher:
     # robot itself is already stopping either way: the e-stop latch
     # engaged at press-down, independent of injection delivery.
     STOP_RETRY_MS = 300
+
+    # Starvation notes are throttled to one per this window — each
+    # note is a committed log write, and on a slow filesystem the
+    # write itself starves the next tick (the run_68 log storm).
+    STARVE_NOTE_MS = 5000
 
     # Contact-chatter defences (1.15.3). Bench event-ring capture of
     # "pressed start 4 times, only the 4th worked": the START press's
@@ -379,7 +423,10 @@ class Launcher:
             gap = _ticks_diff(now, self._tick_last_ms)
             if gap > self._tick_gap_max:
                 self._tick_gap_max = gap
-            if gap >= self._poll_ms * 4:
+            if gap >= self._poll_ms * 4 and (
+                    self._starve_note_ms is None
+                    or _ticks_diff(now, self._starve_note_ms)
+                    >= self.STARVE_NOTE_MS):
                 # Include the slowest log-write so the starvation
                 # note carries its own prime suspect: littlefs block
                 # erases (under the pump's file.write) suspend the
@@ -387,6 +434,16 @@ class Launcher:
                 # enough to fill the 8-deep scheduler queue and drop
                 # ticks. Same order as the gap -> flash owns it;
                 # small while gaps are large -> blocker is elsewhere.
+                #
+                # Rate-limited to one note per STARVE_NOTE_MS: the
+                # note is ITSELF a committed log write, so on a slow
+                # filesystem every note starved the next tick, which
+                # wrote another note — a self-sustaining storm that
+                # stretched a 0.5 s program to 28 s (bench run_68,
+                # 2026-08-09: ~400 ms per write, every tick). The
+                # worst-gap tracking above still sees every gap; only
+                # the note is throttled.
+                self._starve_note_ms = now
                 _note("tick starved %d ms (worst log write %d ms)"
                       % (gap, _worst_log_write_ms()))
         self._tick_last_ms = now
@@ -1237,6 +1294,9 @@ def run(program_path=DEFAULT_PROGRAM_PATH, button_pin=DEFAULT_BUTTON_PIN,
     launcher = _ensure_launcher(
         button_pin=button_pin, poll_ms=poll_ms, timer_id=timer_id)
     launcher._program_path = program_path
+    # A read-only BLE session's restore must never launch a program:
+    # discard anything that queued while the loop was down.
+    launcher._discard_stale_start()
     print("openbricks: idle. Press button to run", program_path)
     while True:
         launcher._mark_idle_alive()
