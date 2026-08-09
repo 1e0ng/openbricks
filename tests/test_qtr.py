@@ -13,7 +13,7 @@ import unittest
 
 from machine import ADC
 from openbricks import pins as _pins
-from openbricks.drivers.qtr import QTRArray
+from openbricks.drivers.qtr import QTRArray, QTRElement
 
 
 _PINS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
@@ -209,6 +209,38 @@ class CalibrationPersistenceTests(unittest.TestCase):
         qtr = QTRArray(pins=_PINS)
         with self.assertRaises(RuntimeError):
             qtr.save_calibration(self._PATH)
+
+
+class ElementAmbientTests(unittest.TestCase):
+    """``ambient()`` is the Pybricks scale: 0 black .. 100 white,
+    the inverse of the calibrated 0 (mat) .. 1000 (line) value."""
+
+    def test_full_scale_endpoints(self):
+        self.assertEqual(QTRElement(1000, 300).ambient(), 0)
+        self.assertEqual(QTRElement(0, 300).ambient(), 100)
+
+    def test_midpoint_and_direction(self):
+        self.assertEqual(QTRElement(500, 300).ambient(), 50)
+        darker = QTRElement(800, 300)
+        lighter = QTRElement(200, 300)
+        self.assertTrue(darker.ambient() < lighter.ambient())
+
+    def test_integer_percent(self):
+        self.assertEqual(QTRElement(995, 300).ambient(), 0)
+        self.assertEqual(QTRElement(5, 300).ambient(), 99)
+        self.assertTrue(isinstance(QTRElement(437, 300).ambient(), int))
+
+    def test_live_reading_carries_ambient(self):
+        _pins._claims_reset()
+        try:
+            qtr = _calibrated()
+            _script(dark_pins=(5,))
+            r = qtr.read()
+            self.assertEqual(r[4].ambient(), 0)
+            self.assertEqual(r[0].ambient(), 100)
+        finally:
+            ADC.reads = {}
+            _pins._claims_reset()
 
 
 class ReadingTests(unittest.TestCase):

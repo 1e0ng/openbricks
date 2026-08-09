@@ -3,6 +3,19 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.76.0 — QTRElement.ambient() + edge-aligned square-up
+
+`QTRElement.ambient()`: reflected brightness on the Pybricks
+scale — 0 (black) .. 100 (white), the inverse of the calibrated
+0..1000 `value`.
+
+`examples/qtr_align.py` now aligns on the line's EDGE, in two
+passes: seek creeps each wheel forward until its half of the bar
+reaches the line (pivoting the chassis square), then the edge pass
+backs each wheel off until its half turns white again — the bar
+parks right on the near edge instead of somewhere inside the line.
+Each phase has its own timeout that names the phase in the error.
+
 ## 1.75.0 — QTR square-up example
 
 New `examples/qtr_align.py`: the classic FLL/WRO align-on-a-line
