@@ -4,9 +4,10 @@
 #include "icm45686_core.h"
 
 // betaflight's proven bring-up order: soft reset, sensors off, both
-// sensors to low-noise mode, then rate/scale configs. Values:
+// sensors to low-noise mode, then rate/scale configs. Values
+// (verified against DS-000577 rev 1.0 register tables):
 //   PWR_MGMT0  0x0F = gyro LN | accel LN
-//   ACCEL_CFG0 0x14 = 16 g full scale, 1.6 kHz ODR
+//   ACCEL_CFG0 0x14 = 16 g full scale, 3.2 kHz ODR
 //   GYRO_CFG0  0x13 = 2000 dps full scale, 6.4 kHz ODR
 const ob_icm_reg_write_t ob_icm_init_seq[] = {
     { OB_ICM_REG_MISC2,      0x02, 20 },   // soft reset
@@ -57,10 +58,12 @@ int ob_icm_read_burst(ob_icm_txn_t txn, void *ctx,
     if (r != 0) {
         return r;
     }
-    // Little-endian: low byte at the lower address. The 45686
-    // breaks with the 42688 family here — silicon-verified
-    // 2026-08-10 (big-endian decode read gravity as 12.4 g;
-    // swapped, |a| = 1.0095 g on a resting chip).
+    // Little-endian: low byte at the lower address — the part's
+    // POWER-ON DEFAULT (DS-000577 §15: SREG_DATA_ENDIAN_SEL=0).
+    // The register names (X1 = [15:8]) describe big-endian mode,
+    // which betaflight enables via an IREG write we deliberately
+    // skip. Silicon-verified 2026-08-10: big-endian decode read
+    // gravity as 12.4 g; swapped, |a| = 1.0095 g on a resting chip.
     for (int i = 0; i < 3; i++) {
         accel[i] = (int16_t)((rx[2 + i * 2] << 8) | rx[1 + i * 2]);
         gyro[i]  = (int16_t)((rx[8 + i * 2] << 8) | rx[7 + i * 2]);
