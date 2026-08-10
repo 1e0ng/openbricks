@@ -218,7 +218,7 @@ class NativeSelftestTests(unittest.TestCase):
         if icm is None:
             self.skipTest("real icm45686 C module only")
         got = icm.selftest()
-        self.assertEqual(tuple(got), (258, 772, 1286, -2, 300, -5))
+        self.assertEqual(tuple(got), (0, 258, 772, 1286, -2, 300, -5))
 
 
 if __name__ == "__main__":

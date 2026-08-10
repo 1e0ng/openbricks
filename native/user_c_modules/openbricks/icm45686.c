@@ -193,9 +193,13 @@ static MP_DEFINE_CONST_FUN_OBJ_1(icm_available_obj, icm_available);
 
 // Byte-order self-check, available on EVERY build (the core needs
 // no SPI — transfers are injected): decode a canned little-endian
-// frame and hand the raw int16s back for the test suite to pin.
-// This is the off-hardware witness of what first silicon contact
-// established (2026-08-10): the 45686 stores low byte first.
+// frame and hand back (rc, a0, a1, a2, g0, g1, g2) raw for the
+// test suite to pin. Every failure mode lands in the tuple — a
+// wrong command byte poisons the payload with 0xFF, so the values
+// can't accidentally match — because a branch here could only fire
+// on a bug and would otherwise never execute. This is the
+// off-hardware witness of what first silicon contact established
+// (2026-08-10): the 45686 stores low byte first.
 static const uint8_t icm_selftest_frame[13] = {
     0x00,                                     // command-byte echo slot
     0x02, 0x01,  0x04, 0x03,  0x06, 0x05,     // accel 258, 772, 1286
@@ -205,11 +209,10 @@ static const uint8_t icm_selftest_frame[13] = {
 static int icm_selftest_txn(void *ctx, const uint8_t *tx,
                             uint8_t *rx, int len) {
     (void)ctx;
-    if (len != 13 || tx[0] != (OB_ICM_REG_ACCEL_DATA | OB_ICM_READ_FLAG)) {
-        return -1;
-    }
-    for (int i = 0; i < 13; i++) {
-        rx[i] = icm_selftest_frame[i];
+    int cmd_ok = (len == 13
+                  && tx[0] == (OB_ICM_REG_ACCEL_DATA | OB_ICM_READ_FLAG));
+    for (int i = 0; i < len; i++) {
+        rx[i] = cmd_ok ? icm_selftest_frame[i] : 0xFF;
     }
     return 0;
 }
@@ -217,15 +220,13 @@ static int icm_selftest_txn(void *ctx, const uint8_t *tx,
 static mp_obj_t icm_selftest(mp_obj_t self_in) {
     (void)self_in;
     int16_t a[3], g[3];
-    if (ob_icm_read_burst(icm_selftest_txn, NULL, a, g) != 0) {
-        mp_raise_msg(&mp_type_OSError,
-                     MP_ERROR_TEXT("selftest burst refused"));
-    }
-    mp_obj_t t[6] = {
+    int rc = ob_icm_read_burst(icm_selftest_txn, NULL, a, g);
+    mp_obj_t t[7] = {
+        mp_obj_new_int(rc),
         mp_obj_new_int(a[0]), mp_obj_new_int(a[1]), mp_obj_new_int(a[2]),
         mp_obj_new_int(g[0]), mp_obj_new_int(g[1]), mp_obj_new_int(g[2]),
     };
-    return mp_obj_new_tuple(6, t);
+    return mp_obj_new_tuple(7, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(icm_selftest_obj, icm_selftest);
 
