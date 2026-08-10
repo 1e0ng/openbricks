@@ -886,6 +886,33 @@ class MarkerWriteTests(unittest.TestCase):
         self.assertIn("set_blob", snippets[-1])
         self.assertIn("commit", snippets[-1])
 
+    def test_marker_write_failure_dies(self):
+        # A provenance marker that failed to land must be loud: the
+        # next `openbricks flash` would otherwise read the previous
+        # firmware's verdict as the current one.
+        def fake_exec(m, p, s):
+            if "openbricks.__version__" in s:
+                return 0, "9.9.9\n", ""
+            return 1, "", "NVS write refused"
+        orig = flash._mpremote_exec
+        flash._mpremote_exec = fake_exec
+        self.addCleanup(setattr, flash, "_mpremote_exec", orig)
+        with self.assertRaises(flash.FlashError) as ctx:
+            flash._write_fw_marker("mpremote", "/p", "official")
+        self.assertIn("provenance marker", str(ctx.exception))
+        self.assertIn("NVS write refused", str(ctx.exception))
+
+    def test_mpremote_exec_timeout_is_a_failure_not_a_hang(self):
+        def fake_run(cmd, capture_output=True, text=True, timeout=None):
+            raise flash.subprocess.TimeoutExpired(cmd, timeout)
+        orig = flash.subprocess.run
+        flash.subprocess.run = fake_run
+        self.addCleanup(setattr, flash.subprocess, "run", orig)
+        rc, out, err = flash._mpremote_exec("mpremote", "/p", "1+1")
+        self.assertEqual(rc, -1)
+        self.assertEqual(out, "")
+        self.assertIn("timed out", err)
+
     def test_foreign_firmware_skips_the_marker(self):
         calls = []
 

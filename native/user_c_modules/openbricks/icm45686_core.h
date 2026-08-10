@@ -12,9 +12,10 @@
 // deliberately omitted: power-on defaults serve a 1 kHz consumer;
 // revisit only if bench noise says otherwise.
 //
-// BENCH-VERIFY markers: data byte order (X1 = high byte at the
-// lower address per the 42688-family convention) and SPI mode are
-// pinned here from references, not yet from our silicon.
+// Silicon-verified 2026-08-10: SPI mode 3 (WHO_AM_I + 1000 err-free
+// burst reads/s on first contact) and LITTLE-endian data (low byte
+// at the lower address — the 45686 breaks with the 42688 family;
+// gravity magnitude 1.0095 g only under the swapped decode).
 
 #pragma once
 
@@ -63,6 +64,6 @@ int ob_icm_read_reg(ob_icm_txn_t txn, void *ctx,
 int ob_icm_whoami_ok(ob_icm_txn_t txn, void *ctx);
 
 // 13-byte burst from ACCEL_DATA: decode accel[3] + gyro[3] raw
-// int16 (X1-high byte order). Returns 0 on success.
+// int16 (little-endian). Returns 0 on success.
 int ob_icm_read_burst(ob_icm_txn_t txn, void *ctx,
                       int16_t accel[3], int16_t gyro[3]);

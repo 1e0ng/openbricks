@@ -82,7 +82,7 @@ static mp_obj_t icm_config(size_t n_args, const mp_obj_t *pos_args,
         { MP_QSTR_cs,    MP_ARG_REQUIRED | MP_ARG_INT, {0} },
         { MP_QSTR_host,  MP_ARG_INT, {.u_int = 1} },       // SPI2
         { MP_QSTR_hz,    MP_ARG_INT, {.u_int = 8000000} },
-        { MP_QSTR_mode,  MP_ARG_INT, {.u_int = 3} },       // BENCH-VERIFY
+        { MP_QSTR_mode,  MP_ARG_INT, {.u_int = 3} },       // silicon-verified
         { MP_QSTR_scale, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
@@ -191,11 +191,51 @@ static MP_DEFINE_CONST_FUN_OBJ_1(icm_available_obj, icm_available);
 
 #endif
 
+// Byte-order self-check, available on EVERY build (the core needs
+// no SPI — transfers are injected): decode a canned little-endian
+// frame and hand back (rc, a0, a1, a2, g0, g1, g2) raw for the
+// test suite to pin. Every failure mode lands in the tuple — a
+// wrong command byte poisons the payload with 0xFF, so the values
+// can't accidentally match — because a branch here could only fire
+// on a bug and would otherwise never execute. This is the
+// off-hardware witness of what first silicon contact established
+// (2026-08-10): the 45686 stores low byte first.
+static const uint8_t icm_selftest_frame[13] = {
+    0x00,                                     // command-byte echo slot
+    0x02, 0x01,  0x04, 0x03,  0x06, 0x05,     // accel 258, 772, 1286
+    0xFE, 0xFF,  0x2C, 0x01,  0xFB, 0xFF,     // gyro  -2, 300, -5
+};
+
+static int icm_selftest_txn(void *ctx, const uint8_t *tx,
+                            uint8_t *rx, int len) {
+    (void)ctx;
+    int cmd_ok = (len == 13
+                  && tx[0] == (OB_ICM_REG_ACCEL_DATA | OB_ICM_READ_FLAG));
+    for (int i = 0; i < len; i++) {
+        rx[i] = cmd_ok ? icm_selftest_frame[i] : 0xFF;
+    }
+    return 0;
+}
+
+static mp_obj_t icm_selftest(mp_obj_t self_in) {
+    (void)self_in;
+    int16_t a[3], g[3];
+    int rc = ob_icm_read_burst(icm_selftest_txn, NULL, a, g);
+    mp_obj_t t[7] = {
+        mp_obj_new_int(rc),
+        mp_obj_new_int(a[0]), mp_obj_new_int(a[1]), mp_obj_new_int(a[2]),
+        mp_obj_new_int(g[0]), mp_obj_new_int(g[1]), mp_obj_new_int(g[2]),
+    };
+    return mp_obj_new_tuple(7, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(icm_selftest_obj, icm_selftest);
+
 static const mp_rom_map_elem_t icm_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_config),    MP_ROM_PTR(&icm_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_read),      MP_ROM_PTR(&icm_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),     MP_ROM_PTR(&icm_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_available), MP_ROM_PTR(&icm_available_obj) },
+    { MP_ROM_QSTR(MP_QSTR_selftest),  MP_ROM_PTR(&icm_selftest_obj) },
 };
 static MP_DEFINE_CONST_DICT(icm_locals, icm_locals_table);
 

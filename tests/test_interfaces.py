@@ -180,6 +180,17 @@ class TestCompositeManeuvers(unittest.TestCase):
             self.assertTrue("ST3215" in str(e), e)
         self.assertEqual(m.calls, [])
 
+    def test_duty_limit_pop_base_hook_also_refuses(self):
+        # Both base hooks raise, not just push: a driver overriding
+        # push but forgetting pop must fail loudly at restore time
+        # rather than leave a temporary cap in place.
+        m = _ScriptedMotor(stalled_seq=[True])
+        try:
+            m._duty_limit_pop(987)
+            self.fail("expected NotImplementedError")
+        except NotImplementedError as e:
+            self.assertTrue("ST3215" in str(e), e)
+
     def test_run_until_stalled_duty_limit_pushes_and_pops(self):
         pushes = []
         pops = []

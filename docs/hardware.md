@@ -63,6 +63,7 @@ The serial-bus build needs very few pins — that's most of its charm:
 | Program button    | 39      | Start/stop, polled with an internal pull-up (was GPIO 4 until 1.71.0) |
 | BLE-toggle button | 38      | Bluetooth on/off (was GPIO 5 until 1.66.3) |
 | WS2812 data       | 21      | Addressable RGB LED strip / ×8 stick DIN ({mod}`openbricks.drivers.ws2812`) — on boards that break out the header corner next to 5 V/GND, this is the free pin beside the reserved 19/20 USB pair |
+| SPI (SCK, MOSI, MISO, CS) | 12, 13, 11, 17 | ICM-45686 IMU breakout ({class}`openbricks.drivers.icm45686.ICM45686`) — 3V3 + GND + these four; INT and the other breakout pins stay unwired (the 1 kHz hard tick polls) |
 
 Pin gotchas on the ESP32-S3:
 
