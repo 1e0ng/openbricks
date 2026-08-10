@@ -14,8 +14,12 @@
 //
 // Silicon-verified 2026-08-10: SPI mode 3 (WHO_AM_I + 1000 err-free
 // burst reads/s on first contact) and LITTLE-endian data (low byte
-// at the lower address — the 45686 breaks with the 42688 family;
-// gravity magnitude 1.0095 g only under the swapped decode).
+// at the lower address). Endianness is configurable on this part —
+// DS-000577 §15: default little (SREG_DATA_ENDIAN_SEL=0); the
+// register-table naming (X1 = [15:8]) assumes the big-endian mode
+// betaflight selects through an IREG write we deliberately skip —
+// so this map stays valid ONLY while init never touches SREG_CTRL.
+// Gravity magnitude 1.0095 g only under the little-endian decode.
 
 #pragma once
 
