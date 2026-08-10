@@ -84,6 +84,11 @@ def _build_parser():
         help="Skip the confirmation prompt when the target firmware "
              "is the same version as (or older than) the current one.",
     )
+    p_flash.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Echo every subprocess command line (mpremote/esptool) "
+             "and cache paths. Default output is step-level only.",
+    )
 
     # ---- run ----
     p_run = sub.add_parser(

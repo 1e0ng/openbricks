@@ -32,6 +32,11 @@ looks up the newest release. Flashing the **same version** again, or
 an **older** one, asks for confirmation first; pass `--yes` to skip
 the prompt in scripts.
 
+The default output is step-level (probe, download, erase, write,
+hub name, marker, reboot); pass `--verbose` / `-v` to also echo
+every underlying `mpremote` / `esptool` command line and the
+firmware cache paths — useful when reporting a flash problem.
+
 Every firmware image published by CI is signed (Ed25519), and the
 CLI ships the matching public key. An image whose `.bin.sig`
 verifies is labeled `(official)`; anything else — a self-built

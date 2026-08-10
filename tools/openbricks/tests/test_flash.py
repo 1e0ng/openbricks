@@ -41,6 +41,7 @@ def _args(**overrides):
         baud="460800",
         skip_erase=False,
         yes=False,
+        verbose=False,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -866,6 +867,26 @@ class CurrentFirmwareProbeTests(unittest.TestCase):
         self.assertEqual(
             flash._read_current_firmware("mpremote", "/p"),
             (None, None))
+
+
+class VerboseOutputTests(unittest.TestCase):
+    def test_vprint_silent_by_default_loud_when_enabled(self):
+        import contextlib
+        import io
+        orig = flash._verbose
+        try:
+            flash._verbose = False
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                flash._vprint(">>> plumbing")
+            self.assertEqual(out.getvalue(), "")
+            flash._verbose = True
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                flash._vprint(">>> plumbing")
+            self.assertIn(">>> plumbing", out.getvalue())
+        finally:
+            flash._verbose = orig
 
 
 class MarkerWriteTests(unittest.TestCase):

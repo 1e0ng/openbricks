@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.85.3 — flash output speaks user, not plumbing
+
+`openbricks flash` now prints step-level intent by default: probe,
+download (asset name, not cache path), erase, write, hub name
+written-and-verified, `firmware marker: X (official)`, reboot, and
+a closing `done — hub 'N' is running openbricks X (official)`. The
+raw `mpremote`/`esptool` command echoes, multi-line probe snippet,
+cache paths and the `===` banner move behind a new `--verbose`/`-v`
+flag (esptool's own output still streams — that's the risky 20 s
+where feedback matters).
+
 ## 1.85.2 — settle watchdog scales with the move; square at demo speeds
 
 The move-settle watchdog was a fixed 8 s regardless of what was
