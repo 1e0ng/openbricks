@@ -31,7 +31,7 @@ Owning the firmware shapes several decisions:
 ├─────────────────────────────────────────────────────────┤
 │  Abstract interfaces   (Motor, Servo, IMU, ColorSensor)  │
 ├─────────────────────────────────────────────────────────┤
-│  Concrete drivers      (st3032, tcs34725, bno055, …)     │
+│  Concrete drivers      (st3032, icm45686, tcs34725, …)   │
 ├─────────────────────────────────────────────────────────┤
 │  MicroPython HAL       (machine.Pin, I2C, UART, PWM)     │
 ├─────────────────────────────────────────────────────────┤
@@ -98,7 +98,10 @@ are direct where they can be.
    ownership handover, no peripheral double-claim) and runs the
    2-DOF controller inside the hard tick on serial-bus servo slots
    (~220 Hz odometry per wheel, floor-verified 0.3% odometry closure
-   on a square), with `use_gyro(True)` fed by a Python outer loop at
+   on a square), with `use_gyro(True)` fed by the ICM-45686 read
+   inside the hard tick itself (1 kHz heading correction, no Python
+   in the loop; bench-verified +0.6° over a four-turn square) — or,
+   for an I2C IMU like the BNO055, by a Python outer loop at
    ~50-100 Hz. There is exactly ONE drivebase class and NO Python
    control loop: on a runtime with neither the native bus nor the
    sim's emulated bus, constructing a serial-bus `DriveBase` raises

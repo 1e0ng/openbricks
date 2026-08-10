@@ -3,12 +3,14 @@ Sensor drivers
 
 All sensors construct against a ``machine.I2C`` bus (or a
 :class:`~openbricks.drivers.tca9548a.TCA9548A` mux channel, which
-quacks the same) except the GPIO-driven HC-SR04.
+quacks the same) except two: the GPIO-driven HC-SR04, and the
+ICM-45686 IMU, which wires over SPI so the firmware can read it
+inside the 1 kHz control tick.
 
 .. code-block:: python
 
     from machine import I2C, Pin
-    from openbricks.drivers.bno055 import BNO055
+    from openbricks.drivers.icm45686 import ICM45686
     from openbricks.drivers.tcs34725 import TCS34725
     from openbricks.drivers.tca9548a import TCA9548A
 
@@ -17,7 +19,7 @@ quacks the same) except the GPIO-driven HC-SR04.
 
     color = TCS34725(mux[0])          # two same-address sensors ...
     color2 = TCS34725(mux[1])         # ... on separate mux channels
-    imu = BNO055(i2c=mux[3], address=0x29)
+    imu = ICM45686(sck=12, mosi=13, miso=11, cs=17)   # SPI, not I2C
 
     print(color.rgb())                # (r, g, b) each 0-255
     print(color.ambient())            # clear channel, 0-100
