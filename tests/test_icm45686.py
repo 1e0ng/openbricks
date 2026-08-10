@@ -193,5 +193,24 @@ class ICM45686DriverTests(unittest.TestCase):
             pins.release(8)
 
 
+def _real_native_icm():
+    """The real C binding, when this runtime has it (unix MP builds
+    the module; CPython runs against the stub installed above)."""
+    mod = sys.modules.get("_openbricks_native")
+    icm = getattr(mod, "icm45686", None)
+    return icm if hasattr(icm, "selftest") else None
+
+
+@unittest.skipUnless(_real_native_icm(), "real icm45686 C module only")
+class NativeSelftestTests(unittest.TestCase):
+
+    def test_selftest_decodes_the_canned_frame_little_endian(self):
+        # The off-hardware witness of first silicon contact
+        # (2026-08-10): the 45686 stores low byte at the lower
+        # address. A byte-order regression flips every value here.
+        got = _real_native_icm().selftest()
+        self.assertEqual(tuple(got), (258, 772, 1286, -2, 300, -5))
+
+
 if __name__ == "__main__":
     unittest.main()
