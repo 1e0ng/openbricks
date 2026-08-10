@@ -16,6 +16,12 @@ silicon-verified. Docstring wiring example moved off the QTR ADC
 bank onto free pins (SCK 12 / MOSI 13 / MISO 11 / CS 17) and the
 hardware guide gained the IMU SPI row.
 
+Also closes a batch of untested error branches flagged by patch
+coverage: duty-limit pop refusal, press-feedback failure swallow,
+mpremote exec timeout, provenance-marker write failure, sim
+servo-detach / db_curve cancel / kinematic velocity accessor, and
+the servo-core bad-slot poll.
+
 ## 1.83.5 — align: one servo, one loop
 
 `seek_wheel_speeds` removed: servoing each wheel straight to the

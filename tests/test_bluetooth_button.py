@@ -602,6 +602,22 @@ class PressFlashTests(unittest.TestCase):
         self.assertEqual(bluetooth_button._press_color,
                          bluetooth_button.PRESS_COLOR_STOP)
 
+    def test_launcher_helper_swallows_feedback_failures(self):
+        # A feedback failure must never cost the press its action:
+        # the helper's contract is fire-and-forget.
+        from openbricks import bluetooth_button
+        from openbricks import launcher
+
+        def boom(stop=False):
+            raise RuntimeError("led driver dead")
+        orig = bluetooth_button.notify_press
+        bluetooth_button.notify_press = boom
+        try:
+            launcher._notify_press_feedback()
+            launcher._notify_press_feedback(stop=True)
+        finally:
+            bluetooth_button.notify_press = orig
+
 
 class StopInterruptRelayTests(unittest.TestCase):
     """Same relay contract as launcher._tick: a hard-button stop

@@ -361,6 +361,19 @@ class BenchShapeTests(_ShimTestBase):
         self.assertTrue(abs(float(self.robot.runtime.data.qpos[0]) - x0)
                         > 0.005)
 
+    def test_task_motor_velocity_reads_the_kinematic_integrator(self):
+        # A task motor has no MuJoCo actuator (or qvel) behind it,
+        # so the velocity accessor must answer from the kinematic
+        # integrator — pinned here so any caller gets a live value,
+        # not a crash on the missing DOF.
+        db, _, t2 = self._bench()
+        t2.run_speed(120)
+        time.sleep_ms(300)
+        self.assertTrue(abs(t2._vel_dps() - 120) < 40, t2._vel_dps())
+        t2.coast()
+        time.sleep_ms(100)
+        self.assertEqual(t2._vel_dps(), 0.0)
+
     def test_task_wheels_cannot_back_a_drivebase(self):
         # Construction order is the sim's binding rule: wheels must
         # be the FIRST TWO motors. Adopting kinematic stand-ins would
@@ -920,6 +933,23 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertEqual(sb.servo_slot_of(2), 1)     # right_id
         self.assertEqual(sb.servo_slot_of(9), -1)
         self.assertFalse(sb.servo_attach(0, 9, False, 0))  # occupied
+
+    def test_db_curve_cancels_an_armed_move(self):
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        sb.db_curve(200.0, 45.0, 60.0)
+        self.assertFalse(sb._moves[0].is_active())
+        sb.db_stop()
+
+    def test_servo_detach_frees_the_slot(self):
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        self.assertEqual(sb.servo_slot_of(2), 1)
+        sb.servo_detach(1)
+        self.assertEqual(sb.servo_slot_of(2), -1)
+        self.assertTrue(sb.servo_attach(1, 9, False, 0))
+        self.assertEqual(sb.servo_slot_of(9), 1)
 
     def test_db_and_runtime_verbs_cancel_armed_moves(self):
         # New-command-wins in every direction: each db/runtime verb

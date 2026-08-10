@@ -510,6 +510,9 @@ TEST(user_txn_write_and_read_full_cycle) {
 
     // Nothing staged / bad args.
     CHECK_EQ_INT(ob_sservo_user_poll(&sv, 0, &val), -2);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, -1, &val), -2);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, OB_SSERVO_SLOTS, &val), -2);
+    CHECK_EQ_INT(ob_sservo_user_poll(&sv, 1, &val), -2);   // not attached
     CHECK_EQ_INT(ob_sservo_user_stage(&sv, 1, 1, 0x30, 300, 2), -1);
     CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 3, 0x30, 300, 2), -1);
     CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 3), -1);
