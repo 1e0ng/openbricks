@@ -3,6 +3,24 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.85.1 — `run` stops killing quiet programs
+
+The 1.85.0 gyro-square example died on the bench: its first pass is
+~25 s of silent driving, and `openbricks run` treated 30 s of quiet
+stdout as a dead hub and hung up mid-run — then the NEXT run hit the
+half-torn session's leftover raw-REPL banner and failed the
+raw-paste handshake with `got b'ra'`. Three fixes:
+
+- `run` now distinguishes a quiet program from a dead link: while
+  the BLE connection is alive it waits indefinitely (with a one-time
+  "hub quiet but connected" note); only a dropped link ends the
+  session. Robot programs legitimately print nothing for minutes.
+- The raw-paste handshake drains stale bytes (duplicate banners from
+  retried raw-REPL entry) before reading its reply, so an aborted
+  session can't wedge the next one.
+- The square example prints per-corner headings again — better
+  showcase output, and no long silent window on older CLIs.
+
 ## 1.85.0 — use_gyro showcase: example + docs
 
 New `examples/icm45686_square.py`: the same square driven twice,

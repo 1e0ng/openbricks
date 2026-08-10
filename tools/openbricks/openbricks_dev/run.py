@@ -251,6 +251,12 @@ async def _restore_idle_loop(link):
 
 
 async def _raw_paste_upload(blink, link, script_bytes):
+    # A retried raw-REPL entry can queue a SECOND banner: read_until
+    # consumed only through the first one, so the duplicate's bytes
+    # sit ahead of the handshake reply and read_exact answers "ra"
+    # instead of "R\x01" (the wedge seen after an aborted run).
+    # Nothing the hub sends before our request can matter — drop it.
+    await blink.drain(timeout=0)
     blink._step = "raw-paste handshake (waiting for 'R\\x01')"
     await link.write(_RAW_PASTE_REQUEST)
     resp = await blink.read_exact(2)
@@ -302,6 +308,7 @@ async def _stream_output(blink, link, out):
     """
     # --- stdout ---
     blink._step = "streaming script stdout"
+    noted_quiet = False
     while True:
         if blink._buf:
             chunk = bytes(blink._buf)
@@ -309,6 +316,18 @@ async def _stream_output(blink, link, out):
         else:
             chunk = await blink._link.read(timeout=30.0)
             if not chunk:
+                # A quiet program is not a dead hub: robot code
+                # legitimately prints nothing for minutes while it
+                # drives (a 4-side square at bench speeds is ~25 s of
+                # silence). Only a dropped BLE link ends the wait —
+                # the user always has Ctrl-C and the stop button.
+                if link.stats().get("connected") is True:
+                    if not noted_quiet:
+                        print("hub quiet but connected — program "
+                              "likely still driving; waiting "
+                              "(Ctrl-C to abort)", file=sys.stderr)
+                        noted_quiet = True
+                    continue
                 raise RunError(_format_timeout(link, blink._step, blink._buf))
         idx = chunk.find(_CTRL_D)
         if idx >= 0:

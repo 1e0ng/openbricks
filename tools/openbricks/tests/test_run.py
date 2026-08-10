@@ -37,6 +37,13 @@ class _ScriptedLink:
         self.writes.append(bytes(data))
 
     async def read(self, timeout=None):
+        if timeout == 0:
+            # Non-blocking stale-drain: a real hub has sent nothing
+            # ahead of a request unless the test staged it.
+            stale = getattr(self, "stale", None)
+            if stale:
+                return stale.pop(0)
+            return b""
         if self._responses:
             return self._responses.pop(0)
         return b""
@@ -564,6 +571,19 @@ class RawPasteProtocolTests(unittest.TestCase):
         self.assertEqual(link.writes, [
             run_mod._RAW_PASTE_REQUEST, b"abcd", b"ef", run_mod._CTRL_D])
 
+    def test_stale_banner_bytes_are_drained_before_handshake(self):
+        # A retried raw-REPL entry can leave a duplicate banner both
+        # in the pushback buffer (read_until stopped at the FIRST
+        # banner) and queued on the link. The handshake must read the
+        # hub's reply, not the leftovers — the "got b'ra'" wedge.
+        link = _ProtocolLink([b"R\x01\x04\x00", b"\x04"])
+        link.stale = [b"raw REPL; CTRL-B to exit\r\n>"]
+        blink = run_mod._BufferedLink(link)
+        blink._buf = bytearray(b"raw REPL; CTRL-B to exit\r\n>")
+        _drive(run_mod._raw_paste_upload(blink, link, b"ab"))
+        self.assertEqual(link.writes, [
+            run_mod._RAW_PASTE_REQUEST, b"ab", run_mod._CTRL_D])
+
     def test_hub_abort_sends_ctrl_d_and_raises(self):
         link = _ProtocolLink([b"R\x01\x01\x00", b"\x04"])
         blink = run_mod._BufferedLink(link)
@@ -617,9 +637,16 @@ class StreamOutputTests(unittest.TestCase):
         self.assertIn("out", out.getvalue())
         self.assertIn("trace", out.getvalue())
 
-    def test_live_then_silent_hub_raises_formatted_timeout(self):
+    def test_live_then_dropped_link_raises_formatted_timeout(self):
         import io
-        link = _ProtocolLink([b"live"])
+
+        class _DroppedLink(_ProtocolLink):
+            def stats(self):
+                s = _ProtocolLink.stats(self)
+                s["connected"] = False
+                return s
+
+        link = _DroppedLink([b"live"])
         blink = run_mod._BufferedLink(link)
         out = io.StringIO()
         try:
@@ -629,6 +656,26 @@ class StreamOutputTests(unittest.TestCase):
         else:
             self.fail("expected RunError")
         self.assertEqual(out.getvalue(), "live")
+
+    def test_quiet_but_connected_hub_keeps_the_session_alive(self):
+        # A program that drives silently for minutes is healthy; only
+        # a dropped BLE link may end the wait. Two empty reads (each
+        # a 30 s quiet window in production) then the output arrives.
+        import io
+        import sys as _sys
+        link = _ProtocolLink([b"", b"", b"done\x04", b"\x04"])
+        blink = run_mod._BufferedLink(link)
+        out = io.StringIO()
+        err = io.StringIO()
+        orig = _sys.stderr
+        _sys.stderr = err
+        try:
+            _drive(run_mod._stream_output(blink, link, out))
+        finally:
+            _sys.stderr = orig
+        self.assertEqual(out.getvalue(), "done")
+        self.assertEqual(err.getvalue().count("quiet but connected"), 1,
+                         "the waiting note must print exactly once")
 
 
 class FormatTimeoutHintTests(unittest.TestCase):

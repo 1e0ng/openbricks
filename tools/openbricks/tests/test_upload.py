@@ -95,6 +95,14 @@ class _ScriptedLink:
         self.writes.append(bytes(data))
 
     async def read(self, timeout=None):
+        if timeout == 0:
+            # Non-blocking stale-drain (the raw-paste handshake's
+            # pre-request sweep): a real hub has sent nothing ahead
+            # of the request unless a test staged it.
+            stale = getattr(self, "stale", None)
+            if stale:
+                return stale.pop(0)
+            return b""
         if self._responses:
             return self._responses.pop(0)
         return b""
