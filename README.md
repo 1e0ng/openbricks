@@ -32,7 +32,9 @@ Each platform ships as a separate firmware image.
 | ST-3215-C018 | Serial bus servo (FeeTech/SCServo protocol) — slower, more torque; arms / grippers | `drivers.st3215` |
 | TCS34725 | RGB + clear color sensor | `drivers.tcs34725` |
 | TCA9548A | 8-channel I2C multiplexer — run several fixed-address sensors (e.g. a TCS34725 array) on one bus | `drivers.tca9548a` |
-| BNO055 | 9-DOF IMU with onboard sensor fusion | `drivers.bno055` |
+| ICM-45686 | 6-axis IMU over SPI — read inside the 1 kHz control tick; the heading source for `use_gyro` | `drivers.icm45686` |
+| BNO055 | 9-DOF IMU with onboard sensor fusion (I2C alternative) | `drivers.bno055` |
+| QTRX-HD-15A | 10-channel reflectance bar — `QTRLineSensor` line following / edge alignment | `drivers.qtr` |
 | HC-SR04 | Ultrasonic distance sensor (echo-pulse timing, 20–4000 mm) | `drivers.hcsr04` |
 | VL53L0X | Laser ToF distance sensor (I2C, 30–2000 mm) | `drivers.vl53l0x` |
 | VL53L1X | Laser ToF distance sensor (I2C, longer range, up to 4000 mm; VL53L4CD pin-compatible) | `drivers.vl53l1x` |
@@ -74,25 +76,28 @@ Once the firmware is flashed, write a `main.py` and push it to the hub:
 ```python
 # main.py — ESP32-S3 pins; see docs/hardware.md for the wiring
 from machine import I2C, Pin
+from openbricks.drivers.icm45686 import ICM45686
 from openbricks.drivers.st3032 import ST3032Motor
-from openbricks.drivers.bno055 import BNO055
 from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.drivers.tcs34725 import TCS34725
 from openbricks.robotics import DriveBase
 
 # Two ST-3032 serial bus servos, daisy-chained on one URT-2 adapter.
-left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
 
-# Colour sensor array through the mux (TCS34725 is fixed at 0x29,
-# so more than one needs the TCA9548A); IMU straight on the bus.
+# Colour sensor array through the mux (TCS34725 is fixed at 0x29, so
+# more than one needs the TCA9548A); the IMU is on SPI, read inside
+# the firmware's 1 kHz control tick.
 i2c     = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)
 mux     = TCA9548A(i2c)
 sensors = [TCS34725(mux[ch]) for ch in range(2)]
-imu     = BNO055(i2c)
+imu     = ICM45686(sck=12, mosi=13, miso=11, cs=17)
 
-robot = DriveBase(left, right, wheel_diameter_mm=65, axle_track_mm=120)
-robot.settings(acceleration=180)   # soften the launch (wheel-deg/s²; default 720)
+robot = DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=136,
+                  imu=imu)
+robot.use_gyro(True)               # heading corrected at 1 kHz in C
+robot.settings(acceleration=180)   # soften the launch (wheel-deg/s²; default 400)
 robot.straight(500)                # mm
 robot.turn(90)                     # degrees
 print([s.rgb() for s in sensors])  # [(r, g, b), ...] 0-255
@@ -111,7 +116,7 @@ To iterate without hardware, the MuJoCo simulator runs the same firmware APIs �
 
 Pybricks is the gold-standard MicroPython firmware for educational robotics — we modelled openbricks's API and three-layer architecture on it directly. Where openbricks differs:
 
-- **Open hardware.** Pybricks runs on LEGO hubs with LEGO motors and LEGO sensors. openbricks runs on commodity ESP32-S3 / ESP32 boards driving any motor (ST-3032 / ST-3215 serial bus servos, or JGB37-520 / MG370 / L298N / TB6612 DC stacks), any IMU (BNO055), any I2C colour sensor (TCS34725 — arrays of them via the TCA9548A mux), any I2C OLED (SSD1306). New driver = one Python file under `openbricks/drivers/`.
+- **Open hardware.** Pybricks runs on LEGO hubs with LEGO motors and LEGO sensors. openbricks runs on commodity ESP32-S3 / ESP32 boards driving any motor (ST-3032 / ST-3215 serial bus servos, or JGB37-520 / MG370 / L298N / TB6612 DC stacks), any IMU (ICM-45686 read at 1 kHz inside the control tick, or a BNO055 on I2C), any I2C colour sensor (TCS34725 — arrays of them via the TCA9548A mux), a 10-channel QTR reflectance bar, any I2C OLED (SSD1306). New driver = one Python file under `openbricks/drivers/`.
 - **Hardware-accurate simulator (`openbricks sim`).** A MuJoCo-backed sim with the *same C control cores* as the firmware — `*_core.c` files compile into both targets, so the sim's hot-path math is byte-identical to the hub's. Write your `main.py` once, test it in MuJoCo against a WRO mat, then flash. Pybricks has no comparable sim — closest equivalent is the LEGO virtual brick, which simulates the API but not the physics.
 - **Driver shim — same script, both targets.** `openbricks sim run main.py` installs a shim that replaces `machine`, `openbricks._native`, and the I2C driver classes (`TCS34725` etc.) with sim-aware versions. Code that imports `from openbricks.drivers.jgb37_520 import JGB37Motor` runs unchanged in MuJoCo. No "if simulator else hardware" branches in user code.
 - **Slip-immune drivebase.** `DriveBase.use_gyro(True)` routes heading feedback through the IMU instead of the encoder differential — a robot that wheel-slips on a slippery patch keeps its course. The firmware C drivebase + sim adapter both honour it.
