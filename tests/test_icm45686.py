@@ -195,20 +195,29 @@ class ICM45686DriverTests(unittest.TestCase):
 
 def _real_native_icm():
     """The real C binding, when this runtime has it (unix MP builds
-    the module; CPython runs against the stub installed above)."""
-    mod = sys.modules.get("_openbricks_native")
-    icm = getattr(mod, "icm45686", None)
+    the module; CPython gets the attribute-less stub installed
+    above). Import, don't read sys.modules: MP builtin modules
+    never register there. Method-level gate, not a class decorator:
+    MP unittest's skipUnless turns a class into a closure the
+    collector silently drops."""
+    try:
+        import _openbricks_native
+    except ImportError:
+        return None
+    icm = getattr(_openbricks_native, "icm45686", None)
     return icm if hasattr(icm, "selftest") else None
 
 
-@unittest.skipUnless(_real_native_icm(), "real icm45686 C module only")
 class NativeSelftestTests(unittest.TestCase):
 
     def test_selftest_decodes_the_canned_frame_little_endian(self):
         # The off-hardware witness of first silicon contact
         # (2026-08-10): the 45686 stores low byte at the lower
         # address. A byte-order regression flips every value here.
-        got = _real_native_icm().selftest()
+        icm = _real_native_icm()
+        if icm is None:
+            self.skipTest("real icm45686 C module only")
+        got = icm.selftest()
         self.assertEqual(tuple(got), (258, 772, 1286, -2, 300, -5))
 
 
