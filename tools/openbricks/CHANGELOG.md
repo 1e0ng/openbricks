@@ -3,6 +3,12 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.85.2 — gyro-square example at demo speeds
+
+`examples/icm45686_square.py` drives at `STRAIGHT_SPEED = 300` /
+`TURN_RATE = 200` (was 80/60 — cautious first-bench values). The
+gyro comparison reads the same; the demo just doesn't crawl.
+
 ## 1.85.1 — `run` stops killing quiet programs
 
 The 1.85.0 gyro-square example died on the bench: its first pass is
