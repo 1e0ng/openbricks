@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: MIT
-"""examples/esp32_drivebase.py must not claim reserved ESP32-S3 pins.
+"""Shipped examples must not wire reserved ESP32-S3 pins.
 
 The DC-motor example once used GPIO 4/5/6 for the left motor — GPIO 4
 is the launcher's default program button (polled as an input, so IN1
 toggling low read as button presses and stopped the running program),
 GPIO 5 is the BLE-toggle button, and GPIO 6 is the serial-bus UART RX
-convention. This test parses the example (no import — it drives real
-hardware at module level) and fails if any wired pin lands on a
-reserved one, or if the docstring's wiring table drifts from the code.
+convention. The ICM-45686 examples once wired sck=8/mosi=9 straight
+into the ADC1 bank the QTRLineSensor window owns. These tests parse
+the examples (no import — they drive real hardware at module level)
+and fail if any wired pin lands on a reserved one, or if the
+docstring's wiring table drifts from the code.
 
 Runs under both CPython and unix MicroPython: plain string scanning,
 no ``re`` (MP's ``re`` lacks ``finditer``) and no ``ast``.
@@ -57,6 +59,21 @@ def _ints_after(text, marker):
         start = k if k > j else j
 
 
+def _line_ints(text, marker):
+    """The comma-separated integers on ``marker``'s line, after it."""
+    i = text.find(marker)
+    if i < 0:
+        return []
+    j = text.find("\n", i)
+    tail = text[i + len(marker):j if j >= 0 else len(text)]
+    out = []
+    for part in tail.split(","):
+        part = part.strip()
+        if part.isdigit():
+            out.append(int(part))
+    return out
+
+
 class ExamplePinTests(unittest.TestCase):
 
     @classmethod
@@ -93,6 +110,49 @@ class ExamplePinTests(unittest.TestCase):
         self.assertEqual(len(set(self.code_pins)), len(self.code_pins),
                          "same GPIO wired to two functions: %r"
                          % sorted(self.code_pins))
+
+
+class IcmExamplePinTests(unittest.TestCase):
+    """Both ICM-45686 examples wire one SPI quad via
+    ``SCK, MOSI, MISO, CS = ...``; it must dodge the reserved set
+    AND the ADC1 bank (GPIO 1-10) that the QTRLineSensor window
+    owns on the reference robot."""
+
+    EXAMPLES = ("icm45686_bringup.py", "icm45686_square.py")
+
+    def _spi_pins(self, name):
+        path = (_here[:_idx] if _idx >= 0 else ".") + "/../examples/" + name
+        try:
+            with open(path) as f:
+                text = f.read()
+        except OSError:
+            raise unittest.SkipTest("examples/ not present (not a checkout)")
+        pins = _line_ints(text, "SCK, MOSI, MISO, CS = ")
+        self.assertEqual(len(pins), 4,
+                         "%s: expected 4 SPI pins, parsed %r" % (name, pins))
+        return pins
+
+    def test_no_reserved_or_adc_bank_pins(self):
+        for name in self.EXAMPLES:
+            for p in self._spi_pins(name):
+                self.assertFalse(p in _RESERVED,
+                                 "%s wires GPIO %d: %s"
+                                 % (name, p, _RESERVED.get(p)))
+                self.assertFalse(1 <= p <= 10,
+                                 "%s wires GPIO %d inside the ADC1 bank "
+                                 "(QTR window convention)" % (name, p))
+
+    def test_examples_agree_on_the_wiring(self):
+        quads = [self._spi_pins(name) for name in self.EXAMPLES]
+        self.assertEqual(quads[0], quads[1],
+                         "bringup and square examples wire different "
+                         "SPI pins: %r vs %r" % (quads[0], quads[1]))
+
+    def test_no_duplicate_pins(self):
+        for name in self.EXAMPLES:
+            pins = self._spi_pins(name)
+            self.assertEqual(len(set(pins)), len(pins),
+                             "%s wires one GPIO twice: %r" % (name, pins))
 
 
 if __name__ == "__main__":

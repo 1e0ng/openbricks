@@ -20,6 +20,26 @@ Two representative ones are reproduced below.
    :language: python
 ```
 
+## Gyro-corrected square (ICM-45686)
+
+With an ICM-45686 attached, `use_gyro(True)` moves heading control
+off the encoders and onto measured body rotation — corrected every
+millisecond inside the firmware's 1 kHz control tick, with no Python
+in the loop. This script drives the same square twice, encoders-only
+and gyro-corrected, and prints each pass's heading drift so the
+difference is a number, not an impression. On the reference bench the
+gyro pass returns within ~0.6° over all four turns; wheel slip that
+would bend the encoder pass simply gets steered back out.
+
+```{eval-rst}
+.. literalinclude:: ../examples/icm45686_square.py
+   :language: python
+```
+
+Wiring for the IMU is four SPI pins plus power — see
+{doc}`/hardware`. The first still half-second learns the gyro bias;
+`save_calibration()` persists it so later boots skip the wait.
+
 ## Rounded square (DriveBase.curve)
 
 `curve(radius, angle)` follows the Pybricks contract — positional
