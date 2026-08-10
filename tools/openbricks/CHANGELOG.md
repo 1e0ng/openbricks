@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.85.0 — use_gyro showcase: example + docs
+
+New `examples/icm45686_square.py`: the same square driven twice,
+encoders-only then gyro-corrected, printing each pass's heading
+drift — the bench-measured payoff (+0.6° over four turns) as a
+runnable comparison. The bring-up example's wiring moved off the
+QTR ADC bank onto the verified bench pins (SCK 12 / MOSI 13 /
+MISO 11 / CS 17) and its pre-silicon caveats are gone. Docs:
+examples page gained the gyro square, the DriveBase API page now
+leads `use_gyro` with the hard-tick ICM-45686 (BNO055 documented
+as the I2C alternative), and the measuring guide quotes the
+measured numbers. The example-pin test now guards both ICM
+examples' SPI quad against reserved pins and the ADC1 bank.
+
 ## 1.84.1 — ICM-45686 survives a program re-run
 
 Constructing the IMU a second time in the same boot died with EIO

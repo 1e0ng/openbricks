@@ -57,7 +57,25 @@ error" to the heading loop. ``db.check_motors()`` runs the same check
 on demand.
 
 With an IMU attached, ``use_gyro(True)`` steers by measured body
-rotation instead of the encoder differential — immune to wheel slip:
+rotation instead of the encoder differential — immune to wheel slip.
+The preferred IMU is the :class:`~openbricks.drivers.icm45686.ICM45686`:
+it is read *inside* the 1 kHz control tick over SPI, so the heading
+correction runs every millisecond in C with no Python in the loop
+(bench: +0.6° total drift over a four-turn square):
+
+.. code-block:: python
+
+    from openbricks.drivers.icm45686 import ICM45686
+
+    imu = ICM45686(sck=12, mosi=13, miso=11, cs=17)
+    db = DriveBase(left, right, wheel_diameter_mm=88,
+                   axle_track_mm=138, imu=imu)
+    db.use_gyro(True)
+
+A :class:`~openbricks.drivers.bno055.BNO055` on the I2C bus works
+too — its fused heading is pumped from Python between ticks, which
+is accurate but slower to correct (typically +0.5° to +1.8° per
+turn):
 
 .. code-block:: python
 

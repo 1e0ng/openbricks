@@ -119,3 +119,10 @@ track being exact — wheel slip included. Calibrate the track anyway:
 the controller still uses it to shape the commanded wheel speeds, and
 encoder-only operation (gyro off, or no IMU on the robot) depends on
 it entirely.
+
+How much the gyro buys depends on which IMU: an ICM-45686 read
+inside the 1 kHz control tick returned a four-turn square within
+**+0.6° total** on the reference bench, versus +0.5° to +1.8° *per
+turn* for a Python-pumped BNO055 and a few degrees encoder-only.
+`examples/icm45686_square.py` measures all of this on your own robot
+— run it and read the two drift numbers.
