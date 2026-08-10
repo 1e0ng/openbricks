@@ -118,7 +118,8 @@ class IcmExamplePinTests(unittest.TestCase):
     AND the ADC1 bank (GPIO 1-10) that the QTRLineSensor window
     owns on the reference robot."""
 
-    EXAMPLES = ("icm45686_bringup.py", "icm45686_square.py")
+    EXAMPLES = ("icm45686_bringup.py", "icm45686_square.py",
+                "icm45686_axle_track.py")
 
     def _spi_pins(self, name):
         path = (_here[:_idx] if _idx >= 0 else ".") + "/../examples/" + name
@@ -144,9 +145,11 @@ class IcmExamplePinTests(unittest.TestCase):
 
     def test_examples_agree_on_the_wiring(self):
         quads = [self._spi_pins(name) for name in self.EXAMPLES]
-        self.assertEqual(quads[0], quads[1],
-                         "bringup and square examples wire different "
-                         "SPI pins: %r vs %r" % (quads[0], quads[1]))
+        for name, quad in zip(self.EXAMPLES, quads):
+            self.assertEqual(quad, quads[0],
+                             "%s wires different SPI pins than %s: "
+                             "%r vs %r" % (name, self.EXAMPLES[0],
+                                           quad, quads[0]))
 
     def test_no_duplicate_pins(self):
         for name in self.EXAMPLES:

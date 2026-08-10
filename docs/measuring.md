@@ -60,13 +60,20 @@ than the caliper says — the test drive measures reality, load included.
 
 ## Step 2 — axle track, from an in-place spin
 
-With the wheel diameter calibrated:
+With the wheel diameter calibrated, the fastest way is to let an
+attached ICM-45686 measure the spin for you:
+`examples/icm45686_axle_track.py` commands ten encoder-only turns
+(the drivebase's gyro stays off — the point is to measure what the
+*encoders* produce), reads the true rotation off the IMU, and prints
+the corrected `axle_track_mm` to paste into your `DriveBase(...)`
+call. Ten turns make each 0.1° of gyro error only 0.003 % of track.
+
+No IMU on the robot? The manual version:
 
 1. Align the robot against a straightedge (a wall or ruler touching
    both wheels works well) and note its exact heading.
 2. Command several full spins in place — more turns amplify the error
-   so it's easier to measure. **Keep the gyro off for this test** (the
-   default): the point is to measure what the *encoders* produce.
+   so it's easier to measure:
 
    ```python
    db.settings(turn_rate=120)
@@ -80,16 +87,17 @@ With the wheel diameter calibrated:
 4. Scale the track by how far the robot really rotated:
 
    ```text
-   new_track = old_track × (3600 + err_deg) / 3600
+   new_track = old_track × 3600 / (3600 + err_deg)
    ```
 
    Overshot by 18° with `axle_track_mm=138`? Then
-   `138 × 3618 / 3600 = 138.7` is your real track.
+   `138 × 3600 / 3618 = 137.3` is your real track.
 
 Note the direction: if the robot turns **too far**, the real track is
-**larger** than configured (each wheel-degree of travel produces less
-body rotation than the math assumed), so the correction *increases*
-the configured value.
+**smaller** than configured (each wheel-degree of travel produced
+*more* body rotation than the math assumed), so the correction
+*decreases* the configured value. Stopping short means the opposite —
+increase it.
 
 The contact *points* matter, not the wheel centers: wide, soft tires
 effectively touch the ground inboard of their centerline, so the real
