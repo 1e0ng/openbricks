@@ -26,10 +26,10 @@ index 938f26e27..1e8bb9f84 100644
  #endif
 diff --git a/ports/esp32/openbricks_spi_shim.c b/ports/esp32/openbricks_spi_shim.c
 new file mode 100644
-index 000000000..8e36ad8e7
+index 0000000..dae0a41
 --- /dev/null
 +++ b/ports/esp32/openbricks_spi_shim.c
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,79 @@
 +// SPDX-License-Identifier: MIT
 +//
 +// openbricks SPI master shim — blocking transactions for hard-tick
@@ -43,12 +43,17 @@ index 000000000..8e36ad8e7
 +// spi_device_polling_transmit busy-waits the CPU — a 13-byte burst
 +// at 8 MHz is ~13 us, legal in the esp_timer hard-tick context.
 +// Serialization contract: config-time init writes run on the MP
-+// task BEFORE the hard-tick consumer is installed; afterwards the
-+// hard tick is the only caller.
++// task with the hard-tick consumer PAUSED (the binding clears its
++// configured flag and drains a tick before touching the bus);
++// afterwards the hard tick is the only caller. ob_spi_close undoes
++// open completely — device and bus — so a program re-run can
++// reconfigure with new pins/clock/mode instead of dying on the
++// previous construction's half-open state.
 +
 +#include "driver/spi_master.h"
 +
 +static spi_device_handle_t ob_spi_dev;
++static int ob_spi_host = -1;
 +
 +int ob_spi_open(int host, int sck, int mosi, int miso, int cs,
 +                int hz, int mode) {
@@ -74,8 +79,21 @@ index 000000000..8e36ad8e7
 +    };
 +    if (spi_bus_add_device(host, &dev, &ob_spi_dev) != ESP_OK) {
 +        ob_spi_dev = NULL;
-+        return -1;
++        spi_bus_free(host);   // else every retry fails on the
++        return -1;            // half-initialized bus
 +    }
++    ob_spi_host = host;
++    return 0;
++}
++
++int ob_spi_close(void) {
++    if (ob_spi_dev == NULL) {
++        return 0;
++    }
++    spi_bus_remove_device(ob_spi_dev);
++    ob_spi_dev = NULL;
++    spi_bus_free(ob_spi_host);
++    ob_spi_host = -1;
 +    return 0;
 +}
 +
