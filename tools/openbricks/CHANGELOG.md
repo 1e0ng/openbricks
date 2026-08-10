@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.86.0 — gyro-measured axle-track calibration
+
+New `examples/icm45686_axle_track.py`: ten encoder-only turns with
+the ICM-45686 independently measuring the true rotation, then the
+corrected `axle_track_mm` printed for the `DriveBase(...)` call —
+the measuring guide's protractor step, automated. While wiring the
+docs to it, found the manual procedure's correction INVERTED:
+overshooting the mark means the real track is *smaller* (actual
+rotation = commanded × configured/real), but the guide multiplied
+by (3600+err)/3600 and told you to increase it. Fixed, and the law
+test pins the direction so it can't come back.
+
 ## 1.85.3 — flash output speaks user, not plumbing
 
 `openbricks flash` now prints step-level intent by default: probe,
