@@ -61,12 +61,14 @@ TEST(whoami_accepts_e9_rejects_else) {
     CHECK_EQ_INT(ob_icm_whoami_ok(fake_txn, NULL), -1);
 }
 
-TEST(burst_decodes_big_endian_signed) {
+TEST(burst_decodes_little_endian_signed) {
+    // Silicon-verified byte order (2026-08-10): low byte at the
+    // lower address, unlike the 42688 family.
     memset(canned_rx, 0, sizeof(canned_rx));
     // accel X = 0x0102, gyro X = -2 (0xFFFE), gyro Z = 0x7FFF.
-    canned_rx[1] = 0x01; canned_rx[2] = 0x02;      // accel X
-    canned_rx[7] = 0xFF; canned_rx[8] = 0xFE;      // gyro X
-    canned_rx[11] = 0x7F; canned_rx[12] = 0xFF;    // gyro Z
+    canned_rx[1] = 0x02; canned_rx[2] = 0x01;      // accel X
+    canned_rx[7] = 0xFE; canned_rx[8] = 0xFF;      // gyro X
+    canned_rx[11] = 0xFF; canned_rx[12] = 0x7F;    // gyro Z
     int16_t a[3], g[3];
     CHECK_EQ_INT(ob_icm_read_burst(fake_txn, NULL, a, g), 0);
     CHECK_EQ_INT(last_tx[0], OB_ICM_REG_ACCEL_DATA | 0x80);
@@ -93,7 +95,7 @@ int main(void) {
     RUN(init_sequence_shape);
     RUN(write_clears_read_flag_read_sets_it);
     RUN(whoami_accepts_e9_rejects_else);
-    RUN(burst_decodes_big_endian_signed);
+    RUN(burst_decodes_little_endian_signed);
     RUN(burst_failure_propagates);
     RUN(scale_constants_match_the_configured_full_scales);
     return harness_exit("icm45686_core");

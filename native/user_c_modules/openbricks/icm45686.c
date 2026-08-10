@@ -82,7 +82,7 @@ static mp_obj_t icm_config(size_t n_args, const mp_obj_t *pos_args,
         { MP_QSTR_cs,    MP_ARG_REQUIRED | MP_ARG_INT, {0} },
         { MP_QSTR_host,  MP_ARG_INT, {.u_int = 1} },       // SPI2
         { MP_QSTR_hz,    MP_ARG_INT, {.u_int = 8000000} },
-        { MP_QSTR_mode,  MP_ARG_INT, {.u_int = 3} },       // BENCH-VERIFY
+        { MP_QSTR_mode,  MP_ARG_INT, {.u_int = 3} },       // silicon-verified
         { MP_QSTR_scale, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];

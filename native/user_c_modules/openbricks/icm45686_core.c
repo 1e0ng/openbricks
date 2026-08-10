@@ -57,11 +57,13 @@ int ob_icm_read_burst(ob_icm_txn_t txn, void *ctx,
     if (r != 0) {
         return r;
     }
-    // X1 (high byte) sits at the lower address — 42688-family
-    // convention. BENCH-VERIFY on first silicon contact.
+    // Little-endian: low byte at the lower address. The 45686
+    // breaks with the 42688 family here — silicon-verified
+    // 2026-08-10 (big-endian decode read gravity as 12.4 g;
+    // swapped, |a| = 1.0095 g on a resting chip).
     for (int i = 0; i < 3; i++) {
-        accel[i] = (int16_t)((rx[1 + i * 2] << 8) | rx[2 + i * 2]);
-        gyro[i]  = (int16_t)((rx[7 + i * 2] << 8) | rx[8 + i * 2]);
+        accel[i] = (int16_t)((rx[2 + i * 2] << 8) | rx[1 + i * 2]);
+        gyro[i]  = (int16_t)((rx[8 + i * 2] << 8) | rx[7 + i * 2]);
     }
     return 0;
 }

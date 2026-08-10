@@ -11,6 +11,8 @@ consumes it every millisecond with no Python in the loop.
 
 Wiring: 4 free GPIOs to the breakout's SPI pins (SCLK/MOSI(SDI)/
 MISO(SDO)/CS) — the I2C bus, mux and color sensors are untouched.
+INT/FSYNC/CLKIN stay unwired: the hard tick polls, nothing
+interrupts.
 
 Example::
 
@@ -18,9 +20,9 @@ Example::
     from openbricks.drivers.st3032 import ST3032Motor
     from openbricks.robotics import DriveBase
 
-    imu = ICM45686(sck=8, mosi=9, miso=17, cs=18)
-    left  = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
-    right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+    imu = ICM45686(sck=12, mosi=13, miso=11, cs=17)
+    left  = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
+    right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
     db = DriveBase(left, right, wheel_diameter_mm=88,
                    axle_track_mm=138, imu=imu)
     db.use_gyro(True)      # heading now corrects at 1 kHz in C

@@ -3,6 +3,19 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.84.0 — ICM-45686 first silicon: little-endian data
+
+First bench contact with the part (mode 3 WHO_AM_I clean, 1000
+err-free burst reads/s on first try) proved the data registers are
+LITTLE-endian — low byte at the lower address, breaking with the
+42688-family convention the driver assumed. Big-endian decode read
+gravity as 12.4 g; swapped, a resting chip reads |a| = 1.0095 g
+with rest gyro under 0.5 dps. Burst decode fixed accordingly; both
+BENCH-VERIFY markers (byte order, SPI mode) retired as
+silicon-verified. Docstring wiring example moved off the QTR ADC
+bank onto free pins (SCK 12 / MOSI 13 / MISO 11 / CS 17) and the
+hardware guide gained the IMU SPI row.
+
 ## 1.83.5 — align: one servo, one loop
 
 `seek_wheel_speeds` removed: servoing each wheel straight to the
