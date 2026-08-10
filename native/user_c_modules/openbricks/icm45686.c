@@ -31,6 +31,7 @@ const mp_obj_base_t icm45686_singleton = { &icm45686_type };
 
 extern int ob_spi_open(int host, int sck, int mosi, int miso, int cs,
                        int hz, int mode);
+extern int ob_spi_close(void);
 extern int ob_spi_txn(const uint8_t *tx, uint8_t *rx, int len);
 extern uint32_t ob_hard_ticks_ms(void);
 
@@ -89,6 +90,17 @@ static mp_obj_t icm_config(size_t n_args, const mp_obj_t *pos_args,
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args,
                      MP_ARRAY_SIZE(allowed), allowed, args);
 
+    if (icm_configured) {
+        // Program re-run in the same boot: the previous
+        // construction's 1 kHz consumer still owns the bus, and a
+        // config transaction from the MP task would race it (the
+        // 1.84.0 second-run EIO / who_am_i-mismatch). Pause the
+        // consumer, let any in-flight burst drain, and rebuild the
+        // SPI so new pins/clock/mode take effect too.
+        icm_configured = 0;
+        mp_hal_delay_ms(3);
+        ob_spi_close();
+    }
     if (ob_spi_open(args[ARG_host].u_int, args[ARG_sck].u_int,
                     args[ARG_mosi].u_int, args[ARG_miso].u_int,
                     args[ARG_cs].u_int, args[ARG_hz].u_int,

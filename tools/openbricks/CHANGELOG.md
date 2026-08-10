@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.84.1 — ICM-45686 survives a program re-run
+
+Constructing the IMU a second time in the same boot died with EIO
+or a phantom `who_am_i mismatch`: the first construction's 1 kHz
+hard-tick consumer keeps the SPI bursting after the program ends,
+and the new construction's config transactions raced it on the
+single-slot device. `config` now pauses the consumer, drains the
+in-flight burst, and tears the SPI down (`ob_spi_close` in the
+shim — device AND bus, so new pins/clock/mode take effect) before
+reopening. Also fixes the shim leaving the bus half-initialized
+when device attach failed, which made every retry fail forever.
+
+Bench verification (no unit seam exists for the ESP-IDF shim):
+run any IMU script twice in a row without rebooting the hub — the
+second run must construct cleanly.
+
 ## 1.84.0 — ICM-45686 first silicon: little-endian data
 
 First bench contact with the part (mode 3 WHO_AM_I clean, 1000
