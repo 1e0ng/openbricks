@@ -941,6 +941,35 @@ class DeadMotorDiagnosisTests(_Base):
         except OSError:
             pass
 
+    def test_ten_metre_straight_gets_a_minute_class_budget(self):
+        # The watchdog scales with the COMMANDED move: 10 m at the
+        # default 200 wheel-dps is ~65 s of healthy driving, and the
+        # fixed 8 s cap killed it with "wheel stalled" (bench
+        # 2026-08-10).
+        db = self._db()
+        db.arm_straight(10_000)
+        self.assertTrue(db._deadline_budget_ms > 90_000,
+                        db._deadline_budget_ms)
+
+    def test_short_straight_keeps_the_floor(self):
+        db = self._db()
+        db.arm_straight(100)
+        self.assertTrue(8000 <= db._deadline_budget_ms <= 11_000,
+                        db._deadline_budget_ms)
+
+    def test_slow_turn_budget_scales_with_the_rate(self):
+        db = self._db()
+        db.settings(turn_rate=10)
+        db.arm_turn(90)
+        self.assertTrue(db._deadline_budget_ms > 20_000,
+                        db._deadline_budget_ms)
+
+    def test_curve_budget_covers_the_outer_arc(self):
+        db = self._db()
+        db.arm_curve(200, 90)
+        self.assertTrue(db._deadline_budget_ms > 11_000,
+                        db._deadline_budget_ms)
+
     def test_settle_timeout_reports_both_wheels_traffic(self):
         # Both wheels talking but the target unreached = mechanical.
         # The per-wheel counters localise it.

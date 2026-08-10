@@ -185,8 +185,10 @@ class _SerialNativeEngine:
         self._gyro_cont = 0.0
         self._gyro_prev = None
         self._deadline = 0
+        self._deadline_budget_ms = self._SETTLE_TIMEOUT_MS
         self._straight_speed_dps = 200
         self._turn_rate_dps = 150
+        self._accel_dps2 = float(accel_dps2)
         # Kept for diagnostics: a dead-motor message is only useful if
         # it says WHICH motor and where it's wired.
         self._left_id, self._right_id = left_id, right_id
@@ -387,13 +389,15 @@ class _SerialNativeEngine:
     # -- moves -----------------------------------------------------------
 
     def set_accel(self, accel_dps2):
+        self._accel_dps2 = float(accel_dps2)
         self._sb.db_set_accel(float(accel_dps2))
 
     def arm_straight(self, distance_mm):
         estop.check()
         mm_s = self._straight_speed_dps * self._wheel_circumference / 360.0
         self._sb.db_straight(float(distance_mm), float(mm_s))
-        self._arm_deadline()
+        accel_mm = self._accel_dps2 * self._wheel_circumference / 360.0
+        self._arm_deadline(self._profile_ms(distance_mm, mm_s, accel_mm))
 
     def straight(self, distance_mm):
         self.arm_straight(distance_mm)
@@ -409,7 +413,9 @@ class _SerialNativeEngine:
         body_dps = (self._turn_rate_dps * self._wheel_circumference
                     / (math.pi * self._axle_track))
         self._sb.db_turn(float(angle_deg), float(body_dps))
-        self._arm_deadline()
+        accel_body = (self._accel_dps2 * self._wheel_circumference
+                      / (math.pi * self._axle_track))
+        self._arm_deadline(self._profile_ms(angle_deg, body_dps, accel_body))
 
     def turn(self, angle_deg):
         self.arm_turn(angle_deg)
@@ -423,11 +429,18 @@ class _SerialNativeEngine:
         place at the rim speed."""
         estop.check()
         mm_s = self._straight_speed_dps * self._wheel_circumference / 360.0
+        outer_mm_s = mm_s
         r = abs(float(radius_mm))
         if r > 0:
             mm_s = mm_s * r / (r + self._axle_track / 2.0)
         self._sb.db_curve(float(radius_mm), float(angle_deg), float(mm_s))
-        self._arm_deadline()
+        # Estimate on the OUTER wheel: it travels the longest arc at
+        # (up to) the straight cruise speed.
+        outer_arc_mm = (abs(float(angle_deg)) * math.pi / 180.0
+                        * (r + self._axle_track / 2.0))
+        accel_mm = self._accel_dps2 * self._wheel_circumference / 360.0
+        self._arm_deadline(
+            self._profile_ms(outer_arc_mm, outer_mm_s, accel_mm))
 
     def curve(self, radius_mm, angle_deg):
         self.arm_curve(radius_mm, angle_deg)
@@ -495,11 +508,37 @@ class _SerialNativeEngine:
         self._gyro_prev = h
         self._sb.db_set_heading(self._gyro_cont)
 
+    # Settle budget = commanded-profile estimate x margin + this
+    # floor. The floor alone covered every move until someone drove
+    # a 10 m straight: 65 s of healthy driving, killed at 8 s with
+    # "wheel stalled" (bench 2026-08-10). The margin absorbs load,
+    # settle wiggle and gyro-correction detours; the floor keeps
+    # short moves on the old contract.
     _SETTLE_TIMEOUT_MS = 8000
+    _SETTLE_MARGIN = 1.5
 
-    def _arm_deadline(self):
+    @staticmethod
+    def _profile_ms(travel, cruise, accel):
+        """Upper-bound duration of a trapezoid/triangle profile, in
+        ms. ``travel``/``cruise``/``accel`` in any one consistent
+        unit family; non-positive inputs estimate 0 (the floor still
+        applies)."""
+        travel = abs(float(travel))
+        cruise = abs(float(cruise))
+        if travel <= 0.0 or cruise <= 0.0 or accel <= 0.0:
+            return 0
+        ramp_s = cruise / accel
+        if cruise * ramp_s >= travel:       # never reaches cruise
+            secs = 2.0 * math.sqrt(travel / accel)
+        else:
+            secs = travel / cruise + ramp_s
+        return int(secs * 1000.0)
+
+    def _arm_deadline(self, est_ms=0):
+        self._deadline_budget_ms = (self._SETTLE_TIMEOUT_MS
+                                    + int(est_ms * self._SETTLE_MARGIN))
         self._deadline = time.ticks_add(time.ticks_ms(),
-                                        self._SETTLE_TIMEOUT_MS)
+                                        self._deadline_budget_ms)
 
     def tick_done(self):
         """One non-blocking iteration of the drive loop: gyro pump,
@@ -526,7 +565,7 @@ class _SerialNativeEngine:
         an asymmetry between them localises the problem."""
         msg = ("DriveBase move did not reach target within %d ms — "
                "wheel stalled, blocked, or gyro frame diverged"
-               % self._SETTLE_TIMEOUT_MS)
+               % self._deadline_budget_ms)
         stats = getattr(self._sb, "servo_stats", None)
         if stats is None:
             return msg

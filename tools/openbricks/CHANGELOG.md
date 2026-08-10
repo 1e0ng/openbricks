@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.85.2 — settle watchdog scales with the move; square at demo speeds
+
+The move-settle watchdog was a fixed 8 s regardless of what was
+commanded: a 10 m straight at 200 wheel-dps is ~65 s of healthy
+driving, and it died at 8 s with a misleading "wheel stalled,
+blocked, or gyro frame diverged" (bench 2026-08-10). The deadline
+is now the commanded profile's estimated duration ×1.5 plus the
+8 s floor — short moves keep the old contract, long or slow moves
+get the time they need, and a genuinely stalled wheel still
+raises. The error message reports the actual budget. (Also fixed:
+the settings() docstring claimed default acceleration 1000; it is
+400 wheel-deg/s².)
+
+`examples/icm45686_square.py` drives at `STRAIGHT_SPEED = 300` /
+`TURN_RATE = 200` (was 80/60 — cautious first-bench values). The
+gyro comparison reads the same; the demo just doesn't crawl.
+
 ## 1.85.1 — `run` stops killing quiet programs
 
 The 1.85.0 gyro-square example died on the bench: its first pass is
