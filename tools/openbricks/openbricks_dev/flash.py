@@ -26,6 +26,16 @@ import time
 _NVS_NAMESPACE = "openbricks"
 _NVS_KEY       = "hub_name"
 
+# --verbose: echo every subprocess command line and cache path. The
+# default view is intent-level steps only — what a user needs to
+# follow the flash, not the plumbing that performs it.
+_verbose = False
+
+
+def _vprint(msg):
+    if _verbose:
+        print(msg, flush=True)
+
 # Provenance marker written after every flash: b"<version>:<verdict>"
 # under this key. The next ``openbricks flash`` reads it back to label
 # the CURRENT firmware (official/customized) without re-hashing flash.
@@ -183,9 +193,10 @@ def _fetch_asset(asset):
     return the local path."""
     path = os.path.join(_FIRMWARE_CACHE_DIR, asset["name"])
     if os.path.exists(path) and os.path.getsize(path) == asset.get("size", -1):
-        print("firmware: using cached %s" % path)
+        print("using cached %s" % asset["name"])
+        _vprint("cache path: %s" % path)
         return path
-    print("firmware: downloading %s ..." % asset["name"])
+    print("downloading %s ..." % asset["name"])
     try:
         data = _http_get(asset["browser_download_url"])
     except Exception as e:
@@ -199,7 +210,7 @@ def _fetch_asset(asset):
     with open(tmp, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
-    print("firmware: saved to %s" % path)
+    _vprint("saved to %s" % path)
     return path
 
 
@@ -315,7 +326,7 @@ def _esptool_paths_and_commands():
 
 def _run(cmd, check=True):
     """Stream subprocess output; optionally raise on non-zero exit."""
-    print(">>> " + " ".join(cmd), flush=True)
+    _vprint(">>> " + " ".join(cmd))
     rc = subprocess.call(cmd)
     if check and rc != 0:
         _die("command failed (rc=%d): %s" % (rc, " ".join(cmd)))
@@ -339,7 +350,7 @@ def _mpremote_exec(mpremote, port, snippet):
     persists across our flash-flow steps.
     """
     cmd = [mpremote, "connect", port, "resume", "exec", snippet]
-    print(">>> " + " ".join(cmd), flush=True)
+    _vprint(">>> " + " ".join(cmd))
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=30)
@@ -394,7 +405,7 @@ def _write_hub_name(mpremote, port, name):
     rc, out, err = _mpremote_exec(mpremote, port, snippet)
     if rc != 0:
         _die("failed to write hub name to NVS:\n" + (err or out))
-    print(out.strip())
+    _vprint(out.strip())
 
 
 def _read_hub_name(mpremote, port):
@@ -458,7 +469,8 @@ def _read_current_firmware(mpremote, port):
 
 
 def _write_fw_marker(mpremote, port, verdict):
-    """Store the provenance marker for the firmware just flashed.
+    """Store the provenance marker for the firmware just flashed;
+    return the version read off the chip (None for a foreign image).
 
     The version half is read from the chip itself (never trusted
     from a file name); a chip whose fresh firmware has no importable
@@ -471,7 +483,7 @@ def _write_fw_marker(mpremote, port, verdict):
     if not version:
         print("warning: flashed image has no importable openbricks — "
               "skipping the provenance marker", file=sys.stderr)
-        return
+        return None
     marker = "%s:%s" % (version, verdict)
     snippet = (
         "import esp32; "
@@ -484,7 +496,9 @@ def _write_fw_marker(mpremote, port, verdict):
     if rc != 0:
         _die("failed to write the firmware provenance marker:\n"
              + (err or out))
-    print(out.strip())
+    _vprint(out.strip())
+    print("firmware marker: %s (%s)" % (version, verdict))
+    return version
 
 
 def _image_base_offset(firmware_path):
@@ -535,6 +549,8 @@ def _validate_name(name):
 
 def run(args):
     """Subcommand entry. ``args`` is an argparse ``Namespace``."""
+    global _verbose
+    _verbose = bool(getattr(args, "verbose", False))
     _validate_name(args.name)
 
     # esptool v5 renamed the binary (``esptool.py`` → ``esptool``) and
@@ -612,12 +628,14 @@ def run(args):
     if args.chip == "auto" and detected_chip:
         args.chip = detected_chip
 
-    print("=== openbricks flash: name=%r port=%s offset=%s chip=%s ==="
-          % (args.name, args.port, write_offset, args.chip))
+    _vprint("=== openbricks flash: name=%r port=%s offset=%s chip=%s ==="
+            % (args.name, args.port, write_offset, args.chip))
 
     if not args.skip_erase:
+        print("erasing flash ...")
         _run([esptool, "--chip", args.chip, "--port", args.port, erase_cmd])
 
+    print("writing firmware ...")
     _run([
         esptool, "--chip", args.chip, "--port", args.port,
         "--baud", args.baud, write_cmd, write_offset, args.firmware,
@@ -625,6 +643,7 @@ def run(args):
 
     # esptool leaves the device reset; give USB-CDC ports time to
     # re-enumerate before asking mpremote to reconnect.
+    print("waiting for the hub to come back ...")
     time.sleep(2.0)
     _wait_for_repl(mpremote, args.port)
 
@@ -633,9 +652,10 @@ def run(args):
     readback = _read_hub_name(mpremote, args.port)
     if readback != args.name:
         _die("verification failed: wrote %r, read back %r" % (args.name, readback))
-    print("verified: hub name is %r" % readback)
+    print("hub name %r written and verified" % readback)
 
-    _write_fw_marker(mpremote, args.port, firmware_verdict)
+    flashed_version = _write_fw_marker(mpremote, args.port,
+                                       firmware_verdict)
 
     # Trigger a hardware reset so the freshly-flashed chip boots into
     # the BLE-active runtime state (now that hub_name is in NVS).
@@ -651,11 +671,16 @@ def run(args):
     # ``_auto_soft_reset`` off so we go straight from friendly REPL
     # into raw REPL once, send the snippet, and disconnect; the
     # snippet's own ``machine.reset()`` is what reboots the chip.
+    print("rebooting hub ...")
     _run([mpremote, "connect", args.port, "resume",
           "exec", "--no-follow",
           "import machine; machine.reset()"], check=False)
 
-    print("done — hub %r flashed on %s." % (args.name, args.port))
+    if flashed_version:
+        print("done — hub %r is running openbricks %s (%s)."
+              % (args.name, flashed_version, firmware_verdict))
+    else:
+        print("done — hub %r flashed on %s." % (args.name, args.port))
     return 0
 
 
