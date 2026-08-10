@@ -42,6 +42,7 @@ def square_drift(db, imu):
     for side in range(4):
         db.straight(SIDE_MM)
         db.turn(90)
+        print("corner %d: heading %.1f" % (side + 1, imu.heading() - start))
     return imu.heading() - start - 360
 
 
