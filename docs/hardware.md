@@ -20,7 +20,7 @@ can buy on AliExpress / Amazon / Adafruit.
 | Buck converter (12V → 5V, ≥1A) | 1 | Powers the ESP32-S3 and sensors |
 | TCS34725 breakout | 2–4 | Colour sensor array for line following / zone detection |
 | TCA9548A I2C multiplexer breakout | 1 | Required for more than one TCS34725 — its address is fixed at `0x29` |
-| BNO055 breakout | 1 | Adafruit, Adafruit-compatible, or BNO085 with driver changes |
+| ICM-45686 breakout | 1 | SPI IMU, read inside the 1 kHz control tick — the heading source for `use_gyro` (a BNO055 on I2C is also supported) |
 | ST-3215 serial bus servo | 0–4 | Optional; good for arms / grippers. Same bus and protocol, but do **not** share a 6V rail setup — see servo notes |
 | Jumper wires, M3 standoffs, chassis plate | — | Your robot, your build |
 
@@ -58,7 +58,7 @@ The serial-bus build needs very few pins — that's most of its charm:
 | Function          | GPIO(s) | Devices on this line |
 |-------------------|---------|----------------------|
 | Analog sensors    | 1–10    | The FULL ADC1 bank — the {class}`openbricks.drivers.qtr.QTRLineSensor` window (wiring below). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable |
-| I2C0 (SDA, SCL)   | 15, 16  | TCA9548A mux (0x70) + colour sensors behind it, IMU (BNO055, 0x28), shared bus |
+| I2C0 (SDA, SCL)   | 15, 16  | TCA9548A mux (0x70) + colour sensors behind it, shared bus (an I2C BNO055 IMU at 0x28 fits here too) |
 | UART1 (TX, RX)    | 14, 41  | URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained (RX was GPIO 6 until 1.71.0; it moved so the analog bank stays whole) |
 | Program button    | 39      | Start/stop, polled with an internal pull-up (was GPIO 4 until 1.71.0) |
 | BLE-toggle button | 38      | Bluetooth on/off (was GPIO 5 until 1.66.3) |
@@ -168,11 +168,14 @@ change.
 ## Sensor wiring (I2C)
 
 The baseline build has **several colour sensors** (a line-follower /
-zone-detection array) plus one IMU. The TCS34725's address is fixed at
-`0x29` — no address-select pins — so two of them collide on a bare
-bus. The TCA9548A multiplexer solves this: it sits at `0x70` and fans
-the bus out to eight isolated channels, one colour sensor per channel.
-The IMU has its own address (`0x28`) and connects straight to the bus.
+zone-detection array) on this bus — the IMU is the SPI-wired
+ICM-45686 (see the GPIO map above) and doesn't share it. The
+TCS34725's address is fixed at `0x29` — no address-select pins — so
+two of them collide on a bare bus. The TCA9548A multiplexer solves
+this: it sits at `0x70` and fans the bus out to eight isolated
+channels, one colour sensor per channel. (If you use the I2C BNO055
+IMU instead, it has its own address, `0x28`, and connects straight
+to the bus.)
 
 Wire the mux to the ESP32-S3, then each sensor to a mux channel:
 
@@ -180,14 +183,14 @@ Wire the mux to the ESP32-S3, then each sensor to a mux channel:
 |--------------|------------|-------|
 | VIN          | 3.3V       | |
 | GND          | GND        | Common ground with everything else |
-| SDA / SCL    | GPIO 15 / 16 | The main bus — shared with the BNO055 |
+| SDA / SCL    | GPIO 15 / 16 | The main bus |
 | SD0/SC0 … SD7/SC7 | one TCS34725 each | Isolated channels; every sensor sits at its own `0x29` |
 
 | TCS34725 / BNO055 pin | Connect to | Notes |
 |--------------|------------|-------|
 | VIN (or VCC) | 3.3V       | The breakouts have onboard regulators, but the board's 3.3V is cleanest |
 | GND          | GND        | |
-| SDA / SCL    | mux channel `SDn`/`SCn` (colour sensors); GPIO 15/16 directly (IMU) | |
+| SDA / SCL    | mux channel `SDn`/`SCn` (colour sensors); GPIO 15/16 directly (BNO055, if used) | |
 
 The Adafruit breakouts include ~10 kΩ SDA/SCL pull-ups, so for a
 handful of devices you don't need to add your own. In code,
@@ -198,12 +201,10 @@ exactly as it would be on a bare bus:
 from machine import I2C, Pin
 from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.drivers.tcs34725 import TCS34725
-from openbricks.drivers.bno055 import BNO055
 
 i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3
 mux = TCA9548A(i2c)                                    # 0x70 by default
 sensors = [TCS34725(mux[ch]) for ch in range(3)]       # left, mid, right
-imu = BNO055(i2c)                                      # 0x28, straight on the bus
 ```
 
 For a complete program — a 2-sensor array that combines each sensor's
@@ -213,8 +214,9 @@ For a complete program — a 2-sensor array that combines each sensor's
 
 Simplifications when you need fewer parts:
 
-- **One colour sensor**: skip the mux entirely; wire the TCS34725 and
-  BNO055 both to GPIO 15/16 (`0x29` and `0x28` coexist fine).
+- **One colour sensor**: skip the mux entirely; wire the TCS34725
+  straight to GPIO 15/16 (and an I2C BNO055, if you use one, shares
+  the same pins — `0x29` and `0x28` coexist fine).
 - **Exactly two colour sensors**: the ESP32's second hardware I2C
   controller also works (`I2C(1, sda=..., scl=...)` on any two free
   pins), one sensor per bus — no mux.
