@@ -173,8 +173,8 @@ class DriveBase:
             straight_speed: cruise speed for ``straight()``, wheel-deg/s.
             turn_rate: cruise rate for ``turn()``, wheel-deg/s.
             acceleration: trajectory acceleration, wheel-deg/s², shared
-                by ``straight()`` and ``turn()`` ramps. Default 1000
-                (2 wheel-rev/s²) — lower it if the robot pitches or
+                by ``straight()`` and ``turn()`` ramps. Default 400 —
+                lower it if the robot pitches or
                 lifts its rear on launch. In mm/s² that's
                 ``acceleration * wheel_circumference / 360``. Applies
                 on both paths: the native (encoder-servo) controller
