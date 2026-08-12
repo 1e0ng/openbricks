@@ -167,6 +167,127 @@ class _NoopHardware:
     def deinit(self, *a, **k): return None
 
 
+class _SimYawTracker:
+    """Continuous (multi-turn) chassis yaw — the sim stand-in for the
+    firmware's hard-tick yaw integrator. SimIMU wraps to [-180, 180);
+    the integrator does not, so unwrap here. Ground truth, no drift."""
+
+    def __init__(self):
+        self._imu = None
+        self._cont = 0.0
+        self._prev = None
+        self._ref = 0.0
+
+    def deg(self):
+        if self._imu is None:
+            from openbricks_sim.runtime import SimIMU
+            self._imu = SimIMU(_INSTALLED.runtime)
+        h = self._imu.heading()
+        if self._prev is None:
+            self._prev = h
+        d = h - self._prev
+        if d > 180.0:
+            d -= 360.0
+        elif d < -180.0:
+            d += 360.0
+        self._cont += d
+        self._prev = h
+        return self._cont - self._ref
+
+    def reset(self):
+        self.deg()
+        self._ref = self._cont
+
+
+_sim_yaw = None      # bound by install(), cleared by uninstall()
+
+
+def _make_esp32_module():
+    """Minimal ``esp32`` fake so firmware code that persists state to
+    NVS (the ICM-45686's gyro-bias calibration, the hub name) runs
+    unchanged in the sim. In-memory, fresh per install."""
+    m = types.ModuleType("esp32")
+    store = {}
+
+    class NVS:
+        def __init__(self, namespace):
+            self._ns = str(namespace)
+
+        def _key(self, key):
+            return (self._ns, str(key))
+
+        def set_i32(self, key, value):
+            store[self._key(key)] = int(value)
+
+        def get_i32(self, key):
+            try:
+                v = store[self._key(key)]
+            except KeyError:
+                raise OSError(-4354)      # ESP_ERR_NVS_NOT_FOUND
+            if not isinstance(v, int):
+                raise OSError(-4354)
+            return v
+
+        def set_blob(self, key, value):
+            store[self._key(key)] = bytes(value)
+
+        def get_blob(self, key, buf):
+            try:
+                v = store[self._key(key)]
+            except KeyError:
+                raise OSError(-4354)
+            if not isinstance(v, (bytes, bytearray)):
+                raise OSError(-4354)
+            n = len(v)
+            buf[:n] = v
+            return n
+
+        def commit(self):
+            return None
+
+    m.NVS = NVS
+    return m
+
+
+class _SimIcm45686:
+    """The firmware's ``_native.icm45686`` singleton, sim edition —
+    the REAL ``openbricks.drivers.icm45686.ICM45686`` class runs
+    unchanged on top of it. Ground-truth chassis state stands in for
+    the SPI part; the hard-yaw surfaces live on the motor_process
+    stub, same split as firmware."""
+
+    def __init__(self):
+        self._configured = False
+        self._reads = 0
+        self._imu = None
+
+    def config(self, **kwargs):
+        if _INSTALLED is None:
+            raise RuntimeError(
+                "shim not installed; call install(runtime) first")
+        from openbricks_sim.runtime import SimIMU
+        self._imu = SimIMU(_INSTALLED.runtime)
+        self._configured = True
+
+    def read(self):
+        if not self._configured:
+            raise OSError("icm45686 not configured")
+        self._reads += 1
+        ax, ay, az = self._imu.acceleration()     # m/s^2 -> g
+        gx, gy, gz = self._imu.angular_velocity()
+        return (ax / 9.81, ay / 9.81, az / 9.81, gx, gy, gz)
+
+    def stats(self):
+        return (self._reads, 0, self._configured)
+
+    def available(self):
+        return True
+
+    def selftest(self):
+        # The canned-frame decode the firmware pins; same tuple.
+        return (0, 258, 772, 1286, -2, 300, -5)
+
+
 def _make_machine_module():
     m = types.ModuleType("machine")
     m.Pin    = _NoopHardware
@@ -426,6 +547,18 @@ class _SimStBus:
     def db_use_gyro(self, enable):
         self._raw.set_use_gyro(bool(enable))
 
+    def db_gyro_source(self, mode):
+        # Firmware parity: source 1 = the hard-tick yaw integrator
+        # feeds the controller directly (the ICM-45686 path). The
+        # engine SKIPS its Python pump for hard-source IMUs, so the
+        # sim must feed heading itself — ref captured at selection,
+        # exactly like the C side.
+        if int(mode) == 1:
+            self._gyro_hard_ref = _sim_yaw.deg()
+            self._gyro_hard = True
+        else:
+            self._gyro_hard = False
+
     def db_set_heading(self, body_deg):
         self._raw.set_heading_override(float(body_deg))
 
@@ -510,6 +643,9 @@ class _SimStBus:
 
     def _tick(self, now_ms):
         if self._raw is not None:
+            if getattr(self, "_gyro_hard", False):
+                self._raw.set_heading_override(
+                    _sim_yaw.deg() - self._gyro_hard_ref)
             l = self._wheels[0].angle()
             r = self._wheels[1].angle()
             if self._active and self._db_writing:
@@ -1095,6 +1231,9 @@ def _make_native_module():
     m.QuadratureEncoder  = _NoopHardware
     m.PCNTEncoder        = _NoopHardware
     m.BNO055             = ShimBNO055
+    # The ICM-45686 driver is pure Python over these two surfaces —
+    # the real class runs unchanged in the sim (no Shim* variant).
+    m.icm45686           = _SimIcm45686()
     # ``motor_process`` — the firmware exposes it as a singleton
     # object with .start / .stop / .tick / .is_running. The sim's
     # SimRuntime.step() is the equivalent; expose a stub that
@@ -1115,6 +1254,24 @@ class _MotorProcessStub:
     def configure(self, *a, **k): return None
     def now_ms(self):
         return _INSTALLED.runtime.now_ms if _INSTALLED else 0
+
+    # Hard-tick yaw surfaces (the ICM-45686 driver's heading source).
+    # Ground-truth chassis yaw; the bias machinery reports "locked"
+    # immediately — the sim has no bias to learn.
+    def hard_tick_selftest(self):
+        return True
+
+    def hard_yaw_deg(self):
+        return _sim_yaw.deg()
+
+    def hard_yaw_reset(self):
+        _sim_yaw.reset()
+
+    def hard_yaw_state(self):
+        return (0.0, True, True)
+
+    def hard_yaw_seed_bias(self, bias):
+        return None
 
 
 # ---------------------------------------------------------------------
@@ -1166,10 +1323,13 @@ def install(runtime: SimRuntime) -> None:
     # 1. machine + _openbricks_native fakes.
     for name, factory in [
             ("machine",             _make_machine_module),
+            ("esp32",               _make_esp32_module),
             ("_openbricks_native",  _make_native_module),
     ]:
         state.prev_sys_modules[name] = sys.modules.get(name)
         sys.modules[name] = factory()
+    global _sim_yaw
+    _sim_yaw = _SimYawTracker()
 
     # 2. time patches — only patch the attributes that exist (or
     # plant new ones for sleep_ms / ticks_ms which don't exist on

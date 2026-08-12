@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.91.0 — ICM-45686 in the sim; BNO055 demoted to legacy
+
+The REAL firmware ICM-45686 driver now runs unchanged in the
+simulator — no shim class: the sim's `_native` grows the
+`icm45686` singleton and the motor_process hard-yaw surfaces
+(ground-truth chassis yaw, unwrapped multi-turn, bias reported
+locked), `_SimStBus` honors `db_gyro_source(1)` (the engine skips
+its Python pump for hard-source IMUs, so the sim feeds heading
+itself — previously that combination silently disabled gyro
+correction in sim), and a minimal in-memory `esp32.NVS` fake lets
+`save_calibration()` persistence run. `examples/full_robot.py`
+carries the ICM-45686 now, and the docs stop recommending the
+BNO055 — it remains supported and documented, labeled the legacy
+I2C option.
+
 ## 1.90.1 — exceptions stop ADOPTED wheels too
 
 Both program-exit guarantees (full traceback in `openbricks log`;

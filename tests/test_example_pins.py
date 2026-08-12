@@ -119,7 +119,7 @@ class IcmExamplePinTests(unittest.TestCase):
     owns on the reference robot."""
 
     EXAMPLES = ("icm45686_bringup.py", "icm45686_square.py",
-                "icm45686_axle_track.py")
+                "icm45686_axle_track.py", "full_robot.py")
 
     def _spi_pins(self, name):
         path = (_here[:_idx] if _idx >= 0 else ".") + "/../examples/" + name

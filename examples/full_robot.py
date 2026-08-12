@@ -7,7 +7,7 @@ Hardware:
     * ESP32-S3 DevKitC-1 (or classic ESP32 DevKitC-V4)
     * 2× JGB37-520 DC gear motors (with Hall-effect quadrature encoders)
         driven by a shared L298N (or TB6612FNG) H-bridge
-    * 1× BNO055 9-DOF IMU on I2C
+    * 1× ICM-45686 IMU on SPI
     * 1× TCS34725 RGB colour sensor on the same I2C bus
     * 1× ST-3215 serial bus servo on UART (optional — the servo demo
         at the bottom just prints a message if it isn't attached)
@@ -19,7 +19,7 @@ import time
 
 from machine import I2C, Pin, UART
 
-from openbricks.drivers.bno055 import BNO055
+from openbricks.drivers.icm45686 import ICM45686
 from openbricks.drivers.jgb37_520 import JGB37Motor
 from openbricks.drivers.st3215 import ST3215
 from openbricks.drivers.tcs34725 import TCS34725
@@ -28,6 +28,8 @@ from openbricks.robotics import DriveBase
 
 I2C_SDA  = 15
 I2C_SCL  = 16
+
+SCK, MOSI, MISO, CS = 12, 13, 11, 17
 
 LEFT_IN1,  LEFT_IN2,  LEFT_PWM  = 4, 5, 6
 LEFT_EA,   LEFT_EB               = 7, 8
@@ -43,7 +45,7 @@ AXLE_TRACK_MM     = 114
 
 
 i2c   = I2C(0, sda=Pin(I2C_SDA), scl=Pin(I2C_SCL), freq=400_000)
-imu   = BNO055(i2c)
+imu   = ICM45686(sck=SCK, mosi=MOSI, miso=MISO, cs=CS)
 color = TCS34725(i2c)
 
 left  = JGB37Motor(in1=LEFT_IN1,  in2=LEFT_IN2,  pwm=LEFT_PWM,
