@@ -934,6 +934,20 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertEqual(sb.servo_slot_of(9), -1)
         self.assertFalse(sb.servo_attach(0, 9, False, 0))  # occupied
 
+    def test_duty_parity_surface_exists(self):
+        # Firmware's dumb-mode switches must run unchanged in sim:
+        # accepted for good slots, loud for bad ones.
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        sb.servo_drive_duty(0, True)
+        sb.servo_drive_duty(0, False)
+        sb.duty_gains(101, 51, 3)
+        try:
+            sb.servo_drive_duty(9, True)
+            self.fail("expected ValueError")
+        except ValueError:
+            pass
+
     def test_db_curve_cancels_an_armed_move(self):
         db, _, _ = self._serial_db()
         sb = db._serial_engine._sb

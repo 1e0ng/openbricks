@@ -331,6 +331,25 @@ class _SimStBus:
     def db_set_accel(self, dps2):
         self._raw.set_accel(float(dps2))
 
+    def servo_drive_duty(self, slot, on):
+        # Firmware parity surface (st_bus.servo_drive_duty). The sim
+        # wheel is an ideal plant already driven by our own model, so
+        # "dumb mode" changes nothing here — but scripts that flip it
+        # must run unchanged, and a bad slot must fail as loudly as
+        # the firmware's ValueError.
+        if not (0 <= int(slot) < 4):
+            raise ValueError("servo_drive_duty: bad slot")
+        self._duty_slots = getattr(self, "_duty_slots", set())
+        if on:
+            self._duty_slots.add(int(slot))
+        else:
+            self._duty_slots.discard(int(slot))
+
+    def duty_gains(self, ff, kp, ki):
+        # Accepted for parity; the sim plant needs no gain schedule.
+        self._duty_gain_log = getattr(self, "_duty_gain_log", [])
+        self._duty_gain_log.append((int(ff), int(kp), int(ki)))
+
     def _sync_bridges(self):
         # Firmware parity (st_bus.c sb_db_straight/sb_db_turn): arm
         # against LIVE odometry. The per-tick sync below usually keeps

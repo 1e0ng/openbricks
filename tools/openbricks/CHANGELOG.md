@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.88.0 — the engine's own duty drive (dumb mode, stage 2)
+
+The serial engine can now drive a wheel slot in "dumb mode": the
+servo runs open-loop (mode 2) and the hard-tick engine closes the
+speed loop itself — integer feedforward + PI computing a raw duty
+each sync cycle, shipped to both wheels in one GOAL_TIME
+sync-packet (bit-10 sign, upstream WritePwm convention). A driving
+duty slot stays perpetually dirty so the loop keeps correcting on
+a one-shot run_speed; commanded rest ships duty 0 once, releases
+the integrator, and goes bus-quiet. Feedback-dark cycles fall back
+to feedforward-only (the dead-wheel fault still cuts torque, which
+kills mode-2 output too), and mixed duty/wheel fleets alternate
+their sync kinds so neither starves. Switch per slot with
+`st_bus.servo_drive_duty(slot, on)` (re-runs the config sequence
+so the wire's op_mode always matches); tune with
+`st_bus.duty_gains(ff, kp, ki)` (per-1024; bench defaults
+101/51/3 from the measured 10.17 steps/s per duty unit). Six new
+c-unit batteries pin the encode, config, integral action,
+rest-quiescence, dark-feedback, and alternation behaviors. Sim
+gains the parity surface. DriveBase integration (stage 3) follows
+bench validation.
+
 ## 1.87.0 — true open-loop dc() on the serial servos
 
 `Motor.dc()` on ST-3032/ST-3215 is now real Pybricks semantics:

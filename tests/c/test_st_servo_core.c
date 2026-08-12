@@ -637,6 +637,177 @@ TEST(detach_mid_flight_clears_user_routing) {
     ob_sservo_user_read_result(&sv, 1, pl, 2);
 }
 
+// ---- duty drive ("dumb mode": servo open-loop, our FF+PI) ----
+
+static void fast_configure(int slot, uint8_t id, int duty_mode) {
+    ob_sservo_attach(&sv, slot, id, 0, 45);
+    if (duty_mode) {
+        ob_sservo_set_drive_duty(&sv, slot, 1);
+    }
+    ob_sservo_op_t op;
+    for (int i = 0; i < 3; i++) {
+        ob_sservo_next_op(&sv, &op);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_write_result(&sv, 1);
+    }
+}
+
+static void feed_feedback(int slot, uint16_t raw, int32_t speed) {
+    sv.read_in_flight = slot;
+    uint16_t sp = (speed < 0) ? (uint16_t)((-speed) | 0x8000)
+                              : (uint16_t)speed;
+    uint8_t pl[6] = { (uint8_t)(raw & 0xFF), (uint8_t)(raw >> 8),
+                      (uint8_t)(sp & 0xFF), (uint8_t)(sp >> 8), 0, 0 };
+    ob_sservo_read_result(&sv, 1, pl, 6);
+}
+
+static uint16_t sync_duty_value(const ob_sservo_op_t *op, int k) {
+    return (uint16_t)(op->sync_data[k * 2]
+                      | (op->sync_data[k * 2 + 1] << 8));
+}
+
+TEST(duty_encode_uses_bit_10_and_clamps) {
+    CHECK_EQ_INT(ob_sservo_encode_duty(300), 300);
+    CHECK_EQ_INT(ob_sservo_encode_duty(-300), 300 | 0x0400);
+    CHECK_EQ_INT(ob_sservo_encode_duty(1500), 1000);
+    CHECK_EQ_INT(ob_sservo_encode_duty(-1500), 1000 | 0x0400);
+    CHECK_EQ_INT(ob_sservo_encode_duty(0), 0);
+}
+
+TEST(duty_slot_configures_mode_2_and_back) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_set_drive_duty(&sv, 0, 1);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_WRITE);
+    CHECK_EQ_INT(op.reg, OB_SREG_OP_MODE);
+    CHECK_EQ_INT(op.data[0], 2);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_write_result(&sv, 1);
+    ob_sservo_next_op(&sv, &op);        // torque-coast step
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_write_result(&sv, 1);
+    ob_sservo_next_op(&sv, &op);        // goal_acc step
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_write_result(&sv, 1);
+    // Switching back re-runs config with wheel mode.
+    ob_sservo_set_drive_duty(&sv, 0, 0);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_WRITE);
+    CHECK_EQ_INT(op.reg, OB_SREG_OP_MODE);
+    CHECK_EQ_INT(op.data[0], 1);
+}
+
+TEST(duty_sync_ships_ff_then_integral_corrects_sag) {
+    reset();
+    fast_configure(0, 7, 1);
+    ob_sservo_set_speed(&sv, 0, 1000);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);              // torque-on first
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_TORQUE);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
+    CHECK_EQ_INT(op.sync_n, 1);
+    CHECK_EQ_INT(op.sync_ids[0], 7);
+    // No feedback yet: feedforward only — 101*1000/1024 = 98.
+    uint16_t first = sync_duty_value(&op, 0);
+    CHECK_EQ_INT(first, 98);
+    ob_sservo_op_started(&sv, &op);
+    // Driving duty slot STAYS dirty — the PI must keep ticking on a
+    // one-shot run_speed.
+    CHECK_EQ_INT(sv.slots[0].target_dirty, 1);
+    // Simulate persistent 100 steps/s sag: the integral term climbs
+    // the shipped duty over cycles (sync -> read fairness respected).
+    uint16_t duty = first;
+    for (int cycle = 0; cycle < 30; cycle++) {
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_READ_POS);
+        ob_sservo_op_started(&sv, &op);
+        feed_feedback(0, 100, 900);
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
+        duty = sync_duty_value(&op, 0);
+        ob_sservo_op_started(&sv, &op);
+    }
+    CHECK(duty > first + 5);                  // integral action real
+    CHECK(sv.slots[0].duty_integ > 0);
+}
+
+TEST(duty_rest_ships_zero_once_and_goes_quiet) {
+    reset();
+    fast_configure(0, 7, 1);
+    ob_sservo_set_speed(&sv, 0, 1000);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);              // torque sync
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);              // first duty sync
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);              // fairness read
+    ob_sservo_op_started(&sv, &op);
+    feed_feedback(0, 100, 900);
+    ob_sservo_set_speed(&sv, 0, 0);           // commanded rest
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
+    CHECK_EQ_INT(sync_duty_value(&op, 0), 0);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.slots[0].target_dirty, 0);   // quiet at rest
+    CHECK_EQ_INT(sv.slots[0].duty_integ, 0);     // windup released
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_READ_POS);      // only feedback left
+}
+
+TEST(duty_feedback_dark_is_ff_only) {
+    reset();
+    fast_configure(0, 7, 1);
+    ob_sservo_set_speed(&sv, 0, 1000);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);              // torque
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);              // duty (ff only)
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);              // read...
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_read_result(&sv, 0, NULL, 0);   // ...and it FAILS
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
+    // stale feedback: P term excluded, duty stays at ff+integ.
+    CHECK_EQ_INT(sync_duty_value(&op, 0), 98);
+}
+
+TEST(duty_and_wheel_sync_kinds_alternate) {
+    reset();
+    fast_configure(0, 7, 1);                  // duty wheel
+    fast_configure(1, 8, 0);                  // classic wheel
+    ob_sservo_set_speed(&sv, 0, 1000);
+    ob_sservo_set_speed(&sv, 1, 1000);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);              // torque for both
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_TORQUE);
+    ob_sservo_op_started(&sv, &op);
+    int saw_duty = 0, saw_speed = 0;
+    for (int cycle = 0; cycle < 4; cycle++) {
+        ob_sservo_next_op(&sv, &op);
+        if (op.kind == OB_SOP_SYNC_DUTY) {
+            saw_duty++;
+            CHECK_EQ_INT(op.sync_ids[0], 7);
+        } else {
+            CHECK_EQ_INT(op.kind, OB_SOP_SYNC_SPEED);
+            saw_speed++;
+            CHECK_EQ_INT(op.sync_ids[0], 8);
+        }
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_next_op(&sv, &op);          // fairness read
+        CHECK_EQ_INT(op.kind, OB_SOP_READ_POS);
+        ob_sservo_op_started(&sv, &op);
+        feed_feedback(op.slot, 100, 900);
+        ob_sservo_set_speed(&sv, 1, 1000);    // drivebase-style restage
+    }
+    CHECK_EQ_INT(saw_duty, 2);
+    CHECK_EQ_INT(saw_speed, 2);
+}
+
 int main(void) {
     RUN(widened_feedback_decodes_speed_and_load);
     RUN(inverted_slot_flips_feedback_to_user_frame);
@@ -666,5 +837,11 @@ int main(void) {
     RUN(user_txn_losses_retry_then_latch);
     RUN(user_read_short_reply_counts_as_a_loss);
     RUN(detach_mid_flight_clears_user_routing);
+    RUN(duty_encode_uses_bit_10_and_clamps);
+    RUN(duty_slot_configures_mode_2_and_back);
+    RUN(duty_sync_ships_ff_then_integral_corrects_sag);
+    RUN(duty_rest_ships_zero_once_and_goes_quiet);
+    RUN(duty_feedback_dark_is_ff_only);
+    RUN(duty_and_wheel_sync_kinds_alternate);
     return harness_exit("st_servo_core");
 }

@@ -18,6 +18,11 @@ void ob_sservo_init(ob_sservo_t *s) {
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         s->slots[i].torque_cmd = -1;
     }
+    // Duty-loop defaults from the 2026-08-12 bench line: ~10.17
+    // steps/s per duty unit free-run.
+    s->duty_ff = 101;
+    s->duty_kp = 51;
+    s->duty_ki = 3;
 }
 
 
@@ -169,6 +174,92 @@ uint16_t ob_sservo_encode_speed(int32_t steps_per_s) {
 }
 
 
+uint16_t ob_sservo_encode_duty(int32_t duty) {
+    uint32_t mag = (duty < 0) ? (uint32_t)(-duty) : (uint32_t)duty;
+    if (mag > 1000) {
+        mag = 1000;
+    }
+    uint16_t v = (uint16_t)mag;
+    if (duty < 0) {
+        v |= 0x0400;    // load-register convention: direction bit 10
+    }
+    return v;
+}
+
+
+int ob_sservo_set_drive_duty(ob_sservo_t *s, int slot, int on) {
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS || !s->slots[slot].in_use) {
+        return -1;
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    uint8_t want = on ? 1 : 0;
+    if (sl->drive_duty == want) {
+        return 0;
+    }
+    sl->drive_duty = want;
+    sl->duty_integ = 0;
+    sl->duty_last_err = 0;
+    // The wire's op_mode must follow: re-run the config sequence
+    // (mode, torque-coast, goal_acc). config_failed is cleared so a
+    // deliberate mode switch gets fresh retries.
+    sl->config_step = 0;
+    sl->config_fails = 0;
+    sl->config_failed = 0;
+    return 0;
+}
+
+
+void ob_sservo_set_duty_gains(ob_sservo_t *s, int32_t ff,
+                              int32_t kp, int32_t ki) {
+    if (ff > 0) {
+        s->duty_ff = ff;
+    }
+    if (kp > 0) {
+        s->duty_kp = kp;
+    }
+    if (ki > 0) {
+        s->duty_ki = ki;
+    }
+}
+
+
+// The duty each sync ships: feedforward on the target plus PI on the
+// measured-speed error. Integer-only; ±1000 clamp matches the
+// register range. The integrator itself advances in op_started (the
+// planner-state contract) using duty_last_err stored here.
+#define DUTY_INTEG_CLAMP (400 * 1024)
+
+static int32_t duty_compute(ob_sservo_t *s, ob_sservo_slot_t *sl) {
+    if (sl->target_steps == 0) {
+        // Commanded rest: exact zero output, integrator released —
+        // a wheel at rest must not dither around residual windup.
+        sl->duty_integ = 0;
+        sl->duty_last_err = 0;
+        return 0;
+    }
+    int32_t duty = (s->duty_ff * sl->target_steps) / 1024;
+    if (sl->have_feedback && sl->stale == 0) {
+        int32_t err = sl->target_steps - sl->speed_steps;
+        sl->duty_last_err = err;
+        duty += (s->duty_kp * err) / 1024;
+        duty += sl->duty_integ / 1024;
+    } else {
+        // Feedback dark: feedforward only, integrator frozen. A
+        // prolonged loss is the dead-wheel fault's problem, and the
+        // fault path cuts TORQUE — which kills mode-2 output too.
+        sl->duty_last_err = 0;
+        duty += sl->duty_integ / 1024;
+    }
+    if (duty > 1000) {
+        duty = 1000;
+    }
+    if (duty < -1000) {
+        duty = -1000;
+    }
+    return duty;
+}
+
+
 // Next readable slot of the requested kind from that kind's own
 // round-robin cursor. ``want_hot``: 1 = driving slots, 0 = parked.
 // Each kind has its own cursor so a parked slot's occasional turn
@@ -233,7 +324,9 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
         switch (sl->config_step) {
             case 0:
                 op->reg = OB_SREG_OP_MODE;
-                op->data[0] = MODE_WHEEL;
+                // Duty slots run the servo open-loop (mode 2) — the
+                // engine's FF+PI is the speed controller there.
+                op->data[0] = sl->drive_duty ? 2 : MODE_WHEEL;
                 break;
             case 1:
                 op->reg = OB_SREG_TORQUE;
@@ -274,24 +367,68 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
         return;
     }
 
-    // 3. Dirty speeds — one sync-write covers every dirty slot, so
-    //    both wheels of a drivebase get their setpoints at the same
-    //    packet boundary (the Python driver's SyncServoGroup lesson).
-    uint8_t n = 0;
-    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
-        ob_sservo_slot_t *sl = &s->slots[i];
-        if (sl->in_use && sl->config_step >= 3 && sl->target_dirty) {
-            uint16_t v = ob_sservo_encode_speed(sl->target_steps);
-            op->sync_ids[n] = sl->id;
-            op->sync_data[n * 2]     = (uint8_t)(v & 0xFF);
-            op->sync_data[n * 2 + 1] = (uint8_t)(v >> 8);
-            n++;
+    // 3. Dirty setpoints — one sync-write covers every dirty slot of
+    //    a kind, so both wheels of a drivebase get their setpoints at
+    //    the same packet boundary (the Python driver's
+    //    SyncServoGroup lesson). Duty and wheel slots write DIFFERENT
+    //    registers, so a mixed fleet needs one sync each — duty ships
+    //    first, wheel speeds compete at the next idle slot. On the
+    //    reference robot both wheels share one mode: one packet, as
+    //    always.
+    if (!s->last_was_sync) {
+        uint8_t duty_dirty = 0, wheel_dirty = 0;
+        for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+            ob_sservo_slot_t *sl = &s->slots[i];
+            if (sl->in_use && sl->config_step >= 3 && sl->target_dirty) {
+                if (sl->drive_duty) {
+                    duty_dirty++;
+                } else {
+                    wheel_dirty++;
+                }
+            }
         }
-    }
-    if (n > 0 && !s->last_was_sync) {
-        op->kind = OB_SOP_SYNC_SPEED;
-        op->sync_n = n;
-        return;
+        int pick_duty;
+        if (duty_dirty > 0 && wheel_dirty > 0) {
+            pick_duty = s->sync_kind_toggle == 0;
+            s->sync_kind_toggle ^= 1;
+        } else {
+            pick_duty = duty_dirty > 0;
+        }
+        uint8_t n = 0;
+        if (pick_duty && duty_dirty > 0) {
+            for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+                ob_sservo_slot_t *sl = &s->slots[i];
+                if (sl->in_use && sl->config_step >= 3
+                    && sl->target_dirty && sl->drive_duty) {
+                    uint16_t v =
+                        ob_sservo_encode_duty(duty_compute(s, sl));
+                    op->sync_ids[n] = sl->id;
+                    op->sync_data[n * 2]     = (uint8_t)(v & 0xFF);
+                    op->sync_data[n * 2 + 1] = (uint8_t)(v >> 8);
+                    n++;
+                }
+            }
+            op->kind = OB_SOP_SYNC_DUTY;
+            op->sync_n = n;
+            return;
+        }
+        if (wheel_dirty > 0) {
+            for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+                ob_sservo_slot_t *sl = &s->slots[i];
+                if (sl->in_use && sl->config_step >= 3
+                    && sl->target_dirty && !sl->drive_duty) {
+                    uint16_t v =
+                        ob_sservo_encode_speed(sl->target_steps);
+                    op->sync_ids[n] = sl->id;
+                    op->sync_data[n * 2]     = (uint8_t)(v & 0xFF);
+                    op->sync_data[n * 2 + 1] = (uint8_t)(v >> 8);
+                    n++;
+                }
+            }
+            op->kind = OB_SOP_SYNC_SPEED;
+            op->sync_n = n;
+            return;
+        }
     }
     op->sync_n = 0;   // sync deferred for fairness (or none dirty)
 
@@ -353,6 +490,32 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
                     if (s->slots[i].in_use
                         && s->slots[i].id == op->sync_ids[k]) {
                         s->slots[i].target_dirty = 0;
+                    }
+                }
+            }
+            break;
+        case OB_SOP_SYNC_DUTY:
+            s->last_was_sync = 1;
+            for (uint8_t k = 0; k < op->sync_n; k++) {
+                for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+                    ob_sservo_slot_t *sl = &s->slots[i];
+                    if (!sl->in_use || sl->id != op->sync_ids[k]) {
+                        continue;
+                    }
+                    // A DRIVING duty slot stays dirty: the PI must
+                    // keep shipping corrections even when the target
+                    // never changes (a one-shot run_speed would
+                    // otherwise freeze the loop at its first duty).
+                    // Rest (target 0) ships once and goes quiet.
+                    sl->target_dirty = (sl->target_steps != 0);
+                    // Integrator advances HERE — for the duty that
+                    // actually shipped (planner-state contract).
+                    sl->duty_integ += s->duty_ki * sl->duty_last_err;
+                    if (sl->duty_integ > DUTY_INTEG_CLAMP) {
+                        sl->duty_integ = DUTY_INTEG_CLAMP;
+                    }
+                    if (sl->duty_integ < -DUTY_INTEG_CLAMP) {
+                        sl->duty_integ = -DUTY_INTEG_CLAMP;
                     }
                 }
             }
