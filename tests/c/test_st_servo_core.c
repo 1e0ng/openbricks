@@ -776,6 +776,65 @@ TEST(duty_feedback_dark_is_ff_only) {
     CHECK_EQ_INT(sync_duty_value(&op, 0), 98);
 }
 
+TEST(duty_mode_switch_guards_and_gain_keepers) {
+    reset();
+    CHECK_EQ_INT(ob_sservo_set_drive_duty(&sv, -1, 1), -1);
+    CHECK_EQ_INT(ob_sservo_set_drive_duty(&sv, 0, 1), -1);  // not in use
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    CHECK_EQ_INT(ob_sservo_set_drive_duty(&sv, 0, 1), 0);
+    uint8_t step_after_switch = sv.slots[0].config_step;
+    CHECK_EQ_INT(step_after_switch, 0);
+    sv.slots[0].config_step = 3;                 // pretend configured
+    CHECK_EQ_INT(ob_sservo_set_drive_duty(&sv, 0, 1), 0);   // same value
+    CHECK_EQ_INT(sv.slots[0].config_step, 3);    // no needless re-config
+    // Gains: <= 0 keeps the current value.
+    ob_sservo_set_duty_gains(&sv, 0, -5, 0);
+    CHECK_EQ_INT(sv.duty_ff, 101);
+    CHECK_EQ_INT(sv.duty_kp, 51);
+    CHECK_EQ_INT(sv.duty_ki, 3);
+    ob_sservo_set_duty_gains(&sv, 200, 80, 7);
+    CHECK_EQ_INT(sv.duty_ff, 200);
+    CHECK_EQ_INT(sv.duty_kp, 80);
+    CHECK_EQ_INT(sv.duty_ki, 7);
+}
+
+TEST(duty_output_and_integrator_clamp_both_rails) {
+    reset();
+    fast_configure(0, 7, 1);
+    // FF alone beyond the register range: 101*20000/1024 = 1972.
+    ob_sservo_set_speed(&sv, 0, 20000);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);                 // torque
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
+    CHECK_EQ_INT(sync_duty_value(&op, 0), 1000);            // + rail
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);                 // fairness read
+    ob_sservo_op_started(&sv, &op);
+    feed_feedback(0, 100, 0);
+    // Giant KI: one shipped duty on a huge error must clamp the
+    // integrator, both signs.
+    ob_sservo_set_duty_gains(&sv, 0, 0, 1000000);
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.slots[0].duty_integ, 400 * 1024);
+    ob_sservo_set_speed(&sv, 0, -20000);
+    ob_sservo_next_op(&sv, &op);                 // read (fairness)
+    ob_sservo_op_started(&sv, &op);
+    feed_feedback(0, 100, 0);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
+    CHECK_EQ_INT(sync_duty_value(&op, 0), 1000 | 0x0400);   // - rail
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_next_op(&sv, &op);                 // read (fairness)
+    ob_sservo_op_started(&sv, &op);
+    feed_feedback(0, 100, 0);
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.slots[0].duty_integ, -400 * 1024);
+}
+
 TEST(duty_and_wheel_sync_kinds_alternate) {
     reset();
     fast_configure(0, 7, 1);                  // duty wheel
@@ -842,6 +901,8 @@ int main(void) {
     RUN(duty_sync_ships_ff_then_integral_corrects_sag);
     RUN(duty_rest_ships_zero_once_and_goes_quiet);
     RUN(duty_feedback_dark_is_ff_only);
+    RUN(duty_mode_switch_guards_and_gain_keepers);
+    RUN(duty_output_and_integrator_clamp_both_rails);
     RUN(duty_and_wheel_sync_kinds_alternate);
     return harness_exit("st_servo_core");
 }

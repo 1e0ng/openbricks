@@ -237,11 +237,14 @@ static int32_t duty_compute(ob_sservo_t *s, ob_sservo_slot_t *sl) {
         sl->duty_last_err = 0;
         return 0;
     }
-    int32_t duty = (s->duty_ff * sl->target_steps) / 1024;
+    // 64-bit intermediates: gains are user-settable, and gain x
+    // steps/s overflows int32 at values a tuning session can
+    // legitimately type (UBSan-caught by the rail test).
+    int64_t duty = ((int64_t)s->duty_ff * sl->target_steps) / 1024;
     if (sl->have_feedback && sl->stale == 0) {
         int32_t err = sl->target_steps - sl->speed_steps;
         sl->duty_last_err = err;
-        duty += (s->duty_kp * err) / 1024;
+        duty += ((int64_t)s->duty_kp * err) / 1024;
         duty += sl->duty_integ / 1024;
     } else {
         // Feedback dark: feedforward only, integrator frozen. A
@@ -256,7 +259,7 @@ static int32_t duty_compute(ob_sservo_t *s, ob_sservo_slot_t *sl) {
     if (duty < -1000) {
         duty = -1000;
     }
-    return duty;
+    return (int32_t)duty;
 }
 
 
@@ -510,13 +513,17 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
                     sl->target_dirty = (sl->target_steps != 0);
                     // Integrator advances HERE — for the duty that
                     // actually shipped (planner-state contract).
-                    sl->duty_integ += s->duty_ki * sl->duty_last_err;
-                    if (sl->duty_integ > DUTY_INTEG_CLAMP) {
-                        sl->duty_integ = DUTY_INTEG_CLAMP;
+                    // 64-bit: user-settable ki x steps/s error
+                    // overflows int32 (UBSan-caught).
+                    int64_t integ = (int64_t)sl->duty_integ
+                        + (int64_t)s->duty_ki * sl->duty_last_err;
+                    if (integ > DUTY_INTEG_CLAMP) {
+                        integ = DUTY_INTEG_CLAMP;
                     }
-                    if (sl->duty_integ < -DUTY_INTEG_CLAMP) {
-                        sl->duty_integ = -DUTY_INTEG_CLAMP;
+                    if (integ < -DUTY_INTEG_CLAMP) {
+                        integ = -DUTY_INTEG_CLAMP;
                     }
+                    sl->duty_integ = (int32_t)integ;
                 }
             }
             break;
