@@ -1057,3 +1057,13 @@ class TurnAccelTests(_Base):
                          "in 0.7 s")
         self.w.advance(9000)
         self.assertTrue(sb.db_done())
+
+    def test_curve_rides_the_straight_accel(self):
+        # curve() is a drive move (Pybricks classification): it must
+        # arm with the STRAIGHT accel even when the turn accel is a
+        # crawl.
+        sb.db_set_turn_accel(30.0)
+        sb.db_curve(200.0, 45.0, 120.0)
+        self.w.advance(4000)
+        self.assertTrue(sb.db_done(),
+                        "curve slowed by the turn accel")

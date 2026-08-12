@@ -1003,6 +1003,10 @@ class DeadMotorDiagnosisTests(_Base):
         self.assertEqual(db._accel_dps2, 1500.0)
         self.assertEqual(db._turn_accel_dps2, 1500.0)
 
+    def test_distinct_turn_accel_at_construction_reaches_the_wire(self):
+        db = self._db(accel_dps2=1000.0, turn_accel_dps2=500.0)
+        self.assertTrue(("db_set_turn_accel", 500.0) in self.bus.calls)
+
     def test_set_turn_accel_reaches_the_wire_and_the_deadline(self):
         db = self._db()
         db.set_turn_accel(500.0)
@@ -1026,6 +1030,11 @@ class DeadMotorDiagnosisTests(_Base):
             self.fail("expected ValueError")
         except ValueError as e:
             self.assertTrue("serial-bus" in str(e), e)
+        try:
+            db.settings(turn_acceleration=0)
+            self.fail("expected ValueError")
+        except ValueError as e:
+            self.assertTrue("> 0" in str(e), e)
 
     def test_slow_turn_budget_scales_with_the_rate(self):
         db = self._db()
