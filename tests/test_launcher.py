@@ -1923,6 +1923,40 @@ class EmergencyStopTests(unittest.TestCase):
         self.addCleanup(setattr, launcher, "_stop_all_motors", orig)
         return calls
 
+    def test_stop_all_motors_reaches_the_native_bus(self):
+        # The adopted-wheels hole (1.90.1): adoption empties
+        # ST3215._buses, so the broadcast leg reaches nothing — the
+        # native st_bus.estop() must be attempted too.
+        import sys
+        calls = []
+
+        class _SB:
+            @staticmethod
+            def estop():
+                calls.append("estop")
+                return True
+
+        class _MP:
+            @staticmethod
+            def stop():
+                calls.append("mp_stop")
+        class _Mod:
+            pass
+        mod = _Mod()          # any attr-bearing object works as a
+        mod.st_bus = _SB()    # sys.modules entry on both runtimes
+        mod.motor_process = _MP()
+        orig = sys.modules.get("_openbricks_native")
+        sys.modules["_openbricks_native"] = mod
+        try:
+            launcher._stop_all_motors()
+        finally:
+            if orig is not None:
+                sys.modules["_openbricks_native"] = orig
+            else:
+                sys.modules.pop("_openbricks_native", None)
+        self.assertTrue("estop" in calls, calls)
+        self.assertTrue("mp_stop" in calls, calls)
+
     def test_natural_program_end_stops_all_motors(self):
         # A program that returns with a motor still commanded (e.g.
         # ``motor.run(200)`` then falls off the end) left the robot

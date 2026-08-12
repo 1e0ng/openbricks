@@ -734,6 +734,17 @@ def _stop_all_motors():
         motor_process.stop()
     except Exception:
         pass
+    # ADOPTED serial buses: adoption hands the UART to the native
+    # driver and empties ST3215._buses, so the broadcast below can't
+    # reach the wheels — and an active drivebase or per-slot move
+    # would re-stage torque anyway. st_bus.estop() is the same kill
+    # the hard button uses: writers dead first, then broadcast
+    # torque-off on the native bus.
+    try:
+        from _openbricks_native import st_bus
+        st_bus.estop()
+    except Exception:
+        pass
     try:
         from openbricks.drivers.st3215 import (
             ST3215, _REG_TORQUE, _BROADCAST_ID)

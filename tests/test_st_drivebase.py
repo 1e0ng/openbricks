@@ -88,6 +88,14 @@ class _PerfectWheels:
                 if pkt[5] == 0x28 and pid in self.torque:   # TORQUE
                     self.torque[pid] = pkt[6]
                 sb.feed_rx(_reply(pid, 0))
+            elif instr == 0x03 and pid == 0xFE:        # BROADCAST write
+                # Torque-off broadcast (the e-stop): applies to every
+                # servo, no reply by protocol.
+                if pkt[5] == 0x28:
+                    for sid in self.torque:
+                        self.torque[sid] = pkt[6]
+                        if pkt[6] == 0:
+                            self.spd[sid] = 0
             elif instr == 0x83:                        # SYNC write
                 reg, dl = pkt[5], pkt[6]
                 j = 7
@@ -1067,3 +1075,37 @@ class TurnAccelTests(_Base):
         self.w.advance(4000)
         self.assertTrue(sb.db_done(),
                         "curve slowed by the turn accel")
+
+
+class EstopBindingTests(_Base):
+    """st_bus.estop() — the launcher's program-exit kill for adopted
+    buses: writers dead (db + per-slot moves), broadcast torque-off.
+    Torque-off alone would be re-armed by the next db tick."""
+
+    def test_estop_mid_move_stops_and_stays_stopped(self):
+        sb.db_straight(400.0, 150.0)
+        self.w.advance(400)
+        self.assertTrue(abs(self.w.spd[1]) > 0)
+        self.assertTrue(sb.estop())
+        self.w.advance(5)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque[1], 0)
+        self.assertEqual(self.w.torque[2], 0)
+        # Nothing re-drives: no torque re-arm, no speed/duty syncs.
+        before = (self.w.syncs, getattr(self.w, "duty_syncs", 0))
+        self.w.advance(500)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(
+            (self.w.syncs, getattr(self.w, "duty_syncs", 0)), before)
+        self.assertEqual(self.w.torque[1], 0)
+
+    def test_estop_kills_a_per_slot_move_too(self):
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        self.w.advance(50)
+        self.assertTrue(abs(self.w.spd[2]) > 0)
+        sb.estop()
+        self.w.advance(300)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque[2], 0)

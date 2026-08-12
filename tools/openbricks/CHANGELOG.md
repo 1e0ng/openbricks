@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.90.1 — exceptions stop ADOPTED wheels too
+
+Both program-exit guarantees (full traceback in `openbricks log`;
+motors stopped on every exit) existed — but the motor-stop's
+serial leg broadcast over `ST3215._buses`, which adoption EMPTIES
+(the UART belongs to the native driver). On the standard robot an
+exception mid-move left the C drivebase driving. New
+`st_bus.estop()` — the same kill the hard button's from-tick hook
+performs (drivebase writer dead, per-slot moves reset, THEN
+broadcast torque-off; torque-off alone gets re-armed by the next
+db tick) — now runs in the launcher's stop-all-motors path. Slot
+attachments and the fault latch survive, per the
+evidence-preservation rule. Open question flagged for a DC bench:
+`motor_process.stop()` halts the scheduler but may leave H-bridge
+PWM at its last duty — unverifiable without DC hardware attached.
+
 ## 1.90.0 — Pybricks-parity defaults + turn_acceleration
 
 DriveBase defaults now follow Pybricks' drivebase formulas applied
