@@ -73,20 +73,10 @@ correction runs every millisecond in C with no Python in the loop
                    axle_track_mm=138, imu=imu)
     db.use_gyro(True)
 
-A :class:`~openbricks.drivers.bno055.BNO055` on the I2C bus works
-too — its fused heading is pumped from Python between ticks, which
-is accurate but slower to correct (typically +0.5° to +1.8° per
-turn):
-
-.. code-block:: python
-
-    from machine import I2C, Pin
-    from openbricks.drivers.bno055 import BNO055
-
-    imu = BNO055(i2c=I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000))
-    db = DriveBase(left, right, wheel_diameter_mm=88,
-                   axle_track_mm=138, imu=imu)
-    db.use_gyro(True)
+(A legacy :class:`~openbricks.drivers.bno055.BNO055` on I2C still
+works — its fused heading is pumped from Python between ticks,
+which corrects noticeably slower, typically +0.5° to +1.8° per
+turn. New builds should use the ICM-45686.)
 
 Accurate ``wheel_diameter_mm`` / ``axle_track_mm`` values matter more
 than any tuning — calibrate both with two short test drives:

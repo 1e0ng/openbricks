@@ -20,7 +20,7 @@ can buy on AliExpress / Amazon / Adafruit.
 | Buck converter (12V → 5V, ≥1A) | 1 | Powers the ESP32-S3 and sensors |
 | TCS34725 breakout | 2–4 | Colour sensor array for line following / zone detection |
 | TCA9548A I2C multiplexer breakout | 1 | Required for more than one TCS34725 — its address is fixed at `0x29` |
-| ICM-45686 breakout | 1 | SPI IMU, read inside the 1 kHz control tick — the heading source for `use_gyro` (a BNO055 on I2C is also supported) |
+| ICM-45686 breakout | 1 | SPI IMU, read inside the 1 kHz control tick — the heading source for `use_gyro` |
 | ST-3215 serial bus servo | 0–4 | Optional; good for arms / grippers. Same bus and protocol, but do **not** share a 6V rail setup — see servo notes |
 | Jumper wires, M3 standoffs, chassis plate | — | Your robot, your build |
 

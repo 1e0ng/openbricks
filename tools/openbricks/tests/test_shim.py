@@ -1061,3 +1061,88 @@ class WorldAliasTableTests(unittest.TestCase):
                 continue
             self.assertTrue((root / rel).is_file(),
                             "%s -> %s missing" % (alias, rel))
+
+
+class SimIcm45686Tests(_ShimTestBase):
+    """The REAL firmware ICM-45686 driver runs unchanged in the sim —
+    no Shim class: ``_native.icm45686`` plus the motor_process
+    hard-yaw surfaces are emulated, and the esp32 NVS fake lets
+    calibration persistence run. The default gyro story, sim side."""
+
+    def _icm(self):
+        from openbricks.drivers.icm45686 import ICM45686
+        return ICM45686(sck=12, mosi=13, miso=11, cs=17)
+
+    def test_constructs_calibrated_with_gravity(self):
+        imu = self._icm()
+        self.assertTrue(imu.calibrated())
+        self.assertTrue(imu.stats()[2])
+        time.sleep_ms(50)          # sensors populate after stepping
+        az = imu.acceleration()[2]
+        self.assertTrue(abs(az - 1.0) < 0.2, az)     # g units
+
+    def test_hard_gyro_turn_lands_and_heading_agrees(self):
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)          # hard source: db_gyro_source(1)
+        imu.reset_heading()
+        db.turn(90)
+        h = imu.heading()
+        self.assertTrue(abs(h - 90) < 5, h)
+        imu.reset_heading()
+        self.assertTrue(abs(imu.heading()) < 1, imu.heading())
+
+    def test_calibration_round_trips_through_the_nvs_fake(self):
+        imu = self._icm()
+        imu.save_calibration()     # locked in sim: must not raise
+        again = self._icm()        # reconstruction seeds from NVS
+        self.assertTrue(again.calibrated())
+
+    def test_heading_unwraps_across_the_180_boundary(self):
+        # The firmware integrator is continuous multi-turn; SimIMU
+        # wraps at +/-180 — both unwrap directions must survive.
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        imu.reset_heading()
+        db.turn(200)
+        h = imu.heading()
+        self.assertTrue(abs(h - 200) < 8, h)      # NOT wrapped to -160
+        db.turn(-400)
+        h = imu.heading()
+        self.assertTrue(abs(h + 200) < 10, h)
+        db.use_gyro(False)                        # gyro_source(0) leg
+
+    def test_esp32_nvs_fake_blob_and_error_paths(self):
+        import esp32
+        nvs = esp32.NVS("openbricks")
+        nvs.set_blob("k", b"hello")
+        buf = bytearray(16)
+        n = nvs.get_blob("k", buf)
+        self.assertEqual(bytes(buf[:n]), b"hello")
+        nvs.commit()
+        try:
+            nvs.get_blob("missing", buf)
+            self.fail("expected OSError")
+        except OSError:
+            pass
+        try:
+            nvs.get_i32("k")                      # blob is not an int
+            self.fail("expected OSError")
+        except OSError:
+            pass
+        nvs.set_i32("n", 42)
+        try:
+            nvs.get_blob("n", buf)                # int is not a blob
+            self.fail("expected OSError")
+        except OSError:
+            pass
+
+    def test_native_icm_surface_extras(self):
+        import _openbricks_native as n
+        self.assertTrue(n.icm45686.available())
+
+    def test_native_selftest_matches_firmware_tuple(self):
+        import _openbricks_native as n
+        self.assertEqual(tuple(n.icm45686.selftest()),
+                         (0, 258, 772, 1286, -2, 300, -5))
