@@ -34,6 +34,7 @@
 #define OB_SREG_OP_MODE      0x21
 #define OB_SREG_TORQUE       0x28
 #define OB_SREG_GOAL_ACC     0x29
+#define OB_SREG_GOAL_TIME    0x2C  // mode-2 raw duty (sign bit 10)
 #define OB_SREG_GOAL_SPEED   0x2E
 #define OB_SREG_PRESENT_POS  0x38
 
@@ -68,6 +69,9 @@ typedef enum {
     OB_SOP_NONE = 0,        // nothing pending
     OB_SOP_WRITE,           // single-register write to one servo
     OB_SOP_SYNC_SPEED,      // sync-write goal_speed to every dirty slot
+    OB_SOP_SYNC_DUTY,       // sync-write mode-2 duty to every dirty
+                            // DUTY-mode slot — the engine's own FF+PI
+                            // speed loop, servo internal control out
     OB_SOP_SYNC_TORQUE,     // sync-write torque to every pending slot —
                             // both drivebase wheels coast at the same
                             // packet boundary, not one write apart
@@ -101,6 +105,19 @@ typedef struct {
     // constructor sequence, one packet per idle-bus tick.
     uint8_t  config_step;   // 0..2 pending, 3 = configured
     uint8_t  goal_acc;      // register byte, pre-encoded by Python
+
+    // Drive mode. 0 = wheel (servo's internal speed loop, goal-speed
+    // sync-writes). 1 = duty ("dumb mode"): the servo runs open-loop
+    // mode 2 and THIS core closes the speed loop — feedforward + PI
+    // computing a raw duty each sync cycle. Switched by
+    // ob_sservo_set_drive_duty, which re-runs the config sequence so
+    // op_mode on the wire always matches.
+    uint8_t  drive_duty;
+    int32_t  duty_integ;    // PI integrator, duty units x1024
+    int32_t  duty_last_err; // steps/s error at last compute — the
+                            // integrator advances in op_started (the
+                            // planner-state contract), which needs
+                            // the error the shipped duty was built on
 
     // Command staging (Python writes under the bus lock).
     int32_t  target_steps;  // signed steps/s
@@ -167,6 +184,21 @@ typedef struct {
                              // and the control loop runs on frozen
                              // odometry (caught by the first
                              // drivebase sim run)
+    uint8_t  sync_kind_toggle; // mixed fleet fairness: duty and wheel
+                               // syncs write different registers, so
+                               // they alternate when both have dirty
+                               // slots — a driving duty slot is
+                               // PERPETUALLY dirty (its PI must keep
+                               // ticking) and would otherwise starve
+                               // wheel-mode setpoints forever
+    // Duty-mode loop gains, fixed-point per-1024, shared by every
+    // duty slot. duty = ff*target/1024 + kp*err/1024 + integ/1024,
+    // clamped to ±1000. Defaults from the 2026-08-12 bench line
+    // (0.894 dps free-run per duty unit ⇒ ~10.17 steps/s per unit ⇒
+    // ff ≈ 1024/10.17): ff=101, kp=51, ki=3.
+    int32_t  duty_ff;
+    int32_t  duty_kp;
+    int32_t  duty_ki;
 } ob_sservo_t;
 
 void ob_sservo_init(ob_sservo_t *s);
@@ -185,6 +217,22 @@ int  ob_sservo_coast(ob_sservo_t *s, int slot);
 // — byte-identical to st3215.py::_encode_goal_speed's output for the
 // same signed steps value. Exposed for tests.
 uint16_t ob_sservo_encode_speed(int32_t steps_per_s);
+
+// Encoded mode-2 duty (magnitude clamped to 1000, direction bit 10 —
+// upstream SMS_STS WritePwm's convention, NOT goal-speed's bit 15).
+// Exposed for tests.
+uint16_t ob_sservo_encode_duty(int32_t duty);
+
+// Switch a slot between wheel (0) and duty (1) drive. Re-runs the
+// slot's config sequence so op_mode on the wire matches; resets the
+// PI state. Returns 0, or -1 on bad args. Call under the bus lock,
+// with the slot's motion stopped.
+int ob_sservo_set_drive_duty(ob_sservo_t *s, int slot, int on);
+
+// Duty-loop gains, fixed-point per-1024 (see ob_sservo_t). Values
+// <= 0 keep the current gain.
+void ob_sservo_set_duty_gains(ob_sservo_t *s, int32_t ff,
+                              int32_t kp, int32_t ki);
 
 // Planner: fill *op with the next bus operation, or OB_SOP_NONE.
 // Priority: pending torque > config sequence > dirty speeds (one

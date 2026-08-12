@@ -101,6 +101,17 @@ class _PerfectWheels:
                             self.spd[sid] = (-(v & 0x7FFF) if v & 0x8000
                                              else v)
                         j += 1 + dl
+                elif reg == 0x2C:                      # mode-2 DUTY
+                    # Dumb-mode plant: bit-10 sign, ~10 steps/s per
+                    # duty unit (the bench's linear free-run line).
+                    self.duty_syncs = getattr(self, "duty_syncs", 0) + 1
+                    while j + dl + 1 <= end:
+                        sid = pkt[j]
+                        v = pkt[j + 1] | (pkt[j + 2] << 8)
+                        duty = -(v & 0x3FF) if v & 0x0400 else (v & 0x3FF)
+                        if sid in self.spd:
+                            self.spd[sid] = duty * 10
+                        j += 1 + dl
                 elif reg == 0x28:                      # TORQUE
                     entries = []
                     while j + dl + 1 <= end:
@@ -940,3 +951,62 @@ class HardHeadingSourceTests(_Base):
         bias3, locked3, _s3 = m.hard_yaw_state()
         self.assertTrue(locked3)
         self.assertTrue(abs(bias3 - 0.5) < 1e-9)
+
+
+class DutyDriveTests(_Base):
+    """Dumb mode end to end over the wire harness: the engine's FF+PI
+    closes the speed loop over raw mode-2 duty packets, the servo's
+    own controller out of the circuit. The harness plant follows the
+    bench's linear free-run line (~10 steps/s per duty unit)."""
+
+    def _to_duty(self):
+        sb.servo_drive_duty(0, True)
+        sb.servo_drive_duty(1, True)
+        self.w.advance(50)              # re-config (mode 2) completes
+
+    def test_duty_drive_converges_on_the_target(self):
+        self._to_duty()
+        sb.duty_gains(101, 51, 3)
+        speed_syncs_before = self.w.syncs
+        sb.servo_run(0, 3000)
+        sb.servo_run(1, 3000)
+        self.w.advance(600)
+        self.assertTrue(getattr(self.w, "duty_syncs", 0) > 0,
+                        "no duty packets reached the wire")
+        self.assertEqual(self.w.syncs, speed_syncs_before,
+                         "duty slots must not ship goal-speed syncs")
+        for sid in (1, 2):
+            err = abs(abs(self.w.spd[sid]) - 3000)
+            self.assertTrue(err < 200,
+                            "servo %d speed %r not near 3000"
+                            % (sid, self.w.spd[sid]))
+
+    def test_duty_rest_stops_the_wheel_and_the_packets(self):
+        self._to_duty()
+        sb.servo_run(0, 3000)
+        self.w.advance(300)
+        sb.servo_run(0, 0)
+        self.w.advance(100)
+        self.assertEqual(self.w.spd[2], 0)
+        quiet = getattr(self.w, "duty_syncs", 0)
+        self.w.advance(200)
+        self.assertEqual(getattr(self.w, "duty_syncs", 0), quiet,
+                         "a resting duty slot must go bus-quiet")
+
+    def test_switch_back_restores_wheel_mode(self):
+        self._to_duty()
+        sb.servo_drive_duty(0, False)
+        sb.servo_drive_duty(1, False)
+        self.w.advance(50)              # re-config (mode 1) completes
+        before = getattr(self.w, "duty_syncs", 0)
+        sb.servo_run(0, 2000)
+        self.w.advance(200)
+        self.assertEqual(getattr(self.w, "duty_syncs", 0), before)
+        self.assertEqual(abs(self.w.spd[2]), 2000)
+
+    def test_bad_slot_is_loud(self):
+        try:
+            sb.servo_drive_duty(9, True)
+            self.fail("expected ValueError")
+        except ValueError:
+            pass

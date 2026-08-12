@@ -334,6 +334,11 @@ static void servo_pump_locked(ob_bus_t *b) {
                                                op.sync_ids, op.sync_data,
                                                op.sync_n) == 0);
             break;
+        case OB_SOP_SYNC_DUTY:
+            started = (ob_bus_start_sync_write(b, OB_SREG_GOAL_TIME, 2,
+                                               op.sync_ids, op.sync_data,
+                                               op.sync_n) == 0);
+            break;
         case OB_SOP_SYNC_TORQUE:
             started = (ob_bus_start_sync_write(b, OB_SREG_TORQUE, 1,
                                                op.sync_ids, op.sync_data,
@@ -736,6 +741,39 @@ static mp_obj_t sb_servo_detach(mp_obj_t self_in, mp_obj_t slot_in) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_detach_obj, sb_servo_detach);
+
+static mp_obj_t sb_servo_drive_duty(mp_obj_t self_in, mp_obj_t slot_in,
+                                    mp_obj_t on_in) {
+    // Switch a slot between the servo's wheel mode (default) and the
+    // engine's duty drive ("dumb mode": servo open-loop, FF+PI here).
+    // Re-runs the slot's config sequence; call with motion stopped.
+    (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
+    int on = mp_obj_is_true(on_in);
+    bus_take();
+    int r = ob_sservo_set_drive_duty(sservo_get(), slot, on);
+    bus_release();
+    if (r != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("servo_drive_duty: bad slot"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(sb_servo_drive_duty_obj,
+                                 sb_servo_drive_duty);
+
+static mp_obj_t sb_duty_gains(size_t n_args, const mp_obj_t *args) {
+    // (self, ff, kp, ki) — fixed-point per-1024; <=0 keeps current.
+    (void)n_args;
+    bus_take();
+    ob_sservo_set_duty_gains(sservo_get(),
+                             (int32_t)mp_obj_get_int(args[1]),
+                             (int32_t)mp_obj_get_int(args[2]),
+                             (int32_t)mp_obj_get_int(args[3]));
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_duty_gains_obj, 4, 4,
+                                           sb_duty_gains);
 
 static mp_obj_t sb_servo_run(mp_obj_t self_in, mp_obj_t slot_in,
                              mp_obj_t steps_in) {
@@ -1426,6 +1464,8 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_detach),     MP_ROM_PTR(&sb_servo_detach_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_slot_of),    MP_ROM_PTR(&sb_servo_slot_of_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_run),        MP_ROM_PTR(&sb_servo_run_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_drive_duty), MP_ROM_PTR(&sb_servo_drive_duty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_duty_gains),       MP_ROM_PTR(&sb_duty_gains_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_user_write), MP_ROM_PTR(&sb_servo_user_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_user_read),  MP_ROM_PTR(&sb_servo_user_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_user_poll),  MP_ROM_PTR(&sb_servo_user_poll_obj) },
