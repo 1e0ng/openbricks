@@ -791,12 +791,17 @@ TEST(duty_mode_switch_guards_and_gain_keepers) {
     sv.slots[0].config_step = 3;                 // pretend configured
     CHECK_EQ_INT(ob_sservo_set_drive_duty(&sv, 0, 1), 0);   // same value
     CHECK_EQ_INT(sv.slots[0].config_step, 3);    // no needless re-config
-    // Gains: <= 0 keeps the current value.
-    ob_sservo_set_duty_gains(&sv, 0, -5, 0);
+    // NEGATIVE keeps the current value; zero is a REAL gain (the
+    // 1.88.0 "<=0 keeps" semantics made pure-FF unreachable).
+    ob_sservo_set_duty_gains(&sv, -1, -5, -1);
     CHECK_EQ_INT(sv.duty_ff, 101);
     CHECK_EQ_INT(sv.duty_kp, 51);
     CHECK_EQ_INT(sv.duty_ki, 3);
-    ob_sservo_set_duty_gains(&sv, 200, 80, 7);
+    ob_sservo_set_duty_gains(&sv, 200, 0, 0);
+    CHECK_EQ_INT(sv.duty_ff, 200);
+    CHECK_EQ_INT(sv.duty_kp, 0);
+    CHECK_EQ_INT(sv.duty_ki, 0);
+    ob_sservo_set_duty_gains(&sv, -1, 80, 7);
     CHECK_EQ_INT(sv.duty_ff, 200);
     CHECK_EQ_INT(sv.duty_kp, 80);
     CHECK_EQ_INT(sv.duty_ki, 7);
@@ -819,7 +824,7 @@ TEST(duty_output_and_integrator_clamp_both_rails) {
     feed_feedback(0, 100, 0);
     // Giant KI: one shipped duty on a huge error must clamp the
     // integrator, both signs.
-    ob_sservo_set_duty_gains(&sv, 0, 0, 1000000);
+    ob_sservo_set_duty_gains(&sv, -1, -1, 1000000);
     ob_sservo_next_op(&sv, &op);
     ob_sservo_op_started(&sv, &op);
     CHECK_EQ_INT(sv.slots[0].duty_integ, 400 * 1024);

@@ -762,7 +762,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(sb_servo_drive_duty_obj,
                                  sb_servo_drive_duty);
 
 static mp_obj_t sb_duty_gains(size_t n_args, const mp_obj_t *args) {
-    // (self, ff, kp, ki) — fixed-point per-1024; <=0 keeps current.
+    // (self, ff, kp, ki) — per-1024; negative keeps, >=0 sets.
     (void)n_args;
     bus_take();
     ob_sservo_set_duty_gains(sservo_get(),

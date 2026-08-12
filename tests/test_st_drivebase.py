@@ -1011,3 +1011,30 @@ class DutyDriveTests(_Base):
             self.fail("expected ValueError")
         except ValueError:
             pass
+
+
+class DutyDriveBaseTests(_Base):
+    """The 2-DOF drivebase controller riding the duty loop end to
+    end: db moves converge with the servo's own controller fully out
+    of the circuit."""
+
+    def setUp(self):
+        _Base.setUp(self)
+        sb.servo_drive_duty(0, True)
+        sb.servo_drive_duty(1, True)
+        self.w.advance(50)              # mode-2 re-config completes
+
+    def test_straight_converges_on_duty_packets_only(self):
+        speed_syncs_before = self.w.syncs
+        sb.db_straight(200.0, 150.0)
+        self.w.advance(3500)
+        self.assertTrue(sb.db_done())
+        self.assertTrue(abs(self._mm(0) - 200) < 12, self._mm(0))
+        self.assertTrue(abs(self._mm(1) - 200) < 12, self._mm(1))
+        self.assertTrue(getattr(self.w, "duty_syncs", 0) > 50)
+        self.assertEqual(self.w.syncs, speed_syncs_before)
+
+    def test_turn_converges_on_duty(self):
+        sb.db_turn(90.0, 60.0)
+        self.w.advance(3000)
+        self.assertTrue(sb.db_done())

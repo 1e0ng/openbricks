@@ -78,7 +78,7 @@ class DriveBase:
     """
 
     def __init__(self, left, right, wheel_diameter_mm, axle_track_mm,
-                 imu=None):
+                 imu=None, drive="duty"):
         """
         Args:
             left, right: Motor instances. The wrapper reaches through to
@@ -87,6 +87,16 @@ class DriveBase:
                 directly. Motors without a native servo (e.g. plain
                 ``L298NMotor`` with no encoder) get open-loop
                 ``drive()`` only.
+            drive: serial-bus wheels only — ``"duty"`` (default) runs
+                the servos open-loop with the engine's own FF+PI speed
+                controller closing the loop over raw duty ("dumb
+                mode": the entire drive loop is openbricks code);
+                ``"wheel"`` uses the servo's internal speed loop
+                instead. One caveat in duty mode: at move end,
+                ``then="brake"``/``"hold"`` behave like ``coast`` at
+                the wheel level (open loop has no hold torque) —
+                while a move is ACTIVE the controller corrects as
+                usual. Ignored on encoder/DC motor pairs.
             wheel_diameter_mm: wheel diameter in millimeters.
             axle_track_mm: distance between the two wheel contact points.
             imu: optional ``IMU``-conformant object (any driver with a
@@ -111,7 +121,11 @@ class DriveBase:
         # sim it's the emulated bus over MuJoCo wheels. Same user code
         # everywhere. Raises if the runtime has no bus — there is no
         # Python fallback loop.
-        self._serial_engine = self._try_adopt_serial(left, right, imu)
+        if drive not in ("duty", "wheel"):
+            raise ValueError('drive must be "duty" or "wheel" (got %r)'
+                             % (drive,))
+        self._serial_engine = self._try_adopt_serial(left, right, imu,
+                                                     drive)
 
         # The native drivebase is only usable if both motors are
         # closed-loop servos. Motor pairs with neither engine get
@@ -139,7 +153,7 @@ class DriveBase:
         # True. ``stop()`` clears this. See ``done`` for the layout.
         self._pending = None
 
-    def _try_adopt_serial(self, left, right, imu):
+    def _try_adopt_serial(self, left, right, imu, drive="duty"):
         # Polymorphic: each serial-motor family implements its own
         # adoption (firmware ST3215Motor -> real st_bus + UART
         # handover; the sim's shim motors -> the emulated bus over
@@ -151,7 +165,7 @@ class DriveBase:
         engine = left._adopt_into_drivebase(
             right,
             wheel_diameter_mm=self._wheel_circumference / math.pi,
-            axle_track_mm=self._axle_track, imu=imu,
+            axle_track_mm=self._axle_track, imu=imu, drive=drive,
             accel_dps2=400.0)   # serial-tuned default (the bench
         # value every native square shipped with); settings(
         # acceleration=...) retunes it afterwards via db_set_accel.

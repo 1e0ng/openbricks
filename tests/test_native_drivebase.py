@@ -97,6 +97,9 @@ class _FakeBus:
         self.slot_ids[a[0]] = a[1]
         return True
 
+    def servo_drive_duty(self, slot, on):
+        self.calls.append(("servo_drive_duty", slot, bool(on)))
+
     def db_config(self, *a):
         self.calls.append(("db_config",) + a)
 
@@ -940,6 +943,36 @@ class DeadMotorDiagnosisTests(_Base):
             self.fail("expected OSError")
         except OSError:
             pass
+
+    def test_default_drive_is_duty_on_both_wheel_slots(self):
+        # The dumb-mode default (1.89.0): adoption flips both wheel
+        # slots to the engine's duty drive before db_config.
+        db = self._db()
+        flips = [c for c in self.bus.calls if c[0] == "servo_drive_duty"]
+        self.assertEqual(sorted(flips),
+                         [("servo_drive_duty", db._slot_l, True),
+                          ("servo_drive_duty", db._slot_r, True)]
+                         if db._slot_l < db._slot_r else
+                         [("servo_drive_duty", db._slot_r, True),
+                          ("servo_drive_duty", db._slot_l, True)])
+        cfg_idx = next(i for i, c in enumerate(self.bus.calls)
+                       if c[0] == "db_config")
+        flip_idx = max(i for i, c in enumerate(self.bus.calls)
+                       if c[0] == "servo_drive_duty")
+        self.assertTrue(flip_idx < cfg_idx,
+                        "duty flip must precede db_config")
+
+    def test_drive_wheel_opts_out_of_duty(self):
+        db = self._db(drive="wheel")
+        flips = [c for c in self.bus.calls if c[0] == "servo_drive_duty"]
+        self.assertEqual(flips, [])
+
+    def test_bad_drive_value_is_loud(self):
+        try:
+            self._db(drive="turbo")
+            self.fail("expected ValueError")
+        except ValueError as e:
+            self.assertTrue("duty" in str(e), e)
 
     def test_ten_metre_straight_gets_a_minute_class_budget(self):
         # The watchdog scales with the COMMANDED move: 10 m at the

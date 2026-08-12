@@ -81,7 +81,8 @@ def _bus():
 class _SerialNativeEngine:
     @classmethod
     def adopt_motors(cls, left, right, wheel_diameter_mm,
-                     axle_track_mm, imu=None, accel_dps2=400.0):
+                     axle_track_mm, imu=None, accel_dps2=400.0,
+                     drive="duty"):
         """Adopt two constructed serial-bus Motor objects: recover the
         bus params from the driver registry, RELEASE their
         machine.UART (explicit ownership handover — the double-claim
@@ -137,7 +138,7 @@ class _SerialNativeEngine:
                       invert_right=right._invert,
                       uart_id=uart_id, tx=tx, rx=rx, baud=baud,
                       accel_dps2=accel_dps2,
-                      slot_l=held_l, slot_r=held_r)
+                      slot_l=held_l, slot_r=held_r, drive=drive)
         except BaseException:
             # Engine construction RAISES by design (dead wheel, slot
             # exhaustion, attach failure) — but the MicroPython bus
@@ -170,7 +171,7 @@ class _SerialNativeEngine:
                  invert_left=False, invert_right=False,
                  uart_id=1, tx=14, rx=6, baud=1_000_000,
                  accel_dps2=400.0, sb=None,
-                 slot_l=None, slot_r=None):
+                 slot_l=None, slot_r=None, drive="duty"):
         # ``sb`` is the bus-surface seam: firmware injects the real
         # st_bus (default), the sim injects its emulation — the ONE
         # engine code path serves both worlds.
@@ -224,6 +225,19 @@ class _SerialNativeEngine:
         self._slot_r = (slot_r if slot_r is not None
                         else self._claim_slot(right_id, invert_right, acc,
                                               "right"))
+        if drive not in ("duty", "wheel"):
+            raise ValueError('drive must be "duty" or "wheel" (got %r)'
+                             % (drive,))
+        if drive == "duty":
+            # The default since 1.89.0 (dumb-mode directive): the
+            # servo runs open-loop and the engine's FF+PI is the
+            # speed controller — the whole drive loop is ours. The
+            # flip re-runs each slot's config sequence (op_mode=2);
+            # _require_live_wheels below waits that out like any
+            # other config. drive="wheel" restores the servo's
+            # internal speed loop.
+            self._sb.servo_drive_duty(self._slot_l, True)
+            self._sb.servo_drive_duty(self._slot_r, True)
         self._sb.db_config(self._slot_l, self._slot_r,
                            float(wheel_diameter_mm), float(axle_track_mm),
                            float(accel_dps2))

@@ -229,8 +229,9 @@ uint16_t ob_sservo_encode_duty(int32_t duty);
 // with the slot's motion stopped.
 int ob_sservo_set_drive_duty(ob_sservo_t *s, int slot, int on);
 
-// Duty-loop gains, fixed-point per-1024 (see ob_sservo_t). Values
-// <= 0 keep the current gain.
+// Duty-loop gains, fixed-point per-1024 (see ob_sservo_t). Zero is
+// a real gain (pure-FF runs kp=ki=0); NEGATIVE keeps the current
+// value.
 void ob_sservo_set_duty_gains(ob_sservo_t *s, int32_t ff,
                               int32_t kp, int32_t ki);
 
