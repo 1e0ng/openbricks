@@ -81,7 +81,7 @@ def _bus():
 class _SerialNativeEngine:
     @classmethod
     def adopt_motors(cls, left, right, wheel_diameter_mm,
-                     axle_track_mm, imu=None, accel_dps2=400.0,
+                     axle_track_mm, imu=None, accel_dps2=1500.0,
                      drive="duty"):
         """Adopt two constructed serial-bus Motor objects: recover the
         bus params from the driver registry, RELEASE their
@@ -170,8 +170,9 @@ class _SerialNativeEngine:
                  axle_track_mm, imu=None,
                  invert_left=False, invert_right=False,
                  uart_id=1, tx=14, rx=6, baud=1_000_000,
-                 accel_dps2=400.0, sb=None,
-                 slot_l=None, slot_r=None, drive="duty"):
+                 accel_dps2=1500.0, sb=None,
+                 slot_l=None, slot_r=None, drive="duty",
+                 turn_accel_dps2=1500.0):
         # ``sb`` is the bus-surface seam: firmware injects the real
         # st_bus (default), the sim injects its emulation — the ONE
         # engine code path serves both worlds.
@@ -187,9 +188,13 @@ class _SerialNativeEngine:
         self._gyro_prev = None
         self._deadline = 0
         self._deadline_budget_ms = self._SETTLE_TIMEOUT_MS
-        self._straight_speed_dps = 200
-        self._turn_rate_dps = 150
+        # Pybricks-parity defaults (1.90.0): straight = 40% of the
+        # ST-3032's 888 dps rated speed, turn = 33% (their
+        # drivebase_adopt_settings percentages applied to our motor).
+        self._straight_speed_dps = 350
+        self._turn_rate_dps = 300
         self._accel_dps2 = float(accel_dps2)
+        self._turn_accel_dps2 = float(turn_accel_dps2)
         # Kept for diagnostics: a dead-motor message is only useful if
         # it says WHICH motor and where it's wired.
         self._left_id, self._right_id = left_id, right_id
@@ -241,6 +246,8 @@ class _SerialNativeEngine:
         self._sb.db_config(self._slot_l, self._slot_r,
                            float(wheel_diameter_mm), float(axle_track_mm),
                            float(accel_dps2))
+        if turn_accel_dps2 != accel_dps2:
+            self._sb.db_set_turn_accel(float(turn_accel_dps2))
         # Wiring/ID/power problems are found HERE, at construction,
         # not as mysterious non-motion later: attaching a slot only
         # claims it in C, it never asks the servo whether it exists.
@@ -406,6 +413,10 @@ class _SerialNativeEngine:
         self._accel_dps2 = float(accel_dps2)
         self._sb.db_set_accel(float(accel_dps2))
 
+    def set_turn_accel(self, accel_dps2):
+        self._turn_accel_dps2 = float(accel_dps2)
+        self._sb.db_set_turn_accel(float(accel_dps2))
+
     def arm_straight(self, distance_mm):
         estop.check()
         mm_s = self._straight_speed_dps * self._wheel_circumference / 360.0
@@ -427,7 +438,7 @@ class _SerialNativeEngine:
         body_dps = (self._turn_rate_dps * self._wheel_circumference
                     / (math.pi * self._axle_track))
         self._sb.db_turn(float(angle_deg), float(body_dps))
-        accel_body = (self._accel_dps2 * self._wheel_circumference
+        accel_body = (self._turn_accel_dps2 * self._wheel_circumference
                       / (math.pi * self._axle_track))
         self._arm_deadline(self._profile_ms(angle_deg, body_dps, accel_body))
 

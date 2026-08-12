@@ -10,11 +10,12 @@ body-degrees.
     from openbricks.drivers.st3032 import ST3032Motor
     from openbricks.robotics import DriveBase
 
-    left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-    right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+    left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+    right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
 
     db = DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=138)
-    db.settings(straight_speed=200, turn_rate=150)
+    db.settings(straight_speed=250, turn_rate=200,
+                acceleration=1000, turn_acceleration=800)
 
     for _ in range(4):          # a 300 mm square
         db.straight(300)

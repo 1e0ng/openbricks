@@ -143,10 +143,11 @@ class DriveBase:
         else:
             self._native = None
 
-        # Default cruise parameters (wheel-degrees per second). Tweak via
-        # ``settings()``.
-        self._straight_speed_dps = 200
-        self._turn_rate_dps      = 180
+        # Default cruise parameters (wheel-degrees per second),
+        # Pybricks-parity since 1.90.0: 40% / 33% of the ST-3032's
+        # 888 dps rated speed. Tweak via ``settings()``.
+        self._straight_speed_dps = 350
+        self._turn_rate_dps      = 300
 
         # State for in-flight ``straight(wait=False)`` / ``turn(wait=False)``
         # moves. ``None`` means nothing pending; ``done()`` returns
@@ -166,9 +167,9 @@ class DriveBase:
             right,
             wheel_diameter_mm=self._wheel_circumference / math.pi,
             axle_track_mm=self._axle_track, imu=imu, drive=drive,
-            accel_dps2=400.0)   # serial-tuned default (the bench
-        # value every native square shipped with); settings(
-        # acceleration=...) retunes it afterwards via db_set_accel.
+            accel_dps2=1500.0)  # Pybricks-parity default (their
+        # hardcoded 2000 dps^2 motor accel x 3/4 drivebase factor);
+        # settings(acceleration=...) retunes it via db_set_accel.
         if engine is None:
             # Serial-bus motors with no bus behind them: this runtime
             # can't drive them closed-loop, and the Python fallback
@@ -180,20 +181,27 @@ class DriveBase:
         return engine
 
     def settings(self, straight_speed=None, turn_rate=None,
-                 acceleration=None):
+                 acceleration=None, turn_acceleration=None):
         """Tune cruise + ramp parameters for subsequent moves.
 
         Args:
             straight_speed: cruise speed for ``straight()``, wheel-deg/s.
             turn_rate: cruise rate for ``turn()``, wheel-deg/s.
-            acceleration: trajectory acceleration, wheel-deg/s², shared
-                by ``straight()`` and ``turn()`` ramps. Default 400 —
-                lower it if the robot pitches or
-                lifts its rear on launch. In mm/s² that's
+            acceleration: STRAIGHT (and curve) trajectory
+                acceleration, wheel-deg/s² — Pybricks'
+                ``straight_acceleration``. Serial-engine default 1500
+                (Pybricks parity: their 2000 dps² motor accel × 3/4)
+                — lower it if the robot pitches or lifts its rear on
+                launch. In mm/s² that's
                 ``acceleration * wheel_circumference / 360``. Applies
                 on both paths: the native (encoder-servo) controller
                 arms its C trajectory with it, and the serial-bus
                 engine forwards it to the hard-tick controller.
+            turn_acceleration: ``turn()`` ramps' own acceleration,
+                wheel-deg/s², independent of ``acceleration`` —
+                Pybricks parity (serial default 1500). Serial-bus
+                drivebase only; passing it on an encoder/DC pair
+                raises.
         """
         if straight_speed is not None:
             self._straight_speed_dps = straight_speed
@@ -211,6 +219,17 @@ class DriveBase:
                 self._native.set_accel(float(acceleration))
             if self._serial_engine is not None:
                 self._serial_engine.set_accel(float(acceleration))
+        if turn_acceleration is not None:
+            if not turn_acceleration > 0:
+                raise ValueError(
+                    "turn_acceleration must be > 0 deg/s^2 (got %r)"
+                    % (turn_acceleration,))
+            if self._serial_engine is None:
+                raise ValueError(
+                    "turn_acceleration is supported on the serial-bus "
+                    "drivebase only (encoder/DC pairs share one "
+                    "acceleration)")
+            self._serial_engine.set_turn_accel(float(turn_acceleration))
 
     def use_gyro(self, enable):
         """Switch the heading feedback source between encoder-diff (default)

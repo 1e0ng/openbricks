@@ -942,6 +942,7 @@ class SimStBusEngineTests(_ShimTestBase):
         sb.servo_drive_duty(0, True)
         sb.servo_drive_duty(0, False)
         sb.duty_gains(101, 51, 3)
+        sb.db_set_turn_accel(800.0)
         try:
             sb.servo_drive_duty(9, True)
             self.fail("expected ValueError")

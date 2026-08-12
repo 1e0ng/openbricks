@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.90.0 — Pybricks-parity defaults + turn_acceleration
+
+DriveBase defaults now follow Pybricks' drivebase formulas applied
+to the ST-3032's 888 dps rated speed: straight_speed 350 (40% of
+max, was 200), turn_rate 300 wheel-dps (33%, was 150/180), and
+acceleration 1500 wheel-dps² (their hardcoded 2000 motor accel ×
+3/4 drivebase factor; was 400) — launches reach cruise ~4× sooner.
+And the missing knob exists: `settings(turn_acceleration=...)`
+gives turn ramps their own acceleration (default 1500),
+independent of the straight one, exactly like Pybricks. The C core
+still has one accel field — the arm glue selects the per-move-type
+value (curve counts as a drive move, like Pybricks). Encoder/DC
+pairs keep one shared acceleration; passing turn_acceleration
+there raises. Sim mirrors the split.
+
 ## 1.89.0 — DriveBase drives dumb mode by default (stage 3)
 
 Serial-bus wheels now adopt straight into the engine's duty drive:
