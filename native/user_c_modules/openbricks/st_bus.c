@@ -1062,6 +1062,25 @@ static mp_obj_t sb_torque_off_all(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_torque_off_all_obj, sb_torque_off_all);
 
+static mp_obj_t sb_estop(mp_obj_t self_in) {
+    // The launcher's stop-all-motors leg for ADOPTED buses — the
+    // same kill the hard button's from-tick hook performs, callable
+    // from Python at program exit. Torque-off alone is NOT enough:
+    // an active drivebase tick re-stages torque via set_speed, and
+    // an in-flight per-slot move does the same — both writers must
+    // die first. Slot attachments and the db slot binding survive
+    // (motors keep their slots across the program boundary); the
+    // fault latch is preserved (diagnostics must not destroy
+    // evidence).
+    bus_take();
+    st_db_active = false;
+    st_db_writing = false;
+    st_moves_reset_all();
+    bus_release();
+    return sb_torque_off_all(self_in);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_estop_obj, sb_estop);
+
 // ---- native drivebase bindings ----
 
 static mp_obj_t sb_db_config(size_t n_args, const mp_obj_t *args) {
@@ -1505,6 +1524,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_pump),       MP_ROM_PTR(&sb_servo_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_encode),     MP_ROM_PTR(&sb_servo_encode_obj) },
     { MP_ROM_QSTR(MP_QSTR_torque_off_all),   MP_ROM_PTR(&sb_torque_off_all_obj) },
+    { MP_ROM_QSTR(MP_QSTR_estop),            MP_ROM_PTR(&sb_estop_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset_runtime),    MP_ROM_PTR(&sb_reset_runtime_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_config),        MP_ROM_PTR(&sb_db_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_disable),       MP_ROM_PTR(&sb_db_disable_obj) },
