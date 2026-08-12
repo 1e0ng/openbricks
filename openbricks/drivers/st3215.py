@@ -97,12 +97,14 @@ _MODE_STEP     = 3   # step servo: goal_position is a SIGNED RELATIVE
                      # step; multi-turn capable (needs angle limits=0)
 
 # Mode-2 duty register (upstream SMS_STS ``WritePwm``: GOAL_TIME, reg
-# 44/45). Sign-magnitude with the direction bit at BIT 10 — the
-# load-register convention, NOT the goal-speed bit 15. Magnitude
-# 0..1000 = 0..100% duty. Bench-verified 2026-08-12: linear ~0.894
-# dps free-run per unit on the ST-3032; torque drops on the mode
-# switch and must be re-enabled. The goal-SPEED register (0x2E)
-# accepts writes in mode 2 but is inert.
+# 44/45). Sign-magnitude with the direction bit at BIT 10, and — like
+# the present-LOAD register (bench 2026-08-03) — bit 10 SET means the
+# POSITIVE direction on our units, the OPPOSITE of the Feetech SDK's
+# convention (bench 2026-08-12: SDK-signed duty drove every wheel
+# backwards). Magnitude 0..1000 = 0..100% duty, linear ~0.894 dps
+# free-run per unit on the ST-3032. Torque drops on the mode switch
+# and must be re-enabled; the goal-SPEED register (0x2E) accepts
+# writes in mode 2 but is inert.
 _REG_GOAL_TIME = 0x2C
 _PWM_SIGN_BIT  = 0x0400
 
@@ -905,11 +907,12 @@ class ST3215Motor(Motor):
         self._abandon_pending()
         self._ensure_mode(_MODE_PWM)
         self._ensure_torque_on()
-        raw = int(round(abs(duty) * 10))
+        raw_duty = -duty if self._invert else duty
+        raw = int(round(abs(raw_duty) * 10))
         if raw > 1000:
             raw = 1000
-        if (duty < 0) != self._invert:
-            raw |= _PWM_SIGN_BIT
+        if raw_duty > 0:
+            raw |= _PWM_SIGN_BIT   # bit 10 = POSITIVE (load convention)
         self._bus.write(self._id, _REG_GOAL_TIME,
                         bytes([raw & 0xFF, (raw >> 8) & 0xFF]))
 

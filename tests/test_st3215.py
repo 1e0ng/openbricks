@@ -1154,7 +1154,8 @@ class TestPybricksParityFeedback(unittest.TestCase):
         modes = _writes_to(log, 0x21)
         self.assertEqual(modes[-1], (3, bytes([2])))
         duties = _writes_to(log, 0x2C)
-        self.assertEqual(duties[-1], (3, bytes([500 & 0xFF, 500 >> 8])))
+        raw = 500 | 0x0400          # bit 10 = POSITIVE (load convention)
+        self.assertEqual(duties[-1], (3, bytes([raw & 0xFF, raw >> 8])))
         # torque write must come after the mode write in the log
         torque_idx = max(i for i, p in enumerate(log)
                          if _decode_write(p)[1] == 0x28)
@@ -1165,28 +1166,29 @@ class TestPybricksParityFeedback(unittest.TestCase):
         # speed register untouched: this is not scaled run_speed
         self.assertEqual(_writes_to(log, _REG_GOAL_SPEED), [])
 
-    def test_dc_negative_uses_bit_10_sign(self):
-        # Upstream SMS_STS WritePwm: sign-magnitude, direction bit
-        # 10 (the load convention) — NOT goal-speed's bit 15.
+    def test_dc_negative_clears_the_direction_bit(self):
+        # Sign-magnitude at bit 10, and bit 10 SET means POSITIVE on
+        # our units (present-load convention, bench 2026-08-12 — the
+        # Feetech SDK's sign is inverted, and drove every wheel
+        # backwards until this flip).
         m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0)
         m.dc(-30)
-        raw = 300 | 0x0400
         duties = _writes_to(m._bus._uart._tx_log, 0x2C)
-        self.assertEqual(duties[-1], (3, bytes([raw & 0xFF, raw >> 8])))
+        self.assertEqual(duties[-1], (3, bytes([300 & 0xFF, 300 >> 8])))
 
     def test_dc_invert_flips_the_direction_bit(self):
         m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0,
                         invert=True)
         m.dc(30)
-        raw = 300 | 0x0400
         duties = _writes_to(m._bus._uart._tx_log, 0x2C)
-        self.assertEqual(duties[-1], (3, bytes([raw & 0xFF, raw >> 8])))
+        self.assertEqual(duties[-1], (3, bytes([300 & 0xFF, 300 >> 8])))
 
     def test_dc_clamps_to_full_duty(self):
         m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0)
         m.dc(250)
+        raw = 1000 | 0x0400
         duties = _writes_to(m._bus._uart._tx_log, 0x2C)
-        self.assertEqual(duties[-1], (3, bytes([1000 & 0xFF, 1000 >> 8])))
+        self.assertEqual(duties[-1], (3, bytes([raw & 0xFF, raw >> 8])))
 
     def test_run_speed_after_dc_restores_wheel_mode_and_torque(self):
         # Leaving mode 2 must re-assert BOTH the mode and the torque
