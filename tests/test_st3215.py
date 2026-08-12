@@ -1143,12 +1143,81 @@ class TestPybricksParityFeedback(unittest.TestCase):
         with self.assertRaises(OSError):
             m.stalled()
 
-    def test_dc_maps_duty_onto_max_dps(self):
+    def test_dc_is_true_open_loop_mode_2(self):
+        # dc() must bypass the servo's speed loop entirely: mode 2,
+        # torque re-enabled AFTER the mode switch (the servo drops it
+        # on mode changes — bench 2026-08-12), duty*10 into the
+        # GOAL_TIME register.
         m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0)
         m.dc(50)
-        speeds = _writes_to(m._bus._uart._tx_log, _REG_GOAL_SPEED)
-        self.assertEqual(speeds[-1], (3, bytes([
-            3000 & 0xFF, 3000 >> 8])))   # 300 dps x 10 steps
+        log = m._bus._uart._tx_log
+        modes = _writes_to(log, 0x21)
+        self.assertEqual(modes[-1], (3, bytes([2])))
+        duties = _writes_to(log, 0x2C)
+        self.assertEqual(duties[-1], (3, bytes([500 & 0xFF, 500 >> 8])))
+        # torque write must come after the mode write in the log
+        torque_idx = max(i for i, p in enumerate(log)
+                         if _decode_write(p)[1] == 0x28)
+        mode_idx = max(i for i, p in enumerate(log)
+                       if _decode_write(p)[1] == 0x21)
+        self.assertTrue(torque_idx > mode_idx,
+                        "torque must be re-enabled after the mode switch")
+        # speed register untouched: this is not scaled run_speed
+        self.assertEqual(_writes_to(log, _REG_GOAL_SPEED), [])
+
+    def test_dc_negative_uses_bit_10_sign(self):
+        # Upstream SMS_STS WritePwm: sign-magnitude, direction bit
+        # 10 (the load convention) — NOT goal-speed's bit 15.
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0)
+        m.dc(-30)
+        raw = 300 | 0x0400
+        duties = _writes_to(m._bus._uart._tx_log, 0x2C)
+        self.assertEqual(duties[-1], (3, bytes([raw & 0xFF, raw >> 8])))
+
+    def test_dc_invert_flips_the_direction_bit(self):
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0,
+                        invert=True)
+        m.dc(30)
+        raw = 300 | 0x0400
+        duties = _writes_to(m._bus._uart._tx_log, 0x2C)
+        self.assertEqual(duties[-1], (3, bytes([raw & 0xFF, raw >> 8])))
+
+    def test_dc_clamps_to_full_duty(self):
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0)
+        m.dc(250)
+        duties = _writes_to(m._bus._uart._tx_log, 0x2C)
+        self.assertEqual(duties[-1], (3, bytes([1000 & 0xFF, 1000 >> 8])))
+
+    def test_run_speed_after_dc_restores_wheel_mode_and_torque(self):
+        # Leaving mode 2 must re-assert BOTH the mode and the torque
+        # (the cache is invalidated by the mode change), or the
+        # motion command silently does nothing.
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0)
+        m.dc(50)
+        log = m._bus._uart._tx_log
+        n_before = len(log)
+        m.run_speed(100)
+        tail = log[n_before:]
+        modes = _writes_to(tail, 0x21)
+        self.assertEqual(modes[-1], (3, bytes([1])))
+        torques = _writes_to(tail, 0x28)
+        self.assertEqual(torques[-1], (3, bytes([1])))
+
+    def test_dc_on_adopted_motor_falls_back_to_scaled_speed(self):
+        # The native engine owns the bus for adopted motors; true
+        # open-loop duty lands with the engine's own duty drive.
+        # Until then dc() keeps the historical scaled-speed mapping.
+        m = ST3215Motor(servo_id=3, steps_per_dps=10.0, max_dps=600.0)
+        calls = []
+
+        class _SB:
+            @staticmethod
+            def servo_run(slot, steps):
+                calls.append((slot, steps))
+        m._native_slot = 0
+        m._native_sb = _SB()
+        m.dc(50)
+        self.assertEqual(calls, [(0, 3000)])   # 300 dps x 10 steps
 
     def test_run_is_degrees_per_second_not_power(self):
         # THE breaking change pin: run(300) must command 300 dps
