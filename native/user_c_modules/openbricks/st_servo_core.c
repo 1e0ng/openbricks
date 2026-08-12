@@ -180,8 +180,12 @@ uint16_t ob_sservo_encode_duty(int32_t duty) {
         mag = 1000;
     }
     uint16_t v = (uint16_t)mag;
-    if (duty < 0) {
-        v |= 0x0400;    // load-register convention: direction bit 10
+    if (duty > 0) {
+        // Bit 10 SET = POSITIVE direction — the present-load
+        // register's convention, and the OPPOSITE of the Feetech
+        // SDK's (bench 2026-08-12: SDK-signed duty reversed every
+        // wheel; same SDK-vs-silicon flip the load decode needed).
+        v |= 0x0400;
     }
     return v;
 }

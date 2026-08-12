@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.88.1 — duty direction bit: bit 10 SET means POSITIVE
+
+The bench's dc() sanity drive ran backwards: the GOAL_TIME
+direction bit follows the present-LOAD register's convention on
+our units — bit 10 SET = positive direction — which is the
+OPPOSITE of the Feetech SDK's signing, exactly like the load
+decode discovered on 2026-08-03. Flipped in dc(), in the engine's
+duty encoder, and in every test surface (C, MP harness, driver).
+Do NOT drive the 1.88.0 engine duty mode: its inverted sign turns
+the PI into positive feedback (full-speed reverse runaway); flash
+1.88.1 before any duty-mode driving.
+
 ## 1.88.0 — the engine's own duty drive (dumb mode, stage 2)
 
 The serial engine can now drive a wheel slot in "dumb mode": the

@@ -667,10 +667,13 @@ static uint16_t sync_duty_value(const ob_sservo_op_t *op, int k) {
 }
 
 TEST(duty_encode_uses_bit_10_and_clamps) {
-    CHECK_EQ_INT(ob_sservo_encode_duty(300), 300);
-    CHECK_EQ_INT(ob_sservo_encode_duty(-300), 300 | 0x0400);
-    CHECK_EQ_INT(ob_sservo_encode_duty(1500), 1000);
-    CHECK_EQ_INT(ob_sservo_encode_duty(-1500), 1000 | 0x0400);
+    // Bit 10 SET = POSITIVE (the load-register convention; the
+    // Feetech SDK's sign is inverted for our units — bench
+    // 2026-08-12, every wheel drove backwards under SDK signing).
+    CHECK_EQ_INT(ob_sservo_encode_duty(300), 300 | 0x0400);
+    CHECK_EQ_INT(ob_sservo_encode_duty(-300), 300);
+    CHECK_EQ_INT(ob_sservo_encode_duty(1500), 1000 | 0x0400);
+    CHECK_EQ_INT(ob_sservo_encode_duty(-1500), 1000);
     CHECK_EQ_INT(ob_sservo_encode_duty(0), 0);
 }
 
@@ -711,9 +714,10 @@ TEST(duty_sync_ships_ff_then_integral_corrects_sag) {
     CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
     CHECK_EQ_INT(op.sync_n, 1);
     CHECK_EQ_INT(op.sync_ids[0], 7);
-    // No feedback yet: feedforward only — 101*1000/1024 = 98.
+    // No feedback yet: feedforward only — 101*1000/1024 = 98,
+    // bit 10 set (positive direction).
     uint16_t first = sync_duty_value(&op, 0);
-    CHECK_EQ_INT(first, 98);
+    CHECK_EQ_INT(first, 98 | 0x0400);
     ob_sservo_op_started(&sv, &op);
     // Driving duty slot STAYS dirty — the PI must keep ticking on a
     // one-shot run_speed.
@@ -731,7 +735,7 @@ TEST(duty_sync_ships_ff_then_integral_corrects_sag) {
         duty = sync_duty_value(&op, 0);
         ob_sservo_op_started(&sv, &op);
     }
-    CHECK(duty > first + 5);                  // integral action real
+    CHECK((duty & 0x3FF) > (first & 0x3FF) + 5);   // integral action
     CHECK(sv.slots[0].duty_integ > 0);
 }
 
@@ -773,7 +777,7 @@ TEST(duty_feedback_dark_is_ff_only) {
     ob_sservo_next_op(&sv, &op);
     CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
     // stale feedback: P term excluded, duty stays at ff+integ.
-    CHECK_EQ_INT(sync_duty_value(&op, 0), 98);
+    CHECK_EQ_INT(sync_duty_value(&op, 0), 98 | 0x0400);
 }
 
 TEST(duty_mode_switch_guards_and_gain_keepers) {
@@ -808,7 +812,7 @@ TEST(duty_output_and_integrator_clamp_both_rails) {
     ob_sservo_op_started(&sv, &op);
     ob_sservo_next_op(&sv, &op);
     CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
-    CHECK_EQ_INT(sync_duty_value(&op, 0), 1000);            // + rail
+    CHECK_EQ_INT(sync_duty_value(&op, 0), 1000 | 0x0400);   // + rail
     ob_sservo_op_started(&sv, &op);
     ob_sservo_next_op(&sv, &op);                 // fairness read
     ob_sservo_op_started(&sv, &op);
@@ -825,7 +829,7 @@ TEST(duty_output_and_integrator_clamp_both_rails) {
     feed_feedback(0, 100, 0);
     ob_sservo_next_op(&sv, &op);
     CHECK_EQ_INT(op.kind, OB_SOP_SYNC_DUTY);
-    CHECK_EQ_INT(sync_duty_value(&op, 0), 1000 | 0x0400);   // - rail
+    CHECK_EQ_INT(sync_duty_value(&op, 0), 1000);            // - rail
     ob_sservo_op_started(&sv, &op);
     ob_sservo_next_op(&sv, &op);                 // read (fairness)
     ob_sservo_op_started(&sv, &op);

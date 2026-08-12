@@ -102,13 +102,14 @@ class _PerfectWheels:
                                              else v)
                         j += 1 + dl
                 elif reg == 0x2C:                      # mode-2 DUTY
-                    # Dumb-mode plant: bit-10 sign, ~10 steps/s per
-                    # duty unit (the bench's linear free-run line).
+                    # Dumb-mode plant: bit 10 SET = POSITIVE (the
+                    # load-register convention; bench 2026-08-12),
+                    # ~10 steps/s per duty unit free-run.
                     self.duty_syncs = getattr(self, "duty_syncs", 0) + 1
                     while j + dl + 1 <= end:
                         sid = pkt[j]
                         v = pkt[j + 1] | (pkt[j + 2] << 8)
-                        duty = -(v & 0x3FF) if v & 0x0400 else (v & 0x3FF)
+                        duty = (v & 0x3FF) if v & 0x0400 else -(v & 0x3FF)
                         if sid in self.spd:
                             self.spd[sid] = duty * 10
                         j += 1 + dl
