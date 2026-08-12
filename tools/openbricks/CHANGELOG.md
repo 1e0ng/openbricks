@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.87.0 — true open-loop dc() on the serial servos
+
+`Motor.dc()` on ST-3032/ST-3215 is now real Pybricks semantics:
+raw duty with no speed regulation (servo open-loop mode 2, duty in
+the GOAL_TIME register, sign-magnitude bit 10 per upstream
+SMS_STS ``WritePwm``), so speed sags honestly under load. It was
+previously a scaled ``run_speed`` — still regulated. Also fixes a
+latent transition bug the bench exposed: the servo drops torque on
+a mode change, so the driver's torque cache is now invalidated on
+every mode switch and re-asserted by the next motion command
+(including the ``then="brake"`` dispatch, which could silently
+coast). Adopted motors (native DriveBase wheels) keep the
+scaled-speed mapping until the engine grows its own duty drive —
+the first stage of moving the serial drive path onto our own
+control loop.
+
 ## 1.86.0 — gyro-measured axle-track calibration
 
 New `examples/icm45686_axle_track.py`: ten encoder-only turns with

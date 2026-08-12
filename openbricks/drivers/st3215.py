@@ -91,9 +91,20 @@ _REG_PRESENT_LOAD  = 0x3C
 _REG_TORQUE_LIMIT  = 0x30
 
 _MODE_POSITION = 0   # single-turn absolute position (0..4095 = 0..360°)
-_MODE_WHEEL    = 1   # continuous velocity (wheel)
+_MODE_WHEEL    = 1   # continuous velocity (wheel, servo-internal loop)
+_MODE_PWM      = 2   # wheel OPEN-loop: raw duty, no internal control
 _MODE_STEP     = 3   # step servo: goal_position is a SIGNED RELATIVE
                      # step; multi-turn capable (needs angle limits=0)
+
+# Mode-2 duty register (upstream SMS_STS ``WritePwm``: GOAL_TIME, reg
+# 44/45). Sign-magnitude with the direction bit at BIT 10 — the
+# load-register convention, NOT the goal-speed bit 15. Magnitude
+# 0..1000 = 0..100% duty. Bench-verified 2026-08-12: linear ~0.894
+# dps free-run per unit on the ST-3032; torque drops on the mode
+# switch and must be re-enabled. The goal-SPEED register (0x2E)
+# accepts writes in mode 2 but is inert.
+_REG_GOAL_TIME = 0x2C
+_PWM_SIGN_BIT  = 0x0400
 
 # Hardware: 4096 encoder counts per output revolution.
 _COUNTS_PER_REV = 4096
@@ -708,6 +719,11 @@ class ST3215Motor(Motor):
             self._bus.write(self._id, _REG_OP_MODE, bytes([mode]))
             self._op_mode = mode
             self._last_raw = None
+            # A mode change can drop torque on the servo side (bench
+            # 2026-08-12, entering mode 2) — the cache must not claim
+            # otherwise, or the next _ensure_torque_on no-ops and the
+            # motion command silently does nothing.
+            self._torque_on = False
 
     def _ensure_torque_on(self):
         """Re-enable torque if a prior ``coast`` (or ``then="coast"``)
@@ -864,19 +880,38 @@ class ST3215Motor(Motor):
             self._torque_on = False
         elif then == "brake":
             self._ensure_mode(_MODE_WHEEL)
+            self._ensure_torque_on()
             self._write_goal_speed_signed(0)
         # else "hold": step mode already holds the target — nothing to do.
 
     # --- Motor interface --------------------------------------------------
 
     def dc(self, duty):
-        """Duty-style command, Pybricks ``Motor.dc()`` shape. The
-        serial servo has no raw-PWM wheel mode, so duty maps onto
-        ``run_speed`` scaled to ``max_dps`` — same behaviour as the
-        pre-1.21.0 ``run(power)``."""
+        """True Pybricks ``Motor.dc()``: raw duty, no speed
+        regulation. Switches the servo to its open-loop mode (2) and
+        writes duty straight to the output stage — speed sags under
+        load, exactly like a plain DC motor at fixed voltage.
+
+        On a motor adopted by the native engine the bus belongs to
+        the hard tick, so duty still maps onto ``run_speed`` scaled
+        to ``max_dps`` there (transitional until the engine grows
+        its own duty drive)."""
+        estop.check()
         if duty >  100: duty =  100
         if duty < -100: duty = -100
-        self.run_speed(self._max_dps * duty / 100.0)
+        if self._native_slot is not None:
+            self.run_speed(self._max_dps * duty / 100.0)
+            return
+        self._abandon_pending()
+        self._ensure_mode(_MODE_PWM)
+        self._ensure_torque_on()
+        raw = int(round(abs(duty) * 10))
+        if raw > 1000:
+            raw = 1000
+        if (duty < 0) != self._invert:
+            raw |= _PWM_SIGN_BIT
+        self._bus.write(self._id, _REG_GOAL_TIME,
+                        bytes([raw & 0xFF, (raw >> 8) & 0xFF]))
 
     def speed(self):
         """Measured shaft speed in deg/s from the present-speed
