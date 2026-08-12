@@ -1098,6 +1098,50 @@ class SimIcm45686Tests(_ShimTestBase):
         again = self._icm()        # reconstruction seeds from NVS
         self.assertTrue(again.calibrated())
 
+    def test_heading_unwraps_across_the_180_boundary(self):
+        # The firmware integrator is continuous multi-turn; SimIMU
+        # wraps at +/-180 — both unwrap directions must survive.
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        imu.reset_heading()
+        db.turn(200)
+        h = imu.heading()
+        self.assertTrue(abs(h - 200) < 8, h)      # NOT wrapped to -160
+        db.turn(-400)
+        h = imu.heading()
+        self.assertTrue(abs(h + 200) < 10, h)
+        db.use_gyro(False)                        # gyro_source(0) leg
+
+    def test_esp32_nvs_fake_blob_and_error_paths(self):
+        import esp32
+        nvs = esp32.NVS("openbricks")
+        nvs.set_blob("k", b"hello")
+        buf = bytearray(16)
+        n = nvs.get_blob("k", buf)
+        self.assertEqual(bytes(buf[:n]), b"hello")
+        nvs.commit()
+        try:
+            nvs.get_blob("missing", buf)
+            self.fail("expected OSError")
+        except OSError:
+            pass
+        try:
+            nvs.get_i32("k")                      # blob is not an int
+            self.fail("expected OSError")
+        except OSError:
+            pass
+        nvs.set_i32("n", 42)
+        try:
+            nvs.get_blob("n", buf)                # int is not a blob
+            self.fail("expected OSError")
+        except OSError:
+            pass
+
+    def test_native_icm_surface_extras(self):
+        import _openbricks_native as n
+        self.assertTrue(n.icm45686.available())
+
     def test_native_selftest_matches_firmware_tuple(self):
         import _openbricks_native as n
         self.assertEqual(tuple(n.icm45686.selftest()),
