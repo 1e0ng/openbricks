@@ -1163,7 +1163,8 @@ class ST3215Motor(Motor):
     _native_pending = None    # then= of an in-flight wait=False move
 
     def _adopt_into_drivebase(self, right, wheel_diameter_mm,
-                              axle_track_mm, imu=None, accel_dps2=400.0):
+                              axle_track_mm, imu=None, accel_dps2=400.0,
+                              drive="duty"):
         """DriveBase's adoption hook (polymorphic — the sim's shim
         motors implement their own). Returns the serial-native engine,
         or None when the firmware native bus is absent (then there is
@@ -1175,7 +1176,8 @@ class ST3215Motor(Motor):
         from openbricks.robotics.native_drivebase import _SerialNativeEngine
         return _SerialNativeEngine.adopt_motors(
             self, right, wheel_diameter_mm=wheel_diameter_mm,
-            axle_track_mm=axle_track_mm, imu=imu, accel_dps2=accel_dps2)
+            axle_track_mm=axle_track_mm, imu=imu, accel_dps2=accel_dps2,
+            drive=drive)
 
     # First free slot wins, whoever asks. Reserving 0/1 for wheels
     # made construction order matter: a script that built its task

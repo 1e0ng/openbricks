@@ -215,13 +215,16 @@ int ob_sservo_set_drive_duty(ob_sservo_t *s, int slot, int on) {
 
 void ob_sservo_set_duty_gains(ob_sservo_t *s, int32_t ff,
                               int32_t kp, int32_t ki) {
-    if (ff > 0) {
+    // Zero is a legitimate gain (pure-FF experiments run kp=ki=0);
+    // NEGATIVE keeps the current value. The 1.88.0 "<=0 keeps"
+    // semantics made zero unreachable — caught by the gain sweep.
+    if (ff >= 0) {
         s->duty_ff = ff;
     }
-    if (kp > 0) {
+    if (kp >= 0) {
         s->duty_kp = kp;
     }
-    if (ki > 0) {
+    if (ki >= 0) {
         s->duty_ki = ki;
     }
 }

@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.89.0 — DriveBase drives dumb mode by default (stage 3)
+
+Serial-bus wheels now adopt straight into the engine's duty drive:
+the servo runs open-loop and every layer of the drive loop —
+trajectory, 2-DOF chassis controller, per-wheel FF+PI speed loop —
+is openbricks code. `DriveBase(..., drive="wheel")` restores the
+servo's internal speed controller. Bench-measured trade (both
+directions documented): straights identical to wheel mode
+(~11 vs 10 stddev), high-scrub spins slightly rougher (~18 vs 14 —
+bus-rate loop bandwidth vs the servo's internal kHz loop). One
+behavioral caveat: with duty wheels, `then="brake"`/`"hold"` at
+move END act like coast at the wheel level (open loop has no hold
+torque); the controller corrects normally while a move is active.
+Also: `duty_gains` semantics fixed so zero is a settable gain
+(negative now means keep) — the 1.88.0 rules made pure-FF
+experiments unreachable, caught by the gain sweep.
+
 ## 1.88.1 — duty direction bit: bit 10 SET means POSITIVE
 
 The bench's dc() sanity drive ran backwards: the GOAL_TIME

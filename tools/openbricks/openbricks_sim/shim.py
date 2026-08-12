@@ -703,7 +703,8 @@ class ShimST3215Motor:
         return dps
 
     def _adopt_into_drivebase(self, right, wheel_diameter_mm,
-                              axle_track_mm, imu=None, accel_dps2=400.0):
+                              axle_track_mm, imu=None, accel_dps2=400.0,
+                              drive="duty"):
         """DriveBase adoption hook, sim edition: the engine runs
         UNCHANGED against the emulated bus."""
         from openbricks.robotics.native_drivebase import _SerialNativeEngine
@@ -718,7 +719,7 @@ class ShimST3215Motor:
             left_id=1, right_id=2,
             wheel_diameter_mm=wheel_diameter_mm,
             axle_track_mm=axle_track_mm, imu=imu,
-            accel_dps2=accel_dps2, sb=emu)
+            accel_dps2=accel_dps2, sb=emu, drive=drive)
 
     # ----- Motor interface -------------------------------------------
 

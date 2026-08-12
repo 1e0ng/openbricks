@@ -102,10 +102,15 @@ are direct where they can be.
    inside the hard tick itself (1 kHz heading correction, no Python
    in the loop; bench-verified +0.6° over a four-turn square) — or,
    for an I2C IMU like the BNO055, by a Python outer loop at
-   ~50-100 Hz. There is exactly ONE drivebase class and NO Python
-   control loop: on a runtime with neither the native bus nor the
-   sim's emulated bus, constructing a serial-bus `DriveBase` raises
-   instead of silently degrading. The sim emulates the `st_bus`
+   ~50-100 Hz. Since 1.89.0 the wheels themselves run "dumb mode"
+   by default: the servo is switched to its open-loop duty mode and
+   the engine's own integer FF+PI closes the speed loop over raw
+   duty sync-packets — every layer of the drive loop is openbricks
+   code (`DriveBase(..., drive="wheel")` restores the servo's
+   internal speed controller). There is exactly ONE drivebase class
+   and NO Python control loop: on a runtime with neither the native
+   bus nor the sim's emulated bus, constructing a serial-bus
+   `DriveBase` raises instead of silently degrading. The sim emulates the `st_bus`
    surface (`_SimStBus` over MuJoCo wheels), so the same controller
    code path runs everywhere.
 4. **Drivebase coupling** (pbio `drivebase.c`) — our `drivebase.c`
