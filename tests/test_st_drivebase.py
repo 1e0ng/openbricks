@@ -1038,3 +1038,22 @@ class DutyDriveBaseTests(_Base):
         sb.db_turn(90.0, 60.0)
         self.w.advance(3000)
         self.assertTrue(sb.db_done())
+
+
+class TurnAccelTests(_Base):
+    """Separate turn acceleration (Pybricks parity, 1.90.0): the arm
+    glue selects the per-move-type accel, so a crawl turn accel must
+    not slow the straights."""
+
+    def test_turn_accel_binding_and_independent_ramps(self):
+        sb.db_set_turn_accel(30.0)          # crawl ramp for turns
+        sb.db_straight(150.0, 150.0)        # straights unaffected
+        self.w.advance(2500)
+        self.assertTrue(sb.db_done())
+        sb.db_turn(90.0, 60.0)              # ~2 s cruise + slow ramps
+        self.w.advance(700)
+        self.assertFalse(sb.db_done(),
+                         "a 30 dps^2 turn ramp cannot finish 90 deg "
+                         "in 0.7 s")
+        self.w.advance(9000)
+        self.assertTrue(sb.db_done())

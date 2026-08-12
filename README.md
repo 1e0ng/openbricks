@@ -97,7 +97,7 @@ imu     = ICM45686(sck=12, mosi=13, miso=11, cs=17)
 robot = DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=136,
                   imu=imu)
 robot.use_gyro(True)               # heading corrected at 1 kHz in C
-robot.settings(acceleration=180)   # soften the launch (wheel-deg/s²; default 400)
+robot.settings(acceleration=180)   # soften the launch (wheel-deg/s²; default 1500)
 robot.straight(500)                # mm
 robot.turn(90)                     # degrees
 print([s.rgb() for s in sensors])  # [(r, g, b), ...] 0-255

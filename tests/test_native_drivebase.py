@@ -100,6 +100,9 @@ class _FakeBus:
     def servo_drive_duty(self, slot, on):
         self.calls.append(("servo_drive_duty", slot, bool(on)))
 
+    def db_set_turn_accel(self, dps2):
+        self.calls.append(("db_set_turn_accel", dps2))
+
     def db_config(self, *a):
         self.calls.append(("db_config",) + a)
 
@@ -976,12 +979,12 @@ class DeadMotorDiagnosisTests(_Base):
 
     def test_ten_metre_straight_gets_a_minute_class_budget(self):
         # The watchdog scales with the COMMANDED move: 10 m at the
-        # default 200 wheel-dps is ~65 s of healthy driving, and the
+        # default 350 wheel-dps is ~37 s of healthy driving, and the
         # fixed 8 s cap killed it with "wheel stalled" (bench
-        # 2026-08-10).
+        # 2026-08-10, at the old 200-dps default).
         db = self._db()
         db.arm_straight(10_000)
-        self.assertTrue(db._deadline_budget_ms > 90_000,
+        self.assertTrue(db._deadline_budget_ms > 50_000,
                         db._deadline_budget_ms)
 
     def test_short_straight_keeps_the_floor(self):
@@ -989,6 +992,40 @@ class DeadMotorDiagnosisTests(_Base):
         db.arm_straight(100)
         self.assertTrue(8000 <= db._deadline_budget_ms <= 11_000,
                         db._deadline_budget_ms)
+
+    def test_pybricks_parity_defaults(self):
+        # 1.90.0: 40%/33% of the ST-3032's 888 dps rated speed, and
+        # Pybricks' 2000 x 3/4 acceleration — with turn ramps now on
+        # their own knob.
+        db = self._db()
+        self.assertEqual(db._straight_speed_dps, 350)
+        self.assertEqual(db._turn_rate_dps, 300)
+        self.assertEqual(db._accel_dps2, 1500.0)
+        self.assertEqual(db._turn_accel_dps2, 1500.0)
+
+    def test_set_turn_accel_reaches_the_wire_and_the_deadline(self):
+        db = self._db()
+        db.set_turn_accel(500.0)
+        self.assertTrue(("db_set_turn_accel", 500.0) in self.bus.calls)
+        db.settings(turn_rate=10)
+        db.arm_turn(90)
+        slow_accel_budget = db._deadline_budget_ms
+        db.set_turn_accel(5000.0)
+        db.arm_turn(90)
+        self.assertTrue(db._deadline_budget_ms <= slow_accel_budget,
+                        (db._deadline_budget_ms, slow_accel_budget))
+
+    def test_drivebase_settings_forwards_turn_acceleration(self):
+        from openbricks.robotics import DriveBase
+
+        class _Bare:
+            pass
+        db = DriveBase(_Bare(), _Bare(), 88, 136)   # open-loop pair
+        try:
+            db.settings(turn_acceleration=500)
+            self.fail("expected ValueError")
+        except ValueError as e:
+            self.assertTrue("serial-bus" in str(e), e)
 
     def test_slow_turn_budget_scales_with_the_rate(self):
         db = self._db()
@@ -1000,7 +1037,7 @@ class DeadMotorDiagnosisTests(_Base):
     def test_curve_budget_covers_the_outer_arc(self):
         db = self._db()
         db.arm_curve(200, 90)
-        self.assertTrue(db._deadline_budget_ms > 11_000,
+        self.assertTrue(db._deadline_budget_ms > 10_000,
                         db._deadline_budget_ms)
 
     def test_settle_timeout_reports_both_wheels_traffic(self):

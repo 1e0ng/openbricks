@@ -323,13 +323,20 @@ class _SimStBus:
         from openbricks_sim._native import RawDriveBase
         self._raw = RawDriveBase(float(wheel_mm), float(axle_mm))
         self._raw.set_accel(float(accel))
+        # Firmware parity: separate straight/turn accelerations,
+        # both seeded from db_config, selected at arm time.
+        self._accel_straight = float(accel)
+        self._accel_turn = float(accel)
         self._active = True
         self._db_writing = False
         for m in self._moves.values():
             m.stop()
 
     def db_set_accel(self, dps2):
-        self._raw.set_accel(float(dps2))
+        self._accel_straight = float(dps2)
+
+    def db_set_turn_accel(self, dps2):
+        self._accel_turn = float(dps2)
 
     def servo_drive_duty(self, slot, on):
         # Firmware parity surface (st_bus.servo_drive_duty). The sim
@@ -362,6 +369,7 @@ class _SimStBus:
             m.stop()                      # new command wins
         self._sync_bridges()
         self._db_writing = True
+        self._raw.set_accel(self._accel_straight)
         self._raw.straight(self._rt.now_ms, float(mm), float(mm_s))
 
     def db_turn(self, deg, dps):
@@ -369,6 +377,7 @@ class _SimStBus:
             m.stop()
         self._sync_bridges()
         self._db_writing = True
+        self._raw.set_accel(self._accel_turn)
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
 
     def db_curve(self, radius_mm, deg, mm_s):
@@ -376,6 +385,7 @@ class _SimStBus:
             m.stop()
         self._sync_bridges()
         self._db_writing = True
+        self._raw.set_accel(self._accel_straight)
         self._raw.curve(self._rt.now_ms, float(radius_mm), float(deg),
                         float(mm_s))
 

@@ -141,6 +141,12 @@ static ob_sservo_t *sservo_get(void) {
 
 static ob_servo_t st_db_bridge_l, st_db_bridge_r;
 static ob_drivebase_t st_db;
+// Per-move-type trajectory accelerations (Pybricks parity: separate
+// straight_acceleration / turn_acceleration knobs). The core has ONE
+// accel field, so the arm glue selects the right value per move —
+// db_config seeds both from its accel argument.
+static ob_float_t st_db_accel_straight;
+static ob_float_t st_db_accel_turn;
 static bool st_db_active;
 // Arbitration between the drivebase and per-slot moves (1.46.0):
 // the db writes its slots' speed targets only while it OWNS a move
@@ -1085,6 +1091,8 @@ static mp_obj_t sb_db_config(size_t n_args, const mp_obj_t *args) {
                       OB_DRIVEBASE_DEFAULT_KP_SUM,
                       OB_DRIVEBASE_DEFAULT_KP_DIFF);
     st_db.accel_dps2 = accel;
+    st_db_accel_straight = accel;
+    st_db_accel_turn = accel;
     st_db_active = true;
     // Configured but yielded: the db starts writing at its first
     // move, so a freshly constructed DriveBase leaves the wheels
@@ -1132,6 +1140,7 @@ static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
     st_db_writing = true;
+    st_db.accel_dps2 = st_db_accel_straight;
     ob_drivebase_straight(&st_db, (long)st_db_now_ms, mm, mm_s);
     bus_release();
     return mp_const_none;
@@ -1154,6 +1163,7 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
     st_db_writing = true;
+    st_db.accel_dps2 = st_db_accel_turn;
     ob_drivebase_turn(&st_db, (long)st_db_now_ms, deg, dps);
     bus_release();
     return mp_const_none;
@@ -1176,6 +1186,7 @@ static mp_obj_t sb_db_curve(size_t n_args, const mp_obj_t *args) {
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
     st_db_writing = true;
+    st_db.accel_dps2 = st_db_accel_straight;
     ob_drivebase_curve(&st_db, (long)st_db_now_ms, radius, angle, mm_s);
     bus_release();
     return mp_const_none;
@@ -1346,11 +1357,25 @@ static mp_obj_t sb_db_set_accel(mp_obj_t self_in, mp_obj_t dps2_in) {
     (void)self_in;
     ob_float_t dps2 = (ob_float_t)mp_obj_get_float(dps2_in);
     bus_take();
-    st_db.accel_dps2 = dps2;
+    st_db_accel_straight = dps2;
     bus_release();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_db_set_accel_obj, sb_db_set_accel);
+
+static mp_obj_t sb_db_set_turn_accel(mp_obj_t self_in,
+                                     mp_obj_t dps2_in) {
+    // settings(turn_acceleration=...): the turn ramps' own
+    // accel, independent of the straight one (Pybricks parity).
+    (void)self_in;
+    ob_float_t dps2 = (ob_float_t)mp_obj_get_float(dps2_in);
+    bus_take();
+    st_db_accel_turn = dps2;
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_db_set_turn_accel_obj,
+                                 sb_db_set_turn_accel);
 
 static mp_obj_t sb_db_use_gyro(mp_obj_t self_in, mp_obj_t on_in) {
     (void)self_in;
@@ -1493,6 +1518,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_gyro_source),  MP_ROM_PTR(&sb_db_gyro_source_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_accel),     MP_ROM_PTR(&sb_db_set_accel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_set_turn_accel), MP_ROM_PTR(&sb_db_set_turn_accel_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_heading),   MP_ROM_PTR(&sb_db_set_heading_obj) },
     #if defined(MICROPY_OPENBRICKS_BUS_UART) && MICROPY_OPENBRICKS_BUS_UART
     { MP_ROM_QSTR(MP_QSTR_attach_uart),      MP_ROM_PTR(&sb_attach_uart_obj) },
