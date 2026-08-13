@@ -23,7 +23,7 @@ from openbricks.robotics import DriveBase
 # --- control law (pure logic, unit-tested in tests/test_qtr_align.py) ---
 
 KP = 1.3
-EDGE_TOLERANCE = 5
+EDGE_TOLERANCE = 8
 SIDE_COUNT = 5
 
 
