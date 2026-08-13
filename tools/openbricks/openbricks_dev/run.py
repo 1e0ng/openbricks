@@ -599,12 +599,49 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
 
     runner = _compose_runner()
 
+    # Route Ctrl-C through a CONTROLLED cancellation instead of a raw
+    # KeyboardInterrupt: a KI lands at whatever await bleak happens
+    # to be in, and under a notification flood the loop then tears
+    # down with CoreBluetooth callbacks still in flight — a native
+    # interpreter crash, not a traceback (macOS "Python quit
+    # unexpectedly", bench 2026-08-13). The first SIGINT cancels this
+    # task (the stream handler below turns that into the verified
+    # robot-stop + clean teardown); further presses are absorbed —
+    # cleanup is already running, and letting them land as KI inside
+    # close() would recreate the crash.
+    import signal
+    loop = asyncio.get_running_loop()
+    this_task = asyncio.current_task()
+    sigint_count = [0]
+
+    def _on_sigint():
+        sigint_count[0] += 1
+        if sigint_count[0] == 1:
+            this_task.cancel()
+        else:
+            print("\nstopping — please wait ...", file=sys.stderr)
+
+    try:
+        loop.add_signal_handler(signal.SIGINT, _on_sigint)
+        _sigint_installed = True
+    except (NotImplementedError, RuntimeError):
+        _sigint_installed = False   # e.g. Windows: KI path remains
+
     print("connecting to %r ..." % name, file=sys.stderr)
     try:
-        link = await NUSLink.connect(name, scan_timeout=scan_timeout, debug=debug)
-    except NUSError as e:
-        raise RunError(str(e))
+        try:
+            link = await NUSLink.connect(name, scan_timeout=scan_timeout,
+                                         debug=debug)
+        except NUSError as e:
+            raise RunError(str(e))
 
+        await _run_session(link, name, user_bytes, runner)
+    finally:
+        if _sigint_installed:
+            loop.remove_signal_handler(signal.SIGINT)
+
+
+async def _run_session(link, name, user_bytes, runner):
     async with link:
         blink = _BufferedLink(link)
         blink._step = "scan + connect"

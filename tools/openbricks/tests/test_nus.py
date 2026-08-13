@@ -389,3 +389,37 @@ class NonBlockingReadTests(_BleakInjection):
         link = asyncio.run(NUSLink.connect("RobotA"))
         link._rx_event.set()
         self.assertEqual(asyncio.run(link.read(timeout=0)), b"")
+
+
+class CloseHardeningTests(unittest.TestCase):
+    """Teardown must be bounded and interrupt-proof: a hanging
+    stop_notify (notification flood) cannot wedge the exit, and a
+    BaseException from one step cannot skip the disconnect — the
+    Ctrl-C interpreter-crash class (bench 2026-08-13)."""
+
+    def _link(self, client):
+        link = NUSLink.__new__(NUSLink)
+        link._client = client
+        return link
+
+    def test_hanging_stop_notify_is_bounded_and_disconnect_still_runs(self):
+        class _Hang(_FakeBleakClient):
+            async def stop_notify(self, uuid):
+                await asyncio.sleep(999)
+        c = _Hang(None)
+        from unittest.mock import patch
+        orig = asyncio.wait_for
+
+        async def fast_wait_for(aw, timeout):
+            return await orig(aw, timeout=0.05)
+        with patch("openbricks_dev._nus.asyncio.wait_for", fast_wait_for):
+            asyncio.run(self._link(c).close())
+        self.assertTrue("disconnect" in c.calls, c.calls)
+
+    def test_base_exception_in_stop_notify_cannot_skip_disconnect(self):
+        class _Boom(_FakeBleakClient):
+            async def stop_notify(self, uuid):
+                raise KeyboardInterrupt()
+        c = _Boom(None)
+        asyncio.run(self._link(c).close())
+        self.assertTrue("disconnect" in c.calls, c.calls)

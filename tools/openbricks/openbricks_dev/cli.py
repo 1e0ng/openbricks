@@ -21,6 +21,8 @@ also imported on the host by the sim's driver shim.
 import argparse
 import sys
 
+import asyncio
+
 from openbricks_dev import __version__
 
 
@@ -396,6 +398,13 @@ def main(argv=None):
             from openbricks_dev import docs as docs_mod
             return docs_mod.run(args)
     except KeyboardInterrupt:
+        print("\naborted.", file=sys.stderr)
+        return 130
+    except asyncio.CancelledError:
+        # The run command routes Ctrl-C through task cancellation
+        # (raw KeyboardInterrupt inside bleak teardown crashes the
+        # interpreter under a notification flood) — a cancellation
+        # reaching here IS the user's Ctrl-C, already cleaned up.
         print("\naborted.", file=sys.stderr)
         return 130
     except Exception as e:

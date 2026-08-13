@@ -241,11 +241,19 @@ class NUSLink:
         return data
 
     async def close(self):
+        # Teardown must be BOUNDED and interrupt-proof: under a
+        # notification flood a stop_notify can stall, and a raw
+        # KeyboardInterrupt landing inside bleak's CoreBluetooth
+        # teardown crashes the interpreter outright (macOS "Python
+        # quit unexpectedly", bench 2026-08-13). BaseException so a
+        # late Ctrl-C cannot skip the disconnect; wait_for so a
+        # wedged callback queue cannot hang the exit.
         try:
-            await self._client.stop_notify(UART_TX_UUID)
-        except Exception:
+            await asyncio.wait_for(
+                self._client.stop_notify(UART_TX_UUID), 3.0)
+        except BaseException:
             pass
         try:
-            await self._client.disconnect()
-        except Exception:
+            await asyncio.wait_for(self._client.disconnect(), 4.0)
+        except BaseException:
             pass
