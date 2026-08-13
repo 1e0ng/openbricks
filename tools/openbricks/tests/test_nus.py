@@ -416,10 +416,16 @@ class CloseHardeningTests(unittest.TestCase):
             asyncio.run(self._link(c).close())
         self.assertTrue("disconnect" in c.calls, c.calls)
 
-    def test_base_exception_in_stop_notify_cannot_skip_disconnect(self):
+    def test_cancellation_in_stop_notify_cannot_skip_disconnect(self):
+        # Cancellation is the BaseException that actually reaches a
+        # task's awaits (the SIGINT routing delivers Ctrl-C as
+        # task.cancel(); a raw KeyboardInterrupt inside a task is
+        # re-raised through the loop by asyncio itself and no guard
+        # can contain it — which is exactly why the signal routing
+        # exists).
         class _Boom(_FakeBleakClient):
             async def stop_notify(self, uuid):
-                raise KeyboardInterrupt()
+                raise asyncio.CancelledError()
         c = _Boom(None)
         asyncio.run(self._link(c).close())
         self.assertTrue("disconnect" in c.calls, c.calls)
