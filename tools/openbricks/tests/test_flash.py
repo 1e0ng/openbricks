@@ -7,6 +7,7 @@ the verification flow (write, read back, compare).
 """
 
 import argparse
+import io
 import os
 import shutil
 import subprocess
@@ -831,16 +832,42 @@ class ConfirmTests(unittest.TestCase):
 
 
 class CurrentFirmwareProbeTests(unittest.TestCase):
-    def _patch_exec(self, rc, out=""):
+    def _patch_exec(self, rc, out="", err=""):
         orig = flash._mpremote_exec
-        flash._mpremote_exec = lambda m, p, s: (rc, out, "")
+        flash._mpremote_exec = lambda m, p, s: (rc, out, err)
         self.addCleanup(setattr, flash, "_mpremote_exec", orig)
 
     def test_unreachable_repl_is_unknown(self):
         self._patch_exec(1)
-        self.assertEqual(
-            flash._read_current_firmware("mpremote", "/p"),
-            (None, None))
+        with patch("sys.stderr", new_callable=io.StringIO):
+            self.assertEqual(
+                flash._read_current_firmware("mpremote", "/p"),
+                (None, None))
+
+    def test_failed_probe_names_the_reason_on_stderr(self):
+        # "could not enter raw repl" (hub state) and "failed to access
+        # /dev/..." (host port contention) are DIFFERENT bugs; hiding
+        # mpremote's message behind a generic "unknown" cost a bench
+        # round-trip to tell them apart (2026-08-13).
+        self._patch_exec(
+            1, err="mpremote: failed to access /dev/cu.usbmodemX "
+                   "(it may be in use by another program)\n")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            flash._read_current_firmware("mpremote", "/p")
+        self.assertIn("probe: mpremote rc=1", err.getvalue())
+        self.assertIn("failed to access", err.getvalue())
+
+    def test_failed_probe_without_output_still_reports_rc(self):
+        self._patch_exec(2)
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            flash._read_current_firmware("mpremote", "/p")
+        self.assertEqual(err.getvalue().strip(), "probe: mpremote rc=2")
+
+    def test_failed_probe_falls_back_to_stdout_line(self):
+        self._patch_exec(1, out="noise\ncould not enter raw repl\n")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            flash._read_current_firmware("mpremote", "/p")
+        self.assertIn("could not enter raw repl", err.getvalue())
 
     def test_matching_official_marker(self):
         self._patch_exec(0, "ver=1.77.1\nsig=1.77.1:official\n")

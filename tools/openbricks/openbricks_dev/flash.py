@@ -439,6 +439,15 @@ _PROBE_SNIPPET = (
 ) % (_NVS_NAMESPACE, _NVS_SIG_KEY)
 
 
+def _last_nonempty_line(text):
+    """The final non-blank line of ``text``, or '' — subprocess error
+    output ends with the line that names the actual failure."""
+    for line in reversed((text or "").splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
+
+
 def _read_current_firmware(mpremote, port):
     """The running firmware's ``(version, verdict)``, or
     ``(None, None)`` when the chip has no reachable openbricks REPL
@@ -447,10 +456,20 @@ def _read_current_firmware(mpremote, port):
     The verdict comes from the provenance marker the last
     ``openbricks flash`` stored; a marker whose version prefix does
     not match the running version is stale (firmware replaced behind
-    the CLI's back) and degrades to "customized"."""
+    the CLI's back) and degrades to "customized".
+
+    A failed probe says WHY on stderr (mpremote's own message):
+    "could not enter raw repl" and "failed to access <port>" are
+    different bugs — hub-side state vs host-side port contention —
+    and swallowing the reason forced a bench-instrumentation round
+    to tell them apart (the 2026-08-13 flash-after-log hunt)."""
     from openbricks_dev import _signing
-    rc, out, _err = _mpremote_exec(mpremote, port, _PROBE_SNIPPET)
+    rc, out, err = _mpremote_exec(mpremote, port, _PROBE_SNIPPET)
     if rc != 0:
+        reason = _last_nonempty_line(err) or _last_nonempty_line(out)
+        print("probe: mpremote rc=%d%s"
+              % (rc, (": " + reason) if reason else ""),
+              file=sys.stderr)
         return None, None
     version = marker = ""
     for line in out.splitlines():
