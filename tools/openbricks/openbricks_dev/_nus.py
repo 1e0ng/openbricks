@@ -241,11 +241,21 @@ class NUSLink:
         return data
 
     async def close(self):
+        # Teardown must be BOUNDED and cancellation-proof: under a
+        # notification flood a stop_notify can stall (wait_for caps
+        # each step), and the SIGINT routing delivers Ctrl-C as task
+        # cancellation — BaseException so a cancellation mid-close
+        # cannot skip the disconnect. (A RAW KeyboardInterrupt
+        # inside a task is re-raised through the loop by asyncio
+        # itself and no guard here could contain it — that crash
+        # class is prevented upstream by run.py's signal routing,
+        # macOS "Python quit unexpectedly", bench 2026-08-13.)
         try:
-            await self._client.stop_notify(UART_TX_UUID)
-        except Exception:
+            await asyncio.wait_for(
+                self._client.stop_notify(UART_TX_UUID), 3.0)
+        except BaseException:
             pass
         try:
-            await self._client.disconnect()
-        except Exception:
+            await asyncio.wait_for(self._client.disconnect(), 4.0)
+        except BaseException:
             pass

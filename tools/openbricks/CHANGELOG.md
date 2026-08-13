@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.91.1 — Ctrl-C during a chatty run no longer crashes Python
+
+Pressing Ctrl-C while `openbricks run` streamed heavy output could
+hang and then hard-crash the interpreter (macOS "Python quit
+unexpectedly"): the raw KeyboardInterrupt landed inside bleak's
+CoreBluetooth machinery and the event loop tore down with
+notification callbacks still in flight. The run command now routes
+SIGINT through a controlled task cancellation — the first press
+triggers the existing verified robot-stop + clean teardown, later
+presses print "stopping — please wait" instead of detonating
+mid-cleanup — and the BLE close is bounded (timeouts per step) and
+interrupt-proof (a stray interrupt can no longer skip the
+disconnect). CLI-only; no flash needed.
+
 ## 1.91.0 — ICM-45686 in the sim; BNO055 demoted to legacy
 
 The REAL firmware ICM-45686 driver now runs unchanged in the

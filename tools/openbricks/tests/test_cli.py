@@ -163,6 +163,17 @@ class MainDispatchTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         run_run.assert_called_once()
 
+    def test_cancelled_error_maps_to_aborted_130(self):
+        # The run command converts Ctrl-C into task cancellation (a
+        # raw KeyboardInterrupt inside bleak teardown hard-crashes
+        # the interpreter under a notification flood) — the CLI must
+        # treat a propagated cancellation exactly like Ctrl-C.
+        import asyncio
+        with patch("openbricks_dev.run.run",
+                   side_effect=asyncio.CancelledError()):
+            rc = cli.main(["run", "-n", "A", "script.py"])
+        self.assertEqual(rc, 130)
+
     def test_stop_routes_to_stop_module(self):
         with patch("openbricks_dev.stop.run", return_value=0) as stop_run:
             rc = cli.main(["stop", "-n", "A"])

@@ -22,6 +22,7 @@ watcher lives.
 """
 
 import asyncio
+import signal
 import sys
 import time
 
@@ -599,12 +600,61 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
 
     runner = _compose_runner()
 
+    # Route Ctrl-C through a CONTROLLED cancellation instead of a raw
+    # KeyboardInterrupt: a KI lands at whatever await bleak happens
+    # to be in, and under a notification flood the loop then tears
+    # down with CoreBluetooth callbacks still in flight — a native
+    # interpreter crash, not a traceback (macOS "Python quit
+    # unexpectedly", bench 2026-08-13).
+    loop = asyncio.get_running_loop()
+    _sigint_installed = _install_sigint(
+        loop, _make_sigint_handler(asyncio.current_task()))
+
     print("connecting to %r ..." % name, file=sys.stderr)
     try:
-        link = await NUSLink.connect(name, scan_timeout=scan_timeout, debug=debug)
-    except NUSError as e:
-        raise RunError(str(e))
+        try:
+            link = await NUSLink.connect(name, scan_timeout=scan_timeout,
+                                         debug=debug)
+        except NUSError as e:
+            raise RunError(str(e))
 
+        await _run_session(link, name, user_bytes, runner)
+    finally:
+        if _sigint_installed:
+            loop.remove_signal_handler(signal.SIGINT)
+
+
+def _make_sigint_handler(task):
+    """First SIGINT cancels ``task`` — the session's stream handler
+    turns that cancellation into the verified robot-stop and clean
+    teardown. Further presses only acknowledge: cleanup is already
+    running, and letting them land as KeyboardInterrupt inside
+    ``close()`` would recreate the native-crash class this routing
+    exists to prevent."""
+    count = [0]
+
+    def _on_sigint():
+        count[0] += 1
+        if count[0] == 1:
+            task.cancel()
+        else:
+            print("\nstopping — please wait ...", file=sys.stderr)
+
+    return _on_sigint
+
+
+def _install_sigint(loop, handler):
+    """Route SIGINT on ``loop`` to ``handler``. Returns False where
+    per-loop signal handlers don't exist (e.g. Windows) — there the
+    raw-KeyboardInterrupt path remains, crash risk and all."""
+    try:
+        loop.add_signal_handler(signal.SIGINT, handler)
+        return True
+    except (NotImplementedError, RuntimeError):
+        return False
+
+
+async def _run_session(link, name, user_bytes, runner):
     async with link:
         blink = _BufferedLink(link)
         blink._step = "scan + connect"
