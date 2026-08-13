@@ -40,6 +40,12 @@ mp_int_t openbricks_motor_process_now_ms(void);
 // (ICM-45686 arc). st_bus reads it every db tick when
 // db_gyro_source(1) is selected.
 double openbricks_hard_yaw_deg(void);
+void openbricks_hard_yaw_reset_c(void);
+// Implemented in st_bus.c: whether the (single, global) serial drive
+// base is configured with gyro heading enabled. motor_process's
+// hard_yaw_reset binding refuses under it — resetting the integrator
+// out from under an armed heading controller veers the next move.
+bool openbricks_db_gyro_in_use_c(void);
 
 // C-side feeds/config for the hard-tick IMU consumer (icm45686.c) —
 // no mp_* involved, callable from the esp_timer context.

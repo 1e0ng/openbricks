@@ -1360,6 +1360,61 @@ static mp_obj_t sb_db_gyro_source(mp_obj_t self_in, mp_obj_t mode_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_db_gyro_source_obj, sb_db_gyro_source);
 
+// Whether a configured drive base currently steers by the gyro — the
+// guard ``ICM45686.reset_heading()`` consults (Pybricks parity:
+// "Can't reset heading while gyro in use"). Zeroing the yaw
+// integrator under an armed heading controller shifts the measured
+// frame while the held target stays put, and the next move veers
+// chasing the difference (bench 2026-08-13: straight() after
+// turn(-90) + reset_heading() pivoted left).
+// C-callable form: consumed by motor_process's hard_yaw_reset
+// binding, which is where the refusal is enforced (one gate, lowest
+// Python-visible layer — the driver stays a plain passthrough).
+bool openbricks_db_gyro_in_use_c(void) {
+    bus_take();
+    bool in_use = (st_db_slot_l >= 0) && st_db.use_gyro;
+    bus_release();
+    return in_use;
+}
+
+static mp_obj_t sb_db_gyro_in_use(mp_obj_t self_in) {
+    (void)self_in;
+    return mp_obj_new_bool(openbricks_db_gyro_in_use_c());
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_gyro_in_use_obj, sb_db_gyro_in_use);
+
+// Pybricks ``DriveBase.reset()`` parity: re-zero the WHOLE heading
+// frame — yaw integrator, engine reference, and held target — in one
+// locked section, so the measurement and the target can never
+// disagree. Encoder-mode drive bases have nothing to re-base (their
+// frame is re-derived from the encoders at every arm), so the gyro
+// legs are conditional and the call is a benign success.
+static mp_obj_t sb_db_reset(mp_obj_t self_in) {
+    (void)self_in;
+    bus_take();
+    if (st_db_slot_l < 0 || st_db_slot_r < 0) {
+        bus_release();
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("db_reset before db_config"));
+    }
+    if (st_db.fwd_active || st_db.turn_active) {
+        bus_release();
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("can't reset while a move is "
+                                   "active — stop first"));
+    }
+    if (st_db.use_gyro) {
+        if (st_db_gyro_source == 1) {
+            openbricks_hard_yaw_reset_c();
+            st_db_yaw_ref = 0.0;
+        }
+        ob_drivebase_gyro_frame_reset(&st_db);
+    }
+    bus_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_reset_obj, sb_db_reset);
+
 static mp_obj_t sb_db_done(mp_obj_t self_in) {
     (void)self_in;
     bus_take();
@@ -1536,6 +1591,8 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_fault),         MP_ROM_PTR(&sb_db_fault_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_done),          MP_ROM_PTR(&sb_db_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_gyro_source),  MP_ROM_PTR(&sb_db_gyro_source_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_gyro_in_use),  MP_ROM_PTR(&sb_db_gyro_in_use_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_reset),        MP_ROM_PTR(&sb_db_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_accel),     MP_ROM_PTR(&sb_db_set_accel_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_turn_accel), MP_ROM_PTR(&sb_db_set_turn_accel_obj) },

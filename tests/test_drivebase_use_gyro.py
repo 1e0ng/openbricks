@@ -278,5 +278,62 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         ndb.stop()
 
 
+class _NativeSpy:
+    """Wraps the native drivebase, recording use_gyro toggles."""
+
+    def __init__(self, real):
+        self.real = real
+        self.calls = []
+
+    def use_gyro(self, enable):
+        self.calls.append(enable)
+        return self.real.use_gyro(enable)
+
+
+class TestDriveBaseReset(unittest.TestCase):
+    """``DriveBase.reset()`` — Pybricks parity for re-zeroing the
+    heading frame mid-mission. On the native (encoder-servo) path
+    the re-base rides the use_gyro enable transition; with the gyro
+    off (or open-loop motors) it is a benign no-op."""
+
+    def setUp(self):
+        _reset_all()
+
+    def test_reset_with_gyro_on_retoggles_the_frame(self):
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
+        imu = _FakeIMU(heading=30.0)
+        db = DriveBase(left, right, wheel_diameter_mm=56,
+                       axle_track_mm=114, imu=imu)
+        db.use_gyro(True)
+        imu.heading_value = 75.0   # rotated since enable
+        # Spy by swapping the WRAPPER's reference (the C native
+        # object itself takes no attribute writes under MP).
+        spy = _NativeSpy(db._native)
+        db._native = spy
+        db.reset()
+        # Fresh frame = the same off->on transition the first enable
+        # performs; the drive base must still be in gyro mode after.
+        self.assertEqual(spy.calls, [False, True])
+        self.assertTrue(db._gyro_enabled)
+
+    def test_reset_with_gyro_off_is_a_noop(self):
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
+        db = DriveBase(left, right, wheel_diameter_mm=56,
+                       axle_track_mm=114)
+        spy = _NativeSpy(db._native)
+        db._native = spy
+        db.reset()
+        self.assertEqual(spy.calls, [])
+
+    def test_reset_on_open_loop_pair_is_a_noop(self):
+        left  = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
+        db = DriveBase(left, right, wheel_diameter_mm=56,
+                       axle_track_mm=114)
+        db.reset()   # no native, no serial engine: must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

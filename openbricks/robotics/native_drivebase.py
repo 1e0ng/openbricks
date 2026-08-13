@@ -407,6 +407,21 @@ class _SerialNativeEngine:
             # Selecting source 1 captures the frame reference in C.
             gyro_source(1 if self._hard_gyro else 0)
 
+    def reset(self):
+        """Re-zero the heading frame — yaw integrator, engine
+        reference, and held target together in one locked C section
+        (Pybricks ``DriveBase.reset()``). This is the sanctioned way
+        to declare "current pose is heading zero" mid-mission;
+        ``imu.reset_heading()`` refuses while the gyro steers a
+        drive base precisely because it can't do this atomically.
+        Raises ``RuntimeError`` while a move is active — stop first.
+        """
+        self._sb.db_reset()
+        if self._use_gyro and not self._hard_gyro:
+            # Soft-pump IMUs: restart the continuous frame at zero.
+            self._gyro_cont = 0.0
+            self._gyro_prev = self._imu.heading()
+
     # -- moves -----------------------------------------------------------
 
     def set_accel(self, accel_dps2):
