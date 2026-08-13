@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.92.1 — flash probe failures say why
+
+When ``openbricks flash`` cannot reach the hub's REPL, it now prints
+mpremote's actual error alongside the generic "current firmware:
+unknown" line (``probe: mpremote rc=N: <reason>``). "could not enter
+raw repl" (hub-side state) and "failed to access <port> — in use by
+another program" (host-side contention) are different bugs, and
+hiding the distinction cost a bench round-trip during the
+flash-after-log investigation. CLI-only; no flash needed.
+
 ## 1.92.0 — programs compile on the host (mpy-cross), like Pybricks
 
 `run` and `upload` now cross-compile the script with the pinned
