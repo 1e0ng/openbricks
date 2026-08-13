@@ -160,7 +160,7 @@ class ComposeTests(unittest.TestCase):
         self.assertLess(len(prog), 2600)
 
     def test_bootstrap_calls_launcher_run_program(self):
-        boot = run_mod._compose_runner()
+        boot = run_mod._compose_runner('/program.py')
         self.assertIn(b"from openbricks import launcher", boot)
         self.assertIn(b"launcher.run_program(", boot)
         self.assertIn(b"'/program.py'", boot)
@@ -170,7 +170,7 @@ class ComposeTests(unittest.TestCase):
         # its official/customized provenance suffix) at the top of
         # the stream, before the program launches; pre-1.79 firmware
         # has no firmware_label and falls back to the bare version.
-        boot = run_mod._compose_runner()
+        boot = run_mod._compose_runner('/program.py')
         self.assertIn(b"openbricks.firmware_label()", boot)
         self.assertIn(b"except AttributeError", boot)
         self.assertIn(b"openbricks.__version__", boot)
@@ -184,7 +184,7 @@ class ComposeTests(unittest.TestCase):
         # The runner must not embed the script — it runs the staged
         # file, so its paste size is constant regardless of script
         # growth.
-        boot = run_mod._compose_runner()
+        boot = run_mod._compose_runner('/program.py')
         # Bound is a payload-embedding tripwire, not a byte budget:
         # bumped 600 -> 800 for the firmware-label banner (1.79.0).
         self.assertLess(len(boot), 800)
@@ -194,7 +194,7 @@ class ComposeTests(unittest.TestCase):
         # The hub's run-log epoch stamps need a synced RTC; the sync
         # must come BEFORE the program starts so its prints get real
         # wall-clock time.
-        boot = run_mod._compose_runner()
+        boot = run_mod._compose_runner('/program.py')
         self.assertIn(b"machine.RTC().datetime(", boot)
         self.assertTrue(
             boot.index(b"machine.RTC().datetime(")
@@ -220,7 +220,7 @@ class ComposeTests(unittest.TestCase):
         run_program; the runner must catch it so the hub prints a
         clean stop message instead of letting the raw-REPL surface an
         interrupt traceback."""
-        boot = run_mod._compose_runner()
+        boot = run_mod._compose_runner('/program.py')
         self.assertIn(b"except KeyboardInterrupt", boot)
         self.assertIn(b"stopped by button press", boot)
         # And the stop-path evidence rides in the same stream: the
@@ -233,6 +233,35 @@ class ComposeTests(unittest.TestCase):
         # The runner must still be valid Python.
         import ast
         ast.parse(boot.decode())
+
+    def test_runner_targets_the_given_path(self):
+        boot = run_mod._compose_runner("/program.mpy")
+        self.assertIn(b"'/program.mpy'", boot)
+        self.assertNotIn(b"os.remove", boot)
+
+    def test_runner_removes_the_stale_source_before_launch(self):
+        # Staging .mpy deletes /program.py: the launcher's button path
+        # runs source when present, so a stale source would shadow
+        # every subsequent compiled stage.
+        boot = run_mod._compose_runner("/program.mpy", "/program.py")
+        self.assertIn(b"os.remove('/program.py')", boot)
+        self.assertTrue(
+            boot.index(b"os.remove")
+            < boot.index(b"launcher.run_program("))
+        import ast
+        ast.parse(boot.decode())
+
+    def test_parse_fw_version_reads_the_probe_line(self):
+        self.assertEqual(
+            run_mod._parse_fw_version("fwv=1.92.0\r\n"), (1, 92, 0))
+        self.assertEqual(
+            run_mod._parse_fw_version("noise\nfwv=2.0.13\n"), (2, 0, 13))
+
+    def test_parse_fw_version_rejects_garbage(self):
+        self.assertIsNone(run_mod._parse_fw_version(""))
+        self.assertIsNone(run_mod._parse_fw_version("fwv=1.92"))
+        self.assertIsNone(run_mod._parse_fw_version("fwv=a.b.c"))
+        self.assertIsNone(run_mod._parse_fw_version("version 1.92.0"))
 
     def test_stage_chunk_user_bytes_round_trip(self):
         # Any bytes the user script could contain — NULs, high bits,
@@ -266,16 +295,58 @@ class RunFlowTests(unittest.TestCase):
             ]
         return out
 
-    def _standard_responses(self, stdout_msg, stderr_msg=b"", stage_rounds=1):
+    @staticmethod
+    def _probe_round(version=b"fwv=1.92.0\r\n"):
+        """The firmware-version probe exec that precedes staging: one
+        raw-paste handshake whose stdout carries the ``fwv=`` line."""
+        return [
+            _R_SUPPORTED + _WINDOW_8K,    # probe paste ack + window
+            _CTRL_D,                      # end-of-paste ack
+            version + _CTRL_D,            # stdout: version + EOT
+            _CTRL_D,                      # empty stderr + EOT
+            b">",                         # raw-REPL prompt
+        ]
+
+    def _standard_responses(self, stdout_msg, stderr_msg=b"", stage_rounds=1,
+                            fw_version=b"fwv=1.92.0\r\n"):
         return [
             b"",                          # drain after Ctrl-C interrupt
             _BANNER,                      # raw-REPL banner
-        ] + self._stage_round(stage_rounds) + [
+        ] + self._probe_round(fw_version) \
+          + self._stage_round(stage_rounds) + [
             _R_SUPPORTED + _WINDOW_8K,    # runner paste ack + window
             _CTRL_D,                      # end-of-paste ack
             stdout_msg + _CTRL_D,         # stdout + EOT
             stderr_msg + _CTRL_D,         # stderr + EOT
         ]
+
+    def test_old_firmware_gets_source_with_a_notice(self):
+        # Pre-1.92.0 firmware can't run /program.mpy — the probe
+        # downgrades to source staging and SAYS so on stderr. Nothing
+        # about the downgrade is silent.
+        fake = _ScriptedLink(self._standard_responses(
+            b"hello from hub\r\n", fw_version=b"fwv=1.91.1\r\n"))
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        err = io.StringIO()
+        with patch.object(run_mod.NUSLink, "connect",
+                          side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO), \
+             patch("sys.stderr", err):
+            rc = run_mod.run(_args(script=self.tmp.name))
+
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        # The SOURCE crossed the link, targeting /program.py, and no
+        # sibling delete was composed.
+        self.assertIn(b"hello from hub", joined)
+        self.assertIn(b"'/program.py'", joined)
+        self.assertNotIn(b"'/program.mpy'", joined)
+        self.assertNotIn(b"os.remove", joined)
+        self.assertIn("predates precompiled", err.getvalue())
+        self.assertIn("1.91.1", err.getvalue())
 
     def test_happy_path_streams_stdout(self):
         fake = _ScriptedLink(self._standard_responses(
@@ -412,6 +483,12 @@ class InlineCommandTests(unittest.TestCase):
         responses = [
             b"",
             _BANNER,
+            # probe round: firmware version
+            _R_SUPPORTED + _WINDOW_8K,
+            _CTRL_D,
+            b"fwv=1.92.0\r\n" + _CTRL_D,
+            _CTRL_D,
+            b">",
             # one staging round (inline code is < _STAGE_CHUNK_BYTES)
             _R_SUPPORTED + _WINDOW_8K,
             _CTRL_D,
@@ -435,10 +512,13 @@ class InlineCommandTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         joined = b"".join(fake.writes)
-        # The inline ``CODE`` lands inside the ``f.write(...)`` repr in
-        # the bootstrap — verify the bytes are present.
-        self.assertIn(b"print('hello')", joined)
+        # 1.92.0 firmware: the staged payload is the COMPILED program
+        # (the source never crosses the link), and the runner targets
+        # the .mpy path.
+        self.assertIn(b"M\\x06", joined)   # .mpy header inside the
+        self.assertNotIn(b"print('hello')", joined)  # staged repr
         self.assertIn(b"launcher.run_program", joined)
+        self.assertIn(b"'/program.mpy'", joined)
 
 
     def test_connect_failure_propagates_as_run_error(self):
@@ -768,8 +848,12 @@ class HostInterruptForwardingTests(unittest.TestCase):
         async def _stub_upload(blink, l, script_bytes):
             return None
 
+        async def _stub_pick(blink, l):
+            return run_mod._TARGET_PATH, False, None
+
         patches = [
             ("_enter_raw_repl", _raw_repl),
+            ("_pick_staging", _stub_pick),
             ("_stage_file", _stub_stage),
             ("_raw_paste_upload", _stub_upload),
             ("_stream_output", _stream),

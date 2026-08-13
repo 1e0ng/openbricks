@@ -51,6 +51,26 @@ The suffix follows the version everywhere it reaches you: the
 (`openbricks log`), and the flash preflight above. On the hub,
 `openbricks.firmware_label()` returns the same string.
 
+## Programs are compiled on the host
+
+Since 1.92.0, `openbricks run` and `openbricks upload` cross-compile
+your script with `mpy-cross` **before** connecting, and stage the
+compiled `/program.mpy` instead of source (like Pybricks). Three
+things get better:
+
+- **syntax errors surface in milliseconds**, on your terminal, with
+  the file and line — no BLE scan, no connect, no upload round-trip;
+- **programs start faster**: the hub loads bytecode directly and
+  skips its on-device parse/compile step;
+- **tracebacks name your real file and line** (`File "square.py",
+  line 12`) instead of `File "<string>"`.
+
+No flags, nothing to configure. Firmware older than 1.92.0 can't run
+compiled programs, so the CLI probes the hub's version in-session and
+sends plain source instead — announced on stderr, never silently.
+`upload --path` (custom boot flows) always stages your file verbatim,
+uncompiled, at the path you give.
+
 ## Reference
 
 The reference below is generated from the CLI's own argument parser, so

@@ -11,6 +11,9 @@ env/
 
 # MicroPython cross-compiled
 *.mpy
+# ...except the checked-in loader test fixtures (regenerate with
+# scripts/gen-mpy-fixtures.py after an mpy-cross pin bump)
+!tests/fixtures/*.mpy
 
 # IDE
 .vscode/

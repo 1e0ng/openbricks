@@ -76,6 +76,14 @@ dependencies = [
     # official/customized label). Already in the tree transitively
     # via esptool; declared because ``_signing`` imports it.
     "cryptography >= 3.4",
+    # Host-side cross-compiler for ``run``/``upload`` staging. Pinned
+    # EXACTLY: the .mpy bytecode format must stay loadable by the
+    # firmware's pinned MicroPython (native/micropython @ v1.29
+    # preview, format 6). Bytecode-only .mpy checks only the major
+    # format version at load, so 1.28's compiler feeds 1.29 fine;
+    # tests/test_mpycompile.py canaries the header. Revisit this pin
+    # on every MicroPython submodule bump.
+    "mpy-cross == 1.28.0.post2",
 ]
 
 [project.optional-dependencies]

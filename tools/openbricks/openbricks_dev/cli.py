@@ -158,9 +158,12 @@ def _build_parser():
         help="Path to the local Python script to stage.",
     )
     p_upload.add_argument(
-        "--path", default="/program.py",
-        help="Destination path on the hub's filesystem. Default: "
-             "/program.py (which the frozen launcher reads).",
+        "--path", default=None,
+        help="Destination path on the hub's filesystem; the file is "
+             "staged VERBATIM there (no compilation) for custom boot "
+             "flows. Default: compile with mpy-cross and stage "
+             "/program.mpy (which the frozen launcher runs; older "
+             "firmware gets the source at /program.py).",
     )
     p_upload.add_argument(
         "--scan-timeout", type=float, default=5.0,

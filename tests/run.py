@@ -81,6 +81,7 @@ _TEST_MODULES = [
     "tests.test_bluetooth_button",
     "tests.test_ble_repl",
     "tests.test_launcher",
+    "tests.test_mpy_exec",
     "tests.test_log",
     "tests.test_log_littlefs",
     "tests.test_hcsr04",

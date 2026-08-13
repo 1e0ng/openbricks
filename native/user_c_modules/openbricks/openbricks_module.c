@@ -22,6 +22,7 @@ extern const mp_obj_type_t openbricks_drivebase_type;
 extern const mp_obj_type_t openbricks_pcnt_encoder_type;
 extern const mp_obj_type_t openbricks_encoder_type;
 extern const mp_obj_type_t openbricks_bno055_type;
+extern const mp_obj_fun_builtin_fixed_t openbricks_exec_mpy_obj;
 
 // Inject a KeyboardInterrupt into the MAIN thread — the same mechanism
 // the REPL uses for a host Ctrl-C. This sets the VM's pending exception,
@@ -138,6 +139,7 @@ static const mp_rom_map_elem_t openbricks_native_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_PCNTEncoder),        MP_ROM_PTR(&openbricks_pcnt_encoder_type) },
     { MP_ROM_QSTR(MP_QSTR_QuadratureEncoder),  MP_ROM_PTR(&openbricks_encoder_type) },
     { MP_ROM_QSTR(MP_QSTR_BNO055),             MP_ROM_PTR(&openbricks_bno055_type) },
+    { MP_ROM_QSTR(MP_QSTR_exec_mpy),           MP_ROM_PTR(&openbricks_exec_mpy_obj) },
 };
 static MP_DEFINE_CONST_DICT(openbricks_native_globals, openbricks_native_globals_table);
 

@@ -1147,8 +1147,17 @@ def _exec_program_raw(program_path, origin=None):
     the file is only a backup for inspecting an untethered run later
     via ``openbricks log``.
     """
-    with open(program_path) as f:
-        code = f.read()
+    if program_path.endswith(".mpy"):
+        # Host-cross-compiled program (CLI >= 1.92.0), executed by the
+        # native persistent-code loader. Probe existence here so a
+        # missing file raises the same OSError the source path's
+        # ``open()`` does — before the log session starts.
+        import os
+        os.stat(program_path)
+        code = None
+    else:
+        with open(program_path) as f:
+            code = f.read()
     from openbricks import log as _log
     # Arm the hardware stop button for the duration of the run. A press
     # now fires the native GPIO ISR, which injects a KeyboardInterrupt
@@ -1160,7 +1169,11 @@ def _exec_program_raw(program_path, origin=None):
             sess.write_text("started: %s | %s\n" % (
                 origin or "unknown", _run_header(program_path)))
             try:
-                exec(code, {"__name__": "__main__"})
+                if code is None:
+                    from _openbricks_native import exec_mpy
+                    exec_mpy(program_path, {"__name__": "__main__"})
+                else:
+                    exec(code, {"__name__": "__main__"})
             except KeyboardInterrupt:
                 # The button-stop's injected KeyboardInterrupt (and a REPL
                 # Ctrl-C from ``openbricks run``) both unwind to here.
@@ -1216,9 +1229,39 @@ def _exec_program_raw(program_path, origin=None):
         _stop_all_motors()
 
 
+MPY_PROGRAM_PATH = "/program.mpy"
+
+
+def _resolve_program_path(path):
+    """Button-path staging resolution: source wins when present; the
+    compiled sibling runs only when ``/program.py`` is absent.
+
+    ``openbricks run``/``upload`` >= 1.92.0 stage ``/program.mpy``
+    and delete ``/program.py``; older CLIs stage ``/program.py`` and
+    know nothing about the sibling. "Source wins" makes every mixed
+    old/new staging sequence run the MOST RECENTLY staged program
+    without trusting littlefs timestamps (this filesystem keeps
+    none). Explicit non-default paths are honored verbatim.
+    """
+    if path != DEFAULT_PROGRAM_PATH:
+        return path
+    import os
+    try:
+        os.stat(DEFAULT_PROGRAM_PATH)
+        return DEFAULT_PROGRAM_PATH
+    except OSError:
+        pass
+    try:
+        os.stat(MPY_PROGRAM_PATH)
+        return MPY_PROGRAM_PATH
+    except OSError:
+        return path
+
+
 def _exec_program(program_path, origin=None):
     """Button-gated path: swallow ``KeyboardInterrupt`` and missing-file
     errors so the idle loop keeps running between button presses."""
+    program_path = _resolve_program_path(program_path)
     try:
         _exec_program_raw(program_path, origin=origin)
         print("openbricks: program finished.")
