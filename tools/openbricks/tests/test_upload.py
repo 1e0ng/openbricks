@@ -23,7 +23,7 @@ from openbricks_dev._nus import NUSError
 def _args(
     name="RobotA",
     script="s.py",
-    path="/program.py",
+    path=None,
     scan_timeout=5.0,
 ):
     return argparse.Namespace(
@@ -118,11 +118,20 @@ class UploadFlowTests(unittest.TestCase):
         self.tmp.close()
         self.addCleanup(os.unlink, self.tmp.name)
 
-    def _standard_responses(self, stdout_msg, stage_rounds=1):
+    def _standard_responses(self, stdout_msg, stage_rounds=1,
+                            fw_version=None):
         out = [
             b"",                          # drain after Ctrl-C interrupt
             _BANNER,                      # raw-REPL banner
         ]
+        if fw_version is not None:       # default flow: version probe
+            out += [
+                _R_SUPPORTED + _WINDOW_8K,
+                _CTRL_D,                  # end-of-paste ack
+                fw_version + _CTRL_D,     # stdout: fwv line + EOT
+                _CTRL_D,                  # empty stderr + EOT
+                b">",                     # raw-REPL prompt
+            ]
         for _ in range(stage_rounds):    # chunked staging execs
             out += [
                 _R_SUPPORTED + _WINDOW_8K,
@@ -139,35 +148,63 @@ class UploadFlowTests(unittest.TestCase):
         ]
         return out
 
-    def test_default_flow_stages_to_program_py_without_reset(self):
+    def test_default_flow_stages_compiled_mpy_without_reset(self):
         fake = _ScriptedLink(self._standard_responses(
-            b"uploaded 15 bytes to '/program.py'\r\n"))
+            b"uploaded 59 bytes to '/program.mpy'\r\n",
+            fw_version=b"fwv=1.92.0\r\n"))
 
         async def _fake_connect(name, scan_timeout=5.0):
             return fake
 
         with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
-             patch("sys.stdout", new_callable=io.StringIO) as out:
+             patch("sys.stdout", new_callable=io.StringIO) as out, \
+             patch("sys.stderr", new_callable=io.StringIO) as err:
             rc = ul.run(_args(script=self.tmp.name))
 
         self.assertEqual(rc, 0)
         joined = b"".join(fake.writes)
         # No reset should be issued anywhere in the upload.
         self.assertNotIn(b"machine.reset", joined)
-        self.assertNotIn(b"machine.reset", joined)
         # Raw REPL fully entered and cleanly exited.
         self.assertIn(b"\x01", joined)      # Ctrl-A (enter raw)
         self.assertIn(b"\x05A\x01", joined) # raw-paste request
         self.assertIn(b"launcher.run()", joined)  # idle loop restored on exit
-        # The upload program writes to the default /program.py path.
-        self.assertIn(b"'/program.py'", joined)
-        # User script bytes got embedded in the upload literal.
-        self.assertIn(b"hello", joined)
+        # 1.92.0 firmware: the COMPILED payload lands at /program.mpy
+        # (.mpy header inside the staged repr), and the confirm
+        # program clears the stale source sibling.
+        self.assertIn(b"'/program.mpy'", joined)
+        self.assertIn(b"M\\x06", joined)
+        self.assertIn(b"os.remove('/program.py')", joined)
         self.assertTrue(fake.closed)
-        # Confirmation printed to the user's terminal.
+        # Confirmation printed to the user's terminal, and the final
+        # ready-line names the path that was ACTUALLY staged.
         self.assertIn("uploaded", out.getvalue())
+        self.assertIn("/program.mpy", err.getvalue())
 
-    def test_custom_path_flag_targets_alt_location(self):
+    def test_default_flow_old_firmware_stages_source_with_notice(self):
+        fake = _ScriptedLink(self._standard_responses(
+            b"uploaded 15 bytes to '/program.py'\r\n",
+            fw_version=b"fwv=1.91.1\r\n"))
+
+        async def _fake_connect(name, scan_timeout=5.0):
+            return fake
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO), \
+             patch("sys.stderr", new_callable=io.StringIO) as err:
+            rc = ul.run(_args(script=self.tmp.name))
+
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        # Source crossed the link, to /program.py, no sibling delete;
+        # the downgrade is ANNOUNCED, never silent.
+        self.assertIn(b"'/program.py'", joined)
+        self.assertIn(b"hello", joined)
+        self.assertNotIn(b"'/program.mpy'", joined)
+        self.assertNotIn(b"os.remove", joined)
+        self.assertIn("predates precompiled", err.getvalue())
+
+    def test_custom_path_flag_stages_verbatim(self):
         fake = _ScriptedLink(self._standard_responses(
             b"uploaded 15 bytes to '/main.py'\r\n"))
 
@@ -181,6 +218,11 @@ class UploadFlowTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         joined = b"".join(fake.writes)
         self.assertIn(b"'/main.py'", joined)
+        # Custom boot flows get the file AS-IS: source bytes, no
+        # compile, no firmware-version probe.
+        self.assertIn(b"hello", joined)
+        self.assertNotIn(b"fwv", joined)
+        self.assertNotIn(b"os.remove", joined)
 
     def test_missing_script_raises_without_touching_ble(self):
         with patch.object(ul.NUSLink, "connect") as connect:
@@ -220,7 +262,8 @@ class UploadRestoreFailureTests(UploadFlowTests):
         # _restore_idle_loop failing during teardown must not turn a
         # successful upload into an error.
         fake = _ScriptedLink(self._standard_responses(
-            b"uploaded 15 bytes to '/program.py'\r\n"))
+            b"uploaded 59 bytes to '/program.mpy'\r\n",
+            fw_version=b"fwv=1.92.0\r\n"))
 
         async def _fake_connect(name, scan_timeout=5.0):
             return fake
@@ -236,6 +279,21 @@ class UploadRestoreFailureTests(UploadFlowTests):
 
 
 class UploadInterruptTests(unittest.TestCase):
+    def test_upload_error_propagates_to_the_cli_layer(self):
+        import argparse
+        orig = ul._upload_async
+
+        def _boom(*a, **k):
+            raise ul.UploadError("no hub named X")
+        ul._upload_async = _boom
+        try:
+            with self.assertRaises(ul.UploadError):
+                ul.run(argparse.Namespace(
+                    name="X", script="s.py", path=None,
+                    scan_timeout=1.0))
+        finally:
+            ul._upload_async = orig
+
     def test_ctrl_c_maps_to_130(self):
         import argparse
         orig = ul._upload_async

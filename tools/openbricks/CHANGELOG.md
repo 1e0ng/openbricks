@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.92.0 — programs compile on the host (mpy-cross), like Pybricks
+
+`run` and `upload` now cross-compile the script with the pinned
+`mpy-cross` BEFORE connecting and stage compiled `/program.mpy`
+instead of source: syntax errors surface in milliseconds on the host
+(file + line, no BLE round-trip), the hub skips its on-device
+parse/compile so programs start faster, and tracebacks name the real
+source file and line (`File "square.py", line 12`) instead of
+`File "<string>"`. Firmware side: a native `exec_mpy` loader runs
+the bytecode with exact source-exec parity (`__name__ ==
+"__main__"`), and the launcher's button path resolves staging as
+"source wins when present; `.mpy` only fills absence" — with each
+CLI stage deleting the sibling, every mixed old/new staging sequence
+runs the most recently staged program on a filesystem that keeps no
+timestamps. Pre-1.92.0 firmware is probed in-session and gets plain
+source with a printed notice; `upload --path` stages verbatim for
+custom boot flows, uncompiled. Both sides move: flash firmware
+1.92.0 AND `pipx upgrade openbricks`.
+
 ## 1.91.1 — Ctrl-C during a chatty run no longer crashes Python
 
 Pressing Ctrl-C while `openbricks run` streamed heavy output could

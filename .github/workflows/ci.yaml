@@ -148,6 +148,7 @@ jobs:
             tests.test_hub \
             tests.test_interfaces \
             tests.test_launcher \
+            tests.test_mpy_exec \
             tests.test_native_drivebase \
             tests.test_icm45686 \
             tests.test_l298n \
@@ -210,6 +211,7 @@ jobs:
               tests.test_hub \
               tests.test_interfaces \
               tests.test_launcher \
+              tests.test_mpy_exec \
             tests.test_native_drivebase \
               tests.test_log
           python -m coverage report

@@ -22,10 +22,12 @@ watcher lives.
 """
 
 import asyncio
+import os
 import signal
 import sys
 import time
 
+from openbricks_dev import mpycompile
 from openbricks_dev._nus import NUSLink, NUSError
 
 
@@ -51,6 +53,34 @@ _FLOW_ABORT = b"\x04"
 # Where the script lands; same target as ``openbricks upload`` so
 # the post-run state matches what a follow-up button press would rerun.
 _TARGET_PATH = "/program.py"
+
+# Compiled-program staging (CLI >= 1.92.0). The launcher's button
+# path prefers /program.py when present, so every stage of one format
+# removes the other — see _compose_runner(remove_stale=...).
+_MPY_TARGET_PATH = "/program.mpy"
+
+# First firmware whose launcher runs /program.mpy (native exec_mpy).
+_MIN_MPY_FIRMWARE = (1, 92, 0)
+
+_PROBE_VERSION_PROGRAM = (
+    b"import openbricks\n"
+    b"print('fwv=' + openbricks.__version__)\n")
+
+
+def _parse_fw_version(text):
+    """``(major, minor, patch)`` from the probe's ``fwv=X.Y.Z`` line,
+    or ``None`` when absent or unparseable (which reads as "too old
+    to stage .mpy" — the visible source-fallback notice names it)."""
+    for line in text.splitlines():
+        if line.startswith("fwv="):
+            parts = line[4:].strip().split(".")
+            if len(parts) < 3:
+                return None
+            try:
+                return tuple(int(p) for p in parts[:3])
+            except ValueError:
+                return None
+    return None
 
 
 # Soft upper bound — same as upload, since the upload shape is the same.
@@ -497,15 +527,28 @@ def _compose_stage_chunk(target_path, chunk, first, hub_name):
             % (target_path, mode, repr(chunk))).encode()
 
 
-def _compose_runner():
-    """The fixed-size program that runs the staged /program.py: sync
-    the RTC, then trigger the hub-side launcher. Wrapping the launcher
-    call in a try/except turns a ``KeyboardInterrupt`` (from a
-    button-press stop) into a clean print instead of a raw traceback —
-    the client is exiting anyway, and we'd rather not scare the user
-    with the message that comes with an uncaught interrupt.
+def _compose_runner(target_path, remove_stale=None):
+    """The fixed-size program that runs the staged program at
+    ``target_path``: sync the RTC, then trigger the hub-side launcher.
+    ``remove_stale`` names a sibling staging path to delete first —
+    staging ``/program.mpy`` removes ``/program.py`` so the launcher's
+    button-path resolution ("source wins when present") always runs
+    the most recently staged program. Wrapping the launcher call in a
+    try/except turns a ``KeyboardInterrupt`` (from a button-press
+    stop) into a clean print instead of a raw traceback — the client
+    is exiting anyway, and we'd rather not scare the user with the
+    message that comes with an uncaught interrupt.
     """
-    lines = rtc_sync_lines() + [
+    remove_lines = []
+    if remove_stale is not None:
+        remove_lines = [
+            "import os",
+            "try:",
+            "    os.remove(%r)" % remove_stale,
+            "except OSError:",
+            "    pass",
+        ]
+    lines = rtc_sync_lines() + remove_lines + [
         # Firmware identity first, provenance suffix included —
         # ``firmware_label`` exists since 1.79.0; older firmware
         # falls back to the bare version (it cannot know its own
@@ -517,7 +560,7 @@ def _compose_runner():
         "    print('firmware ' + openbricks.__version__)",
         "from openbricks import launcher",
         "try:",
-        "    launcher.run_program(%r)" % _TARGET_PATH,
+        "    launcher.run_program(%r)" % target_path,
         "except KeyboardInterrupt:",
         "    print('openbricks: stopped by button press.')",
         # Evidence in the stream, read BEFORE anything can reboot or
@@ -538,12 +581,13 @@ def _compose_runner():
 
 async def _exec_step(blink, link, program, what):
     """Raw-paste one SMALL program and consume its whole output
-    framing (stdout \x04 stderr \x04 prompt). Raises ``RunError``
-    carrying the hub's stderr if the step failed (e.g. OSError from a
-    full filesystem while staging)."""
+    framing (stdout \x04 stderr \x04 prompt). Returns the step's
+    stdout bytes. Raises ``RunError`` carrying the hub's stderr if
+    the step failed (e.g. OSError from a full filesystem while
+    staging)."""
     await _raw_paste_upload(blink, link, program)
     blink._step = "%s (reading step output)" % what
-    await blink.read_until(_CTRL_D)          # stdout (discarded)
+    out = await blink.read_until(_CTRL_D)    # stdout
     err = await blink.read_until(_CTRL_D)    # stderr
     prompt = await blink.read_exact(1, timeout=10.0)
     if err.strip():
@@ -551,6 +595,7 @@ async def _exec_step(blink, link, program, what):
                        % (what, err.decode("utf-8", "replace")))
     if prompt != b">":
         raise RunError("unexpected byte %r after %s" % (prompt, what))
+    return out
 
 
 async def _stage_file(blink, link, target_path, payload, hub_name):
@@ -587,18 +632,24 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
         # so cleanup (motor_process reset, KeyboardInterrupt handling)
         # is identical.
         user_bytes = command.encode("utf-8")
+        display_name = "<inline>"
     else:
         try:
             with open(script_path, "rb") as f:
                 user_bytes = f.read()
         except OSError as e:
             raise RunError("cannot read script %r: %s" % (script_path, e))
+        display_name = os.path.basename(script_path)
     if len(user_bytes) > _MAX_SCRIPT_BYTES:
         raise RunError(
             "script is %d bytes, exceeding the %d-byte soft limit" % (
                 len(user_bytes), _MAX_SCRIPT_BYTES))
 
-    runner = _compose_runner()
+    # Compile BEFORE any BLE work: a syntax error costs milliseconds
+    # here instead of a scan + connect + upload round-trip. Whether
+    # the .mpy or the source is actually staged is decided in-session
+    # by the firmware-version probe.
+    mpy_bytes = mpycompile.compile_source(user_bytes, display_name)
 
     # Route Ctrl-C through a CONTROLLED cancellation instead of a raw
     # KeyboardInterrupt: a KI lands at whatever await bleak happens
@@ -618,7 +669,7 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
         except NUSError as e:
             raise RunError(str(e))
 
-        await _run_session(link, name, user_bytes, runner)
+        await _run_session(link, name, user_bytes, mpy_bytes)
     finally:
         if _sigint_installed:
             loop.remove_signal_handler(signal.SIGINT)
@@ -654,13 +705,33 @@ def _install_sigint(loop, handler):
         return False
 
 
-async def _run_session(link, name, user_bytes, runner):
+async def _pick_staging(blink, link):
+    """Probe the hub's firmware version and return the staging plan
+    ``(target_path, use_mpy, remove_stale)``. Firmware >= 1.92.0 gets
+    the host-compiled ``.mpy``; anything older (or a version the probe
+    can't parse) gets source, announced — never silently."""
+    out = await _exec_step(blink, link, _PROBE_VERSION_PROGRAM,
+                           "probing firmware version")
+    fw = _parse_fw_version(out.decode("utf-8", "replace"))
+    if fw is not None and fw >= _MIN_MPY_FIRMWARE:
+        return _MPY_TARGET_PATH, True, _TARGET_PATH
+    shown = ".".join(str(p) for p in fw) if fw else "unknown"
+    print("hub firmware %s predates precompiled programs — sending "
+          "source (flash firmware >= 1.92.0 for faster starts)" % shown,
+          file=sys.stderr)
+    return _TARGET_PATH, False, None
+
+
+async def _run_session(link, name, user_bytes, mpy_bytes):
     async with link:
         blink = _BufferedLink(link)
         blink._step = "scan + connect"
         await _enter_raw_repl(blink, link)
         try:
-            await _stage_file(blink, link, _TARGET_PATH, user_bytes, name)
+            target, use_mpy, remove_stale = await _pick_staging(blink, link)
+            payload = mpy_bytes if use_mpy else user_bytes
+            runner = _compose_runner(target, remove_stale)
+            await _stage_file(blink, link, target, payload, name)
             await _raw_paste_upload(blink, link, runner)
             out = sys.stdout
             try:

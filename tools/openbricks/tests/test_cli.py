@@ -95,9 +95,10 @@ class BuildParserTests(unittest.TestCase):
         args = self._parse(["upload", "-n", "RobotA", "s.py"])
         self.assertEqual(args.name, "RobotA")
         self.assertEqual(args.script, "s.py")
-        # Default target is /program.py — the path the firmware's
-        # frozen launcher reads on button press.
-        self.assertEqual(args.path, "/program.py")
+        # No --path means the DEFAULT program flow: compile on the
+        # host, stage /program.mpy (or source for old firmware) —
+        # decided in-session, so the parser carries None, not a path.
+        self.assertIsNone(args.path)
         self.assertEqual(args.scan_timeout, 5.0)
 
     def test_upload_accepts_path_override(self):
