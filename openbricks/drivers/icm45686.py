@@ -81,7 +81,17 @@ class ICM45686:
         return self._mp.hard_yaw_deg()
 
     def reset_heading(self):
-        """Zero the heading frame (calibration is kept)."""
+        """Zero the heading frame (calibration is kept).
+
+        Refused (``OSError`` from the yaw binding) while a DriveBase
+        steers by this gyro — Pybricks parity: "Can't reset heading
+        while gyro in use". The controller's measured frame would
+        shift under its held target and the next move veers chasing
+        the difference (bench 2026-08-13: straight() after turn(-90)
+        + reset_heading() pivoted left). Use ``db.reset()`` — it
+        re-bases the controller and the heading together — or
+        ``use_gyro(False)`` first.
+        """
         self._mp.hard_yaw_reset()
 
     def gyro(self):

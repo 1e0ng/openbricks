@@ -396,8 +396,11 @@ class _SimStBus:
         # db_disable; yielded, per-slot moves and direct speed
         # commands own them.
         self._db_writing = False
+        self._use_gyro = False
+        self._gyro_hard = False
         self._moves = {}
         self._slot_ids = {}
+        _sim_st_buses.append(self)
         runtime.add_tick(self._tick)
 
     def _move(self, slot):
@@ -545,7 +548,30 @@ class _SimStBus:
         return bool(self._raw.is_done())
 
     def db_use_gyro(self, enable):
+        self._use_gyro = bool(enable)
         self._raw.set_use_gyro(bool(enable))
+
+    def db_gyro_in_use(self):
+        # Firmware parity: the ICM driver's reset_heading guard.
+        return bool(self._active and self._use_gyro)
+
+    def db_reset(self):
+        # Firmware parity (db_reset binding): re-zero yaw integrator,
+        # frame reference, and held target together; refuse while a
+        # move is active.
+        if not self._active:
+            raise RuntimeError("db_reset before db_config")
+        if not self._raw.is_done():
+            raise RuntimeError(
+                "can't reset while a move is active — stop first")
+        if self._use_gyro:
+            if self._gyro_hard:
+                _sim_yaw.reset()
+                self._gyro_hard_ref = _sim_yaw.deg()
+            # Frame reset via the enable transition — the same
+            # "here, now is zero" the firmware binding performs.
+            self._raw.set_use_gyro(False)
+            self._raw.set_use_gyro(True)
 
     def db_gyro_source(self, mode):
         # Firmware parity: source 1 = the hard-tick yaw integrator
@@ -1240,7 +1266,19 @@ def _make_native_module():
     # delegates so user code calling motor_process.start() doesn't
     # crash. (Rarely used by user-facing code; mostly internal.)
     m.motor_process = _MotorProcessStub()
+    # NOTE: no ``st_bus`` here, ON PURPOSE — consumers select the
+    # firmware serial-bus path by attribute presence (see
+    # openbricks/_native.py). The reset-heading guard lives in
+    # _MotorProcessStub.hard_yaw_reset instead, scanning the emulated
+    # buses; a fresh install starts with none registered.
+    del _sim_st_buses[:]
     return m
+
+
+# Live _SimStBus instances of the CURRENT install — the sim's
+# hard_yaw_reset guard scans them (the firmware has one global drive
+# base; the sim can construct several).
+_sim_st_buses = []
 
 
 class _MotorProcessStub:
@@ -1265,6 +1303,12 @@ class _MotorProcessStub:
         return _sim_yaw.deg()
 
     def hard_yaw_reset(self):
+        # Firmware parity (motor_process.c mp_hard_yaw_reset): the
+        # refusal is enforced at this binding on both platforms.
+        if any(b.db_gyro_in_use() for b in _sim_st_buses):
+            raise OSError("can't reset heading while a drive base "
+                          "is using the gyro - use db.reset() "
+                          "instead")
         _sim_yaw.reset()
 
     def hard_yaw_state(self):

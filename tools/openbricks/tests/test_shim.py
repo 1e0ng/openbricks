@@ -1084,13 +1084,58 @@ class SimIcm45686Tests(_ShimTestBase):
     def test_hard_gyro_turn_lands_and_heading_agrees(self):
         imu = self._icm()
         db, _, _ = self._serial_db(imu=imu)
+        imu.reset_heading()        # allowed: gyro not driving yet
         db.use_gyro(True)          # hard source: db_gyro_source(1)
-        imu.reset_heading()
         db.turn(90)
         h = imu.heading()
         self.assertTrue(abs(h - 90) < 5, h)
-        imu.reset_heading()
+        db.reset()                 # the sanctioned mid-mission zero
         self.assertTrue(abs(imu.heading()) < 1, imu.heading())
+
+    def test_reset_heading_refused_while_gyro_drives(self):
+        # Pybricks parity ("Can't reset heading while gyro in use"):
+        # bench 2026-08-13 — resetting the integrator under the armed
+        # controller made the next straight() pivot left chasing the
+        # frame the held target still remembered.
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        try:
+            imu.reset_heading()
+            self.fail("expected OSError")
+        except OSError as e:
+            self.assertTrue("db.reset" in str(e), e)
+        db.use_gyro(False)
+        imu.reset_heading()        # allowed again once gyro released
+
+    def test_db_reset_refused_while_a_move_is_active(self):
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        db.straight(300, wait=False)
+        try:
+            db.reset()
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("stop first" in str(e), e)
+        db.stop()
+        db.reset()                 # idle again: allowed
+
+    def test_straight_after_turn_and_reset_goes_straight(self):
+        # The bench script, end to end in physics: straight, turn
+        # -90, reset, straight — the last leg must hold the NEW zero,
+        # not pivot chasing the pre-reset -90 target.
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        db.straight(100)
+        db.turn(-90)
+        db.reset()
+        self.assertTrue(abs(imu.heading()) < 1, imu.heading())
+        db.straight(130)
+        h = imu.heading()
+        self.assertTrue(abs(h) < 5,
+                        "veered to %.1f deg after reset" % h)
 
     def test_calibration_round_trips_through_the_nvs_fake(self):
         imu = self._icm()
@@ -1103,8 +1148,8 @@ class SimIcm45686Tests(_ShimTestBase):
         # wraps at +/-180 — both unwrap directions must survive.
         imu = self._icm()
         db, _, _ = self._serial_db(imu=imu)
-        db.use_gyro(True)
         imu.reset_heading()
+        db.use_gyro(True)
         db.turn(200)
         h = imu.heading()
         self.assertTrue(abs(h - 200) < 8, h)      # NOT wrapped to -160

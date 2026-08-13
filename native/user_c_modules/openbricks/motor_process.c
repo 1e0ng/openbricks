@@ -588,6 +588,13 @@ double openbricks_hard_yaw_deg(void) {
     return (double)ob_yaw_deg(hard_yaw_get());
 }
 
+// C-callable heading zero for st_bus's db_reset — the ONLY sanctioned
+// reset path while a drive base steers by the gyro (it re-bases the
+// controller frame in the same locked section).
+void openbricks_hard_yaw_reset_c(void) {
+    ob_yaw_reset(hard_yaw_get());
+}
+
 void openbricks_hard_yaw_feed_c(double dt_ms, double rate_dps) {
     ob_yaw_feed(hard_yaw_get(), (ob_float_t)dt_ms, (ob_float_t)rate_dps);
 }
@@ -638,6 +645,19 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_yaw_deg_obj, mp_hard_yaw_deg);
 
 static mp_obj_t mp_hard_yaw_reset(mp_obj_t self_in) {
     (void)self_in;
+    // Pybricks parity ("Can't reset heading while gyro in use"):
+    // zeroing the integrator under an armed heading controller
+    // shifts the measurement out from under the held target — the
+    // next move veers chasing the old frame (bench 2026-08-13).
+    // st_bus's db_reset is the sanctioned path: it re-bases the
+    // controller frame in the same locked section via
+    // openbricks_hard_yaw_reset_c below.
+    if (openbricks_db_gyro_in_use_c()) {
+        mp_raise_msg(&mp_type_OSError,
+                     MP_ERROR_TEXT("can't reset heading while a "
+                                   "drive base is using the gyro - "
+                                   "use db.reset() instead"));
+    }
     ob_yaw_reset(hard_yaw_get());
     return mp_const_none;
 }

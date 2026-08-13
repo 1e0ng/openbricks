@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.93.0 — DriveBase.reset(); reset_heading guarded (Pybricks parity)
+
+Bench report: with `use_gyro(True)`, `imu.reset_heading()` between
+moves made the next `straight()` pivot left — the reset zeroed the
+yaw integrator out from under the armed heading controller, whose
+held target still remembered the old frame (reproduced off-hardware:
+"straight" = left wheel −98 counts, right +3067). Pybricks forbids
+exactly this ("Can't reset heading while gyro in use"), and now so
+do we: `reset_heading()` raises `OSError` while a drive base steers
+by the gyro. The sanctioned mid-mission zero is the new
+**`DriveBase.reset()`** — it re-bases the yaw integrator, the
+engine's frame reference, and the held target in one locked C
+section, so after `reset()` the current pose is heading zero for the
+controller and `imu.heading()` together. `reset()` raises while a
+move is active (stop first); with the gyro off it is a benign no-op
+(the encoder frame re-derives at every arm). Sim has full parity,
+including the refusal. Both sides move: flash firmware 1.93.0 AND
+`pipx upgrade openbricks`.
+
 ## 1.92.1 — flash probe failures say why
 
 When ``openbricks flash`` cannot reach the hub's REPL, it now prints

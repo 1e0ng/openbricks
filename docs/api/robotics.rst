@@ -89,6 +89,26 @@ works — its fused heading is pumped from Python between ticks,
 which corrects noticeably slower, typically +0.5° to +1.8° per
 turn. New builds should use the ICM-45686.)
 
+To re-zero the heading frame mid-mission (say, after squaring up on
+a line), call ``db.reset()`` between moves — afterwards the robot's
+CURRENT pose is heading zero for both the drive base and
+``imu.heading()``, atomically:
+
+.. code-block:: python
+
+    db.straight(100)
+    db.turn(-90)
+    db.reset()          # here, now = heading zero
+    db.straight(130)    # drives straight along the NEW zero
+
+``imu.reset_heading()`` refuses (``OSError``) while a drive base
+steers by the gyro — same rule as Pybricks ("can't reset heading
+while gyro in use"): zeroing the integrator under an armed heading
+controller shifts the measurement out from under the held target,
+and the next move veers chasing the old frame. Use ``db.reset()``,
+or ``use_gyro(False)`` first. ``db.reset()`` itself raises while a
+move is in progress — stop first.
+
 Accurate ``wheel_diameter_mm`` / ``axle_track_mm`` values matter more
 than any tuning — calibrate both with two short test drives:
 :doc:`/measuring`.

@@ -949,6 +949,14 @@ class HardHeadingSourceTests(_Base):
         for _ in range(1000):
             m.hard_yaw_feed(1.0, 90.9)         # 90 dps turn (+bias)
         self.assertTrue(abs(m.hard_yaw_deg() + 90.0) < 3.0)  # sign -1
+        # The reset binding refuses while the db steers by the gyro
+        # (Pybricks parity, 1.93.0) — this class's setUp arms it.
+        try:
+            m.hard_yaw_reset()
+            self.fail("expected OSError under gyro-armed db")
+        except OSError as e:
+            self.assertTrue("db.reset" in str(e), e)
+        sb.db_use_gyro(False)
         m.hard_yaw_reset()
         self.assertTrue(abs(m.hard_yaw_deg()) < 1e-6)
         _bias2, locked2, _s2 = m.hard_yaw_state()
@@ -1109,3 +1117,92 @@ class EstopBindingTests(_Base):
         self.w.advance(300)
         self.assertEqual(self.w.spd[2], 0)
         self.assertEqual(self.w.torque[2], 0)
+
+
+class HeadingResetParityTests(_Base):
+    """``db_reset()``: Pybricks ``DriveBase.reset()`` parity.
+
+    Re-zeroes the yaw integrator, the engine's frame reference, and
+    the held target in ONE locked section — the only sanctioned
+    heading re-zero while a drive base steers by the gyro. Bench
+    2026-08-13: ``imu.reset_heading()`` alone shifted the measured
+    frame under the held target, and ``straight()`` after
+    ``turn(-90)`` pivoted left chasing the -90 the target still
+    remembered.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from _openbricks_native import motor_process as m
+        self.m = m
+        m.hard_yaw_config(1.0)
+        sb.db_use_gyro(True)
+        sb.db_gyro_source(1)
+
+    def _pump_with_hard_gyro(self):
+        prev = ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+                * 360.0 / 4096.0) / (136.0 / 88.0)
+        self.w.pump()
+        now = ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+               * 360.0 / 4096.0) / (136.0 / 88.0)
+        self.m.hard_yaw_feed(1.0, (now - prev) * 1000.0)
+
+    def test_gyro_in_use_reflects_db_state(self):
+        self.assertTrue(sb.db_gyro_in_use())
+        sb.db_use_gyro(False)
+        self.assertFalse(sb.db_gyro_in_use())
+
+    def test_reset_before_config_raises(self):
+        sb.test_reset()
+        try:
+            sb.db_reset()
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("db_config" in str(e), e)
+
+    def test_reset_during_a_move_raises(self):
+        sb.db_straight(200.0, 60.0)
+        try:
+            sb.db_reset()
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("stop first" in str(e), e)
+
+    def test_reset_zeroes_integrator_and_frame(self):
+        sb.db_turn(-90.0, 90.0)
+        for _ in range(8000):
+            self._pump_with_hard_gyro()
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        self.assertTrue(abs(self.m.hard_yaw_deg()) > 60.0)
+        sb.db_reset()
+        self.assertTrue(abs(self.m.hard_yaw_deg()) < 0.001)
+
+    def test_straight_after_turn_and_reset_goes_straight(self):
+        # The bench scenario, distilled: turn(-90), reset, straight.
+        # Without the atomic re-base the controller chases the old
+        # -90 target and the "straight" is a pivot.
+        sb.db_turn(-90.0, 90.0)
+        for _ in range(8000):
+            self._pump_with_hard_gyro()
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        sb.db_reset()
+        base_l = sb.servo_counts(0)
+        base_r = sb.servo_counts(1)
+        sb.db_straight(100.0, 60.0)
+        for _ in range(8000):
+            self._pump_with_hard_gyro()
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        dl = sb.servo_counts(0) - base_l
+        dr = sb.servo_counts(1) - base_r
+        self.assertTrue(abs(dl - dr) < 60,
+                        "veered after reset: dl=%d dr=%d" % (dl, dr))
+
+    def test_reset_without_gyro_is_benign(self):
+        sb.db_use_gyro(False)
+        sb.db_reset()   # no raise; encoder frame re-derives per arm

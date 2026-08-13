@@ -114,6 +114,7 @@ class DriveBase:
         self._wheel_circumference = math.pi * wheel_diameter_mm
         self._axle_track = axle_track_mm
         self._imu = imu
+        self._gyro_enabled = False
 
         # Serial-bus motors: adopt them onto the hard-tick engine
         # transparently (1.45.0 — ONE drivebase class, user decision).
@@ -254,6 +255,32 @@ class DriveBase:
                 "use_gyro needs a closed-loop drivebase (encoder "
                 "servos or serial-bus motors); open-loop pairs have "
                 "no heading-hold loop")
+        self._gyro_enabled = enable
+
+    def reset(self):
+        """Re-zero the heading frame: after ``reset()``, the robot's
+        CURRENT pose is heading zero — for the drive base's
+        controller and ``imu.heading()`` together (Pybricks
+        ``DriveBase.reset()``). Call it between moves; it raises
+        while a move is active.
+
+        This is the supported way to re-zero mid-mission.
+        ``imu.reset_heading()`` refuses while a drive base steers by
+        the gyro, because zeroing the integrator under an armed
+        controller shifts the measurement out from under the held
+        target — the next ``straight()`` then veers chasing the old
+        frame.
+        """
+        if self._serial_engine is not None:
+            self._serial_engine.reset()
+        elif self._native is not None:
+            if self._gyro_enabled:
+                # Fresh frame via the enable transition — the same
+                # "here, now is zero" the first enable performs.
+                self._native.use_gyro(False)
+                self._native.use_gyro(True)
+        # Open-loop / encoder mode: the frame is re-derived at every
+        # arm; nothing to re-base.
 
     # ---- non-blocking open-loop ----
     def drive(self, speed_mm_s, turn_rate_dps):
