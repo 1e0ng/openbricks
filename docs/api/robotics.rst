@@ -21,6 +21,17 @@ body-degrees.
         db.straight(300)
         db.turn(90)
 
+Moves block by default. Pass ``wait=False`` to return immediately
+and poll ``done()`` — the Pybricks pattern for driving while
+reading sensors; any new move command supersedes the pending one::
+
+    db.straight(600, wait=False)
+    while not db.done():
+        if bumper_pressed():
+            db.stop()
+            break
+        time.sleep_ms(10)
+
 For direct control of each wheel — line-following, tank-style
 teleop, or any controller that computes its own per-wheel outputs —
 ``move_wheels`` takes two speeds in wheel-deg/s:
