@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import io
 import os
+import signal
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -1193,6 +1194,58 @@ def setUpModule():
     global _ORIG_RESTORE_WAIT
     _ORIG_RESTORE_WAIT = _rm._RESTORE_WAIT_S
     _rm._RESTORE_WAIT_S = 0.02
+
+
+class _CancelCountingTask:
+    def __init__(self):
+        self.cancels = 0
+
+    def cancel(self):
+        self.cancels += 1
+
+
+class SigintRoutingTests(unittest.TestCase):
+    """Ctrl-C routing: first press cancels the session task, repeats
+    are absorbed, and loops without signal-handler support fall back
+    to the raw-KeyboardInterrupt path."""
+
+    def test_first_press_cancels_the_session_task(self):
+        task = _CancelCountingTask()
+        handler = run_mod._make_sigint_handler(task)
+        handler()
+        self.assertEqual(task.cancels, 1)
+
+    def test_repeat_presses_acknowledge_without_cancelling_again(self):
+        task = _CancelCountingTask()
+        handler = run_mod._make_sigint_handler(task)
+        stderr = io.StringIO()
+        with patch("sys.stderr", stderr):
+            handler()
+            handler()
+            handler()
+        self.assertEqual(task.cancels, 1)
+        self.assertIn("stopping", stderr.getvalue())
+
+    def test_install_registers_sigint_on_a_capable_loop(self):
+        registered = []
+
+        class _Loop:
+            def add_signal_handler(self, sig, cb):
+                registered.append((sig, cb))
+
+        def handler():
+            pass
+
+        self.assertTrue(run_mod._install_sigint(_Loop(), handler))
+        self.assertEqual(registered, [(signal.SIGINT, handler)])
+
+    def test_install_reports_false_where_loop_lacks_support(self):
+        class _WindowsLoop:
+            def add_signal_handler(self, sig, cb):
+                raise NotImplementedError
+
+        self.assertFalse(
+            run_mod._install_sigint(_WindowsLoop(), lambda: None))
 
 
 def tearDownModule():
