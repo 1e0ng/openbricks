@@ -168,6 +168,7 @@ jobs:
             tests.test_pins \
             tests.test_timer_allocation \
             tests.test_estop \
+            tests.test_diagnose_usb_serial \
             tests.test_boot_main
 
   openbricks-py:
