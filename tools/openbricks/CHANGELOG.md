@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.95.0 — no more ~1 s pause between turn() and the next move
+
+Bench report: sometimes, after a `turn()`, the next `straight()`
+started ~1 s late. Cause: `turn(wait=True)` returns only when the
+residual error also closes below the 3 wheel-deg arrival tolerance,
+and after the profile expires the controller drives that residual
+with pure proportional feedback — in duty mode a few degrees of
+turn-end residual command a duty below the gearbox's static-friction
+breakaway, so the robot sat still while the integrator slowly wound
+up. Fix: the post-profile arrival wait now has a NO-PROGRESS cap
+(400 ms) — a stalled small residual (< 12 wheel-deg) is forgiven
+and the move completes; the window re-stamps whenever the error is
+still improving, so a healthy settle keeps full arrival accuracy
+(sim physics pinned this: a plain cap cut converging turns off at
+~84°). A forgiven residual stays in the gyro's absolute frame and
+the next move corrects it in motion. A LARGE stalled residual (a
+genuinely blocked robot) still refuses to complete — the move
+watchdog fails loudly, never a silent wrong pose. Firmware-only
+behavior, but ships lockstep: flash 1.95.0 (CLI unchanged —
+`pipx upgrade openbricks` keeps versions aligned).
+
 ## 1.94.0 — move_wheels / drive() obey settings.acceleration
 
 Bench report: `move_wheels` ignored the acceleration settings.

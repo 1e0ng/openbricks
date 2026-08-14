@@ -57,6 +57,20 @@
 // the 88/136 bench geometry.
 #define OB_DRIVEBASE_DONE_TOL_WHEEL_DEG  3.0
 
+// Post-profile no-progress wait cap (ms), the progress epsilon that
+// re-stamps it (wheel-deg), and the largest residual the cap may
+// forgive (wheel-deg, ~7.8 body-deg on the 88/136 bench). The cap
+// exists for the stiction regime — a few degrees the feedback
+// cannot break loose in duty mode; a robot still CONVERGING keeps
+// re-stamping the window and retains full arrival accuracy. A
+// residual LARGER than the forgive limit means the move genuinely
+// did not happen (blocked robot, dead heading source): done stays
+// false and the move watchdog raises loudly instead of the program
+// continuing from a silently wrong pose. See ``settling``.
+#define OB_DRIVEBASE_SETTLE_MS                 400
+#define OB_DRIVEBASE_SETTLE_PROGRESS_WHEEL_DEG 1.0
+#define OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG  12.0
+
 
 typedef struct {
     // Servo handles — raw pointers into the bindings' ``ob_servo_t``
@@ -100,6 +114,19 @@ typedef struct {
     ob_float_t heading_override_wheel_deg;
 
     bool done;     // last scheduled move finished
+
+    // Bounded settle: after BOTH profiles expire, arrival (errors <
+    // tolerance) latches done immediately; the settle cap fires only
+    // after OB_DRIVEBASE_SETTLE_MS with NO PROGRESS — the window
+    // re-stamps whenever the worst-axis error improves by at least
+    // the progress epsilon, so a robot still converging keeps its
+    // full accuracy and only a STALLED residual (duty-mode stiction
+    // on the last degrees of a turn) is forgiven. In gyro mode a
+    // forgiven residual stays in the ABSOLUTE frame and the next
+    // move pulls it back.
+    bool       settling;
+    long       settle_start_ms;
+    ob_float_t settle_best_err;
 } ob_drivebase_t;
 
 
