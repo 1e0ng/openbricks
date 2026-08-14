@@ -48,6 +48,16 @@
 #define OB_BUTTON_ON_THRESH    15
 #define OB_BUTTON_OFF_THRESH    5
 
+// Release-chatter cooldown (1 kHz ticks) after the STALE press ends:
+// a short start tap's release can re-contact for >= ON_THRESH ms —
+// enough to confirm as a fresh PRESSED — and with the stale marker
+// already retired that phantom press hard-stopped the newborn run
+// (bench 2026-08-14: button start died 42 ms in, "1 ms after
+// press", no watcher note — the C path fired). The Python watcher
+// has had this exact window (RELEASE_CHATTER_MS = 200) since
+// 1.48.x; the hard path now honors the same rule.
+#define OB_BUTTON_CHATTER_TICKS 200
+
 typedef enum {
     OB_BUTTON_NONE = 0,
     OB_BUTTON_PRESSED,      // debounced press edge (down)
@@ -66,6 +76,9 @@ typedef struct {
     uint8_t  stable_pressed;    // debounced level (hysteresis state)
     uint8_t  raw_last;          // most recent raw sample (diagnostics)
     uint8_t  stale_press;       // press in flight at arm time (see below)
+    uint8_t  chatter_ticks;     // cooldown after the stale press ends:
+                                // press edges inside it are its own
+                                // release re-contact, never a stop
     uint32_t n_presses;         // cumulative debounced press edges
     uint32_t n_releases;
     uint32_t n_stale;           // press edges consumed as stale

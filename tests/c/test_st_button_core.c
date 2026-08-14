@@ -177,9 +177,10 @@ TEST(start_press_confirming_after_arm_is_not_a_stop) {
     CHECK_EQ_INT(classify_n(50), 0);  // the edge confirmed, but stale
     CHECK_EQ_INT(b.n_presses, 1);     // it DID fire at the debouncer
     CHECK_EQ_INT(b.n_stale, 1);
-    // Release, then a genuinely new press: THAT one stops.
+    // Release (the chatter cooldown runs), then a genuinely new
+    // press after it: THAT one stops.
     level = 0;
-    classify_n(OB_BUTTON_WINDOW + 5);
+    classify_n(OB_BUTTON_WINDOW + OB_BUTTON_CHATTER_TICKS);
     level = 1;
     CHECK_EQ_INT(classify_n(50), 1);
 }
@@ -197,9 +198,15 @@ TEST(press_already_stable_at_arm_needs_release_before_stop) {
     ob_button_arm_transition(&b);
     CHECK_EQ_INT(classify_n(100), 0); // held a while longer
     level = 0;
-    classify_n(OB_BUTTON_WINDOW + 5); // release clears staleness
+    classify_n(OB_BUTTON_WINDOW + 5); // release clears staleness...
+    // ...into the release-chatter cooldown: a press inside it is the
+    // start press's own re-contact, never a stop.
     level = 1;
-    CHECK_EQ_INT(classify_n(50), 1);
+    CHECK_EQ_INT(classify_n(50), 0);
+    level = 0;
+    classify_n(OB_BUTTON_WINDOW + OB_BUTTON_CHATTER_TICKS);
+    level = 1;
+    CHECK_EQ_INT(classify_n(50), 1);  // cooldown over: stops work
 }
 
 TEST(stale_window_decay_re_enables_stops) {
@@ -214,6 +221,9 @@ TEST(stale_window_decay_re_enables_stops) {
     level = 0;
     ob_button_arm_transition(&b);     // window still holds 5 samples
     classify_n(OB_BUTTON_WINDOW + 1); // decays to empty -> marker off
+    // The decayed press's release chatter is covered by the same
+    // cooldown; a REAL stop press works once it expires.
+    classify_n(OB_BUTTON_CHATTER_TICKS);
     level = 1;
     CHECK_EQ_INT(classify_n(50), 1);
     CHECK_EQ_INT(b.n_stale, 0);
@@ -239,6 +249,48 @@ TEST(clear_stale_on_disarm) {
     CHECK_EQ_INT(b.stale_press, 0);
 }
 
+TEST(release_recontact_after_arm_is_not_a_stop) {
+    // Bench 2026-08-14: a short start tap's release re-contacted for
+    // >= ON_THRESH ms; with the stale marker already retired, the
+    // re-contact confirmed as a "fresh" press and hard-stopped the
+    // newborn run 42 ms in (no watcher note — the C path fired).
+    // Inside the release-chatter cooldown that press is the SAME
+    // press's bounce.
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    level = 1;
+    tick_n(50);                       // start press confirmed, held
+    ob_button_arm_transition(&b);     // run starts, stop armed
+    level = 0;
+    classify_n(OB_BUTTON_WINDOW + 5); // release: stale -> cooldown
+    level = 1;                        // re-contact bounce...
+    CHECK_EQ_INT(classify_n(30), 0);  // ...consumed, run survives
+    CHECK_EQ_INT(b.n_stale >= 1, 1);
+    level = 0;
+    classify_n(OB_BUTTON_WINDOW + OB_BUTTON_CHATTER_TICKS);
+    level = 1;
+    CHECK_EQ_INT(classify_n(50), 1);  // deliberate stop still works
+}
+
+TEST(disarm_clears_the_chatter_cooldown) {
+    // The cooldown must not outlive the run and eat the NEXT run's
+    // start press (post-stop start suppression is the Python
+    // watcher's lockout).
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    level = 1;
+    tick_n(50);
+    ob_button_arm_transition(&b);
+    level = 0;
+    classify_n(OB_BUTTON_WINDOW + 5); // cooldown armed
+    ob_button_clear_stale(&b);        // program ends: disarm
+    CHECK_EQ_INT(b.chatter_ticks, 0);
+    level = 1;
+    CHECK_EQ_INT(classify_n(50), 1);  // next press is fresh input
+}
+
 int main(void) {
     RUN(clean_press_and_release_fire_one_edge_each);
     RUN(chattery_press_still_fires);
@@ -252,5 +304,7 @@ int main(void) {
     RUN(stale_window_decay_re_enables_stops);
     RUN(arm_with_idle_button_suppresses_nothing);
     RUN(clear_stale_on_disarm);
+    RUN(release_recontact_after_arm_is_not_a_stop);
+    RUN(disarm_clears_the_chatter_cooldown);
     return harness_exit("st_button_core");
 }
