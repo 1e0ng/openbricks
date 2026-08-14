@@ -1262,13 +1262,39 @@ def _resolve_program_path(path):
 
 def _exec_program(program_path, origin=None):
     """Button-gated path: swallow ``KeyboardInterrupt`` and missing-file
-    errors so the idle loop keeps running between button presses."""
+    errors so the idle loop keeps running between button presses.
+
+    Attribution matters: the broad ``except OSError`` here also
+    catches log-session open/rotation failures from INSIDE
+    ``_exec_program_raw`` — printing "no program at" for those sent a
+    bench hunt down the wrong path (2026-08-14: press dispatched, run
+    began, died pre-log with no trace; the ring said only that a run
+    started). Distinguish honestly and leave ring evidence either
+    way — the console print goes nowhere when nobody is attached.
+    """
     program_path = _resolve_program_path(program_path)
+    _event("exec-start", program_path)
     try:
         _exec_program_raw(program_path, origin=origin)
         print("openbricks: program finished.")
-    except OSError:
-        print("openbricks: no program at", program_path)
+    except OSError as e:
+        import os
+        try:
+            os.stat(program_path)
+            present = True
+        except OSError:
+            present = False
+        if present:
+            # The program file EXISTS: this OSError came from the
+            # exec machinery (log session open/rotation, flash I/O)
+            # — say so, never "no program".
+            _event("exec-oserror", repr(e))
+            print("openbricks: program did not start (%r from the "
+                  "exec path, program file present):" % (e,),
+                  program_path)
+        else:
+            _event("exec-missing", program_path)
+            print("openbricks: no program at", program_path)
     except KeyboardInterrupt:
         print("openbricks: stopped.")
 

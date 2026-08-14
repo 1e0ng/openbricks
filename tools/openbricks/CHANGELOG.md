@@ -3,6 +3,19 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.96.3 — a run that dies before its log opens now says why
+
+Bench 2026-08-14: a start press dispatched, the run began, and it
+died before the log session opened — leaving no log, no console
+anyone was watching, and a "no program at ..." misattribution: the
+launcher's broad `except OSError` treated ANY exec-path OSError
+(log-session open/rotation, flash I/O) as a missing program file.
+Now the handler checks whether the program file actually exists:
+present-but-failed prints the real error, and three ring events
+(`exec-start`, `exec-missing`, `exec-oserror`) make the next
+`dump_events()` name the failure directly. Firmware-only; flash
+1.96.3 (`pipx upgrade openbricks` keeps versions aligned).
+
 ## 1.96.2 — flash says what the erase took with it
 
 Bench report: after flashing, a start-button press did nothing — no
