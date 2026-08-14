@@ -488,10 +488,13 @@ class _SerialNativeEngine:
 
     def move_wheels(self, left_wheel_speed, right_wheel_speed):
         """Independent per-wheel speeds (wheel-deg/s), both staged in
-        one C critical section so they leave in a single sync-write
-        packet — the drivebase-owned equivalent of a SyncServoGroup
-        over the two wheels (which adoption makes unreachable: the
-        motors' MicroPython UART is gone)."""
+        one C critical section — the drivebase-owned equivalent of a
+        SyncServoGroup over the two wheels (which adoption makes
+        unreachable: the motors' MicroPython UART is gone). Targets
+        ramp at the configured straight acceleration (proportional
+        slew: the larger delta runs at full accel, both wheels arrive
+        together), then the engine yields with the registers holding
+        the final speeds."""
         estop.check()
         # Nothing downstream waits for these, so a silent wheel would
         # never surface — check before commanding. In a control loop

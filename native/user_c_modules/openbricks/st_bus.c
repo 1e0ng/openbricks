@@ -187,6 +187,24 @@ static uint8_t st_db_fault;
 static int st_db_slot_l = -1, st_db_slot_r = -1;
 static uint32_t st_db_now_ms;      // clock fed by the pump caller
 
+// Wheel-speed slew (db_move_wheels / drive): direct speed commands
+// obey settings(acceleration=...) like every other verb — the
+// uniform-accel rule. In wheel mode the servo's own goal_acc used to
+// paper over the step change; duty mode (the 1.89.0 default) has no
+// servo controller in the circuit, so an unramped target slams the
+// FF+PI (bench 2026-08-14: "move_wheels seems not following the
+// acceleration settings"). The db owns the wheels while ramping and
+// yields when both targets are reached (registers hold the speed).
+static bool st_db_ws_active;
+static ob_float_t st_db_ws_cur_l, st_db_ws_cur_r;   // steps/s
+static int32_t st_db_ws_tgt_l, st_db_ws_tgt_r;      // steps/s
+static long st_db_ws_last_ms;
+
+static void st_db_ws_clear_locked(void) {
+    st_db_ws_active = false;
+    st_db_ws_cur_l = st_db_ws_cur_r = (ob_float_t)0.0;
+}
+
 // Per-slot position moves (run_angle / hold on adopted motors).
 static ob_smove_t st_moves[OB_SSERVO_SLOTS];
 
@@ -235,7 +253,47 @@ static void st_db_tick_locked(void) {
         ob_sservo_set_speed(sv, st_db_slot_l, 0);
         ob_sservo_set_speed(sv, st_db_slot_r, 0);
         ob_drivebase_stop(&st_db);
+        st_db_ws_clear_locked();
         st_db_writing = false;     // yield; Python raises on the fault
+        return;
+    }
+    if (st_db_ws_active) {
+        // Wheel-speed slew replaces the trajectory tick: advance both
+        // commanded speeds toward their targets at the configured
+        // straight acceleration, then yield with the registers
+        // holding the final speeds.
+        long now = (long)st_db_now_ms;
+        ob_float_t dt_s = (ob_float_t)(now - st_db_ws_last_ms)
+                          * (ob_float_t)0.001;
+        st_db_ws_last_ms = now;
+        if (dt_s < (ob_float_t)0.0) {
+            dt_s = (ob_float_t)0.0;
+        }
+        if (dt_s > (ob_float_t)0.05) {
+            dt_s = (ob_float_t)0.05;   // a stalled tick must not jump
+        }
+        ob_float_t max_step = st_db_accel_straight
+                              * (ob_float_t)ST_DB_STEPS_PER_DEG * dt_s;
+        // Proportional slew: the wheel with the larger delta runs at
+        // full acceleration, the other proportionally slower — both
+        // arrive TOGETHER, so a drive() arc keeps its L:R ratio (and
+        // therefore its radius) through the ramp.
+        ob_float_t diff_l = (ob_float_t)st_db_ws_tgt_l - st_db_ws_cur_l;
+        ob_float_t diff_r = (ob_float_t)st_db_ws_tgt_r - st_db_ws_cur_r;
+        ob_float_t mag_l = diff_l < (ob_float_t)0.0 ? -diff_l : diff_l;
+        ob_float_t mag_r = diff_r < (ob_float_t)0.0 ? -diff_r : diff_r;
+        ob_float_t mag_max = mag_l > mag_r ? mag_l : mag_r;
+        if (mag_max <= max_step) {
+            st_db_ws_cur_l = (ob_float_t)st_db_ws_tgt_l;
+            st_db_ws_cur_r = (ob_float_t)st_db_ws_tgt_r;
+            st_db_ws_active = false;   // cur values persist as the
+            st_db_writing = false;     // seed for the next command
+        } else {
+            st_db_ws_cur_l += max_step * diff_l / mag_max;
+            st_db_ws_cur_r += max_step * diff_r / mag_max;
+        }
+        ob_sservo_set_speed(sv, st_db_slot_l, (int32_t)st_db_ws_cur_l);
+        ob_sservo_set_speed(sv, st_db_slot_r, (int32_t)st_db_ws_cur_r);
         return;
     }
     if (st_db.use_gyro && st_db_gyro_source == 1) {
@@ -495,6 +553,7 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
+    st_db_ws_clear_locked();
     st_db_fault = 0;
     st_moves_reset_all();
     st_db_slot_l = st_db_slot_r = -1;
@@ -1075,6 +1134,7 @@ static mp_obj_t sb_estop(mp_obj_t self_in) {
     bus_take();
     st_db_active = false;
     st_db_writing = false;
+    st_db_ws_clear_locked();
     st_moves_reset_all();
     bus_release();
     return sb_torque_off_all(self_in);
@@ -1158,6 +1218,7 @@ static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
+    st_db_ws_clear_locked();   // trajectory supersedes a wheel slew
     st_db_writing = true;
     st_db.accel_dps2 = st_db_accel_straight;
     ob_drivebase_straight(&st_db, (long)st_db_now_ms, mm, mm_s);
@@ -1181,6 +1242,7 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
+    st_db_ws_clear_locked();   // trajectory supersedes a wheel slew
     st_db_writing = true;
     st_db.accel_dps2 = st_db_accel_turn;
     ob_drivebase_turn(&st_db, (long)st_db_now_ms, deg, dps);
@@ -1204,6 +1266,7 @@ static mp_obj_t sb_db_curve(size_t n_args, const mp_obj_t *args) {
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
+    st_db_ws_clear_locked();   // trajectory supersedes a wheel slew
     st_db_writing = true;
     st_db.accel_dps2 = st_db_accel_straight;
     ob_drivebase_curve(&st_db, (long)st_db_now_ms, radius, angle, mm_s);
@@ -1244,6 +1307,7 @@ static void st_db_abort_capture_and_yield_locked(void) {
                - st_db_bridge_r.observer.pos_hat) / (ob_float_t)2.0;
     }
     ob_drivebase_stop(&st_db);
+    st_db_ws_clear_locked();
     st_db_writing = false;
 }
 
@@ -1270,11 +1334,22 @@ static mp_obj_t sb_db_move_wheels(mp_obj_t self_in, mp_obj_t l_in,
         ob_sservo_t *sv = sservo_get();
         ob_smove_stop(&st_moves[st_db_slot_l]);
         ob_smove_stop(&st_moves[st_db_slot_r]);
-        // Both dirty before the lock drops -> the planner emits them
-        // together (ob_sservo_next_op batches every dirty slot).
-        ob_sservo_set_speed(sv, st_db_slot_l, l);
-        ob_sservo_set_speed(sv, st_db_slot_r, r);
-        ok = true;
+        // Ramp continues from the wheels' last COMMANDED speeds
+        // (invert un-applied), not from zero — a drive() chain must
+        // not dip through rest at every retarget. The slot targets
+        // carry the last slewed value, so this also chains mid-ramp.
+        ob_sservo_slot_t *sl = &sv->slots[st_db_slot_l];
+        ob_sservo_slot_t *sr = &sv->slots[st_db_slot_r];
+        st_db_ws_cur_l = (ob_float_t)(sl->invert ? -sl->target_steps
+                                                 : sl->target_steps);
+        st_db_ws_cur_r = (ob_float_t)(sr->invert ? -sr->target_steps
+                                                 : sr->target_steps);
+        st_db_ws_last_ms = (long)st_db_now_ms;
+        st_db_ws_tgt_l = l;
+        st_db_ws_tgt_r = r;
+        st_db_ws_active = true;
+        st_db_writing = true;     // own the wheels while ramping —
+        ok = true;                // the tick slews and then yields
     }
     bus_release();
     return mp_obj_new_bool(ok);
@@ -1492,6 +1567,7 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
+    st_db_ws_clear_locked();
     // The fault latch IS cleared here (unlike the estop path, which
     // preserves it as evidence): a program boundary is where the
     // previous run's diagnosis has been read — leaving it latched

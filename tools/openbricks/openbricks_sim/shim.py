@@ -398,6 +398,7 @@ class _SimStBus:
         self._db_writing = False
         self._use_gyro = False
         self._gyro_hard = False
+        self._ws_active = False
         self._moves = {}
         self._slot_ids = {}
         _sim_st_buses.append(self)
@@ -492,6 +493,7 @@ class _SimStBus:
         for m in self._moves.values():
             m.stop()                      # new command wins
         self._sync_bridges()
+        self._ws_active = False        # trajectory supersedes a slew
         self._db_writing = True
         self._raw.set_accel(self._accel_straight)
         self._raw.straight(self._rt.now_ms, float(mm), float(mm_s))
@@ -500,6 +502,7 @@ class _SimStBus:
         for m in self._moves.values():
             m.stop()
         self._sync_bridges()
+        self._ws_active = False        # trajectory supersedes a slew
         self._db_writing = True
         self._raw.set_accel(self._accel_turn)
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
@@ -508,21 +511,46 @@ class _SimStBus:
         for m in self._moves.values():
             m.stop()
         self._sync_bridges()
+        self._ws_active = False        # trajectory supersedes a slew
         self._db_writing = True
         self._raw.set_accel(self._accel_straight)
         self._raw.curve(self._rt.now_ms, float(radius_mm), float(deg),
                         float(mm_s))
 
     def db_move_wheels(self, left_steps_per_s, right_steps_per_s):
-        # Firmware parity (st_bus.c sb_db_move_wheels): independent
-        # per-wheel speeds, the db yields, per-slot moves cancelled.
+        # Firmware parity (st_bus.c sb_db_move_wheels, ramped since
+        # 1.94.0): per-wheel speeds slew at settings.acceleration —
+        # proportionally, so the L:R ratio (a drive() arc's radius)
+        # holds through the ramp — then the db yields with the wheels
+        # holding the final speeds. Per-slot moves cancelled.
         self._raw.stop()
-        self._db_writing = False
         for slot, w in self._wheels.items():
             self._move(slot).stop()
-        self._wheels[0].run_speed(left_steps_per_s / self._STEPS_PER_DEG)
-        self._wheels[1].run_speed(right_steps_per_s / self._STEPS_PER_DEG)
+        # Continue from the wheels' last commanded speeds (dps).
+        self._ws_cur = [getattr(self._wheels[0], "_target_dps", 0.0),
+                        getattr(self._wheels[1], "_target_dps", 0.0)]
+        self._ws_tgt = [left_steps_per_s / self._STEPS_PER_DEG,
+                        right_steps_per_s / self._STEPS_PER_DEG]
+        self._ws_last_ms = self._rt.now_ms
+        self._ws_active = True
+        self._db_writing = True
         return True
+
+    def _ws_tick(self, now_ms):
+        dt_s = max(0.0, min(0.05, (now_ms - self._ws_last_ms) / 1000.0))
+        self._ws_last_ms = now_ms
+        max_step = self._accel_straight * dt_s
+        diff = [t - c for t, c in zip(self._ws_tgt, self._ws_cur)]
+        mag_max = max(abs(diff[0]), abs(diff[1]))
+        if mag_max <= max_step:
+            self._ws_cur = list(self._ws_tgt)
+            self._ws_active = False
+            self._db_writing = False   # ramp done: yield
+        else:
+            self._ws_cur = [c + max_step * d / mag_max
+                            for c, d in zip(self._ws_cur, diff)]
+        self._wheels[0].run_speed(self._ws_cur[0])
+        self._wheels[1].run_speed(self._ws_cur[1])
 
     def db_stop(self, mode=None):
         # Firmware parity (see st_bus.c sb_db_stop): without ``mode``
@@ -675,9 +703,15 @@ class _SimStBus:
             l = self._wheels[0].angle()
             r = self._wheels[1].angle()
             if self._active and self._db_writing:
-                lt, rt = self._raw.tick(now_ms, l, r)
-                self._wheels[0].run_speed(lt)
-                self._wheels[1].run_speed(rt)
+                if self._ws_active:
+                    # Wheel-speed slew replaces the trajectory tick;
+                    # bridge odometry stays live for the next arm.
+                    self._raw.sync(l, r)
+                    self._ws_tick(now_ms)
+                else:
+                    lt, rt = self._raw.tick(now_ms, l, r)
+                    self._wheels[0].run_speed(lt)
+                    self._wheels[1].run_speed(rt)
             else:
                 # Yielded (move_wheels / per-slot moves own the
                 # wheels): keep the bridge odometry live anyway, like
