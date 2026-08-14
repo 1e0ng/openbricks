@@ -561,6 +561,34 @@ class RunHappyPathTests(unittest.TestCase):
             "reset" in call_history[2],
             "expected an mpremote-driven reset; got %r" % call_history[2])
 
+    def test_erasing_flash_says_what_was_lost(self):
+        # A silent loss is a bug: the full-chip erase wipes the
+        # staged program and saved calibrations, and the next button
+        # press then does NOTHING with no log and no visible reason
+        # (bench 2026-08-14). The done message must say so and name
+        # the re-stage command.
+        run_responses = self._responses()
+        buf = io.StringIO()
+        with patch("subprocess.call", side_effect=lambda cmd: 0), \
+             patch("subprocess.run",
+                   side_effect=lambda *a, **k: next(run_responses)), \
+             patch("sys.stdout", buf):
+            flash.run(self._run_args())
+        out = buf.getvalue()
+        self.assertIn("erased the hub's filesystem", out)
+        self.assertIn("openbricks upload", out)
+        self.assertIn("-n RobotA", out)
+
+    def test_skip_erase_flash_omits_the_wipe_note(self):
+        run_responses = self._responses()
+        buf = io.StringIO()
+        with patch("subprocess.call", side_effect=lambda cmd: 0), \
+             patch("subprocess.run",
+                   side_effect=lambda *a, **k: next(run_responses)), \
+             patch("sys.stdout", buf):
+            flash.run(self._run_args(skip_erase=True))
+        self.assertNotIn("erased", buf.getvalue())
+
     def test_skip_erase_drops_erase_flash(self):
         call_history = []
         run_responses = self._responses()
