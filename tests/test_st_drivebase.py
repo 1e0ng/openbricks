@@ -1231,3 +1231,93 @@ class HeadingResetParityTests(_Base):
     def test_reset_without_gyro_is_benign(self):
         sb.db_use_gyro(False)
         sb.db_reset()   # no raise; encoder frame re-derives per arm
+
+
+class _StuckWheels(_PerfectWheels):
+    """Wheels that answer every read but never move — a blocked
+    robot. NOT the dead-wheel fault: reads keep succeeding, so the
+    stale counter never climbs; the odometry is honestly frozen
+    because the chassis is."""
+
+    track = 0.0
+
+
+class BoundedSettleTests(_Base):
+    """Post-profile arrival wait is CAPPED for SMALL residuals
+    (OB_DRIVEBASE_SETTLE_MS / _FORGIVE, 1.95.0). Duty-mode stiction
+    can leave the last degrees of a turn below feedback's breakaway
+    authority; the old arrival-or-nothing latch then stalled the
+    wait loop (bench 2026-08-14: intermittent ~1 s pause between
+    turn() and the next straight()). A forgiven residual stays in
+    the gyro's absolute frame — the next move corrects it in motion.
+    A LARGE residual (blocked robot) still refuses to latch: the
+    move watchdog must fail loudly, never a silent wrong pose."""
+
+    _WHEEL_PER_BODY = 136.0 / 88.0
+
+    def test_small_stiction_residual_latches_at_the_settle_cap(self):
+        # Freeze the heading 6 wheel-deg short of the target — inside
+        # the forgive limit, outside the arrival tolerance. The old
+        # latch waited forever (the bench pause); now the cap fires.
+        sb.db_use_gyro(True)
+        target_body = 45.0
+        frozen_body = target_body - 6.0 / self._WHEEL_PER_BODY
+        sb.db_turn(target_body, 90.0)
+        for _ in range(1400):              # well past the profile
+            self.w.pump()
+            sb.db_set_heading(frozen_body)
+        elapsed = 0
+        while not sb.db_done() and elapsed < 2000:
+            self.w.pump()
+            sb.db_set_heading(frozen_body)
+            elapsed += 1
+        self.assertTrue(sb.db_done(), "never latched (old stall)")
+
+    def test_blocked_robot_still_refuses_to_latch(self):
+        # Heading stuck at ZERO — the turn genuinely didn't happen.
+        # Forgiving this would silently continue from a wrong pose;
+        # done must stay false (the caller's watchdog raises).
+        sb.db_use_gyro(True)
+        sb.db_turn(90.0, 60.0)
+        for _ in range(4000):
+            self.w.pump()
+            sb.db_set_heading(0.0)
+        self.assertFalse(sb.db_done())
+
+    def test_new_move_restarts_the_settle_window(self):
+        # The cap is per-move: after a capped-done move, a freshly
+        # armed move must run its own profile + window, not inherit
+        # a stale settle timestamp.
+        sb.db_use_gyro(True)
+        frozen_body = 45.0 - 6.0 / self._WHEEL_PER_BODY
+        sb.db_turn(45.0, 90.0)
+        for _ in range(2400):
+            self.w.pump()
+            sb.db_set_heading(frozen_body)
+        self.assertTrue(sb.db_done())
+        sb.db_turn(45.0, 90.0)             # fresh move
+        for _ in range(200):               # still inside its profile
+            self.w.pump()
+            sb.db_set_heading(frozen_body)
+        self.assertFalse(sb.db_done())
+
+
+class StuckWheelsLoudnessTests(unittest.TestCase):
+    """A fully blocked chassis in ENCODER mode: the sum error stays
+    at the whole move — far past the forgive limit — so done must
+    never latch (the move watchdog owns this failure, loudly)."""
+
+    def setUp(self):
+        if sb is None:
+            raise unittest.SkipTest("st_bus is firmware/unix-MP only")
+        sb.test_reset()
+        self.w = _StuckWheels()
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.w.advance(50)
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+
+    def test_blocked_straight_never_silently_completes(self):
+        sb.db_straight(100.0, 80.0)
+        self.w.advance(6000)               # profile + many caps
+        self.assertFalse(sb.db_done())

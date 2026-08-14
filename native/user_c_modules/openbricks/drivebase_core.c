@@ -50,6 +50,8 @@ void ob_drivebase_init(ob_drivebase_t *db,
     db->use_gyro                   = false;
     db->heading_override_wheel_deg = 0.0;
     db->done                       = true;
+    db->settling                   = false;
+    db->settle_start_ms            = 0;
 }
 
 
@@ -110,6 +112,7 @@ void ob_drivebase_straight(ob_drivebase_t *db,
     db->turn_active = false;
 
     db->done = false;
+    db->settling = false;
 }
 
 
@@ -160,6 +163,7 @@ void ob_drivebase_turn(ob_drivebase_t *db,
     db->fwd_active = false;
 
     db->done = false;
+    db->settling = false;
 }
 
 
@@ -216,6 +220,7 @@ void ob_drivebase_curve(ob_drivebase_t *db,
         db->fwd_hold      = sum_pos;
         db->fwd_active    = false;
         db->done          = false;
+        db->settling = false;
         return;
     }
 
@@ -238,6 +243,7 @@ void ob_drivebase_curve(ob_drivebase_t *db,
     db->turn_active   = true;
 
     db->done = false;
+    db->settling = false;
 }
 
 
@@ -245,6 +251,7 @@ void ob_drivebase_stop(ob_drivebase_t *db) {
     db->fwd_active  = false;
     db->turn_active = false;
     db->done        = true;
+    db->settling    = false;
 }
 
 
@@ -312,8 +319,35 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
     if (!db->fwd_active && !db->turn_active) {
         ob_float_t se = (sum_err  < 0) ? -sum_err  : sum_err;
         ob_float_t de = (diff_err < 0) ? -diff_err : diff_err;
-        if (se < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
-            && de < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG) {
+        ob_float_t worst = (se > de) ? se : de;
+        if (!db->settling) {
+            db->settling = true;
+            db->settle_start_ms = now_ms;
+            db->settle_best_err = worst;
+        } else if (worst < db->settle_best_err
+                   - (ob_float_t)OB_DRIVEBASE_SETTLE_PROGRESS_WHEEL_DEG) {
+            // Still converging: progress re-stamps the window, so a
+            // healthy settle keeps its full arrival accuracy.
+            db->settle_best_err = worst;
+            db->settle_start_ms = now_ms;
+        }
+        // Arrival latches done; the cap fires only after SETTLE_MS
+        // with NO progress and a residual inside the forgive limit
+        // (duty-mode stiction can leave the last degrees of a turn
+        // below feedback's breakaway authority — bench 2026-08-14:
+        // intermittent ~1 s pause between turn() and the next
+        // straight()). A forgiven residual is NOT banked in gyro
+        // mode: the absolute frame carries it and the next move
+        // corrects it in motion. A residual beyond the forgive
+        // limit is a move that DIDN'T HAPPEN — done stays false and
+        // the caller's watchdog raises loudly.
+        bool arrived = se < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+                       && de < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG;
+        bool capped  = (now_ms - db->settle_start_ms)
+                           >= (long)OB_DRIVEBASE_SETTLE_MS
+                       && worst < (ob_float_t)
+                              OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG;
+        if (arrived || capped) {
             db->done = true;
         }
     }
