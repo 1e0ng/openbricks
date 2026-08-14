@@ -2975,5 +2975,54 @@ class ProgramRunningFlagTests(unittest.TestCase):
         self.assertFalse(launcher.program_running())
 
 
+
+
+class ExecAttributionTests(unittest.TestCase):
+    """_exec_program's OSError attribution (1.96.3): a missing file
+    and an exec-path OSError (log session open, flash I/O) are
+    DIFFERENT failures — the bench hunt 2026-08-14 chased "no
+    program at" when the file was fine. Ring events pin each path."""
+
+    def setUp(self):
+        del launcher._EVENTS[:]
+        launcher._EVENTS_NEXT[0] = 0
+        self.addCleanup(lambda: (launcher._EVENTS.clear(),))
+
+    def _tags(self):
+        return [(e[1], e[2]) for e in launcher._EVENTS]
+
+    def test_missing_file_reports_no_program(self):
+        _cleanup_program()
+        launcher._exec_program(_TEST_PROGRAM_PATH, origin="test")
+        tags = self._tags()
+        self.assertTrue(any(t == "exec-start" for t, a in tags), tags)
+        self.assertTrue(any(t == "exec-missing" for t, a in tags), tags)
+        self.assertFalse(any(t == "exec-oserror" for t, a in tags), tags)
+
+    def test_exec_path_oserror_with_file_present_is_named(self):
+        path = _write_program("print('never runs')\n")
+        self.addCleanup(_cleanup_program)
+        orig = launcher._exec_program_raw
+
+        def _boom(p, origin=None):
+            raise OSError(28, "ENOSPC")   # log rotation on full flash
+        launcher._exec_program_raw = _boom
+        self.addCleanup(
+            setattr, launcher, "_exec_program_raw", orig)
+        launcher._exec_program(path, origin="test")   # must not raise
+        tags = self._tags()
+        self.assertTrue(any(t == "exec-oserror" for t, a in tags), tags)
+        self.assertFalse(any(t == "exec-missing" for t, a in tags), tags)
+
+    def test_successful_run_leaves_only_exec_start(self):
+        path = _write_program("x = 1\n")
+        self.addCleanup(_cleanup_program)
+        launcher._exec_program(path, origin="test")
+        tags = self._tags()
+        self.assertTrue(any(t == "exec-start" for t, a in tags), tags)
+        self.assertFalse(any(t in ("exec-missing", "exec-oserror")
+                             for t, a in tags), tags)
+
+
 if __name__ == "__main__":
     unittest.main()
