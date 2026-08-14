@@ -399,6 +399,7 @@ class _SimStBus:
         self._use_gyro = False
         self._gyro_hard = False
         self._ws_active = False
+        self._ws_stop_pending = 0
         self._moves = {}
         self._slot_ids = {}
         _sim_st_buses.append(self)
@@ -494,6 +495,7 @@ class _SimStBus:
             m.stop()                      # new command wins
         self._sync_bridges()
         self._ws_active = False        # trajectory supersedes a slew
+        self._ws_stop_pending = 0
         self._db_writing = True
         self._raw.set_accel(self._accel_straight)
         self._raw.straight(self._rt.now_ms, float(mm), float(mm_s))
@@ -503,6 +505,7 @@ class _SimStBus:
             m.stop()
         self._sync_bridges()
         self._ws_active = False        # trajectory supersedes a slew
+        self._ws_stop_pending = 0
         self._db_writing = True
         self._raw.set_accel(self._accel_turn)
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
@@ -512,6 +515,7 @@ class _SimStBus:
             m.stop()
         self._sync_bridges()
         self._ws_active = False        # trajectory supersedes a slew
+        self._ws_stop_pending = 0
         self._db_writing = True
         self._raw.set_accel(self._accel_straight)
         self._raw.curve(self._rt.now_ms, float(radius_mm), float(deg),
@@ -533,6 +537,7 @@ class _SimStBus:
                         right_steps_per_s / self._STEPS_PER_DEG]
         self._ws_last_ms = self._rt.now_ms
         self._ws_active = True
+        self._ws_stop_pending = 0
         self._db_writing = True
         return True
 
@@ -546,6 +551,11 @@ class _SimStBus:
             self._ws_cur = list(self._ws_tgt)
             self._ws_active = False
             self._db_writing = False   # ramp done: yield
+            if self._ws_stop_pending == 2:
+                for slot, w in self._wheels.items():
+                    self._move(slot).hold_at(
+                        w.angle() * self._STEPS_PER_DEG)
+            self._ws_stop_pending = 0
         else:
             self._ws_cur = [c + max_step * d / mag_max
                             for c, d in zip(self._ws_cur, diff)]
@@ -554,22 +564,28 @@ class _SimStBus:
 
     def db_stop(self, mode=None):
         # Firmware parity (see st_bus.c sb_db_stop): without ``mode``
-        # yield only; with it the end-state is applied to both wheels
-        # in the same call — 0 = coast, 1 = brake (zero speed),
-        # 2 = hold (REAL C position holds via st_move_core, same as
-        # firmware). The sim has no wire, so "same packet boundary"
-        # is trivially true; what this preserves is the contract.
+        # yield only; 0 = coast (instant — freewheel has no
+        # controlled deceleration); 1 = brake and 2 = hold DECELERATE
+        # at settings.acceleration first (uniform-accel rule,
+        # 2026-08-14), hold anchoring where the robot actually stops.
         self._raw.stop()
+        if mode == 1 or mode == 2:
+            for slot in self._wheels:
+                self._move(slot).stop()
+            self._ws_cur = [getattr(self._wheels[0], "_target_dps", 0.0),
+                            getattr(self._wheels[1], "_target_dps", 0.0)]
+            self._ws_tgt = [0.0, 0.0]
+            self._ws_last_ms = self._rt.now_ms
+            self._ws_active = True
+            self._ws_stop_pending = mode
+            self._db_writing = True
+            return True
         self._db_writing = False          # yield to the motor layer
         for slot, w in self._wheels.items():
             w.run_speed(0)
             if mode == 0:
                 self._move(slot).stop()
                 w.coast()
-            elif mode == 1:
-                self._move(slot).stop()
-            elif mode == 2:
-                self._move(slot).hold_at(w.angle() * self._STEPS_PER_DEG)
         return True
 
     def db_done(self):

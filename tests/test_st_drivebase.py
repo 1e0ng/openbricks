@@ -776,18 +776,43 @@ class StopAndGyroTests(_Base):
         self.assertEqual(self.w.torque[1], 0)
         self.assertEqual(self.w.torque[2], 0)
 
-    def test_stop_brake_zeroes_speeds_with_torque_kept_on(self):
+    def test_stop_brake_ramps_to_zero_with_torque_kept_on(self):
         sb.db_straight(500.0, 150.0)
         self.w.advance(400)
         self.w.torque_pkts = []
         self.assertTrue(sb.db_stop(1))
         self.w.advance(30)
-        # No torque traffic at all — the zero-speed sync IS the brake.
+        # Mid-decel (uniform-accel rule, deceleration too): speed is
+        # coming DOWN but not yet zero — a brake is a controlled
+        # ramp, not a cliff.
+        mid = abs(self.w.spd[1])
+        self.assertTrue(0 < mid < 2223,
+                        "expected a partial decel, got %d" % mid)
+        self.w.advance(700)
+        # No torque traffic at all — the ramped zero-speed sync IS
+        # the brake.
         self.assertEqual(self.w.torque_pkts, [])
         self.assertEqual(self.w.spd[1], 0)
         self.assertEqual(self.w.spd[2], 0)
         self.assertEqual(self.w.torque[1], 1)
         self.assertEqual(self.w.torque[2], 1)
+
+    def test_stop_hold_decelerates_then_anchors_where_it_stopped(self):
+        # Hold called mid-cruise: the robot ramps DOWN at the accel
+        # setting and the hold anchors where it actually stopped —
+        # not a teleport-stop at the request point.
+        sb.db_straight(500.0, 150.0)
+        self.w.advance(400)               # mid-cruise
+        pos_at_request = self.w.pos[1]
+        self.assertTrue(sb.db_stop(2))
+        self.w.advance(900)               # decel completes, hold arms
+        self.assertTrue(self.w.pos[1] > pos_at_request + 20,
+                        "no roll-out: hold anchored at the request "
+                        "point (instant stop)")
+        settled = self.w.pos[1]
+        self.w.advance(300)
+        self.assertTrue(abs(self.w.pos[1] - settled) < 5,
+                        "hold not holding after the ramp")
 
     def test_stop_hold_arms_both_position_holds_at_once(self):
         sb.db_straight(150.0, 150.0)
@@ -1321,3 +1346,23 @@ class StuckWheelsLoudnessTests(unittest.TestCase):
         sb.db_straight(100.0, 80.0)
         self.w.advance(6000)               # profile + many caps
         self.assertFalse(sb.db_done())
+
+
+class DecelSlewTests(_Base):
+    """The 1.94.0 slew is symmetric: retargeting DOWN — including all
+    the way to move_wheels(0, 0) — obeys settings.acceleration just
+    like ramping up (bench directive 2026-08-14: deceleration follows
+    the same value)."""
+
+    def test_move_wheels_zero_ramps_down_not_instant(self):
+        sb.db_move_wheels(2000, 2000)
+        self.w.advance(600)                # up-ramp completes
+        self.assertEqual(self.w.spd[1], 2000)
+        sb.db_move_wheels(0, 0)
+        self.w.advance(50)                 # mid-decel: ~227 of 2000 shed
+        mid = abs(self.w.spd[1])
+        self.assertTrue(1500 < mid < 1950,
+                        "expected a partial decel, got %d" % mid)
+        self.w.advance(600)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)

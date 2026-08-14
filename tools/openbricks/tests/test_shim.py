@@ -872,6 +872,10 @@ class SimStBusEngineTests(_ShimTestBase):
         db.straight(300, wait=False)
         time.sleep_ms(200)
         db.stop(then="hold")
+        # Hold DECELERATES at settings.acceleration first (uniform-
+        # accel rule, 2026-08-14) and anchors where the robot stops —
+        # the position holds arm at ramp completion, not instantly.
+        time.sleep_ms(800)
         self.assertTrue(sb._moves[0].is_active())
         self.assertTrue(sb._moves[1].is_active())
         db.stop(then="coast")
