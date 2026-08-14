@@ -59,6 +59,17 @@ _TARGET_PATH = "/program.py"
 # removes the other — see _compose_runner(remove_stale=...).
 _MPY_TARGET_PATH = "/program.mpy"
 
+# One-shot runs stage to their OWN slot (CLI >= 1.97.0): ``run`` used
+# to share /program.mpy with ``upload``, so every run — including
+# calibrations and diagnostics — silently replaced the program the
+# BUTTON launches. Bench 2026-08-14: upload aa.py, run
+# qtr_calibrate, press start -> the robot invisibly re-ran the
+# calibration and the report was "button does nothing". The button
+# never reads /run.*, so the two intents can no longer clobber
+# each other.
+_RUN_TARGET_PATH = "/run.py"
+_RUN_MPY_TARGET_PATH = "/run.mpy"
+
 # First firmware whose launcher runs /program.mpy (native exec_mpy).
 _MIN_MPY_FIRMWARE = (1, 92, 0)
 
@@ -705,21 +716,25 @@ def _install_sigint(loop, handler):
         return False
 
 
-async def _pick_staging(blink, link):
+async def _pick_staging(blink, link, mpy_target=_MPY_TARGET_PATH,
+                        src_target=_TARGET_PATH):
     """Probe the hub's firmware version and return the staging plan
-    ``(target_path, use_mpy, remove_stale)``. Firmware >= 1.92.0 gets
-    the host-compiled ``.mpy``; anything older (or a version the probe
-    can't parse) gets source, announced — never silently."""
+    ``(target_path, use_mpy, remove_stale)`` for the given slot pair
+    (upload = the button's /program.*, run = its own /run.* — the
+    two intents must not clobber each other). Firmware >= 1.92.0
+    gets the host-compiled ``.mpy``; anything older (or a version
+    the probe can't parse) gets source, announced — never
+    silently."""
     out = await _exec_step(blink, link, _PROBE_VERSION_PROGRAM,
                            "probing firmware version")
     fw = _parse_fw_version(out.decode("utf-8", "replace"))
     if fw is not None and fw >= _MIN_MPY_FIRMWARE:
-        return _MPY_TARGET_PATH, True, _TARGET_PATH
+        return mpy_target, True, src_target
     shown = ".".join(str(p) for p in fw) if fw else "unknown"
     print("hub firmware %s predates precompiled programs — sending "
           "source (flash firmware >= 1.92.0 for faster starts)" % shown,
           file=sys.stderr)
-    return _TARGET_PATH, False, None
+    return src_target, False, None
 
 
 async def _run_session(link, name, user_bytes, mpy_bytes):
@@ -728,7 +743,8 @@ async def _run_session(link, name, user_bytes, mpy_bytes):
         blink._step = "scan + connect"
         await _enter_raw_repl(blink, link)
         try:
-            target, use_mpy, remove_stale = await _pick_staging(blink, link)
+            target, use_mpy, remove_stale = await _pick_staging(
+                blink, link, _RUN_MPY_TARGET_PATH, _RUN_TARGET_PATH)
             payload = mpy_bytes if use_mpy else user_bytes
             runner = _compose_runner(target, remove_stale)
             await _stage_file(blink, link, target, payload, name)
