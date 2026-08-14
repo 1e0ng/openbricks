@@ -289,6 +289,10 @@ class DriveBase:
         Kinematic one-shot — no coupled feedback. Call again (or
         ``stop()``) to change. Positive turn rate = right turn
         (clockwise viewed from above), Pybricks convention.
+
+        Speed changes ramp at ``settings(acceleration=...)`` (the
+        uniform-accel rule, 1.94.0) — proportionally across the two
+        wheels, so an arc keeps its radius through the ramp.
         """
         # New command wins — same rule as move_wheels/stop. drive()
         # was the ONE motion verb that skipped it: a still-running

@@ -677,16 +677,40 @@ class StopAndGyroTests(_Base):
                         "straight after an aborted turn moved the "
                         "diff axis %.1f wheel-deg" % drift_wheel_deg)
 
-    def test_move_wheels_sends_both_speeds_in_one_packet(self):
-        # The SyncServoGroup replacement: two independent wheel
-        # speeds must leave in ONE sync-write, with each slot's
+    def test_move_wheels_reaches_both_speeds_with_inverts(self):
+        # The SyncServoGroup replacement: both wheel speeds ramp to
+        # target (settings.acceleration — 1.94.0) with each slot's
         # invert applied (slot0 = id2 inverted, slot1 = id1).
-        self.w.syncs = 0
         self.assertTrue(sb.db_move_wheels(400, 200))
-        self.w.advance(6)
-        self.assertEqual(self.w.syncs, 1, "expected exactly one packet")
+        self.w.advance(300)                # > full ramp at 400 dps^2
         self.assertEqual(self.w.spd[2], -400)      # inverted slot
         self.assertEqual(self.w.spd[1], 200)
+
+    def test_move_wheels_ramps_at_the_configured_accel(self):
+        # settings(acceleration) applies to move_wheels/drive too —
+        # the uniform-accel rule. 400 wheel-dps^2 * 11.38 steps/deg
+        # ~= 4551 steps/s^2: at 50 ms the command must sit ~227
+        # steps/s, nowhere near the 2000 target; by ~500 ms it lands.
+        self.assertTrue(sb.db_move_wheels(2000, 2000))
+        self.w.advance(50)
+        mid = abs(self.w.spd[1])
+        self.assertTrue(100 < mid < 400,
+                        "expected ~227 steps/s mid-ramp, got %d" % mid)
+        self.w.advance(500)
+        self.assertEqual(self.w.spd[1], 2000)
+        self.assertEqual(self.w.spd[2], -2000)
+
+    def test_move_wheels_ramp_preserves_the_wheel_ratio(self):
+        # Proportional slew: a 2:1 command stays 2:1 THROUGH the
+        # ramp (a drive() arc keeps its radius), both wheels
+        # arriving together.
+        self.assertTrue(sb.db_move_wheels(2000, 1000))
+        self.w.advance(60)
+        l, r = abs(self.w.spd[2]), abs(self.w.spd[1])
+        self.assertTrue(0 < r < 1000, r)           # genuinely mid-ramp
+        ratio = l / r
+        self.assertTrue(abs(ratio - 2.0) < 0.1,
+                        "ratio drifted to %.2f mid-ramp" % ratio)
 
     def test_move_wheels_supersedes_an_in_flight_move(self):
         # A direct wheel command wins over the coupled controller,
@@ -695,9 +719,10 @@ class StopAndGyroTests(_Base):
         self.w.advance(300)
         self.assertFalse(sb.db_done())
         sb.db_move_wheels(100, 100)
-        self.w.advance(100)
-        # Our speeds survived the ticks (the db is yielded, not
-        # fighting us) — the unfixed shape would overwrite them.
+        self.w.advance(600)               # ramp down from cruise
+        # Our speeds survived the ticks (the db is yielded after the
+        # ramp, not fighting us) — the unfixed shape would overwrite
+        # them.
         self.assertEqual(self.w.spd[2], -100)
         self.assertEqual(self.w.spd[1], 100)
 
@@ -715,10 +740,10 @@ class StopAndGyroTests(_Base):
 
     def test_move_wheels_zero_is_a_stop_not_a_coast(self):
         sb.db_move_wheels(300, 300)
-        self.w.advance(50)
+        self.w.advance(150)               # ramp to 300 completes
         self.w.torque_pkts = []
         sb.db_move_wheels(0, 0)
-        self.w.advance(30)
+        self.w.advance(150)               # ramp back down completes
         self.assertEqual(self.w.spd[1], 0)
         self.assertEqual(self.w.spd[2], 0)
         self.assertEqual(self.w.torque_pkts, [])   # torque stays on

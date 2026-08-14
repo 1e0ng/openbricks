@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.94.0 — move_wheels / drive() obey settings.acceleration
+
+Bench report: `move_wheels` ignored the acceleration settings.
+True — direct speed commands wrote the target registers instantly.
+In wheel mode the servo's internal `goal_acc` ramp papered over the
+step; the 1.89.0 duty default took that servo controller out of the
+circuit, so the step change slammed the engine's FF+PI unramped.
+Now `db_move_wheels` (and `drive()`, which routes through it) slews
+the commanded speeds inside the engine tick at
+`settings(acceleration=...)` — the uniform-accel rule, in both drive
+modes. The slew is proportional: the wheel with the larger delta
+runs at full acceleration and both arrive together, so a `drive()`
+arc keeps its L:R ratio (its radius) through the ramp; retargets
+continue from the current commanded speed, never dipping through
+zero. After the ramp the engine yields with the registers holding
+the final speeds — ownership semantics unchanged. Sim has full
+parity. Both sides move: flash firmware 1.94.0 AND
+`pipx upgrade openbricks`.
+
 ## 1.93.0 — DriveBase.reset(); reset_heading guarded (Pybricks parity)
 
 Bench report: with `use_gyro(True)`, `imu.reset_heading()` between

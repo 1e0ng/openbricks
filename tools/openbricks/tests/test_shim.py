@@ -696,6 +696,37 @@ class SimStBusEngineTests(_ShimTestBase):
                         "turn(90) rotated %+.1f deg" % turned)
         self.assertTrue(db.done())
 
+    def test_move_wheels_ramps_at_the_configured_accel(self):
+        # 1.94.0: move_wheels (and drive(), which routes through it)
+        # obey settings.acceleration — the uniform-accel rule. The
+        # 1.89.0 duty default removed the servo's internal goal_acc
+        # from the circuit, which had been papering over the step.
+        import time as _t
+        db, left, right = self._serial_db()
+        db.settings(acceleration=600)
+        db.move_wheels(300, 300)
+        _t.sleep_ms(100)           # mid-ramp: 600 dps^2 * 0.1 s = 60
+        mid = getattr(left, "_target_dps", None)
+        self.assertTrue(mid is not None and 20 < abs(mid) < 150,
+                        "expected ~60 dps mid-ramp, got %r" % mid)
+        _t.sleep_ms(800)           # ramp completes, db yields
+        self.assertTrue(abs(getattr(left, "_target_dps")) >= 295,
+                        getattr(left, "_target_dps"))
+        db.stop()
+
+    def test_move_wheels_ramp_preserves_the_wheel_ratio(self):
+        import time as _t
+        db, left, right = self._serial_db()
+        db.settings(acceleration=600)
+        db.move_wheels(300, 150)
+        _t.sleep_ms(100)           # genuinely mid-ramp
+        l = abs(getattr(left, "_target_dps"))
+        r = abs(getattr(right, "_target_dps"))
+        self.assertTrue(0 < r < 150, r)
+        self.assertTrue(abs(l / r - 2.0) < 0.1,
+                        "ratio drifted to %.2f mid-ramp" % (l / r))
+        db.stop()
+
     def test_use_gyro_turn_feeds_heading_and_lands(self):
         # use_gyro(True) makes the engine's wait loop pump the IMU
         # heading into db_set_heading; the C controller then ends the
