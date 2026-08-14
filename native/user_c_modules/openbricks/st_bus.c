@@ -199,10 +199,15 @@ static bool st_db_ws_active;
 static ob_float_t st_db_ws_cur_l, st_db_ws_cur_r;   // steps/s
 static int32_t st_db_ws_tgt_l, st_db_ws_tgt_r;      // steps/s
 static long st_db_ws_last_ms;
+// End-state a decelerating stop applies when its ramp completes:
+// 0 = none, 1 = brake (registers at 0, torque on — nothing more to
+// do), 2 = hold (capture poses THERE and arm the per-slot holds).
+static uint8_t st_db_stop_pending;
 
 static void st_db_ws_clear_locked(void) {
     st_db_ws_active = false;
     st_db_ws_cur_l = st_db_ws_cur_r = (ob_float_t)0.0;
+    st_db_stop_pending = 0;
 }
 
 // Per-slot position moves (run_angle / hold on adopted motors).
@@ -288,6 +293,17 @@ static void st_db_tick_locked(void) {
             st_db_ws_cur_r = (ob_float_t)st_db_ws_tgt_r;
             st_db_ws_active = false;   // cur values persist as the
             st_db_writing = false;     // seed for the next command
+            if (st_db_stop_pending == 2
+                && sv->slots[st_db_slot_l].have_raw
+                && sv->slots[st_db_slot_r].have_raw) {
+                // Decelerating hold: anchor where the robot actually
+                // stopped.
+                ob_smove_hold_at(&st_moves[st_db_slot_l],
+                    (ob_float_t)ob_sservo_counts(sv, st_db_slot_l));
+                ob_smove_hold_at(&st_moves[st_db_slot_r],
+                    (ob_float_t)ob_sservo_counts(sv, st_db_slot_r));
+            }
+            st_db_stop_pending = 0;
         } else {
             st_db_ws_cur_l += max_step * diff_l / mag_max;
             st_db_ws_cur_r += max_step * diff_r / mag_max;
@@ -1376,28 +1392,44 @@ static mp_obj_t sb_db_stop(size_t n_args, const mp_obj_t *args) {
     st_db_abort_capture_and_yield_locked();
     if (st_db_slot_l >= 0) {
         ob_sservo_t *sv = sservo_get();
-        ob_sservo_set_speed(sv, st_db_slot_l, 0);
-        ob_sservo_set_speed(sv, st_db_slot_r, 0);
-        if (mode == 0 || mode == 1) {
-            // New command wins: kill any per-slot move too.
+        if (mode == 2 && !(sv->slots[st_db_slot_l].have_raw
+                           && sv->slots[st_db_slot_r].have_raw)) {
+            // Refuse BEFORE any motion change: a hold without live
+            // odometry would anchor to counts=0 and slam the shaft.
+            ok = false;
+        } else if (mode == 1 || mode == 2) {
+            // brake / hold: DECELERATE at settings.acceleration
+            // first (the uniform-accel rule — bench directive
+            // 2026-08-14: deceleration follows the same value), via
+            // the same wheel-speed slew move_wheels uses. Hold's
+            // pose capture is deferred to ramp completion — it
+            // anchors where the robot actually STOPS, not where the
+            // stop was requested mid-motion.
             ob_smove_stop(&st_moves[st_db_slot_l]);
             ob_smove_stop(&st_moves[st_db_slot_r]);
+            ob_sservo_slot_t *sl = &sv->slots[st_db_slot_l];
+            ob_sservo_slot_t *sr = &sv->slots[st_db_slot_r];
+            st_db_ws_cur_l = (ob_float_t)(sl->invert ? -sl->target_steps
+                                                     : sl->target_steps);
+            st_db_ws_cur_r = (ob_float_t)(sr->invert ? -sr->target_steps
+                                                     : sr->target_steps);
+            st_db_ws_last_ms = (long)st_db_now_ms;
+            st_db_ws_tgt_l = 0;
+            st_db_ws_tgt_r = 0;
+            st_db_ws_active = true;
+            st_db_writing = true;
+            st_db_stop_pending = (uint8_t)mode;
+        } else {
+            // coast (and the no-arg yield-only form): instant —
+            // torque-off is a freewheel by definition; there is no
+            // controlled deceleration without torque.
+            ob_sservo_set_speed(sv, st_db_slot_l, 0);
+            ob_sservo_set_speed(sv, st_db_slot_r, 0);
             if (mode == 0) {
+                ob_smove_stop(&st_moves[st_db_slot_l]);
+                ob_smove_stop(&st_moves[st_db_slot_r]);
                 ob_sservo_coast(sv, st_db_slot_l);
                 ob_sservo_coast(sv, st_db_slot_r);
-            }
-            // mode 1 (brake): the zero-speed staging above IS the
-            // brake — one sync-write, torque stays on, the servos'
-            // goal_acc ramps to zero (the uniform-accel rule).
-        } else if (mode == 2) {
-            if (sv->slots[st_db_slot_l].have_raw
-                && sv->slots[st_db_slot_r].have_raw) {
-                ob_smove_hold_at(&st_moves[st_db_slot_l],
-                    (ob_float_t)ob_sservo_counts(sv, st_db_slot_l));
-                ob_smove_hold_at(&st_moves[st_db_slot_r],
-                    (ob_float_t)ob_sservo_counts(sv, st_db_slot_r));
-            } else {
-                ok = false;
             }
         }
     }

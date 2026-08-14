@@ -401,12 +401,14 @@ class DriveBase:
         Both wheels are always commanded together, never one motor at
         a time. On serial-bus (adopted) motors the whole stop is
         staged atomically in the C engine and reaches the wheels at
-        the same bus-packet boundary — one sync-torque packet for
-        coast, one sync-speed packet for brake, same-instant pose
-        capture for hold. On encoder servos ``coast`` / ``brake``
-        likewise apply to both bridges inside one native call, so the
-        second wheel's 1 kHz control tick can't keep driving while
-        the first is already released.
+        the same bus-packet boundary. ``brake`` and ``hold``
+        DECELERATE at ``settings(acceleration=...)`` first (the
+        uniform-accel rule) — hold anchors where the robot actually
+        stops; ``coast`` releases torque immediately (a freewheel has
+        no controlled deceleration). On encoder servos ``coast`` /
+        ``brake`` likewise apply to both bridges inside one native
+        call, so the second wheel's 1 kHz control tick can't keep
+        driving while the first is already released.
         """
         if then not in ("coast", "brake", "hold"):
             raise ValueError(

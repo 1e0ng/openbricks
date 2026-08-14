@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.96.0 — deceleration obeys settings.acceleration too
+
+Bench directive: deceleration must follow the same acceleration
+setting. `move_wheels(0, 0)` already ramped down (the 1.94.0 slew is
+symmetric — now pinned by a dedicated test); the remaining cliff was
+`stop()`: `then="brake"` and `then="hold"` staged zero-speed
+instantly. Both now decelerate at `settings(acceleration=...)`
+through the same proportional slew, and hold anchors its position
+where the robot ACTUALLY stops (end of ramp) instead of where the
+stop was requested mid-motion. `then="coast"` (the default) stays
+instant — torque-off is a freewheel, there is no controlled
+deceleration without torque. Stops are non-blocking as before; a new
+move or move_wheels supersedes a decelerating stop. Sim parity.
+Firmware-only; ships lockstep — flash 1.96.0 (`pipx upgrade
+openbricks` keeps versions aligned).
+
 ## 1.95.0 — no more ~1 s pause between turn() and the next move
 
 Bench report: sometimes, after a `turn()`, the next `straight()`
