@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.96.2 — flash says what the erase took with it
+
+Bench report: after flashing, a start-button press did nothing — no
+run, no log. The flash's full-chip erase had wiped the staged
+program (and /qtr.cal, and every saved calibration), and the
+missing-program path exits before the run log opens, so the press
+left no trace anywhere. The flash's done message now states the
+loss and names the re-stage command (`openbricks upload <script>
+-n <name>`) plus the recalibration reminder; `--skip-erase` flashes
+omit the note. CLI-only; no flash needed.
+
 ## 1.96.1 — button start no longer dies to its own release bounce
 
 Bench report: a button press started the program and it stopped

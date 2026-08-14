@@ -700,6 +700,17 @@ def run(args):
               % (args.name, flashed_version, firmware_verdict))
     else:
         print("done — hub %r flashed on %s." % (args.name, args.port))
+    if not args.skip_erase:
+        # A silent loss is a bug: the full-chip erase above took the
+        # staged program and every saved calibration with it. Without
+        # this note the next button press does NOTHING — no program,
+        # no run log, no visible reason (bench 2026-08-14).
+        print("note: the flash erased the hub's filesystem — the "
+              "staged program and saved calibrations are gone.\n"
+              "      re-stage with:  openbricks upload <script.py> "
+              "-n %s\n"
+              "      (and re-run sensor calibration, e.g. "
+              "examples/qtr_calibrate.py, if used)" % args.name)
     return 0
 
 
