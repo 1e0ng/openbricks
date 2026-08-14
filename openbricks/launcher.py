@@ -272,7 +272,9 @@ class Launcher:
     # stay covered throughout by the debounced level path: a NEW
     # press necessarily begins with a confirmed release that ends
     # these windows.
-    RELEASE_CHATTER_MS = 200
+    # 500 ms per bench directive 2026-08-14 (was 200) — one rule
+    # with the hard C path's OB_BUTTON_CHATTER_TICKS.
+    RELEASE_CHATTER_MS = 500
 
     def _fire_stop(self):
         """Everything a stop press triggers, in order of importance:

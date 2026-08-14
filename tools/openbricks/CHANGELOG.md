@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.96.1 — button start no longer dies to its own release bounce
+
+Bench report: a button press started the program and it stopped
+itself 42 ms in ("stopped: KeyboardInterrupt (1 ms after press)"),
+with no stop note in the log — the hard C button path fired. Cause:
+a short start tap's release can re-contact for ≥ 15 ms — enough to
+re-confirm as a "fresh" debounced press — and the C core's
+stale-press guard had already retired at the release, so the bounce
+read as a stop press against the newborn run. The Python watcher has
+had a 200 ms release-chatter window for exactly this since 1.48.x;
+the hard path now honors the same rule: after the start press's
+release (or its partial-window decay), press edges within 500 ms are
+its own chatter, never a stop (both windows widened 200 -> 500 ms). Disarm clears the cooldown so the
+next run's deliberate start press is never eaten. Firmware-only;
+flash 1.96.1 (`pipx upgrade openbricks` keeps versions aligned).
+
 ## 1.96.0 — deceleration obeys settings.acceleration too
 
 Bench directive: deceleration must follow the same acceleration
