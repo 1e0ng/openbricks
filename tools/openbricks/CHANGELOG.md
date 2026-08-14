@@ -14,8 +14,8 @@ stale-press guard had already retired at the release, so the bounce
 read as a stop press against the newborn run. The Python watcher has
 had a 200 ms release-chatter window for exactly this since 1.48.x;
 the hard path now honors the same rule: after the start press's
-release (or its partial-window decay), press edges within 200 ms are
-its own chatter, never a stop. Disarm clears the cooldown so the
+release (or its partial-window decay), press edges within 500 ms are
+its own chatter, never a stop (both windows widened 200 -> 500 ms). Disarm clears the cooldown so the
 next run's deliberate start press is never eaten. Firmware-only;
 flash 1.96.1 (`pipx upgrade openbricks` keeps versions aligned).
 
