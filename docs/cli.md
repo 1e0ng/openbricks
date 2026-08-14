@@ -54,9 +54,9 @@ The suffix follows the version everywhere it reaches you: the
 ## Programs are compiled on the host
 
 Since 1.92.0, `openbricks run` and `openbricks upload` cross-compile
-your script with `mpy-cross` **before** connecting, and stage the
-compiled `/program.mpy` instead of source (like Pybricks). Three
-things get better:
+your script with `mpy-cross` **before** connecting, and stage
+compiled bytecode instead of source (like Pybricks). Three things
+get better:
 
 - **syntax errors surface in milliseconds**, on your terminal, with
   the file and line — no BLE scan, no connect, no upload round-trip;
@@ -70,6 +70,14 @@ compiled programs, so the CLI probes the hub's version in-session and
 sends plain source instead — announced on stderr, never silently.
 `upload --path` (custom boot flows) always stages your file verbatim,
 uncompiled, at the path you give.
+
+The two commands use **separate slots** (since 1.97.0): `upload`
+stages the button's program at `/program.mpy`; `run` stages its
+one-shot script at `/run.mpy` and the hub button never reads it. So
+running a calibration or a quick diagnostic no longer replaces the
+program your button launches — the earlier shared-slot behavior
+turned "upload, calibrate, press start" into the robot silently
+re-running the calibration.
 
 ## Reference
 

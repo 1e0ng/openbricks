@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.97.0 — run gets its own slot; the button program is never clobbered
+
+`openbricks run` used to stage its script to the same `/program.mpy`
+the hub button launches — so every one-shot run (a calibration, a
+diagnostic, a quick test) silently replaced the program the user had
+uploaded. Bench 2026-08-14: "upload aa.py, run qtr_calibrate, press
+start" made the button re-run the calibration — invisible, and
+reported as "the button does nothing". `run` now stages to its own
+`/run.mpy` (`/run.py` for pre-1.92.0 firmware) and the button never
+reads that slot; `upload` keeps `/program.mpy`. The two intents can
+no longer overwrite each other, and diagnostics via `run -c` no
+longer destroy the staged program. CLI-only; works against any
+firmware (`run_program` always took an explicit path).
+
 ## 1.96.3 — a run that dies before its log opens now says why
 
 Bench 2026-08-14: a start press dispatched, the run began, and it

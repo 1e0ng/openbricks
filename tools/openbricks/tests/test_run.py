@@ -339,10 +339,12 @@ class RunFlowTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         joined = b"".join(fake.writes)
-        # The SOURCE crossed the link, targeting /program.py, and no
-        # sibling delete was composed.
+        # The SOURCE crossed the link, targeting the run slot's
+        # source path, and no sibling delete was composed. The
+        # button's /program.* is never touched.
         self.assertIn(b"hello from hub", joined)
-        self.assertIn(b"'/program.py'", joined)
+        self.assertIn(b"'/run.py'", joined)
+        self.assertNotIn(b"'/program.py'", joined)
         self.assertNotIn(b"'/program.mpy'", joined)
         self.assertNotIn(b"os.remove", joined)
         self.assertIn("predates precompiled", err.getvalue())
@@ -365,8 +367,10 @@ class RunFlowTests(unittest.TestCase):
         self.assertNotIn("===", out.getvalue())
 
         joined = b"".join(fake.writes)
-        # Confirm the upload writes /program.py and calls run_program.
-        self.assertIn(b"'/program.py'", joined)
+        # Confirm the staging writes the RUN slot and calls
+        # run_program on it — never the button's /program.*.
+        self.assertIn(b"'/run.mpy'", joined)
+        self.assertNotIn(b"'/program.py'", joined)
         self.assertIn(b"launcher.run_program", joined)
         # Confirm the control-byte sequence of raw-paste mode.
         self.assertIn(b"\x03\x03", joined)      # Ctrl-C interrupt
@@ -518,7 +522,11 @@ class InlineCommandTests(unittest.TestCase):
         self.assertIn(b"M\\x06", joined)   # .mpy header inside the
         self.assertNotIn(b"print('hello')", joined)  # staged repr
         self.assertIn(b"launcher.run_program", joined)
-        self.assertIn(b"'/program.mpy'", joined)
+        # One-shot runs stage to their OWN slot (1.97.0) — the
+        # BUTTON's /program.mpy must never appear in a run session.
+        self.assertIn(b"'/run.mpy'", joined)
+        self.assertNotIn(b"'/program.mpy'", joined)
+        self.assertNotIn(b"os.remove('/program.py')", joined)
 
 
     def test_connect_failure_propagates_as_run_error(self):
@@ -848,8 +856,8 @@ class HostInterruptForwardingTests(unittest.TestCase):
         async def _stub_upload(blink, l, script_bytes):
             return None
 
-        async def _stub_pick(blink, l):
-            return run_mod._TARGET_PATH, False, None
+        async def _stub_pick(blink, l, *slot_pair):
+            return run_mod._RUN_TARGET_PATH, False, None
 
         patches = [
             ("_enter_raw_repl", _raw_repl),
