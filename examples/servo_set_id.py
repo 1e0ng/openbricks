@@ -9,8 +9,13 @@ or set SCAN_ONLY = True to just list who answers. Safety matches the
 guess between multiple servos, and the result is verified — the new
 ID must answer a PING and the old ID must have gone silent. (The ID
 write itself runs unverified: its status reply can already carry the
-new ID, so the PING verification is the real check.)
+new ID, so the PING verification is the real check — but the reply
+still arrives on the wire, so the script waits it out before the
+next write; bench 2026-08-15: skipping that wait let the stale
+old-ID reply answer the re-lock's ACK read.)
 """
+
+import time
 
 NEW_ID = 3
 OLD_ID = None          # required when several servos are on the bus
@@ -73,6 +78,7 @@ else:
     bus.verify_writes = False
     bus.write(target, REG_ID, [NEW_ID])
     bus.verify_writes = True
+    time.sleep_ms(100)
     bus.write(NEW_ID, REG_LOCK, [1])
     if not bus.ping(NEW_ID):
         raise RuntimeError(
