@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.0.0 — trajectories start from the current speed
+
+Bench report: handing over from a line-follow loop (830 dps via
+`move_wheels`) to `straight()`/`turn()` braked far harder than
+`settings(acceleration=...)` allows — "the deceleration is too much
+while the acceleration is correct". Cause: trapezoid profiles armed
+FROM REST, cliffing the commanded speed from cruise to ~zero in one
+tick; duty mode's FF+PI then braked as hard as the plant could. The
+trajectory core now takes an entry speed (matching pbio): every
+`straight`/`turn`/`curve` arms from the axis's current commanded
+speed and blends through the acceleration limit — entry above
+cruise decelerates through it, entry the wrong way brakes through
+zero, and a distance too short to stop within the limit becomes a
+clean pure-deceleration that overshoots by the physics-mandated
+margin and lets position feedback pull back. From-rest behavior is
+bit-identical; the serial engine keeps its bridges' speed targets
+fresh every tick, and the sim carries the same entry speeds. Both
+sides move: flash 2.0.0 AND `pipx upgrade openbricks`.
+
 ## 1.99.0 — servo-id -n: re-ID a servo through the hub
 
 `openbricks servo-id -n NAME 3` (and `-n NAME --scan`) runs the

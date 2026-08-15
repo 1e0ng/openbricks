@@ -751,11 +751,23 @@ static PyObject *RawDriveBase_sync(RawDriveBaseObject *self, PyObject *args) {
      * against a stale pose: verified driving the chassis BACKWARD
      * 142.6 mm on a +50 mm command. */
     double l_deg, r_deg;
-    if (!PyArg_ParseTuple(args, "dd", &l_deg, &r_deg)) {
+    double l_dps = 0.0, r_dps = 0.0;
+    int have_speeds = PyTuple_Size(args) >= 4;
+    if (!PyArg_ParseTuple(args, "dd|dd", &l_deg, &r_deg,
+                          &l_dps, &r_dps)) {
         return NULL;
     }
     self->bridge_l.observer.pos_hat = (ob_float_t)l_deg;
     self->bridge_r.observer.pos_hat = (ob_float_t)r_deg;
+    if (have_speeds) {
+        /* Speed targets too (2.0.0): the arm paths read the
+         * bridges' target_dps as each trajectory's ENTRY speed, so a
+         * straight() after move_wheels() blends from the commanded
+         * cruise instead of cliffing to zero — firmware parity with
+         * st_db_sync_bridges_locked. */
+        self->bridge_l.target_dps = (ob_float_t)l_dps;
+        self->bridge_r.target_dps = (ob_float_t)r_dps;
+    }
     Py_RETURN_NONE;
 }
 
@@ -875,7 +887,7 @@ static PyMethodDef RawDriveBase_methods[] = {
     {"tick",                 (PyCFunction)RawDriveBase_tick,                 METH_VARARGS,
      "tick(now_ms, left_pos_deg, right_pos_deg) -> (left_dps, right_dps)."},
     {"sync",                 (PyCFunction)RawDriveBase_sync,                 METH_VARARGS,
-     "sync(left_pos_deg, right_pos_deg) — update bridge odometry "
+     "sync(left_pos_deg, right_pos_deg[, left_dps, right_dps]) — update bridge odometry (and speed targets) "
      "without running the controller (the yielded-tick half of the "
      "firmware's st_db_tick)."},
     {"straight",             (PyCFunction)RawDriveBase_straight,             METH_VARARGS,

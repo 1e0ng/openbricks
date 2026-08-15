@@ -41,18 +41,38 @@ typedef struct {
     ob_float_t cruise;       // magnitude
     ob_float_t accel;        // magnitude
     ob_float_t direction;    // +1 or -1
-    ob_float_t t_ramp;       // seconds in accel (and decel) phase
+    // Entry state (2.0.0): profiles begin at the axis's CURRENT
+    // speed, relative to the move's direction (negative = moving the
+    // wrong way; may exceed cruise). v0 = 0 reproduces the classic
+    // from-rest trapezoid exactly.
+    ob_float_t v0;           // entry speed, direction-relative
+    ob_float_t t_entry;      // seconds in the entry ramp (v0 -> v_peak)
+    ob_float_t a_entry;      // signed entry acceleration (±accel)
+    ob_float_t d_entry;      // net displacement of the entry ramp
+    ob_float_t t_ramp;       // seconds in the EXIT ramp (v_peak -> 0)
     ob_float_t t_cruise;     // seconds at cruise speed (0 for triangular)
     ob_float_t t_total;      // seconds to completion
-    ob_float_t d_ramp;       // degrees covered in one ramp phase
+    ob_float_t d_ramp;       // degrees covered in the exit ramp
     ob_float_t v_peak;       // peak speed actually reached (magnitude)
     bool       triangular;   // true if the profile never reaches cruise
 } ob_trajectory_t;
 
 // Configure ``t`` for a move from ``start`` to ``target`` with the
-// given cruise speed and acceleration. Zero distance / zero cruise /
-// zero accel yields a degenerate "no motion" profile with
-// ``t_total = 0``.
+// given cruise speed and acceleration, entering at the axis's
+// current speed ``v0_world`` (world frame — the init converts to the
+// move's direction). Zero distance / zero cruise / zero accel yields
+// a degenerate "no motion" profile with ``t_total = 0``. A distance
+// too short to stop from ``v0`` yields a pure-decel profile that
+// overshoots by the physics-mandated margin; position feedback owns
+// the residual after expiry.
+void ob_trajectory_init_v0(ob_trajectory_t *t,
+                           ob_float_t start,
+                           ob_float_t target,
+                           ob_float_t cruise,
+                           ob_float_t accel,
+                           ob_float_t v0_world);
+
+// From-rest form: ``ob_trajectory_init_v0`` with ``v0 = 0``.
 void ob_trajectory_init(ob_trajectory_t *t,
                         ob_float_t start,
                         ob_float_t target,

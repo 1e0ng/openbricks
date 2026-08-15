@@ -727,6 +727,25 @@ class SimStBusEngineTests(_ShimTestBase):
                         "ratio drifted to %.2f mid-ramp" % (l / r))
         db.stop()
 
+    def test_straight_after_cruise_blends_in_physics(self):
+        # 2.0.0: trajectories arm from the current speed. In
+        # MuJoCo, a straight() right after a move_wheels cruise must
+        # not slam the wheel command to zero — the commanded speed
+        # 30 ms into the move is still a large fraction of cruise.
+        import time as _t
+        db, left, right = self._serial_db()
+        db.settings(acceleration=1500)
+        db.move_wheels(500, 500)
+        _t.sleep_ms(600)                # cruise established
+        pre = abs(getattr(left, "_target_dps"))
+        self.assertTrue(pre > 450, pre)
+        db.straight(200, wait=False)
+        _t.sleep_ms(30)
+        mid = abs(getattr(left, "_target_dps"))
+        self.assertTrue(mid > 300,
+                        "command cliffed to %.0f dps" % mid)
+        db.stop()
+
     def test_use_gyro_turn_feeds_heading_and_lands(self):
         # use_gyro(True) makes the engine's wait loop pump the IMU
         # heading into db_set_heading; the C controller then ends the

@@ -289,43 +289,51 @@ class DriveBaseParityTests(unittest.TestCase):
             self.db.set_accel(-720.0)
 
     def test_lower_accel_ramps_the_setpoint_slower(self):
-        # Sample the commanded wheel speed 100 ms into a long move.
-        # Default 720 deg/s² puts the feed-forward at ~72 dps; after
-        # set_accel(90) the same point in the ramp reads ~9 dps.
+        # Measure the RAMP SLOPE over the first 100 ms of a long
+        # move: default 720 deg/s² climbs ~72 dps in the window,
+        # set_accel(90) climbs ~9. Deltas (not absolutes) because
+        # trajectories arm FROM THE CURRENT commanded speed since
+        # 2.0.0 — a bare stop() (yield-only) leaves the servo
+        # targets live, and the second move honestly blends from
+        # them.
         sim = _SyntheticTwoWheel(self.db, self.left, self.right)
         self.db.straight(sim.now_ms, 500.0, 200.0)
         sim.step(100)
-        fast_dps = self.db.target_left_dps()
+        fast_delta = self.db.target_left_dps()      # from rest
         self.db.stop()
 
         self.db.set_accel(90.0)
+        v0 = self.db.target_left_dps()
         self.db.straight(sim.now_ms, 500.0, 200.0)
         sim.step(100)
-        slow_dps = self.db.target_left_dps()
+        slow_delta = self.db.target_left_dps() - v0
 
-        self.assertGreater(fast_dps, 0.0)
-        self.assertGreater(slow_dps, 0.0)
+        self.assertGreater(fast_delta, 0.0)
+        self.assertGreater(slow_delta, 0.0)
         # 8x ratio in theory; assert a comfortable 3x so feedback
         # wiggle can't flake it.
-        self.assertGreater(fast_dps, slow_dps * 3.0)
+        self.assertGreater(fast_delta, slow_delta * 3.0)
 
     def test_set_accel_applies_to_turn_too(self):
         # The core shares one acceleration between the forward and
-        # turn profiles — pin that a gentler setting slows turn ramps.
+        # turn profiles — pin that a gentler setting slows turn
+        # ramps. Deltas, not absolutes: see
+        # test_lower_accel_ramps_the_setpoint_slower.
         sim = _SyntheticTwoWheel(self.db, self.left, self.right)
         self.db.turn(sim.now_ms, 90.0, 180.0)
         sim.step(100)
-        fast_dps = abs(self.db.target_right_dps())
+        fast_delta = abs(self.db.target_right_dps())
         self.db.stop()
 
         self.db.set_accel(90.0)
+        v0 = abs(self.db.target_right_dps())
         self.db.turn(sim.now_ms, 90.0, 180.0)
         sim.step(100)
-        slow_dps = abs(self.db.target_right_dps())
+        slow_delta = abs(abs(self.db.target_right_dps()) - v0)
 
-        self.assertGreater(fast_dps, 0.0)
-        self.assertGreater(slow_dps, 0.0)
-        self.assertGreater(fast_dps, slow_dps * 3.0)
+        self.assertGreater(fast_delta, 0.0)
+        self.assertGreater(slow_delta, 0.0)
+        self.assertGreater(fast_delta, slow_delta * 3.0)
 
 
 if __name__ == "__main__":
