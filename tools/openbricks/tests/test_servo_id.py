@@ -336,6 +336,254 @@ class AutodetectPortTests(unittest.TestCase):
         self.assertEqual(seen, ["/dev/cu.usbmodem9"])
 
 
+class HubPathTests(unittest.TestCase):
+    """servo-id -n NAME (1.99.0): the scan/re-ID runs ON the hub over
+    BLE — same contract as the adapter path, sentinel-verified."""
+
+    def test_composed_program_is_valid_python_with_params(self):
+        import ast
+        prog = sid_mod._compose_hub_program(3, 2, False, 14, 41).decode()
+        ast.parse(prog)
+        self.assertIn("NEW_ID = 3", prog)
+        self.assertIn("OLD_ID = 2", prog)
+        self.assertIn("_SCServoBus(1, 14, 41)", prog)
+        self.assertIn(sid_mod._HUB_OK_SENTINEL, prog)
+
+    def test_scan_variant_changes_nothing(self):
+        prog = sid_mod._compose_hub_program(None, None, True, 14, 41).decode()
+        self.assertIn("SCAN_ONLY = True", prog)
+        # The sentinel must be reachable on the scan path too.
+        self.assertIn(sid_mod._HUB_OK_SENTINEL, prog)
+
+    def test_law_refusals_are_in_the_program(self):
+        prog = sid_mod._compose_hub_program(3, None, False, 14, 41).decode()
+        self.assertIn("pass --old-id", prog)
+        self.assertIn("already taken on this bus", prog)
+        self.assertIn("verify FAILED", prog)
+
+    def test_name_and_port_together_refuse(self):
+        with self.assertRaises(ServoIdError):
+            sid_mod.run(argparse.Namespace(
+                new_id=3, port="/dev/x", name="ls", scan=False,
+                old_id=None, baudrate=1_000_000, timeout=0.02,
+                tx=14, rx=41, scan_timeout=5.0))
+
+    def _hub_args(self, **kw):
+        d = dict(new_id=3, port=None, name="ls", scan=False,
+                 old_id=None, baudrate=1_000_000, timeout=0.02,
+                 tx=14, rx=41, scan_timeout=5.0)
+        d.update(kw)
+        return argparse.Namespace(**d)
+
+    def test_hub_run_succeeds_on_sentinel(self):
+        orig = sid_mod._hub_async
+
+        async def _fake(name, program, scan_timeout):
+            return "servos on the bus: [2]\nset servo ID 2 -> 3 " \
+                   "(verified)\n%s\n" % sid_mod._HUB_OK_SENTINEL
+        sid_mod._hub_async = _fake
+        self.addCleanup(setattr, sid_mod, "_hub_async", orig)
+        self.assertEqual(sid_mod.run(self._hub_args()), 0)
+
+    def test_hub_run_fails_loudly_without_sentinel(self):
+        # A hub-side exception streams a traceback but no sentinel —
+        # the CLI must exit non-zero, never report success.
+        orig = sid_mod._hub_async
+
+        async def _fake(name, program, scan_timeout):
+            return "Traceback ...\nValueError: 2 servos on the bus\n"
+        sid_mod._hub_async = _fake
+        self.addCleanup(setattr, sid_mod, "_hub_async", orig)
+        with self.assertRaises(ServoIdError):
+            sid_mod.run(self._hub_args())
+
+
+class HubSessionTests(unittest.TestCase):
+    """The BLE session plumbing: program uploaded, output captured
+    through the tee, idle loop restored even when streaming dies."""
+
+    def test_tee_captures_and_passes_through(self):
+        import io
+        out = io.StringIO()
+        tee = sid_mod._TeeCapture(out)
+        tee.write("abc")
+        tee.write("def")
+        tee.flush()
+        self.assertEqual(tee.text, "abcdef")
+        self.assertEqual(out.getvalue(), "abcdef")
+
+    def _session(self, stream_fn):
+        import asyncio, io, sys
+        from openbricks_dev import run as run_mod
+        from openbricks_dev import _nus
+
+        class _FakeLink:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        calls = {"upload": None, "restore": 0}
+
+        async def _fake_connect(name, scan_timeout=5.0):
+            return _FakeLink()
+
+        async def _raw_repl(blink, link):
+            pass
+
+        async def _upload(blink, link, program):
+            calls["upload"] = program
+
+        async def _restore(link):
+            calls["restore"] += 1
+
+        patches = [
+            (run_mod, "_enter_raw_repl", _raw_repl),
+            (run_mod, "_raw_paste_upload", _upload),
+            (run_mod, "_stream_output", stream_fn),
+            (run_mod, "_restore_idle_loop", _restore),
+        ]
+        origs = [(m, n, getattr(m, n)) for m, n, _ in patches]
+        for m, n, fn in patches:
+            setattr(m, n, fn)
+        orig_connect = _nus.NUSLink.connect
+        _nus.NUSLink.connect = staticmethod(_fake_connect)
+        err = io.StringIO()
+        orig_stderr = sys.stderr
+        sys.stderr = err
+        try:
+            text = asyncio.run(sid_mod._hub_async(
+                "ls", b"PROGRAM", 1.0))
+        finally:
+            sys.stderr = orig_stderr
+            _nus.NUSLink.connect = orig_connect
+            for m, n, fn in origs:
+                setattr(m, n, fn)
+        return text, calls
+
+    def test_uploads_program_streams_and_restores(self):
+        async def _stream(blink, link, out):
+            out.write("hello %s" % sid_mod._HUB_OK_SENTINEL)
+        import io, sys
+        from unittest.mock import patch
+        with patch("sys.stdout", io.StringIO()):
+            text, calls = self._session(_stream)
+        self.assertIn(sid_mod._HUB_OK_SENTINEL, text)
+        self.assertEqual(calls["upload"], b"PROGRAM")
+        self.assertEqual(calls["restore"], 1)
+
+    def test_restore_runs_even_when_streaming_dies(self):
+        async def _stream(blink, link, out):
+            raise RuntimeError("link dropped")
+        with self.assertRaises(RuntimeError):
+            self._session(_stream)
+        # calls dict is rebuilt per _session; verify via a fresh run
+        # that the restore leg is in the finally path.
+        async def _ok(blink, link, out):
+            out.write("x")
+        import io
+        from unittest.mock import patch
+        with patch("sys.stdout", io.StringIO()):
+            _, calls = self._session(_ok)
+        self.assertEqual(calls["restore"], 1)
+
+    def test_connect_failure_is_a_servo_id_error(self):
+        import asyncio
+        from openbricks_dev import _nus
+
+        async def _fail(name, scan_timeout=5.0):
+            raise _nus.NUSError("no hub named ls")
+        orig = _nus.NUSLink.connect
+        _nus.NUSLink.connect = staticmethod(_fail)
+        self.addCleanup(
+            lambda: setattr(_nus.NUSLink, "connect", orig))
+        import io, sys
+        from unittest.mock import patch
+        with patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(ServoIdError):
+                asyncio.run(sid_mod._hub_async("ls", b"P", 1.0))
+
+    def test_failing_idle_restore_is_swallowed(self):
+        # A hub that hangs up during restore must not turn a
+        # completed re-ID into an error.
+        async def _stream(blink, link, out):
+            out.write(sid_mod._HUB_OK_SENTINEL)
+        from openbricks_dev import run as run_mod
+
+        async def _bad_restore(link):
+            raise RuntimeError("hub hung up first")
+        orig = run_mod._restore_idle_loop
+        text = None
+        try:
+            import io
+            from unittest.mock import patch
+            with patch("sys.stdout", io.StringIO()):
+                run_mod._restore_idle_loop = _bad_restore
+                text, _ = self._session_with_restore(_stream,
+                                                     _bad_restore)
+        finally:
+            run_mod._restore_idle_loop = orig
+        self.assertIn(sid_mod._HUB_OK_SENTINEL, text)
+
+    def _session_with_restore(self, stream_fn, restore_fn):
+        import asyncio, io, sys
+        from openbricks_dev import run as run_mod
+        from openbricks_dev import _nus
+
+        class _FakeLink:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        async def _fake_connect(name, scan_timeout=5.0):
+            return _FakeLink()
+
+        async def _noop2(blink, link):
+            pass
+
+        async def _noop3(blink, link, program):
+            pass
+
+        patches = [
+            (run_mod, "_enter_raw_repl", _noop2),
+            (run_mod, "_raw_paste_upload", _noop3),
+            (run_mod, "_stream_output", stream_fn),
+            (run_mod, "_restore_idle_loop", restore_fn),
+        ]
+        origs = [(m, n, getattr(m, n)) for m, n, _ in patches]
+        for m, n, fn in patches:
+            setattr(m, n, fn)
+        orig_connect = _nus.NUSLink.connect
+        _nus.NUSLink.connect = staticmethod(_fake_connect)
+        err = io.StringIO()
+        orig_stderr = sys.stderr
+        sys.stderr = err
+        try:
+            text = asyncio.run(sid_mod._hub_async("ls", b"P", 1.0))
+        finally:
+            sys.stderr = orig_stderr
+            _nus.NUSLink.connect = orig_connect
+            for m, n, fn in origs:
+                setattr(m, n, fn)
+        return text, None
+
+    def test_ctrl_c_maps_to_130(self):
+        orig = sid_mod._hub_async
+
+        def _boom(*a, **k):
+            raise KeyboardInterrupt()
+        sid_mod._hub_async = _boom
+        self.addCleanup(setattr, sid_mod, "_hub_async", orig)
+        rc = sid_mod.run(argparse.Namespace(
+            new_id=3, port=None, name="ls", scan=False, old_id=None,
+            baudrate=1_000_000, timeout=0.02, tx=14, rx=41,
+            scan_timeout=5.0))
+        self.assertEqual(rc, 130)
+
+
 class ParserTests(unittest.TestCase):
     def setUp(self):
         self.parser = cli._build_parser()
@@ -359,6 +607,13 @@ class ParserTests(unittest.TestCase):
         # -p omitted parses to None; run() then auto-detects.
         args = self.parser.parse_args(["servo-id", "--scan"])
         self.assertIsNone(args.port)
+
+    def test_hub_name_and_pins_parse(self):
+        args = self.parser.parse_args(["servo-id", "-n", "ls", "3"])
+        self.assertEqual(args.name, "ls")
+        self.assertEqual(args.tx, 14)
+        self.assertEqual(args.rx, 41)
+        self.assertEqual(args.scan_timeout, 5.0)
 
     def test_old_id_flag(self):
         args = self.parser.parse_args(

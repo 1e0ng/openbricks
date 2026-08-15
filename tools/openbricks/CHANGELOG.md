@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.99.0 — servo-id -n: re-ID a servo through the hub
+
+`openbricks servo-id -n NAME 3` (and `-n NAME --scan`) runs the
+scan/re-ID THROUGH THE HUB over BLE — the servo stays wired to the
+robot, no USB adapter cable. The hub-side one-shot program reuses
+the firmware driver's echo-safe bus helpers and the same contract
+as the adapter path: full-bus scan, refusal to guess between
+multiple servos (`--old-id`), a settle after the unverified ID
+write (its status reply can carry either ID — bench 2026-08-15),
+and a PING-verified result gated by a success sentinel, so a
+hub-side failure always exits non-zero. `--tx`/`--rx` select the
+bus pins (default 14/41). `-p` (USB adapter) is unchanged and
+mutually exclusive with `-n`. CLI-only; no flash needed.
+
 ## 1.98.0 — servo-id auto-detects the adapter port
 
 `openbricks servo-id` no longer requires `-p`: with exactly one USB

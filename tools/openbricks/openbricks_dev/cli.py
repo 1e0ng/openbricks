@@ -260,9 +260,27 @@ def _build_parser():
     p_servo.add_argument(
         "-p", "--port", default=None,
         help="Serial port of the USB adapter, e.g. "
-             "/dev/cu.usbmodem123. Omitted: auto-detected when "
-             "exactly one USB serial device is connected (unplug "
-             "the hub, or pass -p, when both are attached).",
+             "/dev/cu.usbmodem123. Omitted (and no -n): "
+             "auto-detected when exactly one USB serial device is "
+             "connected.",
+    )
+    p_servo.add_argument(
+        "-n", "--name", default=None,
+        help="Hub name: run the scan/re-ID THROUGH THE HUB over BLE "
+             "instead of a USB adapter — the servo stays wired to "
+             "the robot. Mutually exclusive with -p.",
+    )
+    p_servo.add_argument(
+        "--tx", type=int, default=14,
+        help="Hub path only: servo-bus TX pin (default 14).",
+    )
+    p_servo.add_argument(
+        "--rx", type=int, default=41,
+        help="Hub path only: servo-bus RX pin (default 41).",
+    )
+    p_servo.add_argument(
+        "--scan-timeout", type=float, default=5.0,
+        help="Hub path only: BLE scan timeout. Default: 5.0 s.",
     )
     p_servo.add_argument(
         "--scan", action="store_true",
