@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.0.1 — no overshoot-reverse on short moves; turn() ramps its forward axis
+
+Bench, within the hour of 2.0.0: handovers got WORSE — around the
+transition into `straight()` the robot abruptly stopped more than
+once. Two holes in 2.0.0's entry-speed semantics:
+
+1. A distance too short to stop in (e.g. `straight(115)` at 830 dps,
+   which needs ~177 mm) decelerated cleanly, OVERSHOT, then position
+   feedback reversed the robot back — two abrupt stops per short
+   handover. Entry speed is now CLAMPED to `sqrt(2·a·D)` (pbio's
+   choice): one bounded step at the arm, a clean landing on the
+   mark, position strictly monotonic.
+2. `turn()` armed while translating dropped its forward axis into an
+   instant position-hold — the old cliff, braking at plant limit.
+   The forward axis now gets a stop trajectory: decelerate to rest
+   at the accel limit, hold anchored where the robot actually stops
+   (turn-in-place `curve()` too).
+
+Both sides move: flash 2.0.1 AND `pipx upgrade openbricks`.
+
 ## 2.0.0 — trajectories start from the current speed
 
 Bench report: handing over from a line-follow loop (830 dps via

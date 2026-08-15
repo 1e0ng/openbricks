@@ -169,8 +169,27 @@ void ob_drivebase_turn(ob_drivebase_t *db,
     db->turn_start_ms = now_ms;
     db->turn_active   = true;
 
-    db->fwd_hold   = sum_pos;
-    db->fwd_active = false;
+    // The FORWARD axis of a turn armed while the chassis still
+    // translates (line-follow handing straight into turn()): an
+    // instant position-hold is the same cliff the entry speeds
+    // exist to remove — the P-term brakes at plant limit. Give it a
+    // STOP trajectory instead: decelerate to rest at the accel
+    // limit, landing wherever v0²/2a puts us; the expiry lock
+    // anchors the hold THERE (where the robot actually stops).
+    ob_float_t v0_sum = (db->left->target_dps + db->right->target_dps)
+                        / (ob_float_t)2.0;
+    ob_float_t v0_abs = (v0_sum < 0.0) ? -v0_sum : v0_sum;
+    if (v0_abs > (ob_float_t)1.0 && db->accel_dps2 > (ob_float_t)0.0) {
+        ob_float_t stop_d = v0_sum * v0_abs
+                            / ((ob_float_t)2.0 * db->accel_dps2);
+        ob_trajectory_init_v0(&db->fwd, sum_pos, sum_pos + stop_d,
+                              v0_abs, db->accel_dps2, v0_sum);
+        db->fwd_start_ms = now_ms;
+        db->fwd_active   = true;
+    } else {
+        db->fwd_hold   = sum_pos;
+        db->fwd_active = false;
+    }
 
     db->done = false;
     db->settling = false;
@@ -222,7 +241,9 @@ void ob_drivebase_curve(ob_drivebase_t *db,
         return;
     }
     if (fwd_abs < (ob_float_t)1e-9) {
-        // radius 0: a turn in place, wheels at the rim speed.
+        // radius 0: a turn in place, wheels at the rim speed. The
+        // forward axis gets the same stop-trajectory treatment as
+        // ob_drivebase_turn when entered while translating.
         ob_trajectory_init_v0(&db->turn, diff_pos, diff_pos + turn_delta,
                               speed_dps, db->accel_dps2,
                               (db->left->target_dps
@@ -230,8 +251,20 @@ void ob_drivebase_curve(ob_drivebase_t *db,
                               / (ob_float_t)2.0);
         db->turn_start_ms = now_ms;
         db->turn_active   = true;
-        db->fwd_hold      = sum_pos;
-        db->fwd_active    = false;
+        ob_float_t cv0 = (db->left->target_dps + db->right->target_dps)
+                         / (ob_float_t)2.0;
+        ob_float_t cva = (cv0 < 0.0) ? -cv0 : cv0;
+        if (cva > (ob_float_t)1.0 && db->accel_dps2 > (ob_float_t)0.0) {
+            ob_trajectory_init_v0(&db->fwd, sum_pos,
+                                  sum_pos + cv0 * cva
+                                  / ((ob_float_t)2.0 * db->accel_dps2),
+                                  cva, db->accel_dps2, cv0);
+            db->fwd_start_ms = now_ms;
+            db->fwd_active   = true;
+        } else {
+            db->fwd_hold   = sum_pos;
+            db->fwd_active = false;
+        }
         db->done          = false;
         db->settling = false;
         return;
