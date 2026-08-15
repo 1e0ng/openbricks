@@ -68,6 +68,23 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
     ob_float_t a  = t->accel;
     ob_float_t vc = t->cruise;
 
+    // Entry speed the distance can absorb: stopping from v0 takes
+    // v0²/2a, so v0 above sqrt(2aD) cannot land inside D. Clamp it
+    // (pbio's choice): the feed-forward steps down once, bounded by
+    // the distance's own physics, and the plant absorbs the excess
+    // like any feedback error. The alternative — decelerate cleanly,
+    // OVERSHOOT, then have position feedback reverse the robot —
+    // read as "worse" on the bench within the hour it shipped
+    // (2026-08-16: straight(115mm) at 830 dps glided past the mark
+    // and snapped backwards).
+    if (v0 > 0.0) {
+        ob_float_t v_stop_max = ob_sqrt(2.0 * a * D);
+        if (v0 > v_stop_max) {
+            v0    = v_stop_max;
+            t->v0 = v0;
+        }
+    }
+
     // Net displacement of a monotonic ramp v0 -> v at ±a is
     // (v² - v0²) / (2a) — the algebra holds for signed v0.
     ob_float_t d_entry_trap = ((vc * vc) - (v0 * v0)) / (2.0 * a);
@@ -95,21 +112,8 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
     ob_float_t vp2 = (2.0 * a * D + v0 * v0) / 2.0;
     ob_float_t vp  = ob_sqrt(vp2 > 0.0 ? vp2 : 0.0);
 
-    if (v0 > 0.0 && vp < v0) {
-        // Cannot even stop within D: pure deceleration, overshoot
-        // owned by position feedback after expiry.
-        t->triangular = true;
-        t->v_peak     = v0;
-        t->a_entry    = -a;
-        t->t_entry    = v0 / a;
-        t->d_entry    = (v0 * v0) / (2.0 * a);
-        t->t_cruise   = 0.0;
-        t->t_ramp     = 0.0;
-        t->d_ramp     = 0.0;
-        t->t_total    = t->t_entry;
-        return;
-    }
-
+    // The v0 clamp above guarantees vp >= v0 here: vp² - v0² =
+    // (2aD - v0²)/2 >= 0 once v0 <= sqrt(2aD).
     t->triangular = true;
     t->v_peak     = vp;
     t->a_entry    = a;
@@ -142,12 +146,6 @@ void ob_trajectory_sample(const ob_trajectory_t *t,
     } else if (t_s >= t->t_total) {
         abs_pos = (t->distance < 0) ? -t->distance : t->distance;
         abs_vel = 0.0;
-        if (t->t_cruise == 0.0 && t->t_ramp == 0.0
-            && t->t_entry > 0.0) {
-            // Pure-decel profile: it lands where physics allowed,
-            // not exactly at the target.
-            abs_pos = t->d_entry;
-        }
     } else if (t_s < t->t_entry) {
         // Entry ramp: v0 toward v_peak at a_entry.
         abs_vel = t->v0 + t->a_entry * t_s;
