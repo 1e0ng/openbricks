@@ -2,12 +2,19 @@
 """
 ``openbricks servo-id`` — assign a Feetech SCS/STS servo bus ID.
 
-Talks the Feetech half-duplex serial protocol directly from the host
-through a USB serial adapter (e.g. the URT-2 board's USB port), so a
-fresh servo can be given its bus ID before it ever meets the hub:
+Two transports, one contract:
 
-    openbricks servo-id 3        # set ID -> 3
-    openbricks servo-id --scan   # who's there?
+    openbricks servo-id 3           # via USB adapter (URT-2), auto-detected
+    openbricks servo-id --scan      # who's there? (USB adapter)
+    openbricks servo-id -n ls 3     # THROUGH THE HUB over BLE — the
+    openbricks servo-id -n ls --scan  # servo stays wired to the robot
+
+The adapter path talks the Feetech half-duplex protocol directly
+from the host (e.g. the URT-2 board's USB port), so a fresh servo
+can be given its bus ID before it ever meets the hub. The hub path
+sends a one-shot program over BLE that does the same scan/re-ID on
+the hub's own servo bus (firmware driver's echo-safe helpers; pins
+--tx/--rx, default 14/41).
 
 The adapter's port is auto-detected when exactly one USB serial
 device is connected (same filter the flash command uses); with the
@@ -137,6 +144,122 @@ def _open_serial(port, baudrate, timeout):
         raise ServoIdError("cannot open %s: %s" % (port, e))
 
 
+_HUB_OK_SENTINEL = "SERVO-ID-OK"
+
+# The hub-path program: same contract as the adapter path — full-bus
+# scan, refusal to guess between servos, PING-verified result — run
+# ON the hub over its own servo bus, reusing the firmware driver's
+# echo-safe helpers. Mirrors examples/servo_set_id.py; the sentinel
+# is how the host learns the hub side finished without an exception.
+_HUB_PROGRAM = """\
+import time
+from openbricks.drivers.st3215 import _SCServoBus
+NEW_ID = %(new_id)r
+OLD_ID = %(old_id)r
+SCAN_ONLY = %(scan)r
+bus = _SCServoBus(1, %(tx)d, %(rx)d)
+alive = []
+for sid in range(254):
+    if bus.ping(sid):
+        alive.append(sid)
+print("servos on the bus:", alive)
+if SCAN_ONLY:
+    print("%(sentinel)s")
+else:
+    old = OLD_ID
+    if old is None:
+        if not alive:
+            raise ValueError("no servo answered the scan - check power and wiring")
+        if len(alive) > 1:
+            raise ValueError("%%d servos on the bus %%s - pass --old-id so the right one is re-ID'd" %% (len(alive), alive))
+        old = alive[0]
+    elif old not in alive:
+        raise ValueError("no servo at --old-id %%d (bus has %%s)" %% (old, alive))
+    if NEW_ID == old:
+        raise ValueError("servo %%d already has that ID" %% old)
+    if NEW_ID in alive:
+        raise ValueError("ID %%d is already taken on this bus" %% NEW_ID)
+    print("re-ID: %%d -> %%d" %% (old, NEW_ID))
+    bus.write(old, 0x37, [0])
+    bus.verify_writes = False
+    bus.write(old, 0x05, [NEW_ID])
+    bus.verify_writes = True
+    time.sleep_ms(100)
+    bus.write(NEW_ID, 0x37, [1])
+    if not bus.ping(NEW_ID):
+        raise RuntimeError("verify FAILED: ID %%d does not answer" %% NEW_ID)
+    if bus.ping(old):
+        raise RuntimeError("verify FAILED: old ID %%d still answers" %% old)
+    print("set servo ID %%d -> %%d (verified)" %% (old, NEW_ID))
+    print("%(sentinel)s")
+"""
+
+
+def _compose_hub_program(new_id, old_id, scan, tx, rx):
+    return (_HUB_PROGRAM % {
+        "new_id": new_id, "old_id": old_id, "scan": bool(scan),
+        "tx": tx, "rx": rx, "sentinel": _HUB_OK_SENTINEL,
+    }).encode()
+
+
+class _TeeCapture:
+    """stdout passthrough that remembers the streamed text, so the
+    host can check for the hub program's success sentinel."""
+
+    def __init__(self, out):
+        self._out = out
+        self.text = ""
+
+    def write(self, s):
+        self.text += s
+        self._out.write(s)
+
+    def flush(self):
+        self._out.flush()
+
+
+async def _hub_async(name, program, scan_timeout):
+    import sys as _sys
+    from openbricks_dev._nus import NUSLink, NUSError
+    from openbricks_dev import run as run_mod
+    print("connecting to %r ..." % name, file=_sys.stderr)
+    try:
+        link = await NUSLink.connect(name, scan_timeout=scan_timeout)
+    except NUSError as e:
+        raise ServoIdError(str(e))
+    tee = _TeeCapture(_sys.stdout)
+    async with link:
+        blink = run_mod._BufferedLink(link)
+        await run_mod._enter_raw_repl(blink, link)
+        try:
+            await run_mod._raw_paste_upload(blink, link, program)
+            await run_mod._stream_output(blink, link, tee)
+        finally:
+            try:
+                await run_mod._restore_idle_loop(link)
+            except Exception:
+                pass
+    return tee.text
+
+
+def _run_hub(args):
+    import asyncio
+    program = _compose_hub_program(
+        args.new_id, args.old_id, args.scan, args.tx, args.rx)
+    try:
+        text = asyncio.run(_hub_async(
+            args.name, program, args.scan_timeout))
+    except KeyboardInterrupt:
+        import sys as _sys
+        print("\naborted.", file=_sys.stderr)
+        return 130
+    if _HUB_OK_SENTINEL not in text:
+        raise ServoIdError(
+            "the hub-side program did not complete — see its output "
+            "above")
+    return 0
+
+
 def run(args):
     """Subcommand entry. ``args`` is an argparse Namespace."""
     if not args.scan and args.new_id is None:
@@ -145,6 +268,13 @@ def run(args):
         raise ServoIdError(
             "NEW_ID must be 0..%d (%d is the broadcast address)"
             % (_BROADCAST_ID - 1, _BROADCAST_ID))
+
+    if getattr(args, "name", None) is not None:
+        if args.port is not None:
+            raise ServoIdError(
+                "pass either -n (through the hub) or -p (through the "
+                "USB adapter), not both")
+        return _run_hub(args)
 
     port = args.port
     if port is None:
