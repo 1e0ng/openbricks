@@ -61,15 +61,8 @@ class FlashError(Exception):
     """Raised by ``run`` when any step of the flash / name-write fails."""
 
 
-# USB vendor IDs that identify an ESP dev board's serial interface:
-# Espressif's native USB-Serial-JTAG (the S3's usbmodem port) and the
-# common UART bridge chips soldered onto commodity dev boards.
-_ESP_USB_VIDS = {
-    0x303A: "Espressif native USB",
-    0x10C4: "CP210x bridge",
-    0x1A86: "CH340/CH910x bridge",
-    0x0403: "FTDI bridge",
-}
+# The USB vendor-ID filter lives in ``_ports`` (shared with
+# servo-id's adapter autodetection) — one table, no drift.
 
 # ESP image extended-header chip IDs (bytes 12-13 of the bootloader
 # image, little-endian) -> esptool --chip names. The merged
@@ -89,35 +82,14 @@ _IMAGE_MAGIC = 0xE9
 def _autodetect_port():
     """Return the single connected ESP serial port, or die usefully.
 
-    Filters ``serial.tools.list_ports`` down to known ESP-ish USB
-    vendor IDs so a modem or an Arduino on another port can't be
-    grabbed by mistake. Exactly one match is required — flashing is
-    destructive, so with two candidates we refuse to guess.
+    Shared filter in ``_ports`` (servo-id uses the same one): known
+    USB-serial vendor IDs, so a modem or an Arduino on another port
+    can't be grabbed by mistake. Exactly one match is required —
+    flashing is destructive, so with two candidates we refuse to
+    guess.
     """
-    try:
-        from serial.tools import list_ports
-    except ImportError:
-        _die("--port not given and pyserial is unavailable for "
-             "auto-detection — pip install pyserial (or pass --port)")
-    candidates = []
-    for p in list_ports.comports():
-        if p.vid in _ESP_USB_VIDS:
-            candidates.append(p)
-    if not candidates:
-        _die("--port not given and no connected ESP device found "
-             "(looked for %s). Plug the hub in, or pass --port "
-             "explicitly." % ", ".join(sorted(_ESP_USB_VIDS.values())))
-    if len(candidates) > 1:
-        listing = "\n".join(
-            "  %s  (%s)" % (c.device, _ESP_USB_VIDS.get(c.vid, "?"))
-            for c in candidates)
-        _die("--port not given and %d ESP devices are connected — "
-             "flashing is destructive, refusing to guess:\n%s"
-             % (len(candidates), listing))
-    port = candidates[0].device
-    print("auto-detected port %s (%s)"
-          % (port, _ESP_USB_VIDS.get(candidates[0].vid, "?")))
-    return port
+    from openbricks_dev._ports import autodetect_port
+    return autodetect_port(FlashError, "flashing is destructive")
 
 
 def _detect_chip(esptool, port):

@@ -258,9 +258,11 @@ def _build_parser():
         help="Bus ID to assign (0..253). Omit with --scan.",
     )
     p_servo.add_argument(
-        "-p", "--port", required=True,
+        "-p", "--port", default=None,
         help="Serial port of the USB adapter, e.g. "
-             "/dev/cu.usbmodem123 (ls /dev/cu.usb*).",
+             "/dev/cu.usbmodem123. Omitted: auto-detected when "
+             "exactly one USB serial device is connected (unplug "
+             "the hub, or pass -p, when both are attached).",
     )
     p_servo.add_argument(
         "--scan", action="store_true",

@@ -279,6 +279,63 @@ class RunDispatchTests(unittest.TestCase):
         self.assertEqual(bus.ids, {3})
 
 
+class AutodetectPortTests(unittest.TestCase):
+    """-p optional (1.98.0): the shared _ports filter picks the ONE
+    connected USB serial adapter; zero or several refuse — with the
+    hub also plugged in, guessing could rewrite the wrong device's
+    EEPROM."""
+
+    class _FakePort:
+        def __init__(self, device, vid):
+            self.device = device
+            self.vid = vid
+
+    def _detect(self, ports):
+        from openbricks_dev._ports import autodetect_port
+        import serial.tools.list_ports as lp
+        from unittest.mock import patch
+        with patch.object(lp, "comports", return_value=ports):
+            return autodetect_port(ServoIdError, "testing")
+
+    def test_single_adapter_is_chosen(self):
+        got = self._detect([
+            self._FakePort("/dev/cu.Bluetooth", None),
+            self._FakePort("/dev/cu.usbmodem9", 0x1A86),
+        ])
+        self.assertEqual(got, "/dev/cu.usbmodem9")
+
+    def test_no_adapter_refuses(self):
+        with self.assertRaises(ServoIdError):
+            self._detect([self._FakePort("/dev/cu.Bluetooth", None)])
+
+    def test_hub_plus_adapter_refuses_to_guess(self):
+        with self.assertRaises(ServoIdError) as ctx:
+            self._detect([
+                self._FakePort("/dev/cu.usbmodem9", 0x1A86),
+                self._FakePort("/dev/cu.usbmodem5", 0x303A),
+            ])
+        self.assertIn("refusing to guess", str(ctx.exception))
+
+    def test_run_autodetects_when_port_is_none(self):
+        # End to end through run(): port=None routes through the
+        # detector, whose result reaches _open_serial.
+        from unittest.mock import patch
+        import serial.tools.list_ports as lp
+        bus = _FakeBus({5})
+        seen = []
+        orig = sid_mod._open_serial
+        sid_mod._open_serial = (
+            lambda port, baud, timeout: seen.append(port) or bus)
+        self.addCleanup(setattr, sid_mod, "_open_serial", orig)
+        with patch.object(lp, "comports", return_value=[
+                self._FakePort("/dev/cu.usbmodem9", 0x1A86)]):
+            rc = sid_mod.run(argparse.Namespace(
+                new_id=None, port=None, scan=True, old_id=None,
+                baudrate=1_000_000, timeout=0.02))
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, ["/dev/cu.usbmodem9"])
+
+
 class ParserTests(unittest.TestCase):
     def setUp(self):
         self.parser = cli._build_parser()
@@ -297,6 +354,11 @@ class ParserTests(unittest.TestCase):
             ["servo-id", "-p", "/dev/x", "--scan"])
         self.assertTrue(args.scan)
         self.assertIsNone(args.new_id)
+
+    def test_port_is_optional(self):
+        # -p omitted parses to None; run() then auto-detects.
+        args = self.parser.parse_args(["servo-id", "--scan"])
+        self.assertIsNone(args.port)
 
     def test_old_id_flag(self):
         args = self.parser.parse_args(
