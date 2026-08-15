@@ -728,7 +728,7 @@ class SimStBusEngineTests(_ShimTestBase):
         db.stop()
 
     def test_straight_after_cruise_blends_in_physics(self):
-        # 1.100.0: trajectories arm from the current speed. In
+        # 2.0.0: trajectories arm from the current speed. In
         # MuJoCo, a straight() right after a move_wheels cruise must
         # not slam the wheel command to zero — the commanded speed
         # 30 ms into the move is still a large fraction of cruise.

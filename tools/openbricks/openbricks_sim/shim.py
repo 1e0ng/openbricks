@@ -487,7 +487,7 @@ class _SimStBus:
         # Firmware parity (st_bus.c sb_db_straight/sb_db_turn): arm
         # against LIVE odometry AND the live commanded speeds — the
         # arm reads the bridges' target_dps as the trajectory's entry
-        # speed (1.100.0), so a straight() after move_wheels() blends
+        # speed (2.0.0), so a straight() after move_wheels() blends
         # from cruise instead of cliffing.
         self._raw.sync(self._wheels[0].angle(), self._wheels[1].angle(),
                        getattr(self._wheels[0], "_target_dps", 0.0),

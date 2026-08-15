@@ -3,7 +3,7 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
-## 1.100.0 — trajectories start from the current speed
+## 2.0.0 — trajectories start from the current speed
 
 Bench report: handing over from a line-follow loop (830 dps via
 `move_wheels`) to `straight()`/`turn()` braked far harder than
@@ -20,7 +20,7 @@ clean pure-deceleration that overshoots by the physics-mandated
 margin and lets position feedback pull back. From-rest behavior is
 bit-identical; the serial engine keeps its bridges' speed targets
 fresh every tick, and the sim carries the same entry speeds. Both
-sides move: flash 1.100.0 AND `pipx upgrade openbricks`.
+sides move: flash 2.0.0 AND `pipx upgrade openbricks`.
 
 ## 1.99.0 — servo-id -n: re-ID a servo through the hub
 

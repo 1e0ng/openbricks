@@ -293,7 +293,7 @@ class DriveBaseParityTests(unittest.TestCase):
         # move: default 720 deg/s² climbs ~72 dps in the window,
         # set_accel(90) climbs ~9. Deltas (not absolutes) because
         # trajectories arm FROM THE CURRENT commanded speed since
-        # 1.100.0 — a bare stop() (yield-only) leaves the servo
+        # 2.0.0 — a bare stop() (yield-only) leaves the servo
         # targets live, and the second move honestly blends from
         # them.
         sim = _SyntheticTwoWheel(self.db, self.left, self.right)

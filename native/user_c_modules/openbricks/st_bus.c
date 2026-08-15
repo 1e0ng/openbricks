@@ -228,7 +228,7 @@ static void st_db_sync_bridges_locked(void) {
         (ob_float_t)(ob_sservo_counts(sv, st_db_slot_l) * ST_DB_DEG_PER_COUNT);
     st_db_bridge_r.observer.pos_hat =
         (ob_float_t)(ob_sservo_counts(sv, st_db_slot_r) * ST_DB_DEG_PER_COUNT);
-    // Speed targets too (1.100.0): the arms read the bridges'
+    // Speed targets too (2.0.0): the arms read the bridges'
     // target_dps as each trajectory's entry speed. After a ws slew
     // (move_wheels/drive) the bridges are stale — the slots hold the
     // truth of what is being commanded RIGHT NOW. Un-apply the

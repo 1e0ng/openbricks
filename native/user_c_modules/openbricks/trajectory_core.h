@@ -41,7 +41,7 @@ typedef struct {
     ob_float_t cruise;       // magnitude
     ob_float_t accel;        // magnitude
     ob_float_t direction;    // +1 or -1
-    // Entry state (1.100.0): profiles begin at the axis's CURRENT
+    // Entry state (2.0.0): profiles begin at the axis's CURRENT
     // speed, relative to the move's direction (negative = moving the
     // wrong way; may exceed cruise). v0 = 0 reproduces the classic
     // from-rest trapezoid exactly.

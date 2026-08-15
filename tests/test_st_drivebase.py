@@ -1369,7 +1369,7 @@ class DecelSlewTests(_Base):
 
 
 class TrajectoryEntrySpeedTests(unittest.TestCase):
-    """Trajectories arm FROM THE CURRENT SPEED (1.100.0). A straight
+    """Trajectories arm FROM THE CURRENT SPEED (2.0.0). A straight
     armed while the wheels cruise (line-follow handing over) blends
     down through settings.acceleration; before this, the command
     cliffed from cruise to ~zero in one tick and duty mode braked as

@@ -760,7 +760,7 @@ static PyObject *RawDriveBase_sync(RawDriveBaseObject *self, PyObject *args) {
     self->bridge_l.observer.pos_hat = (ob_float_t)l_deg;
     self->bridge_r.observer.pos_hat = (ob_float_t)r_deg;
     if (have_speeds) {
-        /* Speed targets too (1.100.0): the arm paths read the
+        /* Speed targets too (2.0.0): the arm paths read the
          * bridges' target_dps as each trajectory's ENTRY speed, so a
          * straight() after move_wheels() blends from the commanded
          * cruise instead of cliffing to zero — firmware parity with
