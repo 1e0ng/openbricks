@@ -59,10 +59,12 @@ nothing, and the error names the motor:
     (servo id 1, slot 1) on UART1 tx=14 rx=6 — 0 replies, 137 failed
     reads (137 in a row). Check the servo's power and TX/RX wiring,
     and that it really has that bus id — `openbricks servo-id --scan`
-(through the URT-2's USB port; with the servo already wired to the
-hub, ``openbricks run -n NAME examples/servo_set_id.py`` scans and
-re-IDs through the hub instead)
     lists the ids actually answering on the bus.
+
+(``openbricks servo-id`` talks through the URT-2's USB port. With
+the servo already wired to the hub,
+``openbricks run -n NAME examples/servo_set_id.py`` scans and
+re-IDs through the hub instead — same safety contract.)
 
 Both wheels are verified when the DriveBase is constructed, and on
 every move afterwards. If one goes silent mid-move the controller
