@@ -1149,6 +1149,15 @@ def _exec_program_raw(program_path, origin=None):
     the file is only a backup for inspecting an untethered run later
     via ``openbricks log``.
     """
+    # Program boundary: wipe native state inherited from the previous
+    # run — motor_process's tick-callback list and st_bus's servo
+    # slots / drivebase config / gyro-source flag / fault latch. This
+    # lives HERE, not in run_program, because button presses launch
+    # through _exec_program without ever passing run_program: a second
+    # button run used to inherit the previous run's engine state
+    # (stale gyro-in-use refused imu.reset_heading(); a contaminated
+    # callback list blocked DriveBase.straight() forever).
+    _reset_motor_process()
     if program_path.endswith(".mpy"):
         # Host-cross-compiled program (CLI >= 1.92.0), executed by the
         # native persistent-code loader. Probe existence here so a
@@ -1402,17 +1411,10 @@ def run_program(program_path=DEFAULT_PROGRAM_PATH):
     disconnect signals "stopped" back to the client (which then
     exits).
 
-    Wipes ``motor_process`` state before exec'ing the user script.
-    ``openbricks run`` interrupts whatever was running before
-    (typically a long-lived main.py) but the C-side motor_process
-    callback list isn't tied to Python GC — without this reset, the
-    new program inherits dead servo/drivebase tick-callback pointers
-    from the previous program and ``register_c`` either silently
-    rejects new subscriptions (list full) or schedules them alongside
-    garbage, leaving ``DriveBase.straight()`` blocked forever in the
-    ``while not is_done()`` loop.
+    The program-boundary native-state wipe (motor_process callbacks +
+    st_bus runtime) happens inside ``_exec_program_raw``, shared with
+    the button-press paths.
     """
-    _reset_motor_process()
     launcher = _ensure_launcher()
     from openbricks import estop
     estop.clear()   # fresh run — a stale latch must not kill it at birth
