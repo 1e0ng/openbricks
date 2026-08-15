@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 1.98.0 — servo-id auto-detects the adapter port
+
+`openbricks servo-id` no longer requires `-p`: with exactly one USB
+serial device connected it auto-detects the adapter, using the same
+vendor-ID filter `flash` has always used (now shared in one place —
+`_ports`). Zero or several candidates still refuse loudly: with the
+hub AND the adapter both plugged in, guessing could rewrite the
+wrong device — pass `-p` (or unplug the hub) in that case. CLI-only;
+no flash needed.
+
 ## 1.97.0 — run gets its own slot; the button program is never clobbered
 
 `openbricks run` used to stage its script to the same `/program.mpy`

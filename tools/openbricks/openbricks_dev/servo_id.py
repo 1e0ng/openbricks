@@ -6,8 +6,13 @@ Talks the Feetech half-duplex serial protocol directly from the host
 through a USB serial adapter (e.g. the URT-2 board's USB port), so a
 fresh servo can be given its bus ID before it ever meets the hub:
 
-    openbricks servo-id -p /dev/cu.usbmodem123 3        # set ID -> 3
-    openbricks servo-id -p /dev/cu.usbmodem123 --scan   # who's there?
+    openbricks servo-id 3        # set ID -> 3
+    openbricks servo-id --scan   # who's there?
+
+The adapter's port is auto-detected when exactly one USB serial
+device is connected (same filter the flash command uses); with the
+hub also plugged in there are two candidates, and the tool demands
+``-p`` rather than guess which device's EEPROM to rewrite.
 
 The ID lives in EEPROM register 0x05 behind the lock register 0x37
 (0 = unlock, 1 = lock), so a write is unlock -> write -> re-lock at
@@ -141,7 +146,13 @@ def run(args):
             "NEW_ID must be 0..%d (%d is the broadcast address)"
             % (_BROADCAST_ID - 1, _BROADCAST_ID))
 
-    ser = _open_serial(args.port, args.baudrate, args.timeout)
+    port = args.port
+    if port is None:
+        from openbricks_dev._ports import autodetect_port
+        port = autodetect_port(
+            ServoIdError, "re-writing servo EEPROM through the wrong "
+            "device would be destructive")
+    ser = _open_serial(port, args.baudrate, args.timeout)
     try:
         if args.scan:
             found = scan_bus(ser)
