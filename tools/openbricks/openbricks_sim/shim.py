@@ -987,6 +987,13 @@ class ShimST3215Motor:
     def reset_angle(self, angle=0):
         self._angle_offset = self._raw_angle() - float(angle)
 
+    def speed(self):
+        # Measured shaft speed in deg/s — Motor API parity with the
+        # firmware driver (present-speed register / hard-tick pump).
+        # The sim model's velocity IS the measurement; never silent,
+        # so never None.
+        return self._vel_dps()
+
     def ping(self):
         return True
 

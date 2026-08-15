@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.1.0 — stop(wait=True): block until the wheels actually stop
+
+`db.stop(then=..., wait=True)` now blocks until both wheels'
+MEASURED speeds read ~0 — a deliberate extension beyond Pybricks
+(whose stop/brake return immediately; verified from their source).
+For `then="brake"`/`"hold"` that is the decel ramp finishing plus
+settle; for `"coast"` (still the default `then`) it is the physical
+freewheel decay. The wait polls real feedback, so it raises
+`RuntimeError` (with the measured speeds) if the wheels never
+settle within 5 s, and `ValueError` on open-loop motor pairs that
+have no measured `speed()`. Defaults unchanged: `stop()` remains
+instant coast. The sim's serial motors gain the missing `speed()`
+Motor-API parity method. Both sides move: flash 2.1.0 AND
+`pipx upgrade openbricks`.
+
 ## 2.0.1 — no overshoot-reverse on short moves; turn() ramps its forward axis
 
 Bench, within the hour of 2.0.0: handovers got WORSE — around the

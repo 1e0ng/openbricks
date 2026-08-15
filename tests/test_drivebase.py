@@ -253,5 +253,74 @@ class TestDriveBaseNoPythonLoop(unittest.TestCase):
         self.assertTrue(db.done())
 
 
+class _SpeedFake(_FakeClosedLoopMotor):
+    """Closed-loop fake with a scripted MEASURED-speed sequence for
+    stop(wait=True): each speed() call pops the next value; the last
+    value repeats."""
+
+    def __init__(self, speeds):
+        super().__init__()
+        self._speeds = list(speeds)
+
+    def speed(self):
+        if len(self._speeds) > 1:
+            return self._speeds.pop(0)
+        return self._speeds[0]
+
+
+class StopWaitTests(unittest.TestCase):
+    """stop(wait=True) — a deliberate extension beyond Pybricks
+    (their stop/brake return immediately): block on MEASURED wheel
+    speeds reaching ~0, loud on timeout, refuse without feedback."""
+
+    def _db(self, left, right):
+        return DriveBase(left, right, wheel_diameter_mm=56,
+                         axle_track_mm=114)
+
+    def test_waits_until_both_wheels_settle(self):
+        # Decaying speeds; the wait must consume the fast readings
+        # and only return once BOTH wheels read quiet repeatedly.
+        left = _SpeedFake([500, 300, 100, 40, 8, 3, 0, 0])
+        right = _SpeedFake([480, 280, 90, 30, 5, 2, 0, 0])
+        db = self._db(left, right)
+        db.stop(wait=True)                 # must not raise, must return
+        # Both scripts fully drained past their loud values.
+        self.assertEqual(left._speeds, [0])
+        self.assertEqual(right._speeds, [0])
+
+    def test_one_fast_wheel_keeps_it_waiting(self):
+        left = _SpeedFake([0])
+        right = _SpeedFake([500] * 40 + [0])
+        db = self._db(left, right)
+        db.stop(wait=True)
+        self.assertEqual(right._speeds, [0])
+
+    def test_never_settling_raises_loudly(self):
+        db = self._db(_SpeedFake([500]), _SpeedFake([500]))
+        with self.assertRaises(RuntimeError) as ctx:
+            db.stop(wait=True)
+        self.assertIn("still moving", str(ctx.exception))
+
+    def test_bus_silence_counts_as_not_settled(self):
+        # None = feedback stale; must never satisfy "stopped".
+        db = self._db(_SpeedFake([None]), _SpeedFake([None]))
+        with self.assertRaises(RuntimeError):
+            db.stop(wait=True)
+
+    def test_open_loop_motor_refuses(self):
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
+        db = self._db(left, right)
+        with self.assertRaises(ValueError):
+            db.stop(wait=True)
+
+    def test_default_does_not_poll(self):
+        # wait defaults False: speed() must never be consulted.
+        left = _SpeedFake([500])
+        right = _SpeedFake([500])
+        db = self._db(left, right)
+        db.stop()                          # returns immediately
+
+
 if __name__ == "__main__":
     unittest.main()
