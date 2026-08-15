@@ -388,13 +388,14 @@ class DriveBase:
         self._run_at_dps(self._left, left)
         self._run_at_dps(self._right, right)
 
-    def stop(self, then="coast", wait=None):
+    def stop(self, then="brake", wait=None):
         """Halt both wheels. Also clears any pending ``wait=False``
         move (new command supersedes, pybricks-style). ``then``
         selects the end-state:
 
-        * ``"coast"`` (default) — both motors free-wheel.
-        * ``"brake"`` — both motors actively resist motion at zero velocity.
+        * ``"brake"`` (default) — both motors actively resist motion
+          at zero velocity.
+        * ``"coast"`` — both motors free-wheel.
         * ``"hold"`` — both motors actively hold their current angle.
           Requires motors that implement ``hold()`` (e.g. ``ST3215Motor``);
           open-loop drivers raise ``NotImplementedError``.

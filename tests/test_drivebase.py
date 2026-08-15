@@ -98,16 +98,29 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         self.assertEqual(right._in1.value(), 0)
         self.assertEqual(right._in2.value(), 1)
 
-    def test_stop_default_coasts(self):
-        # New default: ``stop()`` (and the implicit stop at the end of
-        # ``straight``/``turn``) coasts both wheels — pybricks-style.
-        # Coast on L298N drops both H-bridge inputs low and zeroes the
-        # PWM duty.
+    def test_stop_default_brakes(self):
+        # Default since 2.3.0 (user decision): ``stop()`` brakes —
+        # both H-bridge terminals shorted high, actively resisting
+        # motion at zero velocity.
         left = L298NMotor(in1=1, in2=2, pwm=17)
         right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         db.stop()
+
+        self.assertEqual(left._in1.value(), 1)
+        self.assertEqual(left._in2.value(), 1)
+        self.assertEqual(right._in1.value(), 1)
+        self.assertEqual(right._in2.value(), 1)
+
+    def test_stop_then_coast_freewheels(self):
+        # Explicit ``then="coast"``: both H-bridge inputs low, PWM
+        # duty zero — the wheels spin freely.
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        db.stop(then="coast")
 
         self.assertEqual(left._in1.value(), 0)
         self.assertEqual(left._in2.value(), 0)
@@ -115,20 +128,6 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         self.assertEqual(right._in2.value(), 0)
         self.assertEqual(left._pwm.duty(), 0)
         self.assertEqual(right._pwm.duty(), 0)
-
-    def test_stop_then_brake_engages_brake(self):
-        # Explicit ``then="brake"`` falls back to the pre-1.6.7
-        # behaviour: short both H-bridge terminals high.
-        left = L298NMotor(in1=1, in2=2, pwm=17)
-        right = L298NMotor(in1=9, in2=10, pwm=11)
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-
-        db.stop(then="brake")
-
-        self.assertEqual(left._in1.value(), 1)
-        self.assertEqual(left._in2.value(), 1)
-        self.assertEqual(right._in1.value(), 1)
-        self.assertEqual(right._in2.value(), 1)
 
     def test_stop_then_hold_raises_on_open_loop_motors(self):
         # L298N can't actively hold — no encoder, no position loop.

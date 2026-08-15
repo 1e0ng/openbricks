@@ -115,7 +115,7 @@ class EncoderPathConcurrencyTests(unittest.TestCase):
     def test_stop_coast_releases_both_bridges_in_one_native_call(self):
         lc, rc = _Spy(self.left, "coast"), _Spy(self.right, "coast")
         self.db.straight(100, wait=False)
-        self.db.stop()                       # default then="coast"
+        self.db.stop(then="coast")
         self.assertEqual(lc.calls, [])
         self.assertEqual(rc.calls, [])
         # Both detached from the tick, both bridges floating.

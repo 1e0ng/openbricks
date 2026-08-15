@@ -793,7 +793,7 @@ class AtomicStopTests(_Base):
     def test_stop_coast_is_one_atomic_engine_call(self):
         db, _, _ = self._drivebase()
         self.bus.calls = []
-        db.stop()                              # default then="coast"
+        db.stop(then="coast")
         self.assertIn(("db_stop", 0), self.bus.calls)
         names = [c[0] for c in self.bus.calls]
         self.assertFalse("servo_coast" in names)
