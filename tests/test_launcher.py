@@ -524,17 +524,21 @@ class DrainAndExecTests(unittest.TestCase):
 
 
 class RunProgramResetsMotorProcessTests(unittest.TestCase):
-    """``run_program`` is the entry point for both BLE-triggered runs
-    (``openbricks run``) and button-press launches. Each call must
-    wipe the native scheduler's callback list so the new program
-    doesn't inherit dead servo / drivebase tick subscriptions from the
-    previous run.
+    """EVERY program launch — remote ``openbricks run`` AND button
+    press — must wipe the native scheduler's callback list and the
+    st_bus runtime so the new program doesn't inherit servo slots,
+    drivebase config (including the gyro-in-use flag), or dead tick
+    subscriptions from the previous run. The wipe lives in
+    ``_exec_program_raw``, the one choke point under all launch paths.
 
     Discovered 2026-05-06: a stale callback list left
     ``DriveBase.straight()`` blocked forever in
     ``while not is_done()`` — the new drivebase's ``register_c`` call
     silently failed (list contaminated with garbage from the
-    previous run) and the trajectory tick never fired."""
+    previous run) and the trajectory tick never fired. Rediscovered
+    2026-08-16 on the BUTTON path, which bypassed run_program and so
+    never reset: a second button run kept the previous run's
+    gyro-in-use flag and refused ``imu.reset_heading()``."""
 
     def setUp(self):
         self._original = launcher._reset_motor_process
@@ -566,6 +570,32 @@ class RunProgramResetsMotorProcessTests(unittest.TestCase):
                          "run_program must call _reset_motor_process exactly once")
         self.assertTrue(_path_exists(marker),
                         "program should still execute after the reset")
+
+    def test_button_path_resets_motor_process_too(self):
+        # The button press launches via _exec_program, NOT run_program
+        # — the path that shipped without the boundary reset. Drive it
+        # exactly as _drain_pending does.
+        marker = "/tmp/_openbricks_button_reset_marker"
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        self.addCleanup(lambda: os.remove(marker) if _path_exists(marker) else None)
+        path = _write_program("open(%r, 'w').write('ran')\n" % marker)
+        self.addCleanup(_cleanup_program)
+
+        launcher._exec_program(path, origin="button press")
+
+        self.assertEqual(self._call_count, 1,
+                         "button-path exec must call _reset_motor_process")
+        self.assertTrue(_path_exists(marker),
+                        "program should still execute after the reset")
+
+    def test_missing_program_still_resets_before_failing(self):
+        # Reset precedes the program open/stat: even a botched launch
+        # leaves the engine at a clean boundary, never half-inherited.
+        launcher._exec_program("/does/not/exist.py", origin="button press")
+        self.assertEqual(self._call_count, 1)
 
 
 class TickPumpsBleTxTests(unittest.TestCase):
@@ -2580,6 +2610,10 @@ class HardStartLatchGateTests(unittest.TestCase):
                     return True
                 return False
 
+            @staticmethod
+            def reset():
+                pass    # boundary wipe — real module always has it
+
         stub = _Stub()
         stub.motor_process = _MPN()
         self._prev_native = sys.modules.get("_openbricks_native")
@@ -2818,6 +2852,10 @@ class HardStartLatchTests(unittest.TestCase):
             @staticmethod
             def hard_button_arm(on):
                 _MP.armed.append(bool(on))
+
+            @staticmethod
+            def reset():
+                pass    # boundary wipe — real module always has it
 
             @staticmethod
             def hard_button_take_start():

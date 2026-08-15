@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.2.1 — button runs get the program-boundary reset
+
+Every run must initialize itself; no state may leak from the last
+run. The remote `openbricks run` path wiped native engine state
+before each program (motor_process tick callbacks + st_bus servo
+slots / drivebase config / gyro-in-use flag / fault latch) — but
+the BUTTON path never did: it bypassed `run_program` entirely. A
+second button run inherited the previous run's engine state, so
+`imu.reset_heading()` before constructing the new DriveBase was
+refused with "can't reset heading while a drive base is using the
+gyro", and a stale fault latch could blame the new run for the old
+run's wheel fault. The boundary wipe now lives in
+`_exec_program_raw`, the one choke point under all launch paths
+(button, degraded REPL-parked, remote). The ICM-45686 itself was
+verified clean: every construction soft-resets the chip, rebuilds
+the SPI, and zeroes the yaw integrator + bias estimator before
+re-seeding from NVS. Firmware-side fix: flash 2.2.1 (and
+`pipx upgrade openbricks` for lockstep).
+
 ## 2.2.0 — stop() blocks by default
 
 The wait shipped in 2.1.0 is now the default: a bare `db.stop()`
