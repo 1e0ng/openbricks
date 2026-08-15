@@ -1435,6 +1435,20 @@ class TrajectoryEntrySpeedTests(unittest.TestCase):
         self.assertTrue(abs(travelled - 20.0) < 8.0,
                         "landed %.1f mm (wanted 20)" % travelled)
 
+    def test_zero_radius_curve_after_cruise_ramps_forward_too(self):
+        # curve(radius=0) is a turn in place — entered while
+        # translating it takes the same forward-axis stop trajectory
+        # as turn().
+        sb.db_move_wheels(9443, 9443)
+        self.w.advance(800)
+        sb.db_curve(0.0, 90.0, 150.0)
+        self.w.advance(5)
+        s_sum = abs(self.w.spd[1] - self.w.spd[2]) / 2
+        self.assertTrue(s_sum > 8500,
+                        "forward axis cliffed: sum %d" % s_sum)
+        self.w.advance(9000)
+        self.assertTrue(sb.db_done())
+
     def test_turn_after_cruise_ramps_the_forward_axis_down(self):
         # turn() armed while translating: the forward axis gets a
         # STOP trajectory at the accel limit, not an instant
