@@ -82,7 +82,7 @@ def align_on_line():
                 return
             wait(poll_ms)
     finally:
-        db.stop(then="brake")
+        db.stop()
     raise RuntimeError(
         "no line found within %d ms (last ambient: left=%r right=%r) — "
         "is the line in reach, and is LINE_AMBIENT calibrated for "

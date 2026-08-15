@@ -59,7 +59,7 @@ db.settings(turn_rate=TURN_RATE)
 imu.reset_heading()
 print("spinning %d turns on encoder math alone ..." % TURNS)
 db.turn(360 * TURNS)
-db.stop(then="brake")
+db.stop()
 time.sleep_ms(500)
 
 commanded = 360 * TURNS

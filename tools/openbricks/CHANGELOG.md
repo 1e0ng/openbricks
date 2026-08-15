@@ -3,6 +3,19 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.3.0 — stop() brakes by default
+
+`db.stop()`'s `then` default flips from `"coast"` to `"brake"`
+(user decision, reverting to the originally proposed default): a
+bare stop now decelerates at `settings(acceleration=...)` and holds
+zero velocity actively, instead of releasing torque and
+free-wheeling. Combined with the 2.2.0 blocking default, a bare
+`db.stop()` ramps down, actively brakes, and returns once both
+wheels' measured speeds read ~0. Pass `then="coast"` for the old
+freewheel release. Examples that spelled `then="brake"` explicitly
+now use the bare call. Both sides move: flash 2.3.0 AND
+`pipx upgrade openbricks`.
+
 ## 2.2.1 — button runs get the program-boundary reset
 
 Every run must initialize itself; no state may leak from the last

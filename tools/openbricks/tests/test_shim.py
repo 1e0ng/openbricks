@@ -881,14 +881,16 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertTrue(sb.servo_move(0, 1000.0, 1000.0, 4000.0))
 
     def test_db_stop_yields_the_wheels(self):
-        # After stop() the db no longer re-asserts its hold, so a
-        # direct speed command moves the chassis.
+        # After stop(then="coast") the db no longer re-asserts its
+        # hold, so a direct speed command moves the chassis. Coast is
+        # explicit: the brake default actively resists at zero
+        # velocity, which is ownership, not release.
         db, _, _ = self._serial_db()
         sb = db._serial_engine._sb
         db.settings(straight_speed=150, acceleration=360)
         db.straight(500, wait=False)
         time.sleep_ms(300)
-        db.stop()
+        db.stop(then="coast")
         c0 = sb.servo_counts(0)
         sb.servo_run(0, 120 * sb._STEPS_PER_DEG)
         time.sleep_ms(400)

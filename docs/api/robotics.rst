@@ -49,10 +49,10 @@ over the wheels: a DriveBase hands their UART to the native bus
 driver when it adopts them, so a SyncServoGroup can't drive them at
 all.
 
-``stop(then="coast")`` blocks until both wheels' measured speeds
+``stop(then="brake")`` blocks until both wheels' measured speeds
 read ~0 — a deliberate extension beyond Pybricks, whose stop
-returns immediately. ``then`` picks the end state (``"coast"``,
-``"brake"``, ``"hold"``); the wait covers the decel ramp plus
+returns immediately. ``then`` picks the end state (``"brake"``,
+``"coast"``, ``"hold"``); the wait covers the decel ramp plus
 settle for brake/hold, and the physical freewheel decay for coast.
 Pass ``wait=False`` for the Pybricks-style instant return. Motor
 pairs without measured speed (open-loop drivers) return instantly
