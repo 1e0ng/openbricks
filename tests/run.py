@@ -91,6 +91,7 @@ _TEST_MODULES = [
     "tests.test_line_follow",
     "tests.test_qtr",
     "tests.test_qtr_align",
+    "tests.test_servo_set_id",
     "tests.test_qtr_line_follow",
     "tests.test_axle_track_cal",
     "tests.test_version_lockstep",
