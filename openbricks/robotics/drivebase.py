@@ -115,6 +115,7 @@ class DriveBase:
         self._axle_track = axle_track_mm
         self._imu = imu
         self._gyro_enabled = False
+        self._speed_capable = None   # lazily probed by stop()
 
         # Serial-bus motors: adopt them onto the hard-tick engine
         # transparently (1.45.0 — ONE drivebase class, user decision).
@@ -387,7 +388,7 @@ class DriveBase:
         self._run_at_dps(self._left, left)
         self._run_at_dps(self._right, right)
 
-    def stop(self, then="coast", wait=False):
+    def stop(self, then="coast", wait=None):
         """Halt both wheels. Also clears any pending ``wait=False``
         move (new command supersedes, pybricks-style). ``then``
         selects the end-state:
@@ -410,21 +411,47 @@ class DriveBase:
         call, so the second wheel's 1 kHz control tick can't keep
         driving while the first is already released.
 
-        With ``wait=True`` the call BLOCKS until both wheels' MEASURED
-        speeds read ~0 (a deliberate extension beyond Pybricks, whose
-        stop/brake return immediately): for ``brake``/``hold`` that is
-        the decel ramp finishing plus settle; for ``coast`` it is the
-        physical freewheel decay. Raises ``RuntimeError`` if the
-        wheels never settle within the timeout, and ``ValueError``
-        for motors without measured ``speed()`` (open-loop pairs).
+        By default the call BLOCKS until both wheels' MEASURED
+        speeds read ~0 — a deliberate extension beyond Pybricks,
+        whose stop/brake return immediately: for ``brake``/``hold``
+        that is the decel ramp finishing plus settle; for ``coast``
+        it is the physical freewheel decay. Open-loop motor pairs
+        have no measured speed, so their default stays the instant
+        return (there is nothing to wait on). Explicitly: ``wait=True``
+        insists — and raises ``ValueError`` on open-loop pairs;
+        ``wait=False`` is the Pybricks-style instant return.
+        ``RuntimeError`` if the wheels never settle within the
+        timeout.
         """
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
         self._pending = None
         self._dispatch_stop(then)
+        if wait is None:
+            wait = self._speed_measurable()
         if wait:
             self._wait_until_stopped()
+
+    def _speed_measurable(self):
+        """True when both motors report measured speed — probed once
+        and cached (the interface defines ``speed()`` as a
+        NotImplementedError stub, so existence alone proves
+        nothing)."""
+        if self._speed_capable is None:
+            capable = True
+            for m in (self._left, self._right):
+                fn = getattr(m, "speed", None)
+                if fn is None:
+                    capable = False
+                    break
+                try:
+                    fn()
+                except NotImplementedError:
+                    capable = False
+                    break
+            self._speed_capable = capable
+        return self._speed_capable
 
     # stop(wait=True): "almost zero" and how long we insist on it.
     _STOP_WAIT_TOL_DPS = 10.0
@@ -510,12 +537,12 @@ class DriveBase:
         mode = self._pending["mode"]
         if mode in ("straight_native", "turn_native", "curve_native"):
             if self._native.is_done():
-                self.stop(then=self._pending["then"])
+                self.stop(then=self._pending["then"], wait=False)
                 return True
             return False
         if mode in ("straight_serial", "turn_serial", "curve_serial"):
             if self._serial_engine.tick_done():
-                self.stop(then=self._pending["then"])
+                self.stop(then=self._pending["then"], wait=False)
                 return True
             return False
         # Unknown mode — treat as done to avoid wedging the caller.

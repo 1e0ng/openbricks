@@ -345,6 +345,16 @@ class ShimServo:
     def angle(self):
         return self._adapter.angle()
 
+    def measured_dps(self):
+        # The firmware observer samples the encoder every tick even
+        # while coasting; the shim detaches its tick on coast, which
+        # would freeze ``observed_dps()`` at the last driven value.
+        # Physics joint velocity is the always-live equivalent —
+        # sign-corrected here because raw qvel bypasses the servo
+        # core's invert handling.
+        v = self._adapter.speed()
+        return -v if self._adapter.invert else v
+
     def reset_angle(self, angle=0.0):
         self._adapter.reset_angle(float(angle))
 

@@ -314,10 +314,28 @@ class StopWaitTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             db.stop(wait=True)
 
-    def test_default_does_not_poll(self):
-        # wait defaults False: speed() must never be consulted.
+    def test_default_waits(self):
+        # wait defaults TRUE (user decision, 2.2.0): a bare stop()
+        # blocks until the wheels settle.
+        left = _SpeedFake([300, 40, 5, 0, 0])
+        right = _SpeedFake([280, 30, 4, 0, 0])
+        db = self._db(left, right)
+        db.stop()
+        self.assertEqual(left._speeds, [0])   # scripts consumed
+
+    def test_wait_false_does_not_poll(self):
+        # Pybricks-style instant return on request.
         left = _SpeedFake([500])
         right = _SpeedFake([500])
+        db = self._db(left, right)
+        db.stop(wait=False)                # returns immediately
+
+    def test_open_loop_default_stop_is_instant(self):
+        # The adaptive default: open-loop pairs have nothing to
+        # measure, so a bare stop() stays the instant return — it
+        # must neither raise nor hang.
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
         db = self._db(left, right)
         db.stop()                          # returns immediately
 

@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.2.0 — stop() blocks by default
+
+The wait shipped in 2.1.0 is now the default: a bare `db.stop()`
+blocks until both wheels' measured speeds read ~0. Open-loop motor
+pairs have no measured speed, so their default stays the instant
+return (nothing to wait on); an explicit `wait=True` still insists
+and raises `ValueError` there, and `wait=False` is the
+Pybricks-style instant return everywhere. Internal deferred-`then`
+dispatch (a `wait=False` move's end state applied by `done()`)
+stays non-blocking. The sim's `ShimServo` gains `measured_dps()`
+(live physics joint velocity — the firmware observer samples the
+encoder even while coasting, so the shim must too). Both sides
+move: flash 2.2.0 AND `pipx upgrade openbricks`.
+
 ## 2.1.0 — stop(wait=True): block until the wheels actually stop
 
 `db.stop(then=..., wait=True)` now blocks until both wheels'
