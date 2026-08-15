@@ -485,10 +485,13 @@ class _SimStBus:
 
     def _sync_bridges(self):
         # Firmware parity (st_bus.c sb_db_straight/sb_db_turn): arm
-        # against LIVE odometry. The per-tick sync below usually keeps
-        # the bridges current, but a move armed in the same tick as a
-        # wheel command must not race it.
-        self._raw.sync(self._wheels[0].angle(), self._wheels[1].angle())
+        # against LIVE odometry AND the live commanded speeds — the
+        # arm reads the bridges' target_dps as the trajectory's entry
+        # speed (1.100.0), so a straight() after move_wheels() blends
+        # from cruise instead of cliffing.
+        self._raw.sync(self._wheels[0].angle(), self._wheels[1].angle(),
+                       getattr(self._wheels[0], "_target_dps", 0.0),
+                       getattr(self._wheels[1], "_target_dps", 0.0))
 
     def db_straight(self, mm, mm_s):
         for m in self._moves.values():

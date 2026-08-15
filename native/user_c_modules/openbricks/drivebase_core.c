@@ -102,8 +102,14 @@ void ob_drivebase_straight(ob_drivebase_t *db,
         diff_pos = db_diff_pos_encoder(db);
     }
 
-    ob_trajectory_init(&db->fwd, sum_pos, sum_pos + distance_deg,
-                       speed_dps, db->accel_dps2);
+    // Enter at the CURRENT commanded speed of the sum axis — a
+    // straight armed while the wheels cruise (line-follow handing
+    // over) blends down through the accel limit instead of cliffing
+    // the command to zero (bench 2026-08-16).
+    ob_float_t v0_sum = (db->left->target_dps + db->right->target_dps)
+                        / (ob_float_t)2.0;
+    ob_trajectory_init_v0(&db->fwd, sum_pos, sum_pos + distance_deg,
+                          speed_dps, db->accel_dps2, v0_sum);
     db->fwd_start_ms = now_ms;
     db->fwd_active   = true;
 
@@ -153,9 +159,13 @@ void ob_drivebase_turn(ob_drivebase_t *db,
         diff_pos = db_diff_pos_encoder(db);
     }
 
-    ob_trajectory_init(&db->turn, diff_pos, diff_pos + signed_delta,
-                       rate_wheel_dps,
-                       db->accel_dps2);
+    // Same entry-speed rule for the diff axis (a turn armed while
+    // the chassis still rotates from steering).
+    ob_float_t v0_diff = (db->left->target_dps - db->right->target_dps)
+                         / (ob_float_t)2.0;
+    ob_trajectory_init_v0(&db->turn, diff_pos, diff_pos + signed_delta,
+                          rate_wheel_dps,
+                          db->accel_dps2, v0_diff);
     db->turn_start_ms = now_ms;
     db->turn_active   = true;
 
@@ -213,8 +223,11 @@ void ob_drivebase_curve(ob_drivebase_t *db,
     }
     if (fwd_abs < (ob_float_t)1e-9) {
         // radius 0: a turn in place, wheels at the rim speed.
-        ob_trajectory_init(&db->turn, diff_pos, diff_pos + turn_delta,
-                           speed_dps, db->accel_dps2);
+        ob_trajectory_init_v0(&db->turn, diff_pos, diff_pos + turn_delta,
+                              speed_dps, db->accel_dps2,
+                              (db->left->target_dps
+                               - db->right->target_dps)
+                              / (ob_float_t)2.0);
         db->turn_start_ms = now_ms;
         db->turn_active   = true;
         db->fwd_hold      = sum_pos;
@@ -232,13 +245,20 @@ void ob_drivebase_curve(ob_drivebase_t *db,
     ob_float_t turn_speed = speed_dps * ratio;
     ob_float_t turn_accel = db->accel_dps2 * ratio;
 
-    ob_trajectory_init(&db->fwd, sum_pos, sum_pos + distance_deg,
-                       speed_dps, db->accel_dps2);
+    // Curve entry: each axis blends from its current speed. The
+    // entry ramps can differ in length, so the arc's very start may
+    // deviate from the exact circle — the price of never cliffing.
+    ob_trajectory_init_v0(&db->fwd, sum_pos, sum_pos + distance_deg,
+                          speed_dps, db->accel_dps2,
+                          (db->left->target_dps + db->right->target_dps)
+                          / (ob_float_t)2.0);
     db->fwd_start_ms = now_ms;
     db->fwd_active   = true;
 
-    ob_trajectory_init(&db->turn, diff_pos, diff_pos + turn_delta,
-                       turn_speed, turn_accel);
+    ob_trajectory_init_v0(&db->turn, diff_pos, diff_pos + turn_delta,
+                          turn_speed, turn_accel,
+                          (db->left->target_dps - db->right->target_dps)
+                          / (ob_float_t)2.0);
     db->turn_start_ms = now_ms;
     db->turn_active   = true;
 

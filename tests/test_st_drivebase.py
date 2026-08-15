@@ -1366,3 +1366,59 @@ class DecelSlewTests(_Base):
         self.w.advance(600)
         self.assertEqual(self.w.spd[1], 0)
         self.assertEqual(self.w.spd[2], 0)
+
+
+class TrajectoryEntrySpeedTests(unittest.TestCase):
+    """Trajectories arm FROM THE CURRENT SPEED (1.100.0). A straight
+    armed while the wheels cruise (line-follow handing over) blends
+    down through settings.acceleration; before this, the command
+    cliffed from cruise to ~zero in one tick and duty mode braked as
+    hard as the plant allowed (bench 2026-08-16: "deceleration is
+    too much while the acceleration is correct")."""
+
+    def setUp(self):
+        if sb is None:
+            raise unittest.SkipTest("st_bus is firmware/unix-MP only")
+        sb.test_reset()
+        self.w = _PerfectWheels()
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.w.advance(50)
+        sb.db_config(0, 1, 88.0, 136.0, 1500.0)
+
+    def test_straight_armed_at_cruise_blends_not_cliffs(self):
+        sb.db_move_wheels(9443, 9443)       # ~830 dps line-follow cruise
+        self.w.advance(800)
+        self.assertEqual(self.w.spd[1], 9443)
+        sb.db_straight(290.0, 350.0)
+        self.w.advance(5)
+        # 5 ms after the arm the command must still be near cruise —
+        # the old from-rest profile dropped it to ~0 here.
+        self.assertTrue(abs(self.w.spd[1]) > 9000,
+                        "cliffed to %d" % self.w.spd[1])
+        # And the descent obeys the accel setting: 1500 dps^2 is
+        # ~17 steps/s per ms; after 100 ms more, expect ~1700 shed
+        # (loose 2x bound, never a cliff).
+        self.w.advance(100)
+        shed = 9443 - abs(self.w.spd[1])
+        self.assertTrue(800 < shed < 3600,
+                        "shed %d in 100 ms (expected ~1700)" % shed)
+
+    def test_short_straight_at_cruise_overshoots_then_returns(self):
+        # Physics: 830 dps needs ~56 mm to stop at 1500 dps^2. A
+        # 20 mm command cannot be honored within the accel limit —
+        # the profile decelerates cleanly (no cliff) and position
+        # feedback pulls back to the commanded distance.
+        sb.db_move_wheels(9443, 9443)
+        self.w.advance(800)
+        base = sb.servo_counts(1) * _MM_PER_COUNT
+        sb.db_straight(20.0, 350.0)
+        self.w.advance(5)
+        self.assertTrue(abs(self.w.spd[1]) > 9000,
+                        "cliffed to %d" % self.w.spd[1])
+        self.w.advance(6000)
+        self.assertTrue(sb.db_done())
+        travelled = sb.servo_counts(1) * _MM_PER_COUNT - base
+        self.assertTrue(abs(travelled - 20.0) < 12.0,
+                        "landed %.1f mm past the arm (wanted 20)"
+                        % travelled)
