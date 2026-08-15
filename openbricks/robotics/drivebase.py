@@ -387,7 +387,7 @@ class DriveBase:
         self._run_at_dps(self._left, left)
         self._run_at_dps(self._right, right)
 
-    def stop(self, then="coast"):
+    def stop(self, then="coast", wait=False):
         """Halt both wheels. Also clears any pending ``wait=False``
         move (new command supersedes, pybricks-style). ``then``
         selects the end-state:
@@ -409,11 +409,61 @@ class DriveBase:
         ``brake`` likewise apply to both bridges inside one native
         call, so the second wheel's 1 kHz control tick can't keep
         driving while the first is already released.
+
+        With ``wait=True`` the call BLOCKS until both wheels' MEASURED
+        speeds read ~0 (a deliberate extension beyond Pybricks, whose
+        stop/brake return immediately): for ``brake``/``hold`` that is
+        the decel ramp finishing plus settle; for ``coast`` it is the
+        physical freewheel decay. Raises ``RuntimeError`` if the
+        wheels never settle within the timeout, and ``ValueError``
+        for motors without measured ``speed()`` (open-loop pairs).
         """
         if then not in ("coast", "brake", "hold"):
             raise ValueError(
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
         self._pending = None
+        self._dispatch_stop(then)
+        if wait:
+            self._wait_until_stopped()
+
+    # stop(wait=True): "almost zero" and how long we insist on it.
+    _STOP_WAIT_TOL_DPS = 10.0
+    _STOP_WAIT_POLL_MS = 10
+    _STOP_WAIT_POLLS = 500          # 5 s budget
+    _STOP_WAIT_QUIET = 3            # consecutive quiet reads required
+
+    def _wait_until_stopped(self):
+        readers = []
+        for m in (self._left, self._right):
+            fn = getattr(m, "speed", None)
+            if fn is not None:
+                try:
+                    fn()
+                except NotImplementedError:
+                    fn = None   # interface stub: no real measurement
+            if fn is None:
+                raise ValueError(
+                    "stop(wait=True) needs measured wheel speeds - "
+                    "%s has no speed()" % type(m).__name__)
+            readers.append(fn)
+        quiet = 0
+        speeds = []
+        for _ in range(self._STOP_WAIT_POLLS):
+            speeds = [r() for r in readers]
+            if all(v is not None and abs(v) < self._STOP_WAIT_TOL_DPS
+                   for v in speeds):
+                quiet += 1
+                if quiet >= self._STOP_WAIT_QUIET:
+                    return
+            else:
+                quiet = 0
+            time.sleep_ms(self._STOP_WAIT_POLL_MS)
+        raise RuntimeError(
+            "stop(wait=True): wheels still moving after %d ms - "
+            "measured speeds %r dps (None = bus silent)"
+            % (self._STOP_WAIT_POLLS * self._STOP_WAIT_POLL_MS, speeds))
+
+    def _dispatch_stop(self, then):
         if self._serial_engine is not None:
             self._serial_engine.stop(then)
             # New command wins: the atomic stop supersedes any

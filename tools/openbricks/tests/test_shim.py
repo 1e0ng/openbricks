@@ -727,6 +727,20 @@ class SimStBusEngineTests(_ShimTestBase):
                         "ratio drifted to %.2f mid-ramp" % (l / r))
         db.stop()
 
+    def test_stop_wait_blocks_until_wheels_settle(self):
+        # stop(wait=True) — extension beyond Pybricks: dispatch the
+        # ramped brake, then block on MEASURED wheel speeds. On
+        # return, the physics wheels must actually be near rest.
+        import time as _t
+        db, left, right = self._serial_db()
+        db.settings(acceleration=800)
+        db.move_wheels(500, 500)
+        _t.sleep_ms(900)
+        self.assertTrue(abs(left.speed()) > 200, left.speed())
+        db.stop(then="brake", wait=True)
+        self.assertTrue(abs(left.speed()) < 15, left.speed())
+        self.assertTrue(abs(right.speed()) < 15, right.speed())
+
     def test_straight_after_cruise_blends_in_physics(self):
         # 2.0.0: trajectories arm from the current speed. In
         # MuJoCo, a straight() right after a move_wheels cruise must
