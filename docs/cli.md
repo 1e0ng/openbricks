@@ -58,8 +58,9 @@ your script with `mpy-cross` **before** connecting, and stage
 compiled bytecode instead of source (like Pybricks). Three things
 get better:
 
-- **syntax errors surface in milliseconds**, on your terminal, with
-  the file and line — no BLE scan, no connect, no upload round-trip;
+- **syntax errors surface in milliseconds**, on your terminal,
+  naming your file and line and quoting the offending source line —
+  no BLE scan, no connect, no upload round-trip;
 - **programs start faster**: the hub loads bytecode directly and
   skips its on-device parse/compile step;
 - **tracebacks name your real file and line** (`File "square.py",

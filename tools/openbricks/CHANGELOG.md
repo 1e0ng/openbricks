@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.3.1 — syntax errors name your file, not a temp path
+
+Field report: `openbricks run linefollow_y.py` on a file with a
+syntax error printed ``File ".../T/tmprvqlqly3/program.py", line
+54`` — mpy-cross's compile-time SyntaxError shows the temp file it
+actually read (the `-s` display name only covers runtime tracebacks
+inside the .mpy) and quotes no source. The CLI now rewrites the
+message to name YOUR file and quotes the offending line:
+
+    mpy-cross failed:
+    Traceback (most recent call last):
+      File "linefollow_y.py", line 54
+        while True
+    SyntaxError: invalid syntax
+
+CLI-side fix: `pipx upgrade openbricks` (no reflash needed).
+
 ## 2.3.0 — stop() brakes by default
 
 `db.stop()`'s `then` default flips from `"coast"` to `"brake"`
