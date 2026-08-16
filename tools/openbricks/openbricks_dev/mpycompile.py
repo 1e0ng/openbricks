@@ -48,13 +48,38 @@ def _mpy_cross_binary():
     return mpy_cross.mpy_cross
 
 
+def _friendly_compile_message(raw, tmp_src, display_name, source_bytes):
+    """Rewrite mpy-cross's error for the person who wrote the file.
+
+    ``-s`` only names RUNTIME tracebacks inside the .mpy; the
+    compiler's own SyntaxError prints the temp path it actually read
+    (bench report 2026-08-17: ``File ".../T/tmprvqlqly3/program.py",
+    line 54`` for a user's ``linefollow_y.py``) and no source line.
+    Substitute the user's file name and quote the offending line.
+    """
+    message = raw.replace(tmp_src, display_name)
+    lines = []
+    for ln in message.splitlines():
+        lines.append(ln)
+        marker = 'File "%s", line ' % display_name
+        if marker in ln:
+            try:
+                lineno = int(ln.split(marker, 1)[1].split(",")[0])
+                src_line = source_bytes.decode(
+                    "utf-8").splitlines()[lineno - 1]
+            except (ValueError, IndexError, UnicodeError):
+                continue    # unparseable frame: keep the raw message
+            lines.append("    " + src_line.strip())
+    return "\n".join(lines)
+
+
 def compile_source(source_bytes, display_name):
     """Cross-compile Python source to ``.mpy`` bytes.
 
-    ``display_name`` is what hub tracebacks will show as the file name
-    (passed through ``mpy-cross -s``). Raises :class:`CompileError`
-    carrying the compiler's message (which includes file and line for
-    syntax errors).
+    ``display_name`` is what tracebacks — compile-time and on-hub —
+    show as the file name. Raises :class:`CompileError` naming the
+    user's file, line, and the offending source line for syntax
+    errors.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         src = os.path.join(tmpdir, "program.py")
@@ -66,6 +91,9 @@ def compile_source(source_bytes, display_name):
             capture_output=True, text=True)
         if proc.returncode != 0:
             message = (proc.stderr or proc.stdout or "").strip()
+            if message:
+                message = _friendly_compile_message(
+                    message, src, display_name, source_bytes)
             raise CompileError(
                 "mpy-cross failed:\n%s" % (message or
                                            "rc=%d" % proc.returncode))
