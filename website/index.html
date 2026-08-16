@@ -228,6 +228,61 @@ db.<span class="fn">turn</span>(<span class="nu">90</span>)       <span class="c
 
 <section>
 <div class="wrap">
+  <h2>Beyond the Pybricks feature set</h2>
+  <p class="sub">Same programming model, different ceiling. Owning the
+  whole runtime — firmware, tooling, and simulator — lets openbricks
+  ship things a LEGO hub can't.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>A flight recorder for every run</h3>
+      <p>Every program run — prints, tracebacks, how it started and
+      ended — is tee'd to flash on the hub. <code>openbricks log</code>
+      pulls any of the last <strong>10 runs</strong> back over BLE, so a
+      failure on the competition table is debuggable after the fact,
+      no laptop attached at the time.</p>
+    </div>
+    <div class="card">
+      <h3>A real physics simulator</h3>
+      <p>The MuJoCo-backed sim runs your program <em>unchanged</em> —
+      same imports, same DriveBase — against a quantitative motor
+      model, and the color sensor reads printed mat artwork
+      byte-accurately. Tune a line follower before the robot exists.</p>
+    </div>
+    <div class="card">
+      <h3>A serious gyro</h3>
+      <p>The ICM-45686 is sampled over SPI inside the 1&nbsp;kHz native
+      control tick — heading integrates in C with no Python in the
+      loop. Gyro bias calibrates itself whenever the robot sits still
+      and persists across boots, so power-on-and-go starts straight.</p>
+    </div>
+    <div class="card">
+      <h3>Smarter motors</h3>
+      <p>Daisy-chained serial-bus servos report position, speed, load,
+      and temperature back over one UART — and a dead or disconnected
+      wheel raises a loud error naming the exact motor, instead of a
+      robot that quietly veers. Re-ID a servo from the hub itself with
+      <code>openbricks servo-id</code>.</p>
+    </div>
+    <div class="card">
+      <h3>Any sensor you can buy</h3>
+      <p>Reflectance bars, laser rangefinders, color sensors behind an
+      I2C mux, OLEDs, LED strips — a dozen drivers ship frozen into the
+      firmware, and new hardware just implements one small interface.
+      No waiting for a vendor to bless a part.</p>
+    </div>
+    <div class="card">
+      <h3>Docs that travel</h3>
+      <p>The full documentation ships inside the CLI —
+      <code>openbricks docs</code> opens the same Sphinx build as
+      docs.openbricks.dev, entirely offline. Competition venues with no
+      Wi-Fi stop mattering.</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="alt">
+<div class="wrap">
   <h2>Up and running in three steps</h2>
   <p class="sub">Full walkthrough in the <a href="https://docs.openbricks.dev/install.html">installation guide</a>.</p>
   <div class="steps">
@@ -250,7 +305,7 @@ db.<span class="fn">turn</span>(<span class="nu">90</span>)       <span class="c
 </div>
 </section>
 
-<section class="alt">
+<section>
 <div class="wrap">
   <h2>Supported components</h2>
   <p class="sub">Every driver ships frozen into the firmware — <code>import openbricks</code> and go. New components just implement one of the abstract interfaces. Wiring notes in the <a href="https://docs.openbricks.dev/hardware.html">hardware guide</a>.</p>
