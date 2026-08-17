@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.6.1 — settle stats survive the stop dispatch
+
+`db_settle_stats()` read (0.0, 0) on every standard-path move:
+`done()` dispatches `stop()` before the user's move call returns,
+and the stop wiped the diagnostics with the rest of the move state
+— the instrument destroyed its own evidence (bench 2026-08-17,
+while chasing the end-of-run twitch). Expiry residual + landing
+count now reset only when the NEXT move arms; integrals and the
+landing budget still die with the move. Firmware-side: flash 2.6.1.
+
 ## 2.6.0 — PID + landing settle: no more end-of-move jerk
 
 Bench report: at the end of a mission the robot stopped, abruptly

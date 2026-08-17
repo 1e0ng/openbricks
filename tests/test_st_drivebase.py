@@ -1431,6 +1431,27 @@ class PidLandingSettleTests(unittest.TestCase):
                         "landed %.1f mm (wanted 150)" % travelled)
         self.assertTrue(landings <= 3, landings)
 
+    def test_settle_stats_survive_the_stop_dispatch(self):
+        # done() dispatches stop() before the user's move call
+        # returns — the stats must survive that stop, or every
+        # standard-path read sees (0.0, 0) (bench 2026-08-17: the
+        # diagnostic wiped its own evidence). They reset only when
+        # the NEXT move arms.
+        sb.db_straight(150.0, 300.0)
+        for _ in range(4000):
+            self.w.advance(1)
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        sb.db_stop()                       # the done()-path dispatch
+        residual, landings = sb.db_settle_stats()
+        self.assertTrue(residual > 1.0,
+                        "stats wiped by stop: residual %r" % residual)
+        # ...and the next arm starts a fresh record.
+        sb.db_straight(50.0, 300.0)
+        residual2, _ = sb.db_settle_stats()
+        self.assertEqual(residual2, 0.0)
+
     def test_stall_does_not_wind_the_integral_unbounded(self):
         # Wheels that never move: after landings are spent the robot
         # sits with a big residual. The integral clamp bounds the

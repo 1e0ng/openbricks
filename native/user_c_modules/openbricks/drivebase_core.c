@@ -355,7 +355,17 @@ void ob_drivebase_stop(ob_drivebase_t *db) {
     db->turn_active = false;
     db->done        = true;
     db->settling    = false;
-    db_move_state_reset(db);
+    // Integrals and the landing budget die with the move — but NOT
+    // the settle diagnostics: done() dispatches stop() before the
+    // user's move call even returns, so wiping expiry stats here
+    // made db_settle_stats() read (0.0, 0) on every standard-path
+    // move (bench 2026-08-17 — the diagnostic destroyed its own
+    // evidence). Stats reset only when the NEXT move arms.
+    db->integ_sum      = 0.0;
+    db->integ_diff     = 0.0;
+    db->landings       = 0;
+    db->landing_active = false;
+    db->landing_best_err = 0.0;
 }
 
 
