@@ -1454,6 +1454,47 @@ class PidLandingSettleTests(unittest.TestCase):
                         "expiry residual %.1f wheel-deg - the "
                         "integral is not absorbing the deficit" % rs)
 
+    def test_reference_is_continuous_through_fast_entry(self):
+        # THE 2026-08-17 bench bug, pinned via its own instrument: a
+        # move entered FASTER than its cruise (line-follow ~800 dps
+        # into a radius-scaled-cruise curve) stored the entry ramp's
+        # displacement with the wrong sign, shifting every cruise and
+        # exit sample backward by twice the ramp length — the
+        # reference jumped -140 wheel-deg at the entry/cruise
+        # boundary and +150.0 at expiry, and the settle walking that
+        # phantom in WAS the end-of-run twitch. The reference must
+        # never step: row-to-row jumps in the trace stay bounded by
+        # ref_vel * stride plus slack, in BOTH directions, from arm
+        # through expiry.
+        sb.db_move_wheels(9443, 9443)      # ~830 dps handover speed
+        self.w.advance(600)
+        sb.db_curve(280.0, 180.0, 350.0)   # cruise well below entry
+        rows = []
+        for _ in range(6000):
+            self.w.advance(1)
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        rows = sb.db_trace()
+        self.assertTrue(len(rows) > 20)
+        # A landing intentionally re-bases the reference onto the
+        # measured position, so |jump| alone is not the invariant.
+        # The bug's signature is narrower: while the reference is
+        # FLYING FORWARD (ref_vel > 60), it must never step BACKWARD
+        # — the broken d_entry jumped -140 wheel-deg at the
+        # entry/cruise boundary of exactly this move shape.
+        for prev, cur in zip(rows, rows[1:]):
+            t0, r0 = prev[0], prev[1]
+            t1, r1, v1 = cur[0], cur[1], cur[3]   # ref_vel is col 3
+            dt_s = (t1 - t0) / 1000.0
+            if dt_s <= 0 or dt_s > 0.1:
+                continue               # ownership gap in the ring
+            if v1 > 60.0:
+                self.assertTrue(r1 >= r0 - 2.0,
+                                "forward-flying reference stepped "
+                                "back %.1f wheel-deg at t=%d"
+                                % (r0 - r1, t1))
+
     def test_flight_recorder_captures_the_ending(self):
         # db_trace(): rolling ring of (t, ref_pos, meas_pos, ref_vel,
         # cmd, integ) rows at a 16 ms stride, oldest first — the

@@ -115,7 +115,17 @@ void ob_trajectory_init_v0v3(ob_trajectory_t *t,
         t->v_peak     = vc;
         t->a_entry    = (v0 <= vc) ? a : -a;
         t->t_entry    = ((v0 <= vc) ? (vc - v0) : (v0 - vc)) / a;
-        t->d_entry    = ((vc * vc) - (v0 * v0)) / (2.0 * a);
+        // Net entry displacement (vc^2 - v0^2) / (2 * a_entry) — the
+        // SIGNED acceleration, so a faster-than-cruise entry (decel
+        // ramp, a_entry = -a) yields the POSITIVE distance it truly
+        // covers. Dividing by +a stored it negative and shifted every
+        // cruise/exit sample backward by twice the ramp's length —
+        // bench 2026-08-17 (flight recorder): line-follow at ~800 dps
+        // handing into a cruise-643 curve ran the whole move against
+        // a reference 150 wheel-deg short, then the endpoint snapped
+        // forward 150.0 at expiry and the settle walked the robot in:
+        // THE end-of-run twitch, misdiagnosed twice as plant lag.
+        t->d_entry    = ((vc * vc) - (v0 * v0)) / (2.0 * t->a_entry);
         t->t_cruise   = (D - d_entry_trap - d_exit) / vc;
         t->t_ramp     = (vc - v3) / a;           // exit ramp
         t->d_ramp     = d_exit;
