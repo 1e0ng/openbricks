@@ -67,5 +67,5 @@ while True:
         break
     db.move_wheels(speeds[0], speeds[1])
     time.sleep_ms(5)
-db.stop()
+db.stop(then="brake")
 print("aligned - square on the edge")
