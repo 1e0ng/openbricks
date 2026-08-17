@@ -1368,6 +1368,86 @@ class DecelSlewTests(_Base):
         self.assertEqual(self.w.spd[2], 0)
 
 
+class PidLandingSettleTests(unittest.TestCase):
+    """2.6.0: position integral action (pbio integrator.c rules) +
+    landing-trajectory settle. The contract: no move boundary ever
+    STEPS the wheel command — end-of-move corrections are shaped
+    mini-trajectories under the same accel limit as everything else
+    — and the integral squeezes out tracking lag near the target
+    without winding up far from it or hunting inside the deadzone."""
+
+    def setUp(self):
+        if sb is None:
+            raise unittest.SkipTest("st_bus is firmware/unix-MP only")
+        sb.test_reset()
+        self.w = _LaggyWheels()
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.w.advance(50)
+        sb.db_config(0, 1, 88.0, 136.0, 1500.0)
+
+    def test_no_command_step_through_move_end(self):
+        # Laggy wheels guarantee a real residual at profile expiry.
+        # Track the commanded speed tick to tick through the whole
+        # settle: the biggest one-tick jump must stay within the
+        # accel budget (1500 dps^2 = ~17 steps/s per ms, allow 3x for
+        # the P+I terms riding on the ramp) — the old raw P step was
+        # hundreds of steps/s in ONE tick.
+        sb.db_straight(150.0, 300.0)
+        last = self.w.spd[1]
+        worst_jump = 0
+        for _ in range(4000):
+            self.w.advance(1)
+            now = self.w.spd[1]
+            jump = abs(now - last)
+            if jump > worst_jump:
+                worst_jump = jump
+            last = now
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done(), "never latched done")
+        # Commands update every OTHER ms (sync cadence), so one
+        # observed jump covers 2 ms of accel ramp plus the P+I terms
+        # riding it: budget ~150. The raw P step this pins against
+        # measured 727-1479 steps/s.
+        self.assertTrue(worst_jump < 150,
+                        "command stepped %d steps/s in one tick" % worst_jump)
+
+    def test_landing_closes_the_residual_and_reports_it(self):
+        sb.db_straight(150.0, 300.0)
+        for _ in range(4000):
+            self.w.advance(1)
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        residual, landings = sb.db_settle_stats()
+        # Laggy wheels MUST have left a real gap at expiry...
+        self.assertTrue(residual > 1.0,
+                        "expiry residual %.2f — harness not lagging?"
+                        % residual)
+        # ...and the settle machinery closed it to arrival tolerance.
+        travelled = (sb.servo_counts(1)) * _MM_PER_COUNT
+        self.assertTrue(abs(travelled - 150.0) < 3.0,
+                        "landed %.1f mm (wanted 150)" % travelled)
+        self.assertTrue(landings <= 3, landings)
+
+    def test_stall_does_not_wind_the_integral_unbounded(self):
+        # Wheels that never move: after landings are spent the robot
+        # sits with a big residual. The integral clamp bounds the
+        # command — it must never grow past ACTUATION_MAX-ish even
+        # after seconds of stall.
+        self.w.track = 0.0                # fully stuck
+        sb.db_straight(150.0, 300.0)
+        self.w.advance(6000)
+        self.assertFalse(sb.db_done())    # loud, not silent
+        cmd = abs(self.w.spd[1])
+        # kp*err alone is ~2*600=1200 steps-ish; the integral may add
+        # at most ACTUATION_MAX (600 dps = ~6820 steps/s). The point:
+        # bounded, not runaway.
+        self.assertTrue(cmd < 40000,
+                        "command ran away to %d steps/s" % cmd)
+
+
 class TrajectoryEntrySpeedTests(unittest.TestCase):
     """Trajectories arm FROM THE CURRENT SPEED (2.0.0). A straight
     armed while the wheels cruise (line-follow handing over) blends

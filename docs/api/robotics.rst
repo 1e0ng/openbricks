@@ -60,6 +60,15 @@ the next command, so chained segments flow through their seams::
     db.curve(150, 90, then="continue")  # picks the speed up
     db.straight(300)                    # decelerates to rest
 
+Move endings are SHAPED all the way down (2.6.0): the controller
+runs position integral action (pbio's integrator rules — the same
+control law Pybricks uses) so tracking error is squeezed out near
+the target, and any residual left when a profile expires is closed
+by a small landing trajectory under the same acceleration limit as
+every other motion — never a raw feedback step. A robot that ends a
+mission simply comes to rest on its mark; a genuinely stuck robot
+still refuses to report ``done()`` and the stall watchdog raises.
+
 ``stop()`` is Pybricks parity: it coasts and returns immediately.
 ``then`` picks the end state (``"coast"``, ``"brake"``,
 ``"hold"``). Short moves armed while the robot is already fast

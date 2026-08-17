@@ -71,6 +71,28 @@
 #define OB_DRIVEBASE_SETTLE_PROGRESS_WHEEL_DEG 1.0
 #define OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG  12.0
 
+// ---- 2.6.0 PID + landing settle -------------------------------------
+// Position integral action, pbio integrator.c rules: the integral
+// GROWS only in a band near the target (outside the deadzone so
+// stiction can't hunt at rest, inside 2x the error that already
+// saturates proportional control so far-away errors can't wind it
+// up), per-tick growth is rate-capped, the total clamps at the
+// value that alone commands ACTUATION_MAX, and DECREASING is always
+// allowed. ki is dps per (wheel-deg * second).
+#define OB_DRIVEBASE_DEFAULT_KI                8.0
+#define OB_DRIVEBASE_INTEG_DEADZONE_WHEEL_DEG  1.0
+#define OB_DRIVEBASE_INTEG_RATE_MAX_WHEEL_DEG  30.0
+#define OB_DRIVEBASE_ACTUATION_MAX_DPS         600.0
+// Landing settle: when a profile expires with residual above the
+// arrival tolerance, the correction is a SHAPED mini-trajectory
+// (measured position -> target at the settings accel, cruise capped
+// below) instead of a raw P step — the same accel contract as every
+// other motion, so no move boundary ever steps the wheel command.
+// Bounded retries; after the last landing the classic forgive/cap
+// machinery is the backstop for a genuinely stuck robot.
+#define OB_DRIVEBASE_LANDING_DPS               120.0
+#define OB_DRIVEBASE_MAX_LANDINGS              3
+
 
 typedef struct {
     // Servo handles — raw pointers into the bindings' ``ob_servo_t``
@@ -127,6 +149,22 @@ typedef struct {
     bool       settling;
     long       settle_start_ms;
     ob_float_t settle_best_err;
+
+    // PID integral state (2.6.0) — wheel-deg * seconds, per axis.
+    ob_float_t integ_sum;
+    ob_float_t integ_diff;
+    ob_float_t ki;
+    long       last_tick_ms;      // for the integral dt (0 = none yet)
+
+    // Landing settle bookkeeping (2.6.0). ``expiry_residual`` is the
+    // worst-axis error captured at the move's FIRST profile expiry —
+    // the bench-measurable answer to "how big is the gap the settle
+    // actually closes".
+    uint8_t    landings;
+    bool       landing_active;    // a landing profile is in flight
+    ob_float_t landing_best_err;  // best worst-axis err seen at a gate
+    ob_float_t expiry_residual;
+    bool       expiry_captured;
 } ob_drivebase_t;
 
 
@@ -213,6 +251,13 @@ bool ob_drivebase_is_done(const ob_drivebase_t *db);
 // this to do the conversion before tick.
 ob_float_t ob_drivebase_body_to_wheel_diff(const ob_drivebase_t *db,
                                             ob_float_t body_heading_delta_deg);
+
+// Settle diagnostics: residual at the last move's first profile
+// expiry (wheel-deg, worst axis) and shaped-landing count.
+void ob_drivebase_settle_stats(const ob_drivebase_t *db,
+                               ob_float_t *expiry_residual,
+                               int *landings);
+
 
 // Reset the gyro-mode absolute frame (turn_hold + override slot).
 // Bindings call this on the use_gyro ENABLE transition so the

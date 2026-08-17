@@ -817,6 +817,15 @@ static PyObject *RawDriveBase_curve(RawDriveBaseObject *self,
 }
 
 
+static PyObject *RawDriveBase_settle_stats(RawDriveBaseObject *self,
+                                           PyObject *Py_UNUSED(ignored)) {
+    ob_float_t r;
+    int n;
+    ob_drivebase_settle_stats(&self->core, &r, &n);
+    return Py_BuildValue("di", (double)r, n);
+}
+
+
 static PyObject *RawDriveBase_stop(RawDriveBaseObject *self,
                                    PyObject *Py_UNUSED(ignored)) {
     /* Same rule as the firmware binding: capture measured pose ONLY
@@ -889,6 +898,8 @@ static PyObject *RawDriveBase_set_accel(RawDriveBaseObject *self, PyObject *arg)
 
 
 static PyMethodDef RawDriveBase_methods[] = {
+    {"settle_stats", (PyCFunction)RawDriveBase_settle_stats, METH_NOARGS,
+     "(expiry_residual_wheel_deg, landings) for the last move."},
     {"tick",                 (PyCFunction)RawDriveBase_tick,                 METH_VARARGS,
      "tick(now_ms, left_pos_deg, right_pos_deg) -> (left_dps, right_dps)."},
     {"sync",                 (PyCFunction)RawDriveBase_sync,                 METH_VARARGS,

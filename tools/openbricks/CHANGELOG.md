@@ -3,6 +3,32 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.6.0 — PID + landing settle: no more end-of-move jerk
+
+Bench report: at the end of a mission the robot stopped, abruptly
+twitched, and abruptly stopped again. Root cause: move-end
+corrections were raw proportional steps — feed-forward obeyed the
+acceleration setting, feedback never did, and in duty mode a small
+step first loses to stiction, winds the speed integrator, and
+breaks away all at once. Two changes, verified against pbio:
+
+* **Position integral action** (pbio integrator.c rules): the
+  integral grows only near the target (outside a deadzone, inside
+  the proportional-saturation band), growth is rate-capped, the
+  total clamps at bounded authority, and it zeroes the moment a
+  move arrives — so tracking lag is squeezed out during the motion
+  instead of surfacing as a residual after it.
+* **Landing-trajectory settle**: residual left at profile expiry is
+  closed by a small shaped trajectory (entered at the live command,
+  same acceleration limit as everything else) instead of a P step.
+  Retries only while making progress; a stuck robot still refuses
+  done() loudly. Harness-measured: the worst one-tick command jump
+  through a move end dropped from ~1479 to ~73 steps/s.
+
+`st_bus.db_settle_stats()` reports (expiry residual, landings) for
+the last move so the bench can measure, not guess. Both sides move:
+flash 2.6.0 AND `pipx upgrade openbricks`.
+
 ## 2.5.1 — run logs stamp clean exits
 
 A run log that just ENDED was ambiguous between "finished" and

@@ -1499,6 +1499,24 @@ bool openbricks_db_gyro_in_use_c(void) {
     return in_use;
 }
 
+static mp_obj_t sb_db_settle_stats(mp_obj_t self_in) {
+    // (expiry_residual_wheel_deg, landings) for the LAST move — the
+    // bench's measured answer to "how big was the settle gap".
+    (void)self_in;
+    bus_take();
+    ob_float_t r;
+    int n;
+    ob_drivebase_settle_stats(&st_db, &r, &n);
+    bus_release();
+    mp_obj_t t[2] = {
+        mp_obj_new_float((mp_float_t)r),
+        mp_obj_new_int(n),
+    };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_settle_stats_obj,
+                                 sb_db_settle_stats);
+
 static mp_obj_t sb_db_gyro_in_use(mp_obj_t self_in) {
     (void)self_in;
     return mp_obj_new_bool(openbricks_db_gyro_in_use_c());
@@ -1715,6 +1733,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_done),          MP_ROM_PTR(&sb_db_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_gyro_source),  MP_ROM_PTR(&sb_db_gyro_source_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_gyro_in_use),  MP_ROM_PTR(&sb_db_gyro_in_use_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_settle_stats), MP_ROM_PTR(&sb_db_settle_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_reset),        MP_ROM_PTR(&sb_db_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_accel),     MP_ROM_PTR(&sb_db_set_accel_obj) },

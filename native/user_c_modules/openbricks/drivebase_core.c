@@ -52,6 +52,31 @@ void ob_drivebase_init(ob_drivebase_t *db,
     db->done                       = true;
     db->settling                   = false;
     db->settle_start_ms            = 0;
+
+    db->integ_sum       = 0.0;
+    db->integ_diff      = 0.0;
+    db->ki              = (ob_float_t)OB_DRIVEBASE_DEFAULT_KI;
+    db->last_tick_ms    = 0;
+    db->landings        = 0;
+    db->landing_active  = false;
+    db->landing_best_err = 0.0;
+    db->expiry_residual = 0.0;
+    db->expiry_captured = false;
+}
+
+
+// Per-move controller state reset — every arm (and stop) starts a
+// fresh integral and landing budget, pbio-style (their integrators
+// reset at maneuver start): windup from one move must not bias the
+// next, and each move gets its own landing retries.
+static void db_move_state_reset(ob_drivebase_t *db) {
+    db->integ_sum       = 0.0;
+    db->integ_diff      = 0.0;
+    db->landings        = 0;
+    db->landing_active  = false;
+    db->landing_best_err = 0.0;
+    db->expiry_residual = 0.0;
+    db->expiry_captured = false;
 }
 
 
@@ -107,8 +132,12 @@ void ob_drivebase_straight(ob_drivebase_t *db,
     // straight armed while the wheels cruise (line-follow handing
     // over) blends down through the accel limit instead of cliffing
     // the command to zero (bench 2026-08-16).
+    // v0 excludes the integral's share of the outgoing command —
+    // the new move resets the integral, so a v0 that contains it
+    // would hand the FF a bias the controller no longer supplies.
     ob_float_t v0_sum = (db->left->target_dps + db->right->target_dps)
-                        / (ob_float_t)2.0;
+                        / (ob_float_t)2.0
+                        - db->ki * db->integ_sum;
     // carry (then="continue"): end the profile AT cruise — the tick
     // keeps the reference advancing at that speed past the target.
     ob_trajectory_init_v0v3(&db->fwd, sum_pos, sum_pos + distance_deg,
@@ -123,6 +152,7 @@ void ob_drivebase_straight(ob_drivebase_t *db,
 
     db->done = false;
     db->settling = false;
+    db_move_state_reset(db);
 }
 
 
@@ -166,7 +196,8 @@ void ob_drivebase_turn(ob_drivebase_t *db,
     // Same entry-speed rule for the diff axis (a turn armed while
     // the chassis still rotates from steering).
     ob_float_t v0_diff = (db->left->target_dps - db->right->target_dps)
-                         / (ob_float_t)2.0;
+                         / (ob_float_t)2.0
+                         - db->ki * db->integ_diff;
     ob_trajectory_init_v0(&db->turn, diff_pos, diff_pos + signed_delta,
                           rate_wheel_dps,
                           db->accel_dps2, v0_diff);
@@ -181,7 +212,8 @@ void ob_drivebase_turn(ob_drivebase_t *db,
     // limit, landing wherever v0²/2a puts us; the expiry lock
     // anchors the hold THERE (where the robot actually stops).
     ob_float_t v0_sum = (db->left->target_dps + db->right->target_dps)
-                        / (ob_float_t)2.0;
+                        / (ob_float_t)2.0
+                        - db->ki * db->integ_sum;
     ob_float_t v0_abs = (v0_sum < 0.0) ? -v0_sum : v0_sum;
     if (v0_abs > (ob_float_t)1.0 && db->accel_dps2 > (ob_float_t)0.0) {
         ob_float_t stop_d = v0_sum * v0_abs
@@ -197,6 +229,7 @@ void ob_drivebase_turn(ob_drivebase_t *db,
 
     db->done = false;
     db->settling = false;
+    db_move_state_reset(db);
 }
 
 
@@ -254,12 +287,14 @@ void ob_drivebase_curve(ob_drivebase_t *db,
                                 speed_dps, db->accel_dps2,
                                 (db->left->target_dps
                                  - db->right->target_dps)
-                                / (ob_float_t)2.0,
+                                / (ob_float_t)2.0
+                                - db->ki * db->integ_diff,
                                 carry ? speed_dps : (ob_float_t)0.0);
         db->turn_start_ms = now_ms;
         db->turn_active   = true;
         ob_float_t cv0 = (db->left->target_dps + db->right->target_dps)
-                         / (ob_float_t)2.0;
+                         / (ob_float_t)2.0
+                         - db->ki * db->integ_sum;
         ob_float_t cva = (cv0 < 0.0) ? -cv0 : cv0;
         if (cva > (ob_float_t)1.0 && db->accel_dps2 > (ob_float_t)0.0) {
             ob_trajectory_init_v0(&db->fwd, sum_pos,
@@ -274,6 +309,7 @@ void ob_drivebase_curve(ob_drivebase_t *db,
         }
         db->done          = false;
         db->settling = false;
+        db_move_state_reset(db);
         return;
     }
 
@@ -293,7 +329,8 @@ void ob_drivebase_curve(ob_drivebase_t *db,
     ob_trajectory_init_v0v3(&db->fwd, sum_pos, sum_pos + distance_deg,
                             speed_dps, db->accel_dps2,
                             (db->left->target_dps + db->right->target_dps)
-                            / (ob_float_t)2.0,
+                            / (ob_float_t)2.0
+                            - db->ki * db->integ_sum,
                             carry ? speed_dps : (ob_float_t)0.0);
     db->fwd_start_ms = now_ms;
     db->fwd_active   = true;
@@ -301,13 +338,15 @@ void ob_drivebase_curve(ob_drivebase_t *db,
     ob_trajectory_init_v0v3(&db->turn, diff_pos, diff_pos + turn_delta,
                             turn_speed, turn_accel,
                             (db->left->target_dps - db->right->target_dps)
-                            / (ob_float_t)2.0,
+                            / (ob_float_t)2.0
+                            - db->ki * db->integ_diff,
                             carry ? turn_speed : (ob_float_t)0.0);
     db->turn_start_ms = now_ms;
     db->turn_active   = true;
 
     db->done = false;
     db->settling = false;
+    db_move_state_reset(db);
 }
 
 
@@ -316,13 +355,70 @@ void ob_drivebase_stop(ob_drivebase_t *db) {
     db->turn_active = false;
     db->done        = true;
     db->settling    = false;
+    db_move_state_reset(db);
 }
 
 
 // ---------------------------------------------------------------------
 // Per-tick control law
 
+// Position-integral update, pbio integrator.c rules (2.6.0):
+// decreasing the magnitude is always allowed; growth only happens
+// in the band DEADZONE <= |remaining to endpoint| <= 2*(actuation
+// saturation error), is rate-capped per tick, and the total clamps
+// at the value whose ki-term alone commands ACTUATION_MAX. The
+// deadzone stops stiction hunting at rest; the upper bound stops a
+// far-from-target cruise from winding the integral up; the clamp
+// bounds the authority a wound integral can ever have.
+static ob_float_t db_integ_update(ob_float_t *integ,
+                                  ob_float_t err,
+                                  ob_float_t target_err,
+                                  ob_float_t dt_s,
+                                  ob_float_t kp,
+                                  ob_float_t ki) {
+    ob_float_t e = err;
+    ob_float_t next = *integ + e * dt_s;
+    ob_float_t mag_next = (next < 0) ? -next : next;
+    ob_float_t mag_cur  = (*integ < 0) ? -*integ : *integ;
+    bool decrease = mag_next < mag_cur;
+    if (!decrease) {
+        if (e >  (ob_float_t)OB_DRIVEBASE_INTEG_RATE_MAX_WHEEL_DEG) {
+            e =  (ob_float_t)OB_DRIVEBASE_INTEG_RATE_MAX_WHEEL_DEG;
+        }
+        if (e < -(ob_float_t)OB_DRIVEBASE_INTEG_RATE_MAX_WHEEL_DEG) {
+            e = -(ob_float_t)OB_DRIVEBASE_INTEG_RATE_MAX_WHEEL_DEG;
+        }
+        next     = *integ + e * dt_s;
+        mag_next = (next < 0) ? -next : next;
+        decrease = mag_next < mag_cur;
+    }
+    ob_float_t ta = (target_err < 0) ? -target_err : target_err;
+    ob_float_t upper = (kp > 0)
+        ? ((ob_float_t)OB_DRIVEBASE_ACTUATION_MAX_DPS / kp)
+          * (ob_float_t)2.0
+        : (ob_float_t)0.0;
+    if ((ta >= (ob_float_t)OB_DRIVEBASE_INTEG_DEADZONE_WHEEL_DEG
+         && ta <= upper) || decrease) {
+        *integ = next;
+    }
+    if (ki > 0) {
+        ob_float_t imax = (ob_float_t)OB_DRIVEBASE_ACTUATION_MAX_DPS / ki;
+        if (*integ >  imax) { *integ =  imax; }
+        if (*integ < -imax) { *integ = -imax; }
+    }
+    return *integ;
+}
+
 void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
+    // Integral timebase: real elapsed ms, clamped so a stalled tick
+    // (blocked bus) cannot jump the integral.
+    ob_float_t dt_s = 0.0;
+    if (db->last_tick_ms != 0) {
+        dt_s = (ob_float_t)(now_ms - db->last_tick_ms) / (ob_float_t)1000.0;
+        if (dt_s < (ob_float_t)0.0)  { dt_s = (ob_float_t)0.0; }
+        if (dt_s > (ob_float_t)0.05) { dt_s = (ob_float_t)0.05; }
+    }
+    db->last_tick_ms = now_ms;
     // 1. Sample fwd profile (or hold). An axis whose profile has
     //    expired is "flying" no more; a CARRYING axis (v3 > 0,
     //    then="continue") stays active past t_total with its
@@ -399,6 +495,36 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
     ob_float_t sum_err  = fwd_target  - sum_pos;
     ob_float_t diff_err = turn_target - diff_pos;
 
+    // 4b. Arrival cuts a landing short: the landing is only a settle
+    //     aid, so the moment BOTH errors are inside the arrival
+    //     tolerance, done latches and the landing profile is dropped
+    //     — a robot that physically arrives early must not wait out
+    //     the rest of a scheduled correction ramp (the old arrival
+    //     latch was instant; this keeps it so under landings).
+    if (db->landing_active) {
+        // Errors to the move's ENDPOINTS (the holds), NOT to the
+        // landing's moving reference — that reference starts at the
+        // measured position, so its tracking error is ~0 by
+        // construction and would latch a stuck robot instantly.
+        ob_float_t se_now = db->fwd_hold  - sum_pos;
+        ob_float_t de_now = db->turn_hold - diff_pos;
+        se_now = (se_now < 0) ? -se_now : se_now;
+        de_now = (de_now < 0) ? -de_now : de_now;
+        if (se_now < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+            && de_now < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG) {
+            db->fwd_active     = false;
+            db->turn_active    = false;
+            db->landing_active = false;
+            db->done           = true;
+            // Arrived: the integral's job is over. Left wound, it
+            // keeps commanding ki*integ against ZERO error through
+            // the inter-move hold — the probe measured an arrived
+            // robot still pushed at 204 dps.
+            db->integ_sum  = 0.0;
+            db->integ_diff = 0.0;
+        }
+    }
+
     // 5. Move complete = profiles expired AND the robot has ARRIVED.
     //    Time-based done alone left the final move's settling error
     //    permanently uncorrected (bench: +4.5 body-deg banked at
@@ -406,6 +532,7 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
     //    the next move). Matches the classic fallback's
     //    reach-the-target semantics; callers own the stall timeout.
     if (!fwd_flying && !turn_flying) {
+        db->landing_active = false;   // any landing profile has expired
         ob_float_t se = (sum_err  < 0) ? -sum_err  : sum_err;
         ob_float_t de = (diff_err < 0) ? -diff_err : diff_err;
         ob_float_t worst = (se > de) ? se : de;
@@ -440,6 +567,76 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
                 db->done = true;
             }
         } else {
+            // First evaluation after this move's profiles expired:
+            // record the gap the settle has to close — the bench's
+            // answer to "how big is the correction, really".
+            if (!db->expiry_captured) {
+                db->expiry_captured = true;
+                db->expiry_residual = worst;
+            }
+            // Landing settle (2.6.0): residual above arrival
+            // tolerance gets a SHAPED mini-trajectory back to the
+            // hold target instead of a raw P step — same accel
+            // contract as every other motion, done latches when the
+            // landing arrives. Bounded retries; the forgive/cap
+            // machinery below remains the backstop for a genuinely
+            // stuck robot.
+            // Retry a landing only while landings make PROGRESS —
+            // a stuck robot's first landing changes nothing, and
+            // burning the retry budget (plus its ramp time) against
+            // stiction just delays the forgive/cap verdict below.
+            bool landing_progress =
+                db->landings == 0
+                || worst < db->landing_best_err
+                   - (ob_float_t)OB_DRIVEBASE_SETTLE_PROGRESS_WHEEL_DEG;
+            if (worst >= (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+                && db->landings < OB_DRIVEBASE_MAX_LANDINGS
+                && landing_progress) {
+                db->landing_best_err = worst;
+                db->landings++;
+                ob_float_t landing_v = db->accel_dps2 > 0
+                    ? (ob_float_t)OB_DRIVEBASE_LANDING_DPS
+                    : (ob_float_t)0.0;
+                // Entry speed = the CURRENT commanded axis speed —
+                // re-basing the reference onto the measured position
+                // zeroes the P-term's contribution, and starting the
+                // landing from rest would step the total command
+                // down by exactly that amount in one tick (bench
+                // harness: 727 steps/s). Entering at the live
+                // command keeps the total continuous, the same rule
+                // move arming follows.
+                // ...minus the integral's share: the I-term keeps
+                // being ADDED to the landing's feed-forward, so a v0
+                // that contains it would double-count it — measured
+                // as a +ki*integ step at every landing arm.
+                ob_float_t v0_sum = (db->left->target_dps
+                                     + db->right->target_dps)
+                                    / (ob_float_t)2.0
+                                    - db->ki * db->integ_sum;
+                ob_float_t v0_diff = (db->left->target_dps
+                                      - db->right->target_dps)
+                                     / (ob_float_t)2.0
+                                     - db->ki * db->integ_diff;
+                if (se >= (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+                    && landing_v > 0) {
+                    ob_trajectory_init_v0(&db->fwd, sum_pos, db->fwd_hold,
+                                          landing_v, db->accel_dps2,
+                                          v0_sum);
+                    db->fwd_start_ms = now_ms;
+                    db->fwd_active   = true;
+                }
+                if (de >= (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+                    && landing_v > 0) {
+                    ob_trajectory_init_v0(&db->turn, diff_pos, db->turn_hold,
+                                          landing_v, db->accel_dps2,
+                                          v0_diff);
+                    db->turn_start_ms = now_ms;
+                    db->turn_active   = true;
+                }
+                db->landing_active = true;
+                db->settling = false;
+                return;   // commands resume next tick on the landing
+            }
             if (!db->settling) {
                 db->settling = true;
                 db->settle_start_ms = now_ms;
@@ -471,11 +668,34 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
                                   OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG;
             if (arrived || capped) {
                 db->done = true;
+                db->integ_sum  = 0.0;   // see the arrival-cut latch
+                db->integ_diff = 0.0;
             }
         }
     }
-    ob_float_t fwd_cmd  = fwd_ff_vel  + db->kp_sum  * sum_err;
-    ob_float_t diff_cmd = turn_ff_vel + db->kp_diff * diff_err;
+    // Remaining-to-endpoint errors gate WHERE the integral may grow
+    // (pbio's target_error): during cruise the endpoint is far and
+    // the integral stays parked; through the decel ramp and settle
+    // it engages and squeezes out the tracking lag P alone cannot.
+    ob_float_t fwd_end = db->fwd_active
+        ? db->fwd.start + db->fwd.direction
+          * ((db->fwd.distance < 0) ? -db->fwd.distance : db->fwd.distance)
+        : db->fwd_hold;
+    ob_float_t turn_end = db->turn_active
+        ? db->turn.start + db->turn.direction
+          * ((db->turn.distance < 0) ? -db->turn.distance : db->turn.distance)
+        : db->turn_hold;
+    ob_float_t integ_sum  = db_integ_update(&db->integ_sum, sum_err,
+                                            fwd_end - sum_pos, dt_s,
+                                            db->kp_sum, db->ki);
+    ob_float_t integ_diff = db_integ_update(&db->integ_diff, diff_err,
+                                            turn_end - diff_pos, dt_s,
+                                            db->kp_diff, db->ki);
+
+    ob_float_t fwd_cmd  = fwd_ff_vel  + db->kp_sum  * sum_err
+                          + db->ki * integ_sum;
+    ob_float_t diff_cmd = turn_ff_vel + db->kp_diff * diff_err
+                          + db->ki * integ_diff;
 
     // 6. Mix into per-servo target velocities. diff_pos = (L - R)/2,
     //    so diff_cmd is (L_vel - R_vel)/2 — the rate at which left
@@ -511,4 +731,18 @@ ob_float_t ob_drivebase_body_to_wheel_diff(const ob_drivebase_t *db,
 void ob_drivebase_gyro_frame_reset(ob_drivebase_t *db) {
     db->turn_hold                  = 0.0;
     db->heading_override_wheel_deg = 0.0;
+    // The diff integral was learned against the OLD frame.
+    db->integ_diff                 = 0.0;
+}
+
+
+// Settle diagnostics (2.6.0): worst-axis residual captured at the
+// last move's first profile expiry, and how many shaped landings it
+// took. The bench reads this to decide whether the integral gains
+// need another look — measured numbers, not guesses.
+void ob_drivebase_settle_stats(const ob_drivebase_t *db,
+                               ob_float_t *expiry_residual,
+                               int *landings) {
+    *expiry_residual = db->expiry_residual;
+    *landings        = (int)db->landings;
 }
