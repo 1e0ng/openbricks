@@ -1522,6 +1522,30 @@ static mp_obj_t sb_db_settle_stats(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_settle_stats_obj,
                                  sb_db_settle_stats);
 
+static mp_obj_t sb_db_trace(mp_obj_t self_in) {
+    // Flight-recorder dump: list of (t_ms, ref_pos, meas_pos,
+    // ref_vel, cmd_sum, integ_dps) rows, oldest first — copied out
+    // under the bus lock into a static staging buffer, converted to
+    // MP objects OUTSIDE the lock (allocation must never happen
+    // inside bus_take, file-top rule).
+    (void)self_in;
+    static float staging[OB_DRIVEBASE_TRACE_N][6];
+    bus_take();
+    int n = ob_drivebase_trace_dump(&st_db, staging,
+                                    OB_DRIVEBASE_TRACE_N);
+    bus_release();
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (int k = 0; k < n; k++) {
+        mp_obj_t t[6];
+        for (int j = 0; j < 6; j++) {
+            t[j] = mp_obj_new_float((mp_float_t)staging[k][j]);
+        }
+        mp_obj_list_append(list, mp_obj_new_tuple(6, t));
+    }
+    return list;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_trace_obj, sb_db_trace);
+
 static mp_obj_t sb_db_gyro_in_use(mp_obj_t self_in) {
     (void)self_in;
     return mp_obj_new_bool(openbricks_db_gyro_in_use_c());
@@ -1739,6 +1763,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_gyro_source),  MP_ROM_PTR(&sb_db_gyro_source_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_gyro_in_use),  MP_ROM_PTR(&sb_db_gyro_in_use_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_settle_stats), MP_ROM_PTR(&sb_db_settle_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_trace),        MP_ROM_PTR(&sb_db_trace_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_reset),        MP_ROM_PTR(&sb_db_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_use_gyro),      MP_ROM_PTR(&sb_db_use_gyro_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_set_accel),     MP_ROM_PTR(&sb_db_set_accel_obj) },

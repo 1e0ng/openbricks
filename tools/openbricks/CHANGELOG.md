@@ -3,6 +3,18 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.7.2 — motion flight recorder
+
+Bench 2.7.1 read: integral up 51 -> 84 dps but the forward residual
+unchanged at ~97 wheel-deg — the real plant caps integral growth in
+a way the test harness does not model, and five firmwares of
+five-number summaries cannot say which curve stalls it. The tick
+now records the sum axis every 16 ms into a rolling ~4 s ring —
+(t_ms, ref_pos, meas_pos, ref_vel, cmd, integ_dps) —
+`st_bus.db_trace()` dumps it after the run (survives the stop
+dispatch). One run, the complete ending, no more guessing.
+Firmware-side: flash 2.7.2.
+
 ## 2.7.1 — the integral cancels the FF deficit during the move
 
 The end-of-run stutter, root-caused with 2.6.2's per-axis stats:

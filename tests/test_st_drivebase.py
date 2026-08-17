@@ -1454,6 +1454,29 @@ class PidLandingSettleTests(unittest.TestCase):
                         "expiry residual %.1f wheel-deg - the "
                         "integral is not absorbing the deficit" % rs)
 
+    def test_flight_recorder_captures_the_ending(self):
+        # db_trace(): rolling ring of (t, ref_pos, meas_pos, ref_vel,
+        # cmd, integ) rows at a 16 ms stride, oldest first — the
+        # instrument for settle forensics. Must survive the stop
+        # dispatch like the settle stats do.
+        sb.db_straight(300.0, 300.0)
+        for _ in range(6000):
+            self.w.advance(1)
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        sb.db_stop()
+        rows = sb.db_trace()
+        self.assertTrue(len(rows) > 20, len(rows))
+        self.assertEqual(len(rows[0]), 6)
+        # Time increases monotonically; positions progress.
+        ts = [r[0] for r in rows]
+        self.assertEqual(ts, sorted(ts))
+        self.assertTrue(rows[-1][2] > rows[0][2] + 100,
+                        "measured position never progressed in trace")
+        # The integral column is populated (laggy plant needs it).
+        self.assertTrue(any(abs(r[5]) > 10 for r in rows))
+
     def test_settle_stats_survive_the_stop_dispatch(self):
         # done() dispatches stop() before the user's move call
         # returns — the stats must survive that stop, or every

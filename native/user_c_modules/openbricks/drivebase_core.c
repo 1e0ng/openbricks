@@ -62,6 +62,9 @@ void ob_drivebase_init(ob_drivebase_t *db,
     db->prev_sum_pos    = 0.0;
     db->prev_diff_pos   = 0.0;
     db->have_prev_pos   = false;
+    db->trace_next      = 0;
+    db->trace_count     = 0;
+    db->trace_last_ms   = 0;
     db->landings        = 0;
     db->landing_active  = false;
     db->landing_best_err = 0.0;
@@ -772,6 +775,22 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
     //    slows down.
     db->left->target_dps  = fwd_cmd + diff_cmd;
     db->right->target_dps = fwd_cmd - diff_cmd;
+
+    // 7. Flight recorder — rolling, stride-decimated, sum axis.
+    if (now_ms - db->trace_last_ms >= (long)OB_DRIVEBASE_TRACE_STRIDE_MS) {
+        db->trace_last_ms = now_ms;
+        float *row = db->trace[db->trace_next];
+        row[0] = (float)now_ms;
+        row[1] = (float)fwd_target;
+        row[2] = (float)sum_pos;
+        row[3] = (float)fwd_ff_vel;
+        row[4] = (float)fwd_cmd;
+        row[5] = (float)(db->ki * integ_sum);
+        db->trace_next = (db->trace_next + 1) % OB_DRIVEBASE_TRACE_N;
+        if (db->trace_count < OB_DRIVEBASE_TRACE_N) {
+            db->trace_count++;
+        }
+    }
 }
 
 
@@ -802,6 +821,24 @@ void ob_drivebase_gyro_frame_reset(ob_drivebase_t *db) {
     db->heading_override_wheel_deg = 0.0;
     // The diff integral was learned against the OLD frame.
     db->integ_diff                 = 0.0;
+}
+
+
+int ob_drivebase_trace_dump(const ob_drivebase_t *db,
+                            float out[][6], int max_rows) {
+    int n = db->trace_count;
+    if (n > max_rows) {
+        n = max_rows;
+    }
+    int start = (db->trace_count == OB_DRIVEBASE_TRACE_N)
+                ? db->trace_next : 0;
+    for (int k = 0; k < n; k++) {
+        const float *row = db->trace[(start + k) % OB_DRIVEBASE_TRACE_N];
+        for (int j = 0; j < 6; j++) {
+            out[k][j] = row[j];
+        }
+    }
+    return n;
 }
 
 
