@@ -18,6 +18,9 @@ ob_button_event_t ob_button_tick(ob_button_t *b) {
     if (b->chatter_ticks) {
         b->chatter_ticks--;
     }
+    if (b->refractory_ticks) {
+        b->refractory_ticks--;
+    }
     uint8_t raw = b->read_pressed(b->ctx) ? 1 : 0;
     b->raw_last = raw;
     // Sliding window: shift in the new sample, retire the oldest.
@@ -30,6 +33,14 @@ ob_button_event_t ob_button_tick(ob_button_t *b) {
 
     if (!b->stable_pressed && b->win_count >= OB_BUTTON_ON_THRESH) {
         b->stable_pressed = 1;
+        if (b->refractory_ticks) {
+            // Same physical press re-confirming through a violent
+            // bounce train (measured: 30 edges for 10 presses) —
+            // count it as chatter, never as a new press.
+            b->n_stale++;
+            return OB_BUTTON_NONE;
+        }
+        b->refractory_ticks = OB_BUTTON_REFRACTORY_TICKS;
         b->n_presses++;
         return OB_BUTTON_PRESSED;
     }
@@ -51,8 +62,12 @@ void ob_button_clear_stale(ob_button_t *b) {
     b->stale_press = 0;
     // Disarm ends the run: the cooldown must not outlive it and eat
     // the NEXT run's (deliberate) start press — post-stop start
-    // suppression is the Python watcher's lockout, not ours.
+    // suppression is the Python watcher's lockout, not ours. The
+    // refractory follows the same boundary rule: same-press
+    // idempotence is a within-run concept, and a stop press's
+    // bounce landing after the disarm is the lockout's to swallow.
     b->chatter_ticks = 0;
+    b->refractory_ticks = 0;
 }
 
 

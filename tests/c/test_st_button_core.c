@@ -291,6 +291,57 @@ TEST(disarm_clears_the_chatter_cooldown) {
     CHECK_EQ_INT(classify_n(50), 1);  // next press is fresh input
 }
 
+TEST(worn_contact_sixty_percent_duty_press_is_accepted) {
+    // Bench profile A (2026-08-17): a worn contact runs ~50-60%
+    // pressed-duty INSIDE a real press — 21 silicon edges for 10
+    // presses and HALF of them dropped at the old 15-of-20 (75%)
+    // threshold. A 3-on/2-off pattern (60% duty) held for 100 ms
+    // must register exactly one press.
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    int presses = 0;
+    for (int i = 0; i < 100; i++) {
+        level = (i % 5) < 3;      // 60% duty bounce train
+        if (ob_button_tick(&b) == OB_BUTTON_PRESSED) {
+            presses++;
+        }
+    }
+    CHECK_EQ_INT(presses, 1);
+    level = 0;
+    tick_n(2 * OB_BUTTON_WINDOW);
+    CHECK_EQ_INT(b.n_releases, 1);
+}
+
+TEST(violent_bounce_train_cannot_double_fire) {
+    // Bench profile C: 30 silicon edges for 10 presses produced an
+    // ELEVENTH accepted press — the train dipped below OFF_THRESH
+    // mid-press and re-confirmed through the hysteresis. The
+    // refractory makes an accepted press idempotent: any re-confirm
+    // within OB_BUTTON_REFRACTORY_TICKS is chatter (n_stale), not a
+    // press.
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    int presses = 0;
+    // solid press, violent mid-press dropout, re-contact — all
+    // inside one 120 ms physical press.
+    level = 1; for (int i = 0; i < 40; i++) { if (ob_button_tick(&b) == OB_BUTTON_PRESSED) presses++; }
+    level = 0; for (int i = 0; i < 30; i++) { if (ob_button_tick(&b) == OB_BUTTON_PRESSED) presses++; }
+    level = 1; for (int i = 0; i < 50; i++) { if (ob_button_tick(&b) == OB_BUTTON_PRESSED) presses++; }
+    CHECK_EQ_INT(presses, 1);
+    CHECK(b.n_stale >= 1);        // the re-confirm was classified
+    level = 0;
+    tick_n(2 * OB_BUTTON_WINDOW);
+
+    // A genuinely NEW press after the refractory expires still
+    // counts.
+    tick_n(OB_BUTTON_REFRACTORY_TICKS);
+    level = 1;
+    CHECK_EQ_INT(tick_n(OB_BUTTON_WINDOW), OB_BUTTON_PRESSED);
+    CHECK_EQ_INT(b.n_presses, 2);
+}
+
 int main(void) {
     RUN(clean_press_and_release_fire_one_edge_each);
     RUN(chattery_press_still_fires);
@@ -306,5 +357,7 @@ int main(void) {
     RUN(clear_stale_on_disarm);
     RUN(release_recontact_after_arm_is_not_a_stop);
     RUN(disarm_clears_the_chatter_cooldown);
+    RUN(worn_contact_sixty_percent_duty_press_is_accepted);
+    RUN(violent_bounce_train_cannot_double_fire);
     return harness_exit("st_button_core");
 }

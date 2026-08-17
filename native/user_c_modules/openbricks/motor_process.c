@@ -528,7 +528,7 @@ static mp_obj_t mp_hard_button_probe(mp_obj_t self_in) {
     // machine's raw_last / window-count / stable_pressed. Since the
     // N-of-M rewrite (1.49.0), the fourth field is the number of
     // pressed samples in the last OB_BUTTON_WINDOW — during a held
-    // press it should sit near 20; hovering mid-range = heavy
+    // press it should sit near the window size (30); mid-range = heavy
     // chatter; ob_gpio_read stuck at 1 while machine.Pin reads 0 =
     // the shim and the pad disagree.
     (void)self_in;
