@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.5.1 — run logs stamp clean exits
+
+A run log that just ENDED was ambiguous between "finished" and
+"hung forever" — bench 2026-08-17: a mission that ended normally at
+its full-dark stop condition read as a hang, and a whole
+button-forensics session ran before the truth surfaced. Clean exits
+now stamp `finished: clean exit after N ms` into the log tail, so
+every way out of a run leaves a marker (finished / stopped /
+traceback). Firmware-side: flash 2.5.1 (and `pipx upgrade
+openbricks` for lockstep).
+
 ## 2.5.0 — then="continue": chain moves without stopping
 
 `straight()` and `curve()` accept `then="continue"` (Pybricks
