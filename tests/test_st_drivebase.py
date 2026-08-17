@@ -1431,6 +1431,29 @@ class PidLandingSettleTests(unittest.TestCase):
                         "landed %.1f mm (wanted 150)" % travelled)
         self.assertTrue(landings <= 3, landings)
 
+    def test_integral_carries_the_ff_deficit_during_the_move(self):
+        # The 2.7.x gate change, pinned: on a plant that under-
+        # delivers (laggy harness = 60% of command), the integral
+        # engages from move start — gated on TRACKING error, not
+        # pbio's remaining-distance band — and supplies the deficit
+        # DURING the motion. Bench 2026-08-17 measured the old band
+        # engaging only 0.16 s before expiry: integral 51 dps of a
+        # 250 dps deficit, residual 100 wheel-deg, three landings,
+        # the end-of-run stutter.
+        sb.db_straight(700.0, 400.0)
+        for _ in range(8000):
+            self.w.advance(1)
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        rs, rd, landings, gi_s, gi_d = sb.db_settle_stats()
+        self.assertTrue(gi_s > 150.0,
+                        "integral supplied only %.0f dps at expiry "
+                        "- parked again?" % gi_s)
+        self.assertTrue(rs < 25.0,
+                        "expiry residual %.1f wheel-deg - the "
+                        "integral is not absorbing the deficit" % rs)
+
     def test_settle_stats_survive_the_stop_dispatch(self):
         # done() dispatches stop() before the user's move call
         # returns — the stats must survive that stop, or every
