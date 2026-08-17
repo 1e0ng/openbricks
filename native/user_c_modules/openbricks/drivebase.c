@@ -135,17 +135,19 @@ static void drivebase_unregister(drivebase_obj_t *self) {
 // ---------------------------------------------------------------------
 // Python-facing methods
 
-static mp_obj_t db_straight(mp_obj_t self_in, mp_obj_t distance_in,
-                             mp_obj_t speed_in) {
-    drivebase_obj_t *self = MP_OBJ_TO_PTR(self_in);
+static mp_obj_t db_straight(size_t n_args, const mp_obj_t *args) {
+    // (self, distance, speed[, carry])
+    drivebase_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     ob_drivebase_straight(&self->core,
                           (long)openbricks_motor_process_now_ms(),
-                          (ob_float_t)mp_obj_get_float(distance_in),
-                          (ob_float_t)mp_obj_get_float(speed_in));
+                          (ob_float_t)mp_obj_get_float(args[1]),
+                          (ob_float_t)mp_obj_get_float(args[2]),
+                          (n_args > 3) && mp_obj_is_true(args[3]));
     drivebase_register(self);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(db_straight_obj, db_straight);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(db_straight_obj, 3, 4,
+                                           db_straight);
 
 
 static mp_obj_t db_turn(mp_obj_t self_in, mp_obj_t angle_in,
@@ -162,17 +164,17 @@ static MP_DEFINE_CONST_FUN_OBJ_3(db_turn_obj, db_turn);
 
 
 static mp_obj_t db_curve(size_t n_args, const mp_obj_t *args) {
-    (void)n_args;
     drivebase_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     ob_drivebase_curve(&self->core,
                        (long)openbricks_motor_process_now_ms(),
                        (ob_float_t)mp_obj_get_float(args[1]),
                        (ob_float_t)mp_obj_get_float(args[2]),
-                       (ob_float_t)mp_obj_get_float(args[3]));
+                       (ob_float_t)mp_obj_get_float(args[3]),
+                       (n_args > 4) && mp_obj_is_true(args[4]));
     drivebase_register(self);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(db_curve_obj, 4, 4, db_curve);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(db_curve_obj, 4, 5, db_curve);
 
 
 // db.stop([mode]) — without the arg: halt the controller and drop

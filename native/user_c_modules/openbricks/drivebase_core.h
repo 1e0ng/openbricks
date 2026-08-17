@@ -140,11 +140,16 @@ void ob_drivebase_init(ob_drivebase_t *db,
 
 // Kick off a forward move. ``distance_mm`` is signed (negative ⇒
 // reverse). ``speed_mm_s`` is the cruise speed. Heading is held at
-// whatever it was at move-start.
+// whatever it was at move-start. ``carry`` (2.5.0, Pybricks
+// Stop.NONE / then="continue"): the profile ends AT cruise instead
+// of rest, and past its end the reference keeps advancing at that
+// speed until the next command supersedes it — chained maneuvers
+// without a stop between them.
 void ob_drivebase_straight(ob_drivebase_t *db,
                            long now_ms,
                            ob_float_t distance_mm,
-                           ob_float_t speed_mm_s);
+                           ob_float_t speed_mm_s,
+                           bool carry);
 
 
 // Kick off a turn-in-place. ``angle_deg`` is body-degrees, signed
@@ -174,11 +179,14 @@ void ob_drivebase_turn(ob_drivebase_t *db,
 // Degenerate inputs: radius 0 arms a pure turn (wheel rate =
 // speed_mm_s at the rim); angle 0 covers zero distance and
 // completes immediately.
+// ``carry`` continues the ARC at full speed past the end (both
+// axes keep their end speeds) — same contract as straight's.
 void ob_drivebase_curve(ob_drivebase_t *db,
                         long now_ms,
                         ob_float_t radius_mm,
                         ob_float_t angle_deg,
-                        ob_float_t speed_mm_s);
+                        ob_float_t speed_mm_s,
+                        bool carry);
 
 
 // Cancel any active move. Servo target_dps is left at zero; the

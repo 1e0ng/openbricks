@@ -1436,6 +1436,64 @@ class TrajectoryEntrySpeedTests(unittest.TestCase):
         self.assertTrue(abs(travelled - 20.0) < 8.0,
                         "landed %.1f mm (wanted 20)" % travelled)
 
+    def test_straight_with_carry_ends_at_cruise_and_hands_over(self):
+        # then="continue" (2.5.0, Pybricks Stop.NONE): the profile
+        # ends AT cruise, done latches while still flying, and the
+        # reference keeps advancing until the next command.
+        # 350 mm/s on the 88 mm wheel ~= 458 dps ~= 5210 steps/s.
+        sb.db_straight(300.0, 350.0, 1)
+        for _ in range(200):               # up to 2 s
+            self.w.advance(10)
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done(), "carry move never latched done")
+        v_done = abs(self.w.spd[1])
+        self.assertTrue(v_done > 4500,
+                        "speed at done %d, expected ~5210 (carried)"
+                        % v_done)
+        # No next command: the reference keeps driving (Pybricks
+        # Stop.NONE contract) — speed holds, position advances.
+        c0 = sb.servo_counts(1)
+        self.w.advance(300)
+        self.assertTrue(abs(self.w.spd[1]) > 4500,
+                        "carried speed decayed to %d" % self.w.spd[1])
+        self.assertTrue(abs(sb.servo_counts(1) - c0) > 1000,
+                        "reference stopped advancing")
+
+    def test_carry_hands_speed_to_the_next_straight(self):
+        # The seam this feature exists for: segment 1 carries,
+        # segment 2 arms from full speed — the wheel speed through
+        # the handover never dips below ~cruise.
+        sb.db_straight(200.0, 350.0, 1)
+        for _ in range(200):
+            self.w.advance(10)
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        sb.db_straight(200.0, 350.0, 0)    # stopping second leg
+        min_v = 99999
+        for _ in range(30):                # first 300 ms of leg 2
+            self.w.advance(10)
+            v = abs(self.w.spd[1])
+            if v < min_v:
+                min_v = v
+        self.assertTrue(min_v > 4000,
+                        "speed dipped to %d through the seam" % min_v)
+
+    def test_plain_straight_still_stops_at_the_end(self):
+        # carry=0 (and the omitted-arg form) keeps the classic
+        # profile: at completion the wheels are at rest.
+        sb.db_straight(200.0, 350.0)
+        for _ in range(300):
+            self.w.advance(10)
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        self.w.advance(50)
+        self.assertTrue(abs(self.w.spd[1]) < 200,
+                        "still moving at %d after a stopping move"
+                        % self.w.spd[1])
+
     def test_zero_radius_curve_after_cruise_ramps_forward_too(self):
         # curve(radius=0) is a turn in place — entered while
         # translating it takes the same forward-axis stop trajectory

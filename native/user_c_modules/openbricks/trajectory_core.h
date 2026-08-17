@@ -46,10 +46,15 @@ typedef struct {
     // wrong way; may exceed cruise). v0 = 0 reproduces the classic
     // from-rest trapezoid exactly.
     ob_float_t v0;           // entry speed, direction-relative
+    // End state (2.5.0, Pybricks Stop.NONE): the exit ramp lands at
+    // v3 instead of rest. v3 = 0 reproduces the stopping profile
+    // exactly; v3 > 0 means the axis CARRIES its speed past t_total
+    // (the caller keeps integrating the reference).
+    ob_float_t v3;           // end speed, magnitude along direction
     ob_float_t t_entry;      // seconds in the entry ramp (v0 -> v_peak)
     ob_float_t a_entry;      // signed entry acceleration (±accel)
     ob_float_t d_entry;      // net displacement of the entry ramp
-    ob_float_t t_ramp;       // seconds in the EXIT ramp (v_peak -> 0)
+    ob_float_t t_ramp;       // seconds in the EXIT ramp (v_peak -> v3)
     ob_float_t t_cruise;     // seconds at cruise speed (0 for triangular)
     ob_float_t t_total;      // seconds to completion
     ob_float_t d_ramp;       // degrees covered in the exit ramp
@@ -71,6 +76,21 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
                            ob_float_t cruise,
                            ob_float_t accel,
                            ob_float_t v0_world);
+
+// Full form: additionally end the profile at speed ``v3_end``
+// (magnitude, clamped to [0, cruise]) instead of rest — Pybricks
+// Stop.NONE. Sampling at/after ``t_total`` reports velocity v3 with
+// position at the target; integrating the carried reference beyond
+// the target is the caller's job. A distance too short to slow from
+// ``v0`` to ``v3`` raises this move's deceleration to land exactly
+// on target (the 2.4.0 rule, generalized).
+void ob_trajectory_init_v0v3(ob_trajectory_t *t,
+                             ob_float_t start,
+                             ob_float_t target,
+                             ob_float_t cruise,
+                             ob_float_t accel,
+                             ob_float_t v0_world,
+                             ob_float_t v3_end);
 
 // From-rest form: ``ob_trajectory_init_v0`` with ``v0 = 0``.
 void ob_trajectory_init(ob_trajectory_t *t,

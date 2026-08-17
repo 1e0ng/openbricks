@@ -76,7 +76,8 @@ static ob_float_t db_diff_pos_encoder(const ob_drivebase_t *db) {
 void ob_drivebase_straight(ob_drivebase_t *db,
                            long now_ms,
                            ob_float_t distance_mm,
-                           ob_float_t speed_mm_s) {
+                           ob_float_t speed_mm_s,
+                           bool carry) {
     // Convert mm-space → wheel-degree space.
     ob_float_t distance_deg = distance_mm /
                               db->wheel_circumference_mm * (ob_float_t)360.0;
@@ -108,8 +109,11 @@ void ob_drivebase_straight(ob_drivebase_t *db,
     // the command to zero (bench 2026-08-16).
     ob_float_t v0_sum = (db->left->target_dps + db->right->target_dps)
                         / (ob_float_t)2.0;
-    ob_trajectory_init_v0(&db->fwd, sum_pos, sum_pos + distance_deg,
-                          speed_dps, db->accel_dps2, v0_sum);
+    // carry (then="continue"): end the profile AT cruise — the tick
+    // keeps the reference advancing at that speed past the target.
+    ob_trajectory_init_v0v3(&db->fwd, sum_pos, sum_pos + distance_deg,
+                            speed_dps, db->accel_dps2, v0_sum,
+                            carry ? speed_dps : (ob_float_t)0.0);
     db->fwd_start_ms = now_ms;
     db->fwd_active   = true;
 
@@ -200,7 +204,8 @@ void ob_drivebase_curve(ob_drivebase_t *db,
                         long now_ms,
                         ob_float_t radius_mm,
                         ob_float_t angle_deg,
-                        ob_float_t speed_mm_s) {
+                        ob_float_t speed_mm_s,
+                        bool carry) {
     // Forward component: the CENTRE of the robot travels
     // |radians(angle)| * radius mm, signed by the radius (Pybricks:
     // negative radius drives the arc backward).
@@ -244,11 +249,13 @@ void ob_drivebase_curve(ob_drivebase_t *db,
         // radius 0: a turn in place, wheels at the rim speed. The
         // forward axis gets the same stop-trajectory treatment as
         // ob_drivebase_turn when entered while translating.
-        ob_trajectory_init_v0(&db->turn, diff_pos, diff_pos + turn_delta,
-                              speed_dps, db->accel_dps2,
-                              (db->left->target_dps
-                               - db->right->target_dps)
-                              / (ob_float_t)2.0);
+        ob_trajectory_init_v0v3(&db->turn, diff_pos,
+                                diff_pos + turn_delta,
+                                speed_dps, db->accel_dps2,
+                                (db->left->target_dps
+                                 - db->right->target_dps)
+                                / (ob_float_t)2.0,
+                                carry ? speed_dps : (ob_float_t)0.0);
         db->turn_start_ms = now_ms;
         db->turn_active   = true;
         ob_float_t cv0 = (db->left->target_dps + db->right->target_dps)
@@ -281,17 +288,21 @@ void ob_drivebase_curve(ob_drivebase_t *db,
     // Curve entry: each axis blends from its current speed. The
     // entry ramps can differ in length, so the arc's very start may
     // deviate from the exact circle — the price of never cliffing.
-    ob_trajectory_init_v0(&db->fwd, sum_pos, sum_pos + distance_deg,
-                          speed_dps, db->accel_dps2,
-                          (db->left->target_dps + db->right->target_dps)
-                          / (ob_float_t)2.0);
+    // carry: BOTH axes end at their cruise speeds — the reference
+    // continues along the same arc past the end point.
+    ob_trajectory_init_v0v3(&db->fwd, sum_pos, sum_pos + distance_deg,
+                            speed_dps, db->accel_dps2,
+                            (db->left->target_dps + db->right->target_dps)
+                            / (ob_float_t)2.0,
+                            carry ? speed_dps : (ob_float_t)0.0);
     db->fwd_start_ms = now_ms;
     db->fwd_active   = true;
 
-    ob_trajectory_init_v0(&db->turn, diff_pos, diff_pos + turn_delta,
-                          turn_speed, turn_accel,
-                          (db->left->target_dps - db->right->target_dps)
-                          / (ob_float_t)2.0);
+    ob_trajectory_init_v0v3(&db->turn, diff_pos, diff_pos + turn_delta,
+                            turn_speed, turn_accel,
+                            (db->left->target_dps - db->right->target_dps)
+                            / (ob_float_t)2.0,
+                            carry ? turn_speed : (ob_float_t)0.0);
     db->turn_start_ms = now_ms;
     db->turn_active   = true;
 
@@ -312,42 +323,67 @@ void ob_drivebase_stop(ob_drivebase_t *db) {
 // Per-tick control law
 
 void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
-    // 1. Sample fwd profile (or hold).
+    // 1. Sample fwd profile (or hold). An axis whose profile has
+    //    expired is "flying" no more; a CARRYING axis (v3 > 0,
+    //    then="continue") stays active past t_total with its
+    //    reference advancing at the end speed — Pybricks Stop.NONE —
+    //    until the next command supersedes it.
     ob_float_t fwd_target = 0.0;
     ob_float_t fwd_ff_vel = 0.0;
+    bool fwd_flying = false;
     if (db->fwd_active) {
         ob_float_t elapsed = (ob_float_t)(now_ms - db->fwd_start_ms) /
                              (ob_float_t)1000.0;
         if (elapsed >= db->fwd.t_total) {
-            // Lock on end-point so feedback corrects any residual.
             ob_float_t abs_dist = (db->fwd.distance < 0)
                                   ? -db->fwd.distance : db->fwd.distance;
-            fwd_target = db->fwd.start + db->fwd.direction * abs_dist;
-            fwd_ff_vel = 0.0;
-            db->fwd_hold   = fwd_target;
-            db->fwd_active = false;
+            ob_float_t end = db->fwd.start + db->fwd.direction * abs_dist;
+            if (db->fwd.v3 > (ob_float_t)0.0) {
+                // Carry: keep integrating past the target.
+                ob_float_t over = elapsed - db->fwd.t_total;
+                fwd_target = end + db->fwd.direction * db->fwd.v3 * over;
+                fwd_ff_vel = db->fwd.direction * db->fwd.v3;
+                db->fwd_hold = fwd_target;   // stop() anchors HERE
+            } else {
+                // Lock on end-point so feedback corrects any residual.
+                fwd_target = end;
+                fwd_ff_vel = 0.0;
+                db->fwd_hold   = fwd_target;
+                db->fwd_active = false;
+            }
         } else {
             ob_trajectory_sample(&db->fwd, elapsed, &fwd_target, &fwd_ff_vel);
+            fwd_flying = true;
         }
     } else {
         fwd_target = db->fwd_hold;
     }
 
-    // 2. Sample turn profile (or hold).
+    // 2. Sample turn profile (or hold) — same carry rule.
     ob_float_t turn_target = 0.0;
     ob_float_t turn_ff_vel = 0.0;
+    bool turn_flying = false;
     if (db->turn_active) {
         ob_float_t elapsed = (ob_float_t)(now_ms - db->turn_start_ms) /
                              (ob_float_t)1000.0;
         if (elapsed >= db->turn.t_total) {
             ob_float_t abs_dist = (db->turn.distance < 0)
                                   ? -db->turn.distance : db->turn.distance;
-            turn_target = db->turn.start + db->turn.direction * abs_dist;
-            turn_ff_vel = 0.0;
-            db->turn_hold   = turn_target;
-            db->turn_active = false;
+            ob_float_t end = db->turn.start + db->turn.direction * abs_dist;
+            if (db->turn.v3 > (ob_float_t)0.0) {
+                ob_float_t over = elapsed - db->turn.t_total;
+                turn_target = end + db->turn.direction * db->turn.v3 * over;
+                turn_ff_vel = db->turn.direction * db->turn.v3;
+                db->turn_hold = turn_target;
+            } else {
+                turn_target = end;
+                turn_ff_vel = 0.0;
+                db->turn_hold   = turn_target;
+                db->turn_active = false;
+            }
         } else {
             ob_trajectory_sample(&db->turn, elapsed, &turn_target, &turn_ff_vel);
+            turn_flying = true;
         }
     } else {
         turn_target = db->turn_hold;
@@ -369,39 +405,73 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
     //    every gyro'd turn end; only non-final turns were rescued by
     //    the next move). Matches the classic fallback's
     //    reach-the-target semantics; callers own the stall timeout.
-    if (!db->fwd_active && !db->turn_active) {
+    if (!fwd_flying && !turn_flying) {
         ob_float_t se = (sum_err  < 0) ? -sum_err  : sum_err;
         ob_float_t de = (diff_err < 0) ? -diff_err : diff_err;
         ob_float_t worst = (se > de) ? se : de;
-        if (!db->settling) {
-            db->settling = true;
-            db->settle_start_ms = now_ms;
-            db->settle_best_err = worst;
-        } else if (worst < db->settle_best_err
-                   - (ob_float_t)OB_DRIVEBASE_SETTLE_PROGRESS_WHEEL_DEG) {
-            // Still converging: progress re-stamps the window, so a
-            // healthy settle keeps its full arrival accuracy.
-            db->settle_best_err = worst;
-            db->settle_start_ms = now_ms;
-        }
-        // Arrival latches done; the cap fires only after SETTLE_MS
-        // with NO progress and a residual inside the forgive limit
-        // (duty-mode stiction can leave the last degrees of a turn
-        // below feedback's breakaway authority — bench 2026-08-14:
-        // intermittent ~1 s pause between turn() and the next
-        // straight()). A forgiven residual is NOT banked in gyro
-        // mode: the absolute frame carries it and the next move
-        // corrects it in motion. A residual beyond the forgive
-        // limit is a move that DIDN'T HAPPEN — done stays false and
-        // the caller's watchdog raises loudly.
-        bool arrived = se < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
-                       && de < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG;
-        bool capped  = (now_ms - db->settle_start_ms)
-                           >= (long)OB_DRIVEBASE_SETTLE_MS
-                       && worst < (ob_float_t)
-                              OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG;
-        if (arrived || capped) {
-            db->done = true;
+        if (db->fwd_active || db->turn_active) {
+            // A carrying axis is still active past its profile: the
+            // reference MOVES, so there is no settle window to run.
+            // pbio's Stop.NONE rule (control.c): past the nominal
+            // time, done latches as soon as the MEASURED position is
+            // at or past the target — no tolerance band. A lagging
+            // plant latches the moment it crosses the mark (a
+            // tracking-error bar deadlocked the sim, whose plant
+            // trails the moving reference at cruise); a stalled one
+            // never crosses, so the caller's watchdog still fires.
+            (void)worst;
+            bool fwd_past = true;
+            if (db->fwd_active) {
+                ob_float_t d = (db->fwd.distance < 0)
+                               ? -db->fwd.distance : db->fwd.distance;
+                ob_float_t end = db->fwd.start + db->fwd.direction * d;
+                fwd_past = db->fwd.direction * (sum_pos - end)
+                           >= (ob_float_t)0.0;
+            }
+            bool turn_past = true;
+            if (db->turn_active) {
+                ob_float_t d = (db->turn.distance < 0)
+                               ? -db->turn.distance : db->turn.distance;
+                ob_float_t end = db->turn.start + db->turn.direction * d;
+                turn_past = db->turn.direction * (diff_pos - end)
+                            >= (ob_float_t)0.0;
+            }
+            if (fwd_past && turn_past) {
+                db->done = true;
+            }
+        } else {
+            if (!db->settling) {
+                db->settling = true;
+                db->settle_start_ms = now_ms;
+                db->settle_best_err = worst;
+            } else if (worst < db->settle_best_err
+                       - (ob_float_t)OB_DRIVEBASE_SETTLE_PROGRESS_WHEEL_DEG) {
+                // Still converging: progress re-stamps the window, so
+                // a healthy settle keeps its full arrival accuracy.
+                db->settle_best_err = worst;
+                db->settle_start_ms = now_ms;
+            }
+            // Arrival latches done; the cap fires only after
+            // SETTLE_MS with NO progress and a residual inside the
+            // forgive limit (duty-mode stiction can leave the last
+            // degrees of a turn below feedback's breakaway authority
+            // — bench 2026-08-14: intermittent ~1 s pause between
+            // turn() and the next straight()). A forgiven residual
+            // is NOT banked in gyro mode: the absolute frame carries
+            // it and the next move corrects it in motion. A residual
+            // beyond the forgive limit is a move that DIDN'T HAPPEN
+            // — done stays false and the caller's watchdog raises
+            // loudly.
+            bool arrived =
+                se < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+                && de < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG;
+            bool capped  = (now_ms - db->settle_start_ms)
+                               >= (long)OB_DRIVEBASE_SETTLE_MS
+                           && worst < (ob_float_t)
+                                  OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG;
+            if (arrived || capped) {
+                db->done = true;
+            }
         }
     }
     ob_float_t fwd_cmd  = fwd_ff_vel  + db->kp_sum  * sum_err;

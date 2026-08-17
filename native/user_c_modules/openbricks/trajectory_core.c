@@ -14,30 +14,35 @@
 // (bench 2026-08-16: "the deceleration is too much while the
 // acceleration is correct").
 //
+// Profiles end at ``v3`` (2.5.0, Pybricks Stop.NONE): 0 for a
+// stopping move, or a carried speed so the NEXT command picks up
+// where this one leaves off — chained maneuvers without stopping.
+//
 // Segment shape (velocities relative to the move's direction; v0
 // may be negative — moving the wrong way — or above cruise):
 //
 //   A: [0, tA)            v0 -> v_peak at ±accel
 //   B: [tA, tA+t_cruise)  hold v_peak
-//   C: [..., t_total)     v_peak -> 0 at -accel
+//   C: [..., t_total)     v_peak -> v3 at -accel
 //
-// When the distance cannot absorb stopping from v0 at the
-// configured accel (D < v0²/2a), the deceleration is raised for
-// that one move to exactly v0²/(2D): a pure, steeper ramp that
-// lands at rest precisely on target — continuous from the speed the
-// axis is actually doing, never overshooting, never stepping the
-// feed-forward down.
+// When the distance cannot absorb slowing from v0 to v3 at the
+// configured accel (D < (v0²-v3²)/2a), the deceleration is raised
+// for that one move to exactly (v0²-v3²)/(2D): a pure, steeper ramp
+// that lands at the end speed precisely on target — continuous from
+// the speed the axis is actually doing, never overshooting, never
+// stepping the feed-forward down.
 
 #include <math.h>
 
 #include "trajectory_core.h"
 
-void ob_trajectory_init_v0(ob_trajectory_t *t,
-                           ob_float_t start,
-                           ob_float_t target,
-                           ob_float_t cruise,
-                           ob_float_t accel,
-                           ob_float_t v0_world) {
+void ob_trajectory_init_v0v3(ob_trajectory_t *t,
+                             ob_float_t start,
+                             ob_float_t target,
+                             ob_float_t cruise,
+                             ob_float_t accel,
+                             ob_float_t v0_world,
+                             ob_float_t v3_end) {
     t->start    = start;
     t->distance = target - start;
     t->cruise   = (cruise < 0) ? -cruise : cruise;
@@ -49,11 +54,19 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
     // already moving toward the target.
     ob_float_t v0 = v0_world * t->direction;
     t->v0 = v0;
+    // End speed is a magnitude along the move's direction, bounded
+    // by cruise (you can't carry faster than you cruise).
+    ob_float_t v3 = (v3_end < 0) ? 0.0 : v3_end;
+    if (v3 > t->cruise) {
+        v3 = t->cruise;
+    }
+    t->v3 = v3;
 
     if (D == 0.0 || t->cruise == 0.0 || t->accel == 0.0) {
         // Degenerate — no motion (same contract as always; arming a
         // zero move while in motion is the caller's residual to own).
         t->v0         = 0.0;
+        t->v3         = 0.0;
         t->t_entry    = 0.0;
         t->a_entry    = 0.0;
         t->d_entry    = 0.0;
@@ -69,21 +82,21 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
     ob_float_t a  = t->accel;
     ob_float_t vc = t->cruise;
 
-    // Entry speed the distance cannot absorb: stopping from v0 takes
-    // v0²/2a, so v0 above sqrt(2aD) cannot land inside D at the
-    // configured accel. Raise the deceleration for THIS move to
-    // exactly v0²/(2D) — the value that lands at rest precisely on
-    // target — and keep the true entry speed. pbio clamps w0 instead
-    // (bind_w0 against max(accel, decel)), which steps the
-    // feed-forward down once; the steeper ramp brakes harder but
-    // stays continuous from the speed the robot is actually doing
-    // (user decision 2026-08-17, replacing the 2.0.1 clamp). With
-    // a = v0²/2D the segment math below degenerates to a pure
-    // deceleration: v_peak = v0, no entry ramp, no cruise.
-    if (v0 > 0.0) {
-        ob_float_t v_stop_max = ob_sqrt(2.0 * a * D);
-        if (v0 > v_stop_max) {
-            a        = v0 * v0 / (2.0 * D);
+    // Entry speed the distance cannot absorb: slowing from v0 to v3
+    // takes (v0²-v3²)/2a, so beyond that the configured accel cannot
+    // land inside D. Raise the deceleration for THIS move to exactly
+    // (v0²-v3²)/(2D) — the value that lands at the end speed
+    // precisely on target — and keep the true entry speed. pbio
+    // clamps w0 instead (bind_w0 against max(accel, decel)), which
+    // steps the feed-forward down once; the steeper ramp brakes
+    // harder but stays continuous from the speed the robot is
+    // actually doing (user decision 2026-08-17, replacing the 2.0.1
+    // clamp). With the raised a the segment math below degenerates
+    // to a pure deceleration: v_peak = v0, no entry ramp, no cruise.
+    if (v0 > v3) {
+        ob_float_t need = (v0 * v0 - v3 * v3) / (2.0 * a);
+        if (need > D) {
+            a        = (v0 * v0 - v3 * v3) / (2.0 * D);
             t->accel = a;
         }
     }
@@ -94,7 +107,7 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
     if (d_entry_trap < 0.0) {
         d_entry_trap = -d_entry_trap;   // v0 > vc: entry is a decel
     }
-    ob_float_t d_exit = (vc * vc) / (2.0 * a);
+    ob_float_t d_exit = ((vc * vc) - (v3 * v3)) / (2.0 * a);
 
     if (d_entry_trap + d_exit <= D) {
         // Full trapezoid at cruise.
@@ -104,28 +117,41 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
         t->t_entry    = ((v0 <= vc) ? (vc - v0) : (v0 - vc)) / a;
         t->d_entry    = ((vc * vc) - (v0 * v0)) / (2.0 * a);
         t->t_cruise   = (D - d_entry_trap - d_exit) / vc;
-        t->t_ramp     = vc / a;                  // exit ramp
+        t->t_ramp     = (vc - v3) / a;           // exit ramp
         t->d_ramp     = d_exit;
         t->t_total    = t->t_entry + t->t_cruise + t->t_ramp;
         return;
     }
 
-    // Cruise unreachable. Peak that fits D from v0:
-    //   (vp² - v0²)/2a + vp²/2a = D  =>  vp = sqrt((2aD + v0²) / 2)
-    ob_float_t vp2 = (2.0 * a * D + v0 * v0) / 2.0;
+    // Cruise unreachable. Peak that fits D from v0 down to v3:
+    //   (vp² - v0²)/2a + (vp² - v3²)/2a = D
+    //   =>  vp = sqrt((2aD + v0² + v3²) / 2)
+    ob_float_t vp2 = (2.0 * a * D + v0 * v0 + v3 * v3) / 2.0;
     ob_float_t vp  = ob_sqrt(vp2 > 0.0 ? vp2 : 0.0);
 
-    // The decel raise above guarantees vp >= v0 here: vp² - v0² =
-    // (2aD - v0²)/2, and a was raised until v0 <= sqrt(2aD).
+    // The decel raise above guarantees vp >= v0 AND vp >= v3 here:
+    // vp² - v0² = (2aD + v3² - v0²)/2 >= 0 once (v0²-v3²) <= 2aD,
+    // and vp² - v3² = (2aD + v0² - v3²)/2 >= 0 whenever v0 >= v3
+    // (for v0 < v3 the entry ramp supplies the difference).
     t->triangular = true;
     t->v_peak     = vp;
     t->a_entry    = a;
     t->t_entry    = (vp - v0) / a;
     t->d_entry    = ((vp * vp) - (v0 * v0)) / (2.0 * a);
     t->t_cruise   = 0.0;
-    t->t_ramp     = vp / a;                      // exit ramp
-    t->d_ramp     = (vp * vp) / (2.0 * a);
+    t->t_ramp     = (vp - v3) / a;               // exit ramp
+    t->d_ramp     = ((vp * vp) - (v3 * v3)) / (2.0 * a);
     t->t_total    = t->t_entry + t->t_ramp;
+}
+
+void ob_trajectory_init_v0(ob_trajectory_t *t,
+                           ob_float_t start,
+                           ob_float_t target,
+                           ob_float_t cruise,
+                           ob_float_t accel,
+                           ob_float_t v0_world) {
+    ob_trajectory_init_v0v3(t, start, target, cruise, accel,
+                            v0_world, 0.0);
 }
 
 void ob_trajectory_init(ob_trajectory_t *t,
@@ -133,7 +159,7 @@ void ob_trajectory_init(ob_trajectory_t *t,
                         ob_float_t target,
                         ob_float_t cruise,
                         ob_float_t accel) {
-    ob_trajectory_init_v0(t, start, target, cruise, accel, 0.0);
+    ob_trajectory_init_v0v3(t, start, target, cruise, accel, 0.0, 0.0);
 }
 
 void ob_trajectory_sample(const ob_trajectory_t *t,
@@ -148,7 +174,9 @@ void ob_trajectory_sample(const ob_trajectory_t *t,
         abs_vel = (t->t_total > 0.0) ? t->v0 : 0.0;
     } else if (t_s >= t->t_total) {
         abs_pos = (t->distance < 0) ? -t->distance : t->distance;
-        abs_vel = 0.0;
+        // A carrying profile keeps its end speed; extending the
+        // position reference past the target is the caller's job.
+        abs_vel = (t->t_total > 0.0) ? t->v3 : 0.0;
     } else if (t_s < t->t_entry) {
         // Entry ramp: v0 toward v_peak at a_entry.
         abs_vel = t->v0 + t->a_entry * t_s;
@@ -157,11 +185,11 @@ void ob_trajectory_sample(const ob_trajectory_t *t,
         abs_vel = t->v_peak;
         abs_pos = t->d_entry + t->v_peak * (t_s - t->t_entry);
     } else {
-        // Exit ramp: v_peak -> 0 at -accel.
+        // Exit ramp: v_peak -> v3 at -accel.
         ob_float_t td = t_s - t->t_entry - t->t_cruise;
         abs_vel = t->v_peak - t->accel * td;
-        if (abs_vel < 0.0) {
-            abs_vel = 0.0;
+        if (abs_vel < t->v3) {
+            abs_vel = t->v3;
         }
         ob_float_t d_before = t->d_entry + t->v_peak * t->t_cruise;
         abs_pos = d_before + t->v_peak * td - 0.5 * t->accel * td * td;

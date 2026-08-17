@@ -106,16 +106,16 @@ class _FakeBus:
     def db_config(self, *a):
         self.calls.append(("db_config",) + a)
 
-    def db_straight(self, mm, mm_s):
-        self.calls.append(("db_straight", mm, mm_s))
+    def db_straight(self, mm, mm_s, carry=0):
+        self.calls.append(("db_straight", mm, mm_s, carry))
         self._left = self.done_after
 
     def db_turn(self, deg, dps):
         self.calls.append(("db_turn", deg, dps))
         self._left = self.done_after
 
-    def db_curve(self, radius_mm, deg, mm_s):
-        self.calls.append(("db_curve", radius_mm, deg, mm_s))
+    def db_curve(self, radius_mm, deg, mm_s, carry=0):
+        self.calls.append(("db_curve", radius_mm, deg, mm_s, carry))
         self._left = self.done_after
 
     def servo_stats(self, slot):
@@ -467,6 +467,44 @@ class AdoptionTests(_Base):
         db = DriveBase(left, right, wheel_diameter_mm=88,
                        axle_track_mm=138, **kw)
         return db, left, right
+
+    def test_then_continue_skips_the_stop_dispatch(self):
+        # then="continue" hands the wheels to the next command: when
+        # done() latches, NO db_stop is dispatched — the engine keeps
+        # driving at the move's end speed (Pybricks Stop.NONE).
+        db, _, _ = self._drivebase()
+        db.straight(100, then="continue")           # blocking
+        stops = [c for c in self.bus.calls if c[0] == "db_stop"]
+        self.assertEqual(stops, [],
+                         "continue must not dispatch a stop: %r" % stops)
+        # carry flag reached the binding.
+        arm = [c for c in self.bus.calls if c[0] == "db_straight"][0]
+        self.assertEqual(arm[3], 1)
+
+    def test_then_stop_alias_dispatches_coast(self):
+        # "stop" is the plain-named alias of the coast default.
+        db, _, _ = self._drivebase()
+        db.straight(100, then="stop")
+        stops = [c for c in self.bus.calls if c[0] == "db_stop"]
+        self.assertEqual(len(stops), 1)
+        arm = [c for c in self.bus.calls if c[0] == "db_straight"][0]
+        self.assertEqual(arm[3], 0)
+
+    def test_curve_then_continue_carries_too(self):
+        db, _, _ = self._drivebase()
+        db.curve(150, 90, then="continue")
+        stops = [c for c in self.bus.calls if c[0] == "db_stop"]
+        self.assertEqual(stops, [])
+        arm = [c for c in self.bus.calls if c[0] == "db_curve"][0]
+        self.assertEqual(arm[4], 1)
+
+    def test_turn_refuses_continue(self):
+        db, _, _ = self._drivebase()
+        try:
+            db.turn(90, then="continue")
+            self.fail("must raise")
+        except ValueError:
+            pass
 
     def test_drivebase_adopts_and_releases_the_uart(self):
         from openbricks.drivers.st3215 import ST3215

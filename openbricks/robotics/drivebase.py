@@ -515,17 +515,28 @@ class DriveBase:
         mode = self._pending["mode"]
         if mode in ("straight_native", "turn_native", "curve_native"):
             if self._native.is_done():
-                self.stop(then=self._pending["then"], wait=False)
+                self._finish_move()
                 return True
             return False
         if mode in ("straight_serial", "turn_serial", "curve_serial"):
             if self._serial_engine.tick_done():
-                self.stop(then=self._pending["then"], wait=False)
+                self._finish_move()
                 return True
             return False
         # Unknown mode — treat as done to avoid wedging the caller.
         self._pending = None
         return True
+
+    def _finish_move(self):
+        """Apply a completed move's end state. ``then="continue"``
+        dispatches NOTHING: the engine keeps the wheels at the move's
+        end speed until the next command supersedes it (Pybricks
+        Stop.NONE)."""
+        then = self._pending["then"]
+        if then == "continue":
+            self._pending = None
+            return
+        self.stop(then=then, wait=False)
 
     # ---- blocking moves via the C coupled controller ----
     def straight(self, distance_mm, then="coast", wait=True):
@@ -545,11 +556,16 @@ class DriveBase:
         Any subsequent move command supersedes the previous pending
         wait=False move (pybricks "new command wins").
 
+        ``then="continue"`` (Pybricks ``Stop.NONE``) does not
+        decelerate at the end: the move finishes AT cruise speed and
+        the wheels keep it until the next command — chain
+        ``straight``/``curve`` segments without stopping between
+        them. ``"stop"`` is accepted as an alias of the default
+        coast end state.
+
         Raises ``RuntimeError`` for open-loop motor pairs — moves by
         distance need feedback; use ``drive()``/``stop()``."""
-        if then not in ("coast", "brake", "hold"):
-            raise ValueError(
-                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        then = self._check_then(then, allow_continue=True)
         self._arm_straight(distance_mm, then)
         if wait:
             while not self.done():
@@ -560,10 +576,10 @@ class DriveBase:
         right/clockwise viewed from above, Pybricks convention).
 
         Same ``then`` / ``wait`` semantics as ``straight()`` — see
-        its docstring."""
-        if then not in ("coast", "brake", "hold"):
-            raise ValueError(
-                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        its docstring — except ``then="continue"``: a turn in place
+        ends facing its target heading, so there is no speed worth
+        carrying."""
+        then = self._check_then(then, allow_continue=False)
         self._arm_turn(angle_deg, then)
         if wait:
             while not self.done():
@@ -595,19 +611,34 @@ class DriveBase:
         wheel never exceeds ``straight_speed``. ``curve(0, angle)``
         degrades to a turn in place.
 
-        Same ``then`` / ``wait`` semantics as ``straight()``."""
-        if then not in ("coast", "brake", "hold"):
-            raise ValueError(
-                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        Same ``then`` / ``wait`` semantics as ``straight()``,
+        including ``then="continue"`` — the arc hands its full speed
+        to the next command."""
+        then = self._check_then(then, allow_continue=True)
         self._arm_curve(radius, angle, then)
         if wait:
             while not self.done():
                 time.sleep_ms(10)
 
+    @staticmethod
+    def _check_then(then, allow_continue):
+        """Validate a move's ``then=``. "stop" is the plain-named
+        alias of the default coast end state."""
+        if then == "stop":
+            return "coast"
+        allowed = ("coast", "brake", "hold", "continue") if allow_continue \
+                  else ("coast", "brake", "hold")
+        if then not in allowed:
+            raise ValueError(
+                "then must be one of %s (got %r)" % (
+                    "/".join("'%s'" % a for a in ("stop",) + allowed), then))
+        return then
+
     # ---- arm: stash pending state, kick off motion ----
     def _arm_straight(self, distance_mm, then):
+        carry = then == "continue"
         if self._serial_engine is not None:
-            self._serial_engine.arm_straight(float(distance_mm))
+            self._serial_engine.arm_straight(float(distance_mm), carry)
             self._pending = {"mode": "straight_serial", "then": then}
             return
         if self._native is not None:
@@ -617,7 +648,8 @@ class DriveBase:
             # e-stop gate rode on them, hence the explicit check.
             estop.check()
             speed_mm_s = self._straight_speed_dps * self._wheel_circumference / 360
-            self._native.straight(float(distance_mm), float(speed_mm_s))
+            self._native.straight(float(distance_mm), float(speed_mm_s),
+                                  carry)
             self._pending = {"mode": "straight_native", "then": then}
             return
         raise RuntimeError(
@@ -648,15 +680,17 @@ class DriveBase:
         return mm_s
 
     def _arm_curve(self, radius_mm, angle_deg, then):
+        carry = then == "continue"
         if self._serial_engine is not None:
             self._serial_engine.arm_curve(float(radius_mm),
-                                          float(angle_deg))
+                                          float(angle_deg), carry)
             self._pending = {"mode": "curve_serial", "then": then}
             return
         if self._native is not None:
             estop.check()       # see _arm_straight
             self._native.curve(float(radius_mm), float(angle_deg),
-                               float(self._curve_speed_mm_s(radius_mm)))
+                               float(self._curve_speed_mm_s(radius_mm)),
+                               carry)
             self._pending = {"mode": "curve_native", "then": then}
             return
         raise RuntimeError(

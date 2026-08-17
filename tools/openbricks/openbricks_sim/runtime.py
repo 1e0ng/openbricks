@@ -791,9 +791,11 @@ class SimDriveBase:
 
     # -------- user-facing API --------
 
-    def straight(self, distance_mm: float, speed_mm_s: float) -> None:
+    def straight(self, distance_mm: float, speed_mm_s: float,
+                 carry: bool = False) -> None:
         self.db.straight(self.runtime.now_ms,
-                          float(distance_mm), float(speed_mm_s))
+                          float(distance_mm), float(speed_mm_s),
+                          bool(carry))
         self._attach()
 
     def turn(self, angle_deg: float, rate_dps: float) -> None:
@@ -802,9 +804,9 @@ class SimDriveBase:
         self._attach()
 
     def curve(self, radius_mm: float, angle_deg: float,
-              speed_mm_s: float) -> None:
+              speed_mm_s: float, carry: bool = False) -> None:
         self.db.curve(self.runtime.now_ms, float(radius_mm),
-                      float(angle_deg), float(speed_mm_s))
+                      float(angle_deg), float(speed_mm_s), bool(carry))
         self._attach()
 
     def stop(self) -> None:

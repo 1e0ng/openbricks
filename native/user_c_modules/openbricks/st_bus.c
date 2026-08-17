@@ -1226,11 +1226,11 @@ static mp_obj_t sb_db_disable(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_disable_obj, sb_db_disable);
 
-static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
-                               mp_obj_t mm_s_in) {
-    (void)self_in;
-    ob_float_t mm   = (ob_float_t)mp_obj_get_float(mm_in);
-    ob_float_t mm_s = (ob_float_t)mp_obj_get_float(mm_s_in);
+static mp_obj_t sb_db_straight(size_t n_args, const mp_obj_t *args) {
+    // (self, mm, mm_s[, carry])
+    ob_float_t mm   = (ob_float_t)mp_obj_get_float(args[1]);
+    ob_float_t mm_s = (ob_float_t)mp_obj_get_float(args[2]);
+    bool carry      = (n_args > 3) && mp_obj_is_true(args[3]);
     bus_take();
     // Unconfigured (or disabled) db: slots are -1 and st_moves[-1]
     // writes into adjacent statics. sb_db_stop/sb_db_move_wheels
@@ -1250,11 +1250,12 @@ static mp_obj_t sb_db_straight(mp_obj_t self_in, mp_obj_t mm_in,
     st_db_ws_clear_locked();   // trajectory supersedes a wheel slew
     st_db_writing = true;
     st_db.accel_dps2 = st_db_accel_straight;
-    ob_drivebase_straight(&st_db, (long)st_db_now_ms, mm, mm_s);
+    ob_drivebase_straight(&st_db, (long)st_db_now_ms, mm, mm_s, carry);
     bus_release();
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_straight_obj, sb_db_straight);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_db_straight_obj, 3, 4,
+                                           sb_db_straight);
 
 static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
                            mp_obj_t dps_in) {
@@ -1281,10 +1282,10 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
 static MP_DEFINE_CONST_FUN_OBJ_3(sb_db_turn_obj, sb_db_turn);
 
 static mp_obj_t sb_db_curve(size_t n_args, const mp_obj_t *args) {
-    (void)n_args;
     ob_float_t radius = (ob_float_t)mp_obj_get_float(args[1]);
     ob_float_t angle  = (ob_float_t)mp_obj_get_float(args[2]);
     ob_float_t mm_s   = (ob_float_t)mp_obj_get_float(args[3]);
+    bool carry        = (n_args > 4) && mp_obj_is_true(args[4]);
     bus_take();
     if (st_db_slot_l < 0 || st_db_slot_r < 0) {
         bus_release();
@@ -1298,11 +1299,12 @@ static mp_obj_t sb_db_curve(size_t n_args, const mp_obj_t *args) {
     st_db_ws_clear_locked();   // trajectory supersedes a wheel slew
     st_db_writing = true;
     st_db.accel_dps2 = st_db_accel_straight;
-    ob_drivebase_curve(&st_db, (long)st_db_now_ms, radius, angle, mm_s);
+    ob_drivebase_curve(&st_db, (long)st_db_now_ms, radius, angle, mm_s,
+                       carry);
     bus_release();
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_db_curve_obj, 4, 4,
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_db_curve_obj, 4, 5,
                                            sb_db_curve);
 
 // Take the wheels away from the coupled controller: capture the

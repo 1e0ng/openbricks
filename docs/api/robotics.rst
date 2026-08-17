@@ -49,6 +49,17 @@ over the wheels: a DriveBase hands their UART to the native bus
 driver when it adopts them, so a SyncServoGroup can't drive them at
 all.
 
+Moves take a ``then=`` end state: ``"stop"`` (alias ``"coast"``,
+the default) decelerates to rest and free-wheels; ``"brake"`` /
+``"hold"`` end actively. ``then="continue"`` on ``straight`` and
+``curve`` — Pybricks ``Stop.NONE`` — does NOT decelerate at the
+end: the move finishes at cruise speed and the wheels keep it until
+the next command, so chained segments flow through their seams::
+
+    db.straight(300, then="continue")   # ends AT cruise
+    db.curve(150, 90, then="continue")  # picks the speed up
+    db.straight(300)                    # decelerates to rest
+
 ``stop()`` is Pybricks parity: it coasts and returns immediately.
 ``then`` picks the end state (``"coast"``, ``"brake"``,
 ``"hold"``). Short moves armed while the robot is already fast
