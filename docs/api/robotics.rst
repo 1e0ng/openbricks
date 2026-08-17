@@ -49,18 +49,17 @@ over the wheels: a DriveBase hands their UART to the native bus
 driver when it adopts them, so a SyncServoGroup can't drive them at
 all.
 
-``stop(then="brake")`` blocks until both wheels' measured speeds
-read ~0 — a deliberate extension beyond Pybricks, whose stop
-returns immediately. ``then`` picks the end state (``"brake"``,
-``"coast"``, ``"hold"``); the wait covers the decel ramp plus
-settle for brake/hold, and the physical freewheel decay for coast.
-Pass ``wait=False`` for the Pybricks-style instant return. Motor
-pairs without measured speed (open-loop drivers) return instantly
-by default, since there is nothing to wait on; ``wait=True``
-insists and raises ``ValueError`` there. If the wheels never settle
-within 5 s the wait raises ``RuntimeError`` naming the measured
-speeds — a stopped robot that is still moving is a fault, not a
-detail to hide.
+``stop()`` is Pybricks parity: it coasts and returns immediately.
+``then`` picks the end state (``"coast"``, ``"brake"``,
+``"hold"``). Short moves armed while the robot is already fast
+raise their own deceleration to land at rest exactly on target, so
+you rarely need more — but ``wait=True`` is available to block
+until both wheels' measured speeds read ~0 (the decel ramp plus
+settle for brake/hold, the physical freewheel decay for coast). It
+raises ``ValueError`` on open-loop pairs (no measured speed) and,
+if the wheels never settle within 5 s, ``RuntimeError`` naming the
+measured speeds — a stopped robot that is still moving is a fault,
+not a detail to hide.
 
 A wheel that stops answering the bus — no power, a knocked-loose
 TX/RX wire, the wrong ``servo_id`` — raises instead of quietly doing

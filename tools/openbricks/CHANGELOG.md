@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.4.0 — short moves brake harder; stop() reverts to Pybricks parity
+
+Second thoughts on the 2.0.1-2.3.0 deceleration arc (user decision).
+When a move is armed while the robot is already fast and the
+distance cannot absorb stopping at `settings(acceleration=...)`,
+the move now KEEPS the true entry speed and RAISES its own
+deceleration to exactly v0²/(2D) — one continuous, steeper ramp
+that lands at rest precisely on target. (2.0.1 instead clamped the
+entry speed, pbio-style: a one-time feed-forward step down.) With
+short handovers landing correctly on their own, the stop()
+extensions lose their reason to exist as defaults, so `db.stop()`
+reverts to Pybricks parity: `then="coast"`, `wait=False`, instant
+return. `wait=True` and `then="brake"/"hold"` remain available
+explicitly; examples that want brake spell it again. Both sides
+move: flash 2.4.0 AND `pipx upgrade openbricks`.
+
 ## 2.3.1 — syntax errors name your file, not a temp path
 
 Field report: `openbricks run linefollow_y.py` on a file with a

@@ -115,7 +115,6 @@ class DriveBase:
         self._axle_track = axle_track_mm
         self._imu = imu
         self._gyro_enabled = False
-        self._speed_capable = None   # lazily probed by stop()
 
         # Serial-bus motors: adopt them onto the hard-tick engine
         # transparently (1.45.0 — ONE drivebase class, user decision).
@@ -388,14 +387,14 @@ class DriveBase:
         self._run_at_dps(self._left, left)
         self._run_at_dps(self._right, right)
 
-    def stop(self, then="brake", wait=None):
+    def stop(self, then="coast", wait=False):
         """Halt both wheels. Also clears any pending ``wait=False``
         move (new command supersedes, pybricks-style). ``then``
         selects the end-state:
 
-        * ``"brake"`` (default) — both motors actively resist motion
-          at zero velocity.
-        * ``"coast"`` — both motors free-wheel.
+        * ``"coast"`` (default) — both motors free-wheel.
+        * ``"brake"`` — both motors actively resist motion at zero
+          velocity.
         * ``"hold"`` — both motors actively hold their current angle.
           Requires motors that implement ``hold()`` (e.g. ``ST3215Motor``);
           open-loop drivers raise ``NotImplementedError``.
@@ -412,15 +411,15 @@ class DriveBase:
         call, so the second wheel's 1 kHz control tick can't keep
         driving while the first is already released.
 
-        By default the call BLOCKS until both wheels' MEASURED
-        speeds read ~0 — a deliberate extension beyond Pybricks,
-        whose stop/brake return immediately: for ``brake``/``hold``
-        that is the decel ramp finishing plus settle; for ``coast``
-        it is the physical freewheel decay. Open-loop motor pairs
-        have no measured speed, so their default stays the instant
-        return (there is nothing to wait on). Explicitly: ``wait=True``
-        insists — and raises ``ValueError`` on open-loop pairs;
-        ``wait=False`` is the Pybricks-style instant return.
+        Pybricks parity by default: the call returns immediately
+        (their stop/brake do too — verified from their source).
+        Since 2.4.0 short moves armed at speed raise their own
+        deceleration to land at rest on target, so waiting is rarely
+        needed; pass ``wait=True`` to BLOCK until both wheels'
+        MEASURED speeds read ~0 — for ``brake``/``hold`` the decel
+        ramp finishing plus settle, for ``coast`` the physical
+        freewheel decay. ``wait=True`` raises ``ValueError`` on
+        open-loop pairs (no measured speed to wait on) and
         ``RuntimeError`` if the wheels never settle within the
         timeout.
         """
@@ -429,30 +428,8 @@ class DriveBase:
                 "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
         self._pending = None
         self._dispatch_stop(then)
-        if wait is None:
-            wait = self._speed_measurable()
         if wait:
             self._wait_until_stopped()
-
-    def _speed_measurable(self):
-        """True when both motors report measured speed — probed once
-        and cached (the interface defines ``speed()`` as a
-        NotImplementedError stub, so existence alone proves
-        nothing)."""
-        if self._speed_capable is None:
-            capable = True
-            for m in (self._left, self._right):
-                fn = getattr(m, "speed", None)
-                if fn is None:
-                    capable = False
-                    break
-                try:
-                    fn()
-                except NotImplementedError:
-                    capable = False
-                    break
-            self._speed_capable = capable
-        return self._speed_capable
 
     # stop(wait=True): "almost zero" and how long we insist on it.
     _STOP_WAIT_TOL_DPS = 10.0

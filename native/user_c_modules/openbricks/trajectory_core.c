@@ -21,11 +21,12 @@
 //   B: [tA, tA+t_cruise)  hold v_peak
 //   C: [..., t_total)     v_peak -> 0 at -accel
 //
-// When the distance cannot even absorb stopping from v0
-// (D < v0²/2a), the profile is a pure deceleration that OVERSHOOTS
-// the target by the physics-mandated margin; position feedback pulls
-// the residual back after the profile expires. That is the honest
-// answer — the alternative was violating the acceleration limit.
+// When the distance cannot absorb stopping from v0 at the
+// configured accel (D < v0²/2a), the deceleration is raised for
+// that one move to exactly v0²/(2D): a pure, steeper ramp that
+// lands at rest precisely on target — continuous from the speed the
+// axis is actually doing, never overshooting, never stepping the
+// feed-forward down.
 
 #include <math.h>
 
@@ -68,20 +69,22 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
     ob_float_t a  = t->accel;
     ob_float_t vc = t->cruise;
 
-    // Entry speed the distance can absorb: stopping from v0 takes
-    // v0²/2a, so v0 above sqrt(2aD) cannot land inside D. Clamp it
-    // (pbio's choice): the feed-forward steps down once, bounded by
-    // the distance's own physics, and the plant absorbs the excess
-    // like any feedback error. The alternative — decelerate cleanly,
-    // OVERSHOOT, then have position feedback reverse the robot —
-    // read as "worse" on the bench within the hour it shipped
-    // (2026-08-16: straight(115mm) at 830 dps glided past the mark
-    // and snapped backwards).
+    // Entry speed the distance cannot absorb: stopping from v0 takes
+    // v0²/2a, so v0 above sqrt(2aD) cannot land inside D at the
+    // configured accel. Raise the deceleration for THIS move to
+    // exactly v0²/(2D) — the value that lands at rest precisely on
+    // target — and keep the true entry speed. pbio clamps w0 instead
+    // (bind_w0 against max(accel, decel)), which steps the
+    // feed-forward down once; the steeper ramp brakes harder but
+    // stays continuous from the speed the robot is actually doing
+    // (user decision 2026-08-17, replacing the 2.0.1 clamp). With
+    // a = v0²/2D the segment math below degenerates to a pure
+    // deceleration: v_peak = v0, no entry ramp, no cruise.
     if (v0 > 0.0) {
         ob_float_t v_stop_max = ob_sqrt(2.0 * a * D);
         if (v0 > v_stop_max) {
-            v0    = v_stop_max;
-            t->v0 = v0;
+            a        = v0 * v0 / (2.0 * D);
+            t->accel = a;
         }
     }
 
@@ -112,8 +115,8 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
     ob_float_t vp2 = (2.0 * a * D + v0 * v0) / 2.0;
     ob_float_t vp  = ob_sqrt(vp2 > 0.0 ? vp2 : 0.0);
 
-    // The v0 clamp above guarantees vp >= v0 here: vp² - v0² =
-    // (2aD - v0²)/2 >= 0 once v0 <= sqrt(2aD).
+    // The decel raise above guarantees vp >= v0 here: vp² - v0² =
+    // (2aD - v0²)/2, and a was raised until v0 <= sqrt(2aD).
     t->triangular = true;
     t->v_peak     = vp;
     t->a_entry    = a;

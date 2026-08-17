@@ -98,29 +98,15 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         self.assertEqual(right._in1.value(), 0)
         self.assertEqual(right._in2.value(), 1)
 
-    def test_stop_default_brakes(self):
-        # Default since 2.3.0 (user decision): ``stop()`` brakes —
-        # both H-bridge terminals shorted high, actively resisting
-        # motion at zero velocity.
+    def test_stop_default_coasts(self):
+        # Pybricks-parity default (reinstated 2.4.0): ``stop()``
+        # coasts — both H-bridge inputs low, PWM duty zero, the
+        # wheels spin freely.
         left = L298NMotor(in1=1, in2=2, pwm=17)
         right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         db.stop()
-
-        self.assertEqual(left._in1.value(), 1)
-        self.assertEqual(left._in2.value(), 1)
-        self.assertEqual(right._in1.value(), 1)
-        self.assertEqual(right._in2.value(), 1)
-
-    def test_stop_then_coast_freewheels(self):
-        # Explicit ``then="coast"``: both H-bridge inputs low, PWM
-        # duty zero — the wheels spin freely.
-        left = L298NMotor(in1=1, in2=2, pwm=17)
-        right = L298NMotor(in1=9, in2=10, pwm=11)
-        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
-
-        db.stop(then="coast")
 
         self.assertEqual(left._in1.value(), 0)
         self.assertEqual(left._in2.value(), 0)
@@ -128,6 +114,20 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         self.assertEqual(right._in2.value(), 0)
         self.assertEqual(left._pwm.duty(), 0)
         self.assertEqual(right._pwm.duty(), 0)
+
+    def test_stop_then_brake_engages_brake(self):
+        # Explicit ``then="brake"``: both H-bridge terminals shorted
+        # high, actively resisting motion at zero velocity.
+        left = L298NMotor(in1=1, in2=2, pwm=17)
+        right = L298NMotor(in1=9, in2=10, pwm=11)
+        db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+
+        db.stop(then="brake")
+
+        self.assertEqual(left._in1.value(), 1)
+        self.assertEqual(left._in2.value(), 1)
+        self.assertEqual(right._in1.value(), 1)
+        self.assertEqual(right._in2.value(), 1)
 
     def test_stop_then_hold_raises_on_open_loop_motors(self):
         # L298N can't actively hold — no encoder, no position loop.
@@ -313,14 +313,15 @@ class StopWaitTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             db.stop(wait=True)
 
-    def test_default_waits(self):
-        # wait defaults TRUE (user decision, 2.2.0): a bare stop()
-        # blocks until the wheels settle.
-        left = _SpeedFake([300, 40, 5, 0, 0])
-        right = _SpeedFake([280, 30, 4, 0, 0])
+    def test_default_does_not_poll(self):
+        # Pybricks-parity default (reinstated 2.4.0): a bare stop()
+        # returns immediately — never-settling fakes prove no poll
+        # loop ran.
+        left = _SpeedFake([500])
+        right = _SpeedFake([500])
         db = self._db(left, right)
-        db.stop()
-        self.assertEqual(left._speeds, [0])   # scripts consumed
+        db.stop()                              # returns instantly
+        self.assertEqual(left._speeds, [500])  # script untouched
 
     def test_wait_false_does_not_poll(self):
         # Pybricks-style instant return on request.
@@ -330,8 +331,7 @@ class StopWaitTests(unittest.TestCase):
         db.stop(wait=False)                # returns immediately
 
     def test_open_loop_default_stop_is_instant(self):
-        # The adaptive default: open-loop pairs have nothing to
-        # measure, so a bare stop() stays the instant return — it
+        # Open-loop pairs share the instant default — a bare stop()
         # must neither raise nor hang.
         left = L298NMotor(in1=1, in2=2, pwm=17)
         right = L298NMotor(in1=9, in2=10, pwm=11)

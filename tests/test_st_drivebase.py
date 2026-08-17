@@ -1404,23 +1404,24 @@ class TrajectoryEntrySpeedTests(unittest.TestCase):
         self.assertTrue(800 < shed < 3600,
                         "shed %d in 100 ms (expected ~1700)" % shed)
 
-    def test_short_straight_at_cruise_clamps_entry_no_reversal(self):
+    def test_short_straight_at_cruise_boosts_decel_no_reversal(self):
         # Physics: 830 dps needs ~56 mm to stop at 1500 dps^2. A
-        # 20 mm command cannot absorb that entry — v0 is CLAMPED to
-        # sqrt(2aD) (pbio's choice): one bounded step at the arm,
-        # then a clean landing ON the mark. The alternative —
-        # decelerate, overshoot, reverse — put two abrupt stops at
-        # every short handover (bench 2026-08-16).
+        # 20 mm command cannot absorb that entry at the configured
+        # accel — since 2.4.0 the move KEEPS the true entry speed and
+        # RAISES its deceleration to v0^2/(2D) (user decision,
+        # replacing the 2.0.1 entry clamp): one continuous, steeper
+        # ramp that lands at rest ON the mark. No feed-forward step
+        # at the arm, no overshoot-reverse.
         sb.db_move_wheels(9443, 9443)
         self.w.advance(800)
         base_counts = sb.servo_counts(1)
         sb.db_straight(20.0, 350.0)
         self.w.advance(5)
         v = abs(self.w.spd[1])
-        # Clamped to the distance limit (~3175 steps/s for 20 mm),
-        # not the old full cliff to ~0 and not unclamped cruise.
-        self.assertTrue(1500 < v < 4500,
-                        "entry %d, expected ~3175 (clamped)" % v)
+        # Entry speed PRESERVED (~9443 steps/s, minus 5 ms of the
+        # steep ramp) — neither clamped to ~3175 nor cliffed to ~0.
+        self.assertTrue(v > 5000,
+                        "entry %d, expected near 9443 (kept)" % v)
         # Position must be MONOTONIC — the overshoot-reverse cycle
         # is the regression this pins against.
         last = sb.servo_counts(1)
