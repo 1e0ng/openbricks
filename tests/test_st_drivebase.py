@@ -1420,11 +1420,11 @@ class PidLandingSettleTests(unittest.TestCase):
             if sb.db_done():
                 break
         self.assertTrue(sb.db_done())
-        residual, landings = sb.db_settle_stats()
+        rs, rd, landings, _, _ = sb.db_settle_stats()
         # Laggy wheels MUST have left a real gap at expiry...
-        self.assertTrue(residual > 1.0,
-                        "expiry residual %.2f — harness not lagging?"
-                        % residual)
+        self.assertTrue(max(rs, rd) > 1.0,
+                        "expiry residual %.2f/%.2f — harness not "
+                        "lagging?" % (rs, rd))
         # ...and the settle machinery closed it to arrival tolerance.
         travelled = (sb.servo_counts(1)) * _MM_PER_COUNT
         self.assertTrue(abs(travelled - 150.0) < 3.0,
@@ -1444,13 +1444,36 @@ class PidLandingSettleTests(unittest.TestCase):
                 break
         self.assertTrue(sb.db_done())
         sb.db_stop()                       # the done()-path dispatch
-        residual, landings = sb.db_settle_stats()
-        self.assertTrue(residual > 1.0,
-                        "stats wiped by stop: residual %r" % residual)
+        rs, rd, landings, gi_s, gi_d = sb.db_settle_stats()
+        self.assertTrue(max(rs, rd) > 1.0,
+                        "stats wiped by stop: %r/%r" % (rs, rd))
+        self.assertTrue(landings >= 1,
+                        "landing count wiped by stop: %d" % landings)
         # ...and the next arm starts a fresh record.
         sb.db_straight(50.0, 300.0)
-        residual2, _ = sb.db_settle_stats()
-        self.assertEqual(residual2, 0.0)
+        rs2, rd2, l2, _, _ = sb.db_settle_stats()
+        self.assertEqual((rs2, rd2, l2), (0.0, 0.0, 0))
+
+    def test_done_never_latches_at_speed(self):
+        # pbio's standstill condition: an overshooting plant (130% of
+        # command) crosses the position window while the reference is
+        # still moving — done must NOT latch until the commanded
+        # speed is slow, or the then="coast" dispatch releases the
+        # wheels mid-motion (bench 2026-08-17: the twitch that
+        # survived 2.6.0 — stop, lurch, abrupt stop).
+        self.w.track = 1.3
+        sb.db_straight(150.0, 300.0)
+        spd_at_done = None
+        for _ in range(4000):
+            self.w.advance(1)
+            if sb.db_done():
+                spd_at_done = abs(self.w.spd[1])
+                break
+        self.assertTrue(spd_at_done is not None, "never latched")
+        # 60 dps tolerance = ~680 steps/s, plus the P/I riding it.
+        self.assertTrue(spd_at_done < 1200,
+                        "done latched at %d steps/s - wheels released "
+                        "at speed" % spd_at_done)
 
     def test_stall_does_not_wind_the_integral_unbounded(self):
         # Wheels that never move: after landings are spent the robot

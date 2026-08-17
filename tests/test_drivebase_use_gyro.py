@@ -213,7 +213,10 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         # final turn keep its overshoot uncorrected.)
         self.assertFalse(ndb.is_done())
         imu.heading_value = 90.0   # NOW it has physically arrived
-        time.sleep_ms(50)
+        # 2.6.2: done additionally requires the correction reference
+        # to be SLOW (pbio's standstill rule) — give the in-flight
+        # landing time to ramp out before asserting the latch.
+        time.sleep_ms(400)
         self.assertTrue(ndb.is_done())
 
         imu.heading_value = 95.0   # overshot the absolute target by 5

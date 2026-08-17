@@ -92,6 +92,14 @@
 // machinery is the backstop for a genuinely stuck robot.
 #define OB_DRIVEBASE_LANDING_DPS               120.0
 #define OB_DRIVEBASE_MAX_LANDINGS              3
+// Arrival additionally requires the reference to be SLOW — pbio's
+// standstill condition for zero-end-speed maneuvers. Without it, a
+// plant that crosses the position window mid-landing (still
+// carrying the landing ramp's speed) latched done at speed, and
+// the automatic then="coast" dispatch released the wheels while
+// they were turning: stop, lurch, abrupt stop (bench 2026-08-17,
+// the twitch that survived 2.6.0).
+#define OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS     60.0
 
 
 typedef struct {
@@ -164,6 +172,14 @@ typedef struct {
     bool       landing_active;    // a landing profile is in flight
     ob_float_t landing_best_err;  // best worst-axis err seen at a gate
     ob_float_t expiry_residual;
+    // Per-axis diagnostics at the same capture point: which axis
+    // carries the lag, and how much the integral was supplying (in
+    // dps) when the profile expired — the numbers that say whether
+    // the integral did its job during the approach.
+    ob_float_t expiry_res_sum;
+    ob_float_t expiry_res_diff;
+    ob_float_t expiry_integ_sum_dps;
+    ob_float_t expiry_integ_diff_dps;
     bool       expiry_captured;
 } ob_drivebase_t;
 
@@ -255,8 +271,11 @@ ob_float_t ob_drivebase_body_to_wheel_diff(const ob_drivebase_t *db,
 // Settle diagnostics: residual at the last move's first profile
 // expiry (wheel-deg, worst axis) and shaped-landing count.
 void ob_drivebase_settle_stats(const ob_drivebase_t *db,
-                               ob_float_t *expiry_residual,
-                               int *landings);
+                               ob_float_t *res_sum,
+                               ob_float_t *res_diff,
+                               int *landings,
+                               ob_float_t *integ_sum_dps,
+                               ob_float_t *integ_diff_dps);
 
 
 // Reset the gyro-mode absolute frame (turn_hold + override slot).

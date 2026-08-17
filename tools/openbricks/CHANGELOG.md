@@ -3,6 +3,29 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.6.2 — done requires standstill; per-axis settle diagnostics
+
+Bench (the twitch that survived 2.6.0, now measured): the final
+curve expired with a 94-wheel-deg tracking deficit; the robot
+stalled short, the landing walked it in — and done latched the
+moment POSITION was close, while the landing reference still
+carried speed, so the automatic then="coast" dispatch released the
+wheels mid-motion: stop, lurch, abrupt stop. Two fixes:
+
+* **pbio's standstill rule**: done additionally requires the
+  correction reference to be slow (<60 dps) — the missing half of
+  their on-target condition. Wheels are never released at speed.
+* **Diagnostics**: `db_settle_stats()` now reports per-axis —
+  (res_sum, res_diff, landings, integ_sum_dps, integ_diff_dps) at
+  profile expiry — and the landing count survives the stop dispatch
+  (2.6.1 kept the residual but wiped the count). The next bench
+  read says WHICH axis lags and what the integral was supplying.
+
+The 94-wheel-deg deficit itself (why the integral didn't absorb it
+during the approach) is the open root cause the new numbers will
+pin down. Both sides move: flash 2.6.2 AND `pipx upgrade
+openbricks`.
+
 ## 2.6.1 — settle stats survive the stop dispatch
 
 `db_settle_stats()` read (0.0, 0) on every standard-path move:

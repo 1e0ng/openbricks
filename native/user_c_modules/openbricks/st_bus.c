@@ -1500,19 +1500,24 @@ bool openbricks_db_gyro_in_use_c(void) {
 }
 
 static mp_obj_t sb_db_settle_stats(mp_obj_t self_in) {
-    // (expiry_residual_wheel_deg, landings) for the LAST move — the
-    // bench's measured answer to "how big was the settle gap".
+    // (res_sum, res_diff, landings, integ_sum_dps, integ_diff_dps)
+    // for the LAST move, captured at profile expiry — which axis
+    // lags, how many shaped landings it took, and what the integral
+    // was contributing when the profile ended.
     (void)self_in;
     bus_take();
-    ob_float_t r;
+    ob_float_t rs, rd, is_, id_;
     int n;
-    ob_drivebase_settle_stats(&st_db, &r, &n);
+    ob_drivebase_settle_stats(&st_db, &rs, &rd, &n, &is_, &id_);
     bus_release();
-    mp_obj_t t[2] = {
-        mp_obj_new_float((mp_float_t)r),
+    mp_obj_t t[5] = {
+        mp_obj_new_float((mp_float_t)rs),
+        mp_obj_new_float((mp_float_t)rd),
         mp_obj_new_int(n),
+        mp_obj_new_float((mp_float_t)is_),
+        mp_obj_new_float((mp_float_t)id_),
     };
-    return mp_obj_new_tuple(2, t);
+    return mp_obj_new_tuple(5, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_settle_stats_obj,
                                  sb_db_settle_stats);
