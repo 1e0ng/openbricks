@@ -1177,6 +1177,7 @@ def _exec_program_raw(program_path, origin=None):
     _arm_stop_button(True)
     try:
         with _log.session() as sess:
+            started_ms = _now_ms()
             sess.write_text("started: %s | %s\n" % (
                 origin or "unknown", _run_header(program_path)))
             try:
@@ -1185,6 +1186,15 @@ def _exec_program_raw(program_path, origin=None):
                     exec_mpy(program_path, {"__name__": "__main__"})
                 else:
                     exec(code, {"__name__": "__main__"})
+                # Stamp CLEAN exits too. A log that just ends is
+                # ambiguous between "finished" and "hung forever" —
+                # bench 2026-08-17: a mission that ended normally at
+                # its full-dark condition read as a hang, and the
+                # whole button-forensics chain ran before the truth
+                # surfaced. Every way out now leaves a tail marker
+                # (finished / stopped / traceback).
+                sess.write_text("finished: clean exit after %d ms\n"
+                                % (_now_ms() - started_ms))
             except KeyboardInterrupt:
                 # The button-stop's injected KeyboardInterrupt (and a REPL
                 # Ctrl-C from ``openbricks run``) both unwind to here.

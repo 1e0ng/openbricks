@@ -1708,6 +1708,35 @@ class StopBreadcrumbTests(unittest.TestCase):
         self.assertIn("stopped: KeyboardInterrupt", data)
         self.assertIn("no stop press recorded", data)
 
+    def test_clean_exit_logs_finished_marker(self):
+        # A log that just ENDS is ambiguous between "finished" and
+        # "hung forever" — bench 2026-08-17: a mission ending
+        # normally at its full-dark condition read as a hang and
+        # triggered the whole button-forensics chain. Clean exits
+        # stamp a tail marker with the run duration.
+        import tests.test_log as tlog
+        from openbricks import log as log_mod
+        tlog._wipe(tlog._TEST_LOG_DIR)
+        prev_dir = log_mod.LOG_DIR
+        log_mod.LOG_DIR = tlog._TEST_LOG_DIR
+        prog = tlog._TEST_LOG_DIR + "_clean_prog.py"
+        try:
+            with open(prog, "w") as f:
+                f.write("print('mission complete')\n")
+            launcher._exec_program(prog, origin="button press")
+            runs = log_mod.list_runs()
+            self.assertEqual(len(runs), 1)
+            data = log_mod.read_run(runs[0][0])
+        finally:
+            log_mod.LOG_DIR = prev_dir
+            tlog._wipe(tlog._TEST_LOG_DIR)
+            try:
+                os.remove(prog)
+            except OSError:
+                pass
+        self.assertIn("mission complete", data)
+        self.assertIn("finished: clean exit after", data)
+
 
 class StopRequestTests(unittest.TestCase):
     """A press while running requests a STOP (``_request_stop``), never a
