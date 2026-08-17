@@ -78,6 +78,14 @@ def _build_parser():
         help="esptool flash baud rate. Default: 460800.",
     )
     p_flash.add_argument(
+        "--with-qtr-init", action="store_true",
+        help="After flashing, store a starter QTR line-sensor "
+             "calibration at /qtr.cal (recorded on the reference "
+             "bench, default pins 1-10) so line-follow examples work "
+             "out of the box. Re-run examples/qtr_calibrate.py for a "
+             "calibration measured on your own mat and lighting.",
+    )
+    p_flash.add_argument(
         "--skip-erase", action="store_true",
         help="Skip erase_flash (faster dev loop; leaves stale NVS keys).",
     )

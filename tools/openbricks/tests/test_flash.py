@@ -703,6 +703,53 @@ class ToolMissingTests(unittest.TestCase):
         self.assertIn("esptool not found", str(ctx.exception))
 
 
+class QtrStarterCalTests(unittest.TestCase):
+    """``flash --with-qtr-init`` stores the reference-bench starter
+    calibration at /qtr.cal in exactly the format
+    ``QTRArray.save_calibration`` writes — pins list included, since
+    ``load_calibration`` refuses a file recorded for other wiring."""
+
+    def test_snippet_writes_valid_cal_json(self):
+        import json as _json
+        captured = {}
+
+        def _fake_run(cmd, capture_output=True, text=True, timeout=None):
+            captured["snippet"] = cmd[-1]
+            return MagicMock(returncode=0,
+                             stdout="qtr-cal-ok 10 10\n", stderr="")
+
+        with patch("subprocess.run", side_effect=_fake_run):
+            flash._write_qtr_starter_cal("mpremote", "/dev/ttyUSB0")
+
+        snippet = captured["snippet"]
+        self.assertIn("'/qtr.cal'", snippet)
+        # The staged payload is the repr of a JSON document with the
+        # save_calibration schema: 10 pins, 10 mins, 10 maxes, and
+        # every span positive (min < max) — a starter file that fails
+        # load_calibration would be worse than no file.
+        start = snippet.index("f.write(") + len("f.write(")
+        payload_repr = snippet[start:snippet.index("); f.close()")]
+        payload = eval(payload_repr)   # repr of a str literal
+        data = _json.loads(payload)
+        self.assertEqual(data["pins"], list(range(1, 11)))
+        self.assertEqual(len(data["min"]), 10)
+        self.assertEqual(len(data["max"]), 10)
+        for lo, hi in zip(data["min"], data["max"]):
+            self.assertTrue(0 < lo < hi <= 65535, (lo, hi))
+
+    def test_verification_failure_dies(self):
+        def _fake_run(cmd, capture_output=True, text=True, timeout=None):
+            return MagicMock(returncode=0, stdout="garbage\n", stderr="")
+
+        with patch("subprocess.run", side_effect=_fake_run):
+            try:
+                flash._write_qtr_starter_cal("mpremote", "/p")
+            except flash.FlashError as e:
+                self.assertIn("starter QTR calibration", str(e))
+            else:
+                self.fail("must die on unverified write")
+
+
 class NameWriteSnippetTests(unittest.TestCase):
     """The mpremote ``exec`` snippet must embed the name in a form that
     ``openbricks._read_hub_name`` will accept back (bytes via set_blob)."""

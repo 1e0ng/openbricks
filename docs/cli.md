@@ -72,13 +72,21 @@ sends plain source instead — announced on stderr, never silently.
 `upload --path` (custom boot flows) always stages your file verbatim,
 uncompiled, at the path you give.
 
-The two commands use **separate slots** (since 1.97.0): `upload`
-stages the button's program at `/program.mpy`; `run` stages its
-one-shot script at `/run.mpy` and the hub button never reads it. So
-running a calibration or a quick diagnostic no longer replaces the
-program your button launches — the earlier shared-slot behavior
-turned "upload, calibrate, press start" into the robot silently
-re-running the calibration.
+`run` is an **upload-then-run** (since 2.7.0, deliberately
+different from Pybricks): it stages your script at the button's
+`/program.mpy` before executing it, so even a run that fails midway
+leaves the program on the hub — press the start button to rerun it,
+no BLE round trip needed. The flip side: running a calibration or a
+one-shot diagnostic replaces the button's program too, so re-upload
+your mission after such tools (`upload` alone stages without
+running).
+
+`flash --with-qtr-init` additionally stores a starter QTR
+line-sensor calibration at `/qtr.cal` (recorded on the reference
+bench, default pins 1-10), so the line-follow examples work on a
+fresh hub out of the box. Heights, mats and lighting differ — run
+`examples/qtr_calibrate.py` once for a calibration measured on your
+own rig.
 
 ## Reference
 
