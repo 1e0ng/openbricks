@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.8.1 — refractory retuned to the measured re-make distribution
+
+Session 3 of the button characterization measured contact re-makes
+at 226 and 235 ms — past 2.8.0's first-guess 150 ms refractory —
+while the fastest deliberate press cadence observed across three
+28-press sessions was ~490 ms. Refractory raised to 300 ms: every
+observed re-make (72-235 ms) is absorbed as the same press, real
+presses at real cadence are untouched. The 226 ms profile is a
+C-unit regression test. Flash 2.8.1.
+
 ## 2.8.0 — bounce-tolerant button debounce
 
 Live-probed the start button three times (10 presses each, three

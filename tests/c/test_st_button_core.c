@@ -342,6 +342,33 @@ TEST(violent_bounce_train_cannot_double_fire) {
     CHECK_EQ_INT(b.n_presses, 2);
 }
 
+TEST(late_remake_at_226ms_is_the_same_press) {
+    // Bench session 3 (2026-08-17): presses 8 and 10 re-made the
+    // contact 226 and 235 ms after the initial make — past the
+    // first-guess 150 ms refractory, well below the ~490 ms fastest
+    // real press cadence. A full press/release followed by a
+    // re-make 226 ms after the ACCEPT must not fire a second press.
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    level = 1;
+    CHECK_EQ_INT(tick_n(OB_BUTTON_WINDOW), OB_BUTTON_PRESSED);
+    tick_n(60);                       // held ~60 ms more
+    level = 0;
+    tick_n(OB_BUTTON_WINDOW);         // released
+    tick_n(226 - OB_BUTTON_WINDOW - 60 - OB_BUTTON_WINDOW);
+    level = 1;                        // the re-make
+    CHECK_EQ_INT(tick_n(OB_BUTTON_WINDOW), OB_BUTTON_NONE);
+    CHECK_EQ_INT(b.n_presses, 1);
+    level = 0;
+    tick_n(OB_BUTTON_WINDOW);
+    // A real next press at ~490 ms cadence still counts.
+    tick_n(490 - 226 - 2 * OB_BUTTON_WINDOW);
+    level = 1;
+    CHECK_EQ_INT(tick_n(OB_BUTTON_WINDOW), OB_BUTTON_PRESSED);
+    CHECK_EQ_INT(b.n_presses, 2);
+}
+
 int main(void) {
     RUN(clean_press_and_release_fire_one_edge_each);
     RUN(chattery_press_still_fires);
@@ -359,5 +386,6 @@ int main(void) {
     RUN(disarm_clears_the_chatter_cooldown);
     RUN(worn_contact_sixty_percent_duty_press_is_accepted);
     RUN(violent_bounce_train_cannot_double_fire);
+    RUN(late_remake_at_226ms_is_the_same_press);
     return harness_exit("st_button_core");
 }

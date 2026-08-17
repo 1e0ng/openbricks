@@ -57,11 +57,15 @@
 #define OB_BUTTON_OFF_THRESH    4
 
 // Post-accept refractory (1 kHz ticks): a second PRESSED inside
-// this window after an accepted press is the SAME press's bounce,
-// unconditionally — humans do not press twice in 150 ms. This is
-// the layer hysteresis cannot provide when a violent train (30
-// edges/10 presses measured) dips below OFF and re-confirms.
-#define OB_BUTTON_REFRACTORY_TICKS 150
+// this window after an accepted press is the SAME press's re-make,
+// unconditionally. Sized from the bench's MEASURED re-make delay
+// distribution (2026-08-17, three 28-press sessions): re-makes at
+// 72/96/99/114/140/226/235 ms after the initial make, while the
+// fastest deliberate press cadence observed was ~490 ms between
+// presses — 300 covers every observed re-make with margin and
+// stays far below human repeat-press territory. (150 was the first
+// guess and session 3 promptly measured past it.)
+#define OB_BUTTON_REFRACTORY_TICKS 300
 
 // Release-chatter cooldown (1 kHz ticks) after the STALE press ends:
 // a short start tap's release can re-contact for >= ON_THRESH ms —
