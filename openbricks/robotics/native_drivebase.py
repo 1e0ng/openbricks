@@ -432,10 +432,11 @@ class _SerialNativeEngine:
         self._turn_accel_dps2 = float(accel_dps2)
         self._sb.db_set_turn_accel(float(accel_dps2))
 
-    def arm_straight(self, distance_mm):
+    def arm_straight(self, distance_mm, carry=False):
         estop.check()
         mm_s = self._straight_speed_dps * self._wheel_circumference / 360.0
-        self._sb.db_straight(float(distance_mm), float(mm_s))
+        self._sb.db_straight(float(distance_mm), float(mm_s),
+                             1 if carry else 0)
         accel_mm = self._accel_dps2 * self._wheel_circumference / 360.0
         self._arm_deadline(self._profile_ms(distance_mm, mm_s, accel_mm))
 
@@ -461,7 +462,7 @@ class _SerialNativeEngine:
         self.arm_turn(angle_deg)
         self._wait()
 
-    def arm_curve(self, radius_mm, angle_deg):
+    def arm_curve(self, radius_mm, angle_deg, carry=False):
         """Pybricks ``curve()``: arc of ``|radius_mm|`` changing
         heading by ``angle_deg`` (CW-positive). Centre speed is the
         straight_speed setting scaled by |R|/(|R| + track/2) so the
@@ -473,7 +474,8 @@ class _SerialNativeEngine:
         r = abs(float(radius_mm))
         if r > 0:
             mm_s = mm_s * r / (r + self._axle_track / 2.0)
-        self._sb.db_curve(float(radius_mm), float(angle_deg), float(mm_s))
+        self._sb.db_curve(float(radius_mm), float(angle_deg), float(mm_s),
+                          1 if carry else 0)
         # Estimate on the OUTER wheel: it travels the longest arc at
         # (up to) the straight cruise speed.
         outer_arc_mm = (abs(float(angle_deg)) * math.pi / 180.0

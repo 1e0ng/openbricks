@@ -517,12 +517,14 @@ static void DriveBase_dealloc(DriveBaseObject *self) {
 static PyObject *DriveBase_straight(DriveBaseObject *self, PyObject *args) {
     long   now_ms;
     double distance_mm, speed_mm_s;
-    if (!PyArg_ParseTuple(args, "ldd", &now_ms, &distance_mm, &speed_mm_s)) {
+    int    carry = 0;
+    if (!PyArg_ParseTuple(args, "ldd|p", &now_ms, &distance_mm,
+                          &speed_mm_s, &carry)) {
         return NULL;
     }
     ob_drivebase_straight(&self->core, now_ms,
                           (ob_float_t)distance_mm,
-                          (ob_float_t)speed_mm_s);
+                          (ob_float_t)speed_mm_s, carry != 0);
     Py_RETURN_NONE;
 }
 
@@ -543,14 +545,15 @@ static PyObject *DriveBase_turn(DriveBaseObject *self, PyObject *args) {
 static PyObject *DriveBase_curve(DriveBaseObject *self, PyObject *args) {
     long   now_ms;
     double radius_mm, angle_deg, speed_mm_s;
-    if (!PyArg_ParseTuple(args, "lddd", &now_ms, &radius_mm, &angle_deg,
-                          &speed_mm_s)) {
+    int    carry = 0;
+    if (!PyArg_ParseTuple(args, "lddd|p", &now_ms, &radius_mm, &angle_deg,
+                          &speed_mm_s, &carry)) {
         return NULL;
     }
     ob_drivebase_curve(&self->core, now_ms,
                        (ob_float_t)radius_mm,
                        (ob_float_t)angle_deg,
-                       (ob_float_t)speed_mm_s);
+                       (ob_float_t)speed_mm_s, carry != 0);
     Py_RETURN_NONE;
 }
 
@@ -775,11 +778,12 @@ static PyObject *RawDriveBase_sync(RawDriveBaseObject *self, PyObject *args) {
 static PyObject *RawDriveBase_straight(RawDriveBaseObject *self, PyObject *args) {
     long now_ms;
     double mm, mm_s;
-    if (!PyArg_ParseTuple(args, "ldd", &now_ms, &mm, &mm_s)) {
+    int  carry = 0;
+    if (!PyArg_ParseTuple(args, "ldd|p", &now_ms, &mm, &mm_s, &carry)) {
         return NULL;
     }
     ob_drivebase_straight(&self->core, now_ms,
-                          (ob_float_t)mm, (ob_float_t)mm_s);
+                          (ob_float_t)mm, (ob_float_t)mm_s, carry != 0);
     Py_RETURN_NONE;
 }
 
@@ -800,14 +804,15 @@ static PyObject *RawDriveBase_curve(RawDriveBaseObject *self,
                                     PyObject *args) {
     long   now_ms;
     double radius_mm, angle_deg, speed_mm_s;
-    if (!PyArg_ParseTuple(args, "lddd", &now_ms, &radius_mm, &angle_deg,
-                          &speed_mm_s)) {
+    int    carry = 0;
+    if (!PyArg_ParseTuple(args, "lddd|p", &now_ms, &radius_mm, &angle_deg,
+                          &speed_mm_s, &carry)) {
         return NULL;
     }
     ob_drivebase_curve(&self->core, now_ms,
                        (ob_float_t)radius_mm,
                        (ob_float_t)angle_deg,
-                       (ob_float_t)speed_mm_s);
+                       (ob_float_t)speed_mm_s, carry != 0);
     Py_RETURN_NONE;
 }
 

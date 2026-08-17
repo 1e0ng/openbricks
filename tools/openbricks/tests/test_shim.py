@@ -880,6 +880,22 @@ class SimStBusEngineTests(_ShimTestBase):
         db.stop()
         self.assertTrue(sb.servo_move(0, 1000.0, 1000.0, 4000.0))
 
+    def test_then_continue_chains_without_stopping(self):
+        # then="continue" (Pybricks Stop.NONE): the first leg ends AT
+        # speed and the second leg takes it over — the wheels never
+        # rest between segments.
+        db, left, _ = self._serial_db()
+        db.settings(straight_speed=150, acceleration=360)
+        db.straight(150, then="continue")     # blocking, ends at cruise
+        v_seam = abs(left.speed())
+        self.assertGreater(v_seam, 90.0,
+                           "wheels at %.0f dps at the seam - carried "
+                           "speed lost" % v_seam)
+        db.straight(150)                      # stopping second leg
+        db.stop(then="coast")
+        time.sleep_ms(600)                    # freewheel decay
+        self.assertLess(abs(left.speed()), 60.0)
+
     def test_db_stop_yields_the_wheels(self):
         # After stop(then="coast") the db no longer re-asserts its
         # hold, so a direct speed command moves the chassis. Coast is

@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.5.0 — then="continue": chain moves without stopping
+
+`straight()` and `curve()` accept `then="continue"` (Pybricks
+`Stop.NONE`): the move does not decelerate at the end — it finishes
+AT cruise speed and the wheels keep it until the next command
+supersedes it, so chained segments flow through their seams instead
+of braking at every waypoint. Completion follows pbio's rule: past
+the nominal time, done latches as soon as the measured position is
+at or past the target (a stalled robot never crosses, so the stall
+watchdog still fires). `then="stop"` is accepted everywhere as the
+plain-named alias of the coast default; `turn()` refuses
+`"continue"` (a turn ends facing its heading — no speed worth
+carrying). The trajectory core gains a nonzero END speed (`v3`),
+with the 2.4.0 too-short-distance decel raise generalized to it.
+Both sides move: flash 2.5.0 AND `pipx upgrade openbricks`.
+
 ## 2.4.0 — short moves brake harder; stop() reverts to Pybricks parity
 
 Second thoughts on the 2.0.1-2.3.0 deceleration arc (user decision).

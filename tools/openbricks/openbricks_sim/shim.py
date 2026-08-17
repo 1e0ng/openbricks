@@ -503,7 +503,7 @@ class _SimStBus:
                        getattr(self._wheels[0], "_target_dps", 0.0),
                        getattr(self._wheels[1], "_target_dps", 0.0))
 
-    def db_straight(self, mm, mm_s):
+    def db_straight(self, mm, mm_s, carry=0):
         for m in self._moves.values():
             m.stop()                      # new command wins
         self._sync_bridges()
@@ -511,7 +511,8 @@ class _SimStBus:
         self._ws_stop_pending = 0
         self._db_writing = True
         self._raw.set_accel(self._accel_straight)
-        self._raw.straight(self._rt.now_ms, float(mm), float(mm_s))
+        self._raw.straight(self._rt.now_ms, float(mm), float(mm_s),
+                           bool(carry))
 
     def db_turn(self, deg, dps):
         for m in self._moves.values():
@@ -523,7 +524,7 @@ class _SimStBus:
         self._raw.set_accel(self._accel_turn)
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
 
-    def db_curve(self, radius_mm, deg, mm_s):
+    def db_curve(self, radius_mm, deg, mm_s, carry=0):
         for m in self._moves.values():
             m.stop()
         self._sync_bridges()
@@ -532,7 +533,7 @@ class _SimStBus:
         self._db_writing = True
         self._raw.set_accel(self._accel_straight)
         self._raw.curve(self._rt.now_ms, float(radius_mm), float(deg),
-                        float(mm_s))
+                        float(mm_s), bool(carry))
 
     def db_move_wheels(self, left_steps_per_s, right_steps_per_s):
         # Firmware parity (st_bus.c sb_db_move_wheels, ramped since
@@ -1260,16 +1261,17 @@ class ShimDriveBase:
 
     # ----- Move setup ----------------------------------------------
 
-    def straight(self, distance_mm, speed_mm_s):
+    def straight(self, distance_mm, speed_mm_s, carry=False):
         # Heading re-baseline per move happens inside SimDriveBase.
-        self._db.straight(float(distance_mm), float(speed_mm_s))
+        self._db.straight(float(distance_mm), float(speed_mm_s),
+                          bool(carry))
 
     def turn(self, angle_deg, rate_dps):
         self._db.turn(float(angle_deg), float(rate_dps))
 
-    def curve(self, radius_mm, angle_deg, speed_mm_s):
+    def curve(self, radius_mm, angle_deg, speed_mm_s, carry=False):
         self._db.curve(float(radius_mm), float(angle_deg),
-                       float(speed_mm_s))
+                       float(speed_mm_s), bool(carry))
 
     def move_wheels(self, left_dps, right_dps):
         # Firmware parity (drivebase.c db_move_wheels): the coupled
