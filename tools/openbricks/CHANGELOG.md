@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.7.1 — the integral cancels the FF deficit during the move
+
+The end-of-run stutter, root-caused with 2.6.2's per-axis stats:
+the forward axis expired 100 wheel-deg (~77 mm) behind with the
+integral supplying 51 dps of a ~250 dps feed-forward deficit — all
+three landings spent walking the robot in, pulse by pulse. pbio's
+integral only grows NEAR the target (remaining-distance band); a
+plant trailing 100 deg entered that band 0.16 s before expiry.
+Their design assumes a factory-calibrated feed-forward; ours isn't.
+
+* Integral growth now gates on TRACKING error (deadzone up to the
+  P-linear region): it engages from move start and cancels the
+  deficit during the motion. Harness: expiry residual 32.8 -> 11.5
+  wheel-deg, integral carrying 420 dps at expiry.
+* Standstill now reads MEASURED axis speed (EMA of the position
+  derivative, glitch-clamped) — pbio's actual signal; command- and
+  ff-based checks each failed a real case.
+* The integral retires by a ~35 ms bleed after done instead of an
+  instant zero (which was itself a command step).
+
+Both sides move: flash 2.7.1 AND `pipx upgrade openbricks`.
+
 ## 2.7.0 — run is upload-then-run; flash --with-qtr-init
 
 Two CLI changes, both user-requested:

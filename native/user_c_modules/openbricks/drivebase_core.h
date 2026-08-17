@@ -164,6 +164,18 @@ typedef struct {
     ob_float_t ki;
     long       last_tick_ms;      // for the integral dt (0 = none yet)
 
+    // Measured axis speeds (2.7.x) — EMA of the position derivative,
+    // wheel-deg/s. pbio's standstill condition tests the PLANT's
+    // speed, not the command: a wound integral can command hundreds
+    // of dps into a robot that is demonstrably at rest, and a
+    // command-based check then deadlocks done (the integral only
+    // unwinds on opposing error, and error is ~0 at arrival).
+    ob_float_t meas_vel_sum;
+    ob_float_t meas_vel_diff;
+    ob_float_t prev_sum_pos;
+    ob_float_t prev_diff_pos;
+    bool       have_prev_pos;
+
     // Landing settle bookkeeping (2.6.0). ``expiry_residual`` is the
     // worst-axis error captured at the move's FIRST profile expiry —
     // the bench-measurable answer to "how big is the gap the settle

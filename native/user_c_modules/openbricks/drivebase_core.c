@@ -57,6 +57,11 @@ void ob_drivebase_init(ob_drivebase_t *db,
     db->integ_diff      = 0.0;
     db->ki              = (ob_float_t)OB_DRIVEBASE_DEFAULT_KI;
     db->last_tick_ms    = 0;
+    db->meas_vel_sum    = 0.0;
+    db->meas_vel_diff   = 0.0;
+    db->prev_sum_pos    = 0.0;
+    db->prev_diff_pos   = 0.0;
+    db->have_prev_pos   = false;
     db->landings        = 0;
     db->landing_active  = false;
     db->landing_best_err = 0.0;
@@ -383,17 +388,25 @@ void ob_drivebase_stop(ob_drivebase_t *db) {
 // ---------------------------------------------------------------------
 // Per-tick control law
 
-// Position-integral update, pbio integrator.c rules (2.6.0):
-// decreasing the magnitude is always allowed; growth only happens
-// in the band DEADZONE <= |remaining to endpoint| <= 2*(actuation
-// saturation error), is rate-capped per tick, and the total clamps
-// at the value whose ki-term alone commands ACTUATION_MAX. The
-// deadzone stops stiction hunting at rest; the upper bound stops a
-// far-from-target cruise from winding the integral up; the clamp
-// bounds the authority a wound integral can ever have.
+// Position-integral update (2.7.x): decreasing the magnitude is
+// always allowed; growth happens whenever the TRACKING error is in
+// the band DEADZONE <= |err| <= (P-linear region), is rate-capped
+// per tick, and the total clamps at the value whose ki-term alone
+// commands ACTUATION_MAX. Deliberate deviation from pbio's
+// remaining-distance band (2026-08-17, bench-measured): their
+// near-target-only integral assumes a factory-calibrated
+// feed-forward; ours under-delivered ~250 dps on the reference
+// curve, the plant ran ~100 wheel-deg behind the reference the
+// whole move, and it entered pbio's band only 0.16 s before expiry
+// — integral at 51 dps of a 250 dps deficit, three landings, the
+// end-of-run stutter. Gating on tracking error engages the
+// integral from move start, so it cancels the FF deficit DURING
+// the motion and the reference arrives with the plant on it. The
+// deadzone still stops stiction hunting at rest; the band's upper
+// edge (P saturation) still refuses to wind against a hard stall —
+// the fault latch and watchdog own that case.
 static ob_float_t db_integ_update(ob_float_t *integ,
                                   ob_float_t err,
-                                  ob_float_t target_err,
                                   ob_float_t dt_s,
                                   ob_float_t kp,
                                   ob_float_t ki) {
@@ -413,13 +426,12 @@ static ob_float_t db_integ_update(ob_float_t *integ,
         mag_next = (next < 0) ? -next : next;
         decrease = mag_next < mag_cur;
     }
-    ob_float_t ta = (target_err < 0) ? -target_err : target_err;
+    ob_float_t ea = (err < 0) ? -err : err;
     ob_float_t upper = (kp > 0)
         ? ((ob_float_t)OB_DRIVEBASE_ACTUATION_MAX_DPS / kp)
-          * (ob_float_t)2.0
         : (ob_float_t)0.0;
-    if ((ta >= (ob_float_t)OB_DRIVEBASE_INTEG_DEADZONE_WHEEL_DEG
-         && ta <= upper) || decrease) {
+    if ((ea >= (ob_float_t)OB_DRIVEBASE_INTEG_DEADZONE_WHEEL_DEG
+         && ea <= upper) || decrease) {
         *integ = next;
     }
     if (ki > 0) {
@@ -512,6 +524,32 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
                           ? db->heading_override_wheel_deg
                           : db_diff_pos_encoder(db);
 
+    // 3b. Measured axis speeds: EMA of the position derivative
+    //     (~20 ms window at the 1 kHz tick — smooths the 1-count
+    //     quantization step, fast enough for a 60 dps threshold).
+    if (dt_s > (ob_float_t)0.0) {
+        if (db->have_prev_pos) {
+            // Clamp each raw sample to a physically plausible bound:
+            // a heading-frame jump (gyro re-base, injected test
+            // heading) is a position STEP whose derivative would
+            // poison the EMA for ~100 ms.
+            ob_float_t vmax = (ob_float_t)OB_DRIVEBASE_ACTUATION_MAX_DPS
+                              * (ob_float_t)4.0;
+            ob_float_t rs = (sum_pos - db->prev_sum_pos) / dt_s;
+            ob_float_t rd = (diff_pos - db->prev_diff_pos) / dt_s;
+            if (rs >  vmax) { rs =  vmax; }
+            if (rs < -vmax) { rs = -vmax; }
+            if (rd >  vmax) { rd =  vmax; }
+            if (rd < -vmax) { rd = -vmax; }
+            ob_float_t a = (ob_float_t)0.1;
+            db->meas_vel_sum  += a * (rs - db->meas_vel_sum);
+            db->meas_vel_diff += a * (rd - db->meas_vel_diff);
+        }
+        db->prev_sum_pos  = sum_pos;
+        db->prev_diff_pos = diff_pos;
+        db->have_prev_pos = true;
+    }
+
     // 4. Coupled P + feedforward.
     ob_float_t sum_err  = fwd_target  - sum_pos;
     ob_float_t diff_err = turn_target - diff_pos;
@@ -531,26 +569,24 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
         ob_float_t de_now = db->turn_hold - diff_pos;
         se_now = (se_now < 0) ? -se_now : se_now;
         de_now = (de_now < 0) ? -de_now : de_now;
-        // ...and pbio's STANDSTILL condition: the landing's own
-        // feed-forward must be slow before done may latch, or a
-        // plant crossing the window at speed gets its wheels
-        // released mid-motion by the then= dispatch.
-        ob_float_t vf = (fwd_ff_vel  < 0) ? -fwd_ff_vel  : fwd_ff_vel;
-        ob_float_t vt = (turn_ff_vel < 0) ? -turn_ff_vel : turn_ff_vel;
+        // ...and pbio's STANDSTILL condition on MEASURED speed —
+        // theirs tests the plant, not the command. A command-based
+        // check deadlocks: a wound integral commands hundreds of
+        // dps into an arrived robot, and with error ~0 it never
+        // unwinds; an ff-based check let the same integral latch
+        // done with the wheels genuinely turning.
+        ob_float_t mv_sum  = (db->meas_vel_sum  < 0)
+                             ? -db->meas_vel_sum  : db->meas_vel_sum;
+        ob_float_t mv_diff = (db->meas_vel_diff < 0)
+                             ? -db->meas_vel_diff : db->meas_vel_diff;
         if (se_now < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
             && de_now < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
-            && vf < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS
-            && vt < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS) {
+            && mv_sum  < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS
+            && mv_diff < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS) {
             db->fwd_active     = false;
             db->turn_active    = false;
             db->landing_active = false;
             db->done           = true;
-            // Arrived: the integral's job is over. Left wound, it
-            // keeps commanding ki*integ against ZERO error through
-            // the inter-move hold — the probe measured an arrived
-            // robot still pushed at 204 dps.
-            db->integ_sum  = 0.0;
-            db->integ_diff = 0.0;
         }
     }
 
@@ -692,38 +728,38 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
             // beyond the forgive limit is a move that DIDN'T HAPPEN
             // — done stays false and the caller's watchdog raises
             // loudly.
+            ob_float_t amv_sum  = (db->meas_vel_sum  < 0)
+                                  ? -db->meas_vel_sum  : db->meas_vel_sum;
+            ob_float_t amv_diff = (db->meas_vel_diff < 0)
+                                  ? -db->meas_vel_diff : db->meas_vel_diff;
             bool arrived =
                 se < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
-                && de < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG;
+                && de < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+                && amv_sum  < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS
+                && amv_diff < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS;
             bool capped  = (now_ms - db->settle_start_ms)
                                >= (long)OB_DRIVEBASE_SETTLE_MS
                            && worst < (ob_float_t)
                                   OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG;
             if (arrived || capped) {
                 db->done = true;
-                db->integ_sum  = 0.0;   // see the arrival-cut latch
-                db->integ_diff = 0.0;
             }
         }
     }
-    // Remaining-to-endpoint errors gate WHERE the integral may grow
-    // (pbio's target_error): during cruise the endpoint is far and
-    // the integral stays parked; through the decel ramp and settle
-    // it engages and squeezes out the tracking lag P alone cannot.
-    ob_float_t fwd_end = db->fwd_active
-        ? db->fwd.start + db->fwd.direction
-          * ((db->fwd.distance < 0) ? -db->fwd.distance : db->fwd.distance)
-        : db->fwd_hold;
-    ob_float_t turn_end = db->turn_active
-        ? db->turn.start + db->turn.direction
-          * ((db->turn.distance < 0) ? -db->turn.distance : db->turn.distance)
-        : db->turn_hold;
+    if (db->done) {
+        // Post-move hold: retire the integral SMOOTHLY (~35 ms
+        // half-life). An instant zero at the done latch was itself
+        // a command step; left wound instead, it pushed an arrived
+        // robot at 204 dps through the inter-move hold. The bleed
+        // is both: shaped on the way out, gone within a tenth of a
+        // second.
+        db->integ_sum  *= (ob_float_t)0.98;
+        db->integ_diff *= (ob_float_t)0.98;
+    }
     ob_float_t integ_sum  = db_integ_update(&db->integ_sum, sum_err,
-                                            fwd_end - sum_pos, dt_s,
-                                            db->kp_sum, db->ki);
+                                            dt_s, db->kp_sum, db->ki);
     ob_float_t integ_diff = db_integ_update(&db->integ_diff, diff_err,
-                                            turn_end - diff_pos, dt_s,
-                                            db->kp_diff, db->ki);
+                                            dt_s, db->kp_diff, db->ki);
 
     ob_float_t fwd_cmd  = fwd_ff_vel  + db->kp_sum  * sum_err
                           + db->ki * integ_sum;
