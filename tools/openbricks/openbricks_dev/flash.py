@@ -364,6 +364,41 @@ def _wait_for_repl(mpremote, port, timeout_s=20):
     )
 
 
+# Starter QTR calibration shipped by ``--with-qtr-init`` — a real
+# bench sweep (2026-08-17, QTRX-HD-15A on the WRO mat, default pins
+# 1-10; the per-element spans from that run's log). Format matches
+# ``QTRArray.save_calibration``: {"pins", "min", "max"}. A starter
+# file gets a fresh flash line-following immediately; heights, mats
+# and lighting differ, so examples/qtr_calibrate.py remains the way
+# to a calibration measured on YOUR rig.
+_QTR_CAL_PATH = "/qtr.cal"
+_QTR_STARTER_CAL = {
+    "pins": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "min": [9346, 4048, 3888, 3728, 3984, 3888, 3824, 3968, 4593, 8658],
+    "max": [44922, 37849, 36024, 35816, 36056, 36536, 32888, 36552,
+            40057, 43834],
+}
+
+
+def _write_qtr_starter_cal(mpremote, port):
+    """Store the starter QTR calibration on the hub filesystem and
+    verify it parses back — a corrupt or truncated write must fail
+    HERE, not as a RuntimeError in the user's first line-follow."""
+    import json
+    payload = json.dumps(_QTR_STARTER_CAL)
+    snippet = (
+        "f = open(%r, 'w'); f.write(%r); f.close(); "
+        "import json; d = json.load(open(%r)); "
+        "print('qtr-cal-ok', len(d['min']), len(d['max']))"
+    ) % (_QTR_CAL_PATH, payload, _QTR_CAL_PATH)
+    rc, out, err = _mpremote_exec(mpremote, port, snippet)
+    if rc != 0 or "qtr-cal-ok 10 10" not in out:
+        _die("failed to write starter QTR calibration:\n" + (err or out))
+    print("starter QTR calibration written to %s (re-run "
+          "examples/qtr_calibrate.py for your own mat/lighting)"
+          % _QTR_CAL_PATH)
+
+
 def _write_hub_name(mpremote, port, name):
     # The name already passed validation in ``_validate_name``; plain
     # bytes literal is safe.
@@ -644,6 +679,9 @@ def run(args):
     if readback != args.name:
         _die("verification failed: wrote %r, read back %r" % (args.name, readback))
     print("hub name %r written and verified" % readback)
+
+    if getattr(args, "with_qtr_init", False):
+        _write_qtr_starter_cal(mpremote, args.port)
 
     flashed_version = _write_fw_marker(mpremote, args.port,
                                        firmware_verdict)

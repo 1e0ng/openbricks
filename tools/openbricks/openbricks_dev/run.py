@@ -59,16 +59,15 @@ _TARGET_PATH = "/program.py"
 # removes the other — see _compose_runner(remove_stale=...).
 _MPY_TARGET_PATH = "/program.mpy"
 
-# One-shot runs stage to their OWN slot (CLI >= 1.97.0): ``run`` used
-# to share /program.mpy with ``upload``, so every run — including
-# calibrations and diagnostics — silently replaced the program the
-# BUTTON launches. Bench 2026-08-14: upload aa.py, run
+# ``run`` stages to the BUTTON slot (/program.*) — an upload-then-run
+# (user decision 2026-08-17, reversing the 1.97.0 run-slot split and
+# deliberately different from Pybricks): a run that fails mid-way
+# leaves the program on the hub, so the start button reruns it
+# without another BLE round trip. The accepted price is the 1.97.0
+# hazard returning: running a calibration or diagnostic script
+# replaces the button program (bench 2026-08-14: upload aa.py, run
 # qtr_calibrate, press start -> the robot invisibly re-ran the
-# calibration and the report was "button does nothing". The button
-# never reads /run.*, so the two intents can no longer clobber
-# each other.
-_RUN_TARGET_PATH = "/run.py"
-_RUN_MPY_TARGET_PATH = "/run.mpy"
+# calibration) — re-upload your mission after one-shot tools.
 
 # First firmware whose launcher runs /program.mpy (native exec_mpy).
 _MIN_MPY_FIRMWARE = (1, 92, 0)
@@ -744,7 +743,7 @@ async def _run_session(link, name, user_bytes, mpy_bytes):
         await _enter_raw_repl(blink, link)
         try:
             target, use_mpy, remove_stale = await _pick_staging(
-                blink, link, _RUN_MPY_TARGET_PATH, _RUN_TARGET_PATH)
+                blink, link)
             payload = mpy_bytes if use_mpy else user_bytes
             runner = _compose_runner(target, remove_stale)
             await _stage_file(blink, link, target, payload, name)

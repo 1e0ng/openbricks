@@ -3,6 +3,24 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.7.0 — run is upload-then-run; flash --with-qtr-init
+
+Two CLI changes, both user-requested:
+
+* **`run` stages to the button slot** (reversing the 1.97.0 run-slot
+  split, deliberately different from Pybricks): the script lands at
+  `/program.mpy` before executing, so a run that fails midway stays
+  rerunnable with the start button — no BLE round trip. The accepted
+  price: one-shot tools (calibrations, diagnostics) replace the
+  button program; re-upload your mission afterwards.
+* **`flash --with-qtr-init`** stores a starter QTR calibration at
+  `/qtr.cal` (reference-bench sweep, default pins 1-10, the exact
+  `save_calibration` format) so line-follow examples work on a
+  fresh hub. Re-run `examples/qtr_calibrate.py` for your own mat
+  and lighting.
+
+CLI-side: `pipx upgrade openbricks` (no reflash needed).
+
 ## 2.6.2 — done requires standstill; per-axis settle diagnostics
 
 Bench (the twitch that survived 2.6.0, now measured): the final
