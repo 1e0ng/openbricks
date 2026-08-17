@@ -46,24 +46,29 @@ void openbricks_trajectory_sample(const trajectory_obj_t *t,
 static mp_obj_t traj_make_new(const mp_obj_type_t *type,
                               size_t n_args, size_t n_kw,
                               const mp_obj_t *all_args) {
-    enum { ARG_start, ARG_target, ARG_cruise, ARG_accel };
+    enum { ARG_start, ARG_target, ARG_cruise, ARG_accel, ARG_v0 };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_start,      MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_target,     MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_cruise_dps, MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_accel_dps2, MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_v0_dps,     MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
     };
     mp_arg_val_t parsed[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args,
                               MP_ARRAY_SIZE(allowed), allowed, parsed);
 
     trajectory_obj_t *self = mp_obj_malloc(trajectory_obj_t, type);
-    ob_trajectory_init(
+    ob_float_t v0 = (parsed[ARG_v0].u_obj == MP_OBJ_NULL)
+                    ? (ob_float_t)0.0
+                    : (ob_float_t)mp_obj_get_float(parsed[ARG_v0].u_obj);
+    ob_trajectory_init_v0(
         &self->core,
         (ob_float_t)mp_obj_get_float(parsed[ARG_start].u_obj),
         (ob_float_t)mp_obj_get_float(parsed[ARG_target].u_obj),
         (ob_float_t)mp_obj_get_float(parsed[ARG_cruise].u_obj),
-        (ob_float_t)mp_obj_get_float(parsed[ARG_accel].u_obj)
+        (ob_float_t)mp_obj_get_float(parsed[ARG_accel].u_obj),
+        v0
     );
     return MP_OBJ_FROM_PTR(self);
 }

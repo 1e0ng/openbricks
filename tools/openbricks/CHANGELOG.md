@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.7.3 — THE end-of-run twitch: entry-ramp displacement sign
+
+The flight recorder found it in one run. A move entered FASTER than
+its cruise speed (the line-follow handing ~800 dps into a
+radius-scaled-cruise curve) stored the entry ramp's displacement
+with the wrong sign — the decel ramp covers (v0²−vc²)/2a forward,
+the code recorded (vc²−v0²)/2a — so every cruise and exit sample
+ran 2x the ramp length (~150 wheel-deg) BEHIND the truth, and at
+expiry the endpoint math snapped the reference forward by exactly
+that much. The settle machinery then faithfully walked the robot
+through the phantom: stop, lurch, stop. Present since 2.0.0; the
+"~100 wheel-deg residual" that survived three fixes was this
+geometry, not plant lag — the trace shows the real plant tracking
+within a few degrees. One line: divide by the SIGNED entry
+acceleration. Pinned at the trajectory level (dense-sample
+continuity + exact landing, v0 > cruise) and at the engine level
+(forward-flying reference never steps backward, via the recorder).
+`TrapezoidalProfile` gains `v0_dps=` for the test surface. Flash
+2.7.3.
+
 ## 2.7.2 — motion flight recorder
 
 Bench 2.7.1 read: integral up 51 -> 84 dps but the forward residual

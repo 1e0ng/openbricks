@@ -90,6 +90,36 @@ class TestTrapezoidalProfile(unittest.TestCase):
         self.assertAlmostEqual(pos, 50.0, places=6)
         self.assertAlmostEqual(vel, 0.0, places=6)
 
+    def test_fast_entry_is_continuous_and_lands_on_target(self):
+        # THE 2026-08-17 twitch bug: entering FASTER than cruise
+        # (v0 > cruise_dps) stored the entry ramp's displacement with
+        # the wrong sign — every cruise/exit sample shifted backward
+        # by twice the ramp length, and the endpoint snapped +150
+        # wheel-deg at expiry on the bench. Pin: dense sampling shows
+        # no discontinuity anywhere, and the profile ends exactly on
+        # target.
+        try:
+            t = TrapezoidalProfile(start=0, target=500, cruise_dps=200,
+                                   accel_dps2=800, v0_dps=350)
+        except TypeError:
+            raise unittest.SkipTest("fake profile has no v0 support")
+        total = t.duration()
+        self.assertTrue(total > 0)
+        last_pos = None
+        step = total / 400.0
+        for k in range(401):
+            pos, _vel = t.sample(k * step)
+            if last_pos is not None:
+                self.assertTrue(pos >= last_pos - 1e-6,
+                                "reference moved backward at k=%d" % k)
+                self.assertTrue(pos - last_pos < 350 * step + 1.0,
+                                "reference jumped %.2f at k=%d"
+                                % (pos - last_pos, k))
+            last_pos = pos
+        end_pos, end_vel = t.sample(total)
+        self.assertAlmostEqual(end_pos, 500.0, places=3)
+        self.assertAlmostEqual(end_vel, 0.0, places=3)
+
     def test_position_monotonically_approaches_target(self):
         t = TrapezoidalProfile(start=0, target=200, cruise_dps=100, accel_dps2=200)
         prev = -1.0
