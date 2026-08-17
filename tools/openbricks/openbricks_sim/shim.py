@@ -609,6 +609,10 @@ class _SimStBus:
         self._use_gyro = bool(enable)
         self._raw.set_use_gyro(bool(enable))
 
+    def db_settle_stats(self):
+        # (expiry_residual_wheel_deg, landings) — firmware parity.
+        return self._raw.settle_stats()
+
     def db_gyro_in_use(self):
         # Firmware parity: the ICM driver's reset_heading guard.
         return bool(self._active and self._use_gyro)

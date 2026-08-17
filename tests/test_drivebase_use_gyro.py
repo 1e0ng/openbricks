@@ -97,9 +97,11 @@ class TestDriveBaseUseGyro(unittest.TestCase):
         # Now inject a +10° heading (robot rotated CW/right — the
         # 1.24.0 Pybricks convention). Correction is CCW rotation →
         # right wheel advances, left retreats → right_dps ends up
-        # above left_dps.
+        # above left_dps. Since 2.6.0 the correction is a SHAPED
+        # landing trajectory, not an instant P step — give the ramp
+        # a few ticks to show its direction.
         imu.heading_value = 10.0
-        time.sleep_ms(1)   # one tick
+        time.sleep_ms(20)
 
         self.assertGreater(right._servo.target_dps(), left._servo.target_dps())
 
@@ -216,7 +218,9 @@ class TestDriveBaseUseGyro(unittest.TestCase):
 
         imu.heading_value = 95.0   # overshot the absolute target by 5
         ndb.straight(0.0, 50.0)
-        time.sleep_ms(5)
+        # 2.6.0: the pull-back is a shaped landing trajectory, not an
+        # instant P step — give the ramp time to show its direction.
+        time.sleep_ms(30)
 
         self.assertGreater(right._servo.target_dps(),
                            left._servo.target_dps(),
