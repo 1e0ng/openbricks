@@ -44,9 +44,24 @@
 // than the old 20), and releases only when <= OFF_THRESH read
 // pressed — the 10-sample hysteresis gap means mid-hold chatter
 // cannot toggle the state.
-#define OB_BUTTON_WINDOW       20
-#define OB_BUTTON_ON_THRESH    15
-#define OB_BUTTON_OFF_THRESH    5
+// Tuned 2026-08-17 against three MEASURED bench bounce profiles of
+// the same physical button minutes apart (silicon edges / accepted
+// for 10 presses): 21/5 (filthy - HALF DROPPED at 15-of-20), 13/10
+// (clean), 30/11 (violent - one DOUBLE-ACCEPT through the 15<->5
+// hysteresis). A worn contact runs 50-60% pressed-duty inside a
+// real press, so acceptance needs ~57% duty over a wider window;
+// the wider hysteresis gap plus the refractory below make a press
+// idempotent against any bounce train.
+#define OB_BUTTON_WINDOW       30
+#define OB_BUTTON_ON_THRESH    17
+#define OB_BUTTON_OFF_THRESH    4
+
+// Post-accept refractory (1 kHz ticks): a second PRESSED inside
+// this window after an accepted press is the SAME press's bounce,
+// unconditionally — humans do not press twice in 150 ms. This is
+// the layer hysteresis cannot provide when a violent train (30
+// edges/10 presses measured) dips below OFF and re-confirms.
+#define OB_BUTTON_REFRACTORY_TICKS 150
 
 // Release-chatter cooldown (1 kHz ticks) after the STALE press ends:
 // a short start tap's release can re-contact for >= ON_THRESH ms —
@@ -79,6 +94,7 @@ typedef struct {
     uint16_t chatter_ticks;     // cooldown after the stale press ends:
                                 // press edges inside it are its own
                                 // release re-contact, never a stop
+    uint16_t refractory_ticks;  // post-accept same-press suppression
     uint32_t n_presses;         // cumulative debounced press edges
     uint32_t n_releases;
     uint32_t n_stale;           // press edges consumed as stale

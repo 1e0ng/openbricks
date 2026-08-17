@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.8.0 — bounce-tolerant button debounce
+
+Live-probed the start button three times (10 presses each, three
+witnesses: raw 1 ms pin poll, silicon PCNT edge counter, firmware
+sampler): the same contact measured 13, 21, and 30 electrical edges
+for 10 presses across runs — and the 15-of-20 (75% duty) majority
+vote DROPPED half the presses of the filthy run while the violent
+run DOUBLE-FIRED through the 15<->5 hysteresis. Real buttons age
+and real fingers press imperfectly; the sampler now accepts at
+17-of-30 (~57% duty, worn-contact territory), holds a wider
+17<->4 hysteresis, and adds a 150 ms post-accept REFRACTORY so an
+accepted press is idempotent against any bounce train (a
+re-confirm inside it counts as chatter, never a press). Clean-press
+latency moves 15 -> 17 ms. C-unit tests encode the two measured
+pathological profiles verbatim. Firmware-side: flash 2.8.0.
+
 ## 2.7.3 — THE end-of-run twitch: entry-ramp displacement sign
 
 The flight recorder found it in one run. A move entered FASTER than
