@@ -180,6 +180,19 @@ typedef struct {
     // worst-axis error captured at the move's FIRST profile expiry —
     // the bench-measurable answer to "how big is the gap the settle
     // actually closes".
+    // Motion flight recorder (2.7.2): the tick samples the sum
+    // axis every OB_DRIVEBASE_TRACE_STRIDE_MS into a rolling ring —
+    // reference position/velocity, measured position, total
+    // command, integral term. Five bench firmwares of settle-stat
+    // summaries could not distinguish which curve stalls the
+    // integral on the REAL plant; the ring shows the whole ending.
+    #define OB_DRIVEBASE_TRACE_N          250
+    #define OB_DRIVEBASE_TRACE_STRIDE_MS  16
+    float      trace[OB_DRIVEBASE_TRACE_N][6];
+    int        trace_next;
+    int        trace_count;
+    long       trace_last_ms;
+
     uint8_t    landings;
     bool       landing_active;    // a landing profile is in flight
     ob_float_t landing_best_err;  // best worst-axis err seen at a gate
@@ -279,6 +292,13 @@ bool ob_drivebase_is_done(const ob_drivebase_t *db);
 // this to do the conversion before tick.
 ob_float_t ob_drivebase_body_to_wheel_diff(const ob_drivebase_t *db,
                                             ob_float_t body_heading_delta_deg);
+
+// Copy out the flight-recorder ring, oldest first. Returns the
+// number of rows written to ``out`` (each row: t_ms, ref_pos,
+// meas_pos, ref_vel, cmd_sum, integ_dps).
+int ob_drivebase_trace_dump(const ob_drivebase_t *db,
+                            float out[][6], int max_rows);
+
 
 // Settle diagnostics: residual at the last move's first profile
 // expiry (wheel-deg, worst axis) and shaped-landing count.
