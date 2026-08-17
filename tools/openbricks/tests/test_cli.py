@@ -232,6 +232,8 @@ class DispatchTests(unittest.TestCase):
             ("stop", ["stop", "-n", "X"]),
             ("log", ["log", "-n", "X"]),
             ("servo_id", ["servo-id", "-p", "/p", "3"]),
+            ("pasteprobe", ["paste-probe", "-n", "X"]),
+            ("docs", ["docs"]),
         ]
         for mod_name, argv in cases:
             seen.clear()

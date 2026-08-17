@@ -524,6 +524,37 @@ class RunHappyPathTests(unittest.TestCase):
                       stderr=""),
         ])
 
+    def test_full_flow_with_qtr_init_writes_the_cal(self):
+        # --with-qtr-init inserts one mpremote exec between the name
+        # readback and the fw marker: the /qtr.cal write+verify.
+        snippets = []
+
+        def _fake_call(cmd):
+            return 0
+
+        run_responses = iter([
+            MagicMock(returncode=1, stdout="", stderr="no repl"),
+            MagicMock(returncode=0, stdout="ok\n", stderr=""),
+            MagicMock(returncode=0, stdout="wrote: 'RobotA'\n", stderr=""),
+            MagicMock(returncode=0, stdout="RobotA\n", stderr=""),
+            MagicMock(returncode=0, stdout="qtr-cal-ok 10 10\n", stderr=""),
+            MagicMock(returncode=0, stdout="9.9.9\n", stderr=""),
+            MagicMock(returncode=0, stdout="marker: 9.9.9:customized\n",
+                      stderr=""),
+        ])
+
+        def _fake_run(cmd, capture_output=True, text=True, timeout=None):
+            snippets.append(cmd[-1])
+            return next(run_responses)
+
+        with patch("subprocess.call", side_effect=_fake_call), \
+             patch("subprocess.run", side_effect=_fake_run):
+            rc = flash.run(self._run_args(with_qtr_init=True))
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(any("'/qtr.cal'" in sn for sn in snippets),
+                        "qtr cal write never composed")
+
     def test_full_flow_success(self):
         # subprocess.call for erase_flash / write_flash / final reset.
         call_history = []
