@@ -61,6 +61,10 @@ void ob_drivebase_init(ob_drivebase_t *db,
     db->landing_active  = false;
     db->landing_best_err = 0.0;
     db->expiry_residual = 0.0;
+    db->expiry_res_sum = 0.0;
+    db->expiry_res_diff = 0.0;
+    db->expiry_integ_sum_dps = 0.0;
+    db->expiry_integ_diff_dps = 0.0;
     db->expiry_captured = false;
 }
 
@@ -76,6 +80,10 @@ static void db_move_state_reset(ob_drivebase_t *db) {
     db->landing_active  = false;
     db->landing_best_err = 0.0;
     db->expiry_residual = 0.0;
+    db->expiry_res_sum = 0.0;
+    db->expiry_res_diff = 0.0;
+    db->expiry_integ_sum_dps = 0.0;
+    db->expiry_integ_diff_dps = 0.0;
     db->expiry_captured = false;
 }
 
@@ -363,9 +371,12 @@ void ob_drivebase_stop(ob_drivebase_t *db) {
     // evidence). Stats reset only when the NEXT move arms.
     db->integ_sum      = 0.0;
     db->integ_diff     = 0.0;
-    db->landings       = 0;
     db->landing_active = false;
     db->landing_best_err = 0.0;
+    // db->landings is DIAGNOSTIC state alongside expiry_residual —
+    // it survives the stop dispatch (bench read (94.4, 0): the
+    // landing count wiped while the residual survived) and resets
+    // at the next arm.
 }
 
 
@@ -520,8 +531,16 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
         ob_float_t de_now = db->turn_hold - diff_pos;
         se_now = (se_now < 0) ? -se_now : se_now;
         de_now = (de_now < 0) ? -de_now : de_now;
+        // ...and pbio's STANDSTILL condition: the landing's own
+        // feed-forward must be slow before done may latch, or a
+        // plant crossing the window at speed gets its wheels
+        // released mid-motion by the then= dispatch.
+        ob_float_t vf = (fwd_ff_vel  < 0) ? -fwd_ff_vel  : fwd_ff_vel;
+        ob_float_t vt = (turn_ff_vel < 0) ? -turn_ff_vel : turn_ff_vel;
         if (se_now < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
-            && de_now < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG) {
+            && de_now < (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
+            && vf < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS
+            && vt < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS) {
             db->fwd_active     = false;
             db->turn_active    = false;
             db->landing_active = false;
@@ -583,6 +602,10 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
             if (!db->expiry_captured) {
                 db->expiry_captured = true;
                 db->expiry_residual = worst;
+                db->expiry_res_sum  = se;
+                db->expiry_res_diff = de;
+                db->expiry_integ_sum_dps  = db->ki * db->integ_sum;
+                db->expiry_integ_diff_dps = db->ki * db->integ_diff;
             }
             // Landing settle (2.6.0): residual above arrival
             // tolerance gets a SHAPED mini-trajectory back to the
@@ -751,8 +774,14 @@ void ob_drivebase_gyro_frame_reset(ob_drivebase_t *db) {
 // took. The bench reads this to decide whether the integral gains
 // need another look — measured numbers, not guesses.
 void ob_drivebase_settle_stats(const ob_drivebase_t *db,
-                               ob_float_t *expiry_residual,
-                               int *landings) {
-    *expiry_residual = db->expiry_residual;
-    *landings        = (int)db->landings;
+                               ob_float_t *res_sum,
+                               ob_float_t *res_diff,
+                               int *landings,
+                               ob_float_t *integ_sum_dps,
+                               ob_float_t *integ_diff_dps) {
+    *res_sum        = db->expiry_res_sum;
+    *res_diff       = db->expiry_res_diff;
+    *landings       = (int)db->landings;
+    *integ_sum_dps  = db->expiry_integ_sum_dps;
+    *integ_diff_dps = db->expiry_integ_diff_dps;
 }

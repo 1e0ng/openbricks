@@ -819,10 +819,11 @@ static PyObject *RawDriveBase_curve(RawDriveBaseObject *self,
 
 static PyObject *RawDriveBase_settle_stats(RawDriveBaseObject *self,
                                            PyObject *Py_UNUSED(ignored)) {
-    ob_float_t r;
+    ob_float_t rs, rd, is_, id_;
     int n;
-    ob_drivebase_settle_stats(&self->core, &r, &n);
-    return Py_BuildValue("di", (double)r, n);
+    ob_drivebase_settle_stats(&self->core, &rs, &rd, &n, &is_, &id_);
+    return Py_BuildValue("ddidd", (double)rs, (double)rd, n,
+                         (double)is_, (double)id_);
 }
 
 
