@@ -77,6 +77,9 @@ html_extra_path = ["_extra"]
 templates_path = ["_templates"]
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
+# Firebase Analytics — same web app as openbricks.dev; the event
+# hostname separates docs traffic in the Firebase console.
+html_js_files = [("firebase-analytics.js", {"type": "module"})]
 html_theme_options = {
     "collapse_navigation": False,
     "navigation_depth": 3,
