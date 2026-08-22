@@ -108,6 +108,7 @@ pre.code {
 
 section { padding: 56px 0; }
 section.alt { background: var(--bg-alt); }
+.demo-sub { margin: 40px 0 0; font-size: 1.25rem; text-align: center; }
 .demo-video { display: block; margin: 28px auto 0; max-height: 560px; max-width: 100%; border-radius: 12px; border: 1px solid var(--border); }
 h2 { font-size: 28px; letter-spacing: -0.01em; margin-bottom: 8px; }
 .sub { color: var(--fg-muted); margin-bottom: 32px; max-width: 720px; }
@@ -201,6 +202,14 @@ db.<span class="fn">turn</span>(<span class="nu">90</span>)       <span class="c
   on the ICM-45686, branch counting, and back to base. One minute,
   real time, no cuts.</p>
   <video class="demo-video" src="demo.mp4" muted autoplay loop
+         playsinline controls preload="metadata"></video>
+  <h3 class="demo-sub">Continuous mode</h3>
+  <p class="sub">The same robot with the drivebase in continuous
+  mode: each <code>straight()</code> and <code>curve()</code> ends
+  with <code>then=Stop.NONE</code>, so moves hand their speed straight
+  to the next one and the run flows through the course without
+  stopping between segments.</p>
+  <video class="demo-video" src="demo-continuous.mp4" muted loop
          playsinline controls preload="metadata"></video>
 </div>
 </section>
