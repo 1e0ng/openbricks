@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Example programs for openbricks robots: drivebase squares, gyro-corrected driving, line following, color sensing (direct or via a TCA9548A mux), color sorting, and distance-based wall avoidance."
+    description: "Example programs for openbricks robots: drivebase squares, gyro-corrected driving, line following (edge and center modes), color sensing (direct or via a TCA9548A mux), color sorting, and distance-based wall avoidance."
 ---
 
 # Examples
@@ -77,6 +77,19 @@ name the colour under every sensor.
 
 ```{eval-rst}
 .. literalinclude:: ../examples/color_array.py
+   :language: python
+```
+
+## Line following (QTR sensor bar, center mode)
+
+The QTRLineSensor's `"center"` mode steers on the weighted centroid
+of all ten elements, so `edge_error()` is proportional across the
+whole 56 mm window. The same control law ships pinned to
+`"left"` and `"right"` in `examples/qtr_line_follow_left.py` /
+`_right.py` — see {doc}`/hardware` for what each mode holds.
+
+```{eval-rst}
+.. literalinclude:: ../examples/qtr_line_follow_center.py
    :language: python
 ```
 

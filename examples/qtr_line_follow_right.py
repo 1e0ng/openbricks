@@ -4,8 +4,9 @@
 Run ``examples/qtr_calibrate.py`` once first. Holds the line's
 RIGHT edge under channel 12 (the geometry lives in the firmware's QTRLineSensor; wiring
 table in docs/hardware.md). Switch to
-``examples/qtr_line_follow_left.py`` for the mirror discipline —
-or call ``qtr.set_mode(...)`` mid-run. The whole window going
+``examples/qtr_line_follow_left.py`` for the mirror discipline,
+``examples/qtr_line_follow_center.py`` to hold the line's centre
+on all ten elements — or call ``qtr.set_mode(...)`` mid-run. The whole window going
 dark ends the run.
 """
 
@@ -40,8 +41,10 @@ def get_wheel_speeds(reading):
 def branch_seen(reading, mode):
     if mode == "left":
         flags = reading.elements[-FLAG_COUNT:]
-    else:
+    elif mode == "right":
         flags = reading.elements[:FLAG_COUNT]
+    else:
+        flags = reading.elements[:FLAG_COUNT] + reading.elements[-FLAG_COUNT:]
     for e in flags:
         if e.ambient() < 50:
             return True

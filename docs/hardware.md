@@ -88,13 +88,13 @@ See {mod}`openbricks.pins`.
 ### QTRLineSensor wiring (the standard line-follow window)
 
 {class}`openbricks.drivers.qtr.QTRLineSensor` bakes the whole rig
-geometry into the firmware — pins, element positions, and both mode
+geometry into the firmware — pins, element positions, and the mode
 setpoints — so programs just construct it and pick a discipline:
 
 ```python
 from openbricks.drivers.qtr import QTRLineSensor
 qtr = QTRLineSensor()
-qtr.set_mode("left")            # or "right"; switchable mid-run
+qtr.set_mode("left")            # or "right" / "center"; switchable mid-run
 error = qtr.read().edge_error()
 ```
 
@@ -108,18 +108,29 @@ to right as mounted, onto GPIO 1..10 **in order**:
 
 That spans a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm (the
 driver's `positions_mm` carries the true coordinates, so edge
-interpolation is exact across the unequal gaps). The two modes:
+interpolation is exact across the unequal gaps). The three modes:
 
 - **`"left"`** — holds the line's LEFT edge under **channel 4**
   (x = −16 mm)
 - **`"right"`** — holds the line's RIGHT edge under **channel 12**
   (x = +16 mm)
+- **`"center"`** — holds the line's CENTRE at x = 0, steering on
+  the weighted centroid of **all ten channels**
 
-`edge_error()` is how far the mode's channel sits from the
-black/white boundary: that element's ambient (0 black .. 100
-white) referenced to 50, so it reads 0 exactly when the channel
-straddles the edge, and is signed so positive steers right in
-both modes.
+`edge_error()` is signed so positive steers right in every mode,
+range −50 .. +50. In the two edge modes it is how far the mode's
+channel sits from the black/white boundary — that element's
+ambient (0 black .. 100 white) referenced to 50, reading 0 exactly
+when the channel straddles the edge. That is one element, so the
+error is proportional only within about a pitch of the setpoint
+and rails at ±50 beyond it. In `"center"` mode it is the line's
+centroid position scaled so ±50 is the far end of the window
+(±28 mm) — proportional across the whole span, which is what you
+want through sharp corners and after a branch. When no channel
+sees the line, center mode rails toward the side the line left
+through (`last_side()`), and raises if the line was never seen.
+Examples: `qtr_line_follow_left.py` / `_right.py` / `_center.py`,
+one shared law pinned to each mode.
 
 The skip pattern is a palindrome, so if the board is mounted the
 other way round, only these channel labels swap — GPIO order and
