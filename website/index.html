@@ -201,7 +201,7 @@ db.<span class="fn">turn</span>(<span class="nu">90</span>)       <span class="c
   mat — line following on the 10-channel reflectance bar, gyro turns
   on the ICM-45686, branch counting, and back to base. One minute,
   real time, no cuts.</p>
-  <video class="demo-video" src="demo.mp4" muted autoplay loop
+  <video class="demo-video" src="demo.mp4" muted loop
          playsinline controls preload="metadata"></video>
   <h3 class="demo-sub">Continuous mode</h3>
   <p class="sub">The same robot with the drivebase in continuous
@@ -350,6 +350,46 @@ db.<span class="fn">turn</span>(<span class="nu">90</span>)       <span class="c
 </div>
 </footer>
 
+<script>
+// Demo videos: autoplay whichever one occupies the most viewport area;
+// on a tie (both fully visible, or neither) the first wins. Videos are
+// muted, so play() is allowed without a gesture.
+(function () {
+  var videos = Array.prototype.slice.call(document.querySelectorAll("video.demo-video"));
+  if (!videos.length) return;
+  function visibleArea(el) {
+    var r = el.getBoundingClientRect();
+    var w = Math.min(r.right, window.innerWidth) - Math.max(r.left, 0);
+    var h = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+    return (w > 0 && h > 0) ? w * h : 0;
+  }
+  function update() {
+    var best = 0, bestArea = -1;
+    for (var i = 0; i < videos.length; i++) {
+      var a = visibleArea(videos[i]);
+      if (a > bestArea) { bestArea = a; best = i; }   // strict >: ties keep the earlier one
+    }
+    for (var j = 0; j < videos.length; j++) {
+      var v = videos[j];
+      if (j === best && bestArea > 0) {
+        if (v.paused) { var p = v.play(); if (p && p.catch) p.catch(function () {}); }
+      } else if (!v.paused) {
+        v.pause();
+      }
+    }
+  }
+  var scheduled = false;
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    window.requestAnimationFrame(function () { scheduled = false; update(); });
+  }
+  window.addEventListener("scroll", schedule, { passive: true });
+  window.addEventListener("resize", schedule);
+  window.addEventListener("load", update);
+  update();
+})();
+</script>
 <script type="module">
   // Firebase Analytics (page views for openbricks.dev).
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
