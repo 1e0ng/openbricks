@@ -20,8 +20,8 @@ the launcher's press detectors).
 
 This is a different physical button from the one ``openbricks.launcher``
 watches for program start/stop — the BLE toggle lives on its own
-GPIO (default 5, see :class:`openbricks.hub.Hub`) while the program
-button is on GPIO 4. Two pins → no duration-based dispatch, every
+GPIO (default 38 on the S3, 5 on the classic ESP32 — see :class:`openbricks.hub.Hub`) while the program
+button is on GPIO 39. Two pins → no duration-based dispatch, every
 press on this pin means "flip BLE".
 
 Usage from ``main.py``:

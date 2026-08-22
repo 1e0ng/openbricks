@@ -24,8 +24,8 @@ is what `import openbricks` gives you out of the box.
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
 
-left = ST3032Motor(servo_id=1, tx=14, rx=6)
-right = ST3032Motor(servo_id=2, tx=14, rx=6, invert=True)
+left = ST3032Motor(servo_id=1, tx=14, rx=41)
+right = ST3032Motor(servo_id=2, tx=14, rx=41, invert=True)
 
 db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 db.straight(500)   # mm

@@ -3,12 +3,12 @@
 
 Wiring assumed:
     ESP32-S3 GPIO14  ── URT-2 RX  (i.e. data INTO URT-2)
-    ESP32-S3 GPIO6   ── URT-2 TX  (i.e. data OUT of URT-2)
+    ESP32-S3 GPIO41  ── URT-2 TX  (i.e. data OUT of URT-2)
     ESP32-S3 GND     ── URT-2 GND ── servo GND
     URT-2 12 V in    ── bench supply
     Servo 3-pin      ── URT-2 servo header
 
-If `ping` fails, try swapping GPIO14 ↔ GPIO6 — the URT-2 silkscreen
+If `ping` fails, try swapping GPIO14 ↔ GPIO41 — the URT-2 silkscreen
 sometimes labels TX/RX from the board's perspective rather than the
 MCU's.
 
@@ -46,7 +46,7 @@ def main():
     line("    angle = %s deg" % a0)
     if a0 is None:
         line("    angle() returned None — bus is one-way (TX works, RX doesn't).")
-        line("    Most likely: GPIO14/GPIO6 swapped, or no common ground.")
+        line("    Most likely: GPIO14/GPIO41 swapped, or no common ground.")
         return
 
     line("[3] run_speed(+60 dps) for 1 s ...")

@@ -83,7 +83,7 @@ class ST3032Motor(ST3215Motor):
     # ST-3032 @ 12 V: 10 kg·cm ~= 980 mNm (datasheet §5-3).
     STALL_TORQUE_MNM = 980.0
 
-    def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
+    def __init__(self, servo_id, uart_id=1, tx=14, rx=41,
                  baud=1_000_000, dir_pin=None,
                  invert=False,
                  steps_per_dps=_DEFAULT_STEPS_PER_DPS,

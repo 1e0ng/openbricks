@@ -33,6 +33,32 @@ wiring guides in ``docs/hardware.md`` cover the soft cases.
 import os
 
 
+# ---- the ESP32-S3 wiring convention ---------------------------------------
+
+# GPIO -> role, the single source of truth for "which pin does what"
+# on the reference build (docs/hardware.md, "GPIO map"). Drivers
+# default their pin arguments from it, shipped examples are tested
+# against it (tests/test_example_pins.py), and the user-facing docs
+# reproduce it. A pin absent from the table is free for user wiring
+# (subject to :func:`check`).
+ESP32S3_CONVENTION = {
+    # ADC1 bank — the QTRLineSensor window. Nothing else may sit
+    # here: every other role was moved off it deliberately.
+    1: "qtr", 2: "qtr", 3: "qtr", 4: "qtr", 5: "qtr",
+    6: "qtr", 7: "qtr", 8: "qtr", 9: "qtr", 10: "qtr",
+    11: "spi_miso", 12: "spi_sck", 13: "spi_mosi", 17: "spi_cs",
+    14: "uart1_tx", 41: "uart1_rx",
+    15: "i2c_sda", 16: "i2c_scl",
+    19: "usb", 20: "usb",
+    21: "ws2812",
+    38: "ble_button", 39: "program_button",
+    43: "uart0_tx", 44: "uart0_rx",
+    48: "status_led",
+}
+SERVO_BUS_TX = 14
+SERVO_BUS_RX = 41
+
+
 class ReservedPinError(ValueError):
     """A GPIO was requested that can't (or shouldn't) be user-wired."""
 

@@ -17,5 +17,5 @@ def make_i2c(bus_id=0, sda=21, scl=22, freq=400_000):
     return I2C(bus_id, sda=Pin(sda), scl=Pin(scl), freq=freq)
 
 
-def make_uart(bus_id=1, tx=17, rx=16, baud=1_000_000, timeout=50):
+def make_uart(bus_id=1, tx=14, rx=41, baud=1_000_000, timeout=50):
     return UART(bus_id, baudrate=baud, tx=tx, rx=rx, timeout=timeout)

@@ -64,8 +64,8 @@ class DriveBase:
         from openbricks.drivers.st3032 import ST3032Motor
         from openbricks.robotics import DriveBase
 
-        left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6,
+        left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41,
                             invert=True)
         db = DriveBase(left, right, wheel_diameter_mm=88,
                        axle_track_mm=138)

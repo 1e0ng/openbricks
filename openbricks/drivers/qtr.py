@@ -20,8 +20,8 @@ so the array MUST be calibrated once per session: sweep it across the
 line while ``calibrate()`` runs. Reading before calibration raises —
 an uncalibrated centroid is a plausible-looking wrong number.
 
-Example (bench: channels 15..9 left-to-right on ADC1; GPIO 4/6
-belong to the stop button and servo bus)::
+Example (bench: channels 15..9 left-to-right on ADC1; the stop
+button and servo bus live on GPIO 39 and 14/41, off the bank)::
 
     from openbricks.drivers.qtr import QTRArray, QTRChannel
 

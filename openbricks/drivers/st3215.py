@@ -384,7 +384,7 @@ class ST3215(Servo):
         return cls._buses[key]
 
 
-    def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
+    def __init__(self, servo_id, uart_id=1, tx=14, rx=41,
                  baud=1_000_000, dir_pin=None,
                  min_raw=0, max_raw=4095, range_deg=360):
         self._id = servo_id
@@ -509,7 +509,7 @@ class ST3215Motor(Motor):
     STALL_LOAD_PCT   = 80     # % of stall load to call it stalling
     STALL_SPEED_DPS  = 20.0   # and slower than this
 
-    def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
+    def __init__(self, servo_id, uart_id=1, tx=14, rx=41,
                  baud=1_000_000, dir_pin=None,
                  invert=False,
                  steps_per_dps=_DEFAULT_STEPS_PER_DPS,

@@ -1,161 +1,241 @@
 # SPDX-License-Identifier: MIT
-"""Shipped examples must not wire reserved ESP32-S3 pins.
+"""Every shipped example must wire pins per the ESP32-S3 convention.
 
-The DC-motor example once used GPIO 4/5/6 for the left motor — GPIO 4
-is the launcher's default program button (polled as an input, so IN1
-toggling low read as button presses and stopped the running program),
-GPIO 5 is the BLE-toggle button, and GPIO 6 is the serial-bus UART RX
-convention. The ICM-45686 examples once wired sck=8/mosi=9 straight
-into the ADC1 bank the QTRLineSensor window owns. These tests parse
-the examples (no import — they drive real hardware at module level)
-and fail if any wired pin lands on a reserved one, or if the
-docstring's wiring table drifts from the code.
+``openbricks.pins.ESP32S3_CONVENTION`` is the single source of truth
+for which GPIO does what on the reference build (the GPIO map in
+docs/hardware.md). These tests parse every ``examples/*.py`` (no
+import — they drive real hardware at module level), collect each
+wired pin with its role, and fail if:
+
+* a pin is used for a role the convention assigns to something else
+  (e.g. a motor line on the QTR bank, a UART on an I2C pin);
+* one file wires the same GPIO to two different functions
+  (``full_robot.py`` once had the IMU chip-select and the servo
+  UART TX both on GPIO 17);
+* the DC-motor example's docstring wiring table drifts from its code.
+
+The driver defaults are checked the same way: constructing a
+serial-bus servo or the native drivebase without pin arguments must
+land on the convention's UART pins, not on pins another role owns.
 
 Runs under both CPython and unix MicroPython: plain string scanning,
 no ``re`` (MP's ``re`` lacks ``finditer``) and no ``ast``.
 """
 
-import tests._fakes  # noqa: F401  (lets ``openbricks.launcher`` import)
+import tests._fakes  # noqa: F401  (lets the firmware modules import)
 
+import os
 import unittest
 
-from openbricks import launcher
+from openbricks import pins
+from openbricks.pins import ESP32S3_CONVENTION, SERVO_BUS_TX, SERVO_BUS_RX
 
 
 _here = __file__
 _idx = _here.rfind("/")
-_EXAMPLE = (_here[:_idx] if _idx >= 0 else ".") + "/../examples/esp32_drivebase.py"
+_EXAMPLES_DIR = (_here[:_idx] if _idx >= 0 else ".") + "/../examples"
 
-# Pins the example must leave alone, and why. 22-25 don't exist on the
-# S3; 26-37 are flash/PSRAM on the DevKitC-1 modules.
-_RESERVED = {
-    launcher.DEFAULT_BUTTON_PIN: "program button (launcher default)",
-    38: "BLE-toggle button (hub default)",
-    0: "strapping", 3: "strapping", 45: "strapping", 46: "strapping",
-    19: "native USB D-", 20: "native USB D+",
-    15: "I2C SDA convention", 16: "I2C SCL convention",
-    14: "serial-bus UART TX convention",
-    41: "serial-bus UART RX convention",
-    48: "onboard WS2812 LED",
+# Diagnostics that deliberately sweep many GPIOs as pulled-up inputs
+# or poke candidate LED pins; they wire nothing and are exempt.
+_PROBES = ("button_probe.py", "led_probe.py")
+
+# Keyword argument -> role the pin is being used for.
+_KWARG_ROLES = {
+    "tx=": "uart1_tx", "rx=": "uart1_rx",
+    "sda=": "i2c_sda", "scl=": "i2c_scl",
+    "sck=": "spi_sck", "mosi=": "spi_mosi", "miso=": "spi_miso",
+    "cs=": "spi_cs",
+    "in1=": "dc_motor", "in2=": "dc_motor", "pwm=": "dc_motor",
+    "encoder_a=": "dc_motor", "encoder_b=": "dc_motor",
+    "trig=": "ultrasonic", "echo=": "ultrasonic",
 }
-for _p in range(22, 38):
-    _RESERVED[_p] = "nonexistent (22-25) or flash/PSRAM (26-37)"
+# ``NAME = n`` / ``NAME_PIN = n`` module constants -> role.
+_CONST_ROLES = {
+    "TX": "uart1_tx", "RX": "uart1_rx",
+    "TX_PIN": "uart1_tx", "RX_PIN": "uart1_rx",
+    "SERVO_TX": "uart1_tx", "SERVO_RX": "uart1_rx",
+    "SDA_PIN": "i2c_sda", "SCL_PIN": "i2c_scl",
+    "I2C_SDA": "i2c_sda", "I2C_SCL": "i2c_scl",
+    "SCK": "spi_sck", "MOSI": "spi_mosi", "MISO": "spi_miso",
+    "CS": "spi_cs",
+    "DATA_PIN": "ws2812",
+    "BUTTON_PIN": "program_button",
+}
+# Roles that may also sit on otherwise-free pins.
+_MAY_USE_FREE = ("dc_motor", "ultrasonic")
+# The DC build is documented as mutually exclusive with the QTR bar
+# (docs/hardware.md, "Alternative: DC gear motors") — it alone may
+# take pins from the ADC1 bank.
+_QTR_EXEMPT = {"esp32_drivebase.py": "dc_motor"}
 
 
-def _ints_after(text, marker):
-    """Every integer immediately following ``marker`` in ``text``."""
+def _int_at(text, j):
+    """The integer starting at ``text[j]`` (skipping ``Pin(``), or None."""
+    if text.startswith("Pin(", j):
+        j += 4
+    k = j
+    while k < len(text) and text[k].isdigit():
+        k += 1
+    return int(text[j:k]) if k > j else None
+
+
+def _is_ident(c):
+    # MicroPython's str has no isalnum().
+    return c.isalpha() or c.isdigit() or c == "_"
+
+
+def _ints_after(text, marker, guard=True):
     out = []
     start = 0
     while True:
         i = text.find(marker, start)
         if i < 0:
             return out
-        j = i + len(marker)
-        k = j
-        while k < len(text) and text[k].isdigit():
-            k += 1
-        if k > j:
-            out.append(int(text[j:k]))
-        start = k if k > j else j
+        # ``encoder_a=`` must not match inside ``_encoder_a=``-style
+        # identifiers; require a non-identifier char before it.
+        if guard and i > 0 and _is_ident(text[i - 1]):
+            start = i + 1
+            continue
+        v = _int_at(text, i + len(marker))
+        if v is not None:
+            out.append(v)
+        start = i + len(marker)
 
 
-def _line_ints(text, marker):
-    """The comma-separated integers on ``marker``'s line, after it."""
-    i = text.find(marker)
-    if i < 0:
-        return []
-    j = text.find("\n", i)
-    tail = text[i + len(marker):j if j >= 0 else len(text)]
-    out = []
-    for part in tail.split(","):
-        part = part.strip()
-        if part.isdigit():
-            out.append(int(part))
-    return out
+def _code_only(text):
+    """Strip the module docstring and ``#`` comments."""
+    if text.lstrip().startswith('"""') or '"""' in text[:200]:
+        a = text.find('"""')
+        b = text.find('"""', a + 3)
+        if b > a:
+            text = text[:a] + text[b + 3:]
+    lines = []
+    for line in text.split("\n"):
+        h = line.find("#")
+        lines.append(line[:h] if h >= 0 else line)
+    return "\n".join(lines)
 
 
-class ExamplePinTests(unittest.TestCase):
+def _wired_pins(text):
+    """[(role, pin), ...] for every pin the example wires."""
+    code = _code_only(text)
+    found = []
+    for kw, role in _KWARG_ROLES.items():
+        for p in _ints_after(code, kw):
+            found.append((role, p))
+    for line in code.split("\n"):
+        if "=" not in line or line.startswith((" ", "\t")):
+            continue
+        lhs, rhs = line.split("=", 1)
+        names = [n.strip() for n in lhs.split(",")]
+        vals = [v.strip() for v in rhs.split(",")]
+        if len(names) != len(vals):
+            continue
+        for name, val in zip(names, vals):
+            if name in _CONST_ROLES and val.isdigit():
+                found.append((_CONST_ROLES[name], int(val)))
+    return found
 
-    @classmethod
-    def setUpClass(cls):
+
+def _examples():
+    try:
+        names = sorted(os.listdir(_EXAMPLES_DIR))
+    except OSError:
+        raise unittest.SkipTest("examples/ not present (not a checkout)")
+    return [n for n in names if n.endswith(".py") and n not in _PROBES]
+
+
+def _read(name):
+    with open(_EXAMPLES_DIR + "/" + name) as f:
+        return f.read()
+
+
+class ExamplePinConventionTests(unittest.TestCase):
+
+    def test_scanner_sees_the_known_wiring(self):
+        # Guard against the markers silently matching nothing.
+        found = _wired_pins(_read("full_robot.py"))
+        self.assertTrue(("uart1_tx", 14) in found, found)
+        self.assertTrue(("spi_cs", 17) in found, found)
+        self.assertTrue(("i2c_sda", 15) in found, found)
+        dc = _wired_pins(_read("esp32_drivebase.py"))
+        self.assertEqual(len([r for r, _ in dc if r == "dc_motor"]), 10, dc)
+
+    def test_every_example_follows_the_convention(self):
+        bad = []
+        for name in _examples():
+            for role, pin in _wired_pins(_read(name)):
+                owner = ESP32S3_CONVENTION.get(pin)
+                if owner == role:
+                    continue
+                if owner is None and role in _MAY_USE_FREE:
+                    continue
+                if owner == "qtr" and _QTR_EXEMPT.get(name) == role:
+                    continue
+                bad.append("%s wires GPIO %d as %s but the convention "
+                           "assigns it to %s" % (name, pin, role,
+                                                  owner or "(free)"))
+        self.assertEqual(bad, [], "\n".join(bad))
+
+    def test_no_example_wires_one_gpio_twice(self):
+        bad = []
+        for name in _examples():
+            seen = {}
+            for role, pin in _wired_pins(_read(name)):
+                if pin in seen and seen[pin] != role:
+                    bad.append("%s wires GPIO %d as both %s and %s"
+                               % (name, pin, seen[pin], role))
+                seen.setdefault(pin, role)
+        self.assertEqual(bad, [], "\n".join(bad))
+
+    def test_no_example_touches_chip_reserved_pins(self):
+        # Chip rules only: runtime claims (the launcher's button, the
+        # hub's LED) belong to whichever earlier test wired them in
+        # this process, and an example is *allowed* to name those
+        # pins (hard_button_probe.py reads the program button).
+        saved = dict(pins._claims)
+        pins._claims_reset()
+        pins.set_chip("esp32s3")
         try:
-            with open(_EXAMPLE) as f:
-                cls.text = f.read()
-        except OSError:
-            raise unittest.SkipTest("examples/ not present (not a checkout)")
-        cls.code_pins = []
-        for kw in ("in1=", "in2=", "pwm=", "encoder_a=", "encoder_b="):
-            cls.code_pins.extend(_ints_after(cls.text, kw))
-        cls.doc_pins = _ints_after(cls.text, "-> GPIO ")
+            for name in _examples():
+                for role, pin in _wired_pins(_read(name)):
+                    pins.check(pin, "%s %s" % (name, role),
+                               output=(role != "uart1_rx"))
+        finally:
+            pins.set_chip(None)
+            pins._claims.update(saved)
 
-    def test_example_parsed(self):
-        # Two motors x five pins each; if the constructor shape changes
-        # the markers above need updating rather than silently matching
-        # nothing.
-        self.assertEqual(len(self.code_pins), 10,
-                         "expected 10 wired pins, parsed %r" % self.code_pins)
-
-    def test_docstring_matches_code(self):
-        self.assertEqual(sorted(self.doc_pins), sorted(self.code_pins),
+    def test_dc_example_docstring_matches_code(self):
+        text = _read("esp32_drivebase.py")
+        code = sorted(p for r, p in _wired_pins(text) if r == "dc_motor")
+        doc = sorted(_ints_after(text, "-> GPIO ", guard=False))
+        self.assertEqual(doc, code,
                          "wiring table in the docstring drifted from the "
                          "constructor arguments")
 
-    def test_no_reserved_pins(self):
-        clashes = ["GPIO %d is %s" % (p, _RESERVED[p])
-                   for p in self.code_pins if p in _RESERVED]
-        self.assertEqual(clashes, [],
-                         "example wires reserved pins:\n" + "\n".join(clashes))
 
-    def test_no_duplicate_pins(self):
-        self.assertEqual(len(set(self.code_pins)), len(self.code_pins),
-                         "same GPIO wired to two functions: %r"
-                         % sorted(self.code_pins))
+class DriverDefaultPinTests(unittest.TestCase):
+    """Omitting ``tx``/``rx`` must land on the convention's UART pins."""
 
+    def test_convention_reserves_the_servo_bus_pins(self):
+        self.assertEqual(ESP32S3_CONVENTION[SERVO_BUS_TX], "uart1_tx")
+        self.assertEqual(ESP32S3_CONVENTION[SERVO_BUS_RX], "uart1_rx")
+        for p in range(1, 11):
+            self.assertEqual(ESP32S3_CONVENTION[p], "qtr")
 
-class IcmExamplePinTests(unittest.TestCase):
-    """Both ICM-45686 examples wire one SPI quad via
-    ``SCK, MOSI, MISO, CS = ...``; it must dodge the reserved set
-    AND the ADC1 bank (GPIO 1-10) that the QTRLineSensor window
-    owns on the reference robot."""
+    def test_serial_servo_defaults(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.drivers.st3215 import ST3215, ST3215Motor
+        for cls in (ST3215, ST3215Motor, ST3032Motor):
+            s = cls(servo_id=11)
+            uart = s._bus._uart
+            self.assertEqual((uart.tx, uart.rx), (SERVO_BUS_TX, SERVO_BUS_RX),
+                             cls.__name__)
 
-    EXAMPLES = ("icm45686_bringup.py", "icm45686_square.py",
-                "icm45686_axle_track.py", "full_robot.py")
-
-    def _spi_pins(self, name):
-        path = (_here[:_idx] if _idx >= 0 else ".") + "/../examples/" + name
-        try:
-            with open(path) as f:
-                text = f.read()
-        except OSError:
-            raise unittest.SkipTest("examples/ not present (not a checkout)")
-        pins = _line_ints(text, "SCK, MOSI, MISO, CS = ")
-        self.assertEqual(len(pins), 4,
-                         "%s: expected 4 SPI pins, parsed %r" % (name, pins))
-        return pins
-
-    def test_no_reserved_or_adc_bank_pins(self):
-        for name in self.EXAMPLES:
-            for p in self._spi_pins(name):
-                self.assertFalse(p in _RESERVED,
-                                 "%s wires GPIO %d: %s"
-                                 % (name, p, _RESERVED.get(p)))
-                self.assertFalse(1 <= p <= 10,
-                                 "%s wires GPIO %d inside the ADC1 bank "
-                                 "(QTR window convention)" % (name, p))
-
-    def test_examples_agree_on_the_wiring(self):
-        quads = [self._spi_pins(name) for name in self.EXAMPLES]
-        for name, quad in zip(self.EXAMPLES, quads):
-            self.assertEqual(quad, quads[0],
-                             "%s wires different SPI pins than %s: "
-                             "%r vs %r" % (name, self.EXAMPLES[0],
-                                           quad, quads[0]))
-
-    def test_no_duplicate_pins(self):
-        for name in self.EXAMPLES:
-            pins = self._spi_pins(name)
-            self.assertEqual(len(set(pins)), len(pins),
-                             "%s wires one GPIO twice: %r" % (name, pins))
+    def test_make_uart_defaults(self):
+        from openbricks.platforms.esp32 import make_uart
+        u = make_uart()
+        self.assertEqual((u.tx, u.rx), (SERVO_BUS_TX, SERVO_BUS_RX))
 
 
 if __name__ == "__main__":

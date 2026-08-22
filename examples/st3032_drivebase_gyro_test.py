@@ -15,7 +15,7 @@ Hardware (defaults below match the openbricks reference bench —
 EDIT all of this to your own wiring/dims if it differs):
     * 2x ST-3032 (wheel mode), daisy-chained on one URT-2. Left id=1,
       right id=2 (inverted). ESP32-S3 GPIO14 -> URT-2 TX,
-      GPIO6 -> URT-2 RX, common GND. 12V into the URT-2 servo rail.
+      GPIO41 -> URT-2 RX, common GND. 12V into the URT-2 servo rail.
     * BNO055 IMU behind a TCA9548A mux on I2C0 (sda=15, scl=16;
       itself at 0x70) — channel 3, address 0x29 (this particular
       breakout's ADR/COM3 pin defaults HIGH instead of the driver's
