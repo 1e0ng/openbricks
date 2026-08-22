@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.9.0 — QTR "center" mode: all ten elements, proportional across the window
+
+`QTRArray.set_mode("center")` holds the line's centre (the weighted
+centroid over every element, `position()`) at `CENTER_SETPOINT_MM`,
+with `edge_error()` scaled so ±50 is the far end of the window —
+proportional across the whole 56 mm span. The edge modes read one
+setpoint element and rail at ±50 a pitch away from it, which gives
+a follower direction but no distance through corners and after a
+branch. Line lost in center mode rails toward `last_side()`; never
+seen raises. `examples/qtr_line_follow_center.py` ships the shared
+law pinned to the new mode (branches on either outer band); the
+law is test-pinned identical across the three follower files.
+Flash 2.9.0.
+
 ## 2.8.2 — one pin map, every example and driver default on it
 
 Audit of every shipped example against the ESP32-S3 GPIO map

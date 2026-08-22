@@ -228,6 +228,10 @@ class QTRArray:
         self._mode = None
         self._left_idx = self._nearest_index(self.LEFT_SETPOINT_MM)
         self._right_idx = self._nearest_index(self.RIGHT_SETPOINT_MM)
+        # Center mode scales the centroid so the farthest element
+        # from the setpoint reads +/-50.
+        self._half_span = max(abs(x - self.CENTER_SETPOINT_MM)
+                              for x in self._x_mm) or 1.0
 
     def _nearest_index(self, x_mm):
         best = 0
@@ -555,16 +559,21 @@ class QTRArray:
     # numbers.
     LEFT_SETPOINT_MM = 0.0
     RIGHT_SETPOINT_MM = 0.0
+    CENTER_SETPOINT_MM = 0.0
+
+    MODES = ("left", "right", "center")
 
     def set_mode(self, mode):
-        """Select the edge-following discipline: ``"left"`` holds
+        """Select the line-following discipline: ``"left"`` holds
         the line's LEFT edge at ``LEFT_SETPOINT_MM``, ``"right"``
-        the RIGHT edge at ``RIGHT_SETPOINT_MM``. Takes effect on the
-        next :meth:`edge_error` — call it again any time to switch
+        the RIGHT edge at ``RIGHT_SETPOINT_MM``, ``"center"`` the
+        line's CENTRE (the weighted centroid over every element) at
+        ``CENTER_SETPOINT_MM``. Takes effect on the next
+        :meth:`edge_error` — call it again any time to switch
         disciplines mid-run."""
-        if mode not in ("left", "right"):
+        if mode not in self.MODES:
             raise ValueError(
-                "mode must be 'left' or 'right', got %r" % (mode,))
+                "mode must be one of %r, got %r" % (self.MODES, mode))
         self._mode = mode
 
     def mode(self):
@@ -573,22 +582,44 @@ class QTRArray:
 
     def edge_error(self, readings=None):
         """Signed steering error for the discipline selected with
-        :meth:`set_mode`: how far the mode's setpoint element sits
-        from the black/white boundary, as its ambient (0 black ..
-        100 white) referenced to 50. Zero exactly when that element
-        straddles the edge; range -50 .. +50. Positive = steer
-        right, same sign convention as :meth:`position` — drifting
-        onto the mat side pushes the error toward the line, and
-        vice versa, in both modes."""
+        :meth:`set_mode`, range -50 .. +50, positive = steer right
+        (the :meth:`position` sign convention) in every mode.
+
+        ``"left"`` / ``"right"``: how far the mode's setpoint
+        element sits from the black/white boundary, as its ambient
+        (0 black .. 100 white) referenced to 50 — zero exactly when
+        that element straddles the edge. One element, so the error
+        is proportional only within about a pitch of the setpoint
+        and rails at +/-50 beyond it.
+
+        ``"center"``: the line's centroid over ALL elements
+        (:meth:`position`) relative to ``CENTER_SETPOINT_MM``,
+        scaled so +/-50 is the far end of the window — proportional
+        across the whole span. With no element dark the line is
+        outside the window; the error rails toward the side it
+        left through (:meth:`last_side`), and raises if the line
+        has never been seen (there is nothing to steer toward)."""
         if readings is None:
             readings = self.read()
         if self._mode == "left":
             return readings[self._left_idx].ambient() - 50
         if self._mode == "right":
             return 50 - readings[self._right_idx].ambient()
+        if self._mode == "center":
+            pos = self.position(readings)
+            if pos is None:
+                if self._last_side == 0:
+                    raise RuntimeError(
+                        "center mode: no element sees the line and "
+                        "it has never been seen — start with the "
+                        "line inside the window")
+                return 50.0 * self._last_side
+            err = 50.0 * (pos - self.CENTER_SETPOINT_MM) / self._half_span
+            return max(-50.0, min(50.0, err))
         raise RuntimeError(
-            "no edge-following mode selected — call "
-            "set_mode('left') or set_mode('right') first")
+            "no line-following mode selected — call "
+            "set_mode('left'), set_mode('right') or "
+            "set_mode('center') first")
 
     def last_side(self):
         """+1 if the line was last seen right of centre, -1 left,

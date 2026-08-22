@@ -3,7 +3,7 @@
 
 Same extract-and-exec trick as ``tests/test_line_follow.py``: the
 examples wire hardware at module level, so the pure control-law
-block is pulled out by its markers. TWO example files carry ONE
+block is pulled out by its markers. THREE example files carry ONE
 IDENTICAL law; the mode geometry (setpoints, positions, pins)
 lives in the firmware's QTRLineSensor, so the law consumes only
 ``edge_error()``. The whole window dark ends the run; the far-side
@@ -120,6 +120,12 @@ class _LawContract:
         self.assertFalse(branch_seen(r, "left"))
         # No dark anywhere: no branch.
         self.assertFalse(branch_seen(_Reading(), "left"))
+        # Center mode holds the line mid-window, so a branch can
+        # appear on EITHER outer band.
+        self.assertTrue(branch_seen(_Reading(dark_flags=(0,)), "center"))
+        self.assertTrue(branch_seen(_Reading(dark_flags=(9,)), "center"))
+        self.assertFalse(branch_seen(_Reading(dark_flags=(5,)), "center"))
+        self.assertFalse(branch_seen(_Reading(), "center"))
 
 
     def test_file_mode_constant(self):
@@ -136,6 +142,34 @@ class LeftFollowerTests(_LawContract, unittest.TestCase):
 class RightFollowerTests(_LawContract, unittest.TestCase):
     EXAMPLE = "examples/qtr_line_follow_right.py"
     FILE_MODE = "right"
+
+
+class CenterFollowerTests(_LawContract, unittest.TestCase):
+    EXAMPLE = "examples/qtr_line_follow_center.py"
+    FILE_MODE = "center"
+
+
+class LawIsIdenticalAcrossFilesTests(unittest.TestCase):
+    """Three files, one law: the block between the markers must be
+    byte-identical apart from the MODE constant."""
+
+    FILES = ("examples/qtr_line_follow_left.py",
+             "examples/qtr_line_follow_right.py",
+             "examples/qtr_line_follow_center.py")
+
+    def test_identical_law_bodies(self):
+        bodies = []
+        for path in self.FILES:
+            with open(path) as f:
+                src = f.read()
+            body = src[src.index("# --- control law"):
+                       src.index("# --- end control law ---")]
+            lines = [ln for ln in body.split("\n")
+                     if not ln.startswith("MODE = ")]
+            bodies.append("\n".join(lines))
+        for path, body in zip(self.FILES, bodies):
+            self.assertEqual(body, bodies[0],
+                             "%s carries a different law" % path)
 
 
 if __name__ == "__main__":

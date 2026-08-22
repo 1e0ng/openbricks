@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: MIT
-"""Line following on the QTRLineSensor window — left mode.
+"""Line following on the QTRLineSensor window — center mode.
 
 Run ``examples/qtr_calibrate.py`` once first. Holds the line's
-LEFT edge under channel 4 (the geometry lives in the firmware's QTRLineSensor; wiring
-table in docs/hardware.md). Switch to
-``examples/qtr_line_follow_right.py`` for the mirror discipline,
-``examples/qtr_line_follow_center.py`` to hold the line's centre
-on all ten elements — or call ``qtr.set_mode(...)`` mid-run. The whole window going
-dark ends the run.
+CENTRE under the middle of the window, steering on the weighted
+centroid of all ten elements, so the error stays proportional
+across the whole 56 mm span instead of railing a pitch away from
+one setpoint element. Switch to ``examples/qtr_line_follow_left.py``
+/ ``_right.py`` for the edge disciplines — or call
+``qtr.set_mode(...)`` mid-run. Branches show on either outer band.
+The whole window going dark ends the run.
 """
 
 import time
@@ -18,7 +19,7 @@ from openbricks.robotics import DriveBase
 
 # --- control law (pure logic, unit-tested in tests/test_qtr_line_follow.py) ---
 
-MODE = "left"
+MODE = "center"
 
 CRUISE_DPS = 200
 KP = 5.0
