@@ -3,6 +3,17 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.0.1 — supersedes the partial 3.0.0 PyPI release
+
+Identical to 3.0.0. Its PyPI upload hit the project's 10 GB storage
+quota after the first of sixteen files (171 releases × ~59 MB), so
+3.0.0 was installable on exactly one platform. The 149 `1.x` releases
+and the partial 3.0.0 were pruned from PyPI (10.73 GB → 1.2 GB);
+3.0.1 is the complete, consistent release of the enumerated-parameters
+change. The publish step now runs with `skip-existing` so a partial
+upload can be completed by re-running. Flash 3.0.1 (same firmware as
+3.0.0).
+
 ## 3.0.0 — enumerated parameters: `Stop`, `DriveMode`, `LineMode` replace strings
 
 Every option argument that used to take a string now takes a member
