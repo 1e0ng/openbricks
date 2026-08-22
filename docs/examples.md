@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Example programs for openbricks robots: drivebase squares, gyro-corrected driving, line following, color sorting, and distance-based wall avoidance."
+    description: "Example programs for openbricks robots: drivebase squares, gyro-corrected driving, line following, color sensing (direct or via a TCA9548A mux), color sorting, and distance-based wall avoidance."
 ---
 
 # Examples
@@ -54,6 +54,29 @@ move; pass `then="hold"` for the Pybricks end state.)
 
 ```{eval-rst}
 .. literalinclude:: ../examples/st3032_drivebase_curve.py
+   :language: python
+```
+
+## Colour sensor, direct to the ESP32 (one TCS34725)
+
+Mode 1 from the {doc}`hardware guide </hardware>`: a single TCS34725
+on GPIO 15/16, no multiplexer. The driver is handed the bus itself.
+
+```{eval-rst}
+.. literalinclude:: ../examples/read_color.py
+   :language: python
+```
+
+## Colour sensor array via a TCA9548A (two TCS34725s)
+
+Mode 2: the TCS34725's address is fixed at `0x29`, so two or more go
+through a TCA9548A multiplexer, one per channel. `mux[n]` behaves
+like an I2C bus, so the driver call is the same as above — only the
+bus argument changes. Each loop combines `ambient()` and `rgb()` to
+name the colour under every sensor.
+
+```{eval-rst}
+.. literalinclude:: ../examples/color_array.py
    :language: python
 ```
 
