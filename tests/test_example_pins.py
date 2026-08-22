@@ -189,6 +189,12 @@ class ExamplePinConventionTests(unittest.TestCase):
         self.assertEqual(bad, [], "\n".join(bad))
 
     def test_no_example_touches_chip_reserved_pins(self):
+        # Chip rules only: runtime claims (the launcher's button, the
+        # hub's LED) belong to whichever earlier test wired them in
+        # this process, and an example is *allowed* to name those
+        # pins (hard_button_probe.py reads the program button).
+        saved = dict(pins._claims)
+        pins._claims_reset()
         pins.set_chip("esp32s3")
         try:
             for name in _examples():
@@ -197,6 +203,7 @@ class ExamplePinConventionTests(unittest.TestCase):
                                output=(role != "uart1_rx"))
         finally:
             pins.set_chip(None)
+            pins._claims.update(saved)
 
     def test_dc_example_docstring_matches_code(self):
         text = _read("esp32_drivebase.py")
