@@ -42,8 +42,8 @@ Example (the engine is invisible — this is just DriveBase)::
 
     mux = TCA9548A(I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000))
     imu = BNO055(i2c=mux[3], address=0x29)
-    left  = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
-    right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+    left  = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
+    right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
     db = DriveBase(left, right, wheel_diameter_mm=88,
                    axle_track_mm=138, imu=imu)
     db.use_gyro(True)
@@ -169,7 +169,7 @@ class _SerialNativeEngine:
     def __init__(self, left_id, right_id, wheel_diameter_mm,
                  axle_track_mm, imu=None,
                  invert_left=False, invert_right=False,
-                 uart_id=1, tx=14, rx=6, baud=1_000_000,
+                 uart_id=1, tx=14, rx=41, baud=1_000_000,
                  accel_dps2=1500.0, sb=None,
                  slot_l=None, slot_r=None, drive="duty",
                  turn_accel_dps2=1500.0):

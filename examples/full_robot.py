@@ -3,65 +3,56 @@
 Example: a small robot that rolls forward until its colour sensor sees red,
 then demos a servo wave.
 
-Hardware:
-    * ESP32-S3 DevKitC-1 (or classic ESP32 DevKitC-V4)
-    * 2× JGB37-520 DC gear motors (with Hall-effect quadrature encoders)
-        driven by a shared L298N (or TB6612FNG) H-bridge
-    * 1× ICM-45686 IMU on SPI
-    * 1× TCS34725 RGB colour sensor on the same I2C bus
-    * 1× ST-3215 serial bus servo on UART (optional — the servo demo
-        at the bottom just prints a message if it isn't attached)
-
-Edit the GPIOs at the top to match your wiring.
+Hardware — the reference build from docs/hardware.md, wired to its
+GPIO map so nothing collides with the QTR bank (GPIO 1-10):
+    * ESP32-S3 DevKitC-1
+    * 2x ST-3032 serial bus servos (wheel mode, IDs 1 and 2) on one
+        URT-2: GPIO 14 -> URT-2 RX, GPIO 41 -> URT-2 TX
+    * 1x ICM-45686 IMU on SPI: SCK 12, MOSI 13, MISO 11, CS 17
+    * 1x TCS34725 RGB colour sensor on I2C: SDA 15, SCL 16
+    * 1x ST-3215 serial bus servo (ID 3) daisy-chained on the SAME
+        bus as the wheels (optional — the servo demo at the bottom
+        just prints a message if it isn't attached)
 """
 
 import time
 
-from machine import I2C, Pin, UART
+from machine import I2C, Pin
 
 from openbricks.drivers.icm45686 import ICM45686
-from openbricks.drivers.jgb37_520 import JGB37Motor
+from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.drivers.st3215 import ST3215
 from openbricks.drivers.tcs34725 import TCS34725
 from openbricks.robotics import DriveBase
 
 
-I2C_SDA  = 15
-I2C_SCL  = 16
-
+I2C_SDA, I2C_SCL = 15, 16
 SCK, MOSI, MISO, CS = 12, 13, 11, 17
+UART_ID, TX, RX = 1, 14, 41
+LEFT_ID, RIGHT_ID, ARM_ID = 1, 2, 3
 
-LEFT_IN1,  LEFT_IN2,  LEFT_PWM  = 4, 5, 6
-LEFT_EA,   LEFT_EB               = 7, 8
-
-RIGHT_IN1, RIGHT_IN2, RIGHT_PWM = 9, 10, 11
-RIGHT_EA,  RIGHT_EB              = 12, 13
-
-SERVO_TX, SERVO_RX = 17, 18
-SERVO_ID = 1
-
-WHEEL_DIAMETER_MM = 56
-AXLE_TRACK_MM     = 114
+WHEEL_DIAMETER_MM = 88
+AXLE_TRACK_MM     = 138
 
 
 i2c   = I2C(0, sda=Pin(I2C_SDA), scl=Pin(I2C_SCL), freq=400_000)
 imu   = ICM45686(sck=SCK, mosi=MOSI, miso=MISO, cs=CS)
 color = TCS34725(i2c)
 
-left  = JGB37Motor(in1=LEFT_IN1,  in2=LEFT_IN2,  pwm=LEFT_PWM,
-                   encoder_a=LEFT_EA,  encoder_b=LEFT_EB)
-right = JGB37Motor(in1=RIGHT_IN1, in2=RIGHT_IN2, pwm=RIGHT_PWM,
-                   encoder_a=RIGHT_EA, encoder_b=RIGHT_EB)
+left  = ST3032Motor(servo_id=LEFT_ID,  uart_id=UART_ID, tx=TX, rx=RX,
+                    invert=True)
+right = ST3032Motor(servo_id=RIGHT_ID, uart_id=UART_ID, tx=TX, rx=RX)
 
 drivebase = DriveBase(left, right,
                       wheel_diameter_mm=WHEEL_DIAMETER_MM,
                       axle_track_mm=AXLE_TRACK_MM)
 
 try:
-    uart = UART(1, baudrate=1_000_000, tx=SERVO_TX, rx=SERVO_RX)
-    arm  = ST3215(uart, servo_id=SERVO_ID)
+    arm = ST3215(servo_id=ARM_ID, uart_id=UART_ID, tx=TX, rx=RX)
+    if not arm.ping():
+        raise OSError("servo %d did not answer ping" % ARM_ID)
 except Exception as e:
-    print("no servo attached:", e)
+    print("no arm servo attached:", e)
     arm = None
 
 

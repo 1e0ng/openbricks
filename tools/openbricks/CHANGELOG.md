@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 2.8.2 — one pin map, every example and driver default on it
+
+Audit of every shipped example against the ESP32-S3 GPIO map
+(docs/hardware.md): `full_robot.py` wired the IMU chip-select AND
+the servo UART TX to GPIO 17, its right-motor PWM/encoders to the
+SPI pins, and its motors across the QTR bank — it is rewritten on
+the reference build (ST-3032 drivebase + ICM-45686 + TCS34725 +
+optional ST-3215 arm on the same bus). The DC-motor example moves
+its PWM/encoder lines off the SPI pins and its docs now say plainly
+that a DC drivebase and the QTR bar are mutually exclusive (the S3
+has no ten free pins outside the ADC1 bank). Driver defaults that
+still pointed at conflicting pins are corrected: `ST3032Motor`,
+`ST3215`, `ST3215Motor` and `make_uart` defaulted to `tx=17, rx=16`
+(SPI CS / I2C SCL), `NativeDriveBase` to `rx=6` (a QTR channel) —
+all now `tx=14, rx=41`. Stale `rx=6` / GPIO 4 / GPIO 6 mentions in
+docs and docstrings fixed. `openbricks.pins.ESP32S3_CONVENTION` is
+the new single source of truth; `tests/test_example_pins.py` scans
+every example against it and fails on a role mismatch or a GPIO
+wired twice in one file. Flash 2.8.2 for the driver defaults.
+
 ## 2.8.1 — refractory retuned to the measured re-make distribution
 
 Session 3 of the button characterization measured contact re-makes

@@ -10,7 +10,7 @@ Hardware:
     * 2× ST-3215 (continuous-rotation, wheel mode), daisy-chained on
       one URT-2. Left at ID=1, right at ID=2 (re-ID with
       ``examples/st3215_reid.py`` if both are factory-default).
-    * ESP32-S3 GPIO14 → URT-2 RX, GPIO6 → URT-2 TX, common GND.
+    * ESP32-S3 GPIO14 → URT-2 RX, GPIO41 → URT-2 TX, common GND.
     * 12 V into URT-2 servo rail. ESP32-S3 5 V from its own supply.
 
 Run with:

@@ -296,12 +296,12 @@ class ConstructionTests(_Base):
         self.assertEqual(names[-1], "db_config")
         self.assertTrue(names.count("servo_attach") >= 2, names)
         self.assertFalse("servo_detach" in names, names)
-        # Bench defaults: UART1 @1M on 14/6; left slot0 id2 inverted.
+        # Bench defaults: UART1 @1M on 14/41; left slot0 id2 inverted.
         by = {}
         for c in self.bus.calls:
             by.setdefault(c[0], []).append(c)
         self.assertEqual(by["attach_uart"][0],
-                         ("attach_uart", 1, 1_000_000, 14, 6))
+                         ("attach_uart", 1, 1_000_000, 14, 41))
         cfg = by["db_config"][0]
         self.assertEqual(cfg[1:3], (0, 1))      # left slot, right slot
         ok = [c for c in self.bus.calls
@@ -914,7 +914,7 @@ class DeadMotorDiagnosisTests(_Base):
         self.assertTrue("slot 1" in msg, msg)
         self.assertTrue("UART1" in msg, msg)
         self.assertTrue("tx=14" in msg, msg)
-        self.assertTrue("rx=6" in msg, msg)
+        self.assertTrue("rx=41" in msg, msg)
         # Evidence + a next step.
         self.assertTrue("137" in msg, msg)
         self.assertTrue("servo-id" in msg, msg)

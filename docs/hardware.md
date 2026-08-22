@@ -286,8 +286,8 @@ The colour sensor breakout has two extra pins beyond power and I2C:
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
 
-left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
 db = DriveBase(left, right, wheel_diameter_mm=65, axle_track_mm=120)
 ```
 
@@ -342,19 +342,24 @@ assignments; the classic-ESP32 equivalents are in git history):
 | Function          | ESP32-S3 GPIO(s) | Devices on this line |
 |-------------------|------------------|----------------------|
 | Left motor dir    | 1, 2             | L298N / TB6612 IN1, IN2 |
-| Left motor PWM    | 17               | L298N / TB6612 ENA |
+| Left motor PWM    | 18               | L298N / TB6612 ENA |
 | Left encoder A, B | 7, 8             | JGB37-520 encoder channels |
 | Right motor dir   | 9, 10            | L298N / TB6612 IN3, IN4 |
-| Right motor PWM   | 11               | L298N / TB6612 ENB |
-| Right encoder A, B| 12, 13           | JGB37-520 encoder channels |
+| Right motor PWM   | 40               | L298N / TB6612 ENB |
+| Right encoder A, B| 42, 47           | JGB37-520 encoder channels |
 
-The map deliberately leaves GPIO **39 and 38** free — those are the
-firmware's default **program button** and **BLE-toggle button** (see
-{class}`openbricks.hub.ESP32S3DevkitHub`). The launcher polls GPIO 39
+**This build and the QTR line-sensor bar are mutually exclusive.** A
+DC drivebase needs ten GPIOs and the S3 does not have ten free ones
+outside the ADC1 bank once the other conventions are honoured, so
+the motor direction and left-encoder lines take six of the bank's
+pins (GPIO 1, 2, 7, 8, 9, 10) that the
+{class}`openbricks.drivers.qtr.QTRLineSensor` window otherwise owns.
+Everything else follows the reference GPIO map unchanged: 11/12/13/17
+stay free for the SPI IMU, 15/16 for I2C sensors, 14/41 for a
+serial-servo arm, and 39/38 for the program / BLE buttons (see
+{class}`openbricks.hub.ESP32S3DevkitHub` — the launcher polls GPIO 39
 as an input, so a motor driver toggling it would read as button
-presses and stop your program. GPIO 15/16 (I2C) and 14/41
-(serial-bus UART) are also kept free so sensors and a serial-servo
-arm can join the same build unchanged.
+presses and stop your program).
 
 ### Calibrating encoder counts
 

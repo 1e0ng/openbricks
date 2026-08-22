@@ -108,7 +108,12 @@ rigs without the QTR bar.
    :language: python
 ```
 
-## Full robot (drivebase + IMU + color sensor array)
+## Full robot (ST-3032 drivebase + IMU + colour sensor + arm)
+
+Everything from the reference build on one bus map — the wheels and
+the optional ST-3215 arm share the serial bus (IDs 1, 2 and 3), the
+IMU is on SPI, the colour sensor on I2C, and the QTR bank (GPIO 1-10)
+is left untouched.
 
 ```{eval-rst}
 .. literalinclude:: ../examples/full_robot.py

@@ -22,7 +22,7 @@ from machine import Pin
 
 from _openbricks_native import motor_process as m
 
-BUTTON_PIN = 4
+BUTTON_PIN = 39
 
 print("hard_tick_available:", m.hard_tick_available())
 t0 = m.hard_tick_count()

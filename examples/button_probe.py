@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Find the stop button and confirm the firmware actually sees it.
 
-The launcher watches GPIO4 (``DEFAULT_BUTTON_PIN``) for the program
+The launcher watches GPIO39 (``DEFAULT_BUTTON_PIN``) for the program
 start/stop button. If pressing the button doesn't stop a running
 program, the most likely causes are (a) the button is wired to a
-different GPIO than 4, or (b) the press isn't reaching the firmware at
+different GPIO than 39, or (b) the press isn't reaching the firmware at
 all. This probe distinguishes them.
 
 It configures a set of candidate GPIOs as pulled-up inputs and prints
@@ -12,14 +12,14 @@ EVERY level change. Run it, then press your stop button several times
 and watch the output:
 
 * A line like ``GPIO0  1 -> 0  PRESSED`` when you press tells you the
-  button is on that GPIO. If it's not 4, that's the bug — the launcher
+  button is on that GPIO. If it's not 39, that's the bug — the launcher
   is watching the wrong pin (see the note printed at the end).
 * No line at all on press → the firmware never sees the button: wrong
   wiring, not actually connected, or the pin is one this probe skipped.
 
 Cross-check on the launcher itself: this probe does NOT catch
 KeyboardInterrupt, and it runs under ``openbricks run`` (so the
-launcher's own GPIO4 watcher is active with ``_running`` True). So:
+launcher's own GPIO39 watcher is active with ``_running`` True). So:
 
 * If pressing the button STOPS this probe (you see
   ``openbricks: stopped by button press.``) → the launcher detection
@@ -31,7 +31,7 @@ launcher's own GPIO4 watcher is active with ``_running`` True). So:
 
     openbricks run -n ls examples/button_probe.py
 
-The bench servo-bus pins (GPIO14 TX, GPIO6 RX) and the USB pins
+The bench servo-bus pins (GPIO14 TX, GPIO41 RX) and the USB pins
 (19/20) are intentionally skipped so the probe doesn't disturb them.
 """
 

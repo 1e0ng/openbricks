@@ -21,7 +21,7 @@ vs the commanded angle. A correct fix shows |error| within a couple of
 degrees on EVERY case, including the ones past 360°. The old code would
 stall the >180° cases at ~±180° (large error) or reverse them.
 
-Bench wiring (hub ``yt``): ESP32-S3 GPIO14 → URT-2 TX, GPIO6 → URT-2 RX,
+Bench wiring (hub ``yt``): ESP32-S3 GPIO14 → URT-2 TX, GPIO41 → URT-2 RX,
 ST3032 at servo_id=1 on the 12 V rail.
 
     openbricks run -n yt examples/st3032_run_angle_multiturn.py
