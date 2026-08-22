@@ -8,11 +8,11 @@ the chassis geometry (``WHEEL_DIAMETER_MM`` / ``AXLE_TRACK_MM``) is
 calibrated correctly, the robot returns to within a few cm of its
 starting pose after one lap.
 
-Uses the new ``then="coast"`` default end-state (1.6.7), so the
+Uses the new ``then=Stop.COAST`` default end-state (1.6.7), so the
 wheels free-wheel briefly between segments. If your bench has
 significant momentum carryover and you'd rather pin the wheels
-between sides, pass ``then="brake"`` to the ``straight`` / ``turn``
-calls (or ``then="hold"`` for active position lock — ST-3032
+between sides, pass ``then=Stop.BRAKE`` to the ``straight`` / ``turn``
+calls (or ``then=Stop.HOLD`` for active position lock — ST-3032
 supports it).
 
 Hardware: identical to ``examples/st3032_drivebase_test.py``.
@@ -23,6 +23,7 @@ Run with:
 
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
+from openbricks.parameters import Stop
 
 
 LEFT_ID, RIGHT_ID = 2, 1

@@ -23,6 +23,7 @@ import time
 
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
+from openbricks.parameters import Stop
 
 LEFT_ID, RIGHT_ID = 2, 1
 UART_ID, TX, RX   = 1, 14, 41
@@ -145,10 +146,10 @@ def main():
     db.turn(90)
     print("  [ok] turn completed")
 
-    print("--- 8: stop(then='hold') on the drivebase ---")
+    print("--- 8: stop(then=Stop.HOLD) on the drivebase ---")
     db.straight(100, wait=False)
     time.sleep_ms(400)
-    db.stop(then="hold")
+    db.stop(then=Stop.HOLD)
     check_hold(right, "db stop-hold")
 
     db.stop()

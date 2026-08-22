@@ -30,6 +30,7 @@ ST3032 at servo_id=1 on the 12 V rail.
 import time
 
 from openbricks.drivers.st3032 import ST3032Motor
+from openbricks.parameters import Stop
 
 
 SPEED_DPS = 120
@@ -38,7 +39,7 @@ TOL_DEG   = 3.0
 m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
 
 
-def probe(label, target_deg, then="hold"):
+def probe(label, target_deg, then=Stop.HOLD):
     m.reset_angle(0)
     time.sleep_ms(50)
     start = m.angle()

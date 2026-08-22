@@ -21,6 +21,7 @@ import unittest
 
 from openbricks_sim.robot import SimRobot
 from openbricks_sim import shim
+from openbricks.parameters import Stop
 
 
 class _ShimTestBase(unittest.TestCase):
@@ -737,7 +738,7 @@ class SimStBusEngineTests(_ShimTestBase):
         db.move_wheels(500, 500)
         _t.sleep_ms(900)
         self.assertTrue(abs(left.speed()) > 200, left.speed())
-        db.stop(then="brake", wait=True)
+        db.stop(then=Stop.BRAKE, wait=True)
         self.assertTrue(abs(left.speed()) < 15, left.speed())
         self.assertTrue(abs(right.speed()) < 15, right.speed())
 
@@ -793,7 +794,7 @@ class SimStBusEngineTests(_ShimTestBase):
         time.sleep_ms(100)
         self.assertTrue(left._servo._adapter._attached)
         self.assertTrue(right._servo._adapter._attached)
-        db.stop()                                  # then="coast"
+        db.stop()                                  # then=Stop.COAST
         # Both detached from the tick loop and both actuators zeroed
         # by the one call — neither wheel outlives the other.
         rt = left._servo._adapter.runtime
@@ -809,12 +810,12 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertTrue(right._servo._adapter._attached)
         db.stop()
 
-        # turn + then="brake" take the same one-call route (mode 1).
+        # turn + then=Stop.BRAKE take the same one-call route (mode 1).
         db.turn(45, wait=False)
         time.sleep_ms(100)
         self.assertTrue(left._servo._adapter._attached)
         self.assertTrue(right._servo._adapter._attached)
-        db.stop(then="brake")
+        db.stop(then=Stop.BRAKE)
         self.assertFalse(left._servo._adapter._attached)
         self.assertFalse(right._servo._adapter._attached)
         self.assertEqual(rt.data.ctrl[left._servo._adapter._actuator_id], 0.0)
@@ -881,23 +882,23 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertTrue(sb.servo_move(0, 1000.0, 1000.0, 4000.0))
 
     def test_then_continue_chains_without_stopping(self):
-        # then="continue" (Pybricks Stop.NONE): the first leg ends AT
+        # then=Stop.NONE (Pybricks Stop.NONE): the first leg ends AT
         # speed and the second leg takes it over — the wheels never
         # rest between segments.
         db, left, _ = self._serial_db()
         db.settings(straight_speed=150, acceleration=360)
-        db.straight(150, then="continue")     # blocking, ends at cruise
+        db.straight(150, then=Stop.NONE)     # blocking, ends at cruise
         v_seam = abs(left.speed())
         self.assertGreater(v_seam, 90.0,
                            "wheels at %.0f dps at the seam - carried "
                            "speed lost" % v_seam)
         db.straight(150)                      # stopping second leg
-        db.stop(then="coast")
+        db.stop(then=Stop.COAST)
         time.sleep_ms(600)                    # freewheel decay
         self.assertLess(abs(left.speed()), 60.0)
 
     def test_db_stop_yields_the_wheels(self):
-        # After stop(then="coast") the db no longer re-asserts its
+        # After stop(then=Stop.COAST) the db no longer re-asserts its
         # hold, so a direct speed command moves the chassis. Coast is
         # explicit: the brake default actively resists at zero
         # velocity, which is ownership, not release.
@@ -906,7 +907,7 @@ class SimStBusEngineTests(_ShimTestBase):
         db.settings(straight_speed=150, acceleration=360)
         db.straight(500, wait=False)
         time.sleep_ms(300)
-        db.stop(then="coast")
+        db.stop(then=Stop.COAST)
         c0 = sb.servo_counts(0)
         sb.servo_run(0, 120 * sb._STEPS_PER_DEG)
         time.sleep_ms(400)
@@ -922,14 +923,14 @@ class SimStBusEngineTests(_ShimTestBase):
         db.settings(straight_speed=150, acceleration=360)
         db.straight(300, wait=False)
         time.sleep_ms(200)
-        db.stop(then="hold")
+        db.stop(then=Stop.HOLD)
         # Hold DECELERATES at settings.acceleration first (uniform-
         # accel rule, 2026-08-14) and anchors where the robot stops —
         # the position holds arm at ramp completion, not instantly.
         time.sleep_ms(800)
         self.assertTrue(sb._moves[0].is_active())
         self.assertTrue(sb._moves[1].is_active())
-        db.stop(then="coast")
+        db.stop(then=Stop.COAST)
         self.assertFalse(sb._moves[0].is_active())
         self.assertFalse(sb._moves[1].is_active())
         self.assertEqual(left._mode, "idle")

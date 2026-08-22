@@ -36,6 +36,8 @@ button and servo bus live on GPIO 39 and 14/41, off the bank)::
 import time
 
 from openbricks import pins as _pins
+from openbricks import parameters
+from openbricks.parameters import LineMode
 
 _FULL_SCALE = 1000
 
@@ -561,19 +563,16 @@ class QTRArray:
     RIGHT_SETPOINT_MM = 0.0
     CENTER_SETPOINT_MM = 0.0
 
-    MODES = ("left", "right", "center")
-
     def set_mode(self, mode):
-        """Select the line-following discipline: ``"left"`` holds
-        the line's LEFT edge at ``LEFT_SETPOINT_MM``, ``"right"``
-        the RIGHT edge at ``RIGHT_SETPOINT_MM``, ``"center"`` the
-        line's CENTRE (the weighted centroid over every element) at
+        """Select the line-following discipline, a
+        :class:`openbricks.parameters.LineMode`: ``LEFT`` holds the
+        line's LEFT edge at ``LEFT_SETPOINT_MM``, ``RIGHT`` the RIGHT
+        edge at ``RIGHT_SETPOINT_MM``, ``CENTER`` the line's CENTRE
+        (the weighted centroid over every element) at
         ``CENTER_SETPOINT_MM``. Takes effect on the next
         :meth:`edge_error` — call it again any time to switch
         disciplines mid-run."""
-        if mode not in self.MODES:
-            raise ValueError(
-                "mode must be one of %r, got %r" % (self.MODES, mode))
+        parameters.check(LineMode, mode, "mode")
         self._mode = mode
 
     def mode(self):
@@ -585,14 +584,14 @@ class QTRArray:
         :meth:`set_mode`, range -50 .. +50, positive = steer right
         (the :meth:`position` sign convention) in every mode.
 
-        ``"left"`` / ``"right"``: how far the mode's setpoint
+        ``LineMode.LEFT`` / ``RIGHT``: how far the mode's setpoint
         element sits from the black/white boundary, as its ambient
         (0 black .. 100 white) referenced to 50 — zero exactly when
         that element straddles the edge. One element, so the error
         is proportional only within about a pitch of the setpoint
         and rails at +/-50 beyond it.
 
-        ``"center"``: the line's centroid over ALL elements
+        ``LineMode.CENTER``: the line's centroid over ALL elements
         (:meth:`position`) relative to ``CENTER_SETPOINT_MM``,
         scaled so +/-50 is the far end of the window — proportional
         across the whole span. With no element dark the line is
@@ -601,11 +600,11 @@ class QTRArray:
         has never been seen (there is nothing to steer toward)."""
         if readings is None:
             readings = self.read()
-        if self._mode == "left":
+        if self._mode == LineMode.LEFT:
             return readings[self._left_idx].ambient() - 50
-        if self._mode == "right":
+        if self._mode == LineMode.RIGHT:
             return 50 - readings[self._right_idx].ambient()
-        if self._mode == "center":
+        if self._mode == LineMode.CENTER:
             pos = self.position(readings)
             if pos is None:
                 if self._last_side == 0:
@@ -618,8 +617,7 @@ class QTRArray:
             return max(-50.0, min(50.0, err))
         raise RuntimeError(
             "no line-following mode selected — call "
-            "set_mode('left'), set_mode('right') or "
-            "set_mode('center') first")
+            "set_mode(LineMode.LEFT / RIGHT / CENTER) first")
 
     def last_side(self):
         """+1 if the line was last seen right of centre, -1 left,
@@ -673,7 +671,7 @@ class QTRLineSensor(QTRArray):
     pick a discipline, follow::
 
         qtr = QTRLineSensor()
-        qtr.set_mode("left")            # or "right", any time
+        qtr.set_mode(LineMode.LEFT)            # or "right", any time
         error = qtr.read().edge_error()
 
     Wiring (detailed table in docs/hardware.md): QTRX channels

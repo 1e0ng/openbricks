@@ -19,6 +19,7 @@ zero motion in development:
 """
 
 import unittest
+from openbricks.parameters import Stop
 
 try:
     from _openbricks_native import st_bus as sb
@@ -1545,7 +1546,7 @@ class PidLandingSettleTests(unittest.TestCase):
         # pbio's standstill condition: an overshooting plant (130% of
         # command) crosses the position window while the reference is
         # still moving — done must NOT latch until the commanded
-        # speed is slow, or the then="coast" dispatch releases the
+        # speed is slow, or the then=Stop.COAST dispatch releases the
         # wheels mid-motion (bench 2026-08-17: the twitch that
         # survived 2.6.0 — stop, lurch, abrupt stop).
         self.w.track = 1.3
@@ -1648,7 +1649,7 @@ class TrajectoryEntrySpeedTests(unittest.TestCase):
                         "landed %.1f mm (wanted 20)" % travelled)
 
     def test_curve_with_carry_ends_at_arc_speed(self):
-        # then="continue" on a curve: BOTH axes carry — the reference
+        # then=Stop.NONE on a curve: BOTH axes carry — the reference
         # continues along the same arc past the end point (turn-axis
         # carry branch + pbio past-the-target latch on both axes).
         sb.db_curve(150.0, 90.0, 150.0, 1)
@@ -1707,7 +1708,7 @@ class TrajectoryEntrySpeedTests(unittest.TestCase):
                         % (v_slow, v_fast))
 
     def test_straight_with_carry_ends_at_cruise_and_hands_over(self):
-        # then="continue" (2.5.0, Pybricks Stop.NONE): the profile
+        # then=Stop.NONE (2.5.0, Pybricks Stop.NONE): the profile
         # ends AT cruise, done latches while still flying, and the
         # reference keeps advancing until the next command.
         # 350 mm/s on the 88 mm wheel ~= 458 dps ~= 5210 steps/s.

@@ -49,8 +49,8 @@ right (clockwise), a negative `radius` drives the arc backward, and
 profiles run with proportionally scaled speed *and* acceleration, so
 the path is a true circle even through the ramps, and the outer
 wheel is automatically capped at the `straight_speed` setting.
-(One deviation: `then` defaults to `"coast"` like every openbricks
-move; pass `then="hold"` for the Pybricks end state.)
+(One deviation: `then` defaults to `Stop.COAST` like every openbricks
+move; pass `then=Stop.HOLD` for the Pybricks end state.)
 
 ```{eval-rst}
 .. literalinclude:: ../examples/st3032_drivebase_curve.py
@@ -82,10 +82,10 @@ name the colour under every sensor.
 
 ## Line following (QTR sensor bar, center mode)
 
-The QTRLineSensor's `"center"` mode steers on the weighted centroid
+The QTRLineSensor's `LineMode.CENTER` mode steers on the weighted centroid
 of all ten elements, so `edge_error()` is proportional across the
 whole 56 mm window. The same control law ships pinned to
-`"left"` and `"right"` in `examples/qtr_line_follow_left.py` /
+`LineMode.LEFT` and `LineMode.RIGHT` in `examples/qtr_line_follow_left.py` /
 `_right.py` — see {doc}`/hardware` for what each mode holds.
 
 ```{eval-rst}

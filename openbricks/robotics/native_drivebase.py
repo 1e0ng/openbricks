@@ -55,6 +55,8 @@ import math
 import time
 
 from openbricks import estop
+from openbricks import parameters
+from openbricks.parameters import Stop, DriveMode
 
 
 _STEPS_PER_DEG = 4096 / 360.0
@@ -82,7 +84,7 @@ class _SerialNativeEngine:
     @classmethod
     def adopt_motors(cls, left, right, wheel_diameter_mm,
                      axle_track_mm, imu=None, accel_dps2=1500.0,
-                     drive="duty"):
+                     drive=DriveMode.DUTY):
         """Adopt two constructed serial-bus Motor objects: recover the
         bus params from the driver registry, RELEASE their
         machine.UART (explicit ownership handover — the double-claim
@@ -171,7 +173,7 @@ class _SerialNativeEngine:
                  invert_left=False, invert_right=False,
                  uart_id=1, tx=14, rx=41, baud=1_000_000,
                  accel_dps2=1500.0, sb=None,
-                 slot_l=None, slot_r=None, drive="duty",
+                 slot_l=None, slot_r=None, drive=DriveMode.DUTY,
                  turn_accel_dps2=1500.0):
         # ``sb`` is the bus-surface seam: firmware injects the real
         # st_bus (default), the sim injects its emulation — the ONE
@@ -230,16 +232,14 @@ class _SerialNativeEngine:
         self._slot_r = (slot_r if slot_r is not None
                         else self._claim_slot(right_id, invert_right, acc,
                                               "right"))
-        if drive not in ("duty", "wheel"):
-            raise ValueError('drive must be "duty" or "wheel" (got %r)'
-                             % (drive,))
-        if drive == "duty":
+        parameters.check(DriveMode, drive, "drive")
+        if drive == DriveMode.DUTY:
             # The default since 1.89.0 (dumb-mode directive): the
             # servo runs open-loop and the engine's FF+PI is the
             # speed controller — the whole drive loop is ours. The
             # flip re-runs each slot's config sequence (op_mode=2);
             # _require_live_wheels below waits that out like any
-            # other config. drive="wheel" restores the servo's
+            # other config. drive=DriveMode.WHEEL restores the servo's
             # internal speed loop.
             self._sb.servo_drive_duty(self._slot_l, True)
             self._sb.servo_drive_duty(self._slot_r, True)
@@ -510,7 +510,8 @@ class _SerialNativeEngine:
                 "move_wheels refused: the drivebase has no slots "
                 "configured")
 
-    _STOP_MODES = {"coast": 0, "brake": 1, "hold": 2}
+    # Stop.COAST/BRAKE/HOLD carry the native stop codes 0/1/2 as
+    # their .value (the Pybricks numbering).
 
     def stop(self, then=None):
         """Stop the drivebase and yield the wheels.
@@ -526,8 +527,10 @@ class _SerialNativeEngine:
         if then is None:
             self._sb.db_stop()
             return
-        ok = self._sb.db_stop(self._STOP_MODES[then])
-        if then == "hold" and not ok:
+        parameters.check(Stop, then, "then",
+                         allowed=(Stop.COAST, Stop.BRAKE, Stop.HOLD))
+        ok = self._sb.db_stop(then.value)
+        if then == Stop.HOLD and not ok:
             raise RuntimeError(
                 "hold refused: slot odometry is not live yet")
 

@@ -33,6 +33,7 @@ from machine import Timer
 from openbricks._native import motor_process
 from openbricks.drivers.jgb37_520 import JGB37Motor
 from openbricks.robotics.drivebase import DriveBase
+from openbricks.parameters import Stop
 
 
 _DUTY_MAX = 1023        # servo.c DUTY_MAX (10-bit PWM)
@@ -115,7 +116,7 @@ class EncoderPathConcurrencyTests(unittest.TestCase):
     def test_stop_coast_releases_both_bridges_in_one_native_call(self):
         lc, rc = _Spy(self.left, "coast"), _Spy(self.right, "coast")
         self.db.straight(100, wait=False)
-        self.db.stop(then="coast")
+        self.db.stop(then=Stop.COAST)
         self.assertEqual(lc.calls, [])
         self.assertEqual(rc.calls, [])
         # Both detached from the tick, both bridges floating.
@@ -127,7 +128,7 @@ class EncoderPathConcurrencyTests(unittest.TestCase):
     def test_stop_brake_engages_both_bridges_in_one_native_call(self):
         lb, rb = _Spy(self.left, "brake"), _Spy(self.right, "brake")
         self.db.straight(100, wait=False)
-        self.db.stop(then="brake")
+        self.db.stop(then=Stop.BRAKE)
         self.assertEqual(lb.calls, [])
         self.assertEqual(rb.calls, [])
         self.assertFalse(self.left._servo.is_active())
@@ -187,10 +188,10 @@ class EncoderPathConcurrencyTests(unittest.TestCase):
         self.db.straight(100, wait=False)
         raised = False
         try:
-            self.db.stop(then="hold")
+            self.db.stop(then=Stop.HOLD)
         except (AttributeError, NotImplementedError):
             raised = True
-        self.assertTrue(raised, "stop(then='hold') should refuse here")
+        self.assertTrue(raised, "stop(then=Stop.HOLD) should refuse here")
 
     def test_drive_still_clears_the_trajectory_without_an_end_state(self):
         # ``drive()`` calls the no-mode stop to drop an in-flight

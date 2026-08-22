@@ -19,6 +19,7 @@ import math
 import sys
 import time
 import unittest
+from openbricks.parameters import Stop, DriveMode
 
 # CPython has no _openbricks_native at all (the C module is MP-only);
 # install a minimal stand-in so the re-export shim loads. On unix MP
@@ -469,11 +470,11 @@ class AdoptionTests(_Base):
         return db, left, right
 
     def test_then_continue_skips_the_stop_dispatch(self):
-        # then="continue" hands the wheels to the next command: when
+        # then=Stop.NONE hands the wheels to the next command: when
         # done() latches, NO db_stop is dispatched — the engine keeps
         # driving at the move's end speed (Pybricks Stop.NONE).
         db, _, _ = self._drivebase()
-        db.straight(100, then="continue")           # blocking
+        db.straight(100, then=Stop.NONE)           # blocking
         stops = [c for c in self.bus.calls if c[0] == "db_stop"]
         self.assertEqual(stops, [],
                          "continue must not dispatch a stop: %r" % stops)
@@ -484,7 +485,7 @@ class AdoptionTests(_Base):
     def test_then_stop_alias_dispatches_coast(self):
         # "stop" is the plain-named alias of the coast default.
         db, _, _ = self._drivebase()
-        db.straight(100, then="stop")
+        db.straight(100, then=Stop.COAST)
         stops = [c for c in self.bus.calls if c[0] == "db_stop"]
         self.assertEqual(len(stops), 1)
         arm = [c for c in self.bus.calls if c[0] == "db_straight"][0]
@@ -492,7 +493,7 @@ class AdoptionTests(_Base):
 
     def test_curve_then_continue_carries_too(self):
         db, _, _ = self._drivebase()
-        db.curve(150, 90, then="continue")
+        db.curve(150, 90, then=Stop.NONE)
         stops = [c for c in self.bus.calls if c[0] == "db_stop"]
         self.assertEqual(stops, [])
         arm = [c for c in self.bus.calls if c[0] == "db_curve"][0]
@@ -501,9 +502,9 @@ class AdoptionTests(_Base):
     def test_turn_refuses_continue(self):
         db, _, _ = self._drivebase()
         try:
-            db.turn(90, then="continue")
+            db.turn(90, then=Stop.NONE)
             self.fail("must raise")
-        except ValueError:
+        except TypeError:
             pass
 
     def test_drivebase_adopts_and_releases_the_uart(self):
@@ -551,12 +552,12 @@ class AdoptionTests(_Base):
         self.assertAlmostEqual(delta, 90 * 4096 / 360.0, places=3)
         self.assertAlmostEqual(speed, 100 * 4096 / 360.0, places=3)
         self.assertGreater(accel, 0)
-        # Default then="coast": end-of-move dispatch coasts the slot.
+        # Default then=Stop.COAST: end-of-move dispatch coasts the slot.
         self.assertIn(("servo_coast", 0), self.bus.calls)
 
     def test_adopted_run_angle_then_hold_leaves_the_c_hold(self):
         db, left, _ = self._drivebase()
-        left.run_angle(100, 90, then="hold")
+        left.run_angle(100, 90, then=Stop.HOLD)
         # No coast, no zero-speed write after the move: the C move's
         # own position hold is the end state. (assertFalse/in — MP's
         # unittest has no assertNotIn.)
@@ -831,7 +832,7 @@ class AtomicStopTests(_Base):
     def test_stop_coast_is_one_atomic_engine_call(self):
         db, _, _ = self._drivebase()
         self.bus.calls = []
-        db.stop(then="coast")
+        db.stop(then=Stop.COAST)
         self.assertIn(("db_stop", 0), self.bus.calls)
         names = [c[0] for c in self.bus.calls]
         self.assertFalse("servo_coast" in names)
@@ -839,9 +840,9 @@ class AtomicStopTests(_Base):
     def test_stop_brake_and_hold_map_to_modes(self):
         db, _, _ = self._drivebase()
         self.bus.calls = []
-        db.stop(then="brake")
+        db.stop(then=Stop.BRAKE)
         self.assertIn(("db_stop", 1), self.bus.calls)
-        db.stop(then="hold")
+        db.stop(then=Stop.HOLD)
         self.assertIn(("db_stop", 2), self.bus.calls)
         names = [c[0] for c in self.bus.calls]
         self.assertFalse("servo_run" in names)
@@ -850,7 +851,7 @@ class AtomicStopTests(_Base):
     def test_wait_false_done_dispatch_is_atomic_too(self):
         db, _, _ = self._drivebase()
         self.bus.done_after = 2
-        db.straight(150, then="hold", wait=False)
+        db.straight(150, then=Stop.HOLD, wait=False)
         while not db.done():
             pass
         self.assertIn(("db_stop", 2), self.bus.calls)
@@ -866,7 +867,7 @@ class AtomicStopTests(_Base):
         # _native_pending is the watch dict since 1.65.0 (it carries
         # the wait=False stall detection); "then" is the deferred
         # end-state.
-        self.assertEqual(left._native_pending["then"], "coast")
+        self.assertEqual(left._native_pending["then"], Stop.COAST)
         db.stop()
         self.assertIsNone(left._native_pending)
 
@@ -876,7 +877,7 @@ class AtomicStopTests(_Base):
         db, _, _ = self._drivebase()
         self.bus.stop_ok = False
         try:
-            db.stop(then="hold")
+            db.stop(then=Stop.HOLD)
             self.fail("expected RuntimeError")
         except RuntimeError:
             pass
@@ -1004,16 +1005,16 @@ class DeadMotorDiagnosisTests(_Base):
                         "duty flip must precede db_config")
 
     def test_drive_wheel_opts_out_of_duty(self):
-        db = self._db(drive="wheel")
+        db = self._db(drive=DriveMode.WHEEL)
         flips = [c for c in self.bus.calls if c[0] == "servo_drive_duty"]
         self.assertEqual(flips, [])
 
     def test_bad_drive_value_is_loud(self):
         try:
             self._db(drive="turbo")
-            self.fail("expected ValueError")
-        except ValueError as e:
-            self.assertTrue("duty" in str(e), e)
+            self.fail("expected TypeError")
+        except TypeError as e:
+            self.assertTrue("DriveMode.DUTY" in str(e), e)
 
     def test_ten_metre_straight_gets_a_minute_class_budget(self):
         # The watchdog scales with the COMMANDED move: 10 m at the

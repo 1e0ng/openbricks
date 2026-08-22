@@ -33,6 +33,7 @@ from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.drivers.tca9548a import TCA9548A
 from openbricks.drivers.tcs34725 import TCS34725
 from openbricks.robotics import DriveBase
+from openbricks.parameters import Stop
 
 
 left_motor = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41)
@@ -82,7 +83,7 @@ def align_on_line():
                 return
             wait(poll_ms)
     finally:
-        db.stop(then="brake")
+        db.stop(then=Stop.BRAKE)
     raise RuntimeError(
         "no line found within %d ms (last ambient: left=%r right=%r) — "
         "is the line in reach, and is LINE_AMBIENT calibrated for "

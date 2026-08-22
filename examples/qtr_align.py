@@ -19,6 +19,7 @@ import time
 from openbricks.drivers.qtr import QTRLineSensor
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
+from openbricks.parameters import Stop
 
 # --- control law (pure logic, unit-tested in tests/test_qtr_align.py) ---
 
@@ -67,5 +68,5 @@ while True:
         break
     db.move_wheels(speeds[0], speeds[1])
     time.sleep_ms(5)
-db.stop(then="brake")
+db.stop(then=Stop.BRAKE)
 print("aligned - square on the edge")
