@@ -825,6 +825,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          # A partial upload (3.0.0: PyPI's 10 GB project quota cut
+          # the run off after the first of 16 files) must be
+          # completable by re-running this job — skip the files
+          # already on the index instead of failing on them.
+          skip-existing: true
 
   publish-openbricks-dev-deprecation:
     # One-shot final release of the legacy ``openbricks-dev`` PyPI
