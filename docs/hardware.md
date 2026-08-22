@@ -167,15 +167,55 @@ change.
 
 ## Sensor wiring (I2C)
 
-The baseline build has **several colour sensors** (a line-follower /
-zone-detection array) on this bus — the IMU is the SPI-wired
-ICM-45686 (see the GPIO map above) and doesn't share it. The
-TCS34725's address is fixed at `0x29` — no address-select pins — so
-two of them collide on a bare bus. The TCA9548A multiplexer solves
-this: it sits at `0x70` and fans the bus out to eight isolated
-channels, one colour sensor per channel. (If you use the I2C BNO055
-IMU instead, it has its own address, `0x28`, and connects straight
-to the bus.)
+The colour sensor is the TCS34725. Its I2C address is fixed at `0x29`
+— there are no address-select pins — which decides how you wire it:
+
+| Sensors | Mode | Extra part |
+|---------|------|------------|
+| 1 | [Direct](#mode-1-direct-to-the-esp32) — straight onto the ESP32's I2C pins | none |
+| 2 or more | [Via TCA9548A](#mode-2-via-a-tca9548a-multiplexer) — one sensor per mux channel | TCA9548A breakout |
+
+The IMU in the baseline build is the SPI-wired ICM-45686 (see the
+GPIO map above) and doesn't share this bus. If you use the I2C BNO055
+instead, it sits at `0x28` and connects straight to GPIO 15/16 in
+either mode — `0x28` and `0x29` coexist fine.
+
+Both modes use the same driver call. `mux[n]` behaves like an I2C
+bus, so the only difference between the two is what you pass to
+`TCS34725(...)`.
+
+### Mode 1: direct to the ESP32
+
+One colour sensor, no multiplexer:
+
+| TCS34725 pin | Connect to | Notes |
+|--------------|------------|-------|
+| VIN (or VCC) | 3.3V       | The breakout has an onboard regulator, but the board's 3.3V is cleanest |
+| GND          | GND        | Common ground with everything else |
+| SDA          | GPIO 15    | ESP32-S3 (classic ESP32: GPIO 21) |
+| SCL          | GPIO 16    | ESP32-S3 (classic ESP32: GPIO 22) |
+| LED / INT    | see [below](#tcs34725-led-pin) | |
+
+```python
+from machine import I2C, Pin
+from openbricks.drivers.tcs34725 import TCS34725
+
+i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3
+sensor = TCS34725(i2c)
+```
+
+Check the wiring with `i2c.scan()` — it should list `41` (`0x29`).
+A complete program is `examples/read_color.py`.
+
+If you want **exactly two** sensors without a mux, the ESP32's second
+hardware I2C controller also works: `I2C(1, sda=..., scl=...)` on any
+two free pins, one sensor per bus. Beyond two, use Mode 2.
+
+### Mode 2: via a TCA9548A multiplexer
+
+Two or more colour sensors (a line-follower / zone-detection array).
+The TCA9548A sits at `0x70` and fans the bus out to eight isolated
+channels; each sensor lives on its own channel at its own `0x29`.
 
 Wire the mux to the ESP32-S3, then each sensor to a mux channel:
 
@@ -183,19 +223,19 @@ Wire the mux to the ESP32-S3, then each sensor to a mux channel:
 |--------------|------------|-------|
 | VIN          | 3.3V       | |
 | GND          | GND        | Common ground with everything else |
-| SDA / SCL    | GPIO 15 / 16 | The main bus |
-| SD0/SC0 … SD7/SC7 | one TCS34725 each | Isolated channels; every sensor sits at its own `0x29` |
+| SDA / SCL    | GPIO 15 / 16 | The main bus (classic ESP32: 21 / 22) |
+| SD0/SC0 … SD7/SC7 | one TCS34725 each | Isolated channels |
+| A0 / A1 / A2 | leave open | Default address `0x70`; only needed for a second mux |
 
-| TCS34725 / BNO055 pin | Connect to | Notes |
+| TCS34725 pin | Connect to | Notes |
 |--------------|------------|-------|
-| VIN (or VCC) | 3.3V       | The breakouts have onboard regulators, but the board's 3.3V is cleanest |
+| VIN (or VCC) | 3.3V       | |
 | GND          | GND        | |
-| SDA / SCL    | mux channel `SDn`/`SCn` (colour sensors); GPIO 15/16 directly (BNO055, if used) | |
+| SDA / SCL    | mux channel `SDn` / `SCn` | Not the ESP32 pins |
+| LED / INT    | see [below](#tcs34725-led-pin) | |
 
 The Adafruit breakouts include ~10 kΩ SDA/SCL pull-ups, so for a
-handful of devices you don't need to add your own. In code,
-`mux[n]` behaves like an I2C bus, so the sensor driver is constructed
-exactly as it would be on a bare bus:
+handful of devices you don't need to add your own.
 
 ```python
 from machine import I2C, Pin
@@ -207,19 +247,12 @@ mux = TCA9548A(i2c)                                    # 0x70 by default
 sensors = [TCS34725(mux[ch]) for ch in range(3)]       # left, mid, right
 ```
 
-For a complete program — a 2-sensor array that combines each sensor's
-``ambient()`` and ``rgb()`` readings to name the colour under it
-(red / blue / green / yellow / white / black) — see
-`examples/color_array.py`.
-
-Simplifications when you need fewer parts:
-
-- **One colour sensor**: skip the mux entirely; wire the TCS34725
-  straight to GPIO 15/16 (and an I2C BNO055, if you use one, shares
-  the same pins — `0x29` and `0x28` coexist fine).
-- **Exactly two colour sensors**: the ESP32's second hardware I2C
-  controller also works (`I2C(1, sda=..., scl=...)` on any two free
-  pins), one sensor per bus — no mux.
+Check the wiring with `i2c.scan()` — it should list `112` (`0x70`)
+for the mux; `mux[n].scan()` should list `41` (`0x29`) for each
+channel that has a sensor. For a complete program — a 2-sensor array
+that combines each sensor's ``ambient()`` and ``rgb()`` readings to
+name the colour under it (red / blue / green / yellow / white /
+black) — see `examples/color_array.py`.
 
 ### TCS34725 LED pin
 
