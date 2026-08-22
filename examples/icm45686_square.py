@@ -24,6 +24,7 @@ import time
 from openbricks.drivers.icm45686 import ICM45686
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
+from openbricks.parameters import Stop
 
 LEFT_ID, RIGHT_ID = 2, 1
 UART_ID, TX, RX = 1, 14, 41
@@ -65,4 +66,4 @@ print("drift: %+.1f deg" % square_drift(db, imu))
 db.use_gyro(True)
 print("pass 2: gyro-corrected at 1 kHz")
 print("drift: %+.1f deg" % square_drift(db, imu))
-db.stop(then="brake")
+db.stop(then=Stop.BRAKE)

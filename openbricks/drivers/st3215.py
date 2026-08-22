@@ -58,6 +58,8 @@ from machine import UART, Pin
 from openbricks import pins
 from openbricks import estop
 from openbricks.interfaces import Motor, Servo
+from openbricks import parameters
+from openbricks.parameters import Stop, DriveMode
 
 _HEADER = b"\xFF\xFF"
 
@@ -581,7 +583,7 @@ class ST3215Motor(Motor):
         # Cached register state so brake/coast/run_speed avoid redundant
         # bus writes, and so motion commands can transparently restore
         # the mode/torque after a prior ``coast`` or a ``run_angle`` that
-        # left the servo in step mode (``then="hold"``).
+        # left the servo in step mode (``then=Stop.HOLD``).
         self._op_mode    = _MODE_WHEEL
         self._torque_on  = False
 
@@ -709,7 +711,7 @@ class ST3215Motor(Motor):
         Saves a bus packet on the common case where the servo is already
         in the desired mode (e.g. ``run_speed`` after another
         ``run_speed``) and keeps the cache in sync after ``run_angle``
-        returns with ``then="hold"`` and leaves the servo in step mode.
+        returns with ``then=Stop.HOLD`` and leaves the servo in step mode.
 
         A mode change invalidates the present-position delta baseline:
         the register's meaning differs between modes (absolute position
@@ -728,7 +730,7 @@ class ST3215Motor(Motor):
             self._torque_on = False
 
     def _ensure_torque_on(self):
-        """Re-enable torque if a prior ``coast`` (or ``then="coast"``)
+        """Re-enable torque if a prior ``coast`` (or ``then=Stop.COAST``)
         left it disabled. No-op otherwise."""
         if not self._torque_on:
             self._bus.write(self._id, _REG_TORQUE, bytes([1]))
@@ -877,14 +879,14 @@ class ST3215Motor(Motor):
           already holding the target and resisting rotation, so no
           further write is needed.
         """
-        if then == "coast":
+        if then == Stop.COAST:
             self._bus.write(self._id, _REG_TORQUE, bytes([0]))
             self._torque_on = False
-        elif then == "brake":
+        elif then == Stop.BRAKE:
             self._ensure_mode(_MODE_WHEEL)
             self._ensure_torque_on()
             self._write_goal_speed_signed(0)
-        # else "hold": step mode already holds the target — nothing to do.
+        # else Stop.HOLD: step mode already holds the target — nothing to do.
 
     # --- Motor interface --------------------------------------------------
 
@@ -1164,7 +1166,7 @@ class ST3215Motor(Motor):
 
     def _adopt_into_drivebase(self, right, wheel_diameter_mm,
                               axle_track_mm, imu=None, accel_dps2=400.0,
-                              drive="duty"):
+                              drive=DriveMode.DUTY):
         """DriveBase's adoption hook (polymorphic — the sim's shim
         motors implement their own). Returns the serial-native engine,
         or None when the firmware native bus is absent (then there is
@@ -1339,11 +1341,11 @@ class ST3215Motor(Motor):
         return int(ideal_s * 4000.0 + 1000.0)
 
     def _native_dispatch_then(self, then):
-        if then == "coast":
+        if then == Stop.COAST:
             self._native_sb.servo_coast(self._native_slot)
-        elif then == "brake":
+        elif then == Stop.BRAKE:
             self._native_sb.servo_run(self._native_slot, 0)
-        # "hold": the C move already parks in a position hold.
+        # Stop.HOLD: the C move already parks in a position hold.
 
     def _native_run_angle(self, deg_per_s, target_angle, wait, then):
         max_dps = abs(float(deg_per_s))
@@ -1766,7 +1768,7 @@ class ST3215Motor(Motor):
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
                   tolerance_deg=0.5, kp=None, poll_ms=None,
-                  debug=False, then="coast"):
+                  debug=False, then=Stop.COAST):
         """Rotate by ``target_angle`` degrees at up to ``deg_per_s``,
         ending within ``tolerance_deg`` of the target.
 
@@ -1804,12 +1806,12 @@ class ST3215Motor(Motor):
 
         ``then`` selects the end-state, pybricks-style:
 
-        * ``"coast"`` (default) — cut torque; wheel free-wheels. The
+        * ``Stop.COAST`` (default) — cut torque; wheel free-wheels. The
           next ``run_speed`` / ``brake`` / ``run_angle`` transparently
           re-enables torque and restores the mode it needs.
-        * ``"brake"`` — restore wheel mode and write goal_speed=0 so
+        * ``Stop.BRAKE`` — restore wheel mode and write goal_speed=0 so
           the servo's velocity loop actively holds zero rotation rate.
-        * ``"hold"`` — leave the servo in step mode; its position PID
+        * ``Stop.HOLD`` — leave the servo in step mode; its position PID
           is already holding the target and resisting rotation.
 
         ``wait=False`` kicks off the move and returns immediately
@@ -1839,9 +1841,8 @@ class ST3215Motor(Motor):
         but no longer apply — the PID lives on the servo, not in Python.
         """
         estop.check()
-        if then not in ("coast", "brake", "hold"):
-            raise ValueError(
-                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        parameters.check(Stop, then, "then",
+                         allowed=(Stop.COAST, Stop.BRAKE, Stop.HOLD))
         if self._native_slot is not None:
             self._native_pending = None
             return self._native_run_angle(deg_per_s, target_angle,

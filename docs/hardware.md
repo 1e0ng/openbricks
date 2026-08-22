@@ -93,8 +93,9 @@ setpoints — so programs just construct it and pick a discipline:
 
 ```python
 from openbricks.drivers.qtr import QTRLineSensor
+from openbricks.parameters import LineMode
 qtr = QTRLineSensor()
-qtr.set_mode("left")            # or "right" / "center"; switchable mid-run
+qtr.set_mode(LineMode.LEFT)     # or RIGHT / CENTER; switchable mid-run
 error = qtr.read().edge_error()
 ```
 
@@ -110,11 +111,11 @@ That spans a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm (the
 driver's `positions_mm` carries the true coordinates, so edge
 interpolation is exact across the unequal gaps). The three modes:
 
-- **`"left"`** — holds the line's LEFT edge under **channel 4**
+- **`LineMode.LEFT`** — holds the line's LEFT edge under **channel 4**
   (x = −16 mm)
-- **`"right"`** — holds the line's RIGHT edge under **channel 12**
+- **`LineMode.RIGHT`** — holds the line's RIGHT edge under **channel 12**
   (x = +16 mm)
-- **`"center"`** — holds the line's CENTRE at x = 0, steering on
+- **`LineMode.CENTER`** — holds the line's CENTRE at x = 0, steering on
   the weighted centroid of **all ten channels**
 
 `edge_error()` is signed so positive steers right in every mode,
@@ -123,7 +124,7 @@ channel sits from the black/white boundary — that element's
 ambient (0 black .. 100 white) referenced to 50, reading 0 exactly
 when the channel straddles the edge. That is one element, so the
 error is proportional only within about a pitch of the setpoint
-and rails at ±50 beyond it. In `"center"` mode it is the line's
+and rails at ±50 beyond it. In `LineMode.CENTER` mode it is the line's
 centroid position scaled so ±50 is the far end of the window
 (±28 mm) — proportional across the whole span, which is what you
 want through sharp corners and after a branch. When no channel

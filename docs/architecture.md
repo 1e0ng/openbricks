@@ -106,7 +106,7 @@ are direct where they can be.
    by default: the servo is switched to its open-loop duty mode and
    the engine's own integer FF+PI closes the speed loop over raw
    duty sync-packets — every layer of the drive loop is openbricks
-   code (`DriveBase(..., drive="wheel")` restores the servo's
+   code (`DriveBase(..., drive=DriveMode.WHEEL)` restores the servo's
    internal speed controller). There is exactly ONE drivebase class
    and NO Python control loop: on a runtime with neither the native
    bus nor the sim's emulated bus, constructing a serial-bus

@@ -14,6 +14,7 @@ import unittest
 from machine import ADC
 from openbricks import pins as _pins
 from openbricks.drivers.qtr import QTRArray, QTRElement
+from openbricks.parameters import LineMode
 
 
 _PINS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
@@ -555,16 +556,21 @@ class ModeAndLineSensorTests(unittest.TestCase):
 
     def test_set_mode_validates(self):
         qtr = self._base_array()
-        try:
-            qtr.set_mode("middle")
-            self.fail("expected ValueError")
-        except ValueError as e:
-            self.assertTrue("left" in str(e) and "right" in str(e)
-                            and "center" in str(e), e)
+        # A string — even the right word — is not a mode: the
+        # error names the members and calls the string out.
+        for bad in ("middle", "left"):
+            try:
+                qtr.set_mode(bad)
+                self.fail("expected TypeError")
+            except TypeError as e:
+                self.assertTrue("LineMode.LEFT" in str(e)
+                                and "LineMode.RIGHT" in str(e)
+                                and "LineMode.CENTER" in str(e), e)
+                self.assertTrue(repr(bad) in str(e), e)
         self.assertTrue(qtr.mode() is None)
-        for mode in ("left", "right", "center"):
+        for mode in LineMode.members():
             qtr.set_mode(mode)
-            self.assertEqual(qtr.mode(), mode)
+            self.assertTrue(qtr.mode() is mode)
 
     def test_edge_error_before_set_mode_raises_with_remedy(self):
         qtr = self._base_array()
@@ -581,9 +587,9 @@ class ModeAndLineSensorTests(unittest.TestCase):
         # ambient 0 -> full-scale error, mode-signed.
         qtr = self._base_array()
         _script(dark_pins=(5,))
-        qtr.set_mode("left")
+        qtr.set_mode(LineMode.LEFT)
         self.assertEqual(qtr.edge_error(), -50)
-        qtr.set_mode("right")
+        qtr.set_mode(LineMode.RIGHT)
         self.assertEqual(qtr.edge_error(), 50)
 
     def test_edge_error_rails_toward_the_line_when_all_white(self):
@@ -593,9 +599,9 @@ class ModeAndLineSensorTests(unittest.TestCase):
         # in right mode).
         qtr = self._base_array()
         _script(dark_pins=())
-        qtr.set_mode("left")
+        qtr.set_mode(LineMode.LEFT)
         self.assertEqual(qtr.edge_error(), 50)
-        qtr.set_mode("right")
+        qtr.set_mode(LineMode.RIGHT)
         self.assertEqual(qtr.edge_error(), -50)
 
     def _line_sensor(self):
@@ -635,7 +641,7 @@ class ModeAndLineSensorTests(unittest.TestCase):
         # between the calibration extremes -> ambient 50 -> error 0
         # (the element straddles the edge).
         qtr = self._line_sensor()
-        qtr.set_mode("left")
+        qtr.set_mode(LineMode.LEFT)
         self._script10((3,))
         self.assertEqual(qtr.edge_error(), -50)
         self._script10(())
@@ -650,16 +656,16 @@ class ModeAndLineSensorTests(unittest.TestCase):
         qtr = self._line_sensor()
         self._script10((3, 8))
         reading = qtr.read()
-        qtr.set_mode("left")
+        qtr.set_mode(LineMode.LEFT)
         self.assertEqual(qtr.edge_error(reading), -50)
-        qtr.set_mode("right")
+        qtr.set_mode(LineMode.RIGHT)
         self.assertEqual(qtr.edge_error(reading), 50)
 
     # ---- center mode: all ten elements ----
 
     def test_center_error_is_zero_on_a_centred_line(self):
         qtr = self._line_sensor()
-        qtr.set_mode("center")
+        qtr.set_mode(LineMode.CENTER)
         self._script10((5, 6))          # x = -4 and +4: centroid 0
         self.assertEqual(qtr.edge_error(), 0.0)
 
@@ -669,7 +675,7 @@ class ModeAndLineSensorTests(unittest.TestCase):
         # outermost elements (x = -28 / +28 mm -> -50 / +50).
         from openbricks.drivers.qtr import QTRLineSensor
         qtr = self._line_sensor()
-        qtr.set_mode("center")
+        qtr.set_mode(LineMode.CENTER)
         errs = []
         for pin in QTRLineSensor.PINS:
             self._script10((pin,))
@@ -686,7 +692,7 @@ class ModeAndLineSensorTests(unittest.TestCase):
 
     def test_center_error_sign_matches_position(self):
         qtr = self._line_sensor()
-        qtr.set_mode("center")
+        qtr.set_mode(LineMode.CENTER)
         self._script10((9,))            # +20 mm: line right -> +
         self.assertTrue(qtr.edge_error() > 0)
         self.assertTrue(qtr.position() > 0)
@@ -695,7 +701,7 @@ class ModeAndLineSensorTests(unittest.TestCase):
 
     def test_center_error_rails_toward_the_escape_side(self):
         qtr = self._line_sensor()
-        qtr.set_mode("center")
+        qtr.set_mode(LineMode.CENTER)
         self._script10((10,))           # seen far right...
         qtr.edge_error()
         self._script10(())              # ...then gone
@@ -707,7 +713,7 @@ class ModeAndLineSensorTests(unittest.TestCase):
 
     def test_center_error_raises_when_line_never_seen(self):
         qtr = self._line_sensor()
-        qtr.set_mode("center")
+        qtr.set_mode(LineMode.CENTER)
         self._script10(())
         try:
             qtr.edge_error()
@@ -718,7 +724,7 @@ class ModeAndLineSensorTests(unittest.TestCase):
     def test_center_mode_on_the_base_array_uses_its_own_span(self):
         # 9 uniform 8 mm pins: half-span 32 mm; the end pins rail.
         qtr = self._base_array()
-        qtr.set_mode("center")
+        qtr.set_mode(LineMode.CENTER)
         _script(dark_pins=(1,))
         self.assertEqual(qtr.edge_error(), -50.0)
         _script(dark_pins=(9,))
@@ -730,14 +736,14 @@ class ModeAndLineSensorTests(unittest.TestCase):
         qtr = self._line_sensor()
         self._script10((3, 4, 5, 6, 7, 8))   # -16 .. +16: centred
         reading = qtr.read()
-        qtr.set_mode("center")
+        qtr.set_mode(LineMode.CENTER)
         self.assertEqual(qtr.edge_error(reading), 0.0)
-        qtr.set_mode("left")
+        qtr.set_mode(LineMode.LEFT)
         self.assertEqual(qtr.edge_error(reading), -50)
 
     def test_reading_edge_error_delegates(self):
         qtr = self._line_sensor()
-        qtr.set_mode("left")
+        qtr.set_mode(LineMode.LEFT)
         self._script10((4, 5, 6))
         reading = qtr.read()
         self.assertEqual(reading.edge_error(),

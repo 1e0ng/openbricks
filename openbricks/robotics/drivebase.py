@@ -36,6 +36,8 @@ import time
 
 from openbricks import estop
 from openbricks._native import DriveBase as _NativeDriveBase
+from openbricks import parameters
+from openbricks.parameters import Stop, DriveMode
 
 
 class DriveBase:
@@ -78,7 +80,7 @@ class DriveBase:
     """
 
     def __init__(self, left, right, wheel_diameter_mm, axle_track_mm,
-                 imu=None, drive="duty"):
+                 imu=None, drive=DriveMode.DUTY):
         """
         Args:
             left, right: Motor instances. The wrapper reaches through to
@@ -87,13 +89,13 @@ class DriveBase:
                 directly. Motors without a native servo (e.g. plain
                 ``L298NMotor`` with no encoder) get open-loop
                 ``drive()`` only.
-            drive: serial-bus wheels only — ``"duty"`` (default) runs
+            drive: serial-bus wheels only — ``DriveMode.DUTY`` (default) runs
                 the servos open-loop with the engine's own FF+PI speed
                 controller closing the loop over raw duty ("dumb
                 mode": the entire drive loop is openbricks code);
-                ``"wheel"`` uses the servo's internal speed loop
+                ``DriveMode.WHEEL`` uses the servo's internal speed loop
                 instead. One caveat in duty mode: at move end,
-                ``then="brake"``/``"hold"`` behave like ``coast`` at
+                ``then=Stop.BRAKE``/``Stop.HOLD`` behave like coast at
                 the wheel level (open loop has no hold torque) —
                 while a move is ACTIVE the controller corrects as
                 usual. Ignored on encoder/DC motor pairs.
@@ -122,9 +124,7 @@ class DriveBase:
         # sim it's the emulated bus over MuJoCo wheels. Same user code
         # everywhere. Raises if the runtime has no bus — there is no
         # Python fallback loop.
-        if drive not in ("duty", "wheel"):
-            raise ValueError('drive must be "duty" or "wheel" (got %r)'
-                             % (drive,))
+        parameters.check(DriveMode, drive, "drive")
         self._serial_engine = self._try_adopt_serial(left, right, imu,
                                                      drive)
 
@@ -155,7 +155,7 @@ class DriveBase:
         # True. ``stop()`` clears this. See ``done`` for the layout.
         self._pending = None
 
-    def _try_adopt_serial(self, left, right, imu, drive="duty"):
+    def _try_adopt_serial(self, left, right, imu, drive=DriveMode.DUTY):
         # Polymorphic: each serial-motor family implements its own
         # adoption (firmware ST3215Motor -> real st_bus + UART
         # handover; the sim's shim motors -> the emulated bus over
@@ -387,15 +387,15 @@ class DriveBase:
         self._run_at_dps(self._left, left)
         self._run_at_dps(self._right, right)
 
-    def stop(self, then="coast", wait=False):
+    def stop(self, then=Stop.COAST, wait=False):
         """Halt both wheels. Also clears any pending ``wait=False``
         move (new command supersedes, pybricks-style). ``then``
         selects the end-state:
 
-        * ``"coast"`` (default) — both motors free-wheel.
-        * ``"brake"`` — both motors actively resist motion at zero
+        * ``Stop.COAST`` (default) — both motors free-wheel.
+        * ``Stop.BRAKE`` — both motors actively resist motion at zero
           velocity.
-        * ``"hold"`` — both motors actively hold their current angle.
+        * ``Stop.HOLD`` — both motors actively hold their current angle.
           Requires motors that implement ``hold()`` (e.g. ``ST3215Motor``);
           open-loop drivers raise ``NotImplementedError``.
 
@@ -423,9 +423,8 @@ class DriveBase:
         ``RuntimeError`` if the wheels never settle within the
         timeout.
         """
-        if then not in ("coast", "brake", "hold"):
-            raise ValueError(
-                "then must be 'coast', 'brake', or 'hold' (got %r)" % then)
+        parameters.check(Stop, then, "then",
+                         allowed=(Stop.COAST, Stop.BRAKE, Stop.HOLD))
         self._pending = None
         self._dispatch_stop(then)
         if wait:
@@ -477,22 +476,22 @@ class DriveBase:
             self._left._native_pending = None
             self._right._native_pending = None
             return
-        if self._native is not None and then in ("coast", "brake"):
+        if self._native is not None and then in (Stop.COAST, Stop.BRAKE):
             # Both bridges written inside the one native call.
-            self._native.stop(0 if then == "coast" else 1)
+            self._native.stop(then.value)
             return
         if self._native is not None:
-            # then="hold": no native position hold on encoder servos,
+            # then=Stop.HOLD: no native position hold on encoder servos,
             # so this falls through to the per-motor dispatch below
             # (which raises for motors without hold(), as documented).
             self._native.stop()
-        if then == "coast":
+        if then == Stop.COAST:
             self._left.coast()
             self._right.coast()
-        elif then == "brake":
+        elif then == Stop.BRAKE:
             self._left.brake()
             self._right.brake()
-        else:   # "hold"
+        else:   # Stop.HOLD
             self._left.hold()
             self._right.hold()
 
@@ -528,18 +527,18 @@ class DriveBase:
         return True
 
     def _finish_move(self):
-        """Apply a completed move's end state. ``then="continue"``
+        """Apply a completed move's end state. ``then=Stop.NONE``
         dispatches NOTHING: the engine keeps the wheels at the move's
         end speed until the next command supersedes it (Pybricks
         Stop.NONE)."""
         then = self._pending["then"]
-        if then == "continue":
+        if then == Stop.NONE:
             self._pending = None
             return
         self.stop(then=then, wait=False)
 
     # ---- blocking moves via the C coupled controller ----
-    def straight(self, distance_mm, then="coast", wait=True):
+    def straight(self, distance_mm, then=Stop.COAST, wait=True):
         """Drive forward by ``distance_mm``. 2-DOF coupled.
 
         ``then`` is forwarded to ``stop()`` — see its docstring for
@@ -556,7 +555,7 @@ class DriveBase:
         Any subsequent move command supersedes the previous pending
         wait=False move (pybricks "new command wins").
 
-        ``then="continue"`` (Pybricks ``Stop.NONE``) does not
+        ``then=Stop.NONE`` (Pybricks ``Stop.NONE``) does not
         decelerate at the end: the move finishes AT cruise speed and
         the wheels keep it until the next command — chain
         ``straight``/``curve`` segments without stopping between
@@ -571,12 +570,12 @@ class DriveBase:
             while not self.done():
                 time.sleep_ms(10)
 
-    def turn(self, angle_deg, then="coast", wait=True):
+    def turn(self, angle_deg, then=Stop.COAST, wait=True):
         """Turn in place by ``angle_deg`` body heading (positive =
         right/clockwise viewed from above, Pybricks convention).
 
         Same ``then`` / ``wait`` semantics as ``straight()`` — see
-        its docstring — except ``then="continue"``: a turn in place
+        its docstring — except ``then=Stop.NONE``: a turn in place
         ends facing its target heading, so there is no speed worth
         carrying."""
         then = self._check_then(then, allow_continue=False)
@@ -585,14 +584,14 @@ class DriveBase:
             while not self.done():
                 time.sleep_ms(10)
 
-    def curve(self, radius, angle, then="coast", wait=True):
+    def curve(self, radius, angle, then=Stop.COAST, wait=True):
         """Drive an arc along a circle of ``|radius|`` mm, changing
         heading by ``angle`` degrees — Pybricks ``DriveBase.curve()``,
         including the parameter names, so Pybricks-style keyword
         calls (``curve(radius=150, angle=90)``) work verbatim. The
-        one deviation: our ``then`` defaults to ``"coast"`` like
+        one deviation: our ``then`` defaults to ``Stop.COAST`` like
         every openbricks move (Pybricks defaults to hold) — pass
-        ``then="hold"`` for the Pybricks end state.
+        ``then=Stop.HOLD`` for the Pybricks end state.
 
         Positive ``angle`` turns right (clockwise from above,
         the system-wide sign convention, same as ``turn()``); the
@@ -612,7 +611,7 @@ class DriveBase:
         degrades to a turn in place.
 
         Same ``then`` / ``wait`` semantics as ``straight()``,
-        including ``then="continue"`` — the arc hands its full speed
+        including ``then=Stop.NONE`` — the arc hands its full speed
         to the next command."""
         then = self._check_then(then, allow_continue=True)
         self._arm_curve(radius, angle, then)
@@ -622,21 +621,15 @@ class DriveBase:
 
     @staticmethod
     def _check_then(then, allow_continue):
-        """Validate a move's ``then=``. "stop" is the plain-named
-        alias of the default coast end state."""
-        if then == "stop":
-            return "coast"
-        allowed = ("coast", "brake", "hold", "continue") if allow_continue \
-                  else ("coast", "brake", "hold")
-        if then not in allowed:
-            raise ValueError(
-                "then must be one of %s (got %r)" % (
-                    "/".join("'%s'" % a for a in ("stop",) + allowed), then))
-        return then
+        """Validate a move's ``then=`` — a :class:`Stop` member;
+        ``Stop.NONE`` only where the move can hand its speed on."""
+        allowed = (Stop.COAST, Stop.BRAKE, Stop.HOLD, Stop.NONE) \
+            if allow_continue else (Stop.COAST, Stop.BRAKE, Stop.HOLD)
+        return parameters.check(Stop, then, "then", allowed=allowed)
 
     # ---- arm: stash pending state, kick off motion ----
     def _arm_straight(self, distance_mm, then):
-        carry = then == "continue"
+        carry = then == Stop.NONE
         if self._serial_engine is not None:
             self._serial_engine.arm_straight(float(distance_mm), carry)
             self._pending = {"mode": "straight_serial", "then": then}
@@ -680,7 +673,7 @@ class DriveBase:
         return mm_s
 
     def _arm_curve(self, radius_mm, angle_deg, then):
-        carry = then == "continue"
+        carry = then == Stop.NONE
         if self._serial_engine is not None:
             self._serial_engine.arm_curve(float(radius_mm),
                                           float(angle_deg), carry)

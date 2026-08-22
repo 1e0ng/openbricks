@@ -167,6 +167,7 @@ jobs:
             tests.test_servo_set_id \
             tests.test_version_lockstep \
             tests.test_pins \
+            tests.test_parameters \
             tests.test_timer_allocation \
             tests.test_estop \
             tests.test_diagnose_usb_serial \

@@ -8,6 +8,7 @@ import unittest
 
 from openbricks.drivers import st3215 as st3215_mod
 from openbricks.drivers.st3215 import ST3215, ST3215Motor, SyncServoGroup
+from openbricks.parameters import Stop
 
 
 _REG_MIN_ANGLE     = 0x09
@@ -775,12 +776,12 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
         # 5000 dps × 10 = 50000 steps — exceeds the 0x7FFF register cap.
-        m.run_angle(deg_per_s=5000, target_angle=90, then="brake")
+        m.run_angle(deg_per_s=5000, target_angle=90, then=Stop.BRAKE)
         speed_writes = _writes_to(m._bus._uart._tx_log[baseline:],
                                   _REG_GOAL_SPEED)
         v_cruise = speed_writes[0][1][0] | (speed_writes[0][1][1] << 8)
         self.assertEqual(v_cruise, 0x7FFF)
-        # then="brake" also writes goal_speed=0 at the end.
+        # then=Stop.BRAKE also writes goal_speed=0 at the end.
         self.assertEqual(speed_writes[-1][1], bytes([0, 0]))
 
     # --- angle accumulation across a step move ----------------------------
@@ -797,7 +798,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self.assertAlmostEqual(m.angle(), 0.0, places=1)
         # Now a +90° step (1024 counts) that parks exactly (remaining→0).
         self._patch_remaining(m, [1024, 1024, 0])
-        m.run_angle(deg_per_s=200, target_angle=90, then="hold")
+        m.run_angle(deg_per_s=200, target_angle=90, then=Stop.HOLD)
         self.assertAlmostEqual(m.angle(), 90.0, places=1)
 
     def test_angle_tracks_negative_step_with_invert(self):
@@ -808,13 +809,13 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         # User asks -90°; with invert the hardware step is +1024, but
         # angle() must still report the user-frame -90°.
         self._patch_remaining(m, [1024, 1024, 0])
-        m.run_angle(deg_per_s=200, target_angle=-90, then="hold")
+        m.run_angle(deg_per_s=200, target_angle=-90, then=Stop.HOLD)
         self.assertAlmostEqual(m.angle(), -90.0, places=1)
 
     # --- end-state (then=) ------------------------------------------------
 
     def test_run_angle_default_coasts_and_stays_in_step_mode(self):
-        # then="coast" cuts torque and leaves op_mode in step (no flip
+        # then=Stop.COAST cuts torque and leaves op_mode in step (no flip
         # back to wheel — the next run_speed/brake restores it lazily).
         m = ST3215Motor(servo_id=10, steps_per_dps=10.0, max_dps=1000.0)
         self._patch_remaining(m, [1024, 1024, 0])
@@ -830,7 +831,7 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         m = ST3215Motor(servo_id=11, steps_per_dps=10.0, max_dps=1000.0)
         self._patch_remaining(m, [1024, 1024, 0])
         baseline = len(m._bus._uart._tx_log)
-        m.run_angle(deg_per_s=200, target_angle=90, then="brake")
+        m.run_angle(deg_per_s=200, target_angle=90, then=Stop.BRAKE)
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
         self.assertEqual(mode_writes[0][1], bytes([_MODE_STEP]))    # into step
         self.assertEqual(mode_writes[-1][1], bytes([_MODE_WHEEL]))  # back to wheel
@@ -842,16 +843,16 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self._patch_remaining(m, [1024, 1024, 0])
         m.brake()   # enable torque; motors now coast at construction
         baseline = len(m._bus._uart._tx_log)
-        m.run_angle(deg_per_s=200, target_angle=90, then="hold")
+        m.run_angle(deg_per_s=200, target_angle=90, then=Stop.HOLD)
         mode_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_OP_MODE)
         self.assertEqual(len(mode_writes), 1)
         self.assertEqual(mode_writes[0][1], bytes([_MODE_STEP]))
         torque_writes = _writes_to(m._bus._uart._tx_log[baseline:], _REG_TORQUE)
         self.assertEqual(torque_writes, [])   # torque not cut
 
-    def test_run_angle_then_invalid_raises_value_error(self):
+    def test_run_angle_then_invalid_raises_type_error(self):
         m = ST3215Motor(servo_id=13, steps_per_dps=10.0, max_dps=1000.0)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             m.run_angle(deg_per_s=200, target_angle=90, then="freewheel")
 
     def test_run_angle_zero_target_is_a_noop(self):
@@ -988,13 +989,13 @@ class TestST3215MotorRunAngle(unittest.TestCase):
         self.assertTrue(m.done())    # 0 — really parked
 
     def test_run_angle_wait_false_defers_then_dispatch_until_done(self):
-        # then="coast" must cut torque only AFTER the move parks, not at
+        # then=Stop.COAST must cut torque only AFTER the move parks, not at
         # run_angle() return time (else it kills the move).
         m = ST3215Motor(servo_id=22, steps_per_dps=10.0, max_dps=1000.0)
         self._patch_remaining(m, [1024, 1024, 0])
         m.brake()   # enable torque; motors now coast at construction
         baseline = len(m._bus._uart._tx_log)
-        m.run_angle(deg_per_s=200, target_angle=90, wait=False, then="coast")
+        m.run_angle(deg_per_s=200, target_angle=90, wait=False, then=Stop.COAST)
         # No torque write yet — coast deferred.
         self.assertEqual(_writes_to(m._bus._uart._tx_log[baseline:],
                                     _REG_TORQUE), [])
@@ -1441,7 +1442,7 @@ class TestDutyLimit(unittest.TestCase):
         self.assertEqual(writes[0][1], bytes([0x2C, 0x01]))   # cap 300
         self.assertEqual(writes[-1][1], bytes([0xE8, 0x03]))  # back to 1000
         self.assertEqual(m._duty_limit_raw, 1000)
-        # Default then="coast": the last torque write is off.
+        # Default then=Stop.COAST: the last torque write is off.
         torque = _writes_to(m._bus._uart._tx_log, _REG_TORQUE)
         self.assertEqual(torque[-1][1], bytes([0]))
 

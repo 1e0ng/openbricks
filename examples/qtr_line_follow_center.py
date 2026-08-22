@@ -19,7 +19,9 @@ from openbricks.robotics import DriveBase
 
 # --- control law (pure logic, unit-tested in tests/test_qtr_line_follow.py) ---
 
-MODE = "center"
+from openbricks.parameters import LineMode
+
+MODE = LineMode.CENTER
 
 CRUISE_DPS = 200
 KP = 5.0
@@ -40,9 +42,9 @@ def get_wheel_speeds(reading):
 
 
 def branch_seen(reading, mode):
-    if mode == "left":
+    if mode == LineMode.LEFT:
         flags = reading.elements[-FLAG_COUNT:]
-    elif mode == "right":
+    elif mode == LineMode.RIGHT:
         flags = reading.elements[:FLAG_COUNT]
     else:
         flags = reading.elements[:FLAG_COUNT] + reading.elements[-FLAG_COUNT:]

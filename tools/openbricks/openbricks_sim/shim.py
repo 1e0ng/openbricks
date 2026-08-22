@@ -69,6 +69,16 @@ from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
                                      SimIMU, SimColorSensor,
                                      SimDistanceSensor)
 
+# The firmware package (``openbricks``) is not part of the wheel: the
+# sim runs against a checkout, whose root is three directories up.
+# Rigged here at import (``install()`` repeats it idempotently) because
+# the shim's own signatures default to ``openbricks.parameters``
+# members (``then=Stop.COAST``), which must resolve at class-body time.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from openbricks.parameters import Stop, DriveMode  # noqa: E402
+
 
 # Module-level state — only one shim can be installed at a time, but
 # its installer / uninstaller are symmetric so back-to-back tests work.
@@ -918,7 +928,7 @@ class ShimST3215Motor:
                 # Reached (or crossed) the target. Can't detach from
                 # inside the tick loop; park in the end-state mode.
                 self._move = None
-                if mv["then"] in ("brake", "hold"):
+                if mv["then"] in (Stop.BRAKE, Stop.HOLD):
                     self._mode = "speed"      # active zero velocity
                     self._target_dps = 0.0
                 else:
@@ -944,7 +954,7 @@ class ShimST3215Motor:
 
     def _adopt_into_drivebase(self, right, wheel_diameter_mm,
                               axle_track_mm, imu=None, accel_dps2=400.0,
-                              drive="duty"):
+                              drive=DriveMode.DUTY):
         """DriveBase adoption hook, sim edition: the engine runs
         UNCHANGED against the emulated bus."""
         from openbricks.robotics.native_drivebase import _SerialNativeEngine
@@ -1015,7 +1025,7 @@ class ShimST3215Motor:
     # ----- run_angle / done ------------------------------------------
 
     def run_angle(self, deg_per_s, target_angle, wait=True,
-                  tolerance_deg=0.5, then="coast", **_ignored):
+                  tolerance_deg=0.5, then=Stop.COAST, **_ignored):
         """Rotate by ``target_angle`` (relative, unbounded) at up to
         ``deg_per_s``, ending within ``tolerance_deg``. Firmware
         tuning knobs (``kp``, ``poll_ms``, ``debug``) are accepted

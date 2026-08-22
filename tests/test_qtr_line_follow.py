@@ -13,6 +13,7 @@ FLAG_COUNT elements are the branch watch.
 import tests._fakes  # noqa: F401
 
 import unittest
+from openbricks.parameters import LineMode
 
 
 def _load(path):
@@ -106,26 +107,26 @@ class _LawContract:
         n_flags = self.ns["FLAG_COUNT"]
         # Left mode watches the RIGHTMOST elements...
         r = _Reading(dark_flags=(9,))
-        self.assertTrue(branch_seen(r, "left"))
-        self.assertFalse(branch_seen(r, "right"))
+        self.assertTrue(branch_seen(r, LineMode.LEFT))
+        self.assertFalse(branch_seen(r, LineMode.RIGHT))
         # ...right mode the LEFTMOST.
         r = _Reading(dark_flags=(0,))
-        self.assertTrue(branch_seen(r, "right"))
-        self.assertFalse(branch_seen(r, "left"))
+        self.assertTrue(branch_seen(r, LineMode.RIGHT))
+        self.assertFalse(branch_seen(r, LineMode.LEFT))
         # An element just inside the watch band counts; one outside
         # does not.
         r = _Reading(dark_flags=(10 - n_flags,))
-        self.assertTrue(branch_seen(r, "left"))
+        self.assertTrue(branch_seen(r, LineMode.LEFT))
         r = _Reading(dark_flags=(10 - n_flags - 1,))
-        self.assertFalse(branch_seen(r, "left"))
+        self.assertFalse(branch_seen(r, LineMode.LEFT))
         # No dark anywhere: no branch.
-        self.assertFalse(branch_seen(_Reading(), "left"))
+        self.assertFalse(branch_seen(_Reading(), LineMode.LEFT))
         # Center mode holds the line mid-window, so a branch can
         # appear on EITHER outer band.
-        self.assertTrue(branch_seen(_Reading(dark_flags=(0,)), "center"))
-        self.assertTrue(branch_seen(_Reading(dark_flags=(9,)), "center"))
-        self.assertFalse(branch_seen(_Reading(dark_flags=(5,)), "center"))
-        self.assertFalse(branch_seen(_Reading(), "center"))
+        self.assertTrue(branch_seen(_Reading(dark_flags=(0,)), LineMode.CENTER))
+        self.assertTrue(branch_seen(_Reading(dark_flags=(9,)), LineMode.CENTER))
+        self.assertFalse(branch_seen(_Reading(dark_flags=(5,)), LineMode.CENTER))
+        self.assertFalse(branch_seen(_Reading(), LineMode.CENTER))
 
 
     def test_file_mode_constant(self):
@@ -136,17 +137,17 @@ class _LawContract:
 
 class LeftFollowerTests(_LawContract, unittest.TestCase):
     EXAMPLE = "examples/qtr_line_follow_left.py"
-    FILE_MODE = "left"
+    FILE_MODE = LineMode.LEFT
 
 
 class RightFollowerTests(_LawContract, unittest.TestCase):
     EXAMPLE = "examples/qtr_line_follow_right.py"
-    FILE_MODE = "right"
+    FILE_MODE = LineMode.RIGHT
 
 
 class CenterFollowerTests(_LawContract, unittest.TestCase):
     EXAMPLE = "examples/qtr_line_follow_center.py"
-    FILE_MODE = "center"
+    FILE_MODE = LineMode.CENTER
 
 
 class LawIsIdenticalAcrossFilesTests(unittest.TestCase):

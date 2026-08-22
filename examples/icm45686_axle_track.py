@@ -24,6 +24,7 @@ import time
 from openbricks.drivers.icm45686 import ICM45686
 from openbricks.drivers.st3032 import ST3032Motor
 from openbricks.robotics import DriveBase
+from openbricks.parameters import Stop
 
 LEFT_ID, RIGHT_ID = 2, 1
 UART_ID, TX, RX = 1, 14, 41
@@ -59,7 +60,7 @@ db.settings(turn_rate=TURN_RATE)
 imu.reset_heading()
 print("spinning %d turns on encoder math alone ..." % TURNS)
 db.turn(360 * TURNS)
-db.stop(then="brake")
+db.stop(then=Stop.BRAKE)
 time.sleep_ms(500)
 
 commanded = 360 * TURNS

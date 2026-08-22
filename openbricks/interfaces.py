@@ -12,6 +12,9 @@ If you add a new category of component (e.g. a distance sensor), add its
 interface here.
 """
 
+from openbricks import parameters
+from openbricks.parameters import Stop
+
 
 class Motor:
     """A bidirectional motor.
@@ -127,22 +130,20 @@ class Motor:
 
     # --- Pybricks composite maneuvers ---
     # Concrete: built from the primitives above, so every closed-loop
-    # driver gets them. ``then`` is one of "hold" / "brake" /
-    # "coast" / "none" (Pybricks Stop.HOLD is the default).
+    # driver gets them. ``then`` is a :class:`openbricks.parameters.Stop`
+    # member (Pybricks Stop.HOLD is the default).
 
     def _apply_then(self, then):
-        if then == "hold":
+        parameters.check(Stop, then, "then")
+        if then == Stop.HOLD:
             self.hold()
-        elif then == "brake":
+        elif then == Stop.BRAKE:
             self.brake()
-        elif then == "coast":
+        elif then == Stop.COAST:
             self.coast()
-        elif then != "none":
-            raise ValueError(
-                "then must be 'hold', 'brake', 'coast' or 'none', "
-                "got %r" % (then,))
+        # Stop.NONE: leave the motor running.
 
-    def run_time(self, speed, time_ms, then="hold", wait=True):
+    def run_time(self, speed, time_ms, then=Stop.HOLD, wait=True):
         """Run at ``speed`` deg/s for ``time_ms`` ms, then stop with
         the ``then`` flavour — Pybricks ``Motor.run_time()``.
         ``wait=False`` is not supported (no background timer is
@@ -156,7 +157,7 @@ class Motor:
         time.sleep_ms(int(time_ms))
         self._apply_then(then)
 
-    def run_target(self, speed, target_angle, then="hold", wait=True):
+    def run_target(self, speed, target_angle, then=Stop.HOLD, wait=True):
         """Run to the ABSOLUTE ``target_angle`` (degrees, in the
         ``reset_angle`` frame) at up to ``speed`` deg/s — Pybricks
         ``Motor.run_target()``. Built on the relative ``run_angle``:
@@ -168,11 +169,11 @@ class Motor:
         if wait:
             self._apply_then(then)
 
-    def run_until_stalled(self, speed, then="coast", duty_limit=None):
+    def run_until_stalled(self, speed, then=Stop.COAST, duty_limit=None):
         """Run at ``speed`` deg/s until ``stalled()``, apply the
         ``then`` flavour, and return the angle where it stalled —
         Pybricks ``Motor.run_until_stalled()`` (its default ``then``
-        is Stop.COAST).
+        == Stop.COAST).
 
         ``duty_limit`` (percent, 0 < limit <= 100) caps the motor's
         torque for the duration of the run — the Pybricks gripper-

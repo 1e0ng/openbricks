@@ -3,6 +3,24 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.0.0 — enumerated parameters: `Stop`, `DriveMode`, `LineMode` replace strings
+
+Every option argument that used to take a string now takes a member
+of `openbricks.parameters`, the Pybricks `pybricks.parameters`
+pattern: `then=Stop.COAST / BRAKE / HOLD / NONE` on every motor and
+drivebase move (Pybricks names and numbering — `Stop.NONE` replaces
+both the drivebase's `"continue"` and the motor interface's `"none"`,
+two spellings of one thing that strings had let drift apart; the
+undocumented `"stop"` alias is gone), `drive=DriveMode.DUTY / WHEEL`
+on `DriveBase` / `NativeDriveBase`, and `set_mode(LineMode.LEFT /
+RIGHT / CENTER)` on the QTR array. A string — even the right word —
+raises `TypeError` at the call naming the members and the import,
+so a typo can never silently pick a default downstream. Members
+print as `Stop.COAST` and compare by identity like Pybricks'.
+Examples, docs and the sim shim are on the enums; the `Stop` values
+are the native stop codes (0/1/2). Major bump: programs passing
+strings must import the enums. Flash 3.0.0.
+
 ## 2.9.0 — QTR "center" mode: all ten elements, proportional across the window
 
 `QTRArray.set_mode("center")` holds the line's centre (the weighted

@@ -19,6 +19,7 @@ from openbricks._native import motor_process
 from openbricks.drivers.l298n import L298NMotor
 from openbricks.robotics.drivebase import DriveBase
 from openbricks.interfaces import Motor
+from openbricks.parameters import Stop
 
 
 class _FakeClosedLoopMotor(Motor):
@@ -116,13 +117,13 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         self.assertEqual(right._pwm.duty(), 0)
 
     def test_stop_then_brake_engages_brake(self):
-        # Explicit ``then="brake"``: both H-bridge terminals shorted
+        # Explicit ``then=Stop.BRAKE``: both H-bridge terminals shorted
         # high, actively resisting motion at zero velocity.
         left = L298NMotor(in1=1, in2=2, pwm=17)
         right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
-        db.stop(then="brake")
+        db.stop(then=Stop.BRAKE)
 
         self.assertEqual(left._in1.value(), 1)
         self.assertEqual(left._in2.value(), 1)
@@ -131,14 +132,14 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
 
     def test_stop_then_hold_raises_on_open_loop_motors(self):
         # L298N can't actively hold — no encoder, no position loop.
-        # ``stop(then="hold")`` must raise rather than silently fall
+        # ``stop(then=Stop.HOLD)`` must raise rather than silently fall
         # back to brake.
         left = L298NMotor(in1=1, in2=2, pwm=17)
         right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
         with self.assertRaises(NotImplementedError):
-            db.stop(then="hold")
+            db.stop(then=Stop.HOLD)
 
     def test_move_wheels_drives_each_side_independently(self):
         # Open-loop pairs can't batch (two PWM writes), but the API
@@ -161,7 +162,7 @@ class TestDriveBaseOpenLoop(unittest.TestCase):
         right = L298NMotor(in1=9, in2=10, pwm=11)
         db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             db.stop(then="freewheel")
 
 
@@ -205,7 +206,7 @@ class TestDriveBaseNoPythonLoop(unittest.TestCase):
         db, _, _ = self._db()
         with self.assertRaises(RuntimeError):
             db.curve(150, 90)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             db.curve(150, 90, then="drift")
 
     def test_curve_accepts_pybricks_keyword_names(self):
@@ -214,7 +215,7 @@ class TestDriveBaseNoPythonLoop(unittest.TestCase):
         # made it through the signature.)
         db, _, _ = self._db()
         with self.assertRaises(RuntimeError):
-            db.curve(radius=150, angle=90, then="hold", wait=True)
+            db.curve(radius=150, angle=90, then=Stop.HOLD, wait=True)
 
     def test_straight_wait_false_raises_too(self):
         # The raise sits at the arm site, so wait=False can't sneak a

@@ -13,6 +13,7 @@ import tests._fakes  # noqa: F401
 import unittest
 
 from openbricks.interfaces import Motor, Servo, IMU, ColorSensor
+from openbricks.parameters import Stop
 
 
 class TestMotorInterface(unittest.TestCase):
@@ -130,18 +131,18 @@ class TestCompositeManeuvers(unittest.TestCase):
         self.assertEqual(m.calls, [("run_speed", 200), ("hold",)])
 
     def test_run_time_then_flavours(self):
-        for then, expect in (("brake", ("brake",)),
-                             ("coast", ("coast",))):
+        for then, expect in ((Stop.BRAKE, ("brake",)),
+                             (Stop.COAST, ("coast",))):
             m = _ScriptedMotor()
             m.run_time(100, 10, then=then)
             self.assertEqual(m.calls[-1], expect)
         m = _ScriptedMotor()
-        m.run_time(100, 10, then="none")
+        m.run_time(100, 10, then=Stop.NONE)
         self.assertEqual(m.calls, [("run_speed", 100)])
 
     def test_run_time_rejects_bad_then_and_nowait(self):
         m = _ScriptedMotor()
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             m.run_time(100, 10, then="drift")
         with self.assertRaises(NotImplementedError):
             m.run_time(100, 10, wait=False)
