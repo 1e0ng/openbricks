@@ -49,16 +49,19 @@ over the wheels: a DriveBase hands their UART to the native bus
 driver when it adopts them, so a SyncServoGroup can't drive them at
 all.
 
-Moves take a ``then=`` end state: ``"stop"`` (alias ``"coast"``,
-the default) decelerates to rest and free-wheels; ``"brake"`` /
-``"hold"`` end actively. ``then="continue"`` on ``straight`` and
-``curve`` — Pybricks ``Stop.NONE`` — does NOT decelerate at the
-end: the move finishes at cruise speed and the wheels keep it until
-the next command, so chained segments flow through their seams::
+Moves take a ``then=`` end state — a
+:class:`~openbricks.parameters.Stop` member, never a string (3.0.0):
+``Stop.COAST`` (the default) decelerates to rest and free-wheels;
+``Stop.BRAKE`` / ``Stop.HOLD`` end actively. ``then=Stop.NONE`` on
+``straight`` and ``curve`` does NOT decelerate at the end: the move
+finishes at cruise speed and the wheels keep it until the next
+command, so chained segments flow through their seams::
 
-    db.straight(300, then="continue")   # ends AT cruise
-    db.curve(150, 90, then="continue")  # picks the speed up
-    db.straight(300)                    # decelerates to rest
+    from openbricks.parameters import Stop
+
+    db.straight(300, then=Stop.NONE)   # ends AT cruise
+    db.curve(150, 90, then=Stop.NONE)  # picks the speed up
+    db.straight(300)                   # decelerates to rest
 
 Move endings are SHAPED all the way down (2.6.0): the controller
 runs position integral action (pbio's integrator rules — the same
@@ -70,8 +73,8 @@ mission simply comes to rest on its mark; a genuinely stuck robot
 still refuses to report ``done()`` and the stall watchdog raises.
 
 ``stop()`` is Pybricks parity: it coasts and returns immediately.
-``then`` picks the end state (``"coast"``, ``"brake"``,
-``"hold"``). Short moves armed while the robot is already fast
+``then`` picks the end state (``Stop.COAST``, ``Stop.BRAKE``,
+``Stop.HOLD``). Short moves armed while the robot is already fast
 raise their own deceleration to land at rest exactly on target, so
 you rarely need more — but ``wait=True`` is available to block
 until both wheels' measured speeds read ~0 (the decel ramp plus
