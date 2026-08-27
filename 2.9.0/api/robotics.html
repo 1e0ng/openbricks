@@ -1,0 +1,701 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>robotics — DriveBase &mdash; openbricks 2.9.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/api/robotics.html" />
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=182a64a0"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Motor drivers" href="drivers_motors.html" />
+    <link rel="prev" title="API reference" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="2.9.0">firmware&nbsp;v2.9.0</a>
+<a class="obk-pdf-btn" href="../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API reference</a></li>
+      <li class="breadcrumb-item active"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/1e0ng/openbricks/blob/main/docs/api/robotics.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="robotics-drivebase">
+<h1><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase<a class="headerlink" href="#robotics-drivebase" title="Link to this heading"></a></h1>
+<p>Drive a robot, not two motors: <code class="docutils literal notranslate"><span class="pre">DriveBase</span></code> couples a left and a
+right motor into one chassis with moves in millimeters and
+body-degrees.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.st3032</span><span class="w"> </span><span class="kn">import</span> <span class="n">ST3032Motor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.robotics</span><span class="w"> </span><span class="kn">import</span> <span class="n">DriveBase</span>
+
+<span class="n">left</span>  <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">41</span><span class="p">)</span>
+<span class="n">right</span> <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">41</span><span class="p">,</span> <span class="n">invert</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">db</span> <span class="o">=</span> <span class="n">DriveBase</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">wheel_diameter_mm</span><span class="o">=</span><span class="mi">88</span><span class="p">,</span> <span class="n">axle_track_mm</span><span class="o">=</span><span class="mi">138</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">settings</span><span class="p">(</span><span class="n">straight_speed</span><span class="o">=</span><span class="mi">250</span><span class="p">,</span> <span class="n">turn_rate</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span>
+            <span class="n">acceleration</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">turn_acceleration</span><span class="o">=</span><span class="mi">800</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">4</span><span class="p">):</span>          <span class="c1"># a 300 mm square</span>
+    <span class="n">db</span><span class="o">.</span><span class="n">straight</span><span class="p">(</span><span class="mi">300</span><span class="p">)</span>
+    <span class="n">db</span><span class="o">.</span><span class="n">turn</span><span class="p">(</span><span class="mi">90</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Moves block by default. Pass <code class="docutils literal notranslate"><span class="pre">wait=False</span></code> to return immediately
+and poll <code class="docutils literal notranslate"><span class="pre">done()</span></code> — the Pybricks pattern for driving while
+reading sensors; any new move command supersedes the pending one:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">straight</span><span class="p">(</span><span class="mi">600</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="k">while</span> <span class="ow">not</span> <span class="n">db</span><span class="o">.</span><span class="n">done</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">bumper_pressed</span><span class="p">():</span>
+        <span class="n">db</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+        <span class="k">break</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>For direct control of each wheel — line-following, tank-style
+teleop, or any controller that computes its own per-wheel outputs —
+<code class="docutils literal notranslate"><span class="pre">move_wheels</span></code> takes two speeds in wheel-deg/s:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">move_wheels</span><span class="p">(</span><span class="mi">200</span><span class="p">,</span> <span class="mi">120</span><span class="p">)</span>     <span class="c1"># gentle right-hand arc</span>
+<span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">500</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Both setpoints leave in a single sync-write packet on serial-bus
+motors, so the wheels change speed at the same packet boundary.
+Reach for this rather than a <a class="reference internal" href="drivers_motors.html#openbricks.drivers.st3215.SyncServoGroup" title="openbricks.drivers.st3215.SyncServoGroup"><code class="xref py py-class docutils literal notranslate"><span class="pre">SyncServoGroup</span></code></a>
+over the wheels: a DriveBase hands their UART to the native bus
+driver when it adopts them, so a SyncServoGroup can’t drive them at
+all.</p>
+<p>Moves take a <code class="docutils literal notranslate"><span class="pre">then=</span></code> end state: <code class="docutils literal notranslate"><span class="pre">&quot;stop&quot;</span></code> (alias <code class="docutils literal notranslate"><span class="pre">&quot;coast&quot;</span></code>,
+the default) decelerates to rest and free-wheels; <code class="docutils literal notranslate"><span class="pre">&quot;brake&quot;</span></code> /
+<code class="docutils literal notranslate"><span class="pre">&quot;hold&quot;</span></code> end actively. <code class="docutils literal notranslate"><span class="pre">then=&quot;continue&quot;</span></code> on <code class="docutils literal notranslate"><span class="pre">straight</span></code> and
+<code class="docutils literal notranslate"><span class="pre">curve</span></code> — Pybricks <code class="docutils literal notranslate"><span class="pre">Stop.NONE</span></code> — does NOT decelerate at the
+end: the move finishes at cruise speed and the wheels keep it until
+the next command, so chained segments flow through their seams:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">straight</span><span class="p">(</span><span class="mi">300</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="s2">"continue"</span><span class="p">)</span>   <span class="c1"># ends AT cruise</span>
+<span class="n">db</span><span class="o">.</span><span class="n">curve</span><span class="p">(</span><span class="mi">150</span><span class="p">,</span> <span class="mi">90</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="s2">"continue"</span><span class="p">)</span>  <span class="c1"># picks the speed up</span>
+<span class="n">db</span><span class="o">.</span><span class="n">straight</span><span class="p">(</span><span class="mi">300</span><span class="p">)</span>                    <span class="c1"># decelerates to rest</span>
+</pre></div>
+</div>
+<p>Move endings are SHAPED all the way down (2.6.0): the controller
+runs position integral action (pbio’s integrator rules — the same
+control law Pybricks uses) so tracking error is squeezed out near
+the target, and any residual left when a profile expires is closed
+by a small landing trajectory under the same acceleration limit as
+every other motion — never a raw feedback step. A robot that ends a
+mission simply comes to rest on its mark; a genuinely stuck robot
+still refuses to report <code class="docutils literal notranslate"><span class="pre">done()</span></code> and the stall watchdog raises.</p>
+<p><code class="docutils literal notranslate"><span class="pre">stop()</span></code> is Pybricks parity: it coasts and returns immediately.
+<code class="docutils literal notranslate"><span class="pre">then</span></code> picks the end state (<code class="docutils literal notranslate"><span class="pre">&quot;coast&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;brake&quot;</span></code>,
+<code class="docutils literal notranslate"><span class="pre">&quot;hold&quot;</span></code>). Short moves armed while the robot is already fast
+raise their own deceleration to land at rest exactly on target, so
+you rarely need more — but <code class="docutils literal notranslate"><span class="pre">wait=True</span></code> is available to block
+until both wheels’ measured speeds read ~0 (the decel ramp plus
+settle for brake/hold, the physical freewheel decay for coast). It
+raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> on open-loop pairs (no measured speed) and,
+if the wheels never settle within 5 s, <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> naming the
+measured speeds — a stopped robot that is still moving is a fault,
+not a detail to hide.</p>
+<p>A wheel that stops answering the bus — no power, a knocked-loose
+TX/RX wire, the wrong <code class="docutils literal notranslate"><span class="pre">servo_id</span></code> — raises instead of quietly doing
+nothing, and the error names the motor:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>OSError: motor is not responding on the bus: right wheel
+(servo id 1, slot 1) on UART1 tx=14 rx=6 — 0 replies, 137 failed
+reads (137 in a row). Check the servo's power and TX/RX wiring,
+and that it really has that bus id — `openbricks servo-id --scan`
+lists the ids actually answering on the bus.
+</pre></div>
+</div>
+<p>(<code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">servo-id</span></code> talks through the URT-2’s USB port. With
+the servo already wired to the hub,
+<code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span> <span class="pre">-n</span> <span class="pre">NAME</span> <span class="pre">examples/servo_set_id.py</span></code> scans and
+re-IDs through the hub instead — same safety contract.)</p>
+<p>Both wheels are verified when the DriveBase is constructed, and on
+every move afterwards. If one goes silent mid-move the controller
+halts immediately rather than winding that wheel’s command to the
+rail — a frozen odometry reading would otherwise look like “infinite
+error” to the heading loop. <code class="docutils literal notranslate"><span class="pre">db.check_motors()</span></code> runs the same check
+on demand.</p>
+<p>With an IMU attached, <code class="docutils literal notranslate"><span class="pre">use_gyro(True)</span></code> steers by measured body
+rotation instead of the encoder differential — immune to wheel slip.
+The preferred IMU is the <a class="reference internal" href="drivers_sensors.html#openbricks.drivers.icm45686.ICM45686" title="openbricks.drivers.icm45686.ICM45686"><code class="xref py py-class docutils literal notranslate"><span class="pre">ICM45686</span></code></a>:
+it is read <em>inside</em> the 1 kHz control tick over SPI, so the heading
+correction runs every millisecond in C with no Python in the loop
+(bench: +0.6° total drift over a four-turn square):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.icm45686</span><span class="w"> </span><span class="kn">import</span> <span class="n">ICM45686</span>
+
+<span class="n">imu</span> <span class="o">=</span> <span class="n">ICM45686</span><span class="p">(</span><span class="n">sck</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">mosi</span><span class="o">=</span><span class="mi">13</span><span class="p">,</span> <span class="n">miso</span><span class="o">=</span><span class="mi">11</span><span class="p">,</span> <span class="n">cs</span><span class="o">=</span><span class="mi">17</span><span class="p">)</span>
+<span class="n">db</span> <span class="o">=</span> <span class="n">DriveBase</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">wheel_diameter_mm</span><span class="o">=</span><span class="mi">88</span><span class="p">,</span>
+               <span class="n">axle_track_mm</span><span class="o">=</span><span class="mi">138</span><span class="p">,</span> <span class="n">imu</span><span class="o">=</span><span class="n">imu</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">use_gyro</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>(A legacy <a class="reference internal" href="drivers_sensors.html#openbricks.drivers.bno055.BNO055" title="openbricks.drivers.bno055.BNO055"><code class="xref py py-class docutils literal notranslate"><span class="pre">BNO055</span></code></a> on I2C still
+works — its fused heading is pumped from Python between ticks,
+which corrects noticeably slower, typically +0.5° to +1.8° per
+turn. New builds should use the ICM-45686.)</p>
+<p>To re-zero the heading frame mid-mission (say, after squaring up on
+a line), call <code class="docutils literal notranslate"><span class="pre">db.reset()</span></code> between moves — afterwards the robot’s
+CURRENT pose is heading zero for both the drive base and
+<code class="docutils literal notranslate"><span class="pre">imu.heading()</span></code>, atomically:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">straight</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">turn</span><span class="p">(</span><span class="o">-</span><span class="mi">90</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>          <span class="c1"># here, now = heading zero</span>
+<span class="n">db</span><span class="o">.</span><span class="n">straight</span><span class="p">(</span><span class="mi">130</span><span class="p">)</span>    <span class="c1"># drives straight along the NEW zero</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">imu.reset_heading()</span></code> refuses (<code class="docutils literal notranslate"><span class="pre">OSError</span></code>) while a drive base
+steers by the gyro — same rule as Pybricks (“can’t reset heading
+while gyro in use”): zeroing the integrator under an armed heading
+controller shifts the measurement out from under the held target,
+and the next move veers chasing the old frame. Use <code class="docutils literal notranslate"><span class="pre">db.reset()</span></code>,
+or <code class="docutils literal notranslate"><span class="pre">use_gyro(False)</span></code> first. <code class="docutils literal notranslate"><span class="pre">db.reset()</span></code> itself raises while a
+move is in progress — stop first.</p>
+<p>Accurate <code class="docutils literal notranslate"><span class="pre">wheel_diameter_mm</span></code> / <code class="docutils literal notranslate"><span class="pre">axle_track_mm</span></code> values matter more
+than any tuning — calibrate both with two short test drives:
+<a class="reference internal" href="../measuring.html"><span class="doc">Measuring wheel diameter &amp; axle track</span></a>.</p>
+<p id="module-openbricks.robotics.drivebase">Two-wheel differential drivebase.</p>
+<p>Thin Python wrapper over <code class="docutils literal notranslate"><span class="pre">_openbricks_native.DriveBase</span></code> — the C
+implementation at <code class="docutils literal notranslate"><span class="pre">native/user_c_modules/openbricks/drivebase.c</span></code> that
+runs 2-DOF coupled control at 1 kHz. Both motors are driven by a
+single forward-progress trajectory and a heading-hold trajectory; a
+heading-error feedback term keeps them in sync even when one wheel has
+more friction than the other.</p>
+<p>Public API matches the M1 Python version so existing code and tests
+don’t need to change:</p>
+<blockquote>
+<div><p>db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+db.settings(straight_speed=200, turn_rate=180)   # deg/s at wheels
+db.straight(500)     # mm, blocking
+db.turn(90)          # deg body heading, blocking
+db.drive(100, 0)     # non-blocking kinematic mapping</p>
+</div></blockquote>
+<p>Serial-bus motors (ST-3215 / ST-3032) are adopted transparently onto
+the hard-tick engine (firmware) or the emulated bus (sim) — same class,
+same code, one controller. There is no Python control loop: motor
+pairs with neither a native servo nor a serial-bus adoption path get
+open-loop <code class="docutils literal notranslate"><span class="pre">drive()</span></code>/<code class="docutils literal notranslate"><span class="pre">stop()</span></code> only, and <code class="docutils literal notranslate"><span class="pre">straight()</span></code>/<code class="docutils literal notranslate"><span class="pre">turn()</span></code>
+raise.</p>
+<p>Open-loop <code class="docutils literal notranslate"><span class="pre">drive()</span></code> bypasses the coupled controller; it just maps
+(speed_mm_s, turn_rate_dps) → (left_dps, right_dps) and hands them to
+each servo’s <code class="docutils literal notranslate"><span class="pre">run_speed</span></code>. Useful for interactive control where
+profile-based moves would feel sluggish.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.robotics.drivebase.</span></span><span class="sig-name descname"><span class="pre">DriveBase</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">left</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">right</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wheel_diameter_mm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axle_track_mm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">imu</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">drive</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'duty'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A two-wheel differential drive robot: two motors, one chassis.</p>
+<p>Pybricks-compatible surface: <code class="docutils literal notranslate"><span class="pre">straight(distance_mm)</span></code>,
+<code class="docutils literal notranslate"><span class="pre">turn(angle_deg)</span></code>, <code class="docutils literal notranslate"><span class="pre">drive(speed_mm_s,</span> <span class="pre">turn_rate_dps)</span></code>,
+<code class="docutils literal notranslate"><span class="pre">stop(then=...)</span></code>, <code class="docutils literal notranslate"><span class="pre">settings(...)</span></code>, <code class="docutils literal notranslate"><span class="pre">use_gyro(True)</span></code> and
+non-blocking moves via <code class="docutils literal notranslate"><span class="pre">wait=False</span></code> + <code class="docutils literal notranslate"><span class="pre">done()</span></code>. Positive
+<code class="docutils literal notranslate"><span class="pre">turn</span></code> is right/clockwise viewed from above.</p>
+<p>Give it any two closed-loop motors and it picks the right
+controller automatically:</p>
+<ul class="simple">
+<li><p><strong>Encoder servos</strong> (<code class="docutils literal notranslate"><span class="pre">JGB37Motor</span></code>, <code class="docutils literal notranslate"><span class="pre">MG370Motor</span></code>) — the native
+C 2-DOF coupled controller at 1 kHz.</p></li>
+<li><p><strong>Serial-bus servos</strong> (<code class="docutils literal notranslate"><span class="pre">ST3032Motor</span></code>, <code class="docutils literal notranslate"><span class="pre">ST3215Motor</span></code>) — the
+motors are <em>adopted</em> onto the hard-tick native bus engine
+(~220 Hz odometry per wheel, immune to Python stalls). Their
+wheel-mode motor API keeps working after adoption.</p></li>
+<li><p><strong>Open-loop motors</strong> (<code class="docutils literal notranslate"><span class="pre">L298NMotor</span></code>) — kinematic <code class="docutils literal notranslate"><span class="pre">drive()</span></code> /
+<code class="docutils literal notranslate"><span class="pre">stop()</span></code> only; moves by distance need feedback and raise.</p></li>
+</ul>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.st3032</span><span class="w"> </span><span class="kn">import</span> <span class="n">ST3032Motor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.robotics</span><span class="w"> </span><span class="kn">import</span> <span class="n">DriveBase</span>
+
+<span class="n">left</span>  <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">41</span><span class="p">)</span>
+<span class="n">right</span> <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">41</span><span class="p">,</span>
+                    <span class="n">invert</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">db</span> <span class="o">=</span> <span class="n">DriveBase</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">wheel_diameter_mm</span><span class="o">=</span><span class="mi">88</span><span class="p">,</span>
+               <span class="n">axle_track_mm</span><span class="o">=</span><span class="mi">138</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">straight</span><span class="p">(</span><span class="mi">300</span><span class="p">)</span>     <span class="c1"># forward 300 mm</span>
+<span class="n">db</span><span class="o">.</span><span class="n">turn</span><span class="p">(</span><span class="mi">90</span><span class="p">)</span>          <span class="c1"># turn right 90 degrees</span>
+</pre></div>
+</div>
+<p>Accurate <code class="docutils literal notranslate"><span class="pre">wheel_diameter_mm</span></code> / <code class="docutils literal notranslate"><span class="pre">axle_track_mm</span></code> values matter
+more than any controller gain — see <a class="reference internal" href="../measuring.html"><span class="doc">Measuring wheel diameter &amp; axle track</span></a> for how to
+calibrate both in two short test drives.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.settings">
+<span class="sig-name descname"><span class="pre">settings</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">straight_speed</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">turn_rate</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">acceleration</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">turn_acceleration</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.settings"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.settings" title="Link to this definition"></a></dt>
+<dd><p>Tune cruise + ramp parameters for subsequent moves.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>straight_speed</strong> – cruise speed for <code class="docutils literal notranslate"><span class="pre">straight()</span></code>, wheel-deg/s.</p></li>
+<li><p><strong>turn_rate</strong> – cruise rate for <code class="docutils literal notranslate"><span class="pre">turn()</span></code>, wheel-deg/s.</p></li>
+<li><p><strong>acceleration</strong> – STRAIGHT (and curve) trajectory
+acceleration, wheel-deg/s² — Pybricks’
+<code class="docutils literal notranslate"><span class="pre">straight_acceleration</span></code>. Serial-engine default 1500
+(Pybricks parity: their 2000 dps² motor accel × 3/4)
+— lower it if the robot pitches or lifts its rear on
+launch. In mm/s² that’s
+<code class="docutils literal notranslate"><span class="pre">acceleration</span> <span class="pre">*</span> <span class="pre">wheel_circumference</span> <span class="pre">/</span> <span class="pre">360</span></code>. Applies
+on both paths: the native (encoder-servo) controller
+arms its C trajectory with it, and the serial-bus
+engine forwards it to the hard-tick controller.</p></li>
+<li><p><strong>turn_acceleration</strong> – <code class="docutils literal notranslate"><span class="pre">turn()</span></code> ramps’ own acceleration,
+wheel-deg/s², independent of <code class="docutils literal notranslate"><span class="pre">acceleration</span></code> —
+Pybricks parity (serial default 1500). Serial-bus
+drivebase only; passing it on an encoder/DC pair
+raises.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.use_gyro">
+<span class="sig-name descname"><span class="pre">use_gyro</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">enable</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.use_gyro"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.use_gyro" title="Link to this definition"></a></dt>
+<dd><p>Switch the heading feedback source between encoder-diff (default)
+and the attached IMU (when True). Pybricks-style.</p>
+<p>Requires an <code class="docutils literal notranslate"><span class="pre">imu=</span></code> argument to the constructor. With the gyro,
+heading is slip-immune — wheel slip or wildly asymmetric friction
+won’t throw the robot off course, because the IMU sees actual body
+rotation regardless of what the wheels did. Works on both the
+native (encoder-servo) path and the serial-bus engine.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.reset">
+<span class="sig-name descname"><span class="pre">reset</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.reset" title="Link to this definition"></a></dt>
+<dd><p>Re-zero the heading frame: after <code class="docutils literal notranslate"><span class="pre">reset()</span></code>, the robot’s
+CURRENT pose is heading zero — for the drive base’s
+controller and <code class="docutils literal notranslate"><span class="pre">imu.heading()</span></code> together (Pybricks
+<code class="docutils literal notranslate"><span class="pre">DriveBase.reset()</span></code>). Call it between moves; it raises
+while a move is active.</p>
+<p>This is the supported way to re-zero mid-mission.
+<code class="docutils literal notranslate"><span class="pre">imu.reset_heading()</span></code> refuses while a drive base steers by
+the gyro, because zeroing the integrator under an armed
+controller shifts the measurement out from under the held
+target — the next <code class="docutils literal notranslate"><span class="pre">straight()</span></code> then veers chasing the old
+frame.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.drive">
+<span class="sig-name descname"><span class="pre">drive</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">speed_mm_s</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">turn_rate_dps</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.drive"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.drive" title="Link to this definition"></a></dt>
+<dd><p>Start driving at a given forward speed + body turn rate.</p>
+<p>Kinematic one-shot — no coupled feedback. Call again (or
+<code class="docutils literal notranslate"><span class="pre">stop()</span></code>) to change. Positive turn rate = right turn
+(clockwise viewed from above), Pybricks convention.</p>
+<p>Speed changes ramp at <code class="docutils literal notranslate"><span class="pre">settings(acceleration=...)</span></code> (the
+uniform-accel rule, 1.94.0) — proportionally across the two
+wheels, so an arc keeps its radius through the ramp.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.check_motors">
+<span class="sig-name descname"><span class="pre">check_motors</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.check_motors"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.check_motors" title="Link to this definition"></a></dt>
+<dd><p>Raise if a wheel has stopped answering the bus.</p>
+<p>Serial-bus wheels are checked at construction and on every
+move, so you rarely need this directly — reach for it in a
+long-running open-loop control loop (<code class="docutils literal notranslate"><span class="pre">move_wheels</span></code> in a
+<code class="docutils literal notranslate"><span class="pre">while</span></code> loop already calls it for you), or to verify the
+chassis before a run. The error names the motor: side, bus
+id, slot, UART and pins.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.move_wheels">
+<span class="sig-name descname"><span class="pre">move_wheels</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">left_wheel_speed</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">right_wheel_speed</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.move_wheels"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.move_wheels" title="Link to this definition"></a></dt>
+<dd><p>Drive the two wheels at independent speeds, in wheel-deg/s.</p>
+<p>Positive is forward on both sides (each motor’s <code class="docutils literal notranslate"><span class="pre">invert</span></code>
+is already applied), so <code class="docutils literal notranslate"><span class="pre">move_wheels(200,</span> <span class="pre">200)</span></code> drives
+straight and <code class="docutils literal notranslate"><span class="pre">move_wheels(200,</span> <span class="pre">-200)</span></code> spins in place.</p>
+<p>Non-blocking and continuous, like <code class="docutils literal notranslate"><span class="pre">drive()</span></code>: the wheels
+hold these speeds until you call it again, issue another
+move, or <code class="docutils literal notranslate"><span class="pre">stop()</span></code>. It supersedes any move in flight.</p>
+<p>Use this instead of building a <code class="docutils literal notranslate"><span class="pre">SyncServoGroup</span></code> over the
+wheels. On serial-bus motors both setpoints leave in a
+single sync-write packet, so the wheels change speed at the
+same packet boundary — and a <code class="docutils literal notranslate"><span class="pre">SyncServoGroup</span></code> could not
+drive them anyway, because adopting them into a DriveBase
+hands their UART to the native driver. On encoder servos
+both targets are set and both servos subscribed inside one
+native call.</p>
+<p>Where <code class="docutils literal notranslate"><span class="pre">drive(speed_mm_s,</span> <span class="pre">turn_rate_dps)</span></code> speaks chassis
+kinematics, this speaks wheels directly — the right tool for
+line-following, tank-style teleop, or any controller that
+computes per-wheel outputs itself.</p>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">move_wheels</span><span class="p">(</span><span class="mi">200</span><span class="p">,</span> <span class="mi">120</span><span class="p">)</span>     <span class="c1"># gentle right-hand arc</span>
+<span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">500</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Open-loop motor pairs (no encoder, no serial bus) are
+supported but cannot batch: the two speeds are written one
+after the other.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.stop">
+<span class="sig-name descname"><span class="pre">stop</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">then</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'coast'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.stop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.stop" title="Link to this definition"></a></dt>
+<dd><p>Halt both wheels. Also clears any pending <code class="docutils literal notranslate"><span class="pre">wait=False</span></code>
+move (new command supersedes, pybricks-style). <code class="docutils literal notranslate"><span class="pre">then</span></code>
+selects the end-state:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;coast&quot;</span></code> (default) — both motors free-wheel.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;brake&quot;</span></code> — both motors actively resist motion at zero
+velocity.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;hold&quot;</span></code> — both motors actively hold their current angle.
+Requires motors that implement <code class="docutils literal notranslate"><span class="pre">hold()</span></code> (e.g. <code class="docutils literal notranslate"><span class="pre">ST3215Motor</span></code>);
+open-loop drivers raise <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code>.</p></li>
+</ul>
+<p>Both wheels are always commanded together, never one motor at
+a time. On serial-bus (adopted) motors the whole stop is
+staged atomically in the C engine and reaches the wheels at
+the same bus-packet boundary. <code class="docutils literal notranslate"><span class="pre">brake</span></code> and <code class="docutils literal notranslate"><span class="pre">hold</span></code>
+DECELERATE at <code class="docutils literal notranslate"><span class="pre">settings(acceleration=...)</span></code> first (the
+uniform-accel rule) — hold anchors where the robot actually
+stops; <code class="docutils literal notranslate"><span class="pre">coast</span></code> releases torque immediately (a freewheel has
+no controlled deceleration). On encoder servos <code class="docutils literal notranslate"><span class="pre">coast</span></code> /
+<code class="docutils literal notranslate"><span class="pre">brake</span></code> likewise apply to both bridges inside one native
+call, so the second wheel’s 1 kHz control tick can’t keep
+driving while the first is already released.</p>
+<p>Pybricks parity by default: the call returns immediately
+(their stop/brake do too — verified from their source).
+Since 2.4.0 short moves armed at speed raise their own
+deceleration to land at rest on target, so waiting is rarely
+needed; pass <code class="docutils literal notranslate"><span class="pre">wait=True</span></code> to BLOCK until both wheels’
+MEASURED speeds read ~0 — for <code class="docutils literal notranslate"><span class="pre">brake</span></code>/<code class="docutils literal notranslate"><span class="pre">hold</span></code> the decel
+ramp finishing plus settle, for <code class="docutils literal notranslate"><span class="pre">coast</span></code> the physical
+freewheel decay. <code class="docutils literal notranslate"><span class="pre">wait=True</span></code> raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> on
+open-loop pairs (no measured speed to wait on) and
+<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> if the wheels never settle within the
+timeout.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.done">
+<span class="sig-name descname"><span class="pre">done</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.done"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.done" title="Link to this definition"></a></dt>
+<dd><p>Pybricks-style status check for in-flight
+<code class="docutils literal notranslate"><span class="pre">straight(wait=False)</span></code> / <code class="docutils literal notranslate"><span class="pre">turn(wait=False)</span></code>. Returns
+<code class="docutils literal notranslate"><span class="pre">True</span></code> if no move is pending or the active move has
+reached its target (and <code class="docutils literal notranslate"><span class="pre">stop(then=…)</span></code> has run). Returns
+<code class="docutils literal notranslate"><span class="pre">False</span></code> while the move is still progressing.</p>
+<p>The controller runs the trajectory independently on the hard
+tick (native path: 1 kHz C scheduler; serial path: the
+st_bus pump); <code class="docutils literal notranslate"><span class="pre">done()</span></code> checks a flag — plus, on the serial
+path with the gyro enabled, feeds the IMU heading into the
+hard-tick heading hold. The natural polling cadence is
+<code class="docutils literal notranslate"><span class="pre">time.sleep_ms(10)</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.straight">
+<span class="sig-name descname"><span class="pre">straight</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">distance_mm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">then</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'coast'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.straight"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.straight" title="Link to this definition"></a></dt>
+<dd><p>Drive forward by <code class="docutils literal notranslate"><span class="pre">distance_mm</span></code>. 2-DOF coupled.</p>
+<p><code class="docutils literal notranslate"><span class="pre">then</span></code> is forwarded to <code class="docutils literal notranslate"><span class="pre">stop()</span></code> — see its docstring for
+coast/brake/hold semantics.</p>
+<p><code class="docutils literal notranslate"><span class="pre">wait=True</span></code> (default) blocks until the move completes.
+<code class="docutils literal notranslate"><span class="pre">wait=False</span></code> returns immediately after arming the move;
+the caller polls <code class="docutils literal notranslate"><span class="pre">done()</span></code> to check completion, and the
+<code class="docutils literal notranslate"><span class="pre">then=</span></code> dispatch is deferred until <code class="docutils literal notranslate"><span class="pre">done()</span></code> reports
+the target was reached. Concurrent use with another
+wait=False move on a separate <code class="docutils literal notranslate"><span class="pre">DriveBase</span></code> (or with motor
+<code class="docutils literal notranslate"><span class="pre">run_angle(wait=False)</span></code> calls) is the intended pattern.</p>
+<p>Any subsequent move command supersedes the previous pending
+wait=False move (pybricks “new command wins”).</p>
+<p><code class="docutils literal notranslate"><span class="pre">then=&quot;continue&quot;</span></code> (Pybricks <code class="docutils literal notranslate"><span class="pre">Stop.NONE</span></code>) does not
+decelerate at the end: the move finishes AT cruise speed and
+the wheels keep it until the next command — chain
+<code class="docutils literal notranslate"><span class="pre">straight</span></code>/<code class="docutils literal notranslate"><span class="pre">curve</span></code> segments without stopping between
+them. <code class="docutils literal notranslate"><span class="pre">&quot;stop&quot;</span></code> is accepted as an alias of the default
+coast end state.</p>
+<p>Raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> for open-loop motor pairs — moves by
+distance need feedback; use <code class="docutils literal notranslate"><span class="pre">drive()</span></code>/<code class="docutils literal notranslate"><span class="pre">stop()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.turn">
+<span class="sig-name descname"><span class="pre">turn</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">angle_deg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">then</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'coast'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.turn"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.turn" title="Link to this definition"></a></dt>
+<dd><p>Turn in place by <code class="docutils literal notranslate"><span class="pre">angle_deg</span></code> body heading (positive =
+right/clockwise viewed from above, Pybricks convention).</p>
+<p>Same <code class="docutils literal notranslate"><span class="pre">then</span></code> / <code class="docutils literal notranslate"><span class="pre">wait</span></code> semantics as <code class="docutils literal notranslate"><span class="pre">straight()</span></code> — see
+its docstring — except <code class="docutils literal notranslate"><span class="pre">then=&quot;continue&quot;</span></code>: a turn in place
+ends facing its target heading, so there is no speed worth
+carrying.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.robotics.drivebase.DriveBase.curve">
+<span class="sig-name descname"><span class="pre">curve</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radius</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">angle</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">then</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'coast'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/robotics/drivebase.html#DriveBase.curve"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.robotics.drivebase.DriveBase.curve" title="Link to this definition"></a></dt>
+<dd><p>Drive an arc along a circle of <code class="docutils literal notranslate"><span class="pre">|radius|</span></code> mm, changing
+heading by <code class="docutils literal notranslate"><span class="pre">angle</span></code> degrees — Pybricks <code class="docutils literal notranslate"><span class="pre">DriveBase.curve()</span></code>,
+including the parameter names, so Pybricks-style keyword
+calls (<code class="docutils literal notranslate"><span class="pre">curve(radius=150,</span> <span class="pre">angle=90)</span></code>) work verbatim. The
+one deviation: our <code class="docutils literal notranslate"><span class="pre">then</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">&quot;coast&quot;</span></code> like
+every openbricks move (Pybricks defaults to hold) — pass
+<code class="docutils literal notranslate"><span class="pre">then=&quot;hold&quot;</span></code> for the Pybricks end state.</p>
+<p>Positive <code class="docutils literal notranslate"><span class="pre">angle</span></code> turns right (clockwise from above,
+the system-wide sign convention, same as <code class="docutils literal notranslate"><span class="pre">turn()</span></code>); the
+SIGN of <code class="docutils literal notranslate"><span class="pre">radius</span></code> picks the travel direction along the
+arc (positive = forward, negative = backward).
+<code class="docutils literal notranslate"><span class="pre">curve(150,</span> <span class="pre">90)</span></code> sweeps a forward quarter-circle to the
+right around a centre 150 mm to the robot’s right;
+<code class="docutils literal notranslate"><span class="pre">curve(150,</span> <span class="pre">-90)</span></code> the mirror to the left.</p>
+<p>The forward and turn profiles run simultaneously with
+proportional speed AND acceleration, so heading stays
+proportional to distance at every instant — the path is a
+true circle through the accel/decel ramps, not just at the
+endpoints. The centre speed is the <code class="docutils literal notranslate"><span class="pre">straight_speed</span></code>
+setting scaled by <code class="docutils literal notranslate"><span class="pre">|R|</span> <span class="pre">/</span> <span class="pre">(|R|</span> <span class="pre">+</span> <span class="pre">track/2)</span></code> so the OUTER
+wheel never exceeds <code class="docutils literal notranslate"><span class="pre">straight_speed</span></code>. <code class="docutils literal notranslate"><span class="pre">curve(0,</span> <span class="pre">angle)</span></code>
+degrades to a turn in place.</p>
+<p>Same <code class="docutils literal notranslate"><span class="pre">then</span></code> / <code class="docutils literal notranslate"><span class="pre">wait</span></code> semantics as <code class="docutils literal notranslate"><span class="pre">straight()</span></code>,
+including <code class="docutils literal notranslate"><span class="pre">then=&quot;continue&quot;</span></code> — the arc hands its full speed
+to the next command.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="API reference" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="drivers_motors.html" class="btn btn-neutral float-right" title="Motor drivers" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

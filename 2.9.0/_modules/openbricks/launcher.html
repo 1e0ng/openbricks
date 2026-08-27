@@ -1,0 +1,1741 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.launcher &mdash; openbricks 2.9.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/launcher.html" />
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=182a64a0"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="2.9.0">firmware&nbsp;v2.9.0</a>
+<a class="obk-pdf-btn" href="../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.launcher</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.launcher</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">Button-gated user-program launcher.</span>
+
+<span class="sd">Pybricks-style workflow:</span>
+
+<span class="sd">* ``openbricks upload`` stages a script at ``/program.py`` but</span>
+<span class="sd">  does not run it — the user presses the program button to launch.</span>
+<span class="sd">* ``openbricks run`` stages the same script and triggers the</span>
+<span class="sd">  launcher immediately. Output streams back to the client; pressing</span>
+<span class="sd">  the program button stops the program; when the program stops, the</span>
+<span class="sd">  terminal exits.</span>
+
+<span class="sd">Each press is a full press-release cycle. The program button has its</span>
+<span class="sd">own GPIO (default ``39``), separate from the BLE-toggle button</span>
+<span class="sd">watched by :mod:`openbricks.bluetooth_button` (default ``38``). Two</span>
+<span class="sd">pins → no duration-based dispatch — every press on the program pin</span>
+<span class="sd">means start-or-stop, and every press on the BLE pin means toggle-BLE.</span>
+
+<span class="sd">Wiring:</span>
+
+<span class="sd">* Press while idle → start ``/program.py`` (on release, with a</span>
+<span class="sd">  post-stop lockout against bounce).</span>
+<span class="sd">* Press while running → the stop fires on press-DOWN: the e-stop</span>
+<span class="sd">  latch engages (motors halt + motion commands raise — see</span>
+<span class="sd">  :mod:`openbricks.estop`), and a ``KeyboardInterrupt`` injection is</span>
+<span class="sd">  requested and *retried* until the program is actually dead.</span>
+
+<span class="sd">The watcher runs off a ``machine.Timer`` kept alive for the whole hub</span>
+<span class="sd">uptime (we never ``deinit`` it), so button-press-to-run survives</span>
+<span class="sd">``openbricks run`` interrupting the main idle loop.</span>
+
+<span class="sd">Typical ``main.py`` (the firmware ships a frozen default; users can</span>
+<span class="sd">override by writing to ``/main.py`` in VFS):</span>
+
+<span class="sd">    from openbricks import bluetooth, launcher</span>
+<span class="sd">    bluetooth.apply_persisted_state()</span>
+<span class="sd">    launcher.run()          # installs watcher + blocks on the idle loop</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+
+<span class="c1"># GPIO 39 since 1.71.0 (was 4): the S3 has exactly ten</span>
+<span class="c1"># analog-capable pins (ADC1, GPIO 1-10) and a button needs none of</span>
+<span class="c1"># them — parking the default on GPIO 4 cost an analog channel the</span>
+<span class="c1"># moment a ten-channel sensor array arrived (same rationale as the</span>
+<span class="c1"># BLE button's move to 38 in 1.66.3). On a classic ESP32, GPIO 39</span>
+<span class="c1"># has no internal pull-up — pass ``button_pin=`` explicitly there.</span>
+<span class="n">DEFAULT_BUTTON_PIN</span>   <span class="o">=</span> <span class="mi">39</span>
+
+<span class="c1"># PCNT unit for the hardware press latch. Encoder motors claim units</span>
+<span class="c1"># 0/1 (one unit per PCNTEncoder, see drivers/mg370.py); unit 3 exists</span>
+<span class="c1"># on every PCNT-capable chip (classic ESP32 has 8 units, S3 has 4).</span>
+<span class="n">STOP_PCNT_UNIT</span> <span class="o">=</span> <span class="mi">3</span>
+<span class="n">DEFAULT_POLL_MS</span>      <span class="o">=</span> <span class="mi">50</span>
+<span class="n">DEFAULT_PROGRAM_PATH</span> <span class="o">=</span> <span class="s2">"/program.py"</span>
+
+<span class="c1"># Hardware-timer inventory (ESP32 / ESP32-S3 both have exactly 0..3):</span>
+<span class="c1">#   0 — launcher button poll (this module)</span>
+<span class="c1">#   1 — BLE-toggle button poll (openbricks.bluetooth_button)</span>
+<span class="c1">#   2 — motor_process 1 kHz scheduler (native C module)</span>
+<span class="c1">#   3 — stop-tick interrupt injector (this module)</span>
+<span class="c1"># The stop tick used to take ``timer_id + 1`` = 1, silently stealing</span>
+<span class="c1"># the BLE toggle's timer the moment the launcher started: the BLE</span>
+<span class="c1"># button went dead and the status LED stopped following BLE state.</span>
+<span class="n">STOP_TIMER_ID</span> <span class="o">=</span> <span class="mi">3</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_now_ms</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Monotonic milliseconds — ``time.ticks_ms`` on MicroPython,</span>
+<span class="sd">    wall-clock fallback for CPython tests."""</span>
+    <span class="n">ticks</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">time</span><span class="p">,</span> <span class="s2">"ticks_ms"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ticks</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">ticks</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ticks_diff</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+    <span class="n">diff</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">time</span><span class="p">,</span> <span class="s2">"ticks_diff"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">diff</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">diff</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">a</span> <span class="o">-</span> <span class="n">b</span>
+
+
+<div class="viewcode-block" id="Launcher">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.launcher.Launcher">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Launcher</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Shared state for the program-button watcher.</span>
+
+<span class="sd">    Tests instantiate this directly and drive ``_tick`` with a fake</span>
+<span class="sd">    Pin; production code uses ``_ensure_launcher()`` below, which</span>
+<span class="sd">    installs a singleton + ``machine.Timer``.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">button</span><span class="p">,</span> <span class="n">program_path</span><span class="o">=</span><span class="n">DEFAULT_PROGRAM_PATH</span><span class="p">,</span>
+                 <span class="n">poll_ms</span><span class="o">=</span><span class="n">DEFAULT_POLL_MS</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_btn</span>            <span class="o">=</span> <span class="n">button</span>      <span class="c1"># anything with ``.value()``, 0 = pressed</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_program_path</span>   <span class="o">=</span> <span class="n">program_path</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_poll_ms</span>        <span class="o">=</span> <span class="n">poll_ms</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_running</span>        <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span>    <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_stopped</span>  <span class="o">=</span> <span class="kc">False</span>       <span class="c1"># this press already fired STOP</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_stop_ms</span>   <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># when the last STOP fired</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span> <span class="o">=</span> <span class="kc">None</span>      <span class="c1"># starts swallowed until here</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span>  <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># last injection request time</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_count</span> <span class="o">=</span> <span class="mi">0</span>         <span class="c1"># injections re-requested this stop</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tick_last_ms</span>   <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># last _tick run (starvation detect)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tick_gap_max</span>   <span class="o">=</span> <span class="mi">0</span>           <span class="c1"># worst inter-tick gap seen</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_starve_note_ms</span> <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># last starvation NOTE (throttle)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span>     <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># hardware falling-edge counter</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span> <span class="o">=</span> <span class="mi">0</span>         <span class="c1"># counter value already consumed</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_raw_last</span>       <span class="o">=</span> <span class="kc">False</span>       <span class="c1"># last raw sample (debounce)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_open_ms</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># counter-start press in flight</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_consume_release</span> <span class="o">=</span> <span class="kc">False</span>  <span class="c1"># eat this press's release</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_held</span> <span class="o">=</span> <span class="kc">False</span>     <span class="c1"># counter-start press still down</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_held_up_ticks</span>  <span class="o">=</span> <span class="mi">0</span>           <span class="c1"># raw-high ticks while held</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_latch_ignore_until_ms</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># release chatter: latch off</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_raw_stable</span>     <span class="o">=</span> <span class="mi">0</span>           <span class="c1"># consecutive equal samples</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_run_started_ms</span> <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># when _running went True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span>        <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># None | "start" | "stop"</span>
+        <span class="c1"># Timers stay alive for hub uptime — we never ``.deinit()`` them.</span>
+        <span class="c1"># Keeping the references here stops GC from collecting them.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span>          <span class="o">=</span> <span class="kc">None</span>    <span class="c1"># Timer(0): START + stop-press detect</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stop_timer</span>     <span class="o">=</span> <span class="kc">None</span>    <span class="c1"># Timer(STOP_TIMER_ID=3): stop_tick</span>
+        <span class="c1"># Last time the main-thread idle loop drained. ``_request_start``</span>
+        <span class="c1"># uses this to decide whether a queued "start" will actually be</span>
+        <span class="c1"># picked up (idle loop alive → main-thread exec, button-stop</span>
+        <span class="c1"># works) or whether it must fall back to the degraded</span>
+        <span class="c1"># schedule-exec path (see ``_scheduled_start``).</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_idle_drain_ms</span>  <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_discard_stale_start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Drop every start signal accumulated while NO idle loop was</span>
+<span class="sd">        alive to drain it: the ``_pending`` flag, the hard button's</span>
+<span class="sd">        start latch, and un-consumed PCNT edges.</span>
+
+<span class="sd">        Called on (re)entry to ``run()``. The re-entry case is a BLE</span>
+<span class="sd">        session ending — ``openbricks log`` / ``list`` / ``stop``</span>
+<span class="sd">        Ctrl-C the idle loop and restore it on the way out, and a</span>
+<span class="sd">        press parked during the session (schedule-full fallback under</span>
+<span class="sd">        load) used to fire the instant the restore re-entered the</span>
+<span class="sd">        loop: a read-only log command visibly STARTED the robot</span>
+<span class="sd">        (bench 2026-08-09). A start with no live loop to serve it is</span>
+<span class="sd">        stale by definition — the user presses again."""</span>
+        <span class="n">discarded</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">==</span> <span class="s2">"start"</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">discarded</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">_event</span><span class="p">(</span><span class="s2">"stale-start-discarded"</span><span class="p">,</span> <span class="s2">"pending"</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">motor_process</span> <span class="k">as</span> <span class="n">_mpn</span>
+            <span class="k">if</span> <span class="n">_mpn</span><span class="o">.</span><span class="n">hard_button_take_start</span><span class="p">():</span>
+                <span class="n">discarded</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">_event</span><span class="p">(</span><span class="s2">"stale-start-discarded"</span><span class="p">,</span> <span class="s2">"hard-latch"</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+            <span class="k">pass</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">n</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span><span class="o">.</span><span class="n">value</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="n">n</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span>
+            <span class="k">if</span> <span class="n">n</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span> <span class="o">=</span> <span class="n">n</span>
+                <span class="n">discarded</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">_event</span><span class="p">(</span><span class="s2">"stale-start-discarded"</span><span class="p">,</span> <span class="s2">"pcnt"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">discarded</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: discarded a start queued while the "</span>
+                  <span class="s2">"idle loop was down — press again to run."</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_sync_press_counter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Mark the hardware press counter's current value as</span>
+<span class="sd">        consumed. Called at idle and before each run starts, so edges</span>
+<span class="sd">        counted OUTSIDE a run never stop the next one at birth."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span><span class="o">.</span><span class="n">value</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_mark_idle_alive</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_idle_drain_ms</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_idle_loop_alive</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""True while the main-thread idle loop is actively draining</span>
+<span class="sd">        (last pass within a few poll periods)."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_idle_drain_ms</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="n">_now_ms</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_idle_drain_ms</span><span class="p">)</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_poll_ms</span> <span class="o">*</span> <span class="mi">4</span>
+
+    <span class="c1"># ---- timer callback ----</span>
+
+    <span class="c1"># After a STOP, presses can't START the program again until this</span>
+    <span class="c1"># lockout passes. The stop unwinds the program within milliseconds,</span>
+    <span class="c1"># so contact bounce / finger re-contact after the stopping press</span>
+    <span class="c1"># reads as a *fresh* press with ``_running`` already False —</span>
+    <span class="c1"># without the lockout that second event restarted the program the</span>
+    <span class="c1"># user just stopped. Anchored at the stopping press's RELEASE</span>
+    <span class="c1"># (bounce is a release-adjacent phenomenon), re-armed at stop-fire</span>
+    <span class="c1"># as a fallback for presses whose release was never observed. The</span>
+    <span class="c1"># original 750 ms from stop-FIRE swallowed deliberate quick</span>
+    <span class="c1"># restarts ("start press not detected" bench report); 400 ms from</span>
+    <span class="c1"># release still swallows bounce and finger re-contact with</span>
+    <span class="c1"># margin. 500 (was 400): the 1.15.3 debounce delays a re-contact</span>
+    <span class="c1"># press's DISPATCH by up to two polls, so the window covers</span>
+    <span class="c1"># re-contact at release+200 ms dispatching at ~release+400 ms.</span>
+    <span class="n">START_LOCKOUT_MS</span> <span class="o">=</span> <span class="mi">500</span>
+
+    <span class="c1"># While a stop is in flight but the program hasn't died yet, the</span>
+    <span class="c1"># injection is re-requested at this cadence. The injected</span>
+    <span class="c1"># KeyboardInterrupt raises in whatever main-thread frame is</span>
+    <span class="c1"># executing — a scheduled callback (e.g. the BLE TX flush) can eat</span>
+    <span class="c1"># it — so a one-shot request meant a press could be silently lost</span>
+    <span class="c1"># ("first press ignored, second press works"). Retries make an</span>
+    <span class="c1"># eaten injection cost one retry period instead of the press. The</span>
+    <span class="c1"># robot itself is already stopping either way: the e-stop latch</span>
+    <span class="c1"># engaged at press-down, independent of injection delivery.</span>
+    <span class="n">STOP_RETRY_MS</span> <span class="o">=</span> <span class="mi">300</span>
+
+    <span class="c1"># Starvation notes are throttled to one per this window — each</span>
+    <span class="c1"># note is a committed log write, and on a slow filesystem the</span>
+    <span class="c1"># write itself starves the next tick (the run_68 log storm).</span>
+    <span class="n">STARVE_NOTE_MS</span> <span class="o">=</span> <span class="mi">5000</span>
+
+    <span class="c1"># Contact-chatter defences (1.15.3). Bench event-ring capture of</span>
+    <span class="c1"># "pressed start 4 times, only the 4th worked": the START press's</span>
+    <span class="c1"># release chatter re-closed the contact and KILLED the newborn</span>
+    <span class="c1"># run — once as a phantom press-down(running) 54 ms after start</span>
+    <span class="c1"># (level path), twice as PCNT falling edges 100-180 ms after</span>
+    <span class="c1"># start (hardware latch). Two defences, one per detector:</span>
+    <span class="c1">#</span>
+    <span class="c1"># * DEBOUNCE_TICKS — a level CHANGE must hold for this many</span>
+    <span class="c1">#   consecutive polls before it's believed. Chatter flickers are</span>
+    <span class="c1">#   ~10-20 ms; two 50 ms polls reject them while costing a real</span>
+    <span class="c1">#   press ~50 ms of latency.</span>
+    <span class="c1"># * RUN_START_GRACE_MS — for this long after a run starts, PCNT</span>
+    <span class="c1">#   edges are CONSUMED as the start press's own chatter instead</span>
+    <span class="c1">#   of fired as stops. A real second press physically can't</span>
+    <span class="c1">#   arrive that fast, and the debounced level path still covers</span>
+    <span class="c1">#   the window regardless.</span>
+    <span class="n">DEBOUNCE_TICKS</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">RUN_START_GRACE_MS</span> <span class="o">=</span> <span class="mi">400</span>
+
+    <span class="c1"># Counter-driven START (1.15.4). The debounce above made fast</span>
+    <span class="c1"># taps unreliable: a press must span two 50 ms polls to be</span>
+    <span class="c1"># believed, so a crisp ~60 ms tap is a coin flip and a really</span>
+    <span class="c1"># fast one lands between polls entirely (bench: "press too fast</span>
+    <span class="c1"># -&gt; doesn't start; a bit longer -&gt; starts", with an EMPTY event</span>
+    <span class="c1"># ring). The PCNT counter already sees every tap's edge in</span>
+    <span class="c1"># silicon — so at idle the counter is now the START trigger</span>
+    <span class="c1"># (press-DOWN latency, no tap too fast), the level path demotes</span>
+    <span class="c1"># to state tracking, and edges within START_PRESS_OPEN_MS of a</span>
+    <span class="c1"># dispatch are the same press's chatter, consumed silently.</span>
+    <span class="n">START_PRESS_OPEN_MS</span> <span class="o">=</span> <span class="mi">600</span>
+
+    <span class="c1"># The start press's whole LIFECYCLE must be consumed (1.15.5).</span>
+    <span class="c1"># Starting at press-DOWN means the finger is still on the button</span>
+    <span class="c1"># when the program comes up (~1 tick later), so the same physical</span>
+    <span class="c1"># press keeps echoing into the run through both detectors:</span>
+    <span class="c1"># * its debounced level CONFIRMATION arrives with ``_running``</span>
+    <span class="c1">#   already True and read as a mid-run stop press — the newborn</span>
+    <span class="c1">#   run died at ~55 ms (bench ring: start-latch, then</span>
+    <span class="c1">#   press-down('running') + stop-fire one tick later);</span>
+    <span class="c1"># * its release chatter EDGES land after RUN_START_GRACE_MS when</span>
+    <span class="c1">#   the press is held long, and fired latch-stops.</span>
+    <span class="c1"># ``_start_press_held`` tracks "that press is still physically</span>
+    <span class="c1"># down" (cleared once raw reads released for DEBOUNCE_TICKS</span>
+    <span class="c1"># polls, so a mid-hold flicker can't clear it); while set, the</span>
+    <span class="c1"># level confirmation is consumed, and for RELEASE_CHATTER_MS</span>
+    <span class="c1"># after the consumed release the PCNT latch ignores edges. Stops</span>
+    <span class="c1"># stay covered throughout by the debounced level path: a NEW</span>
+    <span class="c1"># press necessarily begins with a confirmed release that ends</span>
+    <span class="c1"># these windows.</span>
+    <span class="c1"># 500 ms per bench directive 2026-08-14 (was 200) — one rule</span>
+    <span class="c1"># with the hard C path's OB_BUTTON_CHATTER_TICKS.</span>
+    <span class="n">RELEASE_CHATTER_MS</span> <span class="o">=</span> <span class="mi">500</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_fire_stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Everything a stop press triggers, in order of importance:</span>
+<span class="sd">        latch the e-stop (motors die + motion commands raise, no</span>
+<span class="sd">        interrupt needed), then request the interrupt injection that</span>
+<span class="sd">        tears the program down."""</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">estop</span>
+        <span class="n">_notify_press_feedback</span><span class="p">(</span><span class="n">stop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_stop_ms</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_stop_ms</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_count</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_stop_ms</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">START_LOCKOUT_MS</span>
+        <span class="n">_event</span><span class="p">(</span><span class="s2">"stop-fire"</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">estop</span><span class="o">.</span><span class="n">engage</span><span class="p">()</span>
+            <span class="c1"># Breadcrumb AFTER the kill so the file write can't delay</span>
+            <span class="c1"># it; no injection is pending yet (that request comes</span>
+            <span class="c1"># next), so no KeyboardInterrupt can land in this write.</span>
+            <span class="n">_note</span><span class="p">(</span><span class="s2">"estop engaged: motors killed, motion latched"</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="c1"># The latch itself must never fail the stop request.</span>
+            <span class="n">_note</span><span class="p">(</span><span class="s2">"estop engage FAILED: </span><span class="si">%r</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">e</span><span class="p">,))</span>
+        <span class="c1"># Commit the run log while it is still safe to write. Print</span>
+        <span class="c1"># output is buffered in RAM (see openbricks.log), and the</span>
+        <span class="c1"># program is about to be torn down — anything unflushed would</span>
+        <span class="c1"># die with it. This MUST stay above _request_stop: after that</span>
+        <span class="c1"># an injected KeyboardInterrupt can land mid-write, which is</span>
+        <span class="c1"># the same ordering rule the _note calls above follow.</span>
+        <span class="n">_flush_log</span><span class="p">()</span>
+        <span class="n">_request_stop</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Launcher.note_external_stop">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.launcher.Launcher.note_external_stop">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">note_external_stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Attribute a stop delivered OUTSIDE this watcher's own</span>
+<span class="sd">        machinery — the hard-button path, or a REPL Ctrl-C.</span>
+
+<span class="sd">        The 1.48.2 start gates check state (`_lockout_until_ms`,</span>
+<span class="sd">        press lifecycle) that only the watcher's stop path armed.</span>
+<span class="sd">        When the hard path wins the race (stop in ~2 ms, before the</span>
+<span class="sd">        watcher's next 50 ms tick), that state never arms: the</span>
+<span class="sd">        stopping press's echoes — PCNT edges, the hard latch's</span>
+<span class="sd">        post-disarm confirmation — read as fresh idle presses and</span>
+<span class="sd">        dispatch a phantom start (bench 2026-08-03, second</span>
+<span class="sd">        occurrence: gates in place, lockout never armed, next BLE</span>
+<span class="sd">        session dead again). Called from the program teardown, so</span>
+<span class="sd">        EVERY interrupt-unwound run arms the same suppression."""</span>
+        <span class="n">_notify_press_feedback</span><span class="p">(</span><span class="n">stop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">now</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_stop_ms</span> <span class="o">=</span> <span class="n">now</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span> <span class="o">=</span> <span class="n">now</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">START_LOCKOUT_MS</span>
+        <span class="c1"># The stopping press's release is still coming — consume it.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_stopped</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="c1"># Drain latches the press may already have filled.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">motor_process</span> <span class="k">as</span> <span class="n">_mpn</span>
+            <span class="n">_mpn</span><span class="o">.</span><span class="n">hard_button_take_start</span><span class="p">()</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+            <span class="k">pass</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sync_press_counter</span><span class="p">()</span>
+        <span class="n">_event</span><span class="p">(</span><span class="s2">"external-stop-noted"</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_start_gate_verdict</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">now</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Shared start-dispatch gate for the PCNT latch AND the hard</span>
+<span class="sd">        button's start latch (Part 12 meta-rule: any detector slower</span>
+<span class="sd">        than the dispatcher re-reports the dispatching press — every</span>
+<span class="sd">        echo must be attributed to it, not treated as new input).</span>
+<span class="sd">        Returns ``None`` when a start may dispatch, else the reason</span>
+<span class="sd">        to swallow."""</span>
+        <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                <span class="ow">and</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span><span class="p">,</span> <span class="n">now</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">):</span>
+            <span class="k">return</span> <span class="s2">"post-stop lockout"</span>
+        <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_start_press_open_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_held</span>
+                <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_consume_release</span>
+                <span class="ow">or</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_latch_ignore_until_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                    <span class="ow">and</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_latch_ignore_until_ms</span><span class="p">,</span>
+                                    <span class="n">now</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)):</span>
+            <span class="k">return</span> <span class="s2">"same-press chatter"</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tick</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_timer</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tick_body</span><span class="p">(</span><span class="n">_timer</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+            <span class="c1"># A stop interrupt (the hard-button path's</span>
+            <span class="c1"># mp_sched_keyboard_interrupt) landed in THIS callback</span>
+            <span class="c1"># frame instead of the program — a pending exception</span>
+            <span class="c1"># fires at the next VM boundary, whichever Python frame</span>
+            <span class="c1"># holds it. Without the relay the callback unwinds,</span>
+            <span class="c1"># MicroPython logs the traceback, and the program keeps</span>
+            <span class="c1"># running (bench 2026-08-03: hard_stops incremented,</span>
+            <span class="c1"># traceback into _tick/log.pump, program survived).</span>
+            <span class="c1"># Re-post so delivery retries until it lands in the</span>
+            <span class="c1"># program.</span>
+            <span class="n">_resignal_stop_interrupt</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tick_body</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_timer</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Called on every ``poll_ms`` tick.</span>
+
+<span class="sd">        While a program runs, a STOP fires on **press-down**</span>
+<span class="sd">        (Pybricks-style: reacts a poll period sooner, and the release</span>
+<span class="sd">        that follows is consumed so it can't double-fire). The stop</span>
+<span class="sd">        engages the e-stop latch — the robot halts and motion commands</span>
+<span class="sd">        raise regardless of interrupt delivery — and the interrupt</span>
+<span class="sd">        request is retried every ``STOP_RETRY_MS`` until the program</span>
+<span class="sd">        is actually dead. While idle, a START fires on release of a</span>
+<span class="sd">        full press-release cycle — unless it lands inside the</span>
+<span class="sd">        post-stop lockout, which swallows the bounce that used to</span>
+<span class="sd">        restart a just-stopped program.</span>
+
+<span class="sd">        This (a soft Python callback) only *detects* the press and sets a</span>
+<span class="sd">        flag — it can't inject the interrupt, because a pending exception</span>
+<span class="sd">        set in a Python callback frame unwinds the callback, not the</span>
+<span class="sd">        program. The native C-function ``stop_tick`` Timer callback (set</span>
+<span class="sd">        up in ``_ensure_launcher``) does the injection."""</span>
+        <span class="c1"># BLE TX liveness backstop: revive a flush chain that died with</span>
+        <span class="c1"># bytes still buffered (scheduler queue full at re-schedule</span>
+        <span class="c1"># time, or a paced notify-failure retry — see</span>
+        <span class="c1"># ``ble_repl._flush``). Runs before the button logic so the</span>
+        <span class="c1"># early ``return``s below can't skip it. Wrapped like</span>
+        <span class="c1"># ``estop.engage()`` in ``_fire_stop``: a backstop must never</span>
+        <span class="c1"># kill the tick that also owns the stop button.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">ble_repl</span>
+            <span class="n">ble_repl</span><span class="o">.</span><span class="n">pump_tx</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="c1"># Run-log liveness, same contract as the TX pump above: the</span>
+        <span class="c1"># tee'd ``print`` only buffers (a littlefs commit costs ~60-90</span>
+        <span class="c1"># ms and used to run inline with every print, stalling the</span>
+        <span class="c1"># program between its own bytecodes), so the bytes reach flash</span>
+        <span class="c1"># here instead — off the hot path. Unforced: this pump writes,</span>
+        <span class="c1"># while the real commit is paid at program end and on the stop</span>
+        <span class="c1"># press. Wrapped, because a logging failure must never kill the</span>
+        <span class="c1"># tick that owns the stop button.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span> <span class="k">as</span> <span class="n">_log</span>
+            <span class="n">_log</span><span class="o">.</span><span class="n">pump</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="c1"># Starvation self-detection: Timer callbacks dispatch through</span>
+        <span class="c1"># micropython.schedule's bounded queue, and a full queue DROPS</span>
+        <span class="c1"># ticks silently — during such a gap a button press is</span>
+        <span class="c1"># invisible. Measure the gap between consecutive runs and</span>
+        <span class="c1"># leave a stamped note in the run log when it stretches, so a</span>
+        <span class="c1"># silently-missed press shows WHY right where it happened.</span>
+        <span class="n">now</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tick_last_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">gap</span> <span class="o">=</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="n">now</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tick_last_ms</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">gap</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tick_gap_max</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_tick_gap_max</span> <span class="o">=</span> <span class="n">gap</span>
+            <span class="k">if</span> <span class="n">gap</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_poll_ms</span> <span class="o">*</span> <span class="mi">4</span> <span class="ow">and</span> <span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_starve_note_ms</span> <span class="ow">is</span> <span class="kc">None</span>
+                    <span class="ow">or</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="n">now</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_starve_note_ms</span><span class="p">)</span>
+                    <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">STARVE_NOTE_MS</span><span class="p">):</span>
+                <span class="c1"># Include the slowest log-write so the starvation</span>
+                <span class="c1"># note carries its own prime suspect: littlefs block</span>
+                <span class="c1"># erases (under the pump's file.write) suspend the</span>
+                <span class="c1"># CPU cache, and a repeated ~100 ms-class block is</span>
+                <span class="c1"># enough to fill the 8-deep scheduler queue and drop</span>
+                <span class="c1"># ticks. Same order as the gap -&gt; flash owns it;</span>
+                <span class="c1"># small while gaps are large -&gt; blocker is elsewhere.</span>
+                <span class="c1">#</span>
+                <span class="c1"># Rate-limited to one note per STARVE_NOTE_MS: the</span>
+                <span class="c1"># note is ITSELF a committed log write, so on a slow</span>
+                <span class="c1"># filesystem every note starved the next tick, which</span>
+                <span class="c1"># wrote another note — a self-sustaining storm that</span>
+                <span class="c1"># stretched a 0.5 s program to 28 s (bench run_68,</span>
+                <span class="c1"># 2026-08-09: ~400 ms per write, every tick). The</span>
+                <span class="c1"># worst-gap tracking above still sees every gap; only</span>
+                <span class="c1"># the note is throttled.</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_starve_note_ms</span> <span class="o">=</span> <span class="n">now</span>
+                <span class="n">_note</span><span class="p">(</span><span class="s2">"tick starved </span><span class="si">%d</span><span class="s2"> ms (worst log write </span><span class="si">%d</span><span class="s2"> ms)"</span>
+                      <span class="o">%</span> <span class="p">(</span><span class="n">gap</span><span class="p">,</span> <span class="n">_worst_log_write_ms</span><span class="p">()))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tick_last_ms</span> <span class="o">=</span> <span class="n">now</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_running</span><span class="p">:</span>
+            <span class="c1"># Hardware press latch: the PCNT peripheral counted every</span>
+            <span class="c1"># falling edge on the button in silicon, including during</span>
+            <span class="c1"># scheduler blackouts (a program blocking in C I2C stalls</span>
+            <span class="c1"># the drain for 100-200 ms, and machine.Timer ticks are</span>
+            <span class="c1"># silently dropped while the queue is full — a quick</span>
+            <span class="c1"># ~120-160 ms press fit entirely inside such a gap and</span>
+            <span class="c1"># was never seen; the 4-presses-1-stop bench repro). The</span>
+            <span class="c1"># tick may run LATE, but the edge count means the press</span>
+            <span class="c1"># cannot be LOST.</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">n</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span><span class="o">.</span><span class="n">value</span><span class="p">()</span>
+                <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                    <span class="n">n</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span>
+                <span class="k">if</span> <span class="n">n</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span><span class="p">:</span>
+                    <span class="n">in_grace</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_run_started_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                        <span class="ow">and</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="n">_now_ms</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_started_ms</span><span class="p">)</span>
+                        <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">RUN_START_GRACE_MS</span><span class="p">)</span>
+                    <span class="c1"># The start press outliving the grace window: while</span>
+                    <span class="c1"># it is still physically down, and for</span>
+                    <span class="c1"># RELEASE_CHATTER_MS after its consumed release,</span>
+                    <span class="c1"># edges are its own chatter — a long-held start's</span>
+                    <span class="c1"># release must not latch-stop the run it started.</span>
+                    <span class="c1"># (Stops stay covered by the debounced level path.)</span>
+                    <span class="n">same_press</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_held</span>
+                        <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_consume_release</span>
+                        <span class="ow">or</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_latch_ignore_until_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                            <span class="ow">and</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_latch_ignore_until_ms</span><span class="p">,</span>
+                                            <span class="n">_now_ms</span><span class="p">())</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">))</span>
+                    <span class="k">if</span> <span class="n">in_grace</span> <span class="ow">or</span> <span class="n">same_press</span><span class="p">:</span>
+                        <span class="c1"># The start press's own release chatter.</span>
+                        <span class="n">_event</span><span class="p">(</span><span class="s2">"latch-grace-consumed"</span><span class="p">,</span>
+                               <span class="n">n</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span><span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span> <span class="o">=</span> <span class="n">n</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span> <span class="o">=</span> <span class="n">n</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_press_stopped</span> <span class="o">=</span> <span class="kc">True</span>  <span class="c1"># consume the release</span>
+                        <span class="n">_event</span><span class="p">(</span><span class="s2">"latch-stop"</span><span class="p">)</span>
+                        <span class="n">_note</span><span class="p">(</span><span class="s2">"button press latched by hardware counter -&gt; stop"</span><span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_fire_stop</span><span class="p">()</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">_ticks_diff</span><span class="p">(</span>
+                    <span class="n">_now_ms</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">STOP_RETRY_MS</span><span class="p">:</span>
+                <span class="c1"># A stop is in flight but the program is still alive —</span>
+                <span class="c1"># the previous injection was eaten. Re-request. (No log</span>
+                <span class="c1"># note here: an injection is pending and could land</span>
+                <span class="c1"># inside the file write, eaten by _tick instead of the</span>
+                <span class="c1"># program. The count lands in the stop debrief line.)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_count</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">_request_stop</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="c1"># Hard-button START backup: a press the hard tick saw</span>
+            <span class="c1"># while idle. The PCNT latch usually sees the same edge</span>
+            <span class="c1"># and dispatches below; _pending is level-triggered so a</span>
+            <span class="c1"># double request collapses into one run. This path is the</span>
+            <span class="c1"># one that survives if the PCNT latch ever regresses.</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">motor_process</span> <span class="k">as</span> <span class="n">_mpn</span>
+                <span class="k">if</span> <span class="n">_mpn</span><span class="o">.</span><span class="n">hard_button_take_start</span><span class="p">():</span>
+                    <span class="n">_notify_press_feedback</span><span class="p">()</span>
+                    <span class="c1"># Same gates as the PCNT path below (Part 12</span>
+                    <span class="c1"># meta-rule: every echo of a dispatching press</span>
+                    <span class="c1"># belongs to it). Ungated, the STOPPING press's</span>
+                    <span class="c1"># own debounce confirmation — which lands ~20 ms</span>
+                    <span class="c1"># after the disarm, so the hard sampler counts it</span>
+                    <span class="c1"># UNARMED — latched a start, and the idle loop</span>
+                    <span class="c1"># phantom-restarted the just-stopped program.</span>
+                    <span class="c1"># That busy hub is what killed the next BLE</span>
+                    <span class="c1"># session (bench 2026-08-03: presses 2-&gt;3 with</span>
+                    <span class="c1"># hard_stops frozen at 2, then notify_count=0).</span>
+                    <span class="n">swallow</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_gate_verdict</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">swallow</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">_event</span><span class="p">(</span><span class="s2">"hard-start-latch"</span><span class="p">)</span>
+                        <span class="n">_request_start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">_event</span><span class="p">(</span><span class="s2">"hard-start-swallowed"</span><span class="p">,</span> <span class="n">swallow</span><span class="p">)</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: start press ignored (</span><span class="si">%s</span><span class="s2">)"</span>
+                              <span class="o">%</span> <span class="n">swallow</span><span class="p">)</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+                <span class="k">pass</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># Counter-driven START: a counted falling edge at idle</span>
+                <span class="c1"># IS a press, regardless of whether the 50 ms level</span>
+                <span class="c1"># sampling ever catches it.</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">n</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_pcnt</span><span class="o">.</span><span class="n">value</span><span class="p">()</span>
+                <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                    <span class="n">n</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span>
+                <span class="k">if</span> <span class="n">n</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span><span class="p">:</span>
+                    <span class="n">_notify_press_feedback</span><span class="p">()</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_press_count_seen</span> <span class="o">=</span> <span class="n">n</span>
+                    <span class="n">verdict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_gate_verdict</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">verdict</span> <span class="o">==</span> <span class="s2">"post-stop lockout"</span><span class="p">:</span>
+                        <span class="c1"># Post-stop bounce / re-contact edges.</span>
+                        <span class="n">_event</span><span class="p">(</span><span class="s2">"start-latch-swallowed"</span><span class="p">,</span> <span class="s2">"lockout"</span><span class="p">)</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: start press ignored "</span>
+                              <span class="s2">"(post-stop lockout)"</span><span class="p">)</span>
+                    <span class="k">elif</span> <span class="n">verdict</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="c1"># Chatter edges of the press that already</span>
+                        <span class="c1"># dispatched — including a press held clear</span>
+                        <span class="c1"># through a short run's whole lifetime (its</span>
+                        <span class="c1"># release chatter lands back at idle and must</span>
+                        <span class="c1"># not dispatch a phantom new start).</span>
+                        <span class="n">_event</span><span class="p">(</span><span class="s2">"start-latch-consumed"</span><span class="p">,</span> <span class="s2">"same-press"</span><span class="p">)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_open_ms</span> <span class="o">=</span> <span class="n">now</span>
+                        <span class="c1"># The press is physically DOWN right now (we</span>
+                        <span class="c1"># just counted its falling edge). Its later</span>
+                        <span class="c1"># echoes — level confirmation, release chatter</span>
+                        <span class="c1"># — belong to it, not to the run it starts.</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_held</span> <span class="o">=</span> <span class="kc">True</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_held_up_ticks</span> <span class="o">=</span> <span class="mi">0</span>
+                        <span class="n">_event</span><span class="p">(</span><span class="s2">"start-latch"</span><span class="p">)</span>
+                        <span class="n">_request_start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_start_press_open_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                    <span class="ow">and</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="n">now</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_open_ms</span><span class="p">)</span>
+                    <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">START_PRESS_OPEN_MS</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_open_ms</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_btn</span><span class="o">.</span><span class="n">value</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_held</span><span class="p">:</span>
+            <span class="c1"># "Still down" ends only after DEBOUNCE_TICKS consecutive</span>
+            <span class="c1"># released samples — a mid-hold chatter flicker (1 tick)</span>
+            <span class="c1"># must not detach the press from its later echoes.</span>
+            <span class="k">if</span> <span class="n">raw</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_held_up_ticks</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_held_up_ticks</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_held_up_ticks</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">DEBOUNCE_TICKS</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_held</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="n">raw</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">_raw_last</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_raw_stable</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">DEBOUNCE_TICKS</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_raw_stable</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_raw_stable</span> <span class="o">=</span> <span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_raw_last</span> <span class="o">=</span> <span class="n">raw</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_raw_stable</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">DEBOUNCE_TICKS</span><span class="p">:</span>
+            <span class="n">pressed</span> <span class="o">=</span> <span class="n">raw</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Mid-flicker: hold the previous debounced state. A</span>
+            <span class="c1"># chatter blip spans one poll at most; a real press or</span>
+            <span class="c1"># release confirms on the next tick.</span>
+            <span class="n">pressed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span>
+            <span class="k">if</span> <span class="n">raw</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span><span class="p">:</span>
+                <span class="n">_event</span><span class="p">(</span><span class="s2">"bounce-filtered"</span><span class="p">,</span> <span class="s2">"press"</span> <span class="k">if</span> <span class="n">raw</span> <span class="k">else</span> <span class="s2">"release"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">pressed</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_held</span><span class="p">:</span>
+                    <span class="c1"># Delayed level confirmation of the press whose</span>
+                    <span class="c1"># START the counter already dispatched. The program</span>
+                    <span class="c1"># is usually running by now (the idle loop drains</span>
+                    <span class="c1"># within a tick), so without this it reads as a</span>
+                    <span class="c1"># mid-run stop press and kills the newborn run at</span>
+                    <span class="c1"># ~55 ms — the 1.15.4 bench ring: start-latch,</span>
+                    <span class="c1"># then press-down('running') + stop-fire one tick</span>
+                    <span class="c1"># later.</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_held</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_press_stopped</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_press_consume_release</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="n">_event</span><span class="p">(</span><span class="s2">"press-down"</span><span class="p">,</span> <span class="s2">"start-press-consumed"</span><span class="p">)</span>
+                    <span class="k">return</span>
+                <span class="n">_event</span><span class="p">(</span><span class="s2">"press-down"</span><span class="p">,</span> <span class="s2">"running"</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_running</span> <span class="k">else</span> <span class="s2">"idle"</span><span class="p">)</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_running</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_press_stopped</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="c1"># Not already stopping (the hardware latch may</span>
+                        <span class="c1"># have fired for this same press). Note BEFORE</span>
+                        <span class="c1"># _fire_stop: the injection request is not</span>
+                        <span class="c1"># pending yet, so no KeyboardInterrupt can land</span>
+                        <span class="c1"># inside this file write.</span>
+                        <span class="n">_note</span><span class="p">(</span><span class="s2">"button pressed -&gt; stop"</span><span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_fire_stop</span><span class="p">()</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_press_stopped</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_open_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="c1"># The counter already dispatched this press's</span>
+                        <span class="c1"># start — its release (which may arrive after</span>
+                        <span class="c1"># the program is running) must not dispatch</span>
+                        <span class="c1"># again or read as a mid-hold stop.</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_press_consume_release</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="c1"># Released after a press — dispatch at most once.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_stopped</span><span class="p">:</span>
+            <span class="c1"># Release of the press that already fired the stop. Bounce</span>
+            <span class="c1"># follows THIS moment — re-anchor the lockout here.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_press_stopped</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">START_LOCKOUT_MS</span>
+            <span class="n">_event</span><span class="p">(</span><span class="s2">"release"</span><span class="p">,</span> <span class="s2">"stop-consumed"</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_consume_release</span><span class="p">:</span>
+            <span class="c1"># Release of the press whose START the counter already</span>
+            <span class="c1"># dispatched. Without this, a long-held start press whose</span>
+            <span class="c1"># program is up by release time would hit the mid-hold</span>
+            <span class="c1"># branch below and STOP the run it started. Bounce follows</span>
+            <span class="c1"># THIS moment: the PCNT latch ignores its falling edges</span>
+            <span class="c1"># for RELEASE_CHATTER_MS.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_press_consume_release</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_start_press_open_ms</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_latch_ignore_until_ms</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">_now_ms</span><span class="p">()</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">RELEASE_CHATTER_MS</span><span class="p">)</span>
+            <span class="n">_event</span><span class="p">(</span><span class="s2">"release"</span><span class="p">,</span> <span class="s2">"start-consumed"</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_running</span><span class="p">:</span>
+            <span class="c1"># Program came up between press-down and release (remote</span>
+            <span class="c1"># start mid-hold) — a button event during a run means stop.</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop_retry_ms</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">_note</span><span class="p">(</span><span class="s2">"button pressed -&gt; stop"</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_fire_stop</span><span class="p">()</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">remaining</span> <span class="o">=</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span><span class="p">,</span> <span class="n">_now_ms</span><span class="p">())</span>
+            <span class="k">if</span> <span class="n">remaining</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="c1"># Bounce / re-contact right after a stop: swallow it —</span>
+                <span class="c1"># but SAY so. A silently-swallowed deliberate press</span>
+                <span class="c1"># reads as "start button not detected".</span>
+                <span class="n">_event</span><span class="p">(</span><span class="s2">"release"</span><span class="p">,</span> <span class="s2">"lockout-swallowed"</span><span class="p">,</span> <span class="n">remaining</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: start press ignored "</span>
+                      <span class="s2">"(</span><span class="si">%d</span><span class="s2"> ms left of post-stop lockout)"</span> <span class="o">%</span> <span class="n">remaining</span><span class="p">)</span>
+                <span class="k">return</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_lockout_until_ms</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">_event</span><span class="p">(</span><span class="s2">"release"</span><span class="p">,</span> <span class="s2">"start"</span><span class="p">)</span>
+        <span class="n">_request_start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_drain_pending</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Consume a queued ``_pending`` start — the PRIMARY start path.</span>
+
+<span class="sd">        Runs in the main thread (called from ``run()``'s idle loop), so</span>
+<span class="sd">        the program executes with the scheduler unlocked: Timer</span>
+<span class="sd">        callbacks keep firing between its bytecodes and the stop</span>
+<span class="sd">        button works. Programs must never be exec'd from a scheduled</span>
+<span class="sd">        callback — see ``_request_start``.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">==</span> <span class="s2">"start"</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_running</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">estop</span>
+            <span class="n">estop</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>   <span class="c1"># fresh run — stale latch must not kill it</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_sync_press_counter</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_run_started_ms</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_running</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">_exec_program</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_program_path</span><span class="p">,</span> <span class="n">origin</span><span class="o">=</span><span class="s2">"button press"</span><span class="p">)</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_running</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="n">estop</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+                <span class="c1"># Re-mark liveness immediately so a start-press landing</span>
+                <span class="c1"># in the instant after a long program ends doesn't</span>
+                <span class="c1"># misread the idle loop as gone.</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_mark_idle_alive</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: idle. Press button to run"</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_program_path</span><span class="p">)</span></div>
+
+
+
+<span class="c1"># ---- emergency stop ----</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_stop_all_motors</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Best-effort: cut drive to every motor we can reach, regardless of</span>
+<span class="sd">    the user program's structure.</span>
+
+<span class="sd">    Raising ``KeyboardInterrupt`` to unwind the program does NOT stop the</span>
+<span class="sd">    motors — a serial-bus servo keeps spinning at its last commanded</span>
+<span class="sd">    velocity and the native 1 kHz scheduler keeps ticking. So the</span>
+<span class="sd">    button-stop path calls this first, hitting both reachable groups:</span>
+
+<span class="sd">    * **Native scheduler** — ``motor_process.stop()`` halts the 1 kHz</span>
+<span class="sd">      tick that drives closed-loop (PWM/encoder) motors.</span>
+<span class="sd">    * **Serial-bus servos** (ST-3215 / ST-3032) — broadcast a torque-off</span>
+<span class="sd">      (coast) to *every* servo on *every* known bus via the shared bus</span>
+<span class="sd">      registry and the broadcast ID. Torque-off halts a servo in any</span>
+<span class="sd">      mode (wheel / step / position), so it doesn't matter what the</span>
+<span class="sd">      program was doing.</span>
+
+<span class="sd">    Every step is wrapped defensively: an emergency stop must try every</span>
+<span class="sd">    avenue even if one bus is wedged — a failure to reach one motor must</span>
+<span class="sd">    not prevent stopping the others. This is the one place a broad</span>
+<span class="sd">    ``except`` is correct rather than papering over a bug.</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">motor_process</span>
+        <span class="n">motor_process</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="c1"># ADOPTED serial buses: adoption hands the UART to the native</span>
+    <span class="c1"># driver and empties ST3215._buses, so the broadcast below can't</span>
+    <span class="c1"># reach the wheels — and an active drivebase or per-slot move</span>
+    <span class="c1"># would re-stage torque anyway. st_bus.estop() is the same kill</span>
+    <span class="c1"># the hard button uses: writers dead first, then broadcast</span>
+    <span class="c1"># torque-off on the native bus.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">st_bus</span>
+        <span class="n">st_bus</span><span class="o">.</span><span class="n">estop</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.st3215</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+            <span class="n">ST3215</span><span class="p">,</span> <span class="n">_REG_TORQUE</span><span class="p">,</span> <span class="n">_BROADCAST_ID</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">bus</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">ST3215</span><span class="o">.</span><span class="n">_buses</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">bus</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">_BROADCAST_ID</span><span class="p">,</span> <span class="n">_REG_TORQUE</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">([</span><span class="mi">0</span><span class="p">]))</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="k">pass</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_run_header</span><span class="p">(</span><span class="n">program_path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Environment summary for the run log's first line: firmware</span>
+<span class="sd">    version, program path, milliseconds since boot (a tiny uptime</span>
+<span class="sd">    right after an unexpected reboot is itself a clue), and free</span>
+<span class="sd">    heap. Every probe is independent — a failing one reports ? and</span>
+<span class="sd">    must not cost the run its log."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">firmware_label</span>
+        <span class="n">_ver</span> <span class="o">=</span> <span class="n">firmware_label</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="n">_ver</span> <span class="o">=</span> <span class="s2">"?"</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">time</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">_t</span>
+        <span class="n">up</span> <span class="o">=</span> <span class="n">_t</span><span class="o">.</span><span class="n">ticks_ms</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="n">up</span> <span class="o">=</span> <span class="s2">"?"</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">gc</span>
+        <span class="n">free</span> <span class="o">=</span> <span class="n">gc</span><span class="o">.</span><span class="n">mem_free</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="n">free</span> <span class="o">=</span> <span class="s2">"?"</span>
+    <span class="k">return</span> <span class="s2">"firmware </span><span class="si">%s</span><span class="s2"> | program </span><span class="si">%s</span><span class="s2"> | uptime </span><span class="si">%s</span><span class="s2"> ms | free </span><span class="si">%s</span><span class="s2"> B"</span> <span class="o">%</span> <span class="p">(</span>
+        <span class="n">_ver</span><span class="p">,</span> <span class="n">program_path</span><span class="p">,</span> <span class="n">up</span><span class="p">,</span> <span class="n">free</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_stop_debrief</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""One-line summary of the in-flight stop for the run log: how</span>
+<span class="sd">    long after the press the program actually died, and how many</span>
+<span class="sd">    injection retries that took. A KeyboardInterrupt with no recorded</span>
+<span class="sd">    press is a host-side Ctrl-C (openbricks run / stop)."""</span>
+    <span class="n">inst</span> <span class="o">=</span> <span class="n">_singleton</span>
+    <span class="k">if</span> <span class="n">inst</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">inst</span><span class="o">.</span><span class="n">_last_stop_ms</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">"no stop press recorded (host Ctrl-C?)"</span>
+    <span class="k">return</span> <span class="s2">"</span><span class="si">%d</span><span class="s2"> ms after press, </span><span class="si">%d</span><span class="s2"> retries; worst tick gap </span><span class="si">%d</span><span class="s2"> ms"</span> <span class="o">%</span> <span class="p">(</span>
+        <span class="n">_ticks_diff</span><span class="p">(</span><span class="n">_now_ms</span><span class="p">(),</span> <span class="n">inst</span><span class="o">.</span><span class="n">_last_stop_ms</span><span class="p">),</span>
+        <span class="n">inst</span><span class="o">.</span><span class="n">_stop_retry_count</span><span class="p">,</span> <span class="n">inst</span><span class="o">.</span><span class="n">_tick_gap_max</span><span class="p">)</span>
+
+
+<span class="c1"># In-memory button/dispatch event ring. Run logs only exist while a</span>
+<span class="c1"># program runs — an IDLE press that gets swallowed (or never seen)</span>
+<span class="c1"># leaves no trace anywhere else. 64 entries of (ticks_ms, tag, args),</span>
+<span class="c1"># newest kept; dump with ``launcher.dump_events()`` over USB after a</span>
+<span class="c1"># "my start press did nothing" report.</span>
+<span class="n">_EVENTS</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">_EVENTS_MAX</span> <span class="o">=</span> <span class="mi">64</span>
+<span class="n">_EVENTS_NEXT</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_event</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="p">(</span><span class="n">_now_ms</span><span class="p">(),</span> <span class="n">tag</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">_EVENTS</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">_EVENTS_MAX</span><span class="p">:</span>
+            <span class="n">_EVENTS</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="n">_EVENTS_NEXT</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">_EVENTS</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">entry</span>
+            <span class="n">_EVENTS_NEXT</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="n">_EVENTS_MAX</span>
+    <span class="k">except</span> <span class="ne">MemoryError</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<div class="viewcode-block" id="dump_events">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.launcher.dump_events">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">dump_events</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Print the launcher button-event ring, oldest first."""</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">_EVENTS</span><span class="p">)</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="n">_EVENTS_NEXT</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">n</span> <span class="o">==</span> <span class="n">_EVENTS_MAX</span> <span class="k">else</span> <span class="mi">0</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"launcher event ring (last </span><span class="si">%d</span><span class="s2">):"</span> <span class="o">%</span> <span class="n">n</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+        <span class="n">ms</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">args</span> <span class="o">=</span> <span class="n">_EVENTS</span><span class="p">[(</span><span class="n">start</span> <span class="o">+</span> <span class="n">k</span><span class="p">)</span> <span class="o">%</span> <span class="n">n</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%d</span><span class="s2"> </span><span class="si">%s</span><span class="s2"> </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">ms</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">args</span><span class="p">))</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_resignal_stop_interrupt</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Re-post a stop KeyboardInterrupt that was delivered into a</span>
+<span class="sd">    soft Timer callback instead of the program.</span>
+
+<span class="sd">    NOT via ``mp_sched_keyboard_interrupt`` from here: a pending</span>
+<span class="sd">    exception posted from Python fires at the poster's very next</span>
+<span class="sd">    bytecode — the 1.48.0 relay re-received its own post inside this</span>
+<span class="sd">    function and the interrupt escaped the callback anyway (bench:</span>
+<span class="sd">    traceback into ``_resignal_stop_interrupt``, stop delayed to the</span>
+<span class="sd">    watcher retry). The only self-delivery-proof context is a frame</span>
+<span class="sd">    with no Python bytecodes after the post — which is exactly the</span>
+<span class="sd">    C-function ``stop_tick`` Timer (Part 4 architecture). So relay</span>
+<span class="sd">    through its flag: ``request_stop()`` + the armed 20 ms stop tick</span>
+<span class="sd">    re-inject into the program, ≤20 ms later. Guarded: off-firmware</span>
+<span class="sd">    the binding is absent, and the watcher's STOP_RETRY_MS machinery</span>
+<span class="sd">    still delivers eventually."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">request_stop</span>
+        <span class="n">request_stop</span><span class="p">()</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="k">pass</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_install_press_counter</span><span class="p">(</span><span class="n">button_pin</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Hardware falling-edge counter on the stop button (esp32.PCNT).</span>
+
+<span class="sd">    Tick-based level polling alone LOSES short presses: machine.Timer</span>
+<span class="sd">    callbacks dispatch through micropython.schedule's bounded queue,</span>
+<span class="sd">    and a program blocking inside C (I2C sensor reads) stalls the</span>
+<span class="sd">    drain — measured blackouts reach ~200 ms while a quick press is</span>
+<span class="sd">    ~120-160 ms. The PCNT peripheral counts the edge in silicon</span>
+<span class="sd">    regardless of what Python is doing. Returns None off-ESP32 or if</span>
+<span class="sd">    the unit is taken; the announcement makes the degraded (tick-bound)</span>
+<span class="sd">    mode visible instead of silent."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">esp32</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">Pin</span>
+        <span class="n">pcnt</span> <span class="o">=</span> <span class="n">esp32</span><span class="o">.</span><span class="n">PCNT</span><span class="p">(</span>
+            <span class="n">STOP_PCNT_UNIT</span><span class="p">,</span>
+            <span class="n">pin</span><span class="o">=</span><span class="n">Pin</span><span class="p">(</span><span class="n">button_pin</span><span class="p">,</span> <span class="n">Pin</span><span class="o">.</span><span class="n">IN</span><span class="p">,</span> <span class="n">Pin</span><span class="o">.</span><span class="n">PULL_UP</span><span class="p">),</span>
+            <span class="n">falling</span><span class="o">=</span><span class="n">esp32</span><span class="o">.</span><span class="n">PCNT</span><span class="o">.</span><span class="n">INCREMENT</span><span class="p">,</span>
+            <span class="n">rising</span><span class="o">=</span><span class="n">esp32</span><span class="o">.</span><span class="n">PCNT</span><span class="o">.</span><span class="n">IGNORE</span><span class="p">,</span>
+            <span class="nb">filter</span><span class="o">=</span><span class="mi">1023</span><span class="p">,</span>   <span class="c1"># max hardware glitch filter (~12.8 us)</span>
+        <span class="p">)</span>
+        <span class="n">pcnt</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">pcnt</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: hardware press latch unavailable (</span><span class="si">%r</span><span class="s2">); "</span>
+              <span class="s2">"stop presses are tick-bound"</span> <span class="o">%</span> <span class="p">(</span><span class="n">e</span><span class="p">,))</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_note</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Mirror a button event into the active run's log file (stamped;</span>
+<span class="sd">    file only). Guarded — a logging failure must never break the tick</span>
+<span class="sd">    that owns the stop button."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span> <span class="k">as</span> <span class="n">_log</span>
+        <span class="n">_log</span><span class="o">.</span><span class="n">note</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_worst_log_write_ms</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""The run log's slowest filesystem call so far (0 off-log).</span>
+<span class="sd">    Guarded like every log touch from the tick."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span> <span class="k">as</span> <span class="n">_log</span>
+        <span class="k">return</span> <span class="n">_log</span><span class="o">.</span><span class="n">worst_write_ms</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_flush_log</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Commit the run log's buffered output to flash.</span>
+
+<span class="sd">    Separate from ``_note`` so the stop path's durability doesn't</span>
+<span class="sd">    depend on a note having been written: ``note`` swallows its own</span>
+<span class="sd">    failures, and "the stop press commits the log" is a guarantee in</span>
+<span class="sd">    its own right. Guarded for the same reason as ``_note``."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span> <span class="k">as</span> <span class="n">_log</span>
+        <span class="n">_log</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<span class="c1"># ---- hardware stop button (native C-function Timer callback) ----</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_install_stop_tick</span><span class="p">(</span><span class="n">timer_id</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Start a fast ``machine.Timer`` whose callback is the native</span>
+<span class="sd">    C-function ``stop_tick``.</span>
+
+<span class="sd">    The stop interrupt must be injected from a context with no Python</span>
+<span class="sd">    frame (a Python callback would unwind itself, not the program). The</span>
+<span class="sd">    user C module can't use ESP-IDF headers, so the portable answer —</span>
+<span class="sd">    the same one ``motor_process`` uses — is a C-function registered as a</span>
+<span class="sd">    Timer callback: a C callback runs no Python bytecodes, so the pending</span>
+<span class="sd">    ``KeyboardInterrupt`` it sets is raised in the running program, not in</span>
+<span class="sd">    the callback. ``_tick`` (Python) does the press detection and calls</span>
+<span class="sd">    ``request_stop``; this tick injects the interrupt. Returns the Timer</span>
+<span class="sd">    (kept alive by the caller) or ``None`` off-hardware."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">Timer</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">stop_tick</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="n">Timer</span><span class="p">(</span><span class="n">timer_id</span><span class="p">)</span>
+        <span class="n">t</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">period</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">Timer</span><span class="o">.</span><span class="n">PERIODIC</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="n">stop_tick</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">t</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_request_stop</span><span class="p">(</span><span class="n">launcher_instance</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Flag a stop from the Python button watcher. The native C</span>
+<span class="sd">    ``stop_tick`` Timer callback picks it up and injects the interrupt.</span>
+<span class="sd">    No-op where the native module is absent."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">request_stop</span>
+        <span class="n">request_stop</span><span class="p">()</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="s2">"stop"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_notify_press_feedback</span><span class="p">(</span><span class="n">stop</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A program-button press was recognized — let the status LED</span>
+<span class="sd">    acknowledge: red flash for a start press, green for a stop</span>
+<span class="sd">    press. Lazy import: LED-less builds and tests without the</span>
+<span class="sd">    module just no-op, and a feedback failure must never cost the</span>
+<span class="sd">    press its action."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">bluetooth_button</span>
+        <span class="n">bluetooth_button</span><span class="o">.</span><span class="n">notify_press</span><span class="p">(</span><span class="n">stop</span><span class="o">=</span><span class="n">stop</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_arm_stop_button</span><span class="p">(</span><span class="n">armed</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Arm/disarm the native stop paths. Armed only while a user</span>
+<span class="sd">    program is executing, so a press while idle doesn't tear down the</span>
+<span class="sd">    boot/idle loop. No-op where the native module is absent.</span>
+
+<span class="sd">    Two independent paths share this single arming site: the classic</span>
+<span class="sd">    stop_tick injector, and (since 1.44.0) the hard-button sampler on</span>
+<span class="sd">    the hard tick, whose stop actions are bounded at ~2 ms regardless</span>
+<span class="sd">    of scheduler state."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">set_stop_armed</span>
+        <span class="n">set_stop_armed</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">armed</span><span class="p">))</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="k">pass</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">motor_process</span>
+        <span class="n">motor_process</span><span class="o">.</span><span class="n">hard_button_arm</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">armed</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">armed</span><span class="p">:</span>
+            <span class="c1"># Drain a start latched BEFORE arming: it is the press</span>
+            <span class="c1"># that started THIS run (or older), never new input. The</span>
+            <span class="c1"># PCNT counter sees a press's edge in silicon at t=0, so</span>
+            <span class="c1"># a soft tick landing in the ~15 ms before the hard</span>
+            <span class="c1"># sampler's debounced edge dispatches the start FIRST —</span>
+            <span class="c1"># the sampler then latches the same press, unarmed, and</span>
+            <span class="c1"># nothing consumes the latch while the program runs (the</span>
+            <span class="c1"># tick's running branch never polls it). A program that</span>
+            <span class="c1"># ended ITSELF handed that latch to the first idle tick:</span>
+            <span class="c1"># phantom restart at completion (bench 2026-08-07, run</span>
+            <span class="c1"># 15 auto-started at run 14's clean intersection stop).</span>
+            <span class="c1"># Stop-press endings masked it — the post-stop lockout</span>
+            <span class="c1"># swallowed the stale latch. The exact analogue of</span>
+            <span class="c1"># _sync_press_counter's edge-consume at run start.</span>
+            <span class="n">motor_process</span><span class="o">.</span><span class="n">hard_button_take_start</span><span class="p">()</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="k">pass</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_scheduled_start</span><span class="p">(</span><span class="n">launcher_instance</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""DEGRADED fallback: run ``/program.py`` from the MicroPython</span>
+<span class="sd">    scheduler queue.</span>
+
+<span class="sd">    Only used when the main-thread idle loop is gone (hub parked at</span>
+<span class="sd">    the REPL after ``openbricks run`` interrupted the frozen</span>
+<span class="sd">    ``main.py``, or a dev Ctrl-C over USB). The Timer keeps firing,</span>
+<span class="sd">    so routing start through ``micropython.schedule`` still lets a</span>
+<span class="sd">    button press launch the program with nothing actively draining.</span>
+
+<span class="sd">    The price — and why this is a fallback rather than the primary</span>
+<span class="sd">    path: ``mp_sched_run_pending`` holds the scheduler LOCKED for the</span>
+<span class="sd">    entire callback, i.e. for the entire user program. Timer</span>
+<span class="sd">    callbacks are dispatched through that same scheduler queue, so</span>
+<span class="sd">    while the program runs neither the button watcher ``_tick`` nor</span>
+<span class="sd">    the native ``stop_tick`` injector can fire: **the stop button is</span>
+<span class="sd">    dead for the whole run**. Announce it instead of degrading</span>
+<span class="sd">    silently.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_running</span><span class="p">:</span>
+        <span class="k">return</span>  <span class="c1"># already running; ignore (the raise path handles stop)</span>
+    <span class="n">_event</span><span class="p">(</span><span class="s2">"scheduled-start-exec"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: starting from REPL context — the stop button "</span>
+          <span class="s2">"is unavailable for this run (use 'openbricks stop')."</span><span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">estop</span>
+    <span class="n">estop</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+    <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_sync_press_counter</span><span class="p">()</span>
+    <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_run_started_ms</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+    <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_running</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_exec_program</span><span class="p">(</span><span class="n">launcher_instance</span><span class="o">.</span><span class="n">_program_path</span><span class="p">,</span>
+                      <span class="n">origin</span><span class="o">=</span><span class="s2">"button press (degraded REPL-parked path)"</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_running</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: idle. Press button to run"</span><span class="p">,</span>
+          <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_program_path</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_request_start</span><span class="p">(</span><span class="n">launcher_instance</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Queue a program start from the button-watcher Timer.</span>
+
+<span class="sd">    Primary path: set ``_pending = "start"`` for the main-thread idle</span>
+<span class="sd">    loop to drain — the program then executes in the main thread,</span>
+<span class="sd">    where Timer callbacks keep firing between its bytecodes and the</span>
+<span class="sd">    stop button works. (``_tick`` runs as a *scheduled* callback;</span>
+<span class="sd">    exec'ing the program from here — or from anything scheduled —</span>
+<span class="sd">    would hold the scheduler lock for the whole run and starve the</span>
+<span class="sd">    stop path. That was the "start button doesn't stop the program"</span>
+<span class="sd">    bug.)</span>
+
+<span class="sd">    Degraded path: when the idle loop isn't draining (hub parked at</span>
+<span class="sd">    the REPL), fall back to schedule-exec — see ``_scheduled_start``.</span>
+
+<span class="sd">    Module-level so tests can swap it out.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_idle_loop_alive</span><span class="p">():</span>
+        <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="s2">"start"</span>
+        <span class="n">_event</span><span class="p">(</span><span class="s2">"start-dispatch"</span><span class="p">,</span> <span class="s2">"pending"</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="n">_event</span><span class="p">(</span><span class="s2">"start-dispatch"</span><span class="p">,</span> <span class="s2">"degraded-schedule"</span><span class="p">)</span>
+    <span class="n">_start_via_schedule</span><span class="p">(</span><span class="n">launcher_instance</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_start_via_schedule</span><span class="p">(</span><span class="n">launcher_instance</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Degraded-path dispatch, split out as a patchable seam for tests.</span>
+<span class="sd">    Falls back to the ``_pending`` flag where ``micropython.schedule``</span>
+<span class="sd">    isn't available (CPython)."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">micropython</span>
+        <span class="n">micropython</span><span class="o">.</span><span class="n">schedule</span><span class="p">(</span><span class="n">_scheduled_start</span><span class="p">,</span> <span class="n">launcher_instance</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">RuntimeError</span><span class="p">:</span>
+        <span class="c1"># Scheduler queue full — the pending flag is a void if the</span>
+        <span class="c1"># idle loop is dead, but at least the ring SAYS so now.</span>
+        <span class="n">_event</span><span class="p">(</span><span class="s2">"start-dispatch"</span><span class="p">,</span> <span class="s2">"schedule-full"</span><span class="p">)</span>
+        <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="s2">"start"</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="n">launcher_instance</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="s2">"start"</span>
+
+
+<span class="c1"># ---- program exec helpers ----</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_exception_printer</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""The traceback renderer this build provides, or ``None``.</span>
+
+<span class="sd">    Firmware MicroPython ships ``sys.print_exception``; CPython does</span>
+<span class="sd">    not and falls back to the ``traceback`` module. Only one of those</span>
+<span class="sd">    branches is reachable per interpreter, so this lookup is a</span>
+<span class="sd">    module-level seam — otherwise whichever branch the test host</span>
+<span class="sd">    doesn't take can never be exercised.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">sys</span><span class="p">,</span> <span class="s2">"print_exception"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_render_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">buf</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write ``exc``'s traceback into ``buf``.</span>
+
+<span class="sd">    A module-level seam so tests can force the render-failure path.</span>
+<span class="sd">    Patching ``sys.print_exception`` would be the obvious way, but</span>
+<span class="sd">    MicroPython's built-in modules are immutable — storing to one</span>
+<span class="sd">    raises ``AttributeError: 'module' object has no attribute</span>
+<span class="sd">    'print_exception'`` — so the swappable thing has to live here.</span>
+<span class="sd">    """</span>
+    <span class="n">pe</span> <span class="o">=</span> <span class="n">_exception_printer</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">pe</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">pe</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">buf</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+        <span class="n">traceback</span><span class="o">.</span><span class="n">print_exception</span><span class="p">(</span>
+            <span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">),</span> <span class="n">exc</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">__traceback__</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">buf</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_traceback_text</span><span class="p">(</span><span class="n">exc</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Render ``exc``'s traceback to a string, or ``None`` where this</span>
+<span class="sd">    build can't.</span>
+
+<span class="sd">    MicroPython's ``sys.print_exception`` takes an optional file</span>
+<span class="sd">    argument; CPython's has no such builtin, so tests take the</span>
+<span class="sd">    ``traceback`` module branch. Every failure path returns None so the</span>
+<span class="sd">    caller falls back to the old one-line repr — a logging helper must</span>
+<span class="sd">    never be the reason an exception goes unrecorded.</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">io</span>
+        <span class="n">buf</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">StringIO</span><span class="p">()</span>
+        <span class="n">_render_exception</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">buf</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">buf</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_exec_program_raw</span><span class="p">(</span><span class="n">program_path</span><span class="p">,</span> <span class="n">origin</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Load and run ``program_path`` in a fresh namespace. Propagates</span>
+<span class="sd">    ``KeyboardInterrupt``; prints other exceptions and returns.</span>
+<span class="sd">    ``origin`` (e.g. "button press", "remote (openbricks run)") is</span>
+<span class="sd">    written as the run log's first stamped line, so every button</span>
+<span class="sd">    press that starts a program leaves a log entry.</span>
+
+<span class="sd">    Wraps the run in a :func:`openbricks.log.session` so every</span>
+<span class="sd">    ``print()`` / exception traceback is *also* tee'd to a flash</span>
+<span class="sd">    file. The live console (USB-CDC / BLE-NUS) still sees everything;</span>
+<span class="sd">    the file is only a backup for inspecting an untethered run later</span>
+<span class="sd">    via ``openbricks log``.</span>
+<span class="sd">    """</span>
+    <span class="c1"># Program boundary: wipe native state inherited from the previous</span>
+    <span class="c1"># run — motor_process's tick-callback list and st_bus's servo</span>
+    <span class="c1"># slots / drivebase config / gyro-source flag / fault latch. This</span>
+    <span class="c1"># lives HERE, not in run_program, because button presses launch</span>
+    <span class="c1"># through _exec_program without ever passing run_program: a second</span>
+    <span class="c1"># button run used to inherit the previous run's engine state</span>
+    <span class="c1"># (stale gyro-in-use refused imu.reset_heading(); a contaminated</span>
+    <span class="c1"># callback list blocked DriveBase.straight() forever).</span>
+    <span class="n">_reset_motor_process</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">program_path</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">".mpy"</span><span class="p">):</span>
+        <span class="c1"># Host-cross-compiled program (CLI &gt;= 1.92.0), executed by the</span>
+        <span class="c1"># native persistent-code loader. Probe existence here so a</span>
+        <span class="c1"># missing file raises the same OSError the source path's</span>
+        <span class="c1"># ``open()`` does — before the log session starts.</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">stat</span><span class="p">(</span><span class="n">program_path</span><span class="p">)</span>
+        <span class="n">code</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">program_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">code</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">log</span> <span class="k">as</span> <span class="n">_log</span>
+    <span class="c1"># Arm the hardware stop button for the duration of the run. A press</span>
+    <span class="c1"># now fires the native GPIO ISR, which injects a KeyboardInterrupt</span>
+    <span class="c1"># into this exec; disarm in the finally so an idle press can't tear</span>
+    <span class="c1"># down the boot/idle loop.</span>
+    <span class="n">_arm_stop_button</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">_log</span><span class="o">.</span><span class="n">session</span><span class="p">()</span> <span class="k">as</span> <span class="n">sess</span><span class="p">:</span>
+            <span class="n">started_ms</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+            <span class="n">sess</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="s2">"started: </span><span class="si">%s</span><span class="s2"> | </span><span class="si">%s</span><span class="se">\n</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span>
+                <span class="n">origin</span> <span class="ow">or</span> <span class="s2">"unknown"</span><span class="p">,</span> <span class="n">_run_header</span><span class="p">(</span><span class="n">program_path</span><span class="p">)))</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">code</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">exec_mpy</span>
+                    <span class="n">exec_mpy</span><span class="p">(</span><span class="n">program_path</span><span class="p">,</span> <span class="p">{</span><span class="s2">"__name__"</span><span class="p">:</span> <span class="s2">"__main__"</span><span class="p">})</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="p">{</span><span class="s2">"__name__"</span><span class="p">:</span> <span class="s2">"__main__"</span><span class="p">})</span>
+                <span class="c1"># Stamp CLEAN exits too. A log that just ends is</span>
+                <span class="c1"># ambiguous between "finished" and "hung forever" —</span>
+                <span class="c1"># bench 2026-08-17: a mission that ended normally at</span>
+                <span class="c1"># its full-dark condition read as a hang, and the</span>
+                <span class="c1"># whole button-forensics chain ran before the truth</span>
+                <span class="c1"># surfaced. Every way out now leaves a tail marker</span>
+                <span class="c1"># (finished / stopped / traceback).</span>
+                <span class="n">sess</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="s2">"finished: clean exit after </span><span class="si">%d</span><span class="s2"> ms</span><span class="se">\n</span><span class="s2">"</span>
+                                <span class="o">%</span> <span class="p">(</span><span class="n">_now_ms</span><span class="p">()</span> <span class="o">-</span> <span class="n">started_ms</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+                <span class="c1"># The button-stop's injected KeyboardInterrupt (and a REPL</span>
+                <span class="c1"># Ctrl-C from ``openbricks run``) both unwind to here.</span>
+                <span class="c1"># Disarm FIRST: the stop request is retried until the</span>
+                <span class="c1"># program dies, and a retry landing inside the cleanup</span>
+                <span class="c1"># below would abort the very motor-stop it asked for.</span>
+                <span class="n">_arm_stop_button</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+                <span class="c1"># Attribute the stop to the watcher's suppression</span>
+                <span class="c1"># state no matter WHICH detector delivered it — the</span>
+                <span class="c1"># hard path stops faster than the watcher's next tick,</span>
+                <span class="c1"># and un-armed gates let the press's echoes dispatch a</span>
+                <span class="c1"># phantom start.</span>
+                <span class="k">if</span> <span class="n">_singleton</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">_singleton</span><span class="o">.</span><span class="n">note_external_stop</span><span class="p">()</span>
+                    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                        <span class="k">pass</span>
+                <span class="c1"># Then stop every motor before propagating so the robot</span>
+                <span class="c1"># halts no matter how the program was running.</span>
+                <span class="c1"># Idempotent if already stopped.</span>
+                <span class="n">_stop_all_motors</span><span class="p">()</span>
+                <span class="c1"># Safe to write now: the button is disarmed, so no</span>
+                <span class="c1"># further injection can land inside this file write.</span>
+                <span class="n">sess</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span>
+                    <span class="s2">"stopped: KeyboardInterrupt (</span><span class="si">%s</span><span class="s2">)</span><span class="se">\n</span><span class="s2">"</span> <span class="o">%</span> <span class="n">_stop_debrief</span><span class="p">())</span>
+                <span class="k">raise</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">pe</span> <span class="o">=</span> <span class="n">_exception_printer</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">pe</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">pe</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+                    <span class="n">traceback</span><span class="o">.</span><span class="n">print_exception</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">),</span> <span class="n">e</span><span class="p">,</span> <span class="n">e</span><span class="o">.</span><span class="n">__traceback__</span><span class="p">)</span>
+                <span class="c1"># Tracebacks above go to the live console only — print()</span>
+                <span class="c1"># is the only stream we tee. Mirror the FULL traceback</span>
+                <span class="c1"># into the log file, because on an untethered run that</span>
+                <span class="c1"># file is the ONLY record and a bare repr doesn't say</span>
+                <span class="c1"># which call failed: a bench ENODEV reduced to</span>
+                <span class="c1"># "Exception: OSError(19,)" left the mux write and the</span>
+                <span class="c1"># sensor's chip-ID read indistinguishable, which is a</span>
+                <span class="c1"># whole debugging session spent re-deriving a line</span>
+                <span class="c1"># number the hub already knew.</span>
+                <span class="n">text</span> <span class="o">=</span> <span class="n">_traceback_text</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                <span class="n">sess</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">text</span> <span class="k">if</span> <span class="n">text</span> <span class="k">else</span> <span class="s2">"Exception: </span><span class="si">%r</span><span class="se">\n</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">e</span><span class="p">,))</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">_arm_stop_button</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+        <span class="c1"># EVERY way out stops the motors — not just the button path.</span>
+        <span class="c1"># A program ending naturally (or dying on an exception) with</span>
+        <span class="c1"># a motor still commanded left the robot driving at its last</span>
+        <span class="c1"># setpoint until someone pressed stop. Same kill the e-stop</span>
+        <span class="c1"># uses (native scheduler halt + serial torque-off broadcast),</span>
+        <span class="c1"># idempotent when the KeyboardInterrupt path already ran it.</span>
+        <span class="n">_stop_all_motors</span><span class="p">()</span>
+
+
+<span class="n">MPY_PROGRAM_PATH</span> <span class="o">=</span> <span class="s2">"/program.mpy"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_resolve_program_path</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Button-path staging resolution: source wins when present; the</span>
+<span class="sd">    compiled sibling runs only when ``/program.py`` is absent.</span>
+
+<span class="sd">    ``openbricks run``/``upload`` &gt;= 1.92.0 stage ``/program.mpy``</span>
+<span class="sd">    and delete ``/program.py``; older CLIs stage ``/program.py`` and</span>
+<span class="sd">    know nothing about the sibling. "Source wins" makes every mixed</span>
+<span class="sd">    old/new staging sequence run the MOST RECENTLY staged program</span>
+<span class="sd">    without trusting littlefs timestamps (this filesystem keeps</span>
+<span class="sd">    none). Explicit non-default paths are honored verbatim.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">path</span> <span class="o">!=</span> <span class="n">DEFAULT_PROGRAM_PATH</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">path</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">stat</span><span class="p">(</span><span class="n">DEFAULT_PROGRAM_PATH</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">DEFAULT_PROGRAM_PATH</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">stat</span><span class="p">(</span><span class="n">MPY_PROGRAM_PATH</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">MPY_PROGRAM_PATH</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">path</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_exec_program</span><span class="p">(</span><span class="n">program_path</span><span class="p">,</span> <span class="n">origin</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Button-gated path: swallow ``KeyboardInterrupt`` and missing-file</span>
+<span class="sd">    errors so the idle loop keeps running between button presses.</span>
+
+<span class="sd">    Attribution matters: the broad ``except OSError`` here also</span>
+<span class="sd">    catches log-session open/rotation failures from INSIDE</span>
+<span class="sd">    ``_exec_program_raw`` — printing "no program at" for those sent a</span>
+<span class="sd">    bench hunt down the wrong path (2026-08-14: press dispatched, run</span>
+<span class="sd">    began, died pre-log with no trace; the ring said only that a run</span>
+<span class="sd">    started). Distinguish honestly and leave ring evidence either</span>
+<span class="sd">    way — the console print goes nowhere when nobody is attached.</span>
+<span class="sd">    """</span>
+    <span class="n">program_path</span> <span class="o">=</span> <span class="n">_resolve_program_path</span><span class="p">(</span><span class="n">program_path</span><span class="p">)</span>
+    <span class="n">_event</span><span class="p">(</span><span class="s2">"exec-start"</span><span class="p">,</span> <span class="n">program_path</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_exec_program_raw</span><span class="p">(</span><span class="n">program_path</span><span class="p">,</span> <span class="n">origin</span><span class="o">=</span><span class="n">origin</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: program finished."</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">stat</span><span class="p">(</span><span class="n">program_path</span><span class="p">)</span>
+            <span class="n">present</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+            <span class="n">present</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="n">present</span><span class="p">:</span>
+            <span class="c1"># The program file EXISTS: this OSError came from the</span>
+            <span class="c1"># exec machinery (log session open/rotation, flash I/O)</span>
+            <span class="c1"># — say so, never "no program".</span>
+            <span class="n">_event</span><span class="p">(</span><span class="s2">"exec-oserror"</span><span class="p">,</span> <span class="nb">repr</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: program did not start (</span><span class="si">%r</span><span class="s2"> from the "</span>
+                  <span class="s2">"exec path, program file present):"</span> <span class="o">%</span> <span class="p">(</span><span class="n">e</span><span class="p">,),</span>
+                  <span class="n">program_path</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">_event</span><span class="p">(</span><span class="s2">"exec-missing"</span><span class="p">,</span> <span class="n">program_path</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: no program at"</span><span class="p">,</span> <span class="n">program_path</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: stopped."</span><span class="p">)</span>
+
+
+<span class="c1"># ---- singleton + timer wiring ----</span>
+
+<span class="n">_singleton</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="program_running">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.launcher.program_running">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">program_running</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""True while a user program is executing — whatever started it</span>
+<span class="sd">    (button press, ``openbricks run``, or a scheduled start; all</span>
+<span class="sd">    paths maintain the same flag).</span>
+
+<span class="sd">    This is the hub-wide "robot is running" signal. The BLE toggle</span>
+<span class="sd">    watcher polls it from its 50 ms tick to flash the status LED</span>
+<span class="sd">    while a program runs (``openbricks.bluetooth_button``), which is</span>
+<span class="sd">    why it must stay cheap: one attribute read, no allocation.</span>
+<span class="sd">    """</span>
+    <span class="n">inst</span> <span class="o">=</span> <span class="n">_singleton</span>
+    <span class="k">return</span> <span class="n">inst</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">inst</span><span class="o">.</span><span class="n">_running</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ensure_launcher</span><span class="p">(</span><span class="n">button_pin</span><span class="o">=</span><span class="n">DEFAULT_BUTTON_PIN</span><span class="p">,</span>
+                     <span class="n">poll_ms</span><span class="o">=</span><span class="n">DEFAULT_POLL_MS</span><span class="p">,</span>
+                     <span class="n">timer_id</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install the Launcher singleton + persistent Timer. Idempotent.</span>
+
+<span class="sd">    First call wins on pin/poll parameters; later calls just return</span>
+<span class="sd">    the existing instance. This matters because ``run_program`` is</span>
+<span class="sd">    entered after the frozen main.py has already called ``run()`` —</span>
+<span class="sd">    we want the same watcher to keep firing, not a second one.</span>
+<span class="sd">    """</span>
+    <span class="k">global</span> <span class="n">_singleton</span>
+    <span class="k">if</span> <span class="n">_singleton</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_singleton</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">Pin</span><span class="p">,</span> <span class="n">Timer</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">pins</span>
+    <span class="n">pins</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">button_pin</span><span class="p">,</span> <span class="s2">"program button"</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">pins</span><span class="o">.</span><span class="n">claim</span><span class="p">(</span><span class="n">button_pin</span><span class="p">,</span> <span class="s2">"program button"</span><span class="p">,</span>
+               <span class="s2">"launcher.run(button_pin=...) moves it"</span><span class="p">)</span>
+    <span class="n">btn</span> <span class="o">=</span> <span class="n">Pin</span><span class="p">(</span><span class="n">button_pin</span><span class="p">,</span> <span class="n">Pin</span><span class="o">.</span><span class="n">IN</span><span class="p">,</span> <span class="n">Pin</span><span class="o">.</span><span class="n">PULL_UP</span><span class="p">)</span>
+    <span class="n">_singleton</span> <span class="o">=</span> <span class="n">Launcher</span><span class="p">(</span><span class="n">btn</span><span class="p">,</span> <span class="n">poll_ms</span><span class="o">=</span><span class="n">poll_ms</span><span class="p">)</span>
+    <span class="n">_singleton</span><span class="o">.</span><span class="n">_press_pcnt</span> <span class="o">=</span> <span class="n">_install_press_counter</span><span class="p">(</span><span class="n">button_pin</span><span class="p">)</span>
+    <span class="c1"># Hard-button path (1.44.0): sample the same pin from the hard</span>
+    <span class="c1"># tick (esp_timer task, core 0) — press DETECTION and the STOP</span>
+    <span class="c1"># actions (interrupt injection + native-bus torque-off) become</span>
+    <span class="c1"># immune to the scheduler blackouts this Python watcher rides</span>
+    <span class="c1"># through (bench: gaps to 981 ms). This watcher stays as defence</span>
+    <span class="c1"># in depth and as the classic-bus e-stop. Guarded: needs the</span>
+    <span class="c1"># gpio-shim + hard-tick firmware patches.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">motor_process</span> <span class="k">as</span> <span class="n">_mp_native</span>
+        <span class="n">_mp_native</span><span class="o">.</span><span class="n">hard_button_config</span><span class="p">(</span><span class="n">button_pin</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="k">pass</span>
+    <span class="n">_singleton</span><span class="o">.</span><span class="n">_sync_press_counter</span><span class="p">()</span>
+    <span class="n">_singleton</span><span class="o">.</span><span class="n">_timer</span> <span class="o">=</span> <span class="n">Timer</span><span class="p">(</span><span class="n">timer_id</span><span class="p">)</span>
+    <span class="n">_singleton</span><span class="o">.</span><span class="n">_timer</span><span class="o">.</span><span class="n">init</span><span class="p">(</span>
+        <span class="n">period</span><span class="o">=</span><span class="n">poll_ms</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">Timer</span><span class="o">.</span><span class="n">PERIODIC</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="n">_singleton</span><span class="o">.</span><span class="n">_tick</span><span class="p">)</span>
+    <span class="c1"># The Timer(0) poll handles START and detects a stop press. STOP</span>
+    <span class="c1"># delivery is a separate fast Timer whose callback is the native</span>
+    <span class="c1"># C-function stop_tick (a soft Python callback can't inject the</span>
+    <span class="c1"># interrupt into the running program; a C-function callback can).</span>
+    <span class="n">_singleton</span><span class="o">.</span><span class="n">_stop_timer</span> <span class="o">=</span> <span class="n">_install_stop_tick</span><span class="p">(</span><span class="n">STOP_TIMER_ID</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_singleton</span>
+
+
+<span class="c1"># ---- entry points ----</span>
+
+<div class="viewcode-block" id="run">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.launcher.run">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">program_path</span><span class="o">=</span><span class="n">DEFAULT_PROGRAM_PATH</span><span class="p">,</span> <span class="n">button_pin</span><span class="o">=</span><span class="n">DEFAULT_BUTTON_PIN</span><span class="p">,</span>
+        <span class="n">poll_ms</span><span class="o">=</span><span class="n">DEFAULT_POLL_MS</span><span class="p">,</span> <span class="n">timer_id</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install the button watcher and block on the cooperative drain</span>
+<span class="sd">    loop. Called from the frozen ``main.py``.</span>
+
+<span class="sd">    ``timer_id=0`` is the first ESP32-S3 hardware timer. The previous</span>
+<span class="sd">    default ``-1`` (virtual timer) was supported by older MicroPython</span>
+<span class="sd">    builds but raises ``ValueError: invalid Timer number`` on the</span>
+<span class="sd">    v1.27+ MP we vendor — esp32-s3 only exposes hardware timers 0..3.</span>
+
+<span class="sd">    Intentionally blocks forever. If ``openbricks run`` later sends</span>
+<span class="sd">    a Ctrl-C over the REPL to interrupt this loop, the Timer stays</span>
+<span class="sd">    alive (we never ``deinit`` it) so subsequent ``run_program`` /</span>
+<span class="sd">    button-press start continue to work.</span>
+<span class="sd">    """</span>
+    <span class="n">launcher</span> <span class="o">=</span> <span class="n">_ensure_launcher</span><span class="p">(</span>
+        <span class="n">button_pin</span><span class="o">=</span><span class="n">button_pin</span><span class="p">,</span> <span class="n">poll_ms</span><span class="o">=</span><span class="n">poll_ms</span><span class="p">,</span> <span class="n">timer_id</span><span class="o">=</span><span class="n">timer_id</span><span class="p">)</span>
+    <span class="n">launcher</span><span class="o">.</span><span class="n">_program_path</span> <span class="o">=</span> <span class="n">program_path</span>
+    <span class="c1"># A read-only BLE session's restore must never launch a program:</span>
+    <span class="c1"># discard anything that queued while the loop was down.</span>
+    <span class="n">launcher</span><span class="o">.</span><span class="n">_discard_stale_start</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"openbricks: idle. Press button to run"</span><span class="p">,</span> <span class="n">program_path</span><span class="p">)</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">launcher</span><span class="o">.</span><span class="n">_mark_idle_alive</span><span class="p">()</span>
+        <span class="n">launcher</span><span class="o">.</span><span class="n">_drain_pending</span><span class="p">()</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="n">poll_ms</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="run_program">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.launcher.run_program">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">run_program</span><span class="p">(</span><span class="n">program_path</span><span class="o">=</span><span class="n">DEFAULT_PROGRAM_PATH</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Client-triggered entry for ``openbricks run``.</span>
+
+<span class="sd">    Sets the ``_running`` flag, then exec's the program in the main</span>
+<span class="sd">    thread (``_exec_program_raw`` arms the native stop button for the</span>
+<span class="sd">    duration). Propagates ``KeyboardInterrupt`` so the raw-REPL</span>
+<span class="sd">    disconnect signals "stopped" back to the client (which then</span>
+<span class="sd">    exits).</span>
+
+<span class="sd">    The program-boundary native-state wipe (motor_process callbacks +</span>
+<span class="sd">    st_bus runtime) happens inside ``_exec_program_raw``, shared with</span>
+<span class="sd">    the button-press paths.</span>
+<span class="sd">    """</span>
+    <span class="n">launcher</span> <span class="o">=</span> <span class="n">_ensure_launcher</span><span class="p">()</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">estop</span>
+    <span class="n">estop</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>   <span class="c1"># fresh run — a stale latch must not kill it at birth</span>
+    <span class="n">launcher</span><span class="o">.</span><span class="n">_sync_press_counter</span><span class="p">()</span>
+    <span class="n">launcher</span><span class="o">.</span><span class="n">_run_started_ms</span> <span class="o">=</span> <span class="n">_now_ms</span><span class="p">()</span>
+    <span class="n">launcher</span><span class="o">.</span><span class="n">_running</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_exec_program_raw</span><span class="p">(</span><span class="n">program_path</span><span class="p">,</span> <span class="n">origin</span><span class="o">=</span><span class="s2">"remote (openbricks run)"</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">launcher</span><span class="o">.</span><span class="n">_running</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="c1"># Program is dead; release the latch so idle-time commands</span>
+        <span class="c1"># (REPL experiments, the next run) work again.</span>
+        <span class="n">estop</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_reset_motor_process</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Best-effort wipe of the native scheduler's callback list.</span>
+<span class="sd">    Imported lazily so unix MP / CPython tests without the C module</span>
+<span class="sd">    don't fail on launcher import."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">motor_process</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="n">motor_process</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+    <span class="c1"># Same boundary, same reason, for the native serial bus: slots</span>
+    <span class="c1"># and drivebase config claimed by the PREVIOUS program must not</span>
+    <span class="c1"># leak into this one (bench: the second run of a serial-drivebase</span>
+    <span class="c1"># script died with "slot attach failed" until a power-cycle).</span>
+    <span class="c1"># The attached UART survives — hardware config, not program</span>
+    <span class="c1"># state. Guarded: st_bus is absent off-firmware.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">_openbricks_native</span><span class="w"> </span><span class="kn">import</span> <span class="n">st_bus</span>
+        <span class="n">st_bus</span><span class="o">.</span><span class="n">reset_runtime</span><span class="p">()</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="k">pass</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
