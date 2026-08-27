@@ -1,0 +1,478 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.pins &mdash; openbricks 3.0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/pins.html" />
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=08bfcbec"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.0.1">firmware&nbsp;v3.0.1</a>
+<a class="obk-pdf-btn" href="../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.pins</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.pins</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">Reserved-GPIO guard: fail pin misuse at construction time, loudly.</span>
+
+<span class="sd">Drivers that take raw GPIO numbers call :func:`check` before touching</span>
+<span class="sd">``machine.Pin``. Two kinds of mistakes are caught:</span>
+
+<span class="sd">* **Chip-reserved pins** — pins that can never work for user wiring on</span>
+<span class="sd">  the running chip: nonexistent numbers, the SPI-flash pins, the</span>
+<span class="sd">  ESP32-S3's native-USB pair, and (for output roles) the classic</span>
+<span class="sd">  ESP32's input-only range. Claiming these either crashes the chip,</span>
+<span class="sd">  bricks the USB connection, or fails somewhere far from the real</span>
+<span class="sd">  mistake; the guard names the pin and the reason instead.</span>
+<span class="sd">* **Pins the firmware runtime already owns** — the program button, the</span>
+<span class="sd">  Bluetooth-toggle button, and the status LED register themselves via</span>
+<span class="sd">  :func:`claim` when the hub / launcher wire them at boot. A driver</span>
+<span class="sd">  constructed on one of those pins gets an error naming the owner</span>
+<span class="sd">  ("in use as the program button") plus the constructor argument that</span>
+<span class="sd">  moves the owner elsewhere.</span>
+
+<span class="sd">Chip detection reads ``os.uname().machine`` and recognizes the two</span>
+<span class="sd">supported targets (ESP32, ESP32-S3). Off-chip — CPython tests, the</span>
+<span class="sd">MuJoCo sim, unix MicroPython — no chip is detected and the</span>
+<span class="sd">chip-reserved rules are skipped (the runtime-claims check still</span>
+<span class="sd">applies); pins there are fakes, not wiring. Tests pin a chip</span>
+<span class="sd">explicitly with :func:`set_chip`.</span>
+
+<span class="sd">Strapping pins (0/3/45/46 on the S3) are deliberately *not* blocked:</span>
+<span class="sd">they work as regular GPIOs after boot and are routinely used. The</span>
+<span class="sd">wiring guides in ``docs/hardware.md`` cover the soft cases.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+
+<span class="c1"># ---- the ESP32-S3 wiring convention ---------------------------------------</span>
+
+<span class="c1"># GPIO -&gt; role, the single source of truth for "which pin does what"</span>
+<span class="c1"># on the reference build (docs/hardware.md, "GPIO map"). Drivers</span>
+<span class="c1"># default their pin arguments from it, shipped examples are tested</span>
+<span class="c1"># against it (tests/test_example_pins.py), and the user-facing docs</span>
+<span class="c1"># reproduce it. A pin absent from the table is free for user wiring</span>
+<span class="c1"># (subject to :func:`check`).</span>
+<span class="n">ESP32S3_CONVENTION</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="c1"># ADC1 bank — the QTRLineSensor window. Nothing else may sit</span>
+    <span class="c1"># here: every other role was moved off it deliberately.</span>
+    <span class="mi">1</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span> <span class="mi">4</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span> <span class="mi">5</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span>
+    <span class="mi">6</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span> <span class="mi">7</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span> <span class="mi">8</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span> <span class="mi">9</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span> <span class="mi">10</span><span class="p">:</span> <span class="s2">"qtr"</span><span class="p">,</span>
+    <span class="mi">11</span><span class="p">:</span> <span class="s2">"spi_miso"</span><span class="p">,</span> <span class="mi">12</span><span class="p">:</span> <span class="s2">"spi_sck"</span><span class="p">,</span> <span class="mi">13</span><span class="p">:</span> <span class="s2">"spi_mosi"</span><span class="p">,</span> <span class="mi">17</span><span class="p">:</span> <span class="s2">"spi_cs"</span><span class="p">,</span>
+    <span class="mi">14</span><span class="p">:</span> <span class="s2">"uart1_tx"</span><span class="p">,</span> <span class="mi">41</span><span class="p">:</span> <span class="s2">"uart1_rx"</span><span class="p">,</span>
+    <span class="mi">15</span><span class="p">:</span> <span class="s2">"i2c_sda"</span><span class="p">,</span> <span class="mi">16</span><span class="p">:</span> <span class="s2">"i2c_scl"</span><span class="p">,</span>
+    <span class="mi">19</span><span class="p">:</span> <span class="s2">"usb"</span><span class="p">,</span> <span class="mi">20</span><span class="p">:</span> <span class="s2">"usb"</span><span class="p">,</span>
+    <span class="mi">21</span><span class="p">:</span> <span class="s2">"ws2812"</span><span class="p">,</span>
+    <span class="mi">38</span><span class="p">:</span> <span class="s2">"ble_button"</span><span class="p">,</span> <span class="mi">39</span><span class="p">:</span> <span class="s2">"program_button"</span><span class="p">,</span>
+    <span class="mi">43</span><span class="p">:</span> <span class="s2">"uart0_tx"</span><span class="p">,</span> <span class="mi">44</span><span class="p">:</span> <span class="s2">"uart0_rx"</span><span class="p">,</span>
+    <span class="mi">48</span><span class="p">:</span> <span class="s2">"status_led"</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">SERVO_BUS_TX</span> <span class="o">=</span> <span class="mi">14</span>
+<span class="n">SERVO_BUS_RX</span> <span class="o">=</span> <span class="mi">41</span>
+
+
+<div class="viewcode-block" id="ReservedPinError">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.pins.ReservedPinError">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ReservedPinError</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A GPIO was requested that can't (or shouldn't) be user-wired."""</span></div>
+
+
+
+<span class="c1"># ---- chip detection ---------------------------------------------------</span>
+
+<span class="c1"># None = autodetect from os.uname(); set_chip() overrides.</span>
+<span class="n">_chip_override</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">_CHIPS</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"esp32"</span><span class="p">,</span> <span class="s2">"esp32s3"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="set_chip">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.pins.set_chip">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">set_chip</span><span class="p">(</span><span class="n">chip</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Force the chip model the guard validates against.</span>
+
+<span class="sd">    ``chip`` is ``"esp32"``, ``"esp32s3"``, or ``None`` to return to</span>
+<span class="sd">    autodetection. Used by tests; harmless elsewhere.</span>
+<span class="sd">    """</span>
+    <span class="k">global</span> <span class="n">_chip_override</span>
+    <span class="k">if</span> <span class="n">chip</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">chip</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_CHIPS</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"chip must be one of </span><span class="si">%r</span><span class="s2"> or None (got </span><span class="si">%r</span><span class="s2">)"</span>
+                         <span class="o">%</span> <span class="p">(</span><span class="n">_CHIPS</span><span class="p">,</span> <span class="n">chip</span><span class="p">))</span>
+    <span class="n">_chip_override</span> <span class="o">=</span> <span class="n">chip</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_detect_chip</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">_chip_override</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_chip_override</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">machine_str</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">uname</span><span class="p">()</span><span class="o">.</span><span class="n">machine</span>
+    <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">machine_str</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">"-"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">"_"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+    <span class="c1"># Variant names contain the plain "ESP32" substring, so rule the</span>
+    <span class="c1"># unsupported ones out first rather than misapplying classic-ESP32</span>
+    <span class="c1"># pin rules to them.</span>
+    <span class="k">for</span> <span class="n">variant</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"ESP32S3"</span><span class="p">,):</span>
+        <span class="k">if</span> <span class="n">variant</span> <span class="ow">in</span> <span class="n">m</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s2">"esp32s3"</span>
+    <span class="k">for</span> <span class="n">variant</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"ESP32S2"</span><span class="p">,</span> <span class="s2">"ESP32C3"</span><span class="p">,</span> <span class="s2">"ESP32C6"</span><span class="p">,</span> <span class="s2">"ESP32H2"</span><span class="p">,</span> <span class="s2">"ESP32P4"</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">variant</span> <span class="ow">in</span> <span class="n">m</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="s2">"ESP32"</span> <span class="ow">in</span> <span class="n">m</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">"esp32"</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="c1"># ---- runtime claims (buttons, LED) ------------------------------------</span>
+
+<span class="c1"># pin -&gt; (role, hint). Written by the hub / launcher when they wire</span>
+<span class="c1"># their pins at boot; read by driver check() calls. Re-claiming the</span>
+<span class="c1"># same pin overwrites — the hub classes and launcher own their</span>
+<span class="c1"># lifecycle, this dict just mirrors it for error messages.</span>
+<span class="n">_claims</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<div class="viewcode-block" id="claim">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.pins.claim">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">claim</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span> <span class="n">hint</span><span class="o">=</span><span class="s2">""</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Record that the firmware runtime owns ``pin`` (e.g. a button)."""</span>
+    <span class="n">_claims</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">pin</span><span class="p">)]</span> <span class="o">=</span> <span class="p">(</span><span class="n">role</span><span class="p">,</span> <span class="n">hint</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="release">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.pins.release">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">release</span><span class="p">(</span><span class="n">pin</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Forget a claim — for callers that hand a pin back (e.g. after</span>
+<span class="sd">    ``hub.bluetooth_toggle.stop()``). Unknown pins are a no-op."""</span>
+    <span class="n">_claims</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">pin</span><span class="p">),</span> <span class="kc">None</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_claims_reset</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Test helper: drop every claim."""</span>
+    <span class="n">_claims</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+
+
+<span class="c1"># ---- validation --------------------------------------------------------</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_die</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span> <span class="n">reason</span><span class="p">):</span>
+    <span class="k">raise</span> <span class="n">ReservedPinError</span><span class="p">(</span>
+        <span class="s2">"GPIO </span><span class="si">%d</span><span class="s2"> requested for </span><span class="si">%s</span><span class="s2">, but it is </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span> <span class="n">reason</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="check">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.pins.check">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">check</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Validate that ``pin`` is usable for ``role`` on this chip.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        pin: GPIO number the caller is about to wire.</span>
+<span class="sd">        role: human-readable purpose ("L298N IN1", "HC-SR04 echo") —</span>
+<span class="sd">            appears in the error message.</span>
+<span class="sd">        output: the pin must drive (True) or only read (False). Only</span>
+<span class="sd">            matters on the classic ESP32, where GPIO 34-39 are</span>
+<span class="sd">            input-only.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        ReservedPinError: with the pin, the role, and the reason.</span>
+<span class="sd">    """</span>
+    <span class="n">pin</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">pin</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">pin</span> <span class="ow">in</span> <span class="n">_claims</span><span class="p">:</span>
+        <span class="n">owner</span><span class="p">,</span> <span class="n">hint</span> <span class="o">=</span> <span class="n">_claims</span><span class="p">[</span><span class="n">pin</span><span class="p">]</span>
+        <span class="c1"># Same role re-checking its own pin is fine — the frozen</span>
+        <span class="c1"># main.py wires the hub/launcher at boot, and a user program</span>
+        <span class="c1"># constructing its own Hub afterwards re-checks the same pins</span>
+        <span class="c1"># under the same roles.</span>
+        <span class="k">if</span> <span class="n">owner</span> <span class="o">!=</span> <span class="n">role</span><span class="p">:</span>
+            <span class="n">_die</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span> <span class="s2">"in use as the </span><span class="si">%s%s</span><span class="s2">"</span>
+                 <span class="o">%</span> <span class="p">(</span><span class="n">owner</span><span class="p">,</span> <span class="p">(</span><span class="s2">" (</span><span class="si">%s</span><span class="s2">)"</span> <span class="o">%</span> <span class="n">hint</span><span class="p">)</span> <span class="k">if</span> <span class="n">hint</span> <span class="k">else</span> <span class="s2">""</span><span class="p">))</span>
+
+    <span class="n">chip</span> <span class="o">=</span> <span class="n">_detect_chip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">chip</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span>
+
+    <span class="k">if</span> <span class="n">chip</span> <span class="o">==</span> <span class="s2">"esp32s3"</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">pin</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">pin</span> <span class="o">&gt;</span> <span class="mi">48</span> <span class="ow">or</span> <span class="mi">22</span> <span class="o">&lt;=</span> <span class="n">pin</span> <span class="o">&lt;=</span> <span class="mi">25</span><span class="p">:</span>
+            <span class="n">_die</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span>
+                 <span class="s2">"not a GPIO on the ESP32-S3 (valid: 0-21, 26-48)"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="mi">26</span> <span class="o">&lt;=</span> <span class="n">pin</span> <span class="o">&lt;=</span> <span class="mi">32</span><span class="p">:</span>
+            <span class="n">_die</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span>
+                 <span class="s2">"connected to the module's SPI flash on the ESP32-S3 "</span>
+                 <span class="s2">"(GPIO 26-32)"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">pin</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">19</span><span class="p">,</span> <span class="mi">20</span><span class="p">):</span>
+            <span class="n">_die</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span>
+                 <span class="s2">"the ESP32-S3's native USB D-/D+ pair — wiring it "</span>
+                 <span class="s2">"breaks USB flashing and the USB REPL"</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>  <span class="c1"># classic esp32</span>
+        <span class="k">if</span> <span class="n">pin</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">pin</span> <span class="o">&gt;</span> <span class="mi">39</span> <span class="ow">or</span> <span class="n">pin</span> <span class="o">==</span> <span class="mi">20</span> <span class="ow">or</span> <span class="n">pin</span> <span class="o">==</span> <span class="mi">24</span> <span class="ow">or</span> <span class="mi">28</span> <span class="o">&lt;=</span> <span class="n">pin</span> <span class="o">&lt;=</span> <span class="mi">31</span><span class="p">:</span>
+            <span class="n">_die</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span>
+                 <span class="s2">"not a GPIO on the ESP32 "</span>
+                 <span class="s2">"(valid: 0-19, 21-23, 25-27, 32-39)"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="mi">6</span> <span class="o">&lt;=</span> <span class="n">pin</span> <span class="o">&lt;=</span> <span class="mi">11</span><span class="p">:</span>
+            <span class="n">_die</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span>
+                 <span class="s2">"connected to the module's SPI flash on the ESP32 "</span>
+                 <span class="s2">"(GPIO 6-11)"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">output</span> <span class="ow">and</span> <span class="mi">34</span> <span class="o">&lt;=</span> <span class="n">pin</span> <span class="o">&lt;=</span> <span class="mi">39</span><span class="p">:</span>
+            <span class="n">_die</span><span class="p">(</span><span class="n">pin</span><span class="p">,</span> <span class="n">role</span><span class="p">,</span>
+                 <span class="s2">"input-only on the ESP32 (GPIO 34-39 have no output "</span>
+                 <span class="s2">"driver); use it for encoder/sensor inputs instead"</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

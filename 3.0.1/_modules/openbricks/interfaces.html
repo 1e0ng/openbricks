@@ -1,0 +1,625 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.interfaces &mdash; openbricks 3.0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/interfaces.html" />
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=08bfcbec"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.0.1">firmware&nbsp;v3.0.1</a>
+<a class="obk-pdf-btn" href="../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.interfaces</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.interfaces</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">Abstract interfaces for openbricks components.</span>
+
+<span class="sd">MicroPython doesn't ship full ``typing.Protocol`` support, so these are plain</span>
+<span class="sd">base classes. Drivers should subclass the appropriate interface and fill in</span>
+<span class="sd">every method. The higher-level modules (``robotics``, ``config``) only depend</span>
+<span class="sd">on these interfaces, never on concrete drivers — that's what makes the system</span>
+<span class="sd">plug-and-play.</span>
+
+<span class="sd">If you add a new category of component (e.g. a distance sensor), add its</span>
+<span class="sd">interface here.</span>
+<span class="sd">"""</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">parameters</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.parameters</span><span class="w"> </span><span class="kn">import</span> <span class="n">Stop</span>
+
+
+<div class="viewcode-block" id="Motor">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Motor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""A bidirectional motor.</span>
+
+<span class="sd">    Implementations range from an open-loop H-bridge driver (L298N) to a</span>
+<span class="sd">    closed-loop geared motor with quadrature encoder (JGB37-520).</span>
+
+<span class="sd">    The method names and semantics follow the Pybricks Prime</span>
+<span class="sd">    ``Motor`` API (1.21.0): ``run(speed)`` is degrees per second,</span>
+<span class="sd">    closed loop; the raw-duty command is ``dc(duty)``. Additional</span>
+<span class="sd">    openbricks methods (``coast``, ``run_speed``) remain as aliases.</span>
+
+<span class="sd">    Units</span>
+<span class="sd">    -----</span>
+<span class="sd">    * ``duty`` is -100..100 (percent duty cycle, sign = direction).</span>
+<span class="sd">    * ``speed`` is degrees per second at the output shaft (closed-loop only).</span>
+<span class="sd">    * ``angle`` is degrees at the output shaft (closed-loop only).</span>
+<span class="sd">    """</span>
+
+<div class="viewcode-block" id="Motor.run">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.run">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">speed</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Run at ``speed`` degrees per second, closed loop —</span>
+<span class="sd">        Pybricks ``Motor.run()``. Non-blocking. Concrete: delegates</span>
+<span class="sd">        to ``run_speed()`` (the openbricks alias), so open-loop</span>
+<span class="sd">        drivers surface its ``NotImplementedError``.</span>
+
+<span class="sd">        BREAKING (1.21.0): before Pybricks parity this method took</span>
+<span class="sd">        percent power. That command is now ``dc(duty)`` — a script</span>
+<span class="sd">        still calling ``run(30)`` for power gets 30 deg/s instead</span>
+<span class="sd">        (slow, not dangerous) or ``NotImplementedError`` on</span>
+<span class="sd">        open-loop drivers.</span>
+<span class="sd">        """</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">run_speed</span><span class="p">(</span><span class="n">speed</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Motor.dc">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.dc">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dc</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">duty</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Run at a fixed raw duty cycle (-100..100), open loop —</span>
+<span class="sd">        Pybricks ``Motor.dc()``. Non-blocking. This is the pre-1.21.0</span>
+<span class="sd">        ``run()``."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.stop">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.stop">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Stop and let the motor spin freely; it gradually stops</span>
+<span class="sd">        from friction. Pybricks ``Motor.stop()`` semantics — the</span>
+<span class="sd">        default of the three stop flavours (stop/brake/hold), and a</span>
+<span class="sd">        concrete method: it delegates to ``coast()``, so every driver</span>
+<span class="sd">        gets it for free.</span>
+<span class="sd">        """</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">coast</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="Motor.brake">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.brake">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">brake</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Stop with active braking (both terminals shorted)."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.coast">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.coast">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">coast</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Stop by cutting drive power (motor free-wheels)."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.hold">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.hold">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">hold</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Stop and actively hold the current shaft angle via closed-loop</span>
+<span class="sd">        control. Only motors with position-mode hardware (e.g. ST-3215) or</span>
+<span class="sd">        a software position loop implement this; open-loop drivers raise</span>
+<span class="sd">        ``NotImplementedError`` — pick ``brake`` or ``coast`` instead."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+    <span class="c1"># --- Optional closed-loop methods ---</span>
+    <span class="c1"># Open-loop drivers may raise NotImplementedError or simply not override.</span>
+
+<div class="viewcode-block" id="Motor.angle">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.angle">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">angle</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return the current shaft angle in degrees."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.reset_angle">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.reset_angle">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset_angle</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">angle</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Set the current angle to ``angle`` degrees."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.run_speed">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.run_speed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_speed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">deg_per_s</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Hold a target speed (closed loop)."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.run_angle">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.run_angle">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_angle</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">deg_per_s</span><span class="p">,</span> <span class="n">target_angle</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Rotate by ``target_angle`` degrees at ``deg_per_s``. Blocks</span>
+<span class="sd">        if ``wait``; otherwise returns immediately and the caller polls</span>
+<span class="sd">        ``done()`` to advance the move and detect completion."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.done">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.done">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">done</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return ``True`` if no non-blocking move is in flight or</span>
+<span class="sd">        the active ``run_angle(wait=False)`` move has reached its</span>
+<span class="sd">        target. Drivers that don't support non-blocking moves always</span>
+<span class="sd">        return ``True`` (a wait=True call is finished before</span>
+<span class="sd">        returning to the caller, by definition)."""</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+<div class="viewcode-block" id="Motor.speed">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.speed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">speed</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Measured shaft speed in degrees per second — Pybricks</span>
+<span class="sd">        ``Motor.speed()``. Closed-loop drivers implement it (encoder</span>
+<span class="sd">        observer / servo present-speed register)."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.load">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.load">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Measured torque at the shaft in mNm — Pybricks</span>
+<span class="sd">        ``Motor.load()``. Drivers with load feedback (serial servos)</span>
+<span class="sd">        implement it; the value is derived from the servo's load</span>
+<span class="sd">        register and its datasheet stall torque, so treat it as an</span>
+<span class="sd">        estimate."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Motor.stalled">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.stalled">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stalled</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""``True`` when the motor is pushing as hard as it can but</span>
+<span class="sd">        cannot reach its commanded speed — Pybricks</span>
+<span class="sd">        ``Motor.stalled()``. Drivers with load feedback implement</span>
+<span class="sd">        it."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+    <span class="c1"># --- Pybricks composite maneuvers ---</span>
+    <span class="c1"># Concrete: built from the primitives above, so every closed-loop</span>
+    <span class="c1"># driver gets them. ``then`` is a :class:`openbricks.parameters.Stop`</span>
+    <span class="c1"># member (Pybricks Stop.HOLD is the default).</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_apply_then</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">then</span><span class="p">):</span>
+        <span class="n">parameters</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">Stop</span><span class="p">,</span> <span class="n">then</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">then</span> <span class="o">==</span> <span class="n">Stop</span><span class="o">.</span><span class="n">HOLD</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hold</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">then</span> <span class="o">==</span> <span class="n">Stop</span><span class="o">.</span><span class="n">BRAKE</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">brake</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">then</span> <span class="o">==</span> <span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">coast</span><span class="p">()</span>
+        <span class="c1"># Stop.NONE: leave the motor running.</span>
+
+<div class="viewcode-block" id="Motor.run_time">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.run_time">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_time</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">speed</span><span class="p">,</span> <span class="n">time_ms</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="n">Stop</span><span class="o">.</span><span class="n">HOLD</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Run at ``speed`` deg/s for ``time_ms`` ms, then stop with</span>
+<span class="sd">        the ``then`` flavour — Pybricks ``Motor.run_time()``.</span>
+<span class="sd">        ``wait=False`` is not supported (no background timer is</span>
+<span class="sd">        allocated for it); pass ``wait=True`` or sequence it</span>
+<span class="sd">        yourself."""</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">wait</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+                <span class="s2">"run_time(wait=False) is not supported"</span><span class="p">)</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">run_speed</span><span class="p">(</span><span class="n">speed</span><span class="p">)</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">time_ms</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_apply_then</span><span class="p">(</span><span class="n">then</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Motor.run_target">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.run_target">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_target</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">speed</span><span class="p">,</span> <span class="n">target_angle</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="n">Stop</span><span class="o">.</span><span class="n">HOLD</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Run to the ABSOLUTE ``target_angle`` (degrees, in the</span>
+<span class="sd">        ``reset_angle`` frame) at up to ``speed`` deg/s — Pybricks</span>
+<span class="sd">        ``Motor.run_target()``. Built on the relative ``run_angle``:</span>
+<span class="sd">        the delta is measured from ``angle()`` at call time."""</span>
+        <span class="n">here</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">angle</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">here</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">OSError</span><span class="p">(</span><span class="s2">"cannot read angle for run_target"</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">run_angle</span><span class="p">(</span><span class="n">speed</span><span class="p">,</span> <span class="n">target_angle</span> <span class="o">-</span> <span class="n">here</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="n">wait</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">wait</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_apply_then</span><span class="p">(</span><span class="n">then</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Motor.run_until_stalled">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Motor.run_until_stalled">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_until_stalled</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">speed</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">duty_limit</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Run at ``speed`` deg/s until ``stalled()``, apply the</span>
+<span class="sd">        ``then`` flavour, and return the angle where it stalled —</span>
+<span class="sd">        Pybricks ``Motor.run_until_stalled()`` (its default ``then``</span>
+<span class="sd">        == Stop.COAST).</span>
+
+<span class="sd">        ``duty_limit`` (percent, 0 &lt; limit &lt;= 100) caps the motor's</span>
+<span class="sd">        torque for the duration of the run — the Pybricks gripper-</span>
+<span class="sd">        homing pattern: drive gently into the end stop without</span>
+<span class="sd">        crushing it. The cap is applied before the motion starts and</span>
+<span class="sd">        restored afterwards, stall or not. Drivers opt in via</span>
+<span class="sd">        ``_duty_limit_push`` / ``_duty_limit_pop`` (the ST3215/</span>
+<span class="sd">        ST3032 serial servos implement it as a temporary torque-</span>
+<span class="sd">        limit register write; their stall detection scales to the</span>
+<span class="sd">        cap)."""</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+        <span class="n">restore</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">duty_limit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">restore</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_duty_limit_push</span><span class="p">(</span><span class="n">duty_limit</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">run_speed</span><span class="p">(</span><span class="n">speed</span><span class="p">)</span>
+            <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">stalled</span><span class="p">():</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_apply_then</span><span class="p">(</span><span class="n">then</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">angle</span><span class="p">()</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">duty_limit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_duty_limit_pop</span><span class="p">(</span><span class="n">restore</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_duty_limit_push</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">duty_limit</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Apply a temporary torque cap of ``duty_limit`` percent;</span>
+<span class="sd">        return the token ``_duty_limit_pop`` needs to undo it.</span>
+<span class="sd">        Drivers with a torque-limiting mechanism override both."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s2">"duty_limit is not supported on this motor type (the "</span>
+            <span class="s2">"ST3215/ST3032 serial servos support it)"</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_duty_limit_pop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">restore</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="s2">"duty_limit is not supported on this motor type (the "</span>
+            <span class="s2">"ST3215/ST3032 serial servos support it)"</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="Servo">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Servo">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Servo</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""A position-controlled servo (angle-addressable)."""</span>
+
+<div class="viewcode-block" id="Servo.move_to">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Servo.move_to">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">move_to</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">angle_deg</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Move to absolute angle in degrees."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="Servo.angle">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.Servo.angle">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">angle</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Read back the current angle."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="IMU">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.IMU">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">IMU</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""A 3-axis inertial measurement unit.</span>
+
+<span class="sd">    The expected unit convention is:</span>
+<span class="sd">        * heading/yaw/pitch/roll in degrees</span>
+<span class="sd">        * angular_velocity in degrees / second</span>
+<span class="sd">        * acceleration in m / s^2</span>
+<span class="sd">    """</span>
+
+<div class="viewcode-block" id="IMU.heading">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.IMU.heading">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">heading</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return heading (yaw) in degrees, wrapped to [-180, 180)."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="IMU.angular_velocity">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.IMU.angular_velocity">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">angular_velocity</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return (wx, wy, wz) in deg/s."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="IMU.acceleration">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.IMU.acceleration">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">acceleration</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return (ax, ay, az) in m/s^2."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="ColorSensor">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.ColorSensor">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ColorSensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""An RGB-ish color sensor."""</span>
+
+<div class="viewcode-block" id="ColorSensor.rgb">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.ColorSensor.rgb">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rgb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return ``(r, g, b)`` each in 0..255."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="ColorSensor.ambient">
+<a class="viewcode-back" href="../../api/interfaces.html#openbricks.interfaces.ColorSensor.ambient">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ambient</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return ambient / clear-channel intensity in 0..100."""</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+</div>
+
+
+
+<span class="c1"># NOTE: ``DistanceSensor`` lives in ``openbricks.distance`` rather</span>
+<span class="c1"># than here, even though it's an interface. ``openbricks/__init__.py``</span>
+<span class="c1"># eagerly loads this module to re-export Motor/Servo/IMU/ColorSensor,</span>
+<span class="c1"># so every byte of bytecode here is paid by *every* import of</span>
+<span class="c1"># anything in the openbricks package — including the observer test</span>
+<span class="c1"># which runs against a tight MicroPython heap budget. Distance-sensor</span>
+<span class="c1"># users explicitly ``from openbricks.distance import DistanceSensor``</span>
+<span class="c1"># (or just import their concrete driver, which does).</span>
+
+<span class="c1"># Hub-layer interfaces (StatusLED, Button, Display, Hub) live in</span>
+<span class="c1"># ``openbricks.hub`` alongside their concrete implementations so that</span>
+<span class="c1"># tests which don't touch the hub don't pay the class-loading cost on</span>
+<span class="c1"># MicroPython's tight unix heap.</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

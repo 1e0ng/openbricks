@@ -1,0 +1,1075 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.drivers.qtr &mdash; openbricks 3.0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/drivers/qtr.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=08bfcbec"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.0.1">firmware&nbsp;v3.0.1</a>
+<a class="obk-pdf-btn" href="../../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.drivers.qtr</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.drivers.qtr</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">Pololu QTR / QTRX reflectance sensor arrays (analog outputs).</span>
+
+<span class="sd">A row of IR emitter/phototransistor pairs a few millimetres above the</span>
+<span class="sd">mat: dark line = high reading, light mat = low. Unlike a pair of</span>
+<span class="sd">colour sensors, the array gives a CONTINUOUS line position — a</span>
+<span class="sd">weighted centroid across all elements — so a follower steers on a</span>
+<span class="sd">real analog error instead of edge-crossings.</span>
+
+<span class="sd">Wiring (QTRX-HD-15A on ESP32-S3): the analog outputs go to ADC1 pins</span>
+<span class="sd">(GPIO 1..10 — ADC2 fights the radios). Any subset of the array's</span>
+<span class="sd">channels works; pass the pins left-to-right as mounted, and set</span>
+<span class="sd">``pitch_mm`` to the spacing of the channels you actually wired</span>
+<span class="sd">(4 mm for adjacent QTRX-HD channels, 8 mm if every other one).</span>
+<span class="sd">CTRL (emitter enable) may be tied high or given a pin.</span>
+
+<span class="sd">Readings are ratiometric to whatever height and mat you mounted over,</span>
+<span class="sd">so the array MUST be calibrated once per session: sweep it across the</span>
+<span class="sd">line while ``calibrate()`` runs. Reading before calibration raises —</span>
+<span class="sd">an uncalibrated centroid is a plausible-looking wrong number.</span>
+
+<span class="sd">Example (bench: channels 15..9 left-to-right on ADC1; the stop</span>
+<span class="sd">button and servo bus live on GPIO 39 and 14/41, off the bank)::</span>
+
+<span class="sd">    from openbricks.drivers.qtr import QTRArray, QTRChannel</span>
+
+<span class="sd">    line   = QTRArray(pins=(1, 2, 3, 7, 8, 9, 10), pitch_mm=4.0)</span>
+<span class="sd">    branch = QTRChannel(pin=5)        # array channel 1, far right</span>
+<span class="sd">    line.calibrate(duration_ms=3000)  # sweep across the line now</span>
+<span class="sd">    branch.calibrate(duration_ms=3000)</span>
+<span class="sd">    while True:</span>
+<span class="sd">        pos = line.position()         # mm, +right of centre, or None</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">pins</span> <span class="k">as</span> <span class="n">_pins</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">parameters</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.parameters</span><span class="w"> </span><span class="kn">import</span> <span class="n">LineMode</span>
+
+<span class="n">_FULL_SCALE</span> <span class="o">=</span> <span class="mi">1000</span>
+
+
+<div class="viewcode-block" id="QTRElement">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRElement">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QTRElement</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""One calibrated element reading, as returned by</span>
+<span class="sd">    :meth:`QTRArray.read`.</span>
+
+<span class="sd">    ``value`` is the 0 (mat) .. 1000 (line) int; ``dark()`` /</span>
+<span class="sd">    ``white()`` answer per element exactly like</span>
+<span class="sd">    :meth:`QTRChannel.dark`. Deliberately NOT an int subclass:</span>
+<span class="sd">    MicroPython cannot reflect-compare ``int`` against one, so</span>
+<span class="sd">    ``max()`` over such readings raises on the hub while passing on</span>
+<span class="sd">    the desktop — numeric code uses ``.value`` instead</span>
+<span class="sd">    (``max(e.value for e in readings)``)."""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">threshold</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">value</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span> <span class="o">=</span> <span class="n">threshold</span>
+
+<div class="viewcode-block" id="QTRElement.dark">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRElement.dark">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dark</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""True when this element is over the line."""</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">value</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span></div>
+
+
+<div class="viewcode-block" id="QTRElement.white">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRElement.white">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">white</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""True when this element is over the mat."""</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">value</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span></div>
+
+
+<div class="viewcode-block" id="QTRElement.ambient">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRElement.ambient">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ambient</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Reflected brightness as 0 (black) .. 100 (white) — the</span>
+<span class="sd">        Pybricks scale, inverted from ``value``."""</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">_FULL_SCALE</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">value</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span> <span class="o">//</span> <span class="n">_FULL_SCALE</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">"QTRElement(</span><span class="si">%d</span><span class="s2">, </span><span class="si">%s</span><span class="s2">)"</span> <span class="o">%</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="s2">"dark"</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dark</span><span class="p">()</span> <span class="k">else</span> <span class="s2">"white"</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="QTRReading">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QTRReading</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""One snapshot of the whole array, as returned by</span>
+<span class="sd">    :meth:`QTRArray.read`.</span>
+
+<span class="sd">    Behaves like the list of :class:`QTRElement` it holds (index,</span>
+<span class="sd">    iterate, ``len``) and carries every aggregate view of exactly</span>
+<span class="sd">    this snapshot — so a control tick reads once and derives</span>
+<span class="sd">    everything from the same coherent sample::</span>
+
+<span class="sd">        r = qtr.read()</span>
+<span class="sd">        r[0].dark()             # per element</span>
+<span class="sd">        r.position()            # global centroid, mm</span>
+<span class="sd">        r.left_edge_position()  # the line's left edge, mm</span>
+<span class="sd">        r.right_edge_position() # the line's right edge, mm</span>
+<span class="sd">        r.edge_error()          # setpoint element's ambient vs 50</span>
+<span class="sd">        r.leftmost_position()   # fork clusters</span>
+<span class="sd">        r.rightmost_position()</span>
+<span class="sd">        r.dark_count()          # how many elements on the line</span>
+<span class="sd">        r.all_dark()            # whole array on the line</span>
+<span class="sd">        r.max()                 # brightest value (phantom gate)</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">elements</span><span class="p">,</span> <span class="n">array</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">elements</span> <span class="o">=</span> <span class="n">elements</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_array</span> <span class="o">=</span> <span class="n">array</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">iter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">)</span>
+
+<div class="viewcode-block" id="QTRReading.values">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.values">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">values</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""The plain 0..1000 ints, left to right."""</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">e</span><span class="o">.</span><span class="n">value</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.max">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.max">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""The brightest calibrated value in this snapshot — the</span>
+<span class="sd">        follower's off-mat phantom gate."""</span>
+        <span class="n">best</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">value</span> <span class="o">&gt;</span> <span class="n">best</span><span class="p">:</span>
+                <span class="n">best</span> <span class="o">=</span> <span class="n">e</span><span class="o">.</span><span class="n">value</span>
+        <span class="k">return</span> <span class="n">best</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.dark_count">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.dark_count">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dark_count</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_array</span><span class="o">.</span><span class="n">dark_count</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.all_dark">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.all_dark">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">all_dark</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Every element over the line — with the branch flag dark</span>
+<span class="sd">        too, the whole crossing is under the robot (the follower's</span>
+<span class="sd">        stop condition)."""</span>
+        <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">e</span><span class="o">.</span><span class="n">dark</span><span class="p">():</span>
+                <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_array</span><span class="o">.</span><span class="n">position</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.left_edge_position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.left_edge_position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">left_edge_position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_array</span><span class="o">.</span><span class="n">left_edge_position</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.right_edge_position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.right_edge_position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">right_edge_position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_array</span><span class="o">.</span><span class="n">right_edge_position</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.edge_error">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.edge_error">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">edge_error</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_array</span><span class="o">.</span><span class="n">edge_error</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.leftmost_position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.leftmost_position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">leftmost_position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_array</span><span class="o">.</span><span class="n">leftmost_position</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRReading.rightmost_position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRReading.rightmost_position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rightmost_position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_array</span><span class="o">.</span><span class="n">rightmost_position</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">"QTRReading(</span><span class="si">%s</span><span class="s2">)"</span> <span class="o">%</span> <span class="s2">","</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="QTRArray">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QTRArray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Analog QTR/QTRX reflectance array on ESP32 ADC pins.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        pins: ADC-capable GPIO numbers, LEFT to RIGHT as mounted.</span>
+<span class="sd">        pitch_mm: physical spacing between the wired channels.</span>
+<span class="sd">        ctrl: optional emitter-control GPIO (QTRX CTRL). Driven high</span>
+<span class="sd">            at construction (emitters on). ``None`` = tied high.</span>
+<span class="sd">        dark_threshold: calibrated value (0..1000) above which an</span>
+<span class="sd">            element counts as "over the line" for ``position()`` /</span>
+<span class="sd">            ``dark_count()``.</span>
+<span class="sd">    """</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pins</span><span class="p">,</span> <span class="n">pitch_mm</span><span class="o">=</span><span class="mf">4.0</span><span class="p">,</span> <span class="n">ctrl</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">dark_threshold</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span> <span class="n">positions_mm</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""``positions_mm`` (optional): explicit per-element x</span>
+<span class="sd">        coordinates in mm, left to right, strictly increasing — for</span>
+<span class="sd">        wirings whose channels are NOT evenly spaced (e.g. the skip</span>
+<span class="sd">        pattern QTRX ch 15,13,12,11,9,7,5,4,3,1: spacings</span>
+<span class="sd">        8/4/4/8/8/8/4/4/8 mm span a 56 mm window on ten pins). The</span>
+<span class="sd">        origin is wherever the caller puts it; centring the tuple on</span>
+<span class="sd">        0 keeps ``position()`` symmetric. When given, ``pitch_mm``</span>
+<span class="sd">        only seeds the secondary uses (the last-side hysteresis band</span>
+<span class="sd">        and the off-array edge saturation) via the MEAN spacing; all</span>
+<span class="sd">        real geometry comes from the positions."""</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pins</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"at least one element required"</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pins</span><span class="p">:</span>
+            <span class="n">_pins</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="s2">"QTR analog input"</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_check_adc_capable</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pins</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pins</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">dark_threshold</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_make_adc</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pins</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ctrl</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">ctrl</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">Pin</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ctrl</span> <span class="o">=</span> <span class="n">Pin</span><span class="p">(</span><span class="n">ctrl</span><span class="p">,</span> <span class="n">Pin</span><span class="o">.</span><span class="n">OUT</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>   <span class="c1"># emitters on</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">positions_mm</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">positions_mm</span><span class="p">)</span> <span class="o">!=</span> <span class="n">n</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">"positions_mm has </span><span class="si">%d</span><span class="s2"> entries for </span><span class="si">%d</span><span class="s2"> pins"</span>
+                    <span class="o">%</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">positions_mm</span><span class="p">),</span> <span class="n">n</span><span class="p">))</span>
+            <span class="n">xs</span> <span class="o">=</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">positions_mm</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">xs</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">xs</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="s2">"positions_mm must be strictly increasing "</span>
+                        <span class="s2">"left to right, got </span><span class="si">%r</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">positions_mm</span><span class="p">,))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span> <span class="o">=</span> <span class="n">xs</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pitch</span> <span class="o">=</span> <span class="p">((</span><span class="n">xs</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">xs</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">/</span> <span class="p">(</span><span class="n">n</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">n</span> <span class="o">&gt;</span> <span class="mi">1</span>
+                           <span class="k">else</span> <span class="nb">float</span><span class="p">(</span><span class="n">pitch_mm</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pitch</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">pitch_mm</span><span class="p">)</span>
+            <span class="c1"># Element x-positions in mm, centre of the wired span at 0.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span> <span class="o">=</span> <span class="p">[(</span><span class="n">i</span> <span class="o">-</span> <span class="p">(</span><span class="n">n</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pitch</span>
+                          <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">)]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cal_max</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="c1"># Which side the line last left through (+1 right, -1 left):</span>
+        <span class="c1"># when every element reads mat, the line is OUTSIDE the span</span>
+        <span class="c1"># and this is the only information left. Follower logic uses</span>
+        <span class="c1"># it to steer back instead of guessing.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_side</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="c1"># Edge-following discipline, selected via set_mode(), and</span>
+        <span class="c1"># the element each mode holds on the edge: the one nearest</span>
+        <span class="c1"># its setpoint x.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_left_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nearest_index</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">LEFT_SETPOINT_MM</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_right_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nearest_index</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">RIGHT_SETPOINT_MM</span><span class="p">)</span>
+        <span class="c1"># Center mode scales the centroid so the farthest element</span>
+        <span class="c1"># from the setpoint reads +/-50.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_half_span</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">abs</span><span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">CENTER_SETPOINT_MM</span><span class="p">)</span>
+                              <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">)</span> <span class="ow">or</span> <span class="mf">1.0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_nearest_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x_mm</span><span class="p">):</span>
+        <span class="n">best</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x_mm</span><span class="p">)</span> <span class="o">&lt;</span> <span class="nb">abs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">best</span><span class="p">]</span> <span class="o">-</span> <span class="n">x_mm</span><span class="p">):</span>
+                <span class="n">best</span> <span class="o">=</span> <span class="n">i</span>
+        <span class="k">return</span> <span class="n">best</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_check_adc_capable</span><span class="p">(</span><span class="n">pin</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Refuse pins with no usable ADC, BY NAME, at construction.</span>
+
+<span class="sd">        ``pins.check`` validates the board's GPIO map but not analog</span>
+<span class="sd">        capability, and ``machine.ADC`` fails with a bare ValueError —</span>
+<span class="sd">        after the user already soldered the harness (bench 2026-08-06:</span>
+<span class="sd">        five channels landed on GPIO 38-42, which have no ADC at all</span>
+<span class="sd">        on the S3).</span>
+<span class="sd">        """</span>
+        <span class="n">chip</span> <span class="o">=</span> <span class="n">_pins</span><span class="o">.</span><span class="n">_detect_chip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">chip</span> <span class="o">==</span> <span class="s2">"esp32s3"</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="n">pin</span> <span class="o">&lt;=</span> <span class="mi">10</span><span class="p">:</span>
+                <span class="k">if</span> <span class="mi">11</span> <span class="o">&lt;=</span> <span class="n">pin</span> <span class="o">&lt;=</span> <span class="mi">20</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="s2">"GPIO </span><span class="si">%d</span><span class="s2"> is ADC2 on the ESP32-S3 — unusable "</span>
+                        <span class="s2">"for the QTR array: ADC2 is shared with the "</span>
+                        <span class="s2">"radio (BLE is up during `openbricks run`) "</span>
+                        <span class="s2">"and unreliable by errata. Use ADC1, GPIO "</span>
+                        <span class="s2">"1-10."</span> <span class="o">%</span> <span class="n">pin</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">"GPIO </span><span class="si">%d</span><span class="s2"> has no ADC on the ESP32-S3 — analog "</span>
+                    <span class="s2">"inputs must be ADC1, GPIO 1-10."</span> <span class="o">%</span> <span class="n">pin</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">chip</span> <span class="o">==</span> <span class="s2">"esp32"</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="mi">32</span> <span class="o">&lt;=</span> <span class="n">pin</span> <span class="o">&lt;=</span> <span class="mi">39</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">"GPIO </span><span class="si">%d</span><span class="s2"> is not an ADC1 pin on the classic ESP32 "</span>
+                    <span class="s2">"— use GPIO 32-39 (ADC2 is shared with the "</span>
+                    <span class="s2">"radio)."</span> <span class="o">%</span> <span class="n">pin</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_make_adc</span><span class="p">(</span><span class="n">pin</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">ADC</span><span class="p">,</span> <span class="n">Pin</span>
+        <span class="n">adc</span> <span class="o">=</span> <span class="n">ADC</span><span class="p">(</span><span class="n">Pin</span><span class="p">(</span><span class="n">pin</span><span class="p">))</span>
+        <span class="c1"># Full 0..~3.3 V range; the QTRX output swings to its supply.</span>
+        <span class="c1"># Ports without attenuation control (unix) simply skip it.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">adc</span><span class="o">.</span><span class="n">atten</span><span class="p">(</span><span class="n">ADC</span><span class="o">.</span><span class="n">ATTN_11DB</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">return</span> <span class="n">adc</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_read_u16</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">adc</span><span class="o">.</span><span class="n">read_u16</span><span class="p">()</span> <span class="k">for</span> <span class="n">adc</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">]</span>
+
+    <span class="c1"># ---- calibration -------------------------------------------------</span>
+
+<div class="viewcode-block" id="QTRArray.calibrate">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.calibrate">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">calibrate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">duration_ms</span><span class="o">=</span><span class="mi">3000</span><span class="p">,</span> <span class="n">poll_ms</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Learn each element's mat/line extremes.</span>
+
+<span class="sd">        Sweep the array across the line while this runs (rotate the</span>
+<span class="sd">        robot, or slide it by hand). Extends any previous calibration</span>
+<span class="sd">        rather than replacing it, so repeated calls refine.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span> <span class="o">=</span> <span class="p">[</span><span class="mi">65535</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cal_max</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">)</span>
+        <span class="n">deadline</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">ticks_add</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">ticks_ms</span><span class="p">(),</span> <span class="nb">int</span><span class="p">(</span><span class="n">duration_ms</span><span class="p">))</span>
+        <span class="k">while</span> <span class="n">time</span><span class="o">.</span><span class="n">ticks_diff</span><span class="p">(</span><span class="n">deadline</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">ticks_ms</span><span class="p">())</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_read_u16</span><span class="p">()):</span>
+                <span class="k">if</span> <span class="n">v</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span><span class="p">[</span><span class="n">i</span><span class="p">]:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+                <span class="k">if</span> <span class="n">v</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_max</span><span class="p">[</span><span class="n">i</span><span class="p">]:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_cal_max</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="n">poll_ms</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_check_calibration</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_check_calibration</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"QTR array is not calibrated — call calibrate() while "</span>
+                <span class="s2">"sweeping the array across the line (an uncalibrated "</span>
+                <span class="s2">"centroid is a plausible-looking wrong number)"</span><span class="p">)</span>
+        <span class="c1"># An element whose span never opened up saw only mat (or only</span>
+        <span class="c1"># line, or is unwired): its normalized reading would be noise</span>
+        <span class="c1"># amplified to full scale. Name it.</span>
+        <span class="n">flat</span> <span class="o">=</span> <span class="p">[</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">))</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_max</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">1024</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">flat</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"QTR calibration saw no line/mat contrast on "</span>
+                <span class="s2">"element(s) </span><span class="si">%s</span><span class="s2"> (left=0) — that channel is unwired, "</span>
+                <span class="s2">"or the sweep never carried it across the line"</span>
+                <span class="o">%</span> <span class="s2">","</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">flat</span><span class="p">))</span>
+
+<div class="viewcode-block" id="QTRArray.save_calibration">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.save_calibration">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">save_calibration</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Persist the calibration to a file on the hub filesystem, so</span>
+<span class="sd">        one sweep (``examples/qtr_calibrate.py``) serves every later</span>
+<span class="sd">        run. The wiring is stored with it: a calibration is per-</span>
+<span class="sd">        element min/max, so loading it onto different pins would</span>
+<span class="sd">        silently mis-scale every reading."""</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_check_calibration</span><span class="p">()</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">({</span><span class="s2">"pins"</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_pins</span><span class="p">),</span>
+                       <span class="s2">"min"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span><span class="p">,</span>
+                       <span class="s2">"max"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_max</span><span class="p">},</span> <span class="n">f</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.load_calibration">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.load_calibration">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_calibration</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Load a calibration saved by :meth:`save_calibration`.</span>
+
+<span class="sd">        Raises with the remedy when the file is missing (run the</span>
+<span class="sd">        calibrate script), corrupt, or was recorded for DIFFERENT</span>
+<span class="sd">        wiring. Calibration is height- and mat-dependent — resweep</span>
+<span class="sd">        after remounting the array or changing mats."""</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"no saved QTR calibration at </span><span class="si">%s</span><span class="s2"> — run "</span>
+                <span class="s2">"examples/qtr_calibrate.py once (sweep the array "</span>
+                <span class="s2">"across the line while it runs)"</span> <span class="o">%</span> <span class="n">path</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"saved QTR calibration at </span><span class="si">%s</span><span class="s2"> is corrupt — delete it "</span>
+                <span class="s2">"and re-run examples/qtr_calibrate.py"</span> <span class="o">%</span> <span class="n">path</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"pins"</span><span class="p">,</span> <span class="p">()))</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pins</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"saved QTR calibration at </span><span class="si">%s</span><span class="s2"> was recorded for pins </span><span class="si">%s</span><span class="s2"> "</span>
+                <span class="s2">"but this array is wired to </span><span class="si">%s</span><span class="s2"> — per-element min/max "</span>
+                <span class="s2">"does not transfer across wiring; re-run "</span>
+                <span class="s2">"examples/qtr_calibrate.py"</span>
+                <span class="o">%</span> <span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"pins"</span><span class="p">,</span> <span class="p">())),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pins</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">data</span><span class="p">[</span><span class="s2">"min"</span><span class="p">]]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cal_max</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">data</span><span class="p">[</span><span class="s2">"max"</span><span class="p">]]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_check_calibration</span><span class="p">()</span></div>
+
+
+    <span class="c1"># ---- reading -----------------------------------------------------</span>
+
+<div class="viewcode-block" id="QTRArray.read">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.read">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">read</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""One calibrated snapshot: a :class:`QTRReading` holding a</span>
+<span class="sd">        :class:`QTRElement` per array element, left to right —</span>
+<span class="sd">        ``r[i].value`` 0 (mat) .. 1000 (line), ``r[i].dark()`` /</span>
+<span class="sd">        ``r[i].white()``, and the aggregate views (``r.position()``,</span>
+<span class="sd">        ``r.dark_count()``, ...) computed from exactly this</span>
+<span class="sd">        sample."""</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_check_calibration</span><span class="p">()</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_read_u16</span><span class="p">()):</span>
+            <span class="n">span</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_max</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">n</span> <span class="o">=</span> <span class="p">(</span><span class="n">v</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cal_min</span><span class="p">[</span><span class="n">i</span><span class="p">])</span> <span class="o">*</span> <span class="n">_FULL_SCALE</span> <span class="o">//</span> <span class="n">span</span>
+            <span class="k">if</span> <span class="n">n</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">n</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">elif</span> <span class="n">n</span> <span class="o">&gt;</span> <span class="n">_FULL_SCALE</span><span class="p">:</span>
+                <span class="n">n</span> <span class="o">=</span> <span class="n">_FULL_SCALE</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">QTRElement</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">QTRReading</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.dark_count">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.dark_count">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dark_count</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""How many elements are over the line — the intersection /</span>
+<span class="sd">        stop-bar signal (a full-width bar darkens most of the array,</span>
+<span class="sd">        a branch stub only one side)."""</span>
+        <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">readings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">readings</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">dark</span><span class="p">())</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Line centre in mm relative to the array centre; positive =</span>
+<span class="sd">        line is to the RIGHT. ``None`` when no element sees the line —</span>
+<span class="sd">        use :meth:`last_side` to know which way it escaped.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"position() needs at least 2 elements — a single "</span>
+                <span class="s2">"detector channel has no centroid (use QTRChannel"</span>
+                <span class="s2">".dark() for a flag)"</span><span class="p">)</span>
+        <span class="n">readings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read</span><span class="p">()</span> <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">readings</span>
+        <span class="n">weight_sum</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">moment</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">seen</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">for</span> <span class="n">r</span><span class="p">,</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">readings</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">dark</span><span class="p">():</span>
+                <span class="n">seen</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">weight_sum</span> <span class="o">+=</span> <span class="n">r</span><span class="o">.</span><span class="n">value</span>
+            <span class="n">moment</span> <span class="o">+=</span> <span class="n">r</span><span class="o">.</span><span class="n">value</span> <span class="o">*</span> <span class="n">x</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">seen</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">moment</span> <span class="o">/</span> <span class="n">weight_sum</span>
+        <span class="c1"># Remember the escape side while the line is still visible:</span>
+        <span class="c1"># strictly by sign, so a centred line keeps the previous</span>
+        <span class="c1"># memory instead of flapping.</span>
+        <span class="k">if</span> <span class="n">pos</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pitch</span> <span class="o">/</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_last_side</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="n">pos</span> <span class="o">&lt;</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">_pitch</span> <span class="o">/</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_last_side</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+        <span class="k">return</span> <span class="n">pos</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_cluster_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readings</span><span class="p">,</span> <span class="n">rightmost</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Centroid of the leftmost (or rightmost) contiguous dark</span>
+<span class="sd">        cluster, with one sub-threshold neighbour each side joining</span>
+<span class="sd">        the weighting — the same between-element interpolation</span>
+<span class="sd">        position() has. ``None`` when nothing is dark."""</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">readings</span><span class="p">)</span>
+        <span class="n">order</span> <span class="o">=</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">rightmost</span> <span class="k">else</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+        <span class="n">first</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">order</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">readings</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">dark</span><span class="p">():</span>
+                <span class="n">first</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">break</span>
+        <span class="k">if</span> <span class="n">first</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">last</span> <span class="o">=</span> <span class="n">first</span>
+        <span class="n">step</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span> <span class="k">if</span> <span class="n">rightmost</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="k">while</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">last</span> <span class="o">+</span> <span class="n">step</span> <span class="o">&lt;</span> <span class="n">n</span> <span class="ow">and</span> <span class="n">readings</span><span class="p">[</span><span class="n">last</span> <span class="o">+</span> <span class="n">step</span><span class="p">]</span><span class="o">.</span><span class="n">dark</span><span class="p">():</span>
+            <span class="n">last</span> <span class="o">+=</span> <span class="n">step</span>
+        <span class="n">i0</span><span class="p">,</span> <span class="n">i1</span> <span class="o">=</span> <span class="p">(</span><span class="n">last</span><span class="p">,</span> <span class="n">first</span><span class="p">)</span> <span class="k">if</span> <span class="n">rightmost</span> <span class="k">else</span> <span class="p">(</span><span class="n">first</span><span class="p">,</span> <span class="n">last</span><span class="p">)</span>
+        <span class="n">lo</span> <span class="o">=</span> <span class="n">i0</span> <span class="o">-</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">i0</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="n">hi</span> <span class="o">=</span> <span class="n">i1</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">i1</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&lt;</span> <span class="n">n</span> <span class="k">else</span> <span class="n">i1</span>
+        <span class="n">weight_sum</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">moment</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">weight_sum</span> <span class="o">+=</span> <span class="n">readings</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">value</span>
+            <span class="n">moment</span> <span class="o">+=</span> <span class="n">readings</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">value</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">moment</span> <span class="o">/</span> <span class="n">weight_sum</span>
+
+<div class="viewcode-block" id="QTRArray.left_edge_position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.left_edge_position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">left_edge_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Millimetre position of the line's LEFT edge — the</span>
+<span class="sd">        white→black boundary on the left side of the leftmost dark</span>
+<span class="sd">        cluster, in the same frame as :meth:`position` (positive =</span>
+<span class="sd">        right of the array centre). ``None`` when nothing is dark.</span>
+
+<span class="sd">        The crossing is interpolated between the last white element</span>
+<span class="sd">        and the first dark one: the point where the calibrated value</span>
+<span class="sd">        passes ``dark_threshold``. An edge follower keeps THIS at 0,</span>
+<span class="sd">        so the robot straddles the boundary — half the array over</span>
+<span class="sd">        mat, half over line — instead of centring on the line</span>
+<span class="sd">        itself. That also makes line width irrelevant to steering.</span>
+
+<span class="sd">        When the leftmost element is itself dark the true edge is</span>
+<span class="sd">        off-array to the left; the estimate saturates half a pitch</span>
+<span class="sd">        beyond that element, so the error keeps its sign and</span>
+<span class="sd">        magnitude instead of vanishing.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"left_edge_position() needs at least 2 elements — a "</span>
+                <span class="s2">"single detector channel has no edge to interpolate "</span>
+                <span class="s2">"(use QTRChannel.dark() for a flag)"</span><span class="p">)</span>
+        <span class="n">readings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read</span><span class="p">()</span> <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">readings</span>
+        <span class="n">first</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">readings</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">dark</span><span class="p">():</span>
+                <span class="n">first</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">break</span>
+        <span class="k">if</span> <span class="n">first</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">first</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pitch</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="n">v0</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">first</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">v1</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">first</span><span class="p">]</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">frac</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span> <span class="o">-</span> <span class="n">v0</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">v1</span> <span class="o">-</span> <span class="n">v0</span><span class="p">)</span>
+        <span class="c1"># Interpolate over the ACTUAL spacing between these two</span>
+        <span class="c1"># elements — the pitch on a uniform array, the local gap on</span>
+        <span class="c1"># a positions_mm one.</span>
+        <span class="n">span</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">first</span><span class="p">]</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">first</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">first</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">frac</span> <span class="o">*</span> <span class="n">span</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.right_edge_position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.right_edge_position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">right_edge_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Mirror of :meth:`left_edge_position`: the line's RIGHT</span>
+<span class="sd">        edge — the black→white boundary on the right side of the</span>
+<span class="sd">        rightmost dark cluster, in the same mm frame. ``None`` when</span>
+<span class="sd">        nothing is dark; a dark rightmost element saturates half a</span>
+<span class="sd">        pitch off-array to the right.</span>
+
+<span class="sd">        A right-edge follower keeps THIS at 0 — the mirror-image</span>
+<span class="sd">        track discipline of the left-edge follower, same sign</span>
+<span class="sd">        convention (the P law is symmetric between the two)."""</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"right_edge_position() needs at least 2 elements — a "</span>
+                <span class="s2">"single detector channel has no edge to interpolate "</span>
+                <span class="s2">"(use QTRChannel.dark() for a flag)"</span><span class="p">)</span>
+        <span class="n">readings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read</span><span class="p">()</span> <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">readings</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_adcs</span><span class="p">)</span>
+        <span class="n">last</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">readings</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">dark</span><span class="p">():</span>
+                <span class="n">last</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">break</span>
+        <span class="k">if</span> <span class="n">last</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">last</span> <span class="o">==</span> <span class="n">n</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">n</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pitch</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="n">v0</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">last</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">v1</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">last</span><span class="p">]</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">frac</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span> <span class="o">-</span> <span class="n">v0</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">v1</span> <span class="o">-</span> <span class="n">v0</span><span class="p">)</span>
+        <span class="n">span</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">last</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">last</span><span class="p">]</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_mm</span><span class="p">[</span><span class="n">last</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">frac</span> <span class="o">*</span> <span class="n">span</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.leftmost_position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.leftmost_position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">leftmost_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Centroid of the LEFTMOST contiguous dark cluster, in mm</span>
+<span class="sd">        (same frame as :meth:`position`), or ``None`` when nothing is</span>
+<span class="sd">        dark.</span>
+
+<span class="sd">        At a branch the array sees TWO dark regions and the global</span>
+<span class="sd">        centroid lands between them — steering into the gap. The</span>
+<span class="sd">        leftmost cluster is the left line's own centre: a follower</span>
+<span class="sd">        that must take the left fork steers on this while its branch</span>
+<span class="sd">        flag says a second line is present. Computed the same way</span>
+<span class="sd">        every tick, so switching between the two is jump-free."""</span>
+        <span class="n">readings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read</span><span class="p">()</span> <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">readings</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cluster_position</span><span class="p">(</span><span class="n">readings</span><span class="p">,</span> <span class="n">rightmost</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.rightmost_position">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.rightmost_position">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rightmost_position</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Mirror of :meth:`leftmost_position`: the RIGHTMOST</span>
+<span class="sd">        contiguous dark cluster's centre — the right fork, for a</span>
+<span class="sd">        route policy that takes it."""</span>
+        <span class="n">readings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read</span><span class="p">()</span> <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">readings</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cluster_position</span><span class="p">(</span><span class="n">readings</span><span class="p">,</span> <span class="n">rightmost</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+
+    <span class="c1"># Edge-following setpoints, mm in the array frame — where each</span>
+    <span class="c1"># discipline HOLDS its boundary. 0 on a plain array (edge under</span>
+    <span class="c1"># the array centre); rig classes like :class:`QTRLineSensor`</span>
+    <span class="c1"># override with their geometry so user code never carries the</span>
+    <span class="c1"># numbers.</span>
+    <span class="n">LEFT_SETPOINT_MM</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">RIGHT_SETPOINT_MM</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">CENTER_SETPOINT_MM</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+<div class="viewcode-block" id="QTRArray.set_mode">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.set_mode">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_mode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mode</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Select the line-following discipline, a</span>
+<span class="sd">        :class:`openbricks.parameters.LineMode`: ``LEFT`` holds the</span>
+<span class="sd">        line's LEFT edge at ``LEFT_SETPOINT_MM``, ``RIGHT`` the RIGHT</span>
+<span class="sd">        edge at ``RIGHT_SETPOINT_MM``, ``CENTER`` the line's CENTRE</span>
+<span class="sd">        (the weighted centroid over every element) at</span>
+<span class="sd">        ``CENTER_SETPOINT_MM``. Takes effect on the next</span>
+<span class="sd">        :meth:`edge_error` — call it again any time to switch</span>
+<span class="sd">        disciplines mid-run."""</span>
+        <span class="n">parameters</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">LineMode</span><span class="p">,</span> <span class="n">mode</span><span class="p">,</span> <span class="s2">"mode"</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">=</span> <span class="n">mode</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.mode">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.mode">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">mode</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""The selected discipline, or ``None`` before set_mode."""</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.edge_error">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.edge_error">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">edge_error</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readings</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Signed steering error for the discipline selected with</span>
+<span class="sd">        :meth:`set_mode`, range -50 .. +50, positive = steer right</span>
+<span class="sd">        (the :meth:`position` sign convention) in every mode.</span>
+
+<span class="sd">        ``LineMode.LEFT`` / ``RIGHT``: how far the mode's setpoint</span>
+<span class="sd">        element sits from the black/white boundary, as its ambient</span>
+<span class="sd">        (0 black .. 100 white) referenced to 50 — zero exactly when</span>
+<span class="sd">        that element straddles the edge. One element, so the error</span>
+<span class="sd">        is proportional only within about a pitch of the setpoint</span>
+<span class="sd">        and rails at +/-50 beyond it.</span>
+
+<span class="sd">        ``LineMode.CENTER``: the line's centroid over ALL elements</span>
+<span class="sd">        (:meth:`position`) relative to ``CENTER_SETPOINT_MM``,</span>
+<span class="sd">        scaled so +/-50 is the far end of the window — proportional</span>
+<span class="sd">        across the whole span. With no element dark the line is</span>
+<span class="sd">        outside the window; the error rails toward the side it</span>
+<span class="sd">        left through (:meth:`last_side`), and raises if the line</span>
+<span class="sd">        has never been seen (there is nothing to steer toward)."""</span>
+        <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">readings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">==</span> <span class="n">LineMode</span><span class="o">.</span><span class="n">LEFT</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">readings</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_left_idx</span><span class="p">]</span><span class="o">.</span><span class="n">ambient</span><span class="p">()</span> <span class="o">-</span> <span class="mi">50</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">==</span> <span class="n">LineMode</span><span class="o">.</span><span class="n">RIGHT</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">50</span> <span class="o">-</span> <span class="n">readings</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_right_idx</span><span class="p">]</span><span class="o">.</span><span class="n">ambient</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">==</span> <span class="n">LineMode</span><span class="o">.</span><span class="n">CENTER</span><span class="p">:</span>
+            <span class="n">pos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">position</span><span class="p">(</span><span class="n">readings</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">pos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_side</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                        <span class="s2">"center mode: no element sees the line and "</span>
+                        <span class="s2">"it has never been seen — start with the "</span>
+                        <span class="s2">"line inside the window"</span><span class="p">)</span>
+                <span class="k">return</span> <span class="mf">50.0</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_side</span>
+            <span class="n">err</span> <span class="o">=</span> <span class="mf">50.0</span> <span class="o">*</span> <span class="p">(</span><span class="n">pos</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">CENTER_SETPOINT_MM</span><span class="p">)</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">_half_span</span>
+            <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="o">-</span><span class="mf">50.0</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="mf">50.0</span><span class="p">,</span> <span class="n">err</span><span class="p">))</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="s2">"no line-following mode selected — call "</span>
+            <span class="s2">"set_mode(LineMode.LEFT / RIGHT / CENTER) first"</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.last_side">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.last_side">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">last_side</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""+1 if the line was last seen right of centre, -1 left,</span>
+<span class="sd">        0 if it has never been off-centre. The recovery hint for a</span>
+<span class="sd">        follower that lost the line entirely."""</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_side</span></div>
+
+
+<div class="viewcode-block" id="QTRArray.emitters">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRArray.emitters">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">emitters</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">on</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Drive the CTRL pin (no-op when CTRL is tied high)."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctrl</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ctrl</span><span class="o">.</span><span class="n">value</span><span class="p">(</span><span class="mi">1</span> <span class="k">if</span> <span class="n">on</span> <span class="k">else</span> <span class="mi">0</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QTRChannel">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRChannel">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QTRChannel</span><span class="p">(</span><span class="n">QTRArray</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""One reflectance element with the array's calibrate/read</span>
+<span class="sd">    contract — for a DETECTOR channel wired apart from the line</span>
+<span class="sd">    cluster (a branch / marker flag).</span>
+
+<span class="sd">    Kept out of :class:`QTRArray` on purpose: a flag element folded</span>
+<span class="sd">    into the steering centroid would yank the position toward every</span>
+<span class="sd">    marker it passes. Steer on the array; DECIDE on this.</span>
+
+<span class="sd">    Example (bench: QTRX channel 1, far right, on GPIO 9)::</span>
+
+<span class="sd">        branch = QTRChannel(pin=9)</span>
+<span class="sd">        branch.calibrate(duration_ms=3000)   # same sweep as the array</span>
+<span class="sd">        if branch.dark():</span>
+<span class="sd">            ...   # marker under the flag channel</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pin</span><span class="p">,</span> <span class="n">dark_threshold</span><span class="o">=</span><span class="mi">300</span><span class="p">):</span>
+        <span class="n">QTRArray</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pins</span><span class="o">=</span><span class="p">(</span><span class="n">pin</span><span class="p">,),</span>
+                          <span class="n">dark_threshold</span><span class="o">=</span><span class="n">dark_threshold</span><span class="p">)</span>
+
+<div class="viewcode-block" id="QTRChannel.value">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRChannel.value">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">value</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Calibrated reading, 0 (mat) .. 1000 (marker/line)."""</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">read</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">value</span></div>
+
+
+<div class="viewcode-block" id="QTRChannel.dark">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRChannel.dark">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dark</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""True when the element is over a marker/line."""</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">value</span><span class="p">()</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span></div>
+
+
+<div class="viewcode-block" id="QTRChannel.white">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRChannel.white">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">white</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""True when the element is over the mat."""</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">dark</span><span class="p">()</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QTRLineSensor">
+<a class="viewcode-back" href="../../../api/drivers_sensors.html#openbricks.drivers.qtr.QTRLineSensor">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QTRLineSensor</span><span class="p">(</span><span class="n">QTRArray</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""THE bench line sensor: one QTRX-HD-15A window of ten skip-</span>
+<span class="sd">    pattern channels, pre-wired geometry included — construct it,</span>
+<span class="sd">    pick a discipline, follow::</span>
+
+<span class="sd">        qtr = QTRLineSensor()</span>
+<span class="sd">        qtr.set_mode(LineMode.LEFT)            # or "right", any time</span>
+<span class="sd">        error = qtr.read().edge_error()</span>
+
+<span class="sd">    Wiring (detailed table in docs/hardware.md): QTRX channels</span>
+<span class="sd">    1, 3, 4, 5, 7, 9, 11, 12, 13, 15 left-to-right onto GPIO 1..10</span>
+<span class="sd">    in order — a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm</span>
+<span class="sd">    (the pattern is a palindrome, so board orientation only changes</span>
+<span class="sd">    the channel LABELS, never the geometry). ``"left"`` mode holds</span>
+<span class="sd">    the line's LEFT edge under channel 4 (-16 mm); ``"right"``</span>
+<span class="sd">    holds the RIGHT edge under channel 12 (+16 mm) — both derived</span>
+<span class="sd">    from the positions table, not repeated by hand. Different</span>
+<span class="sd">    wiring: use :class:`QTRArray` directly with your own</span>
+<span class="sd">    pins/positions/setpoints.</span>
+<span class="sd">    """</span>
+
+    <span class="n">PINS</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+    <span class="n">POSITIONS_MM</span> <span class="o">=</span> <span class="p">(</span><span class="o">-</span><span class="mf">28.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">20.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">16.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">12.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">4.0</span><span class="p">,</span>
+                    <span class="mf">4.0</span><span class="p">,</span> <span class="mf">12.0</span><span class="p">,</span> <span class="mf">16.0</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">28.0</span><span class="p">)</span>
+    <span class="c1"># Channel 4 is index 2 of the window, channel 12 is index 7.</span>
+    <span class="n">LEFT_SETPOINT_MM</span> <span class="o">=</span> <span class="n">POSITIONS_MM</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">RIGHT_SETPOINT_MM</span> <span class="o">=</span> <span class="n">POSITIONS_MM</span><span class="p">[</span><span class="mi">7</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dark_threshold</span><span class="o">=</span><span class="mi">300</span><span class="p">):</span>
+        <span class="n">QTRArray</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pins</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">PINS</span><span class="p">,</span>
+                          <span class="n">positions_mm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">POSITIONS_MM</span><span class="p">,</span>
+                          <span class="n">dark_threshold</span><span class="o">=</span><span class="n">dark_threshold</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
