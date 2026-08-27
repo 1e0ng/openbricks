@@ -15,12 +15,41 @@ name: website
 # The docs build runs with ``-W`` on every PR too — a docstring that
 # breaks the API reference fails CI, which is the regression test for
 # the docs toolchain.
+#
+# VERSIONED DOCS (Pybricks style): the site root is always the latest
+# docs; every released firmware version's docs (HTML + PDF) are frozen
+# at /X.Y.Z/. The frozen builds live on the orphan ``docs-archive``
+# branch — one directory per version — which a ``v*`` tag push appends
+# to and every deploy merges into the Pages artifact next to the root
+# build, together with /versions.json (scripts/docs-versions.py) that
+# _static/version-switcher.js renders as the sidebar version menu.
+# Because the artifact replaces the whole site on each deploy, the
+# branch — not the live site — is the archive's source of truth.
+#
+# Backfilling docs for a release that predates this pipeline:
+#
+#   gh workflow run website.yaml -f tag=v2.9.0   # archive that tag
+#   gh workflow run website.yaml                 # then one redeploy
+#
+# The backfill builds the tag's docs with MAIN's docs toolchain
+# (conf.py, _templates, _static, requirements) so archived pages get
+# the version switcher; the documented API is the tag's own code.
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]          # firmware releases; cli/v* doesn't match (no /)
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Release tag to backfill into the docs archive (e.g. v2.9.0).
+          Leave EMPTY to just rebuild + redeploy the site from main
+          (picking up freshly backfilled versions).
+        required: false
+        default: ""
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -29,8 +58,72 @@ permissions:
   contents: read
 
 jobs:
-  build-docs:
+  backfill-docs:
+    # Build one old release's docs and append them to docs-archive.
+    # Does NOT deploy — run the workflow once more with an empty tag
+    # when done backfilling.
+    if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Overlay main's docs toolchain onto the tag
+        # The tag's code is what gets documented; main's conf.py,
+        # templates, static assets and pinned requirements are HOW —
+        # so archived pages carry the version switcher and build on
+        # today's Sphinx. conf.py reads openbricks.__version__ from
+        # the TAG's package, so the archived pages name the right
+        # version.
+        run: |
+          git checkout origin/main -- \
+            docs/conf.py docs/_templates docs/_static \
+            docs/requirements.txt
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install docs toolchain
+        run: pip install -r docs/requirements.txt
+      - name: Install LaTeX toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            latexmk texlive-xetex texlive-latex-recommended \
+            texlive-latex-extra texlive-fonts-recommended \
+            fonts-freefont-otf
+      - name: Build the tag's docs (HTML + PDF)
+        run: |
+          sphinx-build -W --keep-going -b html docs docs/_build/html
+          sphinx-build -M latexpdf docs docs/_build -W --keep-going
+          cp docs/_build/latex/openbricks.pdf \
+             docs/_build/html/openbricks-docs.pdf
+      - name: Commit to docs-archive
+        run: |
+          set -euo pipefail
+          VER="${TAG#v}"
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "github-actions[bot]@users.noreply.github.com"
+          git fetch origin docs-archive
+          git worktree add _archive FETCH_HEAD
+          rm -rf "_archive/$VER"
+          cp -R docs/_build/html "_archive/$VER"
+          cd _archive
+          git add -A
+          git commit -m "Archive docs for $VER (backfill)"
+          git push origin HEAD:docs-archive
+        env:
+          TAG: ${{ inputs.tag }}
+
+  build-docs:
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    runs-on: ubuntu-latest
+    permissions:
+      # write: a v* tag push commits this build to docs-archive.
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -106,13 +199,58 @@ jobs:
         run: |
           sphinx-build -M latexpdf docs docs/_build -W --keep-going
           cp docs/_build/latex/openbricks.pdf docs/_build/html/openbricks-docs.pdf
+
+      - name: Version the site (archive on release, merge, manifest)
+        # Every deployable build (main push, v* tag, empty-tag
+        # dispatch redeploy) — a PR build only proves the toolchain,
+        # and must never need the archive branch. Three moves:
+        #   1. v* tag push: freeze THIS build (HTML + PDF) into the
+        #      docs-archive branch as /X.Y.Z/.
+        #   2. Merge every archived version dir into the artifact.
+        #   3. Write /versions.json for the sidebar switcher.
+        # A missing docs-archive branch fails the job — the archive
+        # is a precondition of the versioned site, not an optional
+        # extra to skip past.
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch origin docs-archive
+          git worktree add _archive FETCH_HEAD
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VER="${GITHUB_REF_NAME#v}"
+            git config user.name "github-actions[bot]"
+            git config user.email \
+              "github-actions[bot]@users.noreply.github.com"
+            rm -rf "_archive/$VER"
+            cp -R docs/_build/html "_archive/$VER"
+            (cd _archive \
+              && git add -A \
+              && git commit -m "Archive docs for $VER" \
+              && git push origin HEAD:docs-archive)
+          fi
+          for d in _archive/*/; do
+            name="$(basename "$d")"
+            if echo "$name" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              cp -R "$d" "docs/_build/html/$name"
+            fi
+          done
+          CUR="$(python -c 'import openbricks; print(openbricks.__version__)')"
+          python scripts/docs-versions.py _archive "$CUR" \
+            > docs/_build/html/versions.json
+          cat docs/_build/html/versions.json
+
       - uses: actions/upload-pages-artifact@v4
         with:
           path: docs/_build/html
 
   deploy-docs:
-    # docs.openbricks.dev
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # docs.openbricks.dev — on main pushes, v* release tags, and the
+    # empty-tag workflow_dispatch (post-backfill redeploy).
+    if: >-
+      (github.event_name == 'push'
+        && (github.ref == 'refs/heads/main'
+            || startsWith(github.ref, 'refs/tags/v')))
+      || (github.event_name == 'workflow_dispatch' && inputs.tag == '')
     needs: build-docs
     runs-on: ubuntu-latest
     permissions:

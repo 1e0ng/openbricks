@@ -80,6 +80,10 @@ html_css_files = ["custom.css"]
 # Firebase Analytics — same web app as openbricks.dev; the event
 # hostname separates docs traffic in the Firebase console.
 html_js_files = [("firebase-analytics.js", {"type": "module"})]
+# Version switcher + archived-version banner (sidebar pill from
+# _templates/layout.html; manifest = /versions.json, generated at
+# deploy time by scripts/docs-versions.py).
+html_js_files.append("version-switcher.js")
 html_theme_options = {
     "collapse_navigation": False,
     "navigation_depth": 3,

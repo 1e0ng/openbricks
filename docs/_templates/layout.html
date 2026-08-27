@@ -1,13 +1,22 @@
-{#- Extend sphinx_rtd_theme's layout: a "Download PDF" button pinned
-    under the sidebar search box, visible from EVERY docs page (the
-    inline index.md link was easy to miss — user feedback). The PDF
-    is built by the same CI job that builds this HTML and deployed
-    to the site root; absolute URL so the button also works on
-    localhost preview builds. -#}
+{#- Extend sphinx_rtd_theme's layout with, under the sidebar search
+    box on EVERY docs page:
+
+    * a version pill naming the firmware version this build documents
+      (``release`` — fed from ``openbricks.__version__`` by conf.py).
+      _static/version-switcher.js turns it into a flyout menu listing
+      every published docs version from /versions.json, Pybricks
+      style; without the manifest (localhost preview, offline
+      bundle) it stays a static label.
+    * the "Download PDF" button (the inline index.md link was easy
+      to miss — user feedback). ``pathto(..., 1)`` keeps the href
+      relative, so an ARCHIVED build under /X.Y.Z/ links its own
+      frozen PDF, not the latest one. -#}
 {% extends "!layout.html" %}
 {% block sidebartitle %}
 {{ super() }}
-<a class="obk-pdf-btn" href="https://docs.openbricks.dev/openbricks-docs.pdf">
+<a id="obk-version" class="obk-version" href="#"
+   data-version="{{ release }}">firmware&nbsp;v{{ release }}</a>
+<a class="obk-pdf-btn" href="{{ pathto('openbricks-docs.pdf', 1) }}">
   &#8595;&nbsp;Download docs as PDF
 </a>
 {% endblock %}
