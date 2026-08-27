@@ -171,7 +171,8 @@ jobs:
             tests.test_timer_allocation \
             tests.test_estop \
             tests.test_diagnose_usb_serial \
-            tests.test_boot_main
+            tests.test_boot_main \
+            tests.test_docs_versions
 
   openbricks-py:
     # Already proven on the pull request that produced this

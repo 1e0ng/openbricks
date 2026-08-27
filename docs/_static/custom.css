@@ -36,6 +36,64 @@
   text-decoration: none;
 }
 
+/* Version pill + flyout menu (injected by _templates/layout.html,
+   populated from /versions.json by _static/version-switcher.js).
+   Without the manifest the pill is a static version label. */
+.obk-version {
+  display: block;
+  margin: 10px 0 0;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 4px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff !important;
+  cursor: default;
+}
+.obk-version-has-menu {
+  cursor: pointer;
+}
+.obk-version-has-menu::after {
+  content: " \25BE";
+}
+.obk-version-menu {
+  margin: 4px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+}
+.obk-version-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 10px;
+}
+.obk-version-row a {
+  color: #fff !important;
+}
+.obk-version-row-current a:first-child {
+  font-weight: 700;
+  text-decoration: underline;
+}
+.obk-version-pdf {
+  opacity: 0.8;
+}
+
+/* Banner shown on archived (/X.Y.Z/) pages, injected by
+   version-switcher.js. */
+.obk-version-banner {
+  padding: 10px 16px;
+  background: #fff3cd;
+  border-bottom: 2px solid #d9531e;
+  color: #533f03;
+  font-size: 14px;
+}
+.obk-version-banner a {
+  color: #d9531e;
+  font-weight: 600;
+}
+
 /* ---------------------------------------------------------------
    System font stack.
 

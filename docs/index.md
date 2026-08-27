@@ -11,7 +11,9 @@ hardware** — commodity MCUs, commodity motors, commodity sensors.
 
 *Prefer offline reading? This documentation is also available as a
 single* **[PDF download](https://docs.openbricks.dev/openbricks-docs.pdf)**,
-*rebuilt on every deploy.*
+*rebuilt on every deploy. The sidebar names the firmware version these
+pages document; its version menu lists the archived docs (and PDF) of
+every earlier firmware release, frozen at `/X.Y.Z/`.*
 
 Like Pybricks, openbricks is a *firmware you flash to an MCU*, not a
 library you `pip install` on top of stock MicroPython. The firmware owns
