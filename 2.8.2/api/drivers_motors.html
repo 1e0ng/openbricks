@@ -1,0 +1,1034 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Motor drivers &mdash; openbricks 2.8.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/api/drivers_motors.html" />
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=fa7f208a"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Sensor drivers" href="drivers_sensors.html" />
+    <link rel="prev" title="robotics — DriveBase" href="robotics.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="2.8.2">firmware&nbsp;v2.8.2</a>
+<a class="obk-pdf-btn" href="../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API reference</a></li>
+      <li class="breadcrumb-item active">Motor drivers</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/1e0ng/openbricks/blob/main/docs/api/drivers_motors.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="motor-drivers">
+<h1>Motor drivers<a class="headerlink" href="#motor-drivers" title="Link to this heading"></a></h1>
+<p>Every motor class implements the same <code class="docutils literal notranslate"><span class="pre">Motor</span></code> contract
+(<a class="reference internal" href="interfaces.html"><span class="doc">Interfaces</span></a>), so higher layers — and your code — swap motor
+types without changes. Speeds are output-shaft degrees per second,
+angles are degrees, <code class="docutils literal notranslate"><span class="pre">dc()</span></code> duty is -100..100.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.st3032</span><span class="w"> </span><span class="kn">import</span> <span class="n">ST3032Motor</span>
+
+<span class="n">m</span> <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">6</span><span class="p">)</span>
+<span class="n">m</span><span class="o">.</span><span class="n">run_speed</span><span class="p">(</span><span class="mi">120</span><span class="p">)</span>          <span class="c1"># wheel mode: spin at 120 deg/s</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">angle</span><span class="p">())</span>          <span class="c1"># multi-turn accumulated degrees</span>
+<span class="n">m</span><span class="o">.</span><span class="n">coast</span><span class="p">()</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.jgb37_520</span><span class="w"> </span><span class="kn">import</span> <span class="n">JGB37Motor</span>
+
+<span class="n">e</span> <span class="o">=</span> <span class="n">JGB37Motor</span><span class="p">(</span><span class="n">in1</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">in2</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">pwm</span><span class="o">=</span><span class="mi">27</span><span class="p">,</span> <span class="n">encoder_a</span><span class="o">=</span><span class="mi">18</span><span class="p">,</span> <span class="n">encoder_b</span><span class="o">=</span><span class="mi">19</span><span class="p">)</span>
+<span class="n">e</span><span class="o">.</span><span class="n">run_angle</span><span class="p">(</span><span class="mi">360</span><span class="p">,</span> <span class="mi">720</span><span class="p">)</span>     <span class="c1"># two turns at 360 deg/s, blocking</span>
+</pre></div>
+</div>
+<section id="serial-bus-servos-recommended">
+<h2>Serial bus servos (recommended)<a class="headerlink" href="#serial-bus-servos-recommended" title="Link to this heading"></a></h2>
+<section id="module-openbricks.drivers.st3032">
+<span id="st-3032"></span><h3>ST-3032<a class="headerlink" href="#module-openbricks.drivers.st3032" title="Link to this heading"></a></h3>
+<p>ST-3032 (Feetech STS3032) serial bus servo.</p>
+<p>Smaller sibling of the ST-3215 — same SCS protocol, same 4096-count
+12-bit magnetic encoder, same operating modes (0 = position,
+1 = wheel), same default 1 Mbps bus. The only differences are
+mechanical / electrical.</p>
+<p>Full datasheet: <code class="docutils literal notranslate"><span class="pre">docs/datasheets/feetech_sts3032.pdf</span></code> (model
+ST-3032-C062, Edition A/0 2025-11-30). Headline specs at typical
+12 V operation, all ±10% per Feetech:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Working voltage      9–14 V (typ 12 V)        ST-3215 typ 6–12.6 V
+No-load speed        0.067 s/60° = 148 RPM = 888 °/s
+                     (``ST3032Motor`` defaults ``max_dps`` to
+                     this — the ST-3215's protective 600 default
+                     capped the wire command well below what the
+                     servo can do)
+Stall torque         10 kg·cm (139 oz·in)     ST-3215 ~30 kg·cm
+Stall current        1.6 A
+Rated torque         3.3 kg·cm (1/3 of stall)
+Rated current        500 mA
+No-load current      100 mA
+Idle current         20 mA
+Kt                   6.3 kg·cm/A
+Size                 23 × 12 × 27.5 mm        ST-3215 larger
+Weight               20.6 g
+Gear                 1/205, coreless motor
+Backlash             ≤ 1.0°
+Over-temp shutdown   80 °C
+Over-current         &gt; 80 % stall for 2 s
+Max position update  1 ms
+</pre></div>
+</div>
+<p>Because the wire protocol is identical, <code class="docutils literal notranslate"><span class="pre">ST3032</span></code> and <code class="docutils literal notranslate"><span class="pre">ST3032Motor</span></code>
+are thin marker subclasses of <code class="docutils literal notranslate"><span class="pre">ST3215</span></code> / <code class="docutils literal notranslate"><span class="pre">ST3215Motor</span></code> with no
+behavioural override. Use them when your bench actually carries an
+ST-3032 — the typed name documents the hardware and gives us a place
+to specialise defaults later (lower max_dps, torque caps) if hardware
+testing surfaces a real difference.</p>
+<p>ST-3032 and ST-3215 instances on the same UART share the bus
+registry, so mixing them on one daisy chain is fine — each servo is
+addressed by its 1-byte ID regardless of model.</p>
+<p>⚠ Voltage rail: an ST-3032 will brown out below ~9 V. Don’t share a
+6 V bus with ST-3215s; budget a separate 12 V rail.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.st3032.ST3032">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.st3032.</span></span><span class="sig-name descname"><span class="pre">ST3032</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">servo_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">uart_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">14</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">41</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">baud</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1_000_000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dir_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_raw</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_raw</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4095</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">range_deg</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">360</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3032.html#ST3032"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3032.ST3032" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.drivers.st3215.ST3215" title="openbricks.drivers.st3215.ST3215"><code class="xref py py-class docutils literal notranslate"><span class="pre">ST3215</span></code></a></p>
+<p>One ST-3032 in position-servo mode (Servo interface).</p>
+<p>Behaves identically to <code class="docutils literal notranslate"><span class="pre">ST3215</span></code> — see that class for the
+full API. Subclassed only to let user code spell the actual
+hardware in place.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.st3032.ST3032Motor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.st3032.</span></span><span class="sig-name descname"><span class="pre">ST3032Motor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">servo_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">uart_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">14</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">41</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">baud</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1_000_000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dir_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">invert</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">steps_per_dps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_DEFAULT_STEPS_PER_DPS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_dps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">ST3032_NO_LOAD_DPS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accel_dps2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1500.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">raise_on_stall</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stall_idle_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1000</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3032.html#ST3032Motor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3032.ST3032Motor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.drivers.st3215.ST3215Motor" title="openbricks.drivers.st3215.ST3215Motor"><code class="xref py py-class docutils literal notranslate"><span class="pre">ST3215Motor</span></code></a></p>
+<p>One ST-3032 in wheel/continuous-rotation mode (Motor interface).</p>
+<p>Behaves identically to <code class="docutils literal notranslate"><span class="pre">ST3215Motor</span></code> — see that class for
+<code class="docutils literal notranslate"><span class="pre">run_speed</span></code> / <code class="docutils literal notranslate"><span class="pre">angle</span></code> / <code class="docutils literal notranslate"><span class="pre">run_angle</span></code> semantics — except for
+ONE specialised default: <code class="docutils literal notranslate"><span class="pre">max_dps</span></code> matches the ST-3032’s
+datasheet no-load speed (888 °/s) instead of the ST-3215’s 600,
+so the driver clamp can’t cap the servo below its own spec.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.st3032.ST3032Motor.STALL_TORQUE_MNM">
+<span class="sig-name descname"><span class="pre">STALL_TORQUE_MNM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">980.0</span></span><a class="headerlink" href="#openbricks.drivers.st3032.ST3032Motor.STALL_TORQUE_MNM" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.st3215">
+<span id="st-3215"></span><h3>ST-3215<a class="headerlink" href="#module-openbricks.drivers.st3215" title="Link to this heading"></a></h3>
+<p>ST-3215 (Waveshare/FeeTech) serial bus servo.</p>
+<p>These servos daisy-chain on a half-duplex UART bus: one TX line shared by
+host and all servos, each servo addressed by a 1-byte ID. Packet format (as
+in the FeeTech SCServo / Dynamixel-style protocol):</p>
+<blockquote>
+<div><p>0xFF 0xFF  ID  LEN  INSTR  PARAM…  CHECKSUM</p>
+<p>CHECKSUM = ~(ID + LEN + INSTR + sum(PARAM)) &amp; 0xFF
+LEN      = number of params + 2</p>
+</div></blockquote>
+<p>Common instructions:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="mh">0x01</span> <span class="n">PING</span>            <span class="o">-&gt;</span>  <span class="n">probe</span> <span class="n">the</span> <span class="n">servo</span>
+<span class="mh">0x02</span> <span class="n">READ</span>            <span class="o">-&gt;</span>  <span class="n">READ</span>  <span class="n">reg</span> <span class="nb">len</span>
+<span class="mh">0x03</span> <span class="n">WRITE</span>           <span class="o">-&gt;</span>  <span class="n">WRITE</span> <span class="n">reg</span> <span class="n">value</span><span class="o">...</span>
+</pre></div>
+</div>
+<p>Key registers (ST-3215):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>0x21  Operation Mode — 0 = position, 1 = wheel/continuous
+0x28  Torque Switch  — 1 = enable, 0 = coast
+0x2A  Goal position (low, high) — int16, 0..4095 over ~360°
+0x2E  Goal speed (low, high) — sign-magnitude; in wheel mode this
+      is the velocity setpoint (bit 15 of high byte = direction)
+0x38  Present position (low, high) — read only. 12-bit absolute
+      angle within one revolution: 0..4095 over 360°. Wraps to 0
+      at every full turn; we accumulate multi-turn revolutions in
+      software via a wrap heuristic in ``ST3215Motor.angle``.
+</pre></div>
+</div>
+<p>Half-duplex wiring: most ST-3215 boards use a single data line driven by a
+TX/RX switching circuit, but MicroPython UART pins are usually separate. If
+your adapter exposes TX and RX separately, just wire them normally. If you
+have a true half-duplex bus, you’ll need a driver chip or a direction-enable
+GPIO — set <code class="docutils literal notranslate"><span class="pre">dir_pin</span></code> below.</p>
+<p>Two classes here:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ST3215</span></code> — position-mode (Servo interface), for grippers / lifts /
+sensor turrets. <code class="docutils literal notranslate"><span class="pre">move_to(angle)</span></code> blocks until reached.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ST3215Motor</span></code> — continuous-rotation mode (Motor interface), for
+drivebase wheels. Switches the servo into mode=1 at construction
+and exposes <code class="docutils literal notranslate"><span class="pre">run_speed(dps)</span></code> / <code class="docutils literal notranslate"><span class="pre">angle()</span></code> / <code class="docutils literal notranslate"><span class="pre">brake()</span></code> so it
+drops into <code class="docutils literal notranslate"><span class="pre">DriveBase</span></code> the same way <code class="docutils literal notranslate"><span class="pre">MG370Motor</span></code> does.</p></li>
+</ul>
+<p>The ST-3032 (smaller sibling — 12 V, ~10 kg·cm, same SCS protocol)
+ships as marker subclasses in <code class="docutils literal notranslate"><span class="pre">openbricks.drivers.st3032</span></code>.</p>
+<p>Only a minimal subset of the protocol is implemented here. PR welcome.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.st3215.</span></span><span class="sig-name descname"><span class="pre">ST3215</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">servo_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">uart_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">14</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">41</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">baud</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1_000_000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dir_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_raw</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_raw</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4095</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">range_deg</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">360</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.interfaces.Servo" title="openbricks.interfaces.Servo"><code class="xref py py-class docutils literal notranslate"><span class="pre">Servo</span></code></a></p>
+<p>One ST-3215 servo on a shared bus.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215.move_to">
+<span class="sig-name descname"><span class="pre">move_to</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">angle_deg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">speed</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215.move_to"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215.move_to" title="Link to this definition"></a></dt>
+<dd><p>Move to <code class="docutils literal notranslate"><span class="pre">angle_deg</span></code> within the configured position range.</p>
+<p><code class="docutils literal notranslate"><span class="pre">speed</span></code> (raw goal-speed register units) is optional; with
+<code class="docutils literal notranslate"><span class="pre">wait=True</span></code> polls until within 2% of target or a 3 s
+timeout.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215.angle">
+<span class="sig-name descname"><span class="pre">angle</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215.angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215.angle" title="Link to this definition"></a></dt>
+<dd><p>Current shaft angle in degrees within the position range,
+or <code class="docutils literal notranslate"><span class="pre">None</span></code> if the bus read timed out.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215.ping">
+<span class="sig-name descname"><span class="pre">ping</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215.ping"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215.ping" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">True</span></code> if the servo answers on the bus.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.st3215.</span></span><span class="sig-name descname"><span class="pre">ST3215Motor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">servo_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">uart_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">14</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">41</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">baud</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1_000_000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dir_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">invert</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">steps_per_dps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_DEFAULT_STEPS_PER_DPS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_dps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">600.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accel_dps2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1500.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">raise_on_stall</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stall_idle_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1000</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.interfaces.Motor" title="openbricks.interfaces.Motor"><code class="xref py py-class docutils literal notranslate"><span class="pre">Motor</span></code></a></p>
+<p>One ST-3215 in wheel/continuous-rotation mode.</p>
+<p>Implements the openbricks <code class="docutils literal notranslate"><span class="pre">Motor</span></code> interface so it drops directly
+into <code class="docutils literal notranslate"><span class="pre">DriveBase</span></code>. The servo’s internal velocity loop handles
+closed-loop speed tracking — we just write the setpoint and read
+the multi-turn accumulated angle.</p>
+<p><code class="docutils literal notranslate"><span class="pre">angle()</span></code> accumulates in software because the servo’s
+Present-Position register is a 16-bit signed counter that wraps
+every ~3 turns (4096 counts/rev × ~8 turns to wrap at ±32767).
+Same wrap-correction shape as <code class="docutils literal notranslate"><span class="pre">PCNTEncoder</span></code>.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.STALL_TORQUE_MNM">
+<span class="sig-name descname"><span class="pre">STALL_TORQUE_MNM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2940.0</span></span><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.STALL_TORQUE_MNM" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.STALL_LOAD_PCT">
+<span class="sig-name descname"><span class="pre">STALL_LOAD_PCT</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">80</span></span><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.STALL_LOAD_PCT" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.STALL_SPEED_DPS">
+<span class="sig-name descname"><span class="pre">STALL_SPEED_DPS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">20.0</span></span><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.STALL_SPEED_DPS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.dc">
+<span class="sig-name descname"><span class="pre">dc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">duty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.dc"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.dc" title="Link to this definition"></a></dt>
+<dd><p>True Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.dc()</span></code>: raw duty, no speed
+regulation. Switches the servo to its open-loop mode (2) and
+writes duty straight to the output stage — speed sags under
+load, exactly like a plain DC motor at fixed voltage.</p>
+<p>On a motor adopted by the native engine the bus belongs to
+the hard tick, so duty still maps onto <code class="docutils literal notranslate"><span class="pre">run_speed</span></code> scaled
+to <code class="docutils literal notranslate"><span class="pre">max_dps</span></code> there (transitional until the engine grows
+its own duty drive).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.speed">
+<span class="sig-name descname"><span class="pre">speed</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.speed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.speed" title="Link to this definition"></a></dt>
+<dd><p>Measured shaft speed in deg/s from the present-speed
+register (sign-magnitude, bit 15; steps/s scaled by
+<code class="docutils literal notranslate"><span class="pre">steps_per_dps</span></code>). Returns <code class="docutils literal notranslate"><span class="pre">None</span></code> if the bus is silent,
+matching <code class="docutils literal notranslate"><span class="pre">angle()</span></code>. On an adopted motor (native DriveBase)
+the value comes from the hard-tick pump’s widened feedback
+read — no extra bus traffic.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.load">
+<span class="sig-name descname"><span class="pre">load</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.load"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.load" title="Link to this definition"></a></dt>
+<dd><p>Estimated shaft torque in mNm — Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.load()</span></code>
+shape. The present-load register reports 0.1 %-of-stall units
+(sign in bit 10, per the Feetech SCServo SDK); scaled by the
+model’s datasheet stall torque (<code class="docutils literal notranslate"><span class="pre">STALL_TORQUE_MNM</span></code>), so
+treat it as an estimate, not a measurement. <code class="docutils literal notranslate"><span class="pre">None</span></code> if the
+bus is silent. On an adopted motor the value comes from the
+hard-tick pump’s widened feedback read (user frame — the
+slot carries this motor’s invert).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.stalled">
+<span class="sig-name descname"><span class="pre">stalled</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.stalled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.stalled" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">True</span></code> when the servo is pushing hard (load magnitude at
+least <code class="docutils literal notranslate"><span class="pre">STALL_LOAD_PCT</span></code> percent of stall) but barely moving
+(speed magnitude at most <code class="docutils literal notranslate"><span class="pre">STALL_SPEED_DPS</span></code>) — the Pybricks
+<code class="docutils literal notranslate"><span class="pre">Motor.stalled()</span></code> contract, from the servo’s own feedback
+registers. Raises <code class="docutils literal notranslate"><span class="pre">OSError</span></code> if the bus is silent (a silent
+bus must not read as “not stalled”).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.run_speed">
+<span class="sig-name descname"><span class="pre">run_speed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deg_per_s</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.run_speed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.run_speed" title="Link to this definition"></a></dt>
+<dd><p>Set continuous wheel velocity in degrees per second.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.brake">
+<span class="sig-name descname"><span class="pre">brake</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.brake"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.brake" title="Link to this definition"></a></dt>
+<dd><p>Ramp to zero velocity and hold (servo’s internal loop).</p>
+<p>Deliberately RAMPED at <code class="docutils literal notranslate"><span class="pre">accel_dps2</span></code> like every other speed
+change (user decision, reverting 1.18.1’s instant bypass):
+one uniform rule — the acceleration default governs all
+commanded speed transitions, brake included. The SAFETY stop
+is unaffected: the e-stop and <code class="docutils literal notranslate"><span class="pre">coast()</span></code> cut the torque
+register, which the ramp does not govern, and remain instant.
+A hard local stop without torque-off is <code class="docutils literal notranslate"><span class="pre">accel_dps2=0</span></code> at
+construction.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.coast">
+<span class="sig-name descname"><span class="pre">coast</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.coast"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.coast" title="Link to this definition"></a></dt>
+<dd><p>Disable torque — wheel free-wheels.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.migrate_bus_to_native">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">migrate_bus_to_native</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bus</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.migrate_bus_to_native"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.migrate_bus_to_native" title="Link to this definition"></a></dt>
+<dd><p>Move every motor still on <code class="docutils literal notranslate"><span class="pre">bus</span></code> onto native slots.</p>
+<p>Called by DriveBase adoption right after it takes the UART:
+the wheels become slots 0/1 by their own path, and anything
+else that was sharing the MicroPython bus has to come across
+too or it is left talking into a closed UART.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.hold">
+<span class="sig-name descname"><span class="pre">hold</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.hold"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.hold" title="Link to this definition"></a></dt>
+<dd><p>Actively hold the current shaft angle so the position PID
+resists rotation. Subsequent <code class="docutils literal notranslate"><span class="pre">run_speed</span></code> / <code class="docutils literal notranslate"><span class="pre">brake</span></code> /
+<code class="docutils literal notranslate"><span class="pre">coast</span></code> calls transparently restore wheel mode.</p>
+<p>On an adopted motor (native DriveBase) the hold is a per-slot
+position lock on the hard tick (st_move_core) — it corrects
+disturbances continuously at the bus feedback rate.</p>
+<p>Holding never crosses a turn boundary (the shaft is meant to
+stay put), so the mechanism is chosen to avoid disturbing the
+servo’s turn model:</p>
+<ul class="simple">
+<li><p>If this motor has already been switched to multi-turn step
+mode (a prior <code class="docutils literal notranslate"><span class="pre">run_angle</span></code>), hold with a zero-count step —
+step mode keeps holding its current target.</p></li>
+<li><p>Otherwise (e.g. a <code class="docutils literal notranslate"><span class="pre">DriveBase</span></code> wheel that has only ever run
+in velocity mode), hold in single-turn position mode with
+goal=present. This deliberately does NOT zero the angle-limit
+registers, so a wheel motor keeps its stock single-turn
+present-position reads and its odometry stays intact.</p></li>
+</ul>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.done">
+<span class="sig-name descname"><span class="pre">done</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.done"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.done" title="Link to this definition"></a></dt>
+<dd><p>Pybricks-style status check for an in-flight
+<code class="docutils literal notranslate"><span class="pre">run_angle(wait=False)</span></code> move. Returns <code class="docutils literal notranslate"><span class="pre">True</span></code> if no move
+is in flight (the normal case) or the active move has parked
+(its remaining-to-target register has counted down to within
+tolerance). Returns <code class="docutils literal notranslate"><span class="pre">False</span></code> while the move is still running.</p>
+<p>Calling <code class="docutils literal notranslate"><span class="pre">done()</span></code> is what advances the move: each call reads
+the step-mode remaining register once. For a move larger than 7
+turns (issued as back-to-back steps), <code class="docutils literal notranslate"><span class="pre">done()</span></code> writes the next
+step once the current one parks, and on the final step runs the
+end-of-move <code class="docutils literal notranslate"><span class="pre">then=</span></code> dispatch and clears the pending state. So
+polling cadence matters for &gt;7-turn moves — the wheel sits idle
+at each step boundary until the next <code class="docutils literal notranslate"><span class="pre">done()</span></code> advances it.
+With a typical <code class="docutils literal notranslate"><span class="pre">time.sleep_ms(10)</span></code> poll that’s a single-tick
+gap; if you never poll, a multi-step move stalls after the
+first step.</p>
+<p>On an adopted motor the C controller advances the move on the
+hard tick; <code class="docutils literal notranslate"><span class="pre">done()</span></code> just checks the arrival flag and runs
+the deferred <code class="docutils literal notranslate"><span class="pre">then=</span></code> dispatch.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.angle">
+<span class="sig-name descname"><span class="pre">angle</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.angle" title="Link to this definition"></a></dt>
+<dd><p>Return shaft angle in degrees, multi-turn accumulated.</p>
+<p>In STEP mode the present-position register reads remaining-to-
+target rather than absolute position, so we can’t derive the
+angle from it — return the software accumulator, which
+<code class="docutils literal notranslate"><span class="pre">run_angle</span></code> advances by the executed step counts as each step
+parks. In wheel/position mode, rebuild the accumulator from the
+encoder via the wrap heuristic.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.reset_angle">
+<span class="sig-name descname"><span class="pre">reset_angle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">angle</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.reset_angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.reset_angle" title="Link to this definition"></a></dt>
+<dd><p>Set the current shaft angle to <code class="docutils literal notranslate"><span class="pre">angle</span></code> (degrees).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.run_angle">
+<span class="sig-name descname"><span class="pre">run_angle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deg_per_s</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_angle</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tolerance_deg</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kp</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">poll_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">then</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'coast'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.run_angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.run_angle" title="Link to this definition"></a></dt>
+<dd><p>Rotate by <code class="docutils literal notranslate"><span class="pre">target_angle</span></code> degrees at up to <code class="docutils literal notranslate"><span class="pre">deg_per_s</span></code>,
+ending within <code class="docutils literal notranslate"><span class="pre">tolerance_deg</span></code> of the target.</p>
+<p>On an adopted motor (native DriveBase) the move runs as a
+per-slot trapezoid position move on the hard tick
+(st_move_core) — same trajectory + arrival semantics as the
+drivebase’s own moves; <code class="docutils literal notranslate"><span class="pre">tolerance_deg</span></code> is fixed at the
+C core’s arrival tolerance there.</p>
+<p><code class="docutils literal notranslate"><span class="pre">target_angle</span></code> is RELATIVE and UNBOUNDED — <code class="docutils literal notranslate"><span class="pre">run_angle(200,</span>
+<span class="pre">360)</span></code> rotates one full turn forward, <code class="docutils literal notranslate"><span class="pre">run_angle(200,</span> <span class="pre">1080)</span></code>
+three turns, <code class="docutils literal notranslate"><span class="pre">run_angle(200,</span> <span class="pre">-540)</span></code> one and a half turns
+back. Direction is the sign of <code class="docutils literal notranslate"><span class="pre">target_angle</span></code>.</p>
+<p>Implementation: the servo is driven in <strong>step mode</strong> (op_mode=3)
+for the move. In step mode the goal-position register is a
+<em>signed relative step</em> — write N counts and the shaft advances
+N counts from where it is, with no single-turn 0/4095 wrap to
+cross (the prerequisite is angle limits = 0, set once on the
+first call by <code class="docutils literal notranslate"><span class="pre">_ensure_step_limits</span></code>). This is what makes
+moves past 180° / past one full turn work: the older
+single-turn position mode (op_mode=0) clamps to 0..4095 and a
+target across the boundary was executed the <em>wrong way round</em>,
+capping real motion at roughly half a turn.</p>
+<p>A single step write covers up to ±7 turns (the STS multi-turn
+envelope); larger moves are issued as back-to-back ±7-turn
+steps, each parking before the next — still no boundary to
+cross. The servo’s internal PID handles convergence (≈0.088°
+per encoder count); completion is detected by reading the
+step-mode <em>remaining-to-target</em> register and waiting for it to
+count down to ~0 (see <code class="docutils literal notranslate"><span class="pre">_read_step_remaining</span></code>). The shaft-angle
+accumulator is advanced by the counts actually travelled so
+<code class="docutils literal notranslate"><span class="pre">angle()</span></code> / <code class="docutils literal notranslate"><span class="pre">reset_angle</span></code> stay correct across the move.</p>
+<p><code class="docutils literal notranslate"><span class="pre">then</span></code> selects the end-state, pybricks-style:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;coast&quot;</span></code> (default) — cut torque; wheel free-wheels. The
+next <code class="docutils literal notranslate"><span class="pre">run_speed</span></code> / <code class="docutils literal notranslate"><span class="pre">brake</span></code> / <code class="docutils literal notranslate"><span class="pre">run_angle</span></code> transparently
+re-enables torque and restores the mode it needs.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;brake&quot;</span></code> — restore wheel mode and write goal_speed=0 so
+the servo’s velocity loop actively holds zero rotation rate.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;hold&quot;</span></code> — leave the servo in step mode; its position PID
+is already holding the target and resisting rotation.</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">wait=False</span></code> kicks off the move and returns immediately
+without blocking. Use it for concurrent multi-motor moves,
+pybricks-style:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">left</span><span class="o">.</span><span class="n">run_angle</span><span class="p">(</span><span class="mi">60</span><span class="p">,</span> <span class="mi">720</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">right</span><span class="o">.</span><span class="n">run_angle</span><span class="p">(</span><span class="mi">60</span><span class="p">,</span> <span class="mi">720</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="k">while</span> <span class="ow">not</span> <span class="p">(</span><span class="n">left</span><span class="o">.</span><span class="n">done</span><span class="p">()</span> <span class="ow">and</span> <span class="n">right</span><span class="o">.</span><span class="n">done</span><span class="p">()):</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Multi-revolution targets are supported in <code class="docutils literal notranslate"><span class="pre">wait=False</span></code> mode
+too. For a move within ±7 turns the whole thing is one step
+write and <code class="docutils literal notranslate"><span class="pre">done()</span></code> simply reports convergence; for a larger
+move <code class="docutils literal notranslate"><span class="pre">done()</span></code> issues each subsequent ±7-turn step once the
+previous one parks, so you must keep polling. The end-state
+<code class="docutils literal notranslate"><span class="pre">then=</span></code> dispatch is deferred until <code class="docutils literal notranslate"><span class="pre">done()</span></code> reports the
+final step has converged.</p>
+<p>Any subsequent motion command (<code class="docutils literal notranslate"><span class="pre">run</span></code>, <code class="docutils literal notranslate"><span class="pre">run_speed</span></code>, <code class="docutils literal notranslate"><span class="pre">brake</span></code>,
+<code class="docutils literal notranslate"><span class="pre">coast</span></code>, <code class="docutils literal notranslate"><span class="pre">hold</span></code>, <code class="docutils literal notranslate"><span class="pre">run_angle</span></code>) supersedes a pending
+<code class="docutils literal notranslate"><span class="pre">wait=False</span></code> move — the new command takes over and the
+pending state is dropped (pybricks “new command wins”).</p>
+<p>The legacy <code class="docutils literal notranslate"><span class="pre">kp</span></code> / <code class="docutils literal notranslate"><span class="pre">poll_ms</span></code> / <code class="docutils literal notranslate"><span class="pre">debug</span></code> arguments are
+accepted for back-compat with the velocity-mode implementation
+but no longer apply — the PID lives on the servo, not in Python.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.ST3215Motor.ping">
+<span class="sig-name descname"><span class="pre">ping</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#ST3215Motor.ping"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.ST3215Motor.ping" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">True</span></code> if the servo answers on the bus.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.SyncServoGroup">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.st3215.</span></span><span class="sig-name descname"><span class="pre">SyncServoGroup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">servos</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#SyncServoGroup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.SyncServoGroup" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Coordinated multi-servo writes via SCServo SYNC WRITE.</p>
+<p>All servos must share one <code class="docutils literal notranslate"><span class="pre">_SCServoBus</span></code> (same UART). Mixed
+servo types (<code class="docutils literal notranslate"><span class="pre">ST3215</span></code>, <code class="docutils literal notranslate"><span class="pre">ST3215Motor</span></code>, <code class="docutils literal notranslate"><span class="pre">ST3032</span></code>, <code class="docutils literal notranslate"><span class="pre">ST3032Motor</span></code>)
+are fine since they all speak the same SCS protocol — SYNC WRITE
+just blasts the same register on all listed IDs.</p>
+<p>Use this whenever you have multiple servos that should apply a
+setpoint at the same packet boundary (a multi-finger gripper, a
+multi-axis arm) — each servo receives its byte slot of the
+broadcast packet at the same instant, instead of N serialised
+individual writes.</p>
+<p>NOT for drivebase wheels: use <code class="docutils literal notranslate"><span class="pre">DriveBase.move_wheels(left,</span>
+<span class="pre">right)</span></code> instead. It gives the same one-packet guarantee, and a
+SyncServoGroup cannot drive adopted wheels at all — a DriveBase
+hands their UART to the native bus driver, so the MicroPython
+bus this class writes through is closed.</p>
+<p class="rubric">Example</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.st3215</span><span class="w"> </span><span class="kn">import</span> <span class="n">ST3215Motor</span><span class="p">,</span> <span class="n">SyncServoGroup</span>
+
+<span class="n">thumb</span> <span class="o">=</span> <span class="n">ST3215Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">ST3215Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="n">group</span> <span class="o">=</span> <span class="n">SyncServoGroup</span><span class="p">([</span><span class="n">thumb</span><span class="p">,</span> <span class="n">index</span><span class="p">])</span>
+
+<span class="c1"># Both fingers start moving at the same packet boundary —</span>
+<span class="c1"># one SYNC WRITE instead of two individual writes.</span>
+<span class="n">group</span><span class="o">.</span><span class="n">set_goal_speeds</span><span class="p">([</span><span class="mi">200</span><span class="p">,</span> <span class="mi">200</span><span class="p">])</span>
+</pre></div>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.st3215.SyncServoGroup.set_goal_speeds">
+<span class="sig-name descname"><span class="pre">set_goal_speeds</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">speeds_dps</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/st3215.html#SyncServoGroup.set_goal_speeds"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.st3215.SyncServoGroup.set_goal_speeds" title="Link to this definition"></a></dt>
+<dd><p>Write goal-speed on every servo in one SYNC WRITE packet.</p>
+<p><code class="docutils literal notranslate"><span class="pre">speeds_dps</span></code> is a list parallel to the servos given at
+construction. Each servo’s own <code class="docutils literal notranslate"><span class="pre">_encode_goal_speed</span></code> is
+used, so per-servo <code class="docutils literal notranslate"><span class="pre">invert</span></code> / <code class="docutils literal notranslate"><span class="pre">steps_per_dps</span></code> /
+<code class="docutils literal notranslate"><span class="pre">max_dps</span></code> are respected.</p>
+<p>Servos that don’t expose <code class="docutils literal notranslate"><span class="pre">_encode_goal_speed</span></code> (i.e. the
+position-mode <code class="docutils literal notranslate"><span class="pre">ST3215</span></code> class) raise <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+<section id="dc-gear-motors-with-encoders">
+<h2>DC gear motors with encoders<a class="headerlink" href="#dc-gear-motors-with-encoders" title="Link to this heading"></a></h2>
+<section id="module-openbricks.drivers.jgb37_520">
+<span id="jgb37-520"></span><h3>JGB37-520<a class="headerlink" href="#module-openbricks.drivers.jgb37_520" title="Link to this heading"></a></h3>
+<p>JGB37-520 geared DC motor with magnetic quadrature encoder.</p>
+<p>This is a 6-wire motor: two power leads (into an H-bridge, typically L298N),
+Vcc and GND for the hall sensors, and two encoder channels A and B.</p>
+<dl class="simple">
+<dt>Typical spec sheet values (varies by gear ratio variant):</dt><dd><ul class="simple">
+<li><p>Encoder CPR at motor shaft: 11</p></li>
+<li><p>Gear ratio (example): 1:30  -&gt; output shaft CPR = 11 * 30 * 4 = 1320 edges
+(multiply by 4 because we count both edges on both channels)</p></li>
+</ul>
+</dd>
+</dl>
+<p>This class is a thin Python wrapper over the C <code class="docutils literal notranslate"><span class="pre">Servo</span></code> type in
+<code class="docutils literal notranslate"><span class="pre">_openbricks_native</span></code> (see <code class="docutils literal notranslate"><span class="pre">native/user_c_modules/openbricks/servo.c</span></code>).
+The wrapper’s job is to build the hardware handles (Pin / PWM / encoder)
+from pin numbers and pass them to the native servo — the closed-loop
+control tick runs in C at the <code class="docutils literal notranslate"><span class="pre">motor_process</span></code> tick rate (1 kHz default).</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.jgb37_520.</span></span><span class="sig-name descname"><span class="pre">JGB37Motor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">in1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">in2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pwm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoder_a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoder_b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">counts_per_output_rev</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1320</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">invert</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoder_invert</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kp</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_DEFAULT_KP</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.interfaces.Motor" title="openbricks.interfaces.Motor"><code class="xref py py-class docutils literal notranslate"><span class="pre">Motor</span></code></a></p>
+<p>JGB37-520 DC gear motor with quadrature encoder, closed-loop.</p>
+<p>Runs the full <code class="docutils literal notranslate"><span class="pre">Motor</span></code> contract on the native 1 kHz servo core:
+<code class="docutils literal notranslate"><span class="pre">run_speed(deg_per_s)</span></code>, <code class="docutils literal notranslate"><span class="pre">run_angle(deg_per_s,</span> <span class="pre">target_angle)</span></code>,
+<code class="docutils literal notranslate"><span class="pre">dc(duty)</span></code>, <code class="docutils literal notranslate"><span class="pre">brake()</span></code> / <code class="docutils literal notranslate"><span class="pre">coast()</span></code>, <code class="docutils literal notranslate"><span class="pre">angle()</span></code> /
+<code class="docutils literal notranslate"><span class="pre">reset_angle()</span></code>, <code class="docutils literal notranslate"><span class="pre">speed()</span></code>. Pair two of them in a
+<a class="reference internal" href="robotics.html#openbricks.robotics.drivebase.DriveBase" title="openbricks.robotics.drivebase.DriveBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">DriveBase</span></code></a> for the coupled
+2-DOF chassis controller.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>in1</strong> – H-bridge pins (e.g. L298N IN1/IN2/EN).</p></li>
+<li><p><strong>in2</strong> – H-bridge pins (e.g. L298N IN1/IN2/EN).</p></li>
+<li><p><strong>pwm</strong> – H-bridge pins (e.g. L298N IN1/IN2/EN).</p></li>
+<li><p><strong>encoder_a</strong> – quadrature encoder channel pins.</p></li>
+<li><p><strong>encoder_b</strong> – quadrature encoder channel pins.</p></li>
+<li><p><strong>counts_per_output_rev</strong> – encoder edges per output-shaft
+revolution (4 × PPR × gear ratio; 1320 for the common
+11-PPR 1:30 variant).</p></li>
+<li><p><strong>invert</strong> – flip motor command AND encoder together — for a motor
+wired backwards end-to-end (typically the mirrored side
+of a drivebase).</p></li>
+<li><p><strong>encoder_invert</strong> – flip ONLY the encoder reading — for
+mirror-mounted encoders that count down on motor-forward.</p></li>
+<li><p><strong>kp</strong> – speed-loop proportional gain (native servo core).</p></li>
+</ul>
+</dd>
+</dl>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.jgb37_520</span><span class="w"> </span><span class="kn">import</span> <span class="n">JGB37Motor</span>
+
+<span class="n">m</span> <span class="o">=</span> <span class="n">JGB37Motor</span><span class="p">(</span><span class="n">in1</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">in2</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">pwm</span><span class="o">=</span><span class="mi">27</span><span class="p">,</span>
+               <span class="n">encoder_a</span><span class="o">=</span><span class="mi">18</span><span class="p">,</span> <span class="n">encoder_b</span><span class="o">=</span><span class="mi">19</span><span class="p">)</span>
+<span class="n">m</span><span class="o">.</span><span class="n">run_angle</span><span class="p">(</span><span class="mi">360</span><span class="p">,</span> <span class="mi">720</span><span class="p">)</span>      <span class="c1"># two turns at 360 deg/s, blocking</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">angle</span><span class="p">())</span>
+</pre></div>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor.dc">
+<span class="sig-name descname"><span class="pre">dc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">duty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor.dc"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor.dc" title="Link to this definition"></a></dt>
+<dd><p>Run at a fixed raw duty cycle (-100..100), open loop —
+Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.dc()</span></code>. Non-blocking. This is the pre-1.21.0
+<code class="docutils literal notranslate"><span class="pre">run()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor.speed">
+<span class="sig-name descname"><span class="pre">speed</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor.speed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor.speed" title="Link to this definition"></a></dt>
+<dd><p>Measured shaft speed in degrees per second — Pybricks
+<code class="docutils literal notranslate"><span class="pre">Motor.speed()</span></code>. Closed-loop drivers implement it (encoder
+observer / servo present-speed register).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor.brake">
+<span class="sig-name descname"><span class="pre">brake</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor.brake"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor.brake" title="Link to this definition"></a></dt>
+<dd><p>Stop with active braking (both terminals shorted).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor.coast">
+<span class="sig-name descname"><span class="pre">coast</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor.coast"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor.coast" title="Link to this definition"></a></dt>
+<dd><p>Stop by cutting drive power (motor free-wheels).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor.angle">
+<span class="sig-name descname"><span class="pre">angle</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor.angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor.angle" title="Link to this definition"></a></dt>
+<dd><p>Return the current shaft angle in degrees.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor.reset_angle">
+<span class="sig-name descname"><span class="pre">reset_angle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">angle</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor.reset_angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor.reset_angle" title="Link to this definition"></a></dt>
+<dd><p>Set the current angle to <code class="docutils literal notranslate"><span class="pre">angle</span></code> degrees.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor.run_speed">
+<span class="sig-name descname"><span class="pre">run_speed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deg_per_s</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor.run_speed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor.run_speed" title="Link to this definition"></a></dt>
+<dd><p>Enter closed-loop speed control with the given target (deg/s).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.jgb37_520.JGB37Motor.run_angle">
+<span class="sig-name descname"><span class="pre">run_angle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deg_per_s</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_angle</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accel_dps2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1500.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/jgb37_520.html#JGB37Motor.run_angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.jgb37_520.JGB37Motor.run_angle" title="Link to this definition"></a></dt>
+<dd><p>Rotate by <code class="docutils literal notranslate"><span class="pre">target_angle</span></code> degrees, following a trapezoidal
+profile at up to <code class="docutils literal notranslate"><span class="pre">deg_per_s</span></code>.</p>
+<p>The native servo builds the profile once and the scheduler samples
+it at 1 kHz, so acceleration / cruise / deceleration phases are
+smooth and the move stops cleanly at the target without overshoot
+(apart from small integration error).</p>
+<p>With <code class="docutils literal notranslate"><span class="pre">wait=False</span></code> the scheduler keeps running the profile; the
+caller can poll <code class="docutils literal notranslate"><span class="pre">self._servo.is_done()</span></code> or eventually call
+<code class="docutils literal notranslate"><span class="pre">brake()</span></code> / <code class="docutils literal notranslate"><span class="pre">coast()</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.mg370">
+<span id="mg370"></span><h3>MG370<a class="headerlink" href="#module-openbricks.drivers.mg370" title="Link to this heading"></a></h3>
+<p>MG370 geared DC motor with GMR (giant magnetoresistance) quadrature encoder.</p>
+<p>The GMR variant has a 500-PPR encoder on the motor shaft, giving massively
+more resolution than a standard Hall-effect encoder — at a 1:34 gearbox
+the output shaft sees <code class="docutils literal notranslate"><span class="pre">500</span> <span class="pre">*</span> <span class="pre">4</span> <span class="pre">*</span> <span class="pre">34.014</span> <span class="pre">≈</span> <span class="pre">68028</span> <span class="pre">CPR</span></code>. That edge rate is
+too fast for the software <code class="docutils literal notranslate"><span class="pre">QuadratureEncoder</span></code> (Pin.irq() tops out around
+5-10 kHz), so this driver uses the native <code class="docutils literal notranslate"><span class="pre">PCNTEncoder</span></code> — a C wrapper
+over the ESP32 PCNT peripheral — baked into the firmware image.</p>
+<p>Every MG370Motor instance needs its own PCNT unit — ESP32 has 8, ESP32-S3
+has 4. Pick unit=0 for the first motor, unit=1 for the second, etc.</p>
+<p>Apart from the encoder layer, MG370Motor is identical to JGB37Motor:
+same native <code class="docutils literal notranslate"><span class="pre">Servo</span></code> underneath, same control tick, same closed-loop API.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.mg370.</span></span><span class="sig-name descname"><span class="pre">MG370Motor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">in1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">in2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pwm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoder_a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoder_b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pcnt_unit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pcnt_filter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1023</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">counts_per_output_rev</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_DEFAULT_CPR</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">invert</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoder_invert</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kp</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_DEFAULT_KP</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.interfaces.Motor" title="openbricks.interfaces.Motor"><code class="xref py py-class docutils literal notranslate"><span class="pre">Motor</span></code></a></p>
+<p>MG370 DC gear motor with high-resolution GMR encoder, closed-loop.</p>
+<p>Same <code class="docutils literal notranslate"><span class="pre">Motor</span></code> contract and native 1 kHz servo core as
+<a class="reference internal" href="#openbricks.drivers.jgb37_520.JGB37Motor" title="openbricks.drivers.jgb37_520.JGB37Motor"><code class="xref py py-class docutils literal notranslate"><span class="pre">JGB37Motor</span></code></a>; the difference
+is the encoder path — the 500-PPR GMR encoder is counted by the
+ESP32 PCNT hardware peripheral (<code class="docutils literal notranslate"><span class="pre">pcnt_unit</span></code>), not GPIO
+interrupts, because its edge rate exceeds what <code class="docutils literal notranslate"><span class="pre">Pin.irq</span></code> can
+service.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>in1</strong> – H-bridge pins.</p></li>
+<li><p><strong>in2</strong> – H-bridge pins.</p></li>
+<li><p><strong>pwm</strong> – H-bridge pins.</p></li>
+<li><p><strong>encoder_a</strong> – encoder channel pins (into PCNT).</p></li>
+<li><p><strong>encoder_b</strong> – encoder channel pins (into PCNT).</p></li>
+<li><p><strong>pcnt_unit</strong> – PCNT peripheral unit, unique per motor (ESP32 has
+8, ESP32-S3 has 4 — first motor 0, second 1, …).</p></li>
+<li><p><strong>pcnt_filter</strong> – PCNT glitch filter in APB cycles (default 1023
+≈ 12.8 µs; lower it only for encoders faster than ~35 kHz
+edge rate).</p></li>
+<li><p><strong>counts_per_output_rev</strong> – encoder edges per output-shaft
+revolution (default matches the 1:34 GMR variant).</p></li>
+<li><p><strong>kp</strong> (<em>invert / encoder_invert /</em>) – as in <code class="docutils literal notranslate"><span class="pre">JGB37Motor</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor.dc">
+<span class="sig-name descname"><span class="pre">dc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">duty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor.dc"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor.dc" title="Link to this definition"></a></dt>
+<dd><p>Run at a fixed raw duty cycle (-100..100), open loop —
+Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.dc()</span></code>. Non-blocking. This is the pre-1.21.0
+<code class="docutils literal notranslate"><span class="pre">run()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor.speed">
+<span class="sig-name descname"><span class="pre">speed</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor.speed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor.speed" title="Link to this definition"></a></dt>
+<dd><p>Measured shaft speed in degrees per second — Pybricks
+<code class="docutils literal notranslate"><span class="pre">Motor.speed()</span></code>. Closed-loop drivers implement it (encoder
+observer / servo present-speed register).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor.brake">
+<span class="sig-name descname"><span class="pre">brake</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor.brake"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor.brake" title="Link to this definition"></a></dt>
+<dd><p>Stop with active braking (both terminals shorted).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor.coast">
+<span class="sig-name descname"><span class="pre">coast</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor.coast"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor.coast" title="Link to this definition"></a></dt>
+<dd><p>Stop by cutting drive power (motor free-wheels).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor.angle">
+<span class="sig-name descname"><span class="pre">angle</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor.angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor.angle" title="Link to this definition"></a></dt>
+<dd><p>Return the current shaft angle in degrees.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor.reset_angle">
+<span class="sig-name descname"><span class="pre">reset_angle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">angle</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor.reset_angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor.reset_angle" title="Link to this definition"></a></dt>
+<dd><p>Set the current angle to <code class="docutils literal notranslate"><span class="pre">angle</span></code> degrees.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor.run_speed">
+<span class="sig-name descname"><span class="pre">run_speed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deg_per_s</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor.run_speed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor.run_speed" title="Link to this definition"></a></dt>
+<dd><p>Hold a target speed (closed loop).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.mg370.MG370Motor.run_angle">
+<span class="sig-name descname"><span class="pre">run_angle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deg_per_s</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_angle</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accel_dps2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1500.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/mg370.html#MG370Motor.run_angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.mg370.MG370Motor.run_angle" title="Link to this definition"></a></dt>
+<dd><p>Rotate by <code class="docutils literal notranslate"><span class="pre">target_angle</span></code> degrees at <code class="docutils literal notranslate"><span class="pre">deg_per_s</span></code>. Blocks
+if <code class="docutils literal notranslate"><span class="pre">wait</span></code>; otherwise returns immediately and the caller polls
+<code class="docutils literal notranslate"><span class="pre">done()</span></code> to advance the move and detect completion.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+<section id="h-bridge-drivers-open-loop">
+<h2>H-bridge drivers (open loop)<a class="headerlink" href="#h-bridge-drivers-open-loop" title="Link to this heading"></a></h2>
+<section id="module-openbricks.drivers.l298n">
+<span id="l298n"></span><h3>L298N<a class="headerlink" href="#module-openbricks.drivers.l298n" title="Link to this heading"></a></h3>
+<p>L298N H-bridge motor driver.</p>
+<p>The L298N drives a brushed DC motor via two direction pins (IN1/IN2) and one
+PWM pin (EN-A or EN-B). It’s open-loop: the class knows nothing about the
+physical motor speed or position. For closed-loop use, wrap one of these in
+<code class="docutils literal notranslate"><span class="pre">jgb37_520.JGB37Motor</span></code> (which adds an encoder).</p>
+<p>Pinout recap for one channel:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">IN1</span>  <span class="o">=</span> <span class="n">direction</span> <span class="n">bit</span> <span class="n">A</span>
+<span class="n">IN2</span>  <span class="o">=</span> <span class="n">direction</span> <span class="n">bit</span> <span class="n">B</span>
+<span class="n">PWM</span>  <span class="o">=</span> <span class="n">enable</span> <span class="o">/</span> <span class="n">speed</span> <span class="p">(</span><span class="n">tie</span> <span class="n">to</span> <span class="n">VCC</span> <span class="k">for</span> <span class="mi">100</span><span class="o">%</span><span class="p">,</span> <span class="n">PWM</span> <span class="k">for</span> <span class="n">speed</span> <span class="n">control</span><span class="p">)</span>
+
+<span class="n">IN1</span>  <span class="n">IN2</span>  <span class="n">result</span>
+<span class="o">---</span>  <span class="o">---</span>  <span class="o">----------</span>
+ <span class="mi">0</span>    <span class="mi">0</span>   <span class="n">coast</span>
+ <span class="mi">0</span>    <span class="mi">1</span>   <span class="n">reverse</span>
+ <span class="mi">1</span>    <span class="mi">0</span>   <span class="n">forward</span>
+ <span class="mi">1</span>    <span class="mi">1</span>   <span class="n">brake</span>
+</pre></div>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.l298n.L298NMotor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.l298n.</span></span><span class="sig-name descname"><span class="pre">L298NMotor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">in1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">in2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pwm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">invert</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pwm_freq</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_PWM_FREQ_HZ</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/l298n.html#L298NMotor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.l298n.L298NMotor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.interfaces.Motor" title="openbricks.interfaces.Motor"><code class="xref py py-class docutils literal notranslate"><span class="pre">Motor</span></code></a></p>
+<p>Open-loop brushed DC motor on an L298N H-bridge channel.</p>
+<p>No encoder, so only the open-loop subset of the <code class="docutils literal notranslate"><span class="pre">Motor</span></code>
+contract works: <code class="docutils literal notranslate"><span class="pre">dc(duty)</span></code>, <code class="docutils literal notranslate"><span class="pre">brake()</span></code>, <code class="docutils literal notranslate"><span class="pre">coast()</span></code>.
+Closed-loop methods (<code class="docutils literal notranslate"><span class="pre">run_speed</span></code>, <code class="docutils literal notranslate"><span class="pre">run_angle</span></code>, <code class="docutils literal notranslate"><span class="pre">angle</span></code>,
+<code class="docutils literal notranslate"><span class="pre">hold</span></code>) raise <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> — wrap the same H-bridge
+channel in <a class="reference internal" href="#openbricks.drivers.jgb37_520.JGB37Motor" title="openbricks.drivers.jgb37_520.JGB37Motor"><code class="xref py py-class docutils literal notranslate"><span class="pre">JGB37Motor</span></code></a>
+when the motor has an encoder.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.l298n.L298NMotor.dc">
+<span class="sig-name descname"><span class="pre">dc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">duty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/l298n.html#L298NMotor.dc"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.l298n.L298NMotor.dc" title="Link to this definition"></a></dt>
+<dd><p>Duty is -100..100 — Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.dc()</span></code>. (Open-loop
+H-bridge: there is no closed-loop <code class="docutils literal notranslate"><span class="pre">run(speed)</span></code> here; the
+inherited <code class="docutils literal notranslate"><span class="pre">run</span></code> surfaces run_speed’s NotImplementedError.)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.l298n.L298NMotor.brake">
+<span class="sig-name descname"><span class="pre">brake</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/l298n.html#L298NMotor.brake"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.l298n.L298NMotor.brake" title="Link to this definition"></a></dt>
+<dd><p>Short both terminals — active brake.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.l298n.L298NMotor.coast">
+<span class="sig-name descname"><span class="pre">coast</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/l298n.html#L298NMotor.coast"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.l298n.L298NMotor.coast" title="Link to this definition"></a></dt>
+<dd><p>Cut drive entirely — motor spins freely.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.tb6612">
+<span id="tb6612fng"></span><h3>TB6612FNG<a class="headerlink" href="#module-openbricks.drivers.tb6612" title="Link to this heading"></a></h3>
+<p>TB6612FNG dual MOSFET H-bridge — re-exposes <code class="docutils literal notranslate"><span class="pre">L298NMotor</span></code> under the
+TB6612 name.</p>
+<p>Both chips drive each motor channel with the same three signals:</p>
+<blockquote>
+<div><p>IN1  — direction bit 1
+IN2  — direction bit 2
+PWM  — speed (PWM duty cycle)</p>
+</div></blockquote>
+<p>…so the openbricks driver is identical. TB6612 is generally the better
+commodity choice — MOSFETs instead of Darlingtons, ~0.3 V drop instead
+of ~1.8 V, 3.3 V-logic compatible directly from an ESP32 GPIO, and 3.2
+A peak per channel vs L298N’s 2 A.</p>
+<p>Wiring difference to be aware of: TB6612 has a chip-level <strong>STBY</strong> pin
+that must be held high for either channel to operate. Tie it to 3.3 V
+on your breakout, or drive a spare GPIO high at boot — openbricks
+doesn’t model STBY because most breakout modules already pull it up.</p>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="robotics.html" class="btn btn-neutral float-left" title="robotics — DriveBase" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="drivers_sensors.html" class="btn btn-neutral float-right" title="Sensor drivers" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
