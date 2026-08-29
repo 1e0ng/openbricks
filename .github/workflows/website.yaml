@@ -239,7 +239,7 @@ jobs:
             > docs/_build/html/versions.json
           cat docs/_build/html/versions.json
 
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/_build/html
 
