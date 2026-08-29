@@ -45,7 +45,7 @@ jobs:
     if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -87,7 +87,7 @@ jobs:
     # submodule needed — the cores live in this repo.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Build + run C core tests (sanitized, gcov-instrumented)
         run: |
           # Instrumented only on PRs, where the upload happens; a
@@ -133,7 +133,7 @@ jobs:
     # ``test`` and ``coverage`` jobs.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -189,7 +189,7 @@ jobs:
     # there instead (as C lines, via gcov).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -243,7 +243,7 @@ jobs:
     # heavy runtime dep) installs from the ``[sim]`` extra.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -322,7 +322,7 @@ jobs:
     # gcov + codecov-action). Python coverage isn't attempted — our
     # tests run under unix MicroPython, where coverage.py doesn't apply.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -410,7 +410,7 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -514,7 +514,7 @@ jobs:
     container:
       image: espressif/idf:v5.5.4
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Mark workdir as safe for git
         run: git config --global --add safe.directory '*'
@@ -628,7 +628,7 @@ jobs:
       && github.event_name == 'push'
       && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Download every firmware matrix artifact (openbricks-esp32-*,
       # openbricks-esp32s3-*, …) and merge them into a single
@@ -734,7 +734,7 @@ jobs:
     needs: [openbricks-host]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -770,7 +770,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
@@ -848,7 +848,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
