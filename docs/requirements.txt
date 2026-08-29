@@ -2,7 +2,7 @@
 # CI installs exactly this; build locally with:
 #   pip install -r docs/requirements.txt
 #   sphinx-build -W --keep-going -b html docs docs/_build/html
-sphinx>=7.0
+sphinx>=9.1.0
 sphinx-rtd-theme>=2.0
 myst-parser>=3.0
 sphinx-argparse>=0.4
