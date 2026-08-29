@@ -13,17 +13,33 @@
 
 version: 2
 updates:
+  # Each ecosystem's updates arrive GROUPED as one PR. Ungrouped, the
+  # first Dependabot run opened five separate PRs all editing
+  # docs/requirements.txt — mutually conflicting, and each one failing
+  # the offline-docs bundle source-hash check (the bundle must be
+  # rebuilt whenever a tracked docs/ file changes, requirements.txt
+  # included). One PR per ecosystem means one rebase and one bundle
+  # rebuild per week at most.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: "pip"
     directory: "/docs"
     schedule:
       interval: "weekly"
+    groups:
+      docs-toolchain:
+        patterns: ["*"]
 
   - package-ecosystem: "pip"
     directory: "/tools/openbricks"
     schedule:
       interval: "weekly"
+    groups:
+      cli-deps:
+        patterns: ["*"]

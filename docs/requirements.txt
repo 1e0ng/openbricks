@@ -1,9 +1,11 @@
 # Toolchain for building docs.openbricks.dev (Sphinx).
-# CI installs exactly this; build locally with:
+# Needs Python >= 3.12 (sphinx 9.1 dropped 3.11; the docs jobs in
+# website.yaml run 3.14). CI installs exactly this; build locally
+# with:
 #   pip install -r docs/requirements.txt
 #   sphinx-build -W --keep-going -b html docs docs/_build/html
-sphinx>=7.0
-sphinx-rtd-theme>=2.0
-myst-parser>=3.0
-sphinx-argparse>=0.4
-sphinx-sitemap>=2.6
+sphinx>=9.1.0
+sphinx-rtd-theme>=3.1.0
+myst-parser>=5.1.0
+sphinx-argparse>=0.6.1
+sphinx-sitemap>=2.9.0

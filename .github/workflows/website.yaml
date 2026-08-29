@@ -84,7 +84,7 @@ jobs:
             docs/requirements.txt
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Install docs toolchain
         run: pip install -r docs/requirements.txt
       - name: Install LaTeX toolchain
@@ -129,7 +129,7 @@ jobs:
       - uses: actions/setup-python@v7
 
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Install docs toolchain
         run: pip install -r docs/requirements.txt
       - name: Build docs (warnings are errors)
