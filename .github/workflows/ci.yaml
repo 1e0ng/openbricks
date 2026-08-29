@@ -103,7 +103,7 @@ jobs:
         # this upload is what makes their (thorough) c-unit coverage
         # visible to codecov instead of reading as untested.
         if: github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: tests/c/build
@@ -223,7 +223,7 @@ jobs:
 
       - name: Upload openbricks-py coverage to Codecov
         if: github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
@@ -271,7 +271,7 @@ jobs:
 
       - name: Upload host coverage to Codecov (CLI flag)
         if: github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: tools/openbricks/coverage.xml
@@ -280,7 +280,7 @@ jobs:
 
       - name: Upload host coverage to Codecov (sim flag)
         if: github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: tools/openbricks/coverage.xml
@@ -383,7 +383,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: coverage-out
