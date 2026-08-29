@@ -67,7 +67,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
@@ -125,8 +125,9 @@ jobs:
       # write: a v* tag push commits this build to docs-archive.
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
+
         with:
           python-version: "3.11"
       - name: Install docs toolchain
@@ -239,7 +240,7 @@ jobs:
             > docs/_build/html/versions.json
           cat docs/_build/html/versions.json
 
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/_build/html
 
@@ -261,7 +262,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   deploy-site:
     # openbricks.dev — cross-repo push; SITE_DEPLOY_TOKEN is a PAT with
@@ -269,7 +270,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.SITE_DEPLOY_TOKEN }}
