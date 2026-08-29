@@ -132,6 +132,12 @@ Pybricks is the gold-standard MicroPython firmware for educational robotics — 
 
 The host-side simulator (`openbricks sim`) shares the same C control cores with the firmware via `*_core.c` files compiled into both targets, so sim runs are byte-identical to hardware on the hot path. Pixel-accurate colour-sensor texture sampling on the WRO mat is on `main` (Phase E1) — driving across a printed map reads the actual printed colours, not the material's flat tint. Future work: model-based observer (precision lift, picked up once we have hardware to measure against) and full MuJoCo offscreen rendering (only relevant when scenes grow shadows / lighting / overlays beyond a flat printed mat).
 
+## Security
+
+Found a vulnerability? Report it privately via the [security advisory
+form](../../security/advisories/new) — not a public issue. Details,
+scope, and supported versions: [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT. See `LICENSE`.
