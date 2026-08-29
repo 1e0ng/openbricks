@@ -1,12 +1,29 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
+# Dependabot version updates. Three real dependency surfaces:
+#
+#   * the CI/website workflow actions (.github/workflows/*.yaml),
+#   * the docs toolchain pins (docs/requirements.txt),
+#   * the host CLI package (tools/openbricks/pyproject.toml).
+#
+# Deliberately NOT covered: the native/micropython submodule. It is
+# pinned on purpose — every bump requires re-checking the build-time
+# patches in native/patches/ against the new tree, so submodule
+# updates are a manual, reviewed step, never an automated PR.
+#
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
       interval: "weekly"
 
+  - package-ecosystem: "pip"
+    directory: "/docs"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/tools/openbricks"
+    schedule:
+      interval: "weekly"
