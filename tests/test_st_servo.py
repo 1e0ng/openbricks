@@ -155,6 +155,70 @@ class ConfigSequenceTests(_Base):
         self.assertEqual(sb.servo_write_stats(0)[1], 1)   # latched
         self.assertEqual(sb.servo_stats(0)[0], 0)   # never went live
 
+    def _run_to_verify_read(self):
+        """Answer the three config writes; return with the verify
+        READ on the wire, unanswered."""
+        for _ in range(20):
+            sb.servo_pump()
+            tx = sb.take_tx()
+            self.wire.tx_log += tx
+            if len(tx) >= 8 and tx[4] == 0x02:
+                return tx
+            if len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE:
+                sb.feed_rx(_reply(tx[2], 0))
+        self.fail("verify read never went out")
+
+    def test_detach_mid_verify_read_is_inert(self):
+        # The slot vanishes while its verify read is on the wire; the
+        # late reply must not be routed anywhere, and the slot must
+        # be cleanly reusable.
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        self._run_to_verify_read()
+        sb.servo_detach(0)
+        sb.feed_rx(_reply(2, 0, b"\x01"))
+        for _ in range(5):
+            sb.servo_pump()
+            sb.take_tx()
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        self.wire.settle()
+        self.assertTrue(sb.servo_stats(0)[0] > 0)
+
+    def test_drive_switch_mid_verify_read_drops_the_stale_reply(self):
+        # A drive-mode switch resets the config sequence while the
+        # old verify read is still in flight: its reply answers the
+        # OLD mode question and must be dropped, after which the
+        # re-run configures for duty (mode 2) normally.
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        self._run_to_verify_read()
+        sb.servo_drive_duty(0, True)
+        sb.feed_rx(_reply(2, 0, b"\x01"))   # stale: mode-1 answer
+        self.wire.settle(40)
+        _fails, failed, mismatch, _got = sb.servo_config_state(0)
+        self.assertEqual((failed, mismatch), (0, 0))
+        self.assertEqual(self.wire.regs[(2, 0x21)], 2)
+        self.assertTrue(sb.servo_stats(0)[0] > 0)
+
+    def test_lost_verify_reads_latch_as_a_wiring_fault(self):
+        # The verify READ itself never comes back (feedback line
+        # down): retried like any config write, then latched — as a
+        # plain config failure, NOT a mismatch (nothing was read).
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        for _ in range(600):
+            sb.servo_pump()
+            tx = sb.take_tx()
+            self.wire.tx_log += tx
+            if len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE:
+                sb.feed_rx(_reply(tx[2], 0))   # writes ACK fine
+            # reads: silence
+        _fails, failed, mismatch, _got = sb.servo_config_state(0)
+        self.assertEqual(failed, 1)
+        self.assertEqual(mismatch, 0)
+        self.assertEqual(sb.servo_stats(0)[0], 0)
+
+    def test_config_state_of_a_bad_slot_is_zeros(self):
+        self.assertEqual(sb.servo_config_state(-1), (0, 0, 0, 0))
+        self.assertEqual(sb.servo_config_state(99), (0, 0, 0, 0))
+
     def test_mode_applied_on_a_later_round_heals(self):
         # A servo that finishes its power-on init mid-retry: the
         # cooldown-paced re-runs pick it up and the slot goes live
@@ -509,6 +573,16 @@ class UserRegisterTxnTests(_Base):
         self.wire.settle(10)
         st, _ = sb.servo_user_poll(0)
         self.assertEqual(st, 1)
+
+    def test_dead_servo_latches_read_failure_too(self):
+        # The READ twin of the write-loss latch: a loss is never
+        # silent on either kind.
+        self._configured()
+        self.wire.mute = 10 ** 6             # never answers again
+        self.assertTrue(sb.servo_user_read(0, self.REG, 2))
+        self.wire.settle(120)
+        st, _ = sb.servo_user_poll(0)
+        self.assertEqual(st, -1)
 
     def test_user_txn_waits_for_config(self):
         # Staged before the config sequence finishes: the wire must
