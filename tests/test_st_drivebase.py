@@ -48,6 +48,8 @@ class _PerfectWheels:
         self.pos = {1: 0.0, 2: 0.0}
         self.spd = {1: 0, 2: 0}
         self.torque = {1: None, 2: None}   # last value seen per servo
+        self.regs = {}                     # (servo_id, reg) -> byte,
+                                           # for the op-mode read-back
         self.now = 0
         self.reads = 0
         self.syncs = 0
@@ -69,7 +71,15 @@ class _PerfectWheels:
                 continue
             pid, ln, instr = tx[i + 2], tx[i + 3], tx[i + 4]
             pkt = tx[i:i + 4 + ln]
-            if instr == 0x02:                          # READ feedback
+            if instr == 0x02 and pkt[5] != 0x38:       # register READ
+                # The config sequence's op-mode read-back (1.91.0):
+                # answer from the written-register map, like a servo
+                # that applies what it ACKs.
+                reg, nb = pkt[5], pkt[6]
+                payload = bytes(self.regs.get((pid, reg + k), 0)
+                                for k in range(nb))
+                sb.feed_rx(_reply(pid, 0, payload))
+            elif instr == 0x02:                        # READ feedback
                 self.reads += 1
                 raw = int(self.pos[pid]) & 0x0FFF
                 # Widened 6-byte feedback (1.50.0): pos + present-
@@ -88,6 +98,8 @@ class _PerfectWheels:
             elif instr == 0x03 and pid != 0xFE:        # WRITE
                 if pkt[5] == 0x28 and pid in self.torque:   # TORQUE
                     self.torque[pid] = pkt[6]
+                for k in range(6, 4 + ln - 1):
+                    self.regs[(pid, pkt[5] + k - 6)] = pkt[k]
                 sb.feed_rx(_reply(pid, 0))
             elif instr == 0x03 and pid == 0xFE:        # BROADCAST write
                 # Torque-off broadcast (the e-stop): applies to every
@@ -237,7 +249,20 @@ class _DeadRightWheel(_PerfectWheels):
             pkt = tx[i:i + 4 + ln]
             if pid == self.DEAD_ID:
                 if instr == 0x03 and self.ANSWERS_WRITES:
+                    for k in range(6, 4 + ln - 1):
+                        self.regs[(pid, pkt[5] + k - 6)] = pkt[k]
                     sb.feed_rx(_reply(pid, 0))   # command line fine
+                elif (instr == 0x02 and pkt[5] != 0x38
+                        and self.ANSWERS_WRITES):
+                    # Register read-backs (the op-mode verify) ride
+                    # the same intact command line as the write ACKs:
+                    # this wheel's fault is the FEEDBACK path, and it
+                    # must configure normally so the frozen-odometry
+                    # guards get their turn.
+                    reg, nb = pkt[5], pkt[6]
+                    payload = bytes(self.regs.get((pid, reg + k), 0)
+                                    for k in range(nb))
+                    sb.feed_rx(_reply(pid, 0, payload))
                 elif instr == 0x02:
                     # READ_GRACE > 0 models a wheel that dies LATER:
                     # the first N reads answer (odometry goes live),
@@ -252,12 +277,19 @@ class _DeadRightWheel(_PerfectWheels):
                             0, 0, 0, 0])))
                 i += 4 + ln
                 continue                       # reads: silence
-            if instr == 0x02:
+            if instr == 0x02 and pkt[5] != 0x38:
+                reg, nb = pkt[5], pkt[6]
+                payload = bytes(self.regs.get((pid, reg + k), 0)
+                                for k in range(nb))
+                sb.feed_rx(_reply(pid, 0, payload))
+            elif instr == 0x02:
                 self.reads += 1
                 raw = int(self.pos[pid]) & 0x0FFF
                 sb.feed_rx(_reply(pid, 0, bytes([
                     raw & 0xFF, (raw >> 8) & 0xFF, 0, 0, 0, 0])))
             elif instr == 0x03 and pid != 0xFE:
+                for k in range(6, 4 + ln - 1):
+                    self.regs[(pid, pkt[5] + k - 6)] = pkt[k]
                 sb.feed_rx(_reply(pid, 0))
             elif instr == 0x83:
                 reg, dl = pkt[5], pkt[6]

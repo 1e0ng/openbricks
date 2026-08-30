@@ -15,6 +15,7 @@ void ob_sservo_init(ob_sservo_t *s) {
     s->read_in_flight = -1;
     s->write_in_flight = -1;
     s->user_in_flight = -1;
+    s->verify_in_flight = -1;
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         s->slots[i].torque_cmd = -1;
     }
@@ -38,7 +39,8 @@ int ob_sservo_attach(ob_sservo_t *s, int slot, uint8_t id,
     sl->invert   = invert;
     sl->goal_acc = goal_acc;
     sl->torque_cmd = -1;
-    // config_step 0..2: op_mode, torque(coast), goal_acc — the
+    // config_step 0..3: op_mode, torque(coast), goal_acc writes, then
+    // the op_mode read-back (see OB_SSERVO_STEP_VERIFY) — the
     // st3215.py constructor sequence, including the fresh-motor-
     // coasts rule (writing torque 0, not merely skipping it, also
     // releases a hold left by a previous program).
@@ -59,6 +61,9 @@ void ob_sservo_detach(ob_sservo_t *s, int slot) {
     }
     if (s->user_in_flight == slot) {
         s->user_in_flight = -1;
+    }
+    if (s->verify_in_flight == slot) {
+        s->verify_in_flight = -1;
     }
     memset(&s->slots[slot], 0, sizeof(s->slots[slot]));
     s->slots[slot].torque_cmd = -1;
@@ -204,11 +209,15 @@ int ob_sservo_set_drive_duty(ob_sservo_t *s, int slot, int on) {
     sl->duty_integ = 0;
     sl->duty_last_err = 0;
     // The wire's op_mode must follow: re-run the config sequence
-    // (mode, torque-coast, goal_acc). config_failed is cleared so a
-    // deliberate mode switch gets fresh retries.
+    // (mode, torque-coast, goal_acc, verify). config_failed is
+    // cleared so a deliberate mode switch gets fresh retries.
     sl->config_step = 0;
     sl->config_fails = 0;
     sl->config_failed = 0;
+    sl->config_cooldown = 0;
+    sl->verify_fails = 0;
+    sl->verify_mismatch = 0;
+    sl->verify_val = 0;
     return 0;
 }
 
@@ -279,7 +288,7 @@ int ob_sservo_pick_read(ob_sservo_t *s, int want_hot) {
     for (int k = 0; k < OB_SSERVO_SLOTS; k++) {
         int i = (start + k) % OB_SSERVO_SLOTS;
         ob_sservo_slot_t *sl = &s->slots[i];
-        if (!sl->in_use || sl->config_step < 3) {
+        if (!sl->in_use || sl->config_step < OB_SSERVO_CONFIGURED) {
             continue;
         }
         if ((sl->hot != 0) == (want_hot != 0)) {
@@ -305,7 +314,8 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     uint8_t tn = 0;
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         ob_sservo_slot_t *sl = &s->slots[i];
-        if (sl->in_use && sl->config_step >= 3 && sl->torque_cmd >= 0) {
+        if (sl->in_use && sl->config_step >= OB_SSERVO_CONFIGURED
+            && sl->torque_cmd >= 0) {
             op->sync_ids[tn] = sl->id;
             op->sync_data[tn] = (uint8_t)sl->torque_cmd;
             tn++;
@@ -324,8 +334,28 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     //    of odometry.
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         ob_sservo_slot_t *sl = &s->slots[i];
-        if (!sl->in_use || sl->config_step >= 3 || sl->config_failed) {
+        if (!sl->in_use || sl->config_step >= OB_SSERVO_CONFIGURED
+            || sl->config_failed) {
             continue;
+        }
+        if (sl->config_cooldown) {
+            // Armed by a verify mismatch: the servo is applying
+            // nothing while it finishes its own power-on init, so
+            // give it a beat instead of burning the retry budget
+            // into the same dead window.
+            sl->config_cooldown--;
+            continue;
+        }
+        if (sl->config_step == OB_SSERVO_STEP_VERIFY) {
+            // Read op_mode back: the ACKs above proved the transport,
+            // this proves the SERVO — configured only when the wire
+            // reports the mode the drive needs.
+            op->kind = OB_SOP_CONFIG_VERIFY;
+            op->slot = i;
+            op->id = sl->id;
+            op->reg = OB_SREG_OP_MODE;
+            op->data_len = 1;
+            return;
         }
         op->kind = OB_SOP_WRITE;
         op->slot = i;
@@ -359,7 +389,8 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     //     otherwise starve the transaction indefinitely.
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         ob_sservo_slot_t *sl = &s->slots[i];
-        if (!sl->in_use || sl->config_step < 3 || sl->user_kind == 0
+        if (!sl->in_use || sl->config_step < OB_SSERVO_CONFIGURED
+            || sl->user_kind == 0
             || sl->user_done || sl->user_failed) {
             continue;
         }
@@ -389,7 +420,8 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
         uint8_t duty_dirty = 0, wheel_dirty = 0;
         for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
             ob_sservo_slot_t *sl = &s->slots[i];
-            if (sl->in_use && sl->config_step >= 3 && sl->target_dirty) {
+            if (sl->in_use && sl->config_step >= OB_SSERVO_CONFIGURED
+                && sl->target_dirty) {
                 if (sl->drive_duty) {
                     duty_dirty++;
                 } else {
@@ -408,7 +440,7 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
         if (pick_duty && duty_dirty > 0) {
             for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
                 ob_sservo_slot_t *sl = &s->slots[i];
-                if (sl->in_use && sl->config_step >= 3
+                if (sl->in_use && sl->config_step >= OB_SSERVO_CONFIGURED
                     && sl->target_dirty && sl->drive_duty) {
                     uint16_t v =
                         ob_sservo_encode_duty(duty_compute(s, sl));
@@ -425,7 +457,7 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
         if (wheel_dirty > 0) {
             for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
                 ob_sservo_slot_t *sl = &s->slots[i];
-                if (sl->in_use && sl->config_step >= 3
+                if (sl->in_use && sl->config_step >= OB_SSERVO_CONFIGURED
                     && sl->target_dirty && !sl->drive_duty) {
                     uint16_t v =
                         ob_sservo_encode_speed(sl->target_steps);
@@ -492,6 +524,9 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
         case OB_SOP_USER_WRITE:
         case OB_SOP_USER_READ:
             s->user_in_flight = op->slot;
+            break;
+        case OB_SOP_CONFIG_VERIFY:
+            s->verify_in_flight = op->slot;
             break;
         case OB_SOP_SYNC_SPEED:
             s->last_was_sync = 1;
@@ -618,7 +653,7 @@ void ob_sservo_write_result(ob_sservo_t *s, int ok) {
         return;             // no single write in flight (sync/none)
     }
     ob_sservo_slot_t *sl = &s->slots[slot];
-    if (!sl->in_use || sl->config_step >= 3) {
+    if (!sl->in_use || sl->config_step >= OB_SSERVO_STEP_VERIFY) {
         return;             // detached mid-flight, or already done
     }
     if (!ok) {
@@ -678,6 +713,69 @@ void ob_sservo_user_read_result(ob_sservo_t *s, int ok,
     }
     sl->user_done = 1;
     sl->user_fails = 0;
+}
+
+
+void ob_sservo_config_verify_result(ob_sservo_t *s, int ok,
+                                    const uint8_t *payload, uint8_t len) {
+    int slot = s->verify_in_flight;
+    s->verify_in_flight = -1;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
+        return;
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    if (!sl->in_use || sl->config_step != OB_SSERVO_STEP_VERIFY) {
+        return;                 // detached / re-configured mid-flight
+    }
+    uint8_t want = sl->drive_duty ? 2 : MODE_WHEEL;
+    if (ok && len >= 1 && payload[0] == want) {
+        sl->config_step = OB_SSERVO_CONFIGURED;
+        sl->config_fails = 0;
+        sl->verify_fails = 0;
+        sl->verify_mismatch = 0;
+        return;
+    }
+    if (!ok || len < 1) {
+        // The READ was lost — a transport failure like any config
+        // write's: retry the read itself, no cooldown, and latch as
+        // a plain (wiring-shaped) config failure if it never lands.
+        sl->writes_failed++;
+        if (++sl->config_fails >= OB_SSERVO_CONFIG_TRIES) {
+            sl->config_failed = 1;
+        }
+        return;
+    }
+    // The servo ANSWERED — with the wrong mode. Every write above it
+    // was ACKed, so this is the boot race: a controller still in its
+    // own power-on init acknowledges the EEPROM-backed mode write
+    // without committing it. Re-run the writes after a cooldown;
+    // remember the evidence so the eventual error names the race
+    // instead of the wiring. (verify_fails, not config_fails: the
+    // round's re-writes ACK fine and reset config_fails, which would
+    // pin the count at 1 and retry forever.)
+    sl->verify_val = payload[0];
+    sl->verify_mismatch = 1;
+    if (++sl->verify_fails >= OB_SSERVO_CONFIG_TRIES) {
+        sl->config_failed = 1;
+        return;
+    }
+    sl->config_step = 0;
+    sl->config_cooldown = OB_SSERVO_VERIFY_COOLDOWN;
+}
+
+
+void ob_sservo_config_state(const ob_sservo_t *s, int slot,
+                            uint8_t *fails, uint8_t *failed,
+                            uint8_t *mismatch, uint8_t *val) {
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
+        *fails = *failed = *mismatch = *val = 0;
+        return;
+    }
+    const ob_sservo_slot_t *sl = &s->slots[slot];
+    *fails    = sl->config_fails;
+    *failed   = sl->config_failed;
+    *mismatch = sl->verify_mismatch;
+    *val      = sl->verify_val;
 }
 
 

@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.1.0 — servo mode writes are verified on the servo, not just on the wire
+
+Fixes the cold-start pivot: power on, press the button within ~5 s,
+and one wheel could hold position at full torque while the other
+drove — the robot pivoting around it and `straight()` never
+finishing. Root cause (bench 2026-08-30, register dumps): a servo
+still inside its own power-on init ACKs the EEPROM-backed op-mode
+write (reg 0x21) without committing it, so a duty-drive wheel stayed
+in wheel mode, obeying `goal_speed` 0 while the engine's duty
+commands hammered the register that mode ignores. Every layer
+verified the ACK; nothing verified the *application*.
+
+Now the config sequence ends with an op-mode read-back before a slot
+counts as configured (C pump — drivebase wheels and task motors
+alike), re-running the writes with a cooldown so a servo that
+finishes booting mid-retry heals invisibly, and latching with the
+evidence when it never does: the construction error then names the
+boot race ("ACKed but never applied — give it a second after
+power-on") instead of sending you to check healthy wiring. The
+Python-bus path (motors on their own UART) gets the same verified
+write in the constructor and on every mode switch. Flash 3.1.0.
+
 ## 3.0.1 — supersedes the partial 3.0.0 PyPI release
 
 Identical to 3.0.0. Its PyPI upload hit the project's 10 GB storage

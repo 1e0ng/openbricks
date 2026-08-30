@@ -34,13 +34,13 @@ TEST(unwrap_exact_half_range_boundaries) {
     // arithmetic, unreachable precisely through the Python suite.
     reset();
     ob_sservo_attach(&sv, 0, 1, 0, 0);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     feed_pos(0, 0);                        // prime
     feed_pos(0, 2047);
     CHECK_EQ_INT(ob_sservo_counts(&sv, 0), 2047);
     reset();
     ob_sservo_attach(&sv, 0, 1, 0, 0);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     feed_pos(0, 0);
     feed_pos(0, 2048);                     // ambiguous: defined as -2048
     CHECK_EQ_INT(ob_sservo_counts(&sv, 0), -2048);
@@ -49,7 +49,7 @@ TEST(unwrap_exact_half_range_boundaries) {
 TEST(unwrap_across_zero_both_directions) {
     reset();
     ob_sservo_attach(&sv, 0, 1, 0, 0);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     feed_pos(0, 4090);                     // prime
     feed_pos(0, 30);                       // +36 across the wrap
     CHECK_EQ_INT(ob_sservo_counts(&sv, 0), 36);
@@ -60,7 +60,7 @@ TEST(unwrap_across_zero_both_directions) {
 TEST(invert_mirrors_reported_frame) {
     reset();
     ob_sservo_attach(&sv, 0, 1, 1, 0);     // inverted
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     feed_pos(0, 0);
     feed_pos(0, 100);
     CHECK_EQ_INT(ob_sservo_counts(&sv, 0), -100);
@@ -84,6 +84,15 @@ TEST(planner_priorities_and_torque_dedup) {
         ob_sservo_write_result(&sv, 1);
         CHECK_EQ_INT(sv.slots[0].config_step, i + 1);
     }
+    // Step 3: the op-mode read-back — configured only when the wire
+    // CONFIRMS the mode (an ACK is transport proof, not application).
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_CONFIG_VERIFY);
+    CHECK_EQ_INT(op.reg, OB_SREG_OP_MODE);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t mode1 = 1;
+    ob_sservo_config_verify_result(&sv, 1, &mode1, 1);
+    CHECK_EQ_INT(sv.slots[0].config_step, OB_SSERVO_CONFIGURED);
 
     // Speed command: torque-on first (priority 1, as a sync since
     // the atomic-stop change), then ONE speed sync.
@@ -114,8 +123,8 @@ TEST(coast_both_wheels_rides_one_sync_torque_packet) {
     reset();
     ob_sservo_attach(&sv, 0, 2, 1, 45);
     ob_sservo_attach(&sv, 1, 1, 0, 45);
-    sv.slots[0].config_step = 3;
-    sv.slots[1].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
+    sv.slots[1].config_step = OB_SSERVO_CONFIGURED;
     sv.slots[0].torque_on = 1;
     sv.slots[1].torque_on = 1;
     CHECK_EQ_INT(ob_sservo_coast(&sv, 0), 0);
@@ -144,8 +153,8 @@ TEST(mixed_torque_values_share_one_sync_packet) {
     reset();
     ob_sservo_attach(&sv, 0, 2, 0, 45);
     ob_sservo_attach(&sv, 1, 1, 0, 45);
-    sv.slots[0].config_step = 3;
-    sv.slots[1].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
+    sv.slots[1].config_step = OB_SSERVO_CONFIGURED;
     sv.slots[0].torque_on = 1;
     CHECK_EQ_INT(ob_sservo_coast(&sv, 0), 0);
     CHECK_EQ_INT(ob_sservo_set_speed(&sv, 1, 200), 0);  // stages torque-on
@@ -166,7 +175,7 @@ TEST(torque_sync_skips_the_fairness_gate) {
     // must never wait behind the sync/read alternation.
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.slots[0].torque_on = 1;
     sv.last_was_sync = 1;
     CHECK_EQ_INT(ob_sservo_coast(&sv, 0), 0);
@@ -182,7 +191,7 @@ TEST(torque_sync_skips_the_fairness_gate) {
 TEST(fairness_sync_then_read_alternation) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.slots[0].torque_on = 1;
     ob_sservo_op_t op;
     // Dirty every "tick" like the drivebase does; ops must alternate
@@ -212,7 +221,7 @@ TEST(parked_slots_do_not_halve_a_driving_wheels_odometry) {
     reset();
     for (int i = 0; i < 4; i++) {
         ob_sservo_attach(&sv, i, (uint8_t)(i + 1), 0, 45);
-        sv.slots[i].config_step = 3;
+        sv.slots[i].config_step = OB_SSERVO_CONFIGURED;
         sv.slots[i].torque_on = 1;
     }
     sv.slots[0].hot = 1;      // left wheel driving
@@ -253,7 +262,7 @@ TEST(all_parked_slots_share_the_bus_evenly) {
     reset();
     for (int i = 0; i < 4; i++) {
         ob_sservo_attach(&sv, i, (uint8_t)(i + 1), 0, 45);
-        sv.slots[i].config_step = 3;
+        sv.slots[i].config_step = OB_SSERVO_CONFIGURED;
         sv.slots[i].hot = 0;
     }
     int reads[4] = {0, 0, 0, 0};
@@ -284,7 +293,7 @@ TEST(all_parked_still_get_polled) {
     // service them rather than stall on an empty preference.
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.slots[0].hot = 0;
     ob_sservo_op_t op;
     int reads = 0;
@@ -302,7 +311,7 @@ TEST(all_parked_still_get_polled) {
 TEST(failed_reads_count_stale_and_recover) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.read_in_flight = 0;
     ob_sservo_read_result(&sv, 0, NULL, 0);
     sv.read_in_flight = 0;
@@ -321,7 +330,7 @@ TEST(coast_then_run_immediately_still_drives) {
     // nothing ever re-staged torque for a one-shot caller.
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.slots[0].torque_on = 1;            // driving; wire has torque
     ob_sservo_coast(&sv, 0);              // stop() stages torque-off
     ob_sservo_set_speed(&sv, 0, 300);     // run() before the pump ran
@@ -342,13 +351,147 @@ TEST(coast_parks_the_slot_for_the_heat_heuristic) {
     // and gave coast and brake different polling behaviour.
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     ob_sservo_set_speed(&sv, 0, 300);
     CHECK_EQ_INT(sv.slots[0].target_steps, 300);
     ob_sservo_coast(&sv, 0);
     CHECK_EQ_INT(sv.slots[0].target_steps, 0);
     CHECK_EQ_INT(sv.slots[0].target_dirty, 0);
     CHECK_EQ_INT(sv.slots[0].torque_cmd, 0);    // coast still ships
+}
+
+TEST(config_verify_mismatch_reruns_writes_after_cooldown) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_op_t op;
+    for (int i = 0; i < 3; i++) {
+        ob_sservo_next_op(&sv, &op);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_write_result(&sv, 1);
+    }
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_CONFIG_VERIFY);
+    ob_sservo_op_started(&sv, &op);
+    // The cold-boot servo: ACKed mode 1, still reports 0.
+    uint8_t wrong = 0;
+    ob_sservo_config_verify_result(&sv, 1, &wrong, 1);
+    CHECK_EQ_INT(sv.slots[0].config_step, 0);       // re-run writes
+    CHECK_EQ_INT(sv.slots[0].verify_fails, 1);
+    CHECK_EQ_INT(sv.slots[0].verify_mismatch, 1);
+    CHECK_EQ_INT(sv.slots[0].config_failed, 0);     // not latched yet
+    // The cooldown holds the planner off the slot for a beat...
+    for (int i = 0; i < OB_SSERVO_VERIFY_COOLDOWN; i++) {
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_NONE);
+    }
+    // ...then the mode write goes out again.
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_WRITE);
+    CHECK_EQ_INT(op.reg, OB_SREG_OP_MODE);
+}
+
+TEST(config_verify_mismatch_latches_with_evidence) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_op_t op;
+    for (int round = 0; round < OB_SSERVO_CONFIG_TRIES; round++) {
+        for (int i = 0; i < 3; i++) {
+            ob_sservo_next_op(&sv, &op);
+            ob_sservo_op_started(&sv, &op);
+            ob_sservo_write_result(&sv, 1);
+        }
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_CONFIG_VERIFY);
+        ob_sservo_op_started(&sv, &op);
+        uint8_t wrong = 0;
+        ob_sservo_config_verify_result(&sv, 1, &wrong, 1);
+        sv.slots[0].config_cooldown = 0;   // fast-forward the pause
+    }
+    // Latched — with the mismatch evidence, so Python's error can
+    // name the boot race instead of blaming healthy wiring.
+    CHECK_EQ_INT(sv.slots[0].config_failed, 1);
+    uint8_t fails, failed, mismatch, val;
+    ob_sservo_config_state(&sv, 0, &fails, &failed, &mismatch, &val);
+    CHECK_EQ_INT(failed, 1);
+    CHECK_EQ_INT(mismatch, 1);
+    CHECK_EQ_INT(val, 0);
+    // And the slot goes quiet: no further config ops.
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_NONE);
+}
+
+TEST(config_verify_success_on_a_later_round_heals) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_op_t op;
+    for (int i = 0; i < 3; i++) {
+        ob_sservo_next_op(&sv, &op);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_write_result(&sv, 1);
+    }
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t wrong = 0;
+    ob_sservo_config_verify_result(&sv, 1, &wrong, 1);   // round 1 fails
+    sv.slots[0].config_cooldown = 0;
+    for (int i = 0; i < 3; i++) {
+        ob_sservo_next_op(&sv, &op);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_write_result(&sv, 1);
+    }
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_CONFIG_VERIFY);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t right = 1;                     // servo finished booting
+    ob_sservo_config_verify_result(&sv, 1, &right, 1);
+    CHECK_EQ_INT(sv.slots[0].config_step, OB_SSERVO_CONFIGURED);
+    CHECK_EQ_INT(sv.slots[0].verify_fails, 0);
+    CHECK_EQ_INT(sv.slots[0].verify_mismatch, 0);   // evidence cleared
+    CHECK_EQ_INT(sv.slots[0].config_failed, 0);
+}
+
+TEST(config_verify_lost_reply_retries_the_read_itself) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_op_t op;
+    for (int i = 0; i < 3; i++) {
+        ob_sservo_next_op(&sv, &op);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_write_result(&sv, 1);
+    }
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_CONFIG_VERIFY);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_config_verify_result(&sv, 0, NULL, 0);    // reply lost
+    // A transport loss retries the READ (no cooldown, no rewrite):
+    // the writes are already proven on the wire.
+    CHECK_EQ_INT(sv.slots[0].config_step, OB_SSERVO_STEP_VERIFY);
+    CHECK_EQ_INT(sv.slots[0].verify_mismatch, 0);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_CONFIG_VERIFY);
+}
+
+TEST(duty_config_verify_expects_mode_2) {
+    reset();
+    ob_sservo_attach(&sv, 0, 7, 0, 45);
+    ob_sservo_set_drive_duty(&sv, 0, 1);
+    ob_sservo_op_t op;
+    for (int i = 0; i < 3; i++) {
+        ob_sservo_next_op(&sv, &op);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_write_result(&sv, 1);
+    }
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_CONFIG_VERIFY);
+    ob_sservo_op_started(&sv, &op);
+    // Mode 1 is the WRONG answer for a duty slot — the exact bench
+    // failure: wheel holding goal_speed 0 while duty syncs went to
+    // the register mode 1 ignores.
+    uint8_t wheel = 1;
+    ob_sservo_config_verify_result(&sv, 1, &wheel, 1);
+    CHECK_EQ_INT(sv.slots[0].config_step, 0);
+    CHECK_EQ_INT(sv.slots[0].verify_mismatch, 1);
+    CHECK_EQ_INT(sv.slots[0].verify_val, 1);
 }
 
 TEST(config_write_lost_is_retried_at_the_same_step) {
@@ -377,7 +520,7 @@ TEST(dead_servo_latches_config_failed_and_frees_the_bus) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 0);       // never answers
     ob_sservo_attach(&sv, 1, 8, 0, 0);       // healthy, configured
-    sv.slots[1].config_step = 3;
+    sv.slots[1].config_step = OB_SSERVO_CONFIGURED;
     ob_sservo_op_t op;
     for (int i = 0; i < OB_SSERVO_CONFIG_TRIES; i++) {
         ob_sservo_next_op(&sv, &op);
@@ -417,9 +560,9 @@ TEST(write_result_with_nothing_in_flight_is_inert) {
     ob_sservo_attach(&sv, 0, 7, 0, 45);
     ob_sservo_next_op(&sv, &op);
     ob_sservo_op_started(&sv, &op);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     ob_sservo_write_result(&sv, 1);
-    CHECK_EQ_INT(sv.slots[0].config_step, 3);
+    CHECK_EQ_INT(sv.slots[0].config_step, OB_SSERVO_CONFIGURED);
     CHECK_EQ_INT(sv.write_in_flight, -1);
 }
 
@@ -443,7 +586,7 @@ TEST(widened_feedback_decodes_speed_and_load) {
     ob_sservo_t sv;
     ob_sservo_init(&sv);
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.read_in_flight = 0;
     // pos=0x123, speed=-300 (sign-magnitude b15), load raw bit10
     // SET = pushing POSITIVE (bench-pinned decode) -> +25.
@@ -462,7 +605,7 @@ TEST(inverted_slot_flips_feedback_to_user_frame) {
     ob_sservo_t sv;
     ob_sservo_init(&sv);
     ob_sservo_attach(&sv, 0, 7, 1, 45);        // invert
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.read_in_flight = 0;
     // Raw: speed +500, load b10-clear = -100. The slot invert flips
     // both into the user frame: speed -500, load +100.
@@ -478,7 +621,7 @@ TEST(short_reply_keeps_position_but_no_feedback_freshness) {
     ob_sservo_t sv;
     ob_sservo_init(&sv);
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.read_in_flight = 0;
     ob_sservo_read_result(&sv, 1, (const uint8_t *)"\x10\x00", 2);
     CHECK_EQ_INT(ob_sservo_counts(&sv, 0) >= 0, 1);
@@ -489,7 +632,7 @@ TEST(failed_read_marks_feedback_stale) {
     ob_sservo_t sv;
     ob_sservo_init(&sv);
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     sv.read_in_flight = 0;
     uint8_t pl[6] = { 0, 0, 0x10, 0x00, 0x05, 0x04 };  // b10: +5
     ob_sservo_read_result(&sv, 1, pl, 6);
@@ -504,7 +647,7 @@ TEST(failed_read_marks_feedback_stale) {
 TEST(user_txn_write_and_read_full_cycle) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     ob_sservo_op_t op;
     uint16_t val = 0;
 
@@ -555,7 +698,7 @@ TEST(user_txn_waits_for_config_and_outranks_speed) {
     CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 2), 0);
     ob_sservo_next_op(&sv, &op);
     CHECK_EQ_INT(op.kind, OB_SOP_WRITE);           // config first
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
 
     // Configured, with a dirty speed: user txn ships first.
     ob_sservo_set_speed(&sv, 0, 1000);
@@ -572,7 +715,7 @@ TEST(user_txn_waits_for_config_and_outranks_speed) {
 TEST(user_txn_losses_retry_then_latch) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     ob_sservo_op_t op;
     uint16_t val = 0;
 
@@ -599,7 +742,7 @@ TEST(user_txn_losses_retry_then_latch) {
 TEST(user_read_short_reply_counts_as_a_loss) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     ob_sservo_op_t op;
     uint16_t val = 0;
 
@@ -621,7 +764,7 @@ TEST(user_read_short_reply_counts_as_a_loss) {
 TEST(detach_mid_flight_clears_user_routing) {
     reset();
     ob_sservo_attach(&sv, 0, 7, 0, 45);
-    sv.slots[0].config_step = 3;
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;
     ob_sservo_op_t op;
 
     CHECK_EQ_INT(ob_sservo_user_stage(&sv, 0, 1, 0x30, 300, 2), 0);
@@ -650,6 +793,12 @@ static void fast_configure(int slot, uint8_t id, int duty_mode) {
         ob_sservo_op_started(&sv, &op);
         ob_sservo_write_result(&sv, 1);
     }
+    // Step 3: answer the op-mode read-back with the mode the drive
+    // expects — the servo of an honest wire.
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t mode = duty_mode ? 2 : 1;
+    ob_sservo_config_verify_result(&sv, 1, &mode, 1);
 }
 
 static void feed_feedback(int slot, uint16_t raw, int32_t speed) {
@@ -788,9 +937,10 @@ TEST(duty_mode_switch_guards_and_gain_keepers) {
     CHECK_EQ_INT(ob_sservo_set_drive_duty(&sv, 0, 1), 0);
     uint8_t step_after_switch = sv.slots[0].config_step;
     CHECK_EQ_INT(step_after_switch, 0);
-    sv.slots[0].config_step = 3;                 // pretend configured
+    sv.slots[0].config_step = OB_SSERVO_CONFIGURED;                 // pretend configured
     CHECK_EQ_INT(ob_sservo_set_drive_duty(&sv, 0, 1), 0);   // same value
-    CHECK_EQ_INT(sv.slots[0].config_step, 3);    // no needless re-config
+    CHECK_EQ_INT(sv.slots[0].config_step,
+                 OB_SSERVO_CONFIGURED);          // no needless re-config
     // NEGATIVE keeps the current value; zero is a REAL gain (the
     // 1.88.0 "<=0 keeps" semantics made pure-FF unreachable).
     ob_sservo_set_duty_gains(&sv, -1, -5, -1);
@@ -896,6 +1046,11 @@ int main(void) {
     RUN(failed_reads_count_stale_and_recover);
     RUN(coast_then_run_immediately_still_drives);
     RUN(coast_parks_the_slot_for_the_heat_heuristic);
+    RUN(config_verify_mismatch_reruns_writes_after_cooldown);
+    RUN(config_verify_mismatch_latches_with_evidence);
+    RUN(config_verify_success_on_a_later_round_heals);
+    RUN(config_verify_lost_reply_retries_the_read_itself);
+    RUN(duty_config_verify_expects_mode_2);
     RUN(config_write_lost_is_retried_at_the_same_step);
     RUN(dead_servo_latches_config_failed_and_frees_the_bus);
     RUN(write_result_with_nothing_in_flight_is_inert);
