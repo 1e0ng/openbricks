@@ -57,6 +57,25 @@
 // surfaces the latch through servo_write_stats.
 #define OB_SSERVO_CONFIG_TRIES 8
 
+// Config sequence positions. Steps 0..2 are the writes (op_mode,
+// torque-coast, goal_acc); step 3 reads op_mode BACK before the slot
+// counts as configured. An ACK is transport proof only: a servo
+// still inside its own power-on init ACKs the EEPROM-backed mode
+// write without applying it (bench 2026-08-30 — a duty wheel held
+// mode 1, obeying goal_speed 0 at full torque while the engine's
+// duty syncs hammered the register mode 1 ignores; the robot pivoted
+// around its own held wheel and straight() never finished).
+#define OB_SSERVO_STEP_VERIFY 3
+#define OB_SSERVO_CONFIGURED  4
+
+// Pump calls to pause after a verify MISMATCH before re-running the
+// config writes: a servo that ACKs-without-applying is usually still
+// booting, and back-to-back rewrites all land in the same dead
+// window. ~25 ms per round at the 1 kHz tick; CONFIG_TRIES rounds
+// give the servo ~200 ms of grace before the latch. A healthy attach
+// never waits (the cooldown arms only on a mismatch).
+#define OB_SSERVO_VERIFY_COOLDOWN 25
+
 // Feedback read width: present-position (0x38), present-speed
 // (0x3A) and present-load (0x3C) are CONTIGUOUS, so one 6-byte read
 // returns all three for ~the wire cost of the old 2-byte position
@@ -78,6 +97,9 @@ typedef enum {
     OB_SOP_READ_POS,        // read present-position of one slot
     OB_SOP_USER_WRITE,      // user-staged register write (duty_limit)
     OB_SOP_USER_READ,       // user-staged register read (limit restore)
+    OB_SOP_CONFIG_VERIFY,   // config step 3: read op_mode back — the
+                            // slot is configured only when the wire
+                            // CONFIRMS the mode, not when it ACKs it
 } ob_sservo_op_kind_t;
 
 typedef struct {
@@ -142,6 +164,19 @@ typedef struct {
     uint32_t writes_failed; // config writes that timed out / errored
     uint8_t  config_fails;  // consecutive failures of the CURRENT step
     uint8_t  config_failed; // latched: gave up after CONFIG_TRIES
+    uint8_t  config_cooldown; // pump calls to hold off the next config
+                              // attempt (armed by a verify mismatch)
+    uint8_t  verify_fails;    // verify-MISMATCH rounds so far. Its own
+                              // counter: each round's re-writes ACK
+                              // fine and reset config_fails, which
+                              // would otherwise hold the round count
+                              // at 1 forever and never latch
+    uint8_t  verify_mismatch; // latched WITH config_failed when the
+                              // cause was op_mode reading back wrong
+                              // (ACKed-but-not-applied), so Python can
+                              // name the boot race instead of blaming
+                              // the wiring
+    uint8_t  verify_val;      // the mode the servo actually reported
     // Poll priority. A slot that is DRIVING needs its odometry now;
     // a parked one does not, and polling both alike splits the bus
     // evenly — which halved the drivebase's feedback rate the moment
@@ -173,6 +208,8 @@ typedef struct {
                               // or -1 — its step advances only when
                               // the verified ACK comes back
     int      user_in_flight;  // slot whose USER txn is on the bus, or -1
+    int      verify_in_flight; // slot whose config-verify READ is on
+                               // the bus, or -1
     // Cold slots still get an occasional turn: skipping them
     // entirely would let angle()/speed() drift arbitrarily stale
     // while still reporting themselves fresh.
@@ -282,6 +319,23 @@ int ob_sservo_user_poll(ob_sservo_t *s, int slot, uint16_t *val_out);
 void ob_sservo_user_write_result(ob_sservo_t *s, int ok);
 void ob_sservo_user_read_result(ob_sservo_t *s, int ok,
                                 const uint8_t *payload, uint8_t len);
+
+// Result routing for the config-verify read (step 3). A reply whose
+// mode matches the slot's drive (2 duty / 1 wheel) completes the
+// config; a mismatch re-runs the writes after a cooldown — the servo
+// ACKed without applying, the signature of a controller still in its
+// own power-on init — and latches config_failed + verify_mismatch
+// after OB_SSERVO_CONFIG_TRIES rounds. A lost reply retries like any
+// config write.
+void ob_sservo_config_verify_result(ob_sservo_t *s, int ok,
+                                    const uint8_t *payload, uint8_t len);
+
+// (config_fails, config_failed, verify_mismatch, verify_val) — the
+// evidence Python needs to tell a wiring fault ("never ACKed") from
+// the boot race ("ACKed, never applied") in its construction errors.
+void ob_sservo_config_state(const ob_sservo_t *s, int slot,
+                            uint8_t *fails, uint8_t *failed,
+                            uint8_t *mismatch, uint8_t *val);
 
 // Signed unwrapped position in encoder counts.
 int32_t ob_sservo_counts(const ob_sservo_t *s, int slot);

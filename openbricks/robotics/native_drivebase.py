@@ -327,12 +327,35 @@ class _SerialNativeEngine:
                 for slot in pending:
                     wfailed, latched = wstats(slot)
                     if latched:
-                        # Configuration gave up: the servo never ACKed
-                        # its wheel-mode setup. Reads never start for
-                        # an unconfigured slot, so waiting out the
-                        # timeout below would misreport this as a
-                        # never-polled pump fault. Fail fast, name the
-                        # wheel, count the losses.
+                        # Configuration gave up. Two very different
+                        # faults land here, and blaming the wiring
+                        # for both sent one bench session pulling
+                        # connectors on a healthy harness: a servo
+                        # that never ACKED is absent (wiring/id/
+                        # power), but a servo whose op_mode read-back
+                        # NEVER MATCHED acked every write while still
+                        # inside its own power-on init and silently
+                        # dropped the EEPROM-backed mode commit
+                        # (bench 2026-08-30: cold start + immediate
+                        # button press left one wheel in mode 1,
+                        # holding zero speed at full torque while
+                        # duty commands hammered the register mode 1
+                        # ignores — the robot pivoted around it).
+                        cstate = getattr(self._sb, "servo_config_state",
+                                         None)
+                        if cstate is not None:
+                            _f, _l, mismatch, got = cstate(slot)
+                            if mismatch:
+                                raise OSError(
+                                    "%s ACKed its configuration but "
+                                    "never applied it: op_mode reads "
+                                    "%d after every write was "
+                                    "acknowledged. The servo was "
+                                    "still in its own power-on init "
+                                    "— give it a second after power-"
+                                    "on before starting the program, "
+                                    "then retry."
+                                    % (self._wheel_desc(slot), got))
                         raise self._dead_wheel_error(
                             slot,
                             "motor never ACKed its configuration "

@@ -117,6 +117,7 @@ static uint8_t tick_txn_is_swrite;  // single-servo write (config) —
                                     // write_in_flight last held
 static uint8_t tick_txn_is_uwrite;  // user-staged register write
 static uint8_t tick_txn_is_uread;   // user-staged register read
+static uint8_t tick_txn_is_vread;   // config-verify op_mode read
 
 static ob_sservo_t *sservo_get(void) {
     if (!sservo_inited) {
@@ -404,12 +405,17 @@ static void servo_pump_locked(ob_bus_t *b) {
         } else if (tick_txn_is_uread) {
             ob_sservo_user_read_result(sservo_get(), st == OB_BUS_DONE,
                                        payload, plen);
+        } else if (tick_txn_is_vread) {
+            ob_sservo_config_verify_result(sservo_get(),
+                                           st == OB_BUS_DONE,
+                                           payload, plen);
         }
         tick_txn = 0;
         tick_txn_is_read = 0;
         tick_txn_is_swrite = 0;
         tick_txn_is_uwrite = 0;
         tick_txn_is_uread = 0;
+        tick_txn_is_vread = 0;
     }
     if (b->state != OB_BUS_IDLE) {
         return;
@@ -450,6 +456,10 @@ static void servo_pump_locked(ob_bus_t *b) {
             started = (ob_bus_start_read(b, op.id, op.reg, op.data_len,
                                          OB_SSERVO_READ_TICKS) == 0);
             break;
+        case OB_SOP_CONFIG_VERIFY:
+            started = (ob_bus_start_read(b, op.id, op.reg, op.data_len,
+                                         OB_SSERVO_READ_TICKS) == 0);
+            break;
         default:
             return;
     }
@@ -459,6 +469,7 @@ static void servo_pump_locked(ob_bus_t *b) {
         tick_txn_is_swrite = (op.kind == OB_SOP_WRITE);
         tick_txn_is_uwrite = (op.kind == OB_SOP_USER_WRITE);
         tick_txn_is_uread = (op.kind == OB_SOP_USER_READ);
+        tick_txn_is_vread = (op.kind == OB_SOP_CONFIG_VERIFY);
         ob_sservo_op_started(sservo_get(), &op);
     }
 }
@@ -512,10 +523,12 @@ void ob_st_bus_estop_from_tick(void) {
         tick_txn_is_swrite = 0;
         tick_txn_is_uwrite = 0;
         tick_txn_is_uread = 0;
+        tick_txn_is_vread = 0;
         // The abandoned transaction's slot must not soak up the NEXT
         // single-write's result.
         sservo_get()->write_in_flight = -1;
         sservo_get()->user_in_flight = -1;
+        sservo_get()->verify_in_flight = -1;
     }
     uint8_t off = 0;
     if (ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1) == 0) {
@@ -579,6 +592,7 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     tick_txn_is_swrite = 0;
     tick_txn_is_uwrite = 0;
     tick_txn_is_uread = 0;
+    tick_txn_is_vread = 0;
     st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
@@ -1082,6 +1096,29 @@ static mp_obj_t sb_servo_write_stats(mp_obj_t self_in, mp_obj_t slot_in) {
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_write_stats_obj,
                                  sb_servo_write_stats);
 
+static mp_obj_t sb_servo_config_state(mp_obj_t self_in, mp_obj_t slot_in) {
+    // (config_fails, config_failed, verify_mismatch, verify_val) —
+    // lets Python's construction errors tell a wiring fault ("never
+    // ACKed") from the power-on boot race ("ACKed, never applied":
+    // op_mode read back wrong after every write was acknowledged).
+    (void)self_in;
+    int slot = mp_obj_get_int(slot_in);
+    bus_take();
+    uint8_t fails = 0, failed = 0, mismatch = 0, val = 0;
+    ob_sservo_config_state(sservo_get(), slot,
+                           &fails, &failed, &mismatch, &val);
+    bus_release();
+    mp_obj_t t[4] = {
+        mp_obj_new_int_from_uint(fails),
+        mp_obj_new_int_from_uint(failed),
+        mp_obj_new_int_from_uint(mismatch),
+        mp_obj_new_int_from_uint(val),
+    };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_config_state_obj,
+                                 sb_servo_config_state);
+
 static mp_obj_t sb_servo_pump(size_t n_args, const mp_obj_t *args) {
     // One pump iteration — the hard tick's exact code path, callable
     // from Python. On firmware with the tick running this is a
@@ -1130,6 +1167,7 @@ static mp_obj_t sb_torque_off_all(mp_obj_t self_in) {
         tick_txn_is_swrite = 0;
         tick_txn_is_uwrite = 0;
         tick_txn_is_uread = 0;
+        tick_txn_is_vread = 0;
     }
     int r = ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1);
     // Broadcast completes immediately; consume so the pump can go on.
@@ -1676,6 +1714,7 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     tick_txn_is_swrite = 0;
     tick_txn_is_uwrite = 0;
     tick_txn_is_uread = 0;
+    tick_txn_is_vread = 0;
     // ABANDON any transaction the previous program left in flight.
     //
     // The hard tick pumps right up to the instant a program ends, so
@@ -1746,6 +1785,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_feedback),   MP_ROM_PTR(&sb_servo_feedback_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_stats),      MP_ROM_PTR(&sb_servo_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_write_stats), MP_ROM_PTR(&sb_servo_write_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_servo_config_state), MP_ROM_PTR(&sb_servo_config_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_pump),       MP_ROM_PTR(&sb_servo_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_servo_encode),     MP_ROM_PTR(&sb_servo_encode_obj) },
     { MP_ROM_QSTR(MP_QSTR_torque_off_all),   MP_ROM_PTR(&sb_torque_off_all_obj) },

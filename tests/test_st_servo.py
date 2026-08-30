@@ -41,19 +41,43 @@ def _pos_reply(servo_id, raw, speed=0, load=0):
 
 
 class _Wire:
-    """Answer the captured TX like a healthy servo at ``raw`` counts."""
+    """Answer the captured TX like a healthy servo at ``raw`` counts.
+
+    Register-aware (1.91.0): non-broadcast writes commit into a
+    per-servo register map, and reads of anything but the feedback
+    burst answer FROM that map — so the config sequence's op-mode
+    read-back (reg 0x21) sees what was actually written. Two seams
+    model misbehaving servos: ``drop_writes`` eats the next N writes
+    whole (no ACK — transport loss), ``apply_writes=False`` ACKs
+    every write while committing none of them (the cold-boot EEPROM
+    drop that left a bench wheel in the wrong mode, 2026-08-30)."""
 
     def __init__(self):
         self.raw = 0
         self.tx_log = b""
+        self.regs = {}              # (servo_id, reg) -> byte
+        self.apply_writes = True
+        self.drop_writes = 0
 
     def pump(self):
         sb.servo_pump()
         tx = sb.take_tx()
         self.tx_log += tx
         if len(tx) >= 8 and tx[4] == 0x02:          # READ
-            sb.feed_rx(_pos_reply(tx[2], self.raw))
+            reg, nbytes = tx[5], tx[6]
+            if reg == 0x38:                          # feedback burst
+                sb.feed_rx(_pos_reply(tx[2], self.raw))
+            else:
+                payload = bytes(self.regs.get((tx[2], reg + i), 0)
+                                for i in range(nbytes))
+                sb.feed_rx(_reply(tx[2], 0, payload))
         elif len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE:  # WRITE
+            if self.drop_writes:
+                self.drop_writes -= 1
+                return                               # eaten: no ACK
+            if self.apply_writes:
+                for i, b in enumerate(tx[6:-1]):
+                    self.regs[(tx[2], tx[5] + i)] = b
             sb.feed_rx(_reply(tx[2], 0))
         # SYNC WRITE (0x83) and broadcast: no reply by protocol.
 
@@ -93,23 +117,58 @@ class ConfigSequenceTests(_Base):
         # 0x21, not advance past it — a skipped op_mode is a servo in
         # position mode receiving speed sync-writes.
         self.assertTrue(sb.servo_attach(0, 2, False, 45))
-        dropped = [False]
-        for _ in range(30):
-            sb.servo_pump()
-            tx = sb.take_tx()
-            self.wire.tx_log += tx
-            if (len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE
-                    and not dropped[0]):
-                dropped[0] = True          # first write: silence
-                continue
-            if len(tx) >= 8 and tx[4] == 0x02:
-                sb.feed_rx(_pos_reply(tx[2], 0))
-            elif len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE:
-                sb.feed_rx(_reply(tx[2], 0))
+        self.wire.drop_writes = 1              # first write: silence
+        self.wire.settle(30)
         tx = self.wire.tx_log
-        self.assertEqual(tx.count(bytes([0x21, 0x01])), 2)  # reissued
+        # Count WRITE packets (instr 0x03) — the verify READ's bytes
+        # (0x02 0x21 0x01) would otherwise match the bare pattern.
+        self.assertEqual(tx.count(bytes([0x03, 0x21, 0x01])), 2)
         self.assertEqual(sb.servo_write_stats(0), (1, 0))   # counted
         self.assertTrue(sb.servo_stats(0)[0] > 0)           # then lives
+
+    def test_config_reads_op_mode_back_before_going_live(self):
+        # ACKs prove transport, not application: the sequence must
+        # END with a read of reg 0x21 (1 byte), after the writes, and
+        # only then may feedback polling begin.
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        self.wire.settle()
+        tx = self.wire.tx_log
+        i_verify = tx.find(bytes([0x02, 0x21, 0x01]))   # READ 0x21 x1
+        i_acc = tx.find(bytes([0x29, 45]))
+        self.assertTrue(i_verify >= 0)
+        self.assertTrue(i_verify > i_acc)               # after writes
+        self.assertTrue(sb.servo_stats(0)[0] > 0)       # then lives
+
+    def test_acked_but_unapplied_mode_write_latches_with_evidence(self):
+        # The cold-boot servo: every write ACKed, none committed —
+        # op_mode reads back 0, so the slot must latch config_failed
+        # WITH the mismatch evidence (never "check your wiring": the
+        # wiring just carried eight perfect ACKs), and feedback reads
+        # must never start for it.
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        self.wire.apply_writes = False
+        self.wire.settle(400)      # 8 rounds incl. 25-pump cooldowns
+        _fails, failed, mismatch, got = sb.servo_config_state(0)
+        self.assertEqual(failed, 1)
+        self.assertEqual(mismatch, 1)
+        self.assertEqual(got, 0)                    # the mode it read
+        self.assertEqual(sb.servo_write_stats(0)[1], 1)   # latched
+        self.assertEqual(sb.servo_stats(0)[0], 0)   # never went live
+
+    def test_mode_applied_on_a_later_round_heals(self):
+        # A servo that finishes its power-on init mid-retry: the
+        # cooldown-paced re-runs pick it up and the slot goes live
+        # with no latch and no leftover mismatch evidence.
+        self.assertTrue(sb.servo_attach(0, 2, False, 45))
+        self.wire.apply_writes = False
+        self.wire.settle(40)               # at least one failed round
+        self.wire.apply_writes = True      # servo boot completes
+        self.wire.settle(300)
+        _fails, failed, mismatch, _got = sb.servo_config_state(0)
+        self.assertEqual(failed, 0)
+        self.assertEqual(mismatch, 0)
+        self.assertEqual(sb.servo_write_stats(0)[1], 0)
+        self.assertTrue(sb.servo_stats(0)[0] > 0)
 
 
 class SpeedCommandTests(_Base):

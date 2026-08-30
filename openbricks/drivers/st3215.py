@@ -613,8 +613,10 @@ class ST3215Motor(Motor):
         # its first motion command (every command path re-enables via
         # ``_ensure_torque_on``). Writing 0 — rather than merely not
         # writing — also releases a hold left behind by a previous
-        # program on the same power session.
-        self._bus.write(self._id, _REG_OP_MODE, bytes([_MODE_WHEEL]))
+        # program on the same power session. The mode write is
+        # read-back verified: its ACK alone does not prove a cold
+        # servo applied it.
+        self._write_op_mode_verified(_MODE_WHEEL)
         self._bus.write(self._id, _REG_TORQUE,  bytes([0]))
         # Hardware acceleration ramp (goal-acc register, unit = 100
         # encoder steps/s²): the SERVO slews every speed/position
@@ -706,6 +708,47 @@ class ST3215Motor(Motor):
         self._bus.write(self._id, _REG_GOAL_SPEED,
                         bytes([v & 0xFF, (v >> 8) & 0xFF]))
 
+    # Write-and-read-back rounds before an op-mode change is declared
+    # failed, and the pause between rounds. 0x21 is EEPROM-backed: a
+    # servo still inside its own power-on init ACKs the write without
+    # committing it (bench 2026-08-30 — a cold-started wheel held the
+    # old mode at full torque, obeying goal_speed 0 while duty
+    # commands hammered the register that mode ignores, and the robot
+    # pivoted around it). The pause gives such a servo ~200 ms total
+    # to finish booting; a healthy servo passes on round one.
+    _MODE_VERIFY_TRIES = 8
+    _MODE_VERIFY_PAUSE_MS = 25
+
+    def _write_op_mode_verified(self, mode):
+        """Set op_mode and confirm it on the SERVO, not just on the
+        wire: write, read the register back, and repeat until it
+        matches. The write's ACK proves transport; only the read-back
+        proves application. Raises naming the servo and both modes
+        when it never sticks."""
+        got = None
+        for attempt in range(self._MODE_VERIFY_TRIES):
+            if attempt:
+                time.sleep_ms(self._MODE_VERIFY_PAUSE_MS)
+            self._bus.write(self._id, _REG_OP_MODE, bytes([mode]))
+            data = self._bus.read(self._id, _REG_OP_MODE, 1)
+            if data is not None and data[0] == mode:
+                self._op_mode = mode
+                return
+            got = None if data is None else data[0]
+        if got is None:
+            raise OSError(
+                "servo id %s: op_mode write ACKed but the read-back "
+                "got no reply after %d attempts — check power and "
+                "the servo bus wiring"
+                % (self._id, self._MODE_VERIFY_TRIES))
+        raise OSError(
+            "servo id %s: op_mode still reads %d after %d verified "
+            "writes of %d — the servo ACKs without applying, the "
+            "signature of a controller still in its own power-on "
+            "init. Give it a second after power-on before starting "
+            "the program, then retry." % (self._id, got,
+                                          self._MODE_VERIFY_TRIES, mode))
+
     def _ensure_mode(self, mode):
         """Write op_mode only when it differs from our tracked state.
         Saves a bus packet on the common case where the servo is already
@@ -720,8 +763,7 @@ class ST3215Motor(Motor):
         treat the cross-mode jump as real shaft motion. The accumulated
         count itself is preserved."""
         if self._op_mode != mode:
-            self._bus.write(self._id, _REG_OP_MODE, bytes([mode]))
-            self._op_mode = mode
+            self._write_op_mode_verified(mode)
             self._last_raw = None
             # A mode change can drop torque on the servo side (bench
             # 2026-08-12, entering mode 2) — the cache must not claim
@@ -1249,14 +1291,33 @@ class ST3215Motor(Motor):
             if wstats is not None:
                 wfailed, latched = wstats(slot)
                 if latched:
-                    # The C layer gave up configuring this servo: its
-                    # setup writes (wheel mode, torque, acceleration)
-                    # went unacknowledged OB_SSERVO_CONFIG_TRIES times
-                    # in a row. Feedback reads never even start for an
+                    # The C layer gave up configuring this servo.
+                    # Distinguish the two faults that latch: writes
+                    # that went unACKed (absent servo — wiring/id/
+                    # power) versus writes that were ACKed but whose
+                    # op_mode read-back never matched — a servo still
+                    # inside its own power-on init acknowledges the
+                    # EEPROM-backed mode write without committing it
+                    # (bench 2026-08-30), and telling that user to
+                    # check the wiring hunts the wrong fault.
+                    # Feedback reads never even start for an
                     # unconfigured slot, so without this check the
                     # timeout below would blame "the pump never polled
-                    # it" — a firmware-fault message for what is a
-                    # wiring fault. Fail fast and name it.
+                    # it". Fail fast and name it.
+                    cstate = getattr(self._native_sb,
+                                     "servo_config_state", None)
+                    if cstate is not None:
+                        _f, _l, mismatch, got = cstate(slot)
+                        if mismatch:
+                            raise OSError(
+                                "servo id %s (native slot %d) ACKed "
+                                "its configuration but never applied "
+                                "it: op_mode reads %d after every "
+                                "write was acknowledged. The servo "
+                                "was still in its own power-on init "
+                                "— give it a second after power-on "
+                                "before starting the program, then "
+                                "retry." % (self._id, slot, got))
                     raise OSError(
                         "servo id %s (native slot %d): %d configuration "
                         "writes went unacknowledged — the servo never "

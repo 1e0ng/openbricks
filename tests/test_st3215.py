@@ -326,9 +326,13 @@ def _decode_write(packet):
 
 
 def _writes_to(packets, register):
-    """Filter a UART tx log down to writes targeting one register."""
+    """Filter a UART tx log down to writes targeting one register.
+    Skips non-write packets — the op-mode read-back verification
+    (1.91.0) puts READs in the same log."""
     out = []
     for pkt in packets:
+        if len(pkt) < 6 or pkt[2 + 2] != 0x03:
+            continue
         sid, reg, data = _decode_write(pkt)
         if reg == register:
             out.append((sid, data))
@@ -343,6 +347,68 @@ class TestST3215Motor(unittest.TestCase):
         m = ST3215Motor(servo_id=1)
         mode_writes = _writes_to(m._bus._uart._tx_log, _REG_OP_MODE)
         self.assertEqual(mode_writes, [(1, bytes([1]))])   # 1 = wheel
+
+    def test_constructor_reads_the_mode_back(self):
+        # An ACK proves transport, not application: construction must
+        # follow the mode write with a READ of reg 0x21 (1.91.0).
+        m = ST3215Motor(servo_id=1)
+        reads = [p for p in m._bus._uart._tx_log
+                 if len(p) >= 8 and p[4] == 0x02 and p[5] == 0x21]
+        self.assertEqual(len(reads), 1)
+
+    def test_acked_but_unapplied_mode_write_raises_named(self):
+        # The cold-boot servo: ACKs the EEPROM-backed mode write
+        # without committing it (the bench wheel that held mode 1 at
+        # full torque and pivoted the robot, 2026-08-30). The
+        # constructor must re-write and re-read, then raise NAMING
+        # the boot race — not hand back a motor whose commands go to
+        # a register the servo ignores.
+        uart_holder = {}
+        orig_init = tests._fakes.UART.__init__
+
+        def capture_init(u, *a, **kw):
+            orig_init(u, *a, **kw)
+            u._apply_write = lambda sid, reg, data: None   # ACK, drop
+            # The servo's EEPROM still holds a stale mode (2, from an
+            # old duty session) — what the read-back actually sees.
+            u._regs[(1, 0x21)] = 2
+            uart_holder["u"] = u
+        tests._fakes.UART.__init__ = capture_init
+        try:
+            with self.assertRaises(OSError) as ctx:
+                ST3215Motor(servo_id=1)
+        finally:
+            tests._fakes.UART.__init__ = orig_init
+        msg = str(ctx.exception)
+        self.assertTrue("servo id 1" in msg, msg)
+        self.assertTrue("power-on" in msg, msg)
+        # And it genuinely retried: multiple mode writes on the wire.
+        mode_writes = _writes_to(uart_holder["u"]._tx_log, _REG_OP_MODE)
+        self.assertTrue(len(mode_writes) > 1, mode_writes)
+
+    def test_mode_applied_on_a_retry_heals_construction(self):
+        # A servo that finishes booting between rounds: the verified
+        # write loop picks it up and construction succeeds.
+        state = {"drops": 2}
+        orig_init = tests._fakes.UART.__init__
+
+        def capture_init(u, *a, **kw):
+            orig_init(u, *a, **kw)
+            orig_apply = u._apply_write
+
+            def flaky_apply(sid, reg, data):
+                if reg == 0x21 and state["drops"] > 0:
+                    state["drops"] -= 1
+                    return                       # ACKed, not applied
+                orig_apply(sid, reg, data)
+            u._apply_write = flaky_apply
+        tests._fakes.UART.__init__ = capture_init
+        try:
+            m = ST3215Motor(servo_id=1)
+        finally:
+            tests._fakes.UART.__init__ = orig_init
+        self.assertEqual(state["drops"], 0)
+        self.assertEqual(m._op_mode, 1)
 
     def test_constructor_coasts_torque_off(self):
         # Pybricks-consistent: a constructed motor coasts until its
@@ -1087,10 +1153,22 @@ class TestPybricksParityFeedback(unittest.TestCase):
         m = ST3215Motor(servo_id=1, **kw)
         reads = dict(reads or {})
 
+        # Unlisted registers fall through to the underlying bus (the
+        # register-tracking fake UART) instead of returning None: the
+        # bus is CACHED across _motor calls, and a blanket-None read
+        # left on it silences the next construction's op-mode
+        # read-back (1.91.0). The fake UART stays silent for
+        # never-written registers, so "silent bus" tests still see
+        # None for 0x3A/0x3C.
+        base_read = getattr(m._bus, "_base_read", None)
+        if base_read is None:
+            base_read = m._bus.read
+            m._bus._base_read = base_read
+
         def fake_read(servo_id, register, nbytes):
             v = reads.get(register)
             if v is None:
-                return None
+                return base_read(servo_id, register, nbytes)
             return bytes([v & 0xFF, (v >> 8) & 0xFF])
         m._bus.read = fake_read
         return m
@@ -1158,10 +1236,11 @@ class TestPybricksParityFeedback(unittest.TestCase):
         raw = 500 | 0x0400          # bit 10 = POSITIVE (load convention)
         self.assertEqual(duties[-1], (3, bytes([raw & 0xFF, raw >> 8])))
         # torque write must come after the mode write in the log
+        # (p[4] == 0x03 skips the verify READs sharing the log)
         torque_idx = max(i for i, p in enumerate(log)
-                         if _decode_write(p)[1] == 0x28)
+                         if p[4] == 0x03 and _decode_write(p)[1] == 0x28)
         mode_idx = max(i for i, p in enumerate(log)
-                       if _decode_write(p)[1] == 0x21)
+                       if p[4] == 0x03 and _decode_write(p)[1] == 0x21)
         self.assertTrue(torque_idx > mode_idx,
                         "torque must be re-enabled after the mode switch")
         # speed register untouched: this is not scaled run_speed
@@ -1384,10 +1463,22 @@ class TestDutyLimit(unittest.TestCase):
         m = ST3215Motor(servo_id=1, **kw)
         reads = dict(reads or {})
 
+        # Unlisted registers fall through to the underlying bus (the
+        # register-tracking fake UART) instead of returning None: the
+        # bus is CACHED across _motor calls, and a blanket-None read
+        # left on it silences the next construction's op-mode
+        # read-back (1.91.0). The fake UART stays silent for
+        # never-written registers, so "silent bus" tests still see
+        # None for 0x3A/0x3C.
+        base_read = getattr(m._bus, "_base_read", None)
+        if base_read is None:
+            base_read = m._bus.read
+            m._bus._base_read = base_read
+
         def fake_read(servo_id, register, nbytes):
             v = reads.get(register)
             if v is None:
-                return None
+                return base_read(servo_id, register, nbytes)
             return bytes([v & 0xFF, (v >> 8) & 0xFF])
         m._bus.read = fake_read
         return m

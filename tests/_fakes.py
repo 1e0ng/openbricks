@@ -261,10 +261,16 @@ class UART:
         self.timeout = timeout
         self._rx_buf = b""
         self._tx_log = []
+        # Per-servo register state, kept from observed writes so
+        # read-backs can answer truthfully: {(servo_id, reg): value}.
+        # A test that wants a servo to ACK a write WITHOUT applying it
+        # (the cold-boot EEPROM drop) overrides ``_apply_write``.
+        self._regs = {}
 
     def write(self, data):
         self._tx_log.append(bytes(data))
         self._ack_scs_write(bytes(data))
+        self._answer_scs_read(bytes(data))
         return len(data)
 
     def _ack_scs_write(self, packet):
@@ -286,7 +292,40 @@ class UART:
         servo_id, instr = packet[2], packet[4]
         if instr != 0x03 or servo_id == 0xFE:
             return
+        self._apply_write(servo_id, packet[5], packet[6:-1])
         body = bytes([servo_id, 2, 0])          # id, len, err=0
+        chk = 0
+        for b in body:
+            chk += b
+        self._rx_buf += b"\xff\xff" + body + bytes([(~chk) & 0xFF])
+
+    def _apply_write(self, servo_id, reg, data):
+        """Commit a write into the register map. The seam for the
+        ACK-without-apply servo: a cold-booting controller answers
+        the status packet but drops the EEPROM commit (the mode-1
+        wheel that pivoted the bench robot, 2026-08-30) — tests model
+        it by overriding this to skip chosen registers."""
+        for off, b in enumerate(bytes(data)):
+            self._regs[(servo_id, reg + off)] = b
+
+    def _answer_scs_read(self, packet):
+        """Answer a READ from the register map — but only for a
+        register a write has populated, and only when no test has
+        staged its own reply: staged ``_rx_buf`` bytes model the
+        exact wire a test wants, and must never be interleaved
+        with synthesized packets."""
+        if self._rx_buf or len(packet) < 8 or packet[0:2] != b"\xff\xff":
+            return
+        servo_id, instr = packet[2], packet[4]
+        if instr != 0x02 or servo_id == 0xFE:
+            return
+        reg, nbytes = packet[5], packet[6]
+        payload = []
+        for off in range(nbytes):
+            if (servo_id, reg + off) not in self._regs:
+                return          # unknown register: stay silent
+            payload.append(self._regs[(servo_id, reg + off)])
+        body = bytes([servo_id, nbytes + 2, 0]) + bytes(payload)
         chk = 0
         for b in body:
             chk += b
