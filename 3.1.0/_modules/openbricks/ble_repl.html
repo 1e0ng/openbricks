@@ -1,0 +1,921 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.ble_repl &mdash; openbricks 3.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/ble_repl.html" />
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=dd1205ac"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.1.0">firmware&nbsp;v3.1.0</a>
+<a class="obk-pdf-btn" href="../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.ble_repl</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.ble_repl</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">Nordic UART Service bridge for the MicroPython REPL over BLE.</span>
+
+<span class="sd">Vendored from upstream MicroPython's</span>
+<span class="sd">``examples/bluetooth/ble_uart_peripheral.py`` (the ``BLEUART``</span>
+<span class="sd">class) and ``ble_uart_repl.py`` (the ``BLEUARTStream`` dupterm</span>
+<span class="sd">adapter). Both files are MIT-licensed under MicroPython's project</span>
+<span class="sd">LICENSE. The one structural change is the advertising payload —</span>
+<span class="sd">upstream advertises only the device name + appearance; we add the</span>
+<span class="sd">NUS 128-bit service UUID so clients filtering by service can find</span>
+<span class="sd">us. Everything else (connection-set tracking, append-mode rx</span>
+<span class="sd">buffer, scheduled-flush write batching, ``io.IOBase`` inheritance)</span>
+<span class="sd">is the upstream pattern, unmodified.</span>
+
+<span class="sd">Why vendored: writing this from scratch using only the docs (the</span>
+<span class="sd">1.0.0-1.1.1 history) produced a long parade of "invisible until</span>
+<span class="sd">hardware" bugs — each fix required a hardware reflash + paste</span>
+<span class="sd">diagnostic round. Starting from upstream's working example would</span>
+<span class="sd">have caught all of them at once.</span>
+
+<span class="sd">Public surface (what ``openbricks.bluetooth.apply_persisted_state``</span>
+<span class="sd">calls):</span>
+
+<span class="sd">* ``start()`` — bring up the NUS bridge. Idempotent.</span>
+<span class="sd">* ``stop()``  — tear down. Idempotent.</span>
+<span class="sd">* ``is_running()`` — query.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">bluetooth</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">io</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">micropython</span><span class="w"> </span><span class="kn">import</span> <span class="n">const</span>
+    <span class="n">_IOBASE</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">IOBase</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="c1"># Desktop tests install fakes via ``tests._fakes_ble``; the</span>
+    <span class="c1"># module-level imports still need to succeed at import time on</span>
+    <span class="c1"># CPython. ``const`` is a MicroPython optimisation — pass-through</span>
+    <span class="c1"># works on CPython.</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">io</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+    <span class="n">_IOBASE</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">IOBase</span>
+    <span class="n">const</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span>  <span class="c1"># noqa: E731</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">micropython</span>
+    <span class="n">_SCHEDULE</span> <span class="o">=</span> <span class="n">micropython</span><span class="o">.</span><span class="n">schedule</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="c1"># Desktop tests have no scheduler; flush synchronously.</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_SCHEDULE</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="n">arg</span><span class="p">):</span>
+        <span class="n">fn</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">time</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">_TIME</span>
+    <span class="n">_TICKS</span> <span class="o">=</span> <span class="n">_TIME</span><span class="o">.</span><span class="n">ticks_ms</span>
+<span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">time</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">_TIME</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_TICKS</span><span class="p">():</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">_TIME</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">)</span>
+
+
+<span class="c1"># ---- In-memory event log (1.2.1) -------------------------------------</span>
+<span class="c1">#</span>
+<span class="c1"># 1.2.0 worked in unit tests but produced 0 notify packets on hardware</span>
+<span class="c1"># (host BLE-connected with MTU 256, 30 s wait, nothing came back).</span>
+<span class="c1"># Three possible causes: CENTRAL_CONNECT IRQ not firing, GATTS_WRITE</span>
+<span class="c1"># IRQ not firing, gatts_notify silently dropping. They look identical</span>
+<span class="c1"># from the host. Logging IRQs + write attempts to memory (NOT through</span>
+<span class="c1"># print/dupterm — that recurses through this module's own write path)</span>
+<span class="c1"># tells us which one. Inspect via:</span>
+<span class="c1">#</span>
+<span class="c1">#   mpremote connect /dev/cu.usbmodem... exec \</span>
+<span class="c1">#       'from openbricks import ble_repl; ble_repl.dump_log()'</span>
+<span class="c1">#</span>
+<span class="c1"># Cheap enough at 500 entries × ~40 bytes ≈ 20 KB to keep enabled.</span>
+
+<span class="n">_LOG</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">_LOG_MAX</span> <span class="o">=</span> <span class="mi">500</span>
+<span class="c1"># Ring write index, meaningful once the log is full. Single-element</span>
+<span class="c1"># list so scheduled/IRQ contexts mutate in place without ``global``.</span>
+<span class="n">_LOG_NEXT</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_log</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Record a timestamped event, keeping the LAST ``_LOG_MAX``.</span>
+
+<span class="sd">    This used to stop recording once full ("first 500 events since</span>
+<span class="sd">    boot"), which made it useless for exactly its purpose: a BLE</span>
+<span class="sd">    failure minutes after boot left no trace because chatty connect</span>
+<span class="sd">    traffic had already filled the log in the first minute. A ring</span>
+<span class="sd">    keeps the most recent window instead. Failures inside logging are</span>
+<span class="sd">    swallowed — a diagnostic must never take down the hot path."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="p">(</span><span class="n">_TICKS</span><span class="p">(),</span> <span class="n">tag</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">_LOG</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">_LOG_MAX</span><span class="p">:</span>
+            <span class="n">_LOG</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="n">_LOG_NEXT</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">_LOG</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">entry</span>
+            <span class="n">_LOG_NEXT</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="n">_LOG_MAX</span>
+    <span class="k">except</span> <span class="ne">MemoryError</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<div class="viewcode-block" id="log_entries">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.ble_repl.log_entries">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">log_entries</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""The recorded events, oldest first (unwraps the ring)."""</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">_LOG</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">n</span> <span class="o">&lt;</span> <span class="n">_LOG_MAX</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">_LOG</span><span class="p">)</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="n">_LOG_NEXT</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">_LOG</span><span class="p">[(</span><span class="n">start</span> <span class="o">+</span> <span class="n">k</span><span class="p">)</span> <span class="o">%</span> <span class="n">n</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">)]</span></div>
+
+
+
+<div class="viewcode-block" id="dump_log">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.ble_repl.dump_log">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">dump_log</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Print the in-memory BLE event log over USB-Serial-JTAG.</span>
+
+<span class="sd">    Why a helper rather than ``print(_LOG)``: ``print`` routes through</span>
+<span class="sd">    dupterm which routes through this module's stream, so a long log</span>
+<span class="sd">    print adds entries to itself while running. Iterating + printing</span>
+<span class="sd">    item by item is bounded; the bytes added during the print sit in</span>
+<span class="sd">    _tx_buf until later and don't grow the log.</span>
+<span class="sd">    """</span>
+    <span class="n">entries</span> <span class="o">=</span> <span class="n">log_entries</span><span class="p">()</span>
+    <span class="n">wrapped</span> <span class="o">=</span> <span class="s2">" (older events dropped)"</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">_LOG</span><span class="p">)</span> <span class="o">==</span> <span class="n">_LOG_MAX</span> <span class="k">else</span> <span class="s2">""</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"ble_repl event log (last </span><span class="si">%d%s</span><span class="s2">):"</span> <span class="o">%</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">),</span> <span class="n">wrapped</span><span class="p">))</span>
+    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+        <span class="n">t</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">args</span> <span class="o">=</span> <span class="n">entry</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"  </span><span class="si">%d</span><span class="s2"> </span><span class="si">%s</span><span class="s2"> </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">args</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="clear_log">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.ble_repl.clear_log">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">clear_log</span><span class="p">():</span>
+    <span class="n">_LOG</span><span class="p">[:]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">_LOG_NEXT</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span></div>
+
+
+
+<span class="c1"># ---- BLE constants ----------------------------------------------------</span>
+
+<span class="n">_IRQ_CENTRAL_CONNECT</span>    <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">_IRQ_CENTRAL_DISCONNECT</span> <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+<span class="n">_IRQ_GATTS_WRITE</span>        <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+
+<span class="n">_FLAG_WRITE</span>             <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mh">0x0008</span><span class="p">)</span>
+<span class="n">_FLAG_NOTIFY</span>            <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mh">0x0010</span><span class="p">)</span>
+<span class="n">_FLAG_WRITE_NO_RESPONSE</span> <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mh">0x0004</span><span class="p">)</span>
+
+<span class="n">_MP_STREAM_POLL</span>    <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+<span class="n">_MP_STREAM_POLL_RD</span> <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mh">0x0001</span><span class="p">)</span>
+
+
+<span class="c1"># ---- NUS service UUIDs (the de-facto BLE serial ones) ----------------</span>
+
+<span class="c1"># Stored as strings so tests can compare without instantiating</span>
+<span class="c1"># ``bluetooth.UUID`` (which on the test fakes wraps the string).</span>
+<span class="n">_UART_SERVICE_UUID</span> <span class="o">=</span> <span class="s2">"6E400001-B5A3-F393-E0A9-E50E24DCCA9E"</span>
+<span class="n">_UART_TX_UUID</span>      <span class="o">=</span> <span class="s2">"6E400003-B5A3-F393-E0A9-E50E24DCCA9E"</span>  <span class="c1"># hub → client</span>
+<span class="n">_UART_RX_UUID</span>      <span class="o">=</span> <span class="s2">"6E400002-B5A3-F393-E0A9-E50E24DCCA9E"</span>  <span class="c1"># client → hub</span>
+
+
+<span class="c1"># ---- Advertising payload helper --------------------------------------</span>
+<span class="c1">#</span>
+<span class="c1"># Vendored from ``examples/bluetooth/ble_advertising.py``,</span>
+<span class="c1"># specialised to our exact needs (flags + name + 128-bit UUID).</span>
+
+<span class="n">_ADV_TYPE_FLAGS</span>            <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mh">0x01</span><span class="p">)</span>
+<span class="n">_ADV_TYPE_NAME</span>             <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mh">0x09</span><span class="p">)</span>
+<span class="n">_ADV_TYPE_UUID128_COMPLETE</span> <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mh">0x07</span><span class="p">)</span>
+<span class="n">_ADV_MAX_PAYLOAD</span>           <span class="o">=</span> <span class="n">const</span><span class="p">(</span><span class="mi">31</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_uuid_bytes_le</span><span class="p">(</span><span class="n">uuid_str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Convert a 128-bit UUID string to little-endian bytes (the wire</span>
+<span class="sd">    format BLE advertising expects)."""</span>
+    <span class="n">hex_</span> <span class="o">=</span> <span class="n">uuid_str</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">"-"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="nb">bytes</span><span class="o">.</span><span class="n">fromhex</span><span class="p">(</span><span class="n">hex_</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">bytes</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">b</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_advertising_payload</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">service_uuid_str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Build a BLE advertising payload: flags + name + 128-bit</span>
+<span class="sd">    service UUID. Raises if it overflows 31 bytes (the BLE-LE</span>
+<span class="sd">    advertising max)."""</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">()</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_append</span><span class="p">(</span><span class="n">adv_type</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="n">payload</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s2">"BB"</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">adv_type</span><span class="p">)</span> <span class="o">+</span> <span class="n">value</span><span class="p">)</span>
+    <span class="c1"># 0x06 = LE general discoverable + BR/EDR not supported.</span>
+    <span class="n">_append</span><span class="p">(</span><span class="n">_ADV_TYPE_FLAGS</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s2">"B"</span><span class="p">,</span> <span class="mh">0x06</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">name</span><span class="p">:</span>
+        <span class="n">name_bytes</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">encode</span><span class="p">()</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="n">name</span>
+        <span class="n">_append</span><span class="p">(</span><span class="n">_ADV_TYPE_NAME</span><span class="p">,</span> <span class="n">name_bytes</span><span class="p">[:</span><span class="mi">29</span><span class="p">])</span>  <span class="c1"># leave room for headers</span>
+    <span class="n">_append</span><span class="p">(</span><span class="n">_ADV_TYPE_UUID128_COMPLETE</span><span class="p">,</span> <span class="n">_uuid_bytes_le</span><span class="p">(</span><span class="n">service_uuid_str</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">_ADV_MAX_PAYLOAD</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"advertising payload too large (</span><span class="si">%d</span><span class="s2"> bytes)"</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="n">payload</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+
+
+<span class="c1"># ---- _BLEUART: NUS service registration + connection tracking --------</span>
+<span class="c1">#</span>
+<span class="c1"># Mirror-image of upstream's ``BLEUART`` class. The handler-callback</span>
+<span class="c1"># pattern (``self._handler``) lets ``_BLEUARTStream`` (below) get</span>
+<span class="c1"># notified on rx without us having to call into dupterm from the</span>
+<span class="c1"># IRQ handler — the stream wraps ``_on_rx`` and that's where the</span>
+<span class="c1"># ``os.dupterm_notify`` poke lives.</span>
+
+<span class="c1"># GATT rx buffer for the NUS RX characteristic. MUST be &gt;= 2x the</span>
+<span class="c1"># firmware's ``MICROPY_REPL_STDIN_BUFFER_MAX`` (boards/*/mpconfigboard.h):</span>
+<span class="c1"># raw-paste flow control lets the host have TWO advertised windows</span>
+<span class="c1"># (= one buffer max) in flight before it waits for an ack, and NimBLE</span>
+<span class="c1"># silently drops writes once this buffer is full — the chip then</span>
+<span class="c1"># compiles a fragment of the pasted program.</span>
+<span class="c1">#</span>
+<span class="c1"># 1.32.0 shipped exactly that bug: the window went 128 -&gt; 2048</span>
+<span class="c1"># (in-flight 4096) while this stayed at 512, sized for the OLD</span>
+<span class="c1"># window ("2 windows + headroom"). Bench symptom: the staged</span>
+<span class="c1"># receiver produced empty stdout AND empty stderr — a program</span>
+<span class="c1"># truncated to nothing — and ``openbricks run`` failed with "hub did</span>
+<span class="c1"># not confirm the staged chunk". ``tests/test_board_config.py``</span>
+<span class="c1"># ::BleRxBufferTests pins the relationship in both directions so the</span>
+<span class="c1"># two constants can never drift apart again.</span>
+<span class="n">_RX_BUFFER_BYTES</span> <span class="o">=</span> <span class="mi">8192</span>
+
+<span class="c1"># Consumed-prefix threshold for ``_BLEUART.read``'s compaction. Reads</span>
+<span class="c1"># advance an index instead of re-slicing (see that method), and the</span>
+<span class="c1"># buffer is only rebuilt once this many bytes have been consumed —</span>
+<span class="c1"># so each byte is copied at most once per this many reads instead of</span>
+<span class="c1"># once per read.</span>
+<span class="n">_RX_COMPACT_AT</span> <span class="o">=</span> <span class="mi">1024</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_BLEUART</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ble</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">rxbuf</span><span class="o">=</span><span class="n">_RX_BUFFER_BYTES</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span> <span class="o">=</span> <span class="n">ble</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span><span class="o">.</span><span class="n">irq</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_irq</span><span class="p">)</span>
+        <span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">_tx_handle</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_handle</span><span class="p">),)</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span><span class="o">.</span><span class="n">gatts_register_services</span><span class="p">(</span>
+            <span class="p">((</span><span class="n">bluetooth</span><span class="o">.</span><span class="n">UUID</span><span class="p">(</span><span class="n">_UART_SERVICE_UUID</span><span class="p">),</span> <span class="p">(</span>
+                <span class="p">(</span><span class="n">bluetooth</span><span class="o">.</span><span class="n">UUID</span><span class="p">(</span><span class="n">_UART_TX_UUID</span><span class="p">),</span> <span class="n">_FLAG_NOTIFY</span><span class="p">),</span>
+                <span class="c1"># RX needs BOTH flags. The host-side openbricks</span>
+                <span class="c1"># uses ``write_gatt_char(..., response=False)`` for</span>
+                <span class="c1"># the streaming-REPL hot path; bleak / CoreBluetooth</span>
+                <span class="c1"># silently drop that write if WRITE_NO_RESPONSE isn't</span>
+                <span class="c1"># advertised on the characteristic. WRITE alone leaves</span>
+                <span class="c1"># the chip reading 0 GATTS_WRITE IRQs even after a</span>
+                <span class="c1"># successful BLE connect — which is exactly what 1.2.x</span>
+                <span class="c1"># produced on hardware (see _LOG entries: CONNECT +</span>
+                <span class="c1"># MTU exchange, then no irq(3,) entries).</span>
+                <span class="p">(</span><span class="n">bluetooth</span><span class="o">.</span><span class="n">UUID</span><span class="p">(</span><span class="n">_UART_RX_UUID</span><span class="p">),</span>
+                 <span class="n">_FLAG_WRITE</span> <span class="o">|</span> <span class="n">_FLAG_WRITE_NO_RESPONSE</span><span class="p">),</span>
+            <span class="p">)),)</span>
+        <span class="p">)</span>
+        <span class="c1"># Append-mode rx buffer: back-to-back writes from the central</span>
+        <span class="c1"># accumulate instead of overwriting. Without this, a quick</span>
+        <span class="c1"># "Ctrl-C Ctrl-A" from openbricks run loses one of the two.</span>
+        <span class="c1">#</span>
+        <span class="c1"># Size: see ``_RX_BUFFER_BYTES`` above — it tracks the</span>
+        <span class="c1"># raw-paste window, and undersizing it silently truncates</span>
+        <span class="c1"># pasted programs (upstream BLEUART's 100 lost two thirds of</span>
+        <span class="c1"># the bootstrap; our own 512 lost everything once 1.32.0</span>
+        <span class="c1"># raised the window).</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span><span class="o">.</span><span class="n">gatts_set_buffer</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rx_handle</span><span class="p">,</span> <span class="n">rxbuf</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_connections</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_handler</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_payload</span> <span class="o">=</span> <span class="n">_advertising_payload</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">service_uuid_str</span><span class="o">=</span><span class="n">_UART_SERVICE_UUID</span><span class="p">)</span>
+        <span class="n">_log</span><span class="p">(</span><span class="s2">"init"</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tx_handle</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_handle</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_advertise</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">irq</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">handler</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Set the rx-arrived handler. Called from ``_BLEUARTStream``</span>
+<span class="sd">        to install the ``os.dupterm_notify`` poke."""</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_handler</span> <span class="o">=</span> <span class="n">handler</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_irq</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="c1"># Log EVERY event — including ones we don't expect — so we can</span>
+        <span class="c1"># tell "CONNECT never fired" from "CONNECT fired but with weird</span>
+        <span class="c1"># data" from "some other event we silently dropped".</span>
+        <span class="n">_log</span><span class="p">(</span><span class="s2">"irq"</span><span class="p">,</span> <span class="n">event</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">event</span> <span class="o">==</span> <span class="n">_IRQ_CENTRAL_CONNECT</span><span class="p">:</span>
+            <span class="n">conn_handle</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">data</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">conn_handle</span><span class="p">)</span>
+            <span class="n">_log</span><span class="p">(</span><span class="s2">"CONNECT"</span><span class="p">,</span> <span class="n">conn_handle</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="n">event</span> <span class="o">==</span> <span class="n">_IRQ_CENTRAL_DISCONNECT</span><span class="p">:</span>
+            <span class="n">conn_handle</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">data</span>
+            <span class="k">if</span> <span class="n">conn_handle</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">conn_handle</span><span class="p">)</span>
+            <span class="n">_log</span><span class="p">(</span><span class="s2">"DISCONNECT"</span><span class="p">,</span> <span class="n">conn_handle</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="p">))</span>
+            <span class="c1"># Keep accepting new connections.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_advertise</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">event</span> <span class="o">==</span> <span class="n">_IRQ_GATTS_WRITE</span><span class="p">:</span>
+            <span class="n">conn_handle</span><span class="p">,</span> <span class="n">value_handle</span> <span class="o">=</span> <span class="n">data</span>
+            <span class="n">in_set</span> <span class="o">=</span> <span class="n">conn_handle</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connections</span>
+            <span class="k">if</span> <span class="n">in_set</span> <span class="ow">and</span> <span class="n">value_handle</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_handle</span><span class="p">:</span>
+                <span class="n">buf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span><span class="o">.</span><span class="n">gatts_read</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rx_handle</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span> <span class="o">+=</span> <span class="n">buf</span>
+                <span class="n">_log</span><span class="p">(</span><span class="s2">"GATTS_WRITE_OK"</span><span class="p">,</span> <span class="n">conn_handle</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">buf</span><span class="p">),</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">[:</span><span class="mi">8</span><span class="p">]))</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_handler</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_handler</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">_log</span><span class="p">(</span><span class="s2">"GATTS_WRITE_DROP"</span><span class="p">,</span> <span class="n">conn_handle</span><span class="p">,</span> <span class="n">value_handle</span><span class="p">,</span> <span class="n">in_set</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_handle</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">any</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span><span class="p">)</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">read</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sz</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Drain up to ``sz`` bytes. O(sz) with amortised compaction.</span>
+
+<span class="sd">        THE HOT PATH, and it is called ONCE PER BYTE: MicroPython's</span>
+<span class="sd">        dupterm pulls stdin a byte at a time</span>
+<span class="sd">        (``extmod/os_dupterm.c`` calls ``readinto`` with a 1-byte</span>
+<span class="sd">        buffer), and the raw-paste tokenizer pulls each pasted byte</span>
+<span class="sd">        through ``mp_hal_stdin_rx_chr``. The original implementation</span>
+<span class="sd">        did ``self._rx_buffer = self._rx_buffer[sz:]`` here, which</span>
+<span class="sd">        REALLOCATES AND COPIES the whole remaining buffer on every</span>
+<span class="sd">        single byte — O(n^2) time plus one GC allocation per byte,</span>
+<span class="sd">        on a heap that PSRAM made large (and therefore slow to</span>
+<span class="sd">        collect).</span>
+
+<span class="sd">        That is the real staging bottleneck, and it is why raising</span>
+<span class="sd">        the raw-paste window made things WORSE rather than faster</span>
+<span class="sd">        (1.32.0/1.32.1): a bigger window means more bytes buffered,</span>
+<span class="sd">        and the per-byte cost grows with the buffer. Bench maths at</span>
+<span class="sd">        the stock window put ~80% of each 269 ms window round trip</span>
+<span class="sd">        on-chip, not on the radio.</span>
+
+<span class="sd">        Reading via an index makes each byte O(1); the buffer is</span>
+<span class="sd">        compacted only when the consumed prefix is worth reclaiming,</span>
+<span class="sd">        and reset outright whenever it drains empty (the common</span>
+<span class="sd">        case between pastes).</span>
+<span class="sd">        """</span>
+        <span class="n">avail</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span><span class="p">)</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span>
+        <span class="k">if</span> <span class="n">avail</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">return</span> <span class="sa">b</span><span class="s2">""</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">sz</span> <span class="ow">or</span> <span class="n">sz</span> <span class="o">&gt;</span> <span class="n">avail</span><span class="p">:</span>
+            <span class="n">sz</span> <span class="o">=</span> <span class="n">avail</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span> <span class="o">=</span> <span class="n">start</span> <span class="o">+</span> <span class="n">sz</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span><span class="p">])</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span><span class="p">):</span>
+            <span class="c1"># Fully drained: drop the whole allocation.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span> <span class="o">&gt;=</span> <span class="n">_RX_COMPACT_AT</span><span class="p">:</span>
+            <span class="c1"># Reclaim the consumed prefix. Amortised: each byte is</span>
+            <span class="c1"># copied at most once per _RX_COMPACT_AT bytes read.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rx_buffer</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span><span class="p">:]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_rx_pos</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Notify ``data`` to every connected central.</span>
+
+<span class="sd">        Returns ``True`` when the bytes are handled — delivered to at</span>
+<span class="sd">        least one central, or deliberately dropped because nobody is</span>
+<span class="sd">        connected — and ``False`` when every notify failed (NimBLE</span>
+<span class="sd">        raises ``OSError`` when its msys buffer pool is exhausted,</span>
+<span class="sd">        which a fast dump like ``openbricks log`` reliably provokes).</span>
+<span class="sd">        The caller keeps the bytes and retries on ``False``; treating</span>
+<span class="sd">        that error as fire-and-forget silently lost one TX chunk per</span>
+<span class="sd">        exhaustion, which read back as missing / seemingly duplicated</span>
+<span class="sd">        log lines on the host (the 1.11.0 ``log`` corruption)."""</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="p">:</span>
+            <span class="n">_log</span><span class="p">(</span><span class="s2">"write_no_conn"</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">for</span> <span class="n">conn_handle</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span><span class="o">.</span><span class="n">gatts_notify</span><span class="p">(</span><span class="n">conn_handle</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tx_handle</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+                <span class="n">ok</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">_log</span><span class="p">(</span><span class="s2">"notify_ok"</span><span class="p">,</span> <span class="n">conn_handle</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="c1"># Buffer exhaustion, or the peer went away mid-notify</span>
+                <span class="c1"># (the disconnect IRQ will tidy the latter up).</span>
+                <span class="n">_log</span><span class="p">(</span><span class="s2">"notify_err"</span><span class="p">,</span> <span class="n">conn_handle</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">),</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">ok</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">conn_handle</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span><span class="o">.</span><span class="n">gap_disconnect</span><span class="p">(</span><span class="n">conn_handle</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+                <span class="k">pass</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_connections</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stop_advertising</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_advertise</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">interval_us</span><span class="o">=</span><span class="mi">100_000</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span><span class="o">.</span><span class="n">gap_advertise</span><span class="p">(</span><span class="n">interval_us</span><span class="p">,</span> <span class="n">adv_data</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_payload</span><span class="p">)</span>
+        <span class="n">_log</span><span class="p">(</span><span class="s2">"advertise"</span><span class="p">,</span> <span class="n">interval_us</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_payload</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_stop_advertising</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># ``gap_advertise(None)`` stops advertising in MicroPython.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ble</span><span class="o">.</span><span class="n">gap_advertise</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">):</span>
+            <span class="k">pass</span>
+
+
+<span class="c1"># ---- _BLEUARTStream: dupterm-compatible stream wrapper ---------------</span>
+<span class="c1">#</span>
+<span class="c1"># Vendored from upstream's ``BLEUARTStream``. ``io.IOBase`` is what</span>
+<span class="c1"># gives the type the C-level stream-protocol slot — without that</span>
+<span class="c1"># inheritance, ``os.dupterm()`` raises ``stream operation not</span>
+<span class="c1"># supported``.</span>
+<span class="c1">#</span>
+<span class="c1"># Write-side batching: ``write()`` queues bytes into ``_tx_buf`` and</span>
+<span class="c1"># schedules a ``_flush`` callback via ``micropython.schedule``. The</span>
+<span class="c1"># flush sends up to 100 bytes per pass and re-schedules if more</span>
+<span class="c1"># remain. This keeps gatts_notify off the IRQ-handler hot path AND</span>
+<span class="c1"># avoids one notify per byte (which BLE link-layer rate limits would</span>
+<span class="c1"># choke on).</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_BLEUARTStream</span><span class="p">(</span><span class="n">_IOBASE</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">uart</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_uart</span> <span class="o">=</span> <span class="n">uart</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_uart</span><span class="o">.</span><span class="n">irq</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_on_rx</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_on_rx</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Wake dupterm so it drains uart's rx buffer into stdin</span>
+        <span class="c1"># immediately. Without this, a Ctrl-C arriving over BLE sits</span>
+        <span class="c1"># in the buffer until the REPL happens to poll — which can</span>
+        <span class="c1"># be never, if user code is busy-looping.</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">os</span><span class="p">,</span> <span class="s2">"dupterm_notify"</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">dupterm_notify</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="c1"># Exception armor on every dupterm-facing method. MicroPython</span>
+    <span class="c1"># DEACTIVATES a dupterm stream whose read()/write() raises</span>
+    <span class="c1"># (extmod/os_dupterm.c: mp_os_deactivate, "dupterm: Exception in</span>
+    <span class="c1"># ... method, deactivating") — the message goes to the USB</span>
+    <span class="c1"># console, so over BLE the symptom is a hub that connects, logs</span>
+    <span class="c1"># every host byte, and never sends another notify. The stop</span>
+    <span class="c1"># button's injected KeyboardInterrupt raises at an arbitrary</span>
+    <span class="c1"># main-thread bytecode — including inside these methods during a</span>
+    <span class="c1"># print storm — so a stop press could silently kill the BLE</span>
+    <span class="c1"># console until reboot (the 1.12.0 bench wedge). Swallowing here</span>
+    <span class="c1"># is safe: eating one injection costs one 300 ms launcher retry</span>
+    <span class="c1"># (the e-stop latch already stopped the robot), while a</span>
+    <span class="c1"># deactivated dupterm is permanent.</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">read</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sz</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_uart</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">sz</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">BaseException</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">readinto</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">buf</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">avail</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_uart</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">buf</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">avail</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">None</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">avail</span><span class="p">)):</span>
+                <span class="n">buf</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">avail</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">avail</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">BaseException</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">ioctl</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">op</span><span class="p">,</span> <span class="n">arg</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">op</span> <span class="o">==</span> <span class="n">_MP_STREAM_POLL</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_uart</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+                    <span class="k">return</span> <span class="n">_MP_STREAM_POLL_RD</span>
+            <span class="k">return</span> <span class="mi">0</span>
+        <span class="k">except</span> <span class="ne">BaseException</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">0</span>
+
+    <span class="c1"># No "already scheduled" flag — deliberately. The stop button</span>
+    <span class="c1"># injects KeyboardInterrupt at an arbitrary bytecode boundary of</span>
+    <span class="c1"># whatever the main thread is executing, and scheduled callbacks</span>
+    <span class="c1"># run on the main thread: with a flag, an interrupt landing at</span>
+    <span class="c1"># ``_flush``'s entry (before the flag-clearing statement) unwound</span>
+    <span class="c1"># the callback with the flag stranded True, and every later</span>
+    <span class="c1"># ``write()`` believed a flush was pending — BLE TX dead until</span>
+    <span class="c1"># reboot, while advertising and connections still worked (the</span>
+    <span class="c1"># 1.10.4 bug: "hub connects but never notifies after a button</span>
+    <span class="c1"># stop"). Scheduling per write is idempotent instead: duplicate</span>
+    <span class="c1"># flushes no-op on an empty buffer, a full scheduler queue just</span>
+    <span class="c1"># defers to the next write, and an interrupt unwinding ``_flush``</span>
+    <span class="c1"># anywhere leaves no state to strand — the next write (the</span>
+    <span class="c1"># KeyboardInterrupt traceback itself, usually) re-schedules.</span>
+
+    <span class="c1"># TX buffer hard cap. Bytes are retained across notify failures</span>
+    <span class="c1"># (see ``_flush``), so a persistently jammed link plus a chatty</span>
+    <span class="c1"># program could otherwise grow ``_tx_buf`` without bound. When the</span>
+    <span class="c1"># cap is hit the OLDEST bytes are dropped — for a console stream</span>
+    <span class="c1"># the tail is the valuable part.</span>
+    <span class="n">_TX_MAX</span> <span class="o">=</span> <span class="mi">8192</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_flush</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_arg</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="c1"># Peek-then-trim: the chunk leaves the buffer only after the</span>
+        <span class="c1"># notify reports success. The previous trim-before-write order</span>
+        <span class="c1"># lost the chunk whenever gatts_notify raised (NimBLE buffer</span>
+        <span class="c1"># exhaustion under a sustained dump) — at-least-once beats</span>
+        <span class="c1"># at-most-once here, because a lost chunk can be the raw-REPL</span>
+        <span class="c1"># ``\x04`` terminator, which hangs the host until its timeout.</span>
+        <span class="c1"># The residual race — an injected KeyboardInterrupt landing</span>
+        <span class="c1"># between the successful write and the trim — re-sends at most</span>
+        <span class="c1"># one 100-byte chunk, only during a button stop.</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">100</span><span class="p">])</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_uart</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
+            <span class="c1"># Notify failed; keep the bytes. Deliberately NOT</span>
+            <span class="c1"># re-scheduling here: an immediate retry can spin the</span>
+            <span class="c1"># scheduler drain loop while the stack's buffers are</span>
+            <span class="c1"># still full. The retry is paced instead — the next</span>
+            <span class="c1"># ``write()`` or the launcher's ``pump_tx`` tick.</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span><span class="p">[</span><span class="mi">100</span><span class="p">:]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_schedule_flush</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_schedule_flush</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">_SCHEDULE</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_flush</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span><span class="p">:</span>
+            <span class="c1"># Scheduler queue full. The bytes stay in ``_tx_buf``;</span>
+            <span class="c1"># the next ``write()`` or ``pump_tx`` re-requests.</span>
+            <span class="k">pass</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">buf</span><span class="p">):</span>
+        <span class="c1"># Same armor rationale as read/readinto/ioctl above: an</span>
+        <span class="c1"># exception escaping write() (stop-button KeyboardInterrupt</span>
+        <span class="c1"># landing mid-body, MemoryError growing the buffer) makes</span>
+        <span class="c1"># MicroPython deactivate the dupterm slot permanently. Worst</span>
+        <span class="c1"># case of swallowing: this chunk is lost or the flush waits</span>
+        <span class="c1"># for the pump tick.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">was_empty</span> <span class="o">=</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span> <span class="o">+=</span> <span class="n">buf</span>
+            <span class="n">overflow</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span><span class="p">)</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_TX_MAX</span>
+            <span class="k">if</span> <span class="n">overflow</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tx_buf</span><span class="p">[</span><span class="n">overflow</span><span class="p">:]</span>
+                <span class="n">_log</span><span class="p">(</span><span class="s2">"tx_overflow"</span><span class="p">,</span> <span class="n">overflow</span><span class="p">)</span>
+            <span class="c1"># Schedule only on the empty-&gt;non-empty transition. A</span>
+            <span class="c1"># non-empty buffer means a flush chain is (normally)</span>
+            <span class="c1"># already re-scheduling itself, and if that chain died the</span>
+            <span class="c1"># launcher pump revives it within one poll tick. The old</span>
+            <span class="c1"># schedule-per-write flooded the 8-deep scheduler queue</span>
+            <span class="c1"># during print storms, and machine.Timer callbacks share</span>
+            <span class="c1"># that queue: a full queue silently DROPS timer ticks —</span>
+            <span class="c1"># including the button watcher, which is how a stop press</span>
+            <span class="c1"># went completely unseen (no 'button pressed' breadcrumb).</span>
+            <span class="c1"># The decision derives from buffer content, not a flag, so</span>
+            <span class="c1"># an interrupt unwinding anywhere strands nothing.</span>
+            <span class="k">if</span> <span class="n">was_empty</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_schedule_flush</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">BaseException</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">buf</span><span class="p">)</span>
+
+
+<span class="c1"># ---- Public API ------------------------------------------------------</span>
+
+<span class="c1"># Singleton bridge state. ``_state["bridge"]`` is the active</span>
+<span class="c1"># ``_BLEUART`` (kept under that key for backwards-compat with tests</span>
+<span class="c1"># that introspected the bridge before 1.2.0). ``_state["stream"]``</span>
+<span class="c1"># is the ``_BLEUARTStream`` installed in dupterm.</span>
+<span class="n">_state</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"bridge"</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">"stream"</span><span class="p">:</span> <span class="kc">None</span><span class="p">}</span>
+
+
+<div class="viewcode-block" id="is_running">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.ble_repl.is_running">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">is_running</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">_state</span><span class="p">[</span><span class="s2">"bridge"</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span></div>
+
+
+
+<div class="viewcode-block" id="pump_tx">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.ble_repl.pump_tx">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">pump_tx</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Re-arm the TX flush if bytes are sitting in the buffer.</span>
+
+<span class="sd">    Liveness backstop, called from the launcher's poll tick. A flush</span>
+<span class="sd">    chain dies in two ways: ``micropython.schedule``'s queue was full</span>
+<span class="sd">    at re-schedule time, or a notify failed and the retry is</span>
+<span class="sd">    deliberately paced (see ``_flush``). In both cases the buffered</span>
+<span class="sd">    bytes wait for the *next* ``write()`` — which never comes when the</span>
+<span class="sd">    writer already finished. That was the ``openbricks log``</span>
+<span class="sd">    end-of-dump stall: the file content and the raw-REPL terminator</span>
+<span class="sd">    sat in ``_tx_buf`` forever while the host timed out. The pump</span>
+<span class="sd">    gives the chain a fresh start at tick cadence; it is idempotent</span>
+<span class="sd">    and no-ops when the buffer is empty or the bridge is down."""</span>
+    <span class="n">stream</span> <span class="o">=</span> <span class="n">_state</span><span class="p">[</span><span class="s2">"stream"</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">stream</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">stream</span><span class="o">.</span><span class="n">_tx_buf</span><span class="p">:</span>
+        <span class="n">stream</span><span class="o">.</span><span class="n">_schedule_flush</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="start">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.ble_repl.start">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Bring up the NUS bridge. Idempotent — second call is a no-op</span>
+<span class="sd">    if already running.</span>
+
+<span class="sd">    Caller must have ``ble.active(True)`` before calling. Hub name</span>
+<span class="sd">    comes from ``openbricks.HUB_NAME`` (NVS-backed); we refuse to</span>
+<span class="sd">    advertise without one.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">_state</span><span class="p">[</span><span class="s2">"bridge"</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">openbricks</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">openbricks</span><span class="o">.</span><span class="n">HUB_NAME</span>
+    <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="s2">"hub name unset; flash with `openbricks flash --name NAME ...`"</span>
+        <span class="p">)</span>
+    <span class="n">ble</span> <span class="o">=</span> <span class="n">bluetooth</span><span class="o">.</span><span class="n">BLE</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ble</span><span class="o">.</span><span class="n">active</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="s2">"BLE is not active; call openbricks.bluetooth.set_enabled(True) "</span>
+            <span class="s2">"before ble_repl.start()"</span>
+        <span class="p">)</span>
+    <span class="n">uart</span> <span class="o">=</span> <span class="n">_BLEUART</span><span class="p">(</span><span class="n">ble</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+    <span class="n">stream</span> <span class="o">=</span> <span class="n">_BLEUARTStream</span><span class="p">(</span><span class="n">uart</span><span class="p">)</span>
+    <span class="n">_install_dupterm</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+    <span class="n">_state</span><span class="p">[</span><span class="s2">"bridge"</span><span class="p">]</span> <span class="o">=</span> <span class="n">uart</span>
+    <span class="n">_state</span><span class="p">[</span><span class="s2">"stream"</span><span class="p">]</span> <span class="o">=</span> <span class="n">stream</span></div>
+
+
+
+<div class="viewcode-block" id="stop">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.ble_repl.stop">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">stop</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Tear down the NUS bridge. Idempotent."""</span>
+    <span class="k">if</span> <span class="n">_state</span><span class="p">[</span><span class="s2">"bridge"</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="n">_install_dupterm</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">_state</span><span class="p">[</span><span class="s2">"bridge"</span><span class="p">]</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="n">_state</span><span class="p">[</span><span class="s2">"bridge"</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_state</span><span class="p">[</span><span class="s2">"stream"</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_install_dupterm</span><span class="p">(</span><span class="n">stream</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install/clear the dupterm stream. Indirection point so tests</span>
+<span class="sd">    can monkey-patch this helper instead of touching ``os.dupterm``</span>
+<span class="sd">    directly (``os`` is a frozen module on MicroPython and rejects</span>
+<span class="sd">    ``setattr``)."""</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">os</span><span class="p">,</span> <span class="s2">"dupterm"</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">dupterm</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

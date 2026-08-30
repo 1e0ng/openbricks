@@ -1,0 +1,1009 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.robotics.drivebase &mdash; openbricks 3.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/robotics/drivebase.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=dd1205ac"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.1.0">firmware&nbsp;v3.1.0</a>
+<a class="obk-pdf-btn" href="../../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.robotics.drivebase</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.robotics.drivebase</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">Two-wheel differential drivebase.</span>
+
+<span class="sd">Thin Python wrapper over ``_openbricks_native.DriveBase`` — the C</span>
+<span class="sd">implementation at ``native/user_c_modules/openbricks/drivebase.c`` that</span>
+<span class="sd">runs 2-DOF coupled control at 1 kHz. Both motors are driven by a</span>
+<span class="sd">single forward-progress trajectory and a heading-hold trajectory; a</span>
+<span class="sd">heading-error feedback term keeps them in sync even when one wheel has</span>
+<span class="sd">more friction than the other.</span>
+
+<span class="sd">Public API matches the M1 Python version so existing code and tests</span>
+<span class="sd">don't need to change:</span>
+
+<span class="sd">    db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)</span>
+<span class="sd">    db.settings(straight_speed=200, turn_rate=180)   # deg/s at wheels</span>
+<span class="sd">    db.straight(500)     # mm, blocking</span>
+<span class="sd">    db.turn(90)          # deg body heading, blocking</span>
+<span class="sd">    db.drive(100, 0)     # non-blocking kinematic mapping</span>
+
+<span class="sd">Serial-bus motors (ST-3215 / ST-3032) are adopted transparently onto</span>
+<span class="sd">the hard-tick engine (firmware) or the emulated bus (sim) — same class,</span>
+<span class="sd">same code, one controller. There is no Python control loop: motor</span>
+<span class="sd">pairs with neither a native servo nor a serial-bus adoption path get</span>
+<span class="sd">open-loop ``drive()``/``stop()`` only, and ``straight()``/``turn()``</span>
+<span class="sd">raise.</span>
+
+<span class="sd">Open-loop ``drive()`` bypasses the coupled controller; it just maps</span>
+<span class="sd">(speed_mm_s, turn_rate_dps) → (left_dps, right_dps) and hands them to</span>
+<span class="sd">each servo's ``run_speed``. Useful for interactive control where</span>
+<span class="sd">profile-based moves would feel sluggish.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">estop</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks._native</span><span class="w"> </span><span class="kn">import</span> <span class="n">DriveBase</span> <span class="k">as</span> <span class="n">_NativeDriveBase</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">parameters</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.parameters</span><span class="w"> </span><span class="kn">import</span> <span class="n">Stop</span><span class="p">,</span> <span class="n">DriveMode</span>
+
+
+<div class="viewcode-block" id="DriveBase">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">DriveBase</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""A two-wheel differential drive robot: two motors, one chassis.</span>
+
+<span class="sd">    Pybricks-compatible surface: ``straight(distance_mm)``,</span>
+<span class="sd">    ``turn(angle_deg)``, ``drive(speed_mm_s, turn_rate_dps)``,</span>
+<span class="sd">    ``stop(then=...)``, ``settings(...)``, ``use_gyro(True)`` and</span>
+<span class="sd">    non-blocking moves via ``wait=False`` + ``done()``. Positive</span>
+<span class="sd">    ``turn`` is right/clockwise viewed from above.</span>
+
+<span class="sd">    Give it any two closed-loop motors and it picks the right</span>
+<span class="sd">    controller automatically:</span>
+
+<span class="sd">    * **Encoder servos** (``JGB37Motor``, ``MG370Motor``) — the native</span>
+<span class="sd">      C 2-DOF coupled controller at 1 kHz.</span>
+<span class="sd">    * **Serial-bus servos** (``ST3032Motor``, ``ST3215Motor``) — the</span>
+<span class="sd">      motors are *adopted* onto the hard-tick native bus engine</span>
+<span class="sd">      (~220 Hz odometry per wheel, immune to Python stalls). Their</span>
+<span class="sd">      wheel-mode motor API keeps working after adoption.</span>
+<span class="sd">    * **Open-loop motors** (``L298NMotor``) — kinematic ``drive()`` /</span>
+<span class="sd">      ``stop()`` only; moves by distance need feedback and raise.</span>
+
+<span class="sd">    Example::</span>
+
+<span class="sd">        from openbricks.drivers.st3032 import ST3032Motor</span>
+<span class="sd">        from openbricks.robotics import DriveBase</span>
+
+<span class="sd">        left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)</span>
+<span class="sd">        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41,</span>
+<span class="sd">                            invert=True)</span>
+<span class="sd">        db = DriveBase(left, right, wheel_diameter_mm=88,</span>
+<span class="sd">                       axle_track_mm=138)</span>
+<span class="sd">        db.straight(300)     # forward 300 mm</span>
+<span class="sd">        db.turn(90)          # turn right 90 degrees</span>
+
+<span class="sd">    Accurate ``wheel_diameter_mm`` / ``axle_track_mm`` values matter</span>
+<span class="sd">    more than any controller gain — see :doc:`/measuring` for how to</span>
+<span class="sd">    calibrate both in two short test drives.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">wheel_diameter_mm</span><span class="p">,</span> <span class="n">axle_track_mm</span><span class="p">,</span>
+                 <span class="n">imu</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">drive</span><span class="o">=</span><span class="n">DriveMode</span><span class="o">.</span><span class="n">DUTY</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        Args:</span>
+<span class="sd">            left, right: Motor instances. The wrapper reaches through to</span>
+<span class="sd">                ``.servo`` (for JGB37Motor) when constructing the native</span>
+<span class="sd">                drivebase, since the C layer operates on the servo struct</span>
+<span class="sd">                directly. Motors without a native servo (e.g. plain</span>
+<span class="sd">                ``L298NMotor`` with no encoder) get open-loop</span>
+<span class="sd">                ``drive()`` only.</span>
+<span class="sd">            drive: serial-bus wheels only — ``DriveMode.DUTY`` (default) runs</span>
+<span class="sd">                the servos open-loop with the engine's own FF+PI speed</span>
+<span class="sd">                controller closing the loop over raw duty ("dumb</span>
+<span class="sd">                mode": the entire drive loop is openbricks code);</span>
+<span class="sd">                ``DriveMode.WHEEL`` uses the servo's internal speed loop</span>
+<span class="sd">                instead. One caveat in duty mode: at move end,</span>
+<span class="sd">                ``then=Stop.BRAKE``/``Stop.HOLD`` behave like coast at</span>
+<span class="sd">                the wheel level (open loop has no hold torque) —</span>
+<span class="sd">                while a move is ACTIVE the controller corrects as</span>
+<span class="sd">                usual. Ignored on encoder/DC motor pairs.</span>
+<span class="sd">            wheel_diameter_mm: wheel diameter in millimeters.</span>
+<span class="sd">            axle_track_mm: distance between the two wheel contact points.</span>
+<span class="sd">            imu: optional ``IMU``-conformant object (any driver with a</span>
+<span class="sd">                ``.heading()`` method returning body heading in degrees —</span>
+<span class="sd">                the bundled ``BNO055`` qualifies). When provided, call</span>
+<span class="sd">                ``drivebase.use_gyro(True)`` to have the heading loop</span>
+<span class="sd">                read from the IMU instead of computing from the encoder</span>
+<span class="sd">                differential. Slip-immune. Works on both closed-loop</span>
+<span class="sd">                paths: the native controller reads it on the 1 kHz</span>
+<span class="sd">                tick, and the serial-bus engine pumps it into the</span>
+<span class="sd">                hard-tick heading hold once per ``done()`` poll.</span>
+<span class="sd">        """</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_left</span> <span class="o">=</span> <span class="n">left</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_right</span> <span class="o">=</span> <span class="n">right</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_wheel_circumference</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">wheel_diameter_mm</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_axle_track</span> <span class="o">=</span> <span class="n">axle_track_mm</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_imu</span> <span class="o">=</span> <span class="n">imu</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_gyro_enabled</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="c1"># Serial-bus motors: adopt them onto the hard-tick engine</span>
+        <span class="c1"># transparently (1.45.0 — ONE drivebase class, user decision).</span>
+        <span class="c1"># On firmware that's the real st_bus + UART handover; in the</span>
+        <span class="c1"># sim it's the emulated bus over MuJoCo wheels. Same user code</span>
+        <span class="c1"># everywhere. Raises if the runtime has no bus — there is no</span>
+        <span class="c1"># Python fallback loop.</span>
+        <span class="n">parameters</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">DriveMode</span><span class="p">,</span> <span class="n">drive</span><span class="p">,</span> <span class="s2">"drive"</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_try_adopt_serial</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">imu</span><span class="p">,</span>
+                                                     <span class="n">drive</span><span class="p">)</span>
+
+        <span class="c1"># The native drivebase is only usable if both motors are</span>
+        <span class="c1"># closed-loop servos. Motor pairs with neither engine get</span>
+        <span class="c1"># open-loop ``drive()`` only.</span>
+        <span class="n">left_servo</span>  <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">left</span><span class="p">,</span>  <span class="s2">"_servo"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">right_servo</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">right</span><span class="p">,</span> <span class="s2">"_servo"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">left_servo</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">right_servo</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="o">=</span> <span class="n">_NativeDriveBase</span><span class="p">(</span>
+                <span class="n">left</span><span class="o">=</span><span class="n">left_servo</span><span class="p">,</span>
+                <span class="n">right</span><span class="o">=</span><span class="n">right_servo</span><span class="p">,</span>
+                <span class="n">wheel_diameter_mm</span><span class="o">=</span><span class="n">wheel_diameter_mm</span><span class="p">,</span>
+                <span class="n">axle_track_mm</span><span class="o">=</span><span class="n">axle_track_mm</span><span class="p">,</span>
+                <span class="n">imu</span><span class="o">=</span><span class="n">imu</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Default cruise parameters (wheel-degrees per second),</span>
+        <span class="c1"># Pybricks-parity since 1.90.0: 40% / 33% of the ST-3032's</span>
+        <span class="c1"># 888 dps rated speed. Tweak via ``settings()``.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_straight_speed_dps</span> <span class="o">=</span> <span class="mi">350</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_turn_rate_dps</span>      <span class="o">=</span> <span class="mi">300</span>
+
+        <span class="c1"># State for in-flight ``straight(wait=False)`` / ``turn(wait=False)``</span>
+        <span class="c1"># moves. ``None`` means nothing pending; ``done()`` returns</span>
+        <span class="c1"># True. ``stop()`` clears this. See ``done`` for the layout.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_try_adopt_serial</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">imu</span><span class="p">,</span> <span class="n">drive</span><span class="o">=</span><span class="n">DriveMode</span><span class="o">.</span><span class="n">DUTY</span><span class="p">):</span>
+        <span class="c1"># Polymorphic: each serial-motor family implements its own</span>
+        <span class="c1"># adoption (firmware ST3215Motor -&gt; real st_bus + UART</span>
+        <span class="c1"># handover; the sim's shim motors -&gt; the emulated bus over</span>
+        <span class="c1"># MuJoCo wheels). Motors without the hook (encoder/open-loop</span>
+        <span class="c1"># families) simply don't adopt.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="nb">hasattr</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="s2">"_adopt_into_drivebase"</span><span class="p">)</span>
+                <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">right</span><span class="p">,</span> <span class="s2">"_adopt_into_drivebase"</span><span class="p">)):</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">engine</span> <span class="o">=</span> <span class="n">left</span><span class="o">.</span><span class="n">_adopt_into_drivebase</span><span class="p">(</span>
+            <span class="n">right</span><span class="p">,</span>
+            <span class="n">wheel_diameter_mm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_wheel_circumference</span> <span class="o">/</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span>
+            <span class="n">axle_track_mm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_axle_track</span><span class="p">,</span> <span class="n">imu</span><span class="o">=</span><span class="n">imu</span><span class="p">,</span> <span class="n">drive</span><span class="o">=</span><span class="n">drive</span><span class="p">,</span>
+            <span class="n">accel_dps2</span><span class="o">=</span><span class="mf">1500.0</span><span class="p">)</span>  <span class="c1"># Pybricks-parity default (their</span>
+        <span class="c1"># hardcoded 2000 dps^2 motor accel x 3/4 drivebase factor);</span>
+        <span class="c1"># settings(acceleration=...) retunes it via db_set_accel.</span>
+        <span class="k">if</span> <span class="n">engine</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Serial-bus motors with no bus behind them: this runtime</span>
+            <span class="c1"># can't drive them closed-loop, and the Python fallback</span>
+            <span class="c1"># loop was removed in 1.45.0. No silent degradation.</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"serial-bus drivebase requires the native st_bus "</span>
+                <span class="s2">"(firmware &gt;= 1.45.0) or the sim's emulated bus; "</span>
+                <span class="s2">"this runtime has neither"</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">engine</span>
+
+<div class="viewcode-block" id="DriveBase.settings">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.settings">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">settings</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">straight_speed</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">turn_rate</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">acceleration</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">turn_acceleration</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Tune cruise + ramp parameters for subsequent moves.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            straight_speed: cruise speed for ``straight()``, wheel-deg/s.</span>
+<span class="sd">            turn_rate: cruise rate for ``turn()``, wheel-deg/s.</span>
+<span class="sd">            acceleration: STRAIGHT (and curve) trajectory</span>
+<span class="sd">                acceleration, wheel-deg/s² — Pybricks'</span>
+<span class="sd">                ``straight_acceleration``. Serial-engine default 1500</span>
+<span class="sd">                (Pybricks parity: their 2000 dps² motor accel × 3/4)</span>
+<span class="sd">                — lower it if the robot pitches or lifts its rear on</span>
+<span class="sd">                launch. In mm/s² that's</span>
+<span class="sd">                ``acceleration * wheel_circumference / 360``. Applies</span>
+<span class="sd">                on both paths: the native (encoder-servo) controller</span>
+<span class="sd">                arms its C trajectory with it, and the serial-bus</span>
+<span class="sd">                engine forwards it to the hard-tick controller.</span>
+<span class="sd">            turn_acceleration: ``turn()`` ramps' own acceleration,</span>
+<span class="sd">                wheel-deg/s², independent of ``acceleration`` —</span>
+<span class="sd">                Pybricks parity (serial default 1500). Serial-bus</span>
+<span class="sd">                drivebase only; passing it on an encoder/DC pair</span>
+<span class="sd">                raises.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="n">straight_speed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_straight_speed_dps</span> <span class="o">=</span> <span class="n">straight_speed</span>
+        <span class="k">if</span> <span class="n">turn_rate</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_turn_rate_dps</span> <span class="o">=</span> <span class="n">turn_rate</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">settings</span><span class="p">(</span><span class="n">straight_speed</span><span class="o">=</span><span class="n">straight_speed</span><span class="p">,</span>
+                                         <span class="n">turn_rate</span><span class="o">=</span><span class="n">turn_rate</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">acceleration</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">acceleration</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">"acceleration must be &gt; 0 deg/s^2 (got </span><span class="si">%r</span><span class="s2">)"</span>
+                    <span class="o">%</span> <span class="p">(</span><span class="n">acceleration</span><span class="p">,))</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">set_accel</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">acceleration</span><span class="p">))</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">set_accel</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">acceleration</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">turn_acceleration</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">turn_acceleration</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">"turn_acceleration must be &gt; 0 deg/s^2 (got </span><span class="si">%r</span><span class="s2">)"</span>
+                    <span class="o">%</span> <span class="p">(</span><span class="n">turn_acceleration</span><span class="p">,))</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">"turn_acceleration is supported on the serial-bus "</span>
+                    <span class="s2">"drivebase only (encoder/DC pairs share one "</span>
+                    <span class="s2">"acceleration)"</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">set_turn_accel</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">turn_acceleration</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="DriveBase.use_gyro">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.use_gyro">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">use_gyro</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">enable</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Switch the heading feedback source between encoder-diff (default)</span>
+<span class="sd">        and the attached IMU (when True). Pybricks-style.</span>
+
+<span class="sd">        Requires an ``imu=`` argument to the constructor. With the gyro,</span>
+<span class="sd">        heading is slip-immune — wheel slip or wildly asymmetric friction</span>
+<span class="sd">        won't throw the robot off course, because the IMU sees actual body</span>
+<span class="sd">        rotation regardless of what the wheels did. Works on both the</span>
+<span class="sd">        native (encoder-servo) path and the serial-bus engine.</span>
+<span class="sd">        """</span>
+        <span class="n">enable</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">enable</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">enable</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_imu</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"no imu attached; construct DriveBase(imu=...) first"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">use_gyro</span><span class="p">(</span><span class="n">enable</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">use_gyro</span><span class="p">(</span><span class="n">enable</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">"use_gyro needs a closed-loop drivebase (encoder "</span>
+                <span class="s2">"servos or serial-bus motors); open-loop pairs have "</span>
+                <span class="s2">"no heading-hold loop"</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_gyro_enabled</span> <span class="o">=</span> <span class="n">enable</span></div>
+
+
+<div class="viewcode-block" id="DriveBase.reset">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.reset">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Re-zero the heading frame: after ``reset()``, the robot's</span>
+<span class="sd">        CURRENT pose is heading zero — for the drive base's</span>
+<span class="sd">        controller and ``imu.heading()`` together (Pybricks</span>
+<span class="sd">        ``DriveBase.reset()``). Call it between moves; it raises</span>
+<span class="sd">        while a move is active.</span>
+
+<span class="sd">        This is the supported way to re-zero mid-mission.</span>
+<span class="sd">        ``imu.reset_heading()`` refuses while a drive base steers by</span>
+<span class="sd">        the gyro, because zeroing the integrator under an armed</span>
+<span class="sd">        controller shifts the measurement out from under the held</span>
+<span class="sd">        target — the next ``straight()`` then veers chasing the old</span>
+<span class="sd">        frame.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gyro_enabled</span><span class="p">:</span>
+                <span class="c1"># Fresh frame via the enable transition — the same</span>
+                <span class="c1"># "here, now is zero" the first enable performs.</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">use_gyro</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">use_gyro</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span></div>
+
+        <span class="c1"># Open-loop / encoder mode: the frame is re-derived at every</span>
+        <span class="c1"># arm; nothing to re-base.</span>
+
+    <span class="c1"># ---- non-blocking open-loop ----</span>
+<div class="viewcode-block" id="DriveBase.drive">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.drive">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">drive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">speed_mm_s</span><span class="p">,</span> <span class="n">turn_rate_dps</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Start driving at a given forward speed + body turn rate.</span>
+
+<span class="sd">        Kinematic one-shot — no coupled feedback. Call again (or</span>
+<span class="sd">        ``stop()``) to change. Positive turn rate = right turn</span>
+<span class="sd">        (clockwise viewed from above), Pybricks convention.</span>
+
+<span class="sd">        Speed changes ramp at ``settings(acceleration=...)`` (the</span>
+<span class="sd">        uniform-accel rule, 1.94.0) — proportionally across the two</span>
+<span class="sd">        wheels, so an arc keeps its radius through the ramp.</span>
+<span class="sd">        """</span>
+        <span class="c1"># New command wins — same rule as move_wheels/stop. drive()</span>
+        <span class="c1"># was the ONE motion verb that skipped it: a still-running</span>
+        <span class="c1"># straight() overwrote its speeds every tick (~1 kHz) and a</span>
+        <span class="c1"># later done() poll dispatched the stale move's then= on top.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Clear any in-flight straight/turn trajectory first.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+
+        <span class="n">fwd_wheel_dps</span>  <span class="o">=</span> <span class="n">speed_mm_s</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">_wheel_circumference</span> <span class="o">*</span> <span class="mi">360</span>
+        <span class="n">turn_rad_s</span>     <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">turn_rate_dps</span><span class="p">)</span>
+        <span class="n">diff_mm_s</span>      <span class="o">=</span> <span class="n">turn_rad_s</span> <span class="o">*</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_axle_track</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">diff_wheel_dps</span> <span class="o">=</span> <span class="n">diff_mm_s</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">_wheel_circumference</span> <span class="o">*</span> <span class="mi">360</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Route through move_wheels: it aborts the engine's</span>
+            <span class="c1"># in-flight move and ships both setpoints in one</span>
+            <span class="c1"># sync-write. Sending per-motor run_speed here left the</span>
+            <span class="c1"># drivebase writing its own targets over them.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">move_wheels</span><span class="p">(</span>
+                <span class="n">fwd_wheel_dps</span> <span class="o">+</span> <span class="n">diff_wheel_dps</span><span class="p">,</span>
+                <span class="n">fwd_wheel_dps</span> <span class="o">-</span> <span class="n">diff_wheel_dps</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="o">.</span><span class="n">_native_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="o">.</span><span class="n">_native_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_run_at_dps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="p">,</span>  <span class="n">fwd_wheel_dps</span> <span class="o">+</span> <span class="n">diff_wheel_dps</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_run_at_dps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="p">,</span> <span class="n">fwd_wheel_dps</span> <span class="o">-</span> <span class="n">diff_wheel_dps</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="DriveBase.check_motors">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.check_motors">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">check_motors</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Raise if a wheel has stopped answering the bus.</span>
+
+<span class="sd">        Serial-bus wheels are checked at construction and on every</span>
+<span class="sd">        move, so you rarely need this directly — reach for it in a</span>
+<span class="sd">        long-running open-loop control loop (``move_wheels`` in a</span>
+<span class="sd">        ``while`` loop already calls it for you), or to verify the</span>
+<span class="sd">        chassis before a run. The error names the motor: side, bus</span>
+<span class="sd">        id, slot, UART and pins.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">check_motors</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="DriveBase.move_wheels">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.move_wheels">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">move_wheels</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">left_wheel_speed</span><span class="p">,</span> <span class="n">right_wheel_speed</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Drive the two wheels at independent speeds, in wheel-deg/s.</span>
+
+<span class="sd">        Positive is forward on both sides (each motor's ``invert``</span>
+<span class="sd">        is already applied), so ``move_wheels(200, 200)`` drives</span>
+<span class="sd">        straight and ``move_wheels(200, -200)`` spins in place.</span>
+
+<span class="sd">        Non-blocking and continuous, like ``drive()``: the wheels</span>
+<span class="sd">        hold these speeds until you call it again, issue another</span>
+<span class="sd">        move, or ``stop()``. It supersedes any move in flight.</span>
+
+<span class="sd">        Use this instead of building a ``SyncServoGroup`` over the</span>
+<span class="sd">        wheels. On serial-bus motors both setpoints leave in a</span>
+<span class="sd">        single sync-write packet, so the wheels change speed at the</span>
+<span class="sd">        same packet boundary — and a ``SyncServoGroup`` could not</span>
+<span class="sd">        drive them anyway, because adopting them into a DriveBase</span>
+<span class="sd">        hands their UART to the native driver. On encoder servos</span>
+<span class="sd">        both targets are set and both servos subscribed inside one</span>
+<span class="sd">        native call.</span>
+
+<span class="sd">        Where ``drive(speed_mm_s, turn_rate_dps)`` speaks chassis</span>
+<span class="sd">        kinematics, this speaks wheels directly — the right tool for</span>
+<span class="sd">        line-following, tank-style teleop, or any controller that</span>
+<span class="sd">        computes per-wheel outputs itself.</span>
+
+<span class="sd">        Example::</span>
+
+<span class="sd">            db.move_wheels(200, 120)     # gentle right-hand arc</span>
+<span class="sd">            time.sleep_ms(500)</span>
+<span class="sd">            db.stop()</span>
+
+<span class="sd">        Open-loop motor pairs (no encoder, no serial bus) are</span>
+<span class="sd">        supported but cannot batch: the two speeds are written one</span>
+<span class="sd">        after the other.</span>
+<span class="sd">        """</span>
+        <span class="n">estop</span><span class="o">.</span><span class="n">check</span><span class="p">()</span>
+        <span class="n">left</span>  <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">left_wheel_speed</span><span class="p">)</span>
+        <span class="n">right</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">right_wheel_speed</span><span class="p">)</span>
+        <span class="c1"># A direct wheel command supersedes a pending wait=False move</span>
+        <span class="c1"># (pybricks "new command wins").</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">move_wheels</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="o">.</span><span class="n">_native_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="o">.</span><span class="n">_native_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">move_wheels</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_run_at_dps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="p">,</span> <span class="n">left</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_run_at_dps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="p">,</span> <span class="n">right</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="DriveBase.stop">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.stop">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Halt both wheels. Also clears any pending ``wait=False``</span>
+<span class="sd">        move (new command supersedes, pybricks-style). ``then``</span>
+<span class="sd">        selects the end-state:</span>
+
+<span class="sd">        * ``Stop.COAST`` (default) — both motors free-wheel.</span>
+<span class="sd">        * ``Stop.BRAKE`` — both motors actively resist motion at zero</span>
+<span class="sd">          velocity.</span>
+<span class="sd">        * ``Stop.HOLD`` — both motors actively hold their current angle.</span>
+<span class="sd">          Requires motors that implement ``hold()`` (e.g. ``ST3215Motor``);</span>
+<span class="sd">          open-loop drivers raise ``NotImplementedError``.</span>
+
+<span class="sd">        Both wheels are always commanded together, never one motor at</span>
+<span class="sd">        a time. On serial-bus (adopted) motors the whole stop is</span>
+<span class="sd">        staged atomically in the C engine and reaches the wheels at</span>
+<span class="sd">        the same bus-packet boundary. ``brake`` and ``hold``</span>
+<span class="sd">        DECELERATE at ``settings(acceleration=...)`` first (the</span>
+<span class="sd">        uniform-accel rule) — hold anchors where the robot actually</span>
+<span class="sd">        stops; ``coast`` releases torque immediately (a freewheel has</span>
+<span class="sd">        no controlled deceleration). On encoder servos ``coast`` /</span>
+<span class="sd">        ``brake`` likewise apply to both bridges inside one native</span>
+<span class="sd">        call, so the second wheel's 1 kHz control tick can't keep</span>
+<span class="sd">        driving while the first is already released.</span>
+
+<span class="sd">        Pybricks parity by default: the call returns immediately</span>
+<span class="sd">        (their stop/brake do too — verified from their source).</span>
+<span class="sd">        Since 2.4.0 short moves armed at speed raise their own</span>
+<span class="sd">        deceleration to land at rest on target, so waiting is rarely</span>
+<span class="sd">        needed; pass ``wait=True`` to BLOCK until both wheels'</span>
+<span class="sd">        MEASURED speeds read ~0 — for ``brake``/``hold`` the decel</span>
+<span class="sd">        ramp finishing plus settle, for ``coast`` the physical</span>
+<span class="sd">        freewheel decay. ``wait=True`` raises ``ValueError`` on</span>
+<span class="sd">        open-loop pairs (no measured speed to wait on) and</span>
+<span class="sd">        ``RuntimeError`` if the wheels never settle within the</span>
+<span class="sd">        timeout.</span>
+<span class="sd">        """</span>
+        <span class="n">parameters</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">Stop</span><span class="p">,</span> <span class="n">then</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">,</span>
+                         <span class="n">allowed</span><span class="o">=</span><span class="p">(</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">Stop</span><span class="o">.</span><span class="n">BRAKE</span><span class="p">,</span> <span class="n">Stop</span><span class="o">.</span><span class="n">HOLD</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dispatch_stop</span><span class="p">(</span><span class="n">then</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">wait</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_wait_until_stopped</span><span class="p">()</span></div>
+
+
+    <span class="c1"># stop(wait=True): "almost zero" and how long we insist on it.</span>
+    <span class="n">_STOP_WAIT_TOL_DPS</span> <span class="o">=</span> <span class="mf">10.0</span>
+    <span class="n">_STOP_WAIT_POLL_MS</span> <span class="o">=</span> <span class="mi">10</span>
+    <span class="n">_STOP_WAIT_POLLS</span> <span class="o">=</span> <span class="mi">500</span>          <span class="c1"># 5 s budget</span>
+    <span class="n">_STOP_WAIT_QUIET</span> <span class="o">=</span> <span class="mi">3</span>            <span class="c1"># consecutive quiet reads required</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_wait_until_stopped</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">readers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="p">):</span>
+            <span class="n">fn</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="s2">"speed"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">fn</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">fn</span><span class="p">()</span>
+                <span class="k">except</span> <span class="ne">NotImplementedError</span><span class="p">:</span>
+                    <span class="n">fn</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># interface stub: no real measurement</span>
+            <span class="k">if</span> <span class="n">fn</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">"stop(wait=True) needs measured wheel speeds - "</span>
+                    <span class="s2">"</span><span class="si">%s</span><span class="s2"> has no speed()"</span> <span class="o">%</span> <span class="nb">type</span><span class="p">(</span><span class="n">m</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+            <span class="n">readers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span>
+        <span class="n">quiet</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">speeds</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_STOP_WAIT_POLLS</span><span class="p">):</span>
+            <span class="n">speeds</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">()</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">all</span><span class="p">(</span><span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">abs</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_STOP_WAIT_TOL_DPS</span>
+                   <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">speeds</span><span class="p">):</span>
+                <span class="n">quiet</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="n">quiet</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_STOP_WAIT_QUIET</span><span class="p">:</span>
+                    <span class="k">return</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">quiet</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_STOP_WAIT_POLL_MS</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="s2">"stop(wait=True): wheels still moving after </span><span class="si">%d</span><span class="s2"> ms - "</span>
+            <span class="s2">"measured speeds </span><span class="si">%r</span><span class="s2"> dps (None = bus silent)"</span>
+            <span class="o">%</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_STOP_WAIT_POLLS</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_STOP_WAIT_POLL_MS</span><span class="p">,</span> <span class="n">speeds</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_dispatch_stop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">then</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">stop</span><span class="p">(</span><span class="n">then</span><span class="p">)</span>
+            <span class="c1"># New command wins: the atomic stop supersedes any</span>
+            <span class="c1"># motor-level wait=False move (the per-motor dispatch</span>
+            <span class="c1"># used to clear these as a side effect).</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="o">.</span><span class="n">_native_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="o">.</span><span class="n">_native_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">then</span> <span class="ow">in</span> <span class="p">(</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">Stop</span><span class="o">.</span><span class="n">BRAKE</span><span class="p">):</span>
+            <span class="c1"># Both bridges written inside the one native call.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">stop</span><span class="p">(</span><span class="n">then</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># then=Stop.HOLD: no native position hold on encoder servos,</span>
+            <span class="c1"># so this falls through to the per-motor dispatch below</span>
+            <span class="c1"># (which raises for motors without hold(), as documented).</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">then</span> <span class="o">==</span> <span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="o">.</span><span class="n">coast</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="o">.</span><span class="n">coast</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">then</span> <span class="o">==</span> <span class="n">Stop</span><span class="o">.</span><span class="n">BRAKE</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="o">.</span><span class="n">brake</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="o">.</span><span class="n">brake</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>   <span class="c1"># Stop.HOLD</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_left</span><span class="o">.</span><span class="n">hold</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_right</span><span class="o">.</span><span class="n">hold</span><span class="p">()</span>
+
+<div class="viewcode-block" id="DriveBase.done">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.done">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">done</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Pybricks-style status check for in-flight</span>
+<span class="sd">        ``straight(wait=False)`` / ``turn(wait=False)``. Returns</span>
+<span class="sd">        ``True`` if no move is pending or the active move has</span>
+<span class="sd">        reached its target (and ``stop(then=…)`` has run). Returns</span>
+<span class="sd">        ``False`` while the move is still progressing.</span>
+
+<span class="sd">        The controller runs the trajectory independently on the hard</span>
+<span class="sd">        tick (native path: 1 kHz C scheduler; serial path: the</span>
+<span class="sd">        st_bus pump); ``done()`` checks a flag — plus, on the serial</span>
+<span class="sd">        path with the gyro enabled, feeds the IMU heading into the</span>
+<span class="sd">        hard-tick heading hold. The natural polling cadence is</span>
+<span class="sd">        ``time.sleep_ms(10)``.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="n">mode</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span><span class="p">[</span><span class="s2">"mode"</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">mode</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"straight_native"</span><span class="p">,</span> <span class="s2">"turn_native"</span><span class="p">,</span> <span class="s2">"curve_native"</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">is_done</span><span class="p">():</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_finish_move</span><span class="p">()</span>
+                <span class="k">return</span> <span class="kc">True</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="n">mode</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"straight_serial"</span><span class="p">,</span> <span class="s2">"turn_serial"</span><span class="p">,</span> <span class="s2">"curve_serial"</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">tick_done</span><span class="p">():</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_finish_move</span><span class="p">()</span>
+                <span class="k">return</span> <span class="kc">True</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="c1"># Unknown mode — treat as done to avoid wedging the caller.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_finish_move</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Apply a completed move's end state. ``then=Stop.NONE``</span>
+<span class="sd">        dispatches NOTHING: the engine keeps the wheels at the move's</span>
+<span class="sd">        end speed until the next command supersedes it (Pybricks</span>
+<span class="sd">        Stop.NONE)."""</span>
+        <span class="n">then</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span><span class="p">[</span><span class="s2">"then"</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">then</span> <span class="o">==</span> <span class="n">Stop</span><span class="o">.</span><span class="n">NONE</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stop</span><span class="p">(</span><span class="n">then</span><span class="o">=</span><span class="n">then</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="c1"># ---- blocking moves via the C coupled controller ----</span>
+<div class="viewcode-block" id="DriveBase.straight">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.straight">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">straight</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">distance_mm</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Drive forward by ``distance_mm``. 2-DOF coupled.</span>
+
+<span class="sd">        ``then`` is forwarded to ``stop()`` — see its docstring for</span>
+<span class="sd">        coast/brake/hold semantics.</span>
+
+<span class="sd">        ``wait=True`` (default) blocks until the move completes.</span>
+<span class="sd">        ``wait=False`` returns immediately after arming the move;</span>
+<span class="sd">        the caller polls ``done()`` to check completion, and the</span>
+<span class="sd">        ``then=`` dispatch is deferred until ``done()`` reports</span>
+<span class="sd">        the target was reached. Concurrent use with another</span>
+<span class="sd">        wait=False move on a separate ``DriveBase`` (or with motor</span>
+<span class="sd">        ``run_angle(wait=False)`` calls) is the intended pattern.</span>
+
+<span class="sd">        Any subsequent move command supersedes the previous pending</span>
+<span class="sd">        wait=False move (pybricks "new command wins").</span>
+
+<span class="sd">        ``then=Stop.NONE`` (Pybricks ``Stop.NONE``) does not</span>
+<span class="sd">        decelerate at the end: the move finishes AT cruise speed and</span>
+<span class="sd">        the wheels keep it until the next command — chain</span>
+<span class="sd">        ``straight``/``curve`` segments without stopping between</span>
+<span class="sd">        them. ``"stop"`` is accepted as an alias of the default</span>
+<span class="sd">        coast end state.</span>
+
+<span class="sd">        Raises ``RuntimeError`` for open-loop motor pairs — moves by</span>
+<span class="sd">        distance need feedback; use ``drive()``/``stop()``."""</span>
+        <span class="n">then</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_then</span><span class="p">(</span><span class="n">then</span><span class="p">,</span> <span class="n">allow_continue</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_arm_straight</span><span class="p">(</span><span class="n">distance_mm</span><span class="p">,</span> <span class="n">then</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">wait</span><span class="p">:</span>
+            <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">done</span><span class="p">():</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="DriveBase.turn">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.turn">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">turn</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">angle_deg</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Turn in place by ``angle_deg`` body heading (positive =</span>
+<span class="sd">        right/clockwise viewed from above, Pybricks convention).</span>
+
+<span class="sd">        Same ``then`` / ``wait`` semantics as ``straight()`` — see</span>
+<span class="sd">        its docstring — except ``then=Stop.NONE``: a turn in place</span>
+<span class="sd">        ends facing its target heading, so there is no speed worth</span>
+<span class="sd">        carrying."""</span>
+        <span class="n">then</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_then</span><span class="p">(</span><span class="n">then</span><span class="p">,</span> <span class="n">allow_continue</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_arm_turn</span><span class="p">(</span><span class="n">angle_deg</span><span class="p">,</span> <span class="n">then</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">wait</span><span class="p">:</span>
+            <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">done</span><span class="p">():</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="DriveBase.curve">
+<a class="viewcode-back" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase.curve">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">curve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">radius</span><span class="p">,</span> <span class="n">angle</span><span class="p">,</span> <span class="n">then</span><span class="o">=</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Drive an arc along a circle of ``|radius|`` mm, changing</span>
+<span class="sd">        heading by ``angle`` degrees — Pybricks ``DriveBase.curve()``,</span>
+<span class="sd">        including the parameter names, so Pybricks-style keyword</span>
+<span class="sd">        calls (``curve(radius=150, angle=90)``) work verbatim. The</span>
+<span class="sd">        one deviation: our ``then`` defaults to ``Stop.COAST`` like</span>
+<span class="sd">        every openbricks move (Pybricks defaults to hold) — pass</span>
+<span class="sd">        ``then=Stop.HOLD`` for the Pybricks end state.</span>
+
+<span class="sd">        Positive ``angle`` turns right (clockwise from above,</span>
+<span class="sd">        the system-wide sign convention, same as ``turn()``); the</span>
+<span class="sd">        SIGN of ``radius`` picks the travel direction along the</span>
+<span class="sd">        arc (positive = forward, negative = backward).</span>
+<span class="sd">        ``curve(150, 90)`` sweeps a forward quarter-circle to the</span>
+<span class="sd">        right around a centre 150 mm to the robot's right;</span>
+<span class="sd">        ``curve(150, -90)`` the mirror to the left.</span>
+
+<span class="sd">        The forward and turn profiles run simultaneously with</span>
+<span class="sd">        proportional speed AND acceleration, so heading stays</span>
+<span class="sd">        proportional to distance at every instant — the path is a</span>
+<span class="sd">        true circle through the accel/decel ramps, not just at the</span>
+<span class="sd">        endpoints. The centre speed is the ``straight_speed``</span>
+<span class="sd">        setting scaled by ``|R| / (|R| + track/2)`` so the OUTER</span>
+<span class="sd">        wheel never exceeds ``straight_speed``. ``curve(0, angle)``</span>
+<span class="sd">        degrades to a turn in place.</span>
+
+<span class="sd">        Same ``then`` / ``wait`` semantics as ``straight()``,</span>
+<span class="sd">        including ``then=Stop.NONE`` — the arc hands its full speed</span>
+<span class="sd">        to the next command."""</span>
+        <span class="n">then</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_then</span><span class="p">(</span><span class="n">then</span><span class="p">,</span> <span class="n">allow_continue</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_arm_curve</span><span class="p">(</span><span class="n">radius</span><span class="p">,</span> <span class="n">angle</span><span class="p">,</span> <span class="n">then</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">wait</span><span class="p">:</span>
+            <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">done</span><span class="p">():</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span></div>
+
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_check_then</span><span class="p">(</span><span class="n">then</span><span class="p">,</span> <span class="n">allow_continue</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Validate a move's ``then=`` — a :class:`Stop` member;</span>
+<span class="sd">        ``Stop.NONE`` only where the move can hand its speed on."""</span>
+        <span class="n">allowed</span> <span class="o">=</span> <span class="p">(</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">Stop</span><span class="o">.</span><span class="n">BRAKE</span><span class="p">,</span> <span class="n">Stop</span><span class="o">.</span><span class="n">HOLD</span><span class="p">,</span> <span class="n">Stop</span><span class="o">.</span><span class="n">NONE</span><span class="p">)</span> \
+            <span class="k">if</span> <span class="n">allow_continue</span> <span class="k">else</span> <span class="p">(</span><span class="n">Stop</span><span class="o">.</span><span class="n">COAST</span><span class="p">,</span> <span class="n">Stop</span><span class="o">.</span><span class="n">BRAKE</span><span class="p">,</span> <span class="n">Stop</span><span class="o">.</span><span class="n">HOLD</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">parameters</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">Stop</span><span class="p">,</span> <span class="n">then</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">,</span> <span class="n">allowed</span><span class="o">=</span><span class="n">allowed</span><span class="p">)</span>
+
+    <span class="c1"># ---- arm: stash pending state, kick off motion ----</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_arm_straight</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">distance_mm</span><span class="p">,</span> <span class="n">then</span><span class="p">):</span>
+        <span class="n">carry</span> <span class="o">=</span> <span class="n">then</span> <span class="o">==</span> <span class="n">Stop</span><span class="o">.</span><span class="n">NONE</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">arm_straight</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">distance_mm</span><span class="p">),</span> <span class="n">carry</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"straight_serial"</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">:</span> <span class="n">then</span><span class="p">}</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># The native drivebase subscribes BOTH servos itself, in</span>
+            <span class="c1"># one C call (1.53.0). It used to be two Python</span>
+            <span class="c1"># ``run_speed(0)`` calls here — non-atomic, and the</span>
+            <span class="c1"># e-stop gate rode on them, hence the explicit check.</span>
+            <span class="n">estop</span><span class="o">.</span><span class="n">check</span><span class="p">()</span>
+            <span class="n">speed_mm_s</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_straight_speed_dps</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_wheel_circumference</span> <span class="o">/</span> <span class="mi">360</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">straight</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">distance_mm</span><span class="p">),</span> <span class="nb">float</span><span class="p">(</span><span class="n">speed_mm_s</span><span class="p">),</span>
+                                  <span class="n">carry</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"straight_native"</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">:</span> <span class="n">then</span><span class="p">}</span>
+            <span class="k">return</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="s2">"straight() needs closed-loop motors (encoder servos or "</span>
+            <span class="s2">"serial-bus motors); open-loop pairs use drive()/stop()"</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_arm_turn</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">angle_deg</span><span class="p">,</span> <span class="n">then</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">arm_turn</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">angle_deg</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"turn_serial"</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">:</span> <span class="n">then</span><span class="p">}</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">estop</span><span class="o">.</span><span class="n">check</span><span class="p">()</span>       <span class="c1"># see _arm_straight</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">turn</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">angle_deg</span><span class="p">),</span> <span class="nb">float</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_turn_rate_dps</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"turn_native"</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">:</span> <span class="n">then</span><span class="p">}</span>
+            <span class="k">return</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="s2">"turn() needs closed-loop motors (encoder servos or "</span>
+            <span class="s2">"serial-bus motors); open-loop pairs use drive()/stop()"</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_curve_speed_mm_s</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">radius_mm</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Centre speed for an arc: straight_speed scaled so the</span>
+<span class="sd">        OUTER wheel (radius |R| + track/2) never exceeds it."""</span>
+        <span class="n">mm_s</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_straight_speed_dps</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_wheel_circumference</span> <span class="o">/</span> <span class="mi">360</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">radius_mm</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">r</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">mm_s</span> <span class="o">=</span> <span class="n">mm_s</span> <span class="o">*</span> <span class="n">r</span> <span class="o">/</span> <span class="p">(</span><span class="n">r</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_axle_track</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">mm_s</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_arm_curve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">radius_mm</span><span class="p">,</span> <span class="n">angle_deg</span><span class="p">,</span> <span class="n">then</span><span class="p">):</span>
+        <span class="n">carry</span> <span class="o">=</span> <span class="n">then</span> <span class="o">==</span> <span class="n">Stop</span><span class="o">.</span><span class="n">NONE</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_serial_engine</span><span class="o">.</span><span class="n">arm_curve</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">radius_mm</span><span class="p">),</span>
+                                          <span class="nb">float</span><span class="p">(</span><span class="n">angle_deg</span><span class="p">),</span> <span class="n">carry</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"curve_serial"</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">:</span> <span class="n">then</span><span class="p">}</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">estop</span><span class="o">.</span><span class="n">check</span><span class="p">()</span>       <span class="c1"># see _arm_straight</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_native</span><span class="o">.</span><span class="n">curve</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">radius_mm</span><span class="p">),</span> <span class="nb">float</span><span class="p">(</span><span class="n">angle_deg</span><span class="p">),</span>
+                               <span class="nb">float</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_curve_speed_mm_s</span><span class="p">(</span><span class="n">radius_mm</span><span class="p">)),</span>
+                               <span class="n">carry</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"curve_native"</span><span class="p">,</span> <span class="s2">"then"</span><span class="p">:</span> <span class="n">then</span><span class="p">}</span>
+            <span class="k">return</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="s2">"curve() needs closed-loop motors (encoder servos or "</span>
+            <span class="s2">"serial-bus motors); open-loop pairs use drive()/stop()"</span><span class="p">)</span>
+
+    <span class="c1"># ---- helpers ----</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_run_at_dps</span><span class="p">(</span><span class="n">motor</span><span class="p">,</span> <span class="n">dps</span><span class="p">):</span>
+        <span class="n">run_speed</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">motor</span><span class="p">,</span> <span class="s2">"run_speed"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">callable</span><span class="p">(</span><span class="n">run_speed</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">run_speed</span><span class="p">(</span><span class="n">dps</span><span class="p">)</span>
+                <span class="k">return</span>
+            <span class="k">except</span> <span class="ne">NotImplementedError</span><span class="p">:</span>
+                <span class="k">pass</span>
+        <span class="c1"># Open-loop mapping: assume ~300 dps rated.</span>
+        <span class="n">power</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="o">-</span><span class="mi">100</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="n">dps</span> <span class="o">/</span> <span class="mi">300</span> <span class="o">*</span> <span class="mi">100</span><span class="p">))</span>
+        <span class="n">motor</span><span class="o">.</span><span class="n">dc</span><span class="p">(</span><span class="n">power</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
