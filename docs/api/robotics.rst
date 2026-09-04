@@ -74,15 +74,30 @@ still refuses to report ``done()`` and the stall watchdog raises.
 
 ``stop()`` is Pybricks parity: it coasts and returns immediately.
 ``then`` picks the end state (``Stop.COAST``, ``Stop.BRAKE``,
-``Stop.HOLD``). Short moves armed while the robot is already fast
-raise their own deceleration to land at rest exactly on target, so
-you rarely need more — but ``wait=True`` is available to block
-until both wheels' measured speeds read ~0 (the decel ramp plus
-settle for brake/hold, the physical freewheel decay for coast). It
-raises ``ValueError`` on open-loop pairs (no measured speed) and,
-if the wheels never settle within 5 s, ``RuntimeError`` naming the
-measured speeds — a stopped robot that is still moving is a fault,
-not a detail to hide.
+``Stop.HOLD``). ``Stop.BRAKE`` and ``Stop.HOLD`` decelerate at the
+``acceleration`` setting as a move of the coupled controller, with
+the heading loop closed all the way down — with ``use_gyro(True)``
+the IMU corrects any yaw the brake induces (one wheel gripping
+harder than the other), so the robot stops on the heading it had
+(3.2.0). Coast cannot: it releases torque at once, and nothing can
+steer wheels that carry no torque — so to end a line-follow on
+heading, brake:
+
+.. code-block:: python
+
+    while not at_the_marker():
+        db.drive(SPEED, KP * sensor.edge_error())
+    db.stop(then=Stop.BRAKE)   # gyro-held deceleration
+    db.straight(200)           # holds the heading the follow reached
+
+Short moves armed while the robot is already fast raise their own
+deceleration to land at rest exactly on target, so you rarely need
+more — but ``wait=True`` is available to block until both wheels'
+measured speeds read ~0 (the decel ramp plus settle for brake/hold,
+the physical freewheel decay for coast). It raises ``ValueError`` on
+open-loop pairs (no measured speed) and, if the wheels never settle
+within 5 s, ``RuntimeError`` naming the measured speeds — a stopped
+robot that is still moving is a fault, not a detail to hide.
 
 A wheel that stops answering the bus — no power, a knocked-loose
 TX/RX wire, the wrong ``servo_id`` — raises instead of quietly doing
@@ -129,6 +144,16 @@ works — its fused heading is pumped from Python between ticks,
 which corrects noticeably slower, typically +0.5° to +1.8° per
 turn. New builds should use the ICM-45686.)
 
+The heading target is absolute: each move steers to where the plan
+says the robot should be, so a turn's arrival residual is corrected
+by the next move instead of accumulating. ``drive()`` /
+``move_wheels`` (a line-follow) sit outside that plan — they rotate
+the chassis by whatever your controller decides — so the next
+coupled command after one (a move, or a brake/hold stop) takes the
+heading the follow *reached* as its target rather than steering back
+to the pre-follow one (3.2.0; earlier releases needed ``reset()`` at
+that hand-off).
+
 To re-zero the heading frame mid-mission (say, after squaring up on
 a line), call ``db.reset()`` between moves — afterwards the robot's
 CURRENT pose is heading zero for both the drive base and
@@ -147,7 +172,8 @@ while gyro in use"): zeroing the integrator under an armed heading
 controller shifts the measurement out from under the held target,
 and the next move veers chasing the old frame. Use ``db.reset()``,
 or ``use_gyro(False)`` first. ``db.reset()`` itself raises while a
-move is in progress — stop first.
+move is in progress — stop first (a brake/hold stop counts as a move
+until its ramp has landed: ``stop(then=Stop.BRAKE, wait=True)``).
 
 Accurate ``wheel_diameter_mm`` / ``axle_track_mm`` values matter more
 than any tuning — calibrate both with two short test drives:

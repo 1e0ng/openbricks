@@ -873,6 +873,111 @@ class StopAndGyroTests(_Base):
         sb.db_config(0, 1, 88.0, 136.0, 400.0)
         self.assertFalse(sb.db_stop(2))        # no feedback read yet
 
+    def _body_deg(self):
+        """Body heading implied by the wheels (perfect chassis)."""
+        return ((sb.servo_counts(0) - sb.servo_counts(1)) / 2.0
+                * 360.0 / 4096.0) / self._WHEEL_PER_BODY
+
+    def test_brake_holds_heading_by_the_gyro_through_the_ramp(self):
+        # The brake ramp is a coupled-controller stop, not the open-
+        # loop wheel slew it replaced: the heading loop stays closed
+        # all the way down. Feed a "veering right" heading mid-brake
+        # and the controller must counter-steer — right out-paces
+        # left — exactly as it does mid-straight (bench ask
+        # 2026-09-04: a wheel gripping harder than the other yawed
+        # the chassis on every brake and nothing corrected it).
+        sb.db_use_gyro(True)
+        sb.db_move_wheels(2000, 2000)          # a line-follow's drive
+        self.w.advance(700)                    # cruising
+        sb.db_set_heading(0.0)
+        self.assertTrue(sb.db_stop(1))
+        self.w.advance(20)
+        l0, r0 = self._mm(0), self._mm(1)
+        sb.db_set_heading(5.0)                 # body says: veering right
+        self.w.advance(200)
+        # Still decelerating: 2000 steps/s at 400 dps^2 is ~0.44 s.
+        self.assertTrue(0 < abs(self.w.spd[1]) < 2000, self.w.spd[1])
+        dl, dr = self._mm(0) - l0, self._mm(1) - r0
+        self.assertTrue(dr > dl + 2.0, (dl, dr))
+        # Honest feed from here: the counter-steer physically turned
+        # the chassis, the reported heading converges on the target,
+        # the ramp lands and the brake end-state applies.
+        for _ in range(1500):
+            self._feed_heading_from_wheels()
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque[1], 1)
+        self.assertEqual(self.w.torque[2], 1)
+
+    def test_brake_after_a_drive_keeps_the_heading_the_drive_reached(self):
+        # A line-follow (move_wheels) rotates the chassis without
+        # moving the absolute target. The brake that ends it — and
+        # the move after — must take the heading the follow REACHED
+        # as the target, not steer back to the pre-follow one (a
+        # brake that unwound the whole follow, then a straight that
+        # finished the job).
+        sb.db_use_gyro(True)                   # absolute target: 0
+        sb.db_move_wheels(2400, 1600)          # arcing right
+        for _ in range(1200):
+            self._feed_heading_from_wheels()
+        reached = self._body_deg()
+        self.assertTrue(reached > 10.0, reached)
+        self.assertTrue(sb.db_stop(1))
+        for _ in range(1500):
+            self._feed_heading_from_wheels()
+        self.assertEqual(self.w.spd[1], 0)
+        after = self._body_deg()
+        self.assertTrue(abs(after - reached) < 4.0, (reached, after))
+        sb.db_straight(100.0, 60.0)
+        for _ in range(4000):
+            self._feed_heading_from_wheels()
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        end = self._body_deg()
+        self.assertTrue(abs(end - after) < 3.0,
+                        "straight after the follow steered from %.1f "
+                        "to %.1f body-deg" % (after, end))
+
+    def test_brake_at_move_end_keeps_the_absolute_frame(self):
+        # The banked-residual regression, brake flavour: the decel
+        # stop dispatched at a finished turn's end must not
+        # re-baseline the absolute target to measured — six laggy
+        # turn(20)s + brake land on 120, not ~11 short.
+        self.w = _LaggyWheels()
+        sb.db_use_gyro(True)
+        for _ in range(6):
+            sb.db_turn(20.0, 60.0)
+            for _ in range(6000):
+                self._feed_heading_from_wheels()
+                if sb.db_done():
+                    break
+            self.assertTrue(sb.db_done())
+            self.assertTrue(sb.db_stop(1))
+            for _ in range(200):
+                self._feed_heading_from_wheels()
+        body = self._body_deg()
+        self.assertTrue(abs(body - 120.0) < 3.0,
+                        "6 x turn(20) + brake landed at %.1f body-deg "
+                        "(banked residuals?)" % body)
+
+    def test_reset_refuses_while_a_brake_is_still_decelerating(self):
+        # A decelerating brake is a move of the controller: zeroing
+        # the frame under it would jerk the diff axis. The error says
+        # what to wait for.
+        sb.db_use_gyro(True)
+        sb.db_straight(500.0, 150.0)
+        self.w.advance(400)
+        self.assertTrue(sb.db_stop(1))
+        self.w.advance(50)
+        try:
+            sb.db_reset()
+            self.fail("expected RuntimeError mid-brake")
+        except RuntimeError as e:
+            self.assertTrue("decelerating" in str(e), e)
+        self.w.advance(1500)                   # landed
+        sb.db_reset()
+
     def test_torque_starvation_regression(self):
         # The OTHER planner regression: set_speed re-staging torque
         # every tick starved the sync-writes (98 torque packets per
@@ -994,6 +1099,35 @@ class HardHeadingSourceTests(_Base):
                 * 360.0 / 4096.0) / (136.0 / 88.0)
         self.assertTrue(abs(body - 20.0) < 3.0,
                         "pre-history leaked: landed %.1f" % body)
+
+    def test_brake_after_a_drive_anchors_to_the_live_hard_heading(self):
+        # move_wheels leaves the db out of its trajectory tick, and
+        # the hard-source heading used to be refreshed only INSIDE
+        # that tick — so a brake after a line-follow captured the
+        # heading from before the follow, and the next straight
+        # unwound the follow's whole rotation. The refresh now runs
+        # every tick, yielded or not.
+        sb.db_move_wheels(2000, 2000)
+        for _ in range(800):
+            self._pump_with_hard_gyro()
+        for _ in range(200):
+            self.m.hard_yaw_feed(1.0, 100.0)   # the follow steered +20
+        self.assertTrue(sb.db_stop(1))
+        for _ in range(1500):
+            self._pump_with_hard_gyro()
+        self.assertEqual(self.w.spd[1], 0)
+        d0 = sb.servo_counts(0) - sb.servo_counts(1)
+        sb.db_straight(100.0, 60.0)
+        for _ in range(4000):
+            self._pump_with_hard_gyro()
+            if sb.db_done():
+                break
+        self.assertTrue(sb.db_done())
+        d1 = sb.servo_counts(0) - sb.servo_counts(1)
+        drift = abs(d1 - d0) * 360.0 / 4096.0
+        self.assertTrue(drift < 6.0,
+                        "straight after the follow re-rotated the "
+                        "chassis %.1f wheel-deg" % drift)
 
     def test_reset_runtime_restores_python_source(self):
         sb.reset_runtime()
@@ -1399,6 +1533,21 @@ class DecelSlewTests(_Base):
         self.w.advance(600)
         self.assertEqual(self.w.spd[1], 0)
         self.assertEqual(self.w.spd[2], 0)
+
+    def test_brake_during_an_arc_ramps_both_axes_to_rest(self):
+        # Encoder mode, arcing: the rotation decelerates on the turn
+        # accel and the forward speed on the straight accel — a
+        # coupled stop, both wheels landing at 0 with torque on.
+        sb.db_move_wheels(2400, 800)
+        self.w.advance(700)
+        self.assertTrue(sb.db_stop(1))
+        self.w.advance(40)
+        self.assertTrue(0 < abs(self.w.spd[2]) < 2400, self.w.spd[2])
+        self.w.advance(1500)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque[1], 1)
+        self.assertEqual(self.w.torque[2], 1)
 
 
 class PidLandingSettleTests(unittest.TestCase):

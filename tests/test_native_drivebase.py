@@ -435,6 +435,44 @@ class GyroOuterLoopTests(_Base):
         db.straight(100)
         self.assertTrue(len(self.bus.headings) >= 1)
 
+    def test_brake_stop_pumps_the_soft_gyro_first(self):
+        # A brake/hold ramp anchors its heading target to the LAST
+        # pumped heading — so pump once before staging it, or a
+        # line-follow between two done() polls leaves the ramp
+        # holding the heading from before the follow. Coast is
+        # instant: nothing to anchor, no pump.
+        imu = _FakeIMU()
+        db = self._db(imu=imu)
+        db.use_gyro(True)
+        imu.h = 12.0
+        order = []
+        bus = self.bus
+
+        def heading(deg):
+            order.append(("heading", deg))
+
+        def stop(mode=None):
+            order.append(("db_stop", mode))
+            return True
+
+        bus.db_set_heading = heading
+        bus.db_stop = stop
+        db.stop(Stop.BRAKE)
+        self.assertEqual(order, [("heading", 12.0), ("db_stop", 1)])
+        del order[:]
+        db.stop(Stop.COAST)
+        self.assertEqual(order, [("db_stop", 0)])
+        del order[:]
+        db.stop()
+        self.assertEqual(order, [("db_stop", None)])
+
+    def test_brake_stop_never_pumps_a_hard_source(self):
+        db = self._db(imu=_FakeHardIMU())
+        db.use_gyro(True)
+        db.stop(Stop.HOLD)
+        self.assertEqual(self.bus.headings, [])
+        self.assertIn(("db_stop", 2), self.bus.calls)
+
     def test_use_gyro_without_imu_raises(self):
         db = self._db()
         with self.assertRaises(ValueError):

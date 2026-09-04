@@ -851,6 +851,36 @@ static PyObject *RawDriveBase_stop(RawDriveBaseObject *self,
 }
 
 
+static PyObject *RawDriveBase_stop_decel(RawDriveBaseObject *self,
+                                         PyObject *args) {
+    /* Firmware parity (st_bus.c sb_db_stop, 3.2.0): the brake/hold
+     * ramp is a coupled-controller stop trajectory — both axes
+     * closed-loop all the way down, the IMU steering in gyro mode —
+     * entered at the bridges' current target_dps (sync them first).
+     * False = already at rest: the caller applies the end-state now. */
+    long now_ms;
+    double turn_accel;
+    if (!PyArg_ParseTuple(args, "ld", &now_ms, &turn_accel)) {
+        return NULL;
+    }
+    if (ob_drivebase_stop_decel(&self->core, now_ms,
+                                (ob_float_t)turn_accel)) {
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+static PyObject *RawDriveBase_refresh_frame(RawDriveBaseObject *self,
+                                            PyObject *Py_UNUSED(ignored)) {
+    /* Firmware parity (st_db_refresh_frame_locked): re-anchor the
+     * absolute heading target to the measured heading after the
+     * wheels were driven outside the coupled controller. The shim
+     * owns the "stale" bookkeeping; this is the re-anchor itself. */
+    if (self->core.use_gyro) {
+        self->core.turn_hold  = self->core.heading_override_wheel_deg;
+        self->core.integ_diff = 0.0;
+    }
+    Py_RETURN_NONE;
+}
 static PyObject *RawDriveBase_is_done(RawDriveBaseObject *self,
                                       PyObject *Py_UNUSED(ignored)) {
     if (ob_drivebase_is_done(&self->core)) {
@@ -915,6 +945,12 @@ static PyMethodDef RawDriveBase_methods[] = {
      "curve(now_ms, radius_mm, angle_deg, speed_mm_s) — Pybricks arc."},
     {"stop",                 (PyCFunction)RawDriveBase_stop,                 METH_NOARGS,
      "Capture pose holds + cancel any active move."},
+    {"stop_decel",           (PyCFunction)RawDriveBase_stop_decel,           METH_VARARGS,
+     "stop_decel(now_ms, turn_accel_dps2) -> bool — arm the closed-loop "
+     "brake/hold ramp from the bridges' current speeds; False = at rest."},
+    {"refresh_frame",        (PyCFunction)RawDriveBase_refresh_frame,        METH_NOARGS,
+     "Re-anchor the gyro-mode heading target to the measured heading "
+     "(after move_wheels / per-slot wheel commands)."},
     {"is_done",              (PyCFunction)RawDriveBase_is_done,              METH_NOARGS,
      "True iff arrived (profiles expired AND errors inside tolerance)."},
     {"set_use_gyro",         (PyCFunction)RawDriveBase_set_use_gyro,         METH_O,
