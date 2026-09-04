@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.4.0 — a program that ends by itself brakes to rest before the torque-off
+
+Every way out of a program ends with a torque-off, and torque-off is
+a freewheel: a mission that returned (or crashed) mid-move left the
+robot rolling out on friction — and on a ramp, rolling away. The
+launcher now brakes an adopted drive base to rest first, as the
+3.2.0 closed-loop brake (`db_stop(1)`: decelerate at the acceleration
+setting with the heading loop closed, gyro-held when one is in use),
+waits for the ramp to land (2 s budget; a blocked robot falls through
+to the torque-off), and then cuts torque as before. The run log
+records the outcome (`brake: wheels to rest in 412 ms`). The stop
+button and the e-stop latch keep their instant torque-off — an e-stop
+must not spend half a second driving under power — and off-firmware
+builds (sim, unix) are unaffected. The Berkeley Humanoid Lite rule,
+"every exit goes through damping, only the e-stop cuts torque",
+applied to a wheeled robot. Flash 3.4.0.
+
 ## 3.3.0 — servo health, a servo dynamometer and soak test, tick timing stats, llms.txt
 
 Ideas lifted from Berkeley Humanoid Lite's actuator work (RSS 2025):

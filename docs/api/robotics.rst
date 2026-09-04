@@ -90,6 +90,16 @@ heading, brake:
     db.stop(then=Stop.BRAKE)   # gyro-held deceleration
     db.straight(200)           # holds the heading the follow reached
 
+A program that ends by itself — returns, or dies on an exception —
+gets the same brake for free (3.4.0): the launcher decelerates an
+adopted drive base to rest under the controller before the torque-off
+that ends every run, so a mission that finishes mid-move no longer
+rolls out on friction (or away, on a ramp). The stop button keeps its
+instant torque-off — an e-stop must not spend half a second driving
+under power. The run log records the outcome (``brake: wheels to rest
+in 412 ms``, or the time-out that hands a blocked robot to the
+torque-off).
+
 Short moves armed while the robot is already fast raise their own
 deceleration to land at rest exactly on target, so you rarely need
 more — but ``wait=True`` is available to block until both wheels'

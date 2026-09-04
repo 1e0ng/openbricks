@@ -759,6 +759,52 @@ def _stop_all_motors():
         pass
 
 
+# Program-end brake budget. A ramp from the ST-3032's 888 dps top
+# speed at the default 1500 dps^2 takes ~0.6 s plus settle; wheels
+# that are not at rest after this long are blocked, and the torque-off
+# that follows is the right answer for them.
+_BRAKE_TO_REST_MS = 2000
+
+
+def _brake_to_rest():
+    """Program-end brake for wheels adopted by a DriveBase (3.4.0):
+    decelerate to rest under the coupled controller — heading held by
+    the gyro when one is in use — BEFORE the torque-off that ends
+    every run. Torque-off alone is a freewheel: a program that
+    returned (or died) mid-move left the robot rolling out on
+    friction, and on a ramp, rolling away. The stop button keeps its
+    instant torque-off — an e-stop must not spend half a second
+    driving under power — so this runs only for a program that ended
+    by itself, and never while the e-stop latch is engaged.
+
+    Returns a one-line note for the run log, or ``None`` when there
+    was nothing to brake (no native bus, no drive base, wheels
+    already at rest). A bus that cannot be reached is noted, never
+    raised — the caller's torque-off follows either way.
+    """
+    from openbricks import estop
+    if estop.is_engaged():
+        return None
+    try:
+        from _openbricks_native import st_bus
+    except Exception:
+        return None
+    try:
+        t0 = _now_ms()
+        if not st_bus.db_stop(1):
+            return None
+        if st_bus.db_done():
+            return None              # nothing was moving
+        while not st_bus.db_done():
+            if _now_ms() - t0 >= _BRAKE_TO_REST_MS:
+                return ("brake: wheels not at rest after %d ms - "
+                        "torque-off" % _BRAKE_TO_REST_MS)
+            time.sleep_ms(10)
+        return "brake: wheels to rest in %d ms" % (_now_ms() - t0)
+    except Exception as e:
+        return "brake: skipped (%r)" % (e,)
+
+
 def _run_header(program_path):
     """Environment summary for the run log's first line: firmware
     version, program path, milliseconds since boot (a tiny uptime
@@ -1195,6 +1241,12 @@ def _exec_program_raw(program_path, origin=None):
                 # (finished / stopped / traceback).
                 sess.write_text("finished: clean exit after %d ms\n"
                                 % (_now_ms() - started_ms))
+                # A program that returned mid-move: brake to rest
+                # under the controller before the finally's torque-
+                # off freewheels the robot (3.4.0).
+                note = _brake_to_rest()
+                if note is not None:
+                    sess.write_text(note + "\n")
             except KeyboardInterrupt:
                 # The button-stop's injected KeyboardInterrupt (and a REPL
                 # Ctrl-C from ``openbricks run``) both unwind to here.
@@ -1239,6 +1291,11 @@ def _exec_program_raw(program_path, origin=None):
                 # number the hub already knew.
                 text = _traceback_text(e)
                 sess.write_text(text if text else "Exception: %r\n" % (e,))
+                # A crash is not an e-stop: the robot still comes to a
+                # controlled rest before the torque-off.
+                note = _brake_to_rest()
+                if note is not None:
+                    sess.write_text(note + "\n")
     finally:
         _arm_stop_button(False)
         # EVERY way out stops the motors — not just the button path.
@@ -1246,7 +1303,9 @@ def _exec_program_raw(program_path, origin=None):
         # a motor still commanded left the robot driving at its last
         # setpoint until someone pressed stop. Same kill the e-stop
         # uses (native scheduler halt + serial torque-off broadcast),
-        # idempotent when the KeyboardInterrupt path already ran it.
+        # idempotent when the KeyboardInterrupt path already ran it —
+        # and, on the self-ended paths, after _brake_to_rest has
+        # already brought adopted wheels to a controlled stop.
         _stop_all_motors()
 
 
