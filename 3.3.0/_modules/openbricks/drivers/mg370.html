@@ -1,0 +1,461 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.drivers.mg370 &mdash; openbricks 3.3.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/drivers/mg370.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=3eb8911e"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.3.0">firmware&nbsp;v3.3.0</a>
+<a class="obk-pdf-btn" href="../../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#servo-dynamometer-two-st-3032s-coupled">Servo dynamometer (two ST-3032s, coupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../examples.html#servo-soak-test-one-st-3032">Servo soak test (one ST-3032)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../servo-health.html">Servo health &amp; characterisation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../servo-health.html#health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../servo-health.html#dynamometer-what-does-this-servo-do">Dynamometer: what does <em>this</em> servo do?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../servo-health.html#soak-test-is-it-still-good">Soak test: is it still good?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.drivers.mg370</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.drivers.mg370</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">MG370 geared DC motor with GMR (giant magnetoresistance) quadrature encoder.</span>
+
+<span class="sd">The GMR variant has a 500-PPR encoder on the motor shaft, giving massively</span>
+<span class="sd">more resolution than a standard Hall-effect encoder — at a 1:34 gearbox</span>
+<span class="sd">the output shaft sees ``500 * 4 * 34.014 ≈ 68028 CPR``. That edge rate is</span>
+<span class="sd">too fast for the software ``QuadratureEncoder`` (Pin.irq() tops out around</span>
+<span class="sd">5-10 kHz), so this driver uses the native ``PCNTEncoder`` — a C wrapper</span>
+<span class="sd">over the ESP32 PCNT peripheral — baked into the firmware image.</span>
+
+<span class="sd">Every MG370Motor instance needs its own PCNT unit — ESP32 has 8, ESP32-S3</span>
+<span class="sd">has 4. Pick unit=0 for the first motor, unit=1 for the second, etc.</span>
+
+<span class="sd">Apart from the encoder layer, MG370Motor is identical to JGB37Motor:</span>
+<span class="sd">same native ``Servo`` underneath, same control tick, same closed-loop API.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">Pin</span><span class="p">,</span> <span class="n">PWM</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">pins</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">estop</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks._native</span><span class="w"> </span><span class="kn">import</span> <span class="n">PCNTEncoder</span><span class="p">,</span> <span class="n">Servo</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.interfaces</span><span class="w"> </span><span class="kn">import</span> <span class="n">Motor</span>
+
+<span class="n">_PWM_FREQ_HZ</span> <span class="o">=</span> <span class="mi">20_000</span>
+<span class="n">_DEFAULT_KP</span> <span class="o">=</span> <span class="mf">0.3</span>
+
+<span class="c1"># Default for MG370 GMR with 1:34 gearbox (the spec-sheet ratio).</span>
+<span class="c1">#   500 PPR * 4 (quadrature) * 34.014 ≈ 68028</span>
+<span class="c1"># Override in the constructor if your gearbox ratio differs.</span>
+<span class="n">_DEFAULT_CPR</span> <span class="o">=</span> <span class="mi">68028</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_InvertedEncoder</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Wraps an encoder so its ``count()`` returns negated counts.</span>
+
+<span class="sd">    Used by ``MG370Motor(encoder_invert=True)`` for the case where the</span>
+<span class="sd">    encoder physically counts in the opposite direction of the motor's</span>
+<span class="sd">    "forward" — common with mirror-mounted motor pairs (one side of a</span>
+<span class="sd">    differential drivebase) where motor leads happen to be wired such</span>
+<span class="sd">    that ``run(+N)`` already drives the wheel forward, but the encoder</span>
+<span class="sd">    naturally counts down because the motor shaft spins the other way</span>
+<span class="sd">    relative to the other side.</span>
+
+<span class="sd">    Different from ``invert=True``: that flag flips both motor command</span>
+<span class="sd">    AND encoder reading together (for motors wired backward end-to-end).</span>
+<span class="sd">    ``encoder_invert`` is the right flag when only the encoder direction</span>
+<span class="sd">    is "wrong" relative to motor direction.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inner</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_inner</span> <span class="o">=</span> <span class="n">inner</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">count</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">_inner</span><span class="o">.</span><span class="n">count</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_inner</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="o">-</span><span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="MG370Motor">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MG370Motor</span><span class="p">(</span><span class="n">Motor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""MG370 DC gear motor with high-resolution GMR encoder, closed-loop.</span>
+
+<span class="sd">    Same ``Motor`` contract and native 1 kHz servo core as</span>
+<span class="sd">    :class:`~openbricks.drivers.jgb37_520.JGB37Motor`; the difference</span>
+<span class="sd">    is the encoder path — the 500-PPR GMR encoder is counted by the</span>
+<span class="sd">    ESP32 PCNT hardware peripheral (``pcnt_unit``), not GPIO</span>
+<span class="sd">    interrupts, because its edge rate exceeds what ``Pin.irq`` can</span>
+<span class="sd">    service.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        in1, in2, pwm: H-bridge pins.</span>
+<span class="sd">        encoder_a, encoder_b: encoder channel pins (into PCNT).</span>
+<span class="sd">        pcnt_unit: PCNT peripheral unit, unique per motor (ESP32 has</span>
+<span class="sd">            8, ESP32-S3 has 4 — first motor 0, second 1, ...).</span>
+<span class="sd">        pcnt_filter: PCNT glitch filter in APB cycles (default 1023</span>
+<span class="sd">            ≈ 12.8 µs; lower it only for encoders faster than ~35 kHz</span>
+<span class="sd">            edge rate).</span>
+<span class="sd">        counts_per_output_rev: encoder edges per output-shaft</span>
+<span class="sd">            revolution (default matches the 1:34 GMR variant).</span>
+<span class="sd">        invert / encoder_invert / kp: as in ``JGB37Motor``.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">in1</span><span class="p">,</span> <span class="n">in2</span><span class="p">,</span> <span class="n">pwm</span><span class="p">,</span>
+        <span class="n">encoder_a</span><span class="p">,</span> <span class="n">encoder_b</span><span class="p">,</span>
+        <span class="n">pcnt_unit</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+        <span class="n">pcnt_filter</span><span class="o">=</span><span class="mi">1023</span><span class="p">,</span>
+        <span class="n">counts_per_output_rev</span><span class="o">=</span><span class="n">_DEFAULT_CPR</span><span class="p">,</span>
+        <span class="n">invert</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="n">encoder_invert</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="n">kp</span><span class="o">=</span><span class="n">_DEFAULT_KP</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="n">pins</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">in1</span><span class="p">,</span> <span class="s2">"H-bridge IN1"</span><span class="p">)</span>
+        <span class="n">pins</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">in2</span><span class="p">,</span> <span class="s2">"H-bridge IN2"</span><span class="p">)</span>
+        <span class="n">pins</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">pwm</span><span class="p">,</span> <span class="s2">"H-bridge PWM/EN"</span><span class="p">)</span>
+        <span class="n">pins</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">encoder_a</span><span class="p">,</span> <span class="s2">"encoder channel A"</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">pins</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">encoder_b</span><span class="p">,</span> <span class="s2">"encoder channel B"</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_in1</span> <span class="o">=</span> <span class="n">Pin</span><span class="p">(</span><span class="n">in1</span><span class="p">,</span> <span class="n">Pin</span><span class="o">.</span><span class="n">OUT</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_in2</span> <span class="o">=</span> <span class="n">Pin</span><span class="p">(</span><span class="n">in2</span><span class="p">,</span> <span class="n">Pin</span><span class="o">.</span><span class="n">OUT</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pwm</span> <span class="o">=</span> <span class="n">PWM</span><span class="p">(</span><span class="n">Pin</span><span class="p">(</span><span class="n">pwm</span><span class="p">),</span> <span class="n">freq</span><span class="o">=</span><span class="n">_PWM_FREQ_HZ</span><span class="p">,</span> <span class="n">duty</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_enc</span> <span class="o">=</span> <span class="n">PCNTEncoder</span><span class="p">(</span>
+            <span class="n">pin_a</span><span class="o">=</span><span class="n">encoder_a</span><span class="p">,</span> <span class="n">pin_b</span><span class="o">=</span><span class="n">encoder_b</span><span class="p">,</span>
+            <span class="n">unit</span><span class="o">=</span><span class="n">pcnt_unit</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="n">pcnt_filter</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">encoder_for_servo</span> <span class="o">=</span> <span class="n">_InvertedEncoder</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_enc</span><span class="p">)</span> <span class="k">if</span> <span class="n">encoder_invert</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enc</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span> <span class="o">=</span> <span class="n">Servo</span><span class="p">(</span>
+            <span class="n">in1</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_in1</span><span class="p">,</span>
+            <span class="n">in2</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_in2</span><span class="p">,</span>
+            <span class="n">pwm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_pwm</span><span class="p">,</span>
+            <span class="n">encoder</span><span class="o">=</span><span class="n">encoder_for_servo</span><span class="p">,</span>
+            <span class="n">counts_per_rev</span><span class="o">=</span><span class="n">counts_per_output_rev</span><span class="p">,</span>
+            <span class="n">invert</span><span class="o">=</span><span class="n">invert</span><span class="p">,</span>
+            <span class="n">kp</span><span class="o">=</span><span class="n">kp</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="c1"># --- Open-loop passthroughs ---</span>
+<div class="viewcode-block" id="MG370Motor.dc">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor.dc">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dc</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">duty</span><span class="p">):</span>
+        <span class="n">estop</span><span class="o">.</span><span class="n">check</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">duty</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="MG370Motor.speed">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor.speed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">speed</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Measured deg/s from the native servo core's α-β observer</span>
+        <span class="c1"># (already in output-shaft degrees; invert handled core-side).</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">measured_dps</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="MG370Motor.brake">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor.brake">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">brake</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">brake</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="MG370Motor.coast">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor.coast">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">coast</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">coast</span><span class="p">()</span></div>
+
+
+    <span class="c1"># --- Closed-loop state ---</span>
+<div class="viewcode-block" id="MG370Motor.angle">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor.angle">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">angle</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">angle</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="MG370Motor.reset_angle">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor.reset_angle">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset_angle</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">angle</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">reset_angle</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">angle</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="MG370Motor.run_speed">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor.run_speed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_speed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">deg_per_s</span><span class="p">):</span>
+        <span class="n">estop</span><span class="o">.</span><span class="n">check</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">run_speed</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">deg_per_s</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="MG370Motor.run_angle">
+<a class="viewcode-back" href="../../../api/drivers_motors.html#openbricks.drivers.mg370.MG370Motor.run_angle">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_angle</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">deg_per_s</span><span class="p">,</span> <span class="n">target_angle</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                  <span class="n">accel_dps2</span><span class="o">=</span><span class="mf">1500.0</span><span class="p">):</span>
+        <span class="n">estop</span><span class="o">.</span><span class="n">check</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">run_target</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">target_angle</span><span class="p">),</span>
+                               <span class="nb">abs</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">deg_per_s</span><span class="p">)),</span>
+                               <span class="nb">float</span><span class="p">(</span><span class="n">accel_dps2</span><span class="p">))</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">wait</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_servo</span><span class="o">.</span><span class="n">is_done</span><span class="p">():</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep_ms</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">brake</span><span class="p">()</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

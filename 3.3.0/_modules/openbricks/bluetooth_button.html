@@ -1,0 +1,644 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.bluetooth_button &mdash; openbricks 3.3.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/bluetooth_button.html" />
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=3eb8911e"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.3.0">firmware&nbsp;v3.3.0</a>
+<a class="obk-pdf-btn" href="../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#servo-dynamometer-two-st-3032s-coupled">Servo dynamometer (two ST-3032s, coupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#servo-soak-test-one-st-3032">Servo soak test (one ST-3032)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../servo-health.html">Servo health &amp; characterisation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../servo-health.html#health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../servo-health.html#dynamometer-what-does-this-servo-do">Dynamometer: what does <em>this</em> servo do?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../servo-health.html#soak-test-is-it-still-good">Soak test: is it still good?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.bluetooth_button</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.bluetooth_button</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">Short press on the BLE-toggle button toggles BLE on/off.</span>
+
+<span class="sd">Wires a ``machine.Timer``-driven poll loop (default 50 ms) against a</span>
+<span class="sd">``Button``-conformant object and calls ``openbricks.bluetooth.toggle()``</span>
+<span class="sd">once per press-release cycle. State is persisted via NVS by the</span>
+<span class="sd">``bluetooth`` module, so the new value survives reboots.</span>
+
+<span class="sd">The same poll loop doubles as the **run indicator**: while a user</span>
+<span class="sd">program is executing (``launcher.program_running()``), the status LED</span>
+<span class="sd">flashes at 2 Hz instead of holding a solid colour — blue when BLE is</span>
+<span class="sd">on, yellow when it's off, plain on/off blinking on single-colour</span>
+<span class="sd">LEDs. When the program stops, the LED returns to its idle state</span>
+<span class="sd">(solid state colour on RGB hubs, dark on single-colour hubs). And it</span>
+<span class="sd">renders the **press acknowledgment**: every program-button press</span>
+<span class="sd">flashes the LED for a moment — red for the press that starts a run,</span>
+<span class="sd">green for the press that stops one (``notify_press()``, called by</span>
+<span class="sd">the launcher's press detectors).</span>
+
+<span class="sd">This is a different physical button from the one ``openbricks.launcher``</span>
+<span class="sd">watches for program start/stop — the BLE toggle lives on its own</span>
+<span class="sd">GPIO (default 38 on the S3, 5 on the classic ESP32 — see :class:`openbricks.hub.Hub`) while the program</span>
+<span class="sd">button is on GPIO 39. Two pins → no duration-based dispatch, every</span>
+<span class="sd">press on this pin means "flip BLE".</span>
+
+<span class="sd">Usage from ``main.py``:</span>
+
+<span class="sd">    from openbricks import bluetooth</span>
+<span class="sd">    from openbricks.bluetooth_button import BluetoothToggleButton</span>
+<span class="sd">    from openbricks.hub import ESP32DevkitHub</span>
+
+<span class="sd">    bluetooth.apply_persisted_state()</span>
+<span class="sd">    hub = ESP32DevkitHub()</span>
+<span class="sd">    BluetoothToggleButton(hub.bluetooth_button).start()</span>
+
+<span class="sd">The helper is deliberately standalone (not baked into ``Hub``) so tests</span>
+<span class="sd">can exercise it in isolation, and so boards without a button — or</span>
+<span class="sd">users who want to drive the toggle from something other than a</span>
+<span class="sd">physical press — can skip it.</span>
+<span class="sd">"""</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">Timer</span>
+
+
+<span class="n">DEFAULT_POLL_MS</span> <span class="o">=</span> <span class="mi">50</span>
+
+<span class="c1"># BLE on → blue, off → yellow. Picked for high contrast on the WS2812;</span>
+<span class="c1"># override via ``BluetoothToggleButton(..., color_on=..., color_off=...)``</span>
+<span class="c1"># if you want different hues.</span>
+<span class="n">DEFAULT_COLOR_ON</span>  <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>       <span class="c1"># blue</span>
+<span class="n">DEFAULT_COLOR_OFF</span> <span class="o">=</span> <span class="p">(</span><span class="mi">255</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>     <span class="c1"># yellow</span>
+
+<span class="c1"># Run-indicator blink: while a program runs the LED alternates</span>
+<span class="c1"># state-colour / off, switching phase every RUN_BLINK_MS. 250 ms per</span>
+<span class="c1"># phase = 2 Hz — visibly busier than the solid idle colour (was</span>
+<span class="c1"># 500 ms/1 Hz until 1.80.0; raised so "running" reads as activity at</span>
+<span class="c1"># a glance).</span>
+<span class="n">RUN_BLINK_MS</span> <span class="o">=</span> <span class="mi">250</span>
+
+<span class="c1"># Press acknowledgment: every program-button press paints the LED</span>
+<span class="c1"># for PRESS_FLASH_MS before the normal presentation resumes — RED</span>
+<span class="c1"># for the press that starts a run, GREEN for the press that stops</span>
+<span class="c1"># one. The launcher's press detectors call notify_press(); the</span>
+<span class="c1"># toggle's poll tick renders it, so the flash needs no timer of its</span>
+<span class="c1"># own.</span>
+<span class="n">PRESS_FLASH_MS</span> <span class="o">=</span> <span class="mi">200</span>
+<span class="n">PRESS_COLOR_START</span> <span class="o">=</span> <span class="p">(</span><span class="mi">255</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>     <span class="c1"># red</span>
+<span class="n">PRESS_COLOR_STOP</span>  <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">255</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>     <span class="c1"># green</span>
+
+<span class="n">_press_events</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">_press_color</span> <span class="o">=</span> <span class="n">PRESS_COLOR_START</span>
+
+
+<div class="viewcode-block" id="notify_press">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.bluetooth_button.notify_press">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">notify_press</span><span class="p">(</span><span class="n">stop</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Record a program-button press. ``stop=True`` marks it as the</span>
+<span class="sd">    press that stops a run (green flash); the default is a start</span>
+<span class="sd">    press (red). The active :class:`BluetoothToggleButton` renders</span>
+<span class="sd">    it on its next poll tick. Safe from any context — it only sets</span>
+<span class="sd">    two module variables."""</span>
+    <span class="k">global</span> <span class="n">_press_events</span><span class="p">,</span> <span class="n">_press_color</span>
+    <span class="n">_press_color</span> <span class="o">=</span> <span class="n">PRESS_COLOR_STOP</span> <span class="k">if</span> <span class="n">stop</span> <span class="k">else</span> <span class="n">PRESS_COLOR_START</span>
+    <span class="n">_press_events</span> <span class="o">+=</span> <span class="mi">1</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_launcher_program_running</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Default run-state probe: the launcher's module-level flag.</span>
+
+<span class="sd">    Imported lazily so constructing a ``BluetoothToggleButton`` never</span>
+<span class="sd">    drags the launcher in on hosts/tests that don't use it."""</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">launcher</span>
+    <span class="k">return</span> <span class="n">launcher</span><span class="o">.</span><span class="n">program_running</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="BluetoothToggleButton">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.bluetooth_button.BluetoothToggleButton">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">BluetoothToggleButton</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Polls a button and toggles BLE on each press-release cycle.</span>
+
+<span class="sd">    Optional RGB LED feedback (blue = BLE on, yellow = off). Call</span>
+<span class="sd">    ``start()`` to begin polling on a ``machine.Timer``; ``stop()``</span>
+<span class="sd">    releases the timer. The toggled state persists across reboots.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">button</span><span class="p">,</span> <span class="n">led</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">poll_ms</span><span class="o">=</span><span class="n">DEFAULT_POLL_MS</span><span class="p">,</span> <span class="n">timer_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                 <span class="n">color_on</span><span class="o">=</span><span class="n">DEFAULT_COLOR_ON</span><span class="p">,</span>
+                 <span class="n">color_off</span><span class="o">=</span><span class="n">DEFAULT_COLOR_OFF</span><span class="p">,</span>
+                 <span class="n">program_running</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        Args:</span>
+<span class="sd">            button: any object with a ``.pressed() -&gt; bool`` method</span>
+<span class="sd">                (the ``Button`` / ``PushButton`` from ``openbricks.hub``</span>
+<span class="sd">                both qualify).</span>
+<span class="sd">            led: optional RGB-capable ``StatusLED`` (i.e. one whose</span>
+<span class="sd">                ``.rgb(r, g, b)`` is implemented — the</span>
+<span class="sd">                ``NeoPixelLED`` on the S3 DevKitC-1 qualifies). When</span>
+<span class="sd">                provided, ``start()`` immediately colours the LED based</span>
+<span class="sd">                on the current persisted BLE state (blue = on, yellow</span>
+<span class="sd">                = off) and each toggle recolours it. Pass ``None`` to</span>
+<span class="sd">                skip LED feedback.</span>
+<span class="sd">            poll_ms: polling period. Default 50 ms (20 Hz) — well under</span>
+<span class="sd">                human reaction time, negligible CPU.</span>
+<span class="sd">            timer_id: ``machine.Timer`` hardware ID (0..3 on</span>
+<span class="sd">                ESP32-S3). Default 1 — the reserved inventory is</span>
+<span class="sd">                0 = launcher poll, 1 = this toggle, 2 = motor_process,</span>
+<span class="sd">                3 = the launcher's stop tick (``STOP_TIMER_ID``). The</span>
+<span class="sd">                previous default ``-1`` (virtual timer) was supported</span>
+<span class="sd">                by older MicroPython but raises ``ValueError: invalid</span>
+<span class="sd">                Timer number`` on the v1.27+ MP we vendor.</span>
+<span class="sd">            color_on, color_off: ``(r, g, b)`` tuples the LED is set to</span>
+<span class="sd">                when BLE is enabled / disabled. Defaults: blue / yellow.</span>
+<span class="sd">            program_running: zero-arg callable returning True while a</span>
+<span class="sd">                user program executes — drives the 2 Hz run-indicator</span>
+<span class="sd">                blink. Defaults to ``launcher.program_running`` (the</span>
+<span class="sd">                flag every exec path maintains); tests inject their</span>
+<span class="sd">                own probe.</span>
+<span class="sd">        """</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_button</span> <span class="o">=</span> <span class="n">button</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_led</span>    <span class="o">=</span> <span class="n">led</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_poll_ms</span>       <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">poll_ms</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer_id</span>      <span class="o">=</span> <span class="n">timer_id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_color_on</span>      <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">color_on</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_color_off</span>     <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">color_off</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span>         <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_program_running</span> <span class="o">=</span> <span class="p">(</span><span class="n">program_running</span> <span class="k">if</span> <span class="n">program_running</span>
+                                 <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">_launcher_program_running</span><span class="p">)</span>
+        <span class="c1"># Run-indicator blink state. ``_blink_ticks`` converts the</span>
+        <span class="c1"># wall-clock phase length into poll ticks (≥1 so a huge</span>
+        <span class="c1"># poll_ms still blinks rather than dividing to zero).</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_blink_ticks</span>  <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">RUN_BLINK_MS</span> <span class="o">//</span> <span class="bp">self</span><span class="o">.</span><span class="n">_poll_ms</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_blink_count</span>  <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_blink_lit</span>    <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_running_seen</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="c1"># Press-flash state: consume notify_press() events by counter</span>
+        <span class="c1"># comparison (no shared flags to clear from other contexts).</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_seen</span>       <span class="o">=</span> <span class="n">_press_events</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_flash_left</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="c1"># Stable callback object for bluetooth.add/remove_state_listener.</span>
+        <span class="c1"># A bound method (``self._on_state_change``) is a fresh object on</span>
+        <span class="c1"># every attribute access under MicroPython, where bound methods</span>
+        <span class="c1"># compare by identity — remove() would never match. A closure</span>
+        <span class="c1"># created once here keeps its identity for the toggle's lifetime.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_state_listener</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="k">lambda</span> <span class="n">enabled</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_paint</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">enabled</span><span class="p">)))</span>
+
+        <span class="c1"># Edge-detection state: True from the moment we first saw the</span>
+        <span class="c1"># button pressed until the subsequent release (when we fire).</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="c1"># ---- lifecycle ----</span>
+
+<div class="viewcode-block" id="BluetoothToggleButton.start">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.bluetooth_button.BluetoothToggleButton.start">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Begin polling. Safe to call repeatedly — the second call is a no-op.</span>
+
+<span class="sd">        On first call, paints the LED (if one was provided) to reflect</span>
+<span class="sd">        the current persisted BLE state, and registers with</span>
+<span class="sd">        ``bluetooth.add_state_listener`` so the LED also follows state</span>
+<span class="sd">        changes made *without* the button — ``bluetooth.set_enabled``</span>
+<span class="sd">        from user code or a tool over the REPL.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">bluetooth</span>
+        <span class="n">bluetooth</span><span class="o">.</span><span class="n">add_state_listener</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_state_listener</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_apply_led_for_current_state</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="o">=</span> <span class="n">Timer</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timer_id</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span><span class="o">.</span><span class="n">init</span><span class="p">(</span>
+            <span class="n">period</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_poll_ms</span><span class="p">,</span>
+            <span class="n">mode</span><span class="o">=</span><span class="n">Timer</span><span class="o">.</span><span class="n">PERIODIC</span><span class="p">,</span>
+            <span class="n">callback</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_on_tick</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BluetoothToggleButton.stop">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.bluetooth_button.BluetoothToggleButton.stop">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Stop polling, release the timer, and unregister the LED</span>
+<span class="sd">        state listener."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">bluetooth</span>
+        <span class="n">bluetooth</span><span class="o">.</span><span class="n">remove_state_listener</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_state_listener</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span><span class="o">.</span><span class="n">deinit</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_blink_count</span>  <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_blink_lit</span>    <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_running_seen</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_flash_left</span> <span class="o">=</span> <span class="mi">0</span></div>
+
+
+    <span class="c1"># ---- tick body ----</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_on_tick</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_timer</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_on_tick_body</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+            <span class="c1"># Same relay as launcher._tick: a hard-button stop</span>
+            <span class="c1"># interrupt that lands in this poll callback must be</span>
+            <span class="c1"># re-posted, not eaten with the callback's unwind.</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.launcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">_resignal_stop_interrupt</span>
+            <span class="n">_resignal_stop_interrupt</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_on_tick_body</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_button</span><span class="o">.</span><span class="n">pressed</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span><span class="p">:</span>
+            <span class="c1"># Release after a press — fire once.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_was_pressed</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_fire</span><span class="p">()</span>
+        <span class="c1"># The red press flash outranks the run indicator for its</span>
+        <span class="c1"># short window; the indicator rides every other tick —</span>
+        <span class="c1"># including ticks where the button is held, so a press</span>
+        <span class="c1"># mid-run doesn't freeze the blink.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_flash_tick</span><span class="p">():</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_run_indicator_tick</span><span class="p">()</span>
+
+    <span class="c1"># ---- press acknowledgment (red flash on the program button) ----</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_press_flash_tick</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Render the red press-acknowledgment window. Returns True</span>
+<span class="sd">        while the flash owns the LED (the run indicator pauses</span>
+<span class="sd">        underneath and re-enters cleanly afterwards)."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_seen</span> <span class="o">!=</span> <span class="n">_press_events</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_press_seen</span> <span class="o">=</span> <span class="n">_press_events</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_led</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_press_flash_left</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span>
+                <span class="mi">1</span><span class="p">,</span> <span class="n">PRESS_FLASH_MS</span> <span class="o">//</span> <span class="bp">self</span><span class="o">.</span><span class="n">_poll_ms</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_press_show</span><span class="p">()</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_flash_left</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_press_flash_left</span> <span class="o">-=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_press_flash_left</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="c1"># Window over: hand the LED back. Clearing _running_seen</span>
+        <span class="c1"># makes the run indicator re-enter with a fresh lit phase on</span>
+        <span class="c1"># this same tick; at idle, repaint the solid state colour.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_program_running</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_running_seen</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_restore_idle_led</span><span class="p">()</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_press_show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_led</span><span class="o">.</span><span class="n">rgb</span><span class="p">(</span><span class="o">*</span><span class="n">_press_color</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">NotImplementedError</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_led</span><span class="o">.</span><span class="n">on</span><span class="p">()</span>
+
+    <span class="c1"># ---- run indicator (2 Hz blink while a program executes) ----</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_run_indicator_tick</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Blink the LED while a user program runs; restore the idle</span>
+<span class="sd">        state when it stops.</span>
+
+<span class="sd">        Lit phase re-reads the BLE state each time, so toggling BLE</span>
+<span class="sd">        mid-run switches the blink colour within one phase. On</span>
+<span class="sd">        single-colour LEDs the blink is plain on/off and idle is dark</span>
+<span class="sd">        (matching their existing idle state — ``_paint`` never touches</span>
+<span class="sd">        them)."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_led</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_program_running</span><span class="p">():</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_running_seen</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_running_seen</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_restore_idle_led</span><span class="p">()</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_running_seen</span><span class="p">:</span>
+            <span class="c1"># Program just started: begin the lit phase immediately so</span>
+            <span class="c1"># the indicator reacts within one poll tick.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_running_seen</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_blink_count</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_blink_lit</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_blink_show</span><span class="p">()</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_blink_count</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_blink_count</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_blink_ticks</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_blink_count</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_blink_lit</span> <span class="o">=</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_blink_lit</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_blink_show</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_blink_show</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Render the current blink phase: state colour (or plain on)</span>
+<span class="sd">        when lit, off when dark."""</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_blink_lit</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_led</span><span class="o">.</span><span class="n">off</span><span class="p">()</span>
+            <span class="k">return</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">bluetooth</span>
+        <span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_color_on</span> <span class="k">if</span> <span class="n">bluetooth</span><span class="o">.</span><span class="n">is_enabled</span><span class="p">()</span>
+                 <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_color_off</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_led</span><span class="o">.</span><span class="n">rgb</span><span class="p">(</span><span class="o">*</span><span class="n">color</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">NotImplementedError</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_led</span><span class="o">.</span><span class="n">on</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_restore_idle_led</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Program ended: back to the idle presentation. RGB hubs show</span>
+<span class="sd">        the solid BLE-state colour; single-colour LEDs go dark (their</span>
+<span class="sd">        idle state — ``_paint`` no-ops on them, so ``off`` is the only</span>
+<span class="sd">        way a stale lit phase gets cleaned up)."""</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">bluetooth</span>
+        <span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_color_on</span> <span class="k">if</span> <span class="n">bluetooth</span><span class="o">.</span><span class="n">is_enabled</span><span class="p">()</span>
+                 <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_color_off</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_led</span><span class="o">.</span><span class="n">rgb</span><span class="p">(</span><span class="o">*</span><span class="n">color</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">NotImplementedError</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_led</span><span class="o">.</span><span class="n">off</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_fire</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Imported inside the method so tests that don't install the BLE</span>
+        <span class="c1"># fake don't explode at module-load time. In production both</span>
+        <span class="c1"># imports succeed because the firmware freezes the module in.</span>
+        <span class="c1"># The LED repaint rides the state listener registered in</span>
+        <span class="c1"># ``start()`` — ``toggle()`` fires it.</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">bluetooth</span>
+        <span class="n">bluetooth</span><span class="o">.</span><span class="n">toggle</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_apply_led_for_current_state</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Paint the LED to match the current persisted BLE state.</span>
+<span class="sd">        Early-out with no LED so LED-less hubs skip the NVS read."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_led</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">openbricks</span><span class="w"> </span><span class="kn">import</span> <span class="n">bluetooth</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_paint</span><span class="p">(</span><span class="n">bluetooth</span><span class="o">.</span><span class="n">is_enabled</span><span class="p">())</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_paint</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">enabled</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Paint the LED for ``enabled``, if an RGB-capable LED was</span>
+<span class="sd">        provided. Silently no-ops on plain on/off LEDs (whose</span>
+<span class="sd">        ``.rgb()`` raises ``NotImplementedError``) so the hub can pass</span>
+<span class="sd">        ``self.led`` unconditionally without caring which variant it</span>
+<span class="sd">        is."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_led</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">color</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_color_on</span> <span class="k">if</span> <span class="n">enabled</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_color_off</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_led</span><span class="o">.</span><span class="n">rgb</span><span class="p">(</span><span class="o">*</span><span class="n">color</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">NotImplementedError</span><span class="p">:</span>
+            <span class="k">pass</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

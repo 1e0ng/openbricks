@@ -1,0 +1,887 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="Supported hardware for openbricks: ESP32-S3 and ESP32 boards, ST-3032/ST-3215 serial bus servos, DC gear motors, IMUs, color and distance sensors, with wiring guides." name="description" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hardware guide &mdash; openbricks 3.3.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/hardware.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=3eb8911e"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="_static/version-switcher.js?v=16d832ff"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Command-line tool" href="cli.html" />
+    <link rel="prev" title="Installation" href="install.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.3.0">firmware&nbsp;v3.3.0</a>
+<a class="obk-pdf-btn" href="openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#servo-dynamometer-two-st-3032s-coupled">Servo dynamometer (two ST-3032s, coupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#servo-soak-test-one-st-3032">Servo soak test (one ST-3032)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="servo-health.html">Servo health &amp; characterisation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="servo-health.html#health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="servo-health.html#dynamometer-what-does-this-servo-do">Dynamometer: what does <em>this</em> servo do?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="servo-health.html#soak-test-is-it-still-good">Soak test: is it still good?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Hardware guide</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/1e0ng/openbricks/blob/main/docs/hardware.md" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="hardware-guide">
+<h1>Hardware guide<a class="headerlink" href="#hardware-guide" title="Link to this heading"></a></h1>
+<p>A starter parts list and wiring notes. Everything here is commodity stuff you
+can buy on AliExpress / Amazon / Adafruit.</p>
+<section id="recommended-starter-robot">
+<h2>Recommended starter robot<a class="headerlink" href="#recommended-starter-robot" title="Link to this heading"></a></h2>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Part</p></th>
+<th class="head text-right"><p>Qty</p></th>
+<th class="head text-right"><p>≈ US$ each</p></th>
+<th class="head"><p>Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>ESP32-S3 DevKitC-1 (N16R8)</p></td>
+<td class="text-right"><p>1</p></td>
+<td class="text-right"><p>13</p></td>
+<td><p>Any ESP32-S3 board with ≥10 free GPIOs works; classic ESP32 also supported</p></td>
+</tr>
+<tr class="row-odd"><td><p>Feetech STS3032 serial bus servo (12V)</p></td>
+<td class="text-right"><p>2</p></td>
+<td class="text-right"><p>25</p></td>
+<td><p>Drive wheels, continuous-rotation wheel mode. 10 kg·cm, 148 RPM no-load — datasheet in <code class="docutils literal notranslate"><span class="pre">docs/datasheets/</span></code>. $17.55 each from 100 up on Alibaba; boutique resellers ask $40</p></td>
+</tr>
+<tr class="row-even"><td><p>Feetech URT-2 serial bus adapter</p></td>
+<td class="text-right"><p>1</p></td>
+<td class="text-right"><p>16</p></td>
+<td><p>One half-duplex bus daisy-chains every servo (S$22 at Kuriosity)</p></td>
+</tr>
+<tr class="row-odd"><td><p>3S LiPo battery (11.1V nominal) + balance charger</p></td>
+<td class="text-right"><p>1</p></td>
+<td class="text-right"><p>25–40</p></td>
+<td><p>Feeds the servo rail directly. ST-3032 brown-out floor is ~9V, so a sagging 2S (7.4V) is not enough. <em>Typical price</em></p></td>
+</tr>
+<tr class="row-even"><td><p>Buck converter (12V → 5V, ≥1A)</p></td>
+<td class="text-right"><p>1</p></td>
+<td class="text-right"><p>3</p></td>
+<td><p>Powers the ESP32-S3 and sensors. <em>Typical price</em></p></td>
+</tr>
+<tr class="row-odd"><td><p>Pololu QTRX-HD-15A reflectance array</p></td>
+<td class="text-right"><p>1</p></td>
+<td class="text-right"><p>29</p></td>
+<td><p>The line-follow bar (ten of its fifteen channels on GPIO 1–10, wiring below); $29.10 at Pololu</p></td>
+</tr>
+<tr class="row-even"><td><p>TCS34725 breakout</p></td>
+<td class="text-right"><p>2–4</p></td>
+<td class="text-right"><p>3–8</p></td>
+<td><p>Colour sensor array for zone detection. Adafruit 1334 is discontinued (was $7.95); generic modules are a few dollars on AliExpress / Amazon</p></td>
+</tr>
+<tr class="row-odd"><td><p>TCA9548A I2C multiplexer breakout</p></td>
+<td class="text-right"><p>1</p></td>
+<td class="text-right"><p>7</p></td>
+<td><p>Required for more than one TCS34725 — its address is fixed at <code class="docutils literal notranslate"><span class="pre">0x29</span></code>. Adafruit 2717 $6.95; clones ≈$1–2</p></td>
+</tr>
+<tr class="row-even"><td><p>ICM-45686 breakout</p></td>
+<td class="text-right"><p>1</p></td>
+<td class="text-right"><p>32</p></td>
+<td><p>SPI IMU, read inside the 1 kHz control tick — the heading source for <code class="docutils literal notranslate"><span class="pre">use_gyro</span></code>. TDK’s own EV_ICM-45686 board is $32.45 at DigiKey; generic modules exist on Amazon</p></td>
+</tr>
+<tr class="row-odd"><td><p>ST-3215 serial bus servo</p></td>
+<td class="text-right"><p>0–4</p></td>
+<td class="text-right"><p>—</p></td>
+<td><p>Optional; good for arms / grippers. Same bus and protocol, but do <strong>not</strong> share a 6V rail setup — see servo notes</p></td>
+</tr>
+<tr class="row-even"><td><p>Jumper wires, M3 standoffs, chassis plate</p></td>
+<td class="text-right"><p>—</p></td>
+<td class="text-right"><p>—</p></td>
+<td><p>Your robot, your build</p></td>
+</tr>
+</tbody>
+</table>
+<p>Drive base, IMU, line bar, two colour sensors and the multiplexer
+come to <strong>roughly US$190</strong> before battery, charger and chassis. Prices
+checked 2026-09-05 at single-unit quantity —
+<a class="reference external" href="https://www.alibaba.com/product-detail/FEETECH-SCS-STS3032-4-5-kg_1600138694717.html">Alibaba (STS3032)</a>,
+<a class="reference external" href="https://kuriosity.sg/products/feetech-serial-bus-servo-driver">Kuriosity (URT-2)</a>,
+<a class="reference external" href="https://www.pololu.com/product/4415">Pololu 4415</a>,
+<a class="reference external" href="https://www.adafruit.com/product/2717">Adafruit 2717</a>,
+<a class="reference external" href="https://www.digikey.com/en/products/detail/tdk-invensense/ICM-45686/24374985">DigiKey EV_ICM-45686</a>,
+<a class="reference external" href="https://www.amazon.com/ESP32-S3-DevKitC-1-Development-Dual-Core-Bluetooth/dp/B0GVSHT2Q2">Amazon (ESP32-S3-DevKitC-1 N16R8)</a>
+— and they move; treat the column as a budget, not a quote. The same
+parts from Taobao / AliExpress typically land at half to two-thirds
+of these numbers with longer shipping.</p>
+<p>A DC-gear-motor build (JGB37-520 / MG370 + H-bridge) is still fully
+supported — see <a class="reference internal" href="#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a>
+at the bottom.</p>
+</section>
+<section id="power-budget">
+<h2>Power budget<a class="headerlink" href="#power-budget" title="Link to this heading"></a></h2>
+<p>Two rails, one battery:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>    [ 3S LiPo 11.1V ]
+        │
+        ├─────────────►  URT-2 servo rail   (all ST-3032 / ST-3215 power)
+        │
+        └──► Buck  ──►  5V rail
+                         │
+                         ├──►  ESP32-S3 VIN (5V pin)
+                         └──►  Sensors via 3.3V regulator on the board
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>Never power the servos from the ESP32’s 5V pin or USB — a single
+ST-3032 stall pulls more than a dev board can source.</p></li>
+<li><p>The ST-3032’s brown-out floor is ~9V. A 3S pack sags to ~9.9V near
+empty, which still clears it; a 2S pack does not.</p></li>
+<li><p>Tie all grounds together: battery, buck, URT-2, ESP32, sensor
+breakouts. This sounds obvious but it’s the #1 reason new builds
+misbehave.</p></li>
+</ul>
+</section>
+<section id="gpio-map-esp32-s3">
+<h2>GPIO map (ESP32-S3)<a class="headerlink" href="#gpio-map-esp32-s3" title="Link to this heading"></a></h2>
+<p>The serial-bus build needs very few pins — that’s most of its charm:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Function</p></th>
+<th class="head"><p>GPIO(s)</p></th>
+<th class="head"><p>Devices on this line</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Analog sensors</p></td>
+<td><p>1–10</p></td>
+<td><p>The FULL ADC1 bank — the <a class="reference internal" href="api/drivers_sensors.html#openbricks.drivers.qtr.QTRLineSensor" title="openbricks.drivers.qtr.QTRLineSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.drivers.qtr.QTRLineSensor</span></code></a> window (wiring below). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable</p></td>
+</tr>
+<tr class="row-odd"><td><p>I2C0 (SDA, SCL)</p></td>
+<td><p>15, 16</p></td>
+<td><p>TCA9548A mux (0x70) + colour sensors behind it, shared bus (an I2C BNO055 IMU at 0x28 fits here too)</p></td>
+</tr>
+<tr class="row-even"><td><p>UART1 (TX, RX)</p></td>
+<td><p>14, 41</p></td>
+<td><p>URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained (RX was GPIO 6 until 1.71.0; it moved so the analog bank stays whole)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Program button</p></td>
+<td><p>39</p></td>
+<td><p>Start/stop, polled with an internal pull-up (was GPIO 4 until 1.71.0)</p></td>
+</tr>
+<tr class="row-even"><td><p>BLE-toggle button</p></td>
+<td><p>38</p></td>
+<td><p>Bluetooth on/off (was GPIO 5 until 1.66.3)</p></td>
+</tr>
+<tr class="row-odd"><td><p>WS2812 data</p></td>
+<td><p>21</p></td>
+<td><p>Addressable RGB LED strip / ×8 stick DIN (<a class="reference internal" href="api/drivers_misc.html#module-openbricks.drivers.ws2812" title="openbricks.drivers.ws2812"><code class="xref py py-mod docutils literal notranslate"><span class="pre">openbricks.drivers.ws2812</span></code></a>) — on boards that break out the header corner next to 5 V/GND, this is the free pin beside the reserved 19/20 USB pair</p></td>
+</tr>
+<tr class="row-even"><td><p>SPI (SCK, MOSI, MISO, CS)</p></td>
+<td><p>12, 13, 11, 17</p></td>
+<td><p>ICM-45686 IMU breakout (<a class="reference internal" href="api/drivers_sensors.html#openbricks.drivers.icm45686.ICM45686" title="openbricks.drivers.icm45686.ICM45686"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.drivers.icm45686.ICM45686</span></code></a>) — 3V3 + GND + these four; INT and the other breakout pins stay unwired (the 1 kHz hard tick polls)</p></td>
+</tr>
+</tbody>
+</table>
+<p>Pin gotchas on the ESP32-S3:</p>
+<ul class="simple">
+<li><p><strong>GPIO 22–25 don’t exist</strong> — the pin list is 0–21 then 26–48.</p></li>
+<li><p><strong>GPIO 26–32 (and 33–37 on octal-PSRAM modules) are flash/PSRAM.</strong>
+Do not use them.</p></li>
+<li><p><strong>GPIO 19/20 are the native-USB D-/D+</strong> and <strong>0/3/45/46 are
+strapping pins.</strong></p></li>
+<li><p>I2C and UART route through the GPIO matrix, so none of these
+assignments are fixed — they’re the convention the bundled examples
+use. On a <strong>classic ESP32</strong>, the usual equivalents are I2C on
+21/22 and any two free pins for the UART.</p></li>
+</ul>
+<p>The firmware enforces the hard cases at construction time: a driver
+asked to wire a nonexistent, flash, or USB pin — or a pin the runtime
+already owns, like the program button — raises
+<a class="reference internal" href="api/runtime.html#openbricks.pins.ReservedPinError" title="openbricks.pins.ReservedPinError"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.pins.ReservedPinError</span></code></a> naming the pin, the role,
+and the reason, instead of failing somewhere far from the mistake.
+See <a class="reference internal" href="api/runtime.html#module-openbricks.pins" title="openbricks.pins"><code class="xref py py-mod docutils literal notranslate"><span class="pre">openbricks.pins</span></code></a>.</p>
+<section id="qtrlinesensor-wiring-the-standard-line-follow-window">
+<h3>QTRLineSensor wiring (the standard line-follow window)<a class="headerlink" href="#qtrlinesensor-wiring-the-standard-line-follow-window" title="Link to this heading"></a></h3>
+<p><a class="reference internal" href="api/drivers_sensors.html#openbricks.drivers.qtr.QTRLineSensor" title="openbricks.drivers.qtr.QTRLineSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.drivers.qtr.QTRLineSensor</span></code></a> bakes the whole rig
+geometry into the firmware — pins, element positions, and the mode
+setpoints — so programs just construct it and pick a discipline:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.qtr</span><span class="w"> </span><span class="kn">import</span> <span class="n">QTRLineSensor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.parameters</span><span class="w"> </span><span class="kn">import</span> <span class="n">LineMode</span>
+<span class="n">qtr</span> <span class="o">=</span> <span class="n">QTRLineSensor</span><span class="p">()</span>
+<span class="n">qtr</span><span class="o">.</span><span class="n">set_mode</span><span class="p">(</span><span class="n">LineMode</span><span class="o">.</span><span class="n">LEFT</span><span class="p">)</span>     <span class="c1"># or RIGHT / CENTER; switchable mid-run</span>
+<span class="n">error</span> <span class="o">=</span> <span class="n">qtr</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">edge_error</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Ten channels of a QTRX-HD-15A (4 mm pitch) in a skip pattern, left
+to right as mounted, onto GPIO 1..10 <strong>in order</strong>:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>QTR channel</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>9</p></th>
+<th class="head"><p>11</p></th>
+<th class="head"><p>12</p></th>
+<th class="head"><p>13</p></th>
+<th class="head"><p>15</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>GPIO</p></td>
+<td><p>1</p></td>
+<td><p>2</p></td>
+<td><p>3</p></td>
+<td><p>4</p></td>
+<td><p>5</p></td>
+<td><p>6</p></td>
+<td><p>7</p></td>
+<td><p>8</p></td>
+<td><p>9</p></td>
+<td><p>10</p></td>
+</tr>
+<tr class="row-odd"><td><p>x (mm)</p></td>
+<td><p>−28</p></td>
+<td><p>−20</p></td>
+<td><p>−16</p></td>
+<td><p>−12</p></td>
+<td><p>−4</p></td>
+<td><p>+4</p></td>
+<td><p>+12</p></td>
+<td><p>+16</p></td>
+<td><p>+20</p></td>
+<td><p>+28</p></td>
+</tr>
+</tbody>
+</table>
+<p>That spans a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm (the
+driver’s <code class="docutils literal notranslate"><span class="pre">positions_mm</span></code> carries the true coordinates, so edge
+interpolation is exact across the unequal gaps). The three modes:</p>
+<ul class="simple">
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">LineMode.LEFT</span></code></strong> — holds the line’s LEFT edge under <strong>channel 4</strong>
+(x = −16 mm)</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">LineMode.RIGHT</span></code></strong> — holds the line’s RIGHT edge under <strong>channel 12</strong>
+(x = +16 mm)</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">LineMode.CENTER</span></code></strong> — holds the line’s CENTRE at x = 0, steering on
+the weighted centroid of <strong>all ten channels</strong></p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">edge_error()</span></code> is signed so positive steers right in every mode,
+range −50 .. +50. In the two edge modes it is how far the mode’s
+channel sits from the black/white boundary — that element’s
+ambient (0 black .. 100 white) referenced to 50, reading 0 exactly
+when the channel straddles the edge. That is one element, so the
+error is proportional only within about a pitch of the setpoint
+and rails at ±50 beyond it. In <code class="docutils literal notranslate"><span class="pre">LineMode.CENTER</span></code> mode it is the line’s
+centroid position scaled so ±50 is the far end of the window
+(±28 mm) — proportional across the whole span, which is what you
+want through sharp corners and after a branch. When no channel
+sees the line, center mode rails toward the side the line left
+through (<code class="docutils literal notranslate"><span class="pre">last_side()</span></code>), and raises if the line was never seen.
+Examples: <code class="docutils literal notranslate"><span class="pre">qtr_line_follow_left.py</span></code> / <code class="docutils literal notranslate"><span class="pre">_right.py</span></code> / <code class="docutils literal notranslate"><span class="pre">_center.py</span></code>,
+one shared law pinned to each mode.</p>
+<p>The skip pattern is a palindrome, so if the board is mounted the
+other way round, only these channel labels swap — GPIO order and
+geometry stay identical.</p>
+<p>Either way the ~20 mm line sits inside the middle of the window
+with ≥3 channels of mat visible on the far side — those far-side
+elements are the branch watch in the bundled followers, and the
+whole window going dark is the intersection/ending signal.</p>
+<p>One board-level note: <strong>GPIO 3 (= channel 4, the left-mode
+setpoint channel) is a strapping pin</strong>, and on the
+ESP32-S3-COREBOARD V1.4 it optionally carries a 10 kΩ pull-up
+through the <code class="docutils literal notranslate"><span class="pre">USB-JTAG</span></code> 0 Ω link. Harmless (per-element calibration
+absorbs the bias), but if <code class="docutils literal notranslate"><span class="pre">qtr_calibrate.py</span></code> shows element <code class="docutils literal notranslate"><span class="pre">[2]</span></code>
+with a conspicuously narrower span than its neighbours, that link
+is populated — desoldering it is safe if you never use pin-JTAG.</p>
+<p>The QTRX board’s CTRL (emitter enable) can stay tied high; VCC to
+3V3, GND to GND.</p>
+</section>
+<section id="if-the-status-led-never-lights">
+<h3>If the status LED never lights<a class="headerlink" href="#if-the-status-led-never-lights" title="Link to this heading"></a></h3>
+<p>The onboard WS2812 speaks a write-only protocol — the firmware can’t
+tell a dead LED from a working one, so a blown pixel looks like
+software silently failing. Run <code class="docutils literal notranslate"><span class="pre">examples/led_probe.py</span></code> on the hub: it
+drives full white at both timings across every plausible RGB pin
+(48/38/47/21) plus a raw <code class="docutils literal notranslate"><span class="pre">machine.bitstream</span></code> write. If nothing lights
+through all of that, the problem is physical. The decisive check is a
+<strong>power-off ohmmeter reading from the LED’s data pin (or its GPIO) to
+GND</strong>: a WS2812 whose DI input has failed as an internal short reads
+~0 Ω there and clamps the GPIO — the pin measures millivolts even
+when driven high, every write “succeeds” into the short, and the
+symptom history is “worked once, then went dark for good”. Lift the
+data link to free the pin. Also check the schematic for <strong>population
+options in the LED circuit</strong>. The ESP32-S3-COREBOARD V1.4
+(<code class="docutils literal notranslate"><span class="pre">docs/datasheets/esp32s3_coreboard_v1.4_schematic.pdf</span></code>) routes
+GPIO 48 to the WS2812 through a 0 Ω <code class="docutils literal notranslate"><span class="pre">RGB</span></code> link and feeds the LED’s
+VDD from the <strong>5 V rail</strong> through a second optional link — if either
+link is unpopulated (or the board is powered via 3.3 V only, leaving
+the 5 V rail dead), the LED never lights while every write succeeds.
+Bridge the link / feed 5 V, or wire any external WS2812 to
+3.3V / GND / GPIO 48 — it becomes the status LED with no firmware
+change.</p>
+</section>
+</section>
+<section id="sensor-wiring-i2c">
+<h2>Sensor wiring (I2C)<a class="headerlink" href="#sensor-wiring-i2c" title="Link to this heading"></a></h2>
+<p>The colour sensor is the TCS34725. Its I2C address is fixed at <code class="docutils literal notranslate"><span class="pre">0x29</span></code>
+— there are no address-select pins — which decides how you wire it:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Sensors</p></th>
+<th class="head"><p>Mode</p></th>
+<th class="head"><p>Extra part</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p><a class="reference internal" href="#mode-1-direct-to-the-esp32">Direct</a> — straight onto the ESP32’s I2C pins</p></td>
+<td><p>none</p></td>
+</tr>
+<tr class="row-odd"><td><p>2 or more</p></td>
+<td><p><a class="reference internal" href="#mode-2-via-a-tca9548a-multiplexer">Via TCA9548A</a> — one sensor per mux channel</p></td>
+<td><p>TCA9548A breakout</p></td>
+</tr>
+</tbody>
+</table>
+<p>The IMU in the baseline build is the SPI-wired ICM-45686 (see the
+GPIO map above) and doesn’t share this bus. If you use the I2C BNO055
+instead, it sits at <code class="docutils literal notranslate"><span class="pre">0x28</span></code> and connects straight to GPIO 15/16 in
+either mode — <code class="docutils literal notranslate"><span class="pre">0x28</span></code> and <code class="docutils literal notranslate"><span class="pre">0x29</span></code> coexist fine.</p>
+<p>Both modes use the same driver call. <code class="docutils literal notranslate"><span class="pre">mux[n]</span></code> behaves like an I2C
+bus, so the only difference between the two is what you pass to
+<code class="docutils literal notranslate"><span class="pre">TCS34725(...)</span></code>.</p>
+<section id="mode-1-direct-to-the-esp32">
+<h3>Mode 1: direct to the ESP32<a class="headerlink" href="#mode-1-direct-to-the-esp32" title="Link to this heading"></a></h3>
+<p>One colour sensor, no multiplexer:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>TCS34725 pin</p></th>
+<th class="head"><p>Connect to</p></th>
+<th class="head"><p>Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>VIN (or VCC)</p></td>
+<td><p>3.3V</p></td>
+<td><p>The breakout has an onboard regulator, but the board’s 3.3V is cleanest</p></td>
+</tr>
+<tr class="row-odd"><td><p>GND</p></td>
+<td><p>GND</p></td>
+<td><p>Common ground with everything else</p></td>
+</tr>
+<tr class="row-even"><td><p>SDA</p></td>
+<td><p>GPIO 15</p></td>
+<td><p>ESP32-S3 (classic ESP32: GPIO 21)</p></td>
+</tr>
+<tr class="row-odd"><td><p>SCL</p></td>
+<td><p>GPIO 16</p></td>
+<td><p>ESP32-S3 (classic ESP32: GPIO 22)</p></td>
+</tr>
+<tr class="row-even"><td><p>LED / INT</p></td>
+<td><p>see <a class="reference internal" href="#tcs34725-led-pin">below</a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">I2C</span><span class="p">,</span> <span class="n">Pin</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.tcs34725</span><span class="w"> </span><span class="kn">import</span> <span class="n">TCS34725</span>
+
+<span class="n">i2c</span> <span class="o">=</span> <span class="n">I2C</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">sda</span><span class="o">=</span><span class="n">Pin</span><span class="p">(</span><span class="mi">15</span><span class="p">),</span> <span class="n">scl</span><span class="o">=</span><span class="n">Pin</span><span class="p">(</span><span class="mi">16</span><span class="p">),</span> <span class="n">freq</span><span class="o">=</span><span class="mi">400_000</span><span class="p">)</span>   <span class="c1"># ESP32-S3</span>
+<span class="n">sensor</span> <span class="o">=</span> <span class="n">TCS34725</span><span class="p">(</span><span class="n">i2c</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Check the wiring with <code class="docutils literal notranslate"><span class="pre">i2c.scan()</span></code> — it should list <code class="docutils literal notranslate"><span class="pre">41</span></code> (<code class="docutils literal notranslate"><span class="pre">0x29</span></code>).
+A complete program is <code class="docutils literal notranslate"><span class="pre">examples/read_color.py</span></code>.</p>
+<p>If you want <strong>exactly two</strong> sensors without a mux, the ESP32’s second
+hardware I2C controller also works: <code class="docutils literal notranslate"><span class="pre">I2C(1,</span> <span class="pre">sda=...,</span> <span class="pre">scl=...)</span></code> on any
+two free pins, one sensor per bus. Beyond two, use Mode 2.</p>
+</section>
+<section id="mode-2-via-a-tca9548a-multiplexer">
+<h3>Mode 2: via a TCA9548A multiplexer<a class="headerlink" href="#mode-2-via-a-tca9548a-multiplexer" title="Link to this heading"></a></h3>
+<p>Two or more colour sensors (a line-follower / zone-detection array).
+The TCA9548A sits at <code class="docutils literal notranslate"><span class="pre">0x70</span></code> and fans the bus out to eight isolated
+channels; each sensor lives on its own channel at its own <code class="docutils literal notranslate"><span class="pre">0x29</span></code>.</p>
+<p>Wire the mux to the ESP32-S3, then each sensor to a mux channel:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>TCA9548A pin</p></th>
+<th class="head"><p>Connect to</p></th>
+<th class="head"><p>Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>VIN</p></td>
+<td><p>3.3V</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p>GND</p></td>
+<td><p>GND</p></td>
+<td><p>Common ground with everything else</p></td>
+</tr>
+<tr class="row-even"><td><p>SDA / SCL</p></td>
+<td><p>GPIO 15 / 16</p></td>
+<td><p>The main bus (classic ESP32: 21 / 22)</p></td>
+</tr>
+<tr class="row-odd"><td><p>SD0/SC0 … SD7/SC7</p></td>
+<td><p>one TCS34725 each</p></td>
+<td><p>Isolated channels</p></td>
+</tr>
+<tr class="row-even"><td><p>A0 / A1 / A2</p></td>
+<td><p>leave open</p></td>
+<td><p>Default address <code class="docutils literal notranslate"><span class="pre">0x70</span></code>; only needed for a second mux</p></td>
+</tr>
+</tbody>
+</table>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>TCS34725 pin</p></th>
+<th class="head"><p>Connect to</p></th>
+<th class="head"><p>Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>VIN (or VCC)</p></td>
+<td><p>3.3V</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p>GND</p></td>
+<td><p>GND</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p>SDA / SCL</p></td>
+<td><p>mux channel <code class="docutils literal notranslate"><span class="pre">SDn</span></code> / <code class="docutils literal notranslate"><span class="pre">SCn</span></code></p></td>
+<td><p>Not the ESP32 pins</p></td>
+</tr>
+<tr class="row-odd"><td><p>LED / INT</p></td>
+<td><p>see <a class="reference internal" href="#tcs34725-led-pin">below</a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<p>The Adafruit breakouts include ~10 kΩ SDA/SCL pull-ups, so for a
+handful of devices you don’t need to add your own.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">I2C</span><span class="p">,</span> <span class="n">Pin</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.tca9548a</span><span class="w"> </span><span class="kn">import</span> <span class="n">TCA9548A</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.tcs34725</span><span class="w"> </span><span class="kn">import</span> <span class="n">TCS34725</span>
+
+<span class="n">i2c</span> <span class="o">=</span> <span class="n">I2C</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">sda</span><span class="o">=</span><span class="n">Pin</span><span class="p">(</span><span class="mi">15</span><span class="p">),</span> <span class="n">scl</span><span class="o">=</span><span class="n">Pin</span><span class="p">(</span><span class="mi">16</span><span class="p">),</span> <span class="n">freq</span><span class="o">=</span><span class="mi">400_000</span><span class="p">)</span>   <span class="c1"># ESP32-S3</span>
+<span class="n">mux</span> <span class="o">=</span> <span class="n">TCA9548A</span><span class="p">(</span><span class="n">i2c</span><span class="p">)</span>                                    <span class="c1"># 0x70 by default</span>
+<span class="n">sensors</span> <span class="o">=</span> <span class="p">[</span><span class="n">TCS34725</span><span class="p">(</span><span class="n">mux</span><span class="p">[</span><span class="n">ch</span><span class="p">])</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">)]</span>       <span class="c1"># left, mid, right</span>
+</pre></div>
+</div>
+<p>Check the wiring with <code class="docutils literal notranslate"><span class="pre">i2c.scan()</span></code> — it should list <code class="docutils literal notranslate"><span class="pre">112</span></code> (<code class="docutils literal notranslate"><span class="pre">0x70</span></code>)
+for the mux; <code class="docutils literal notranslate"><span class="pre">mux[n].scan()</span></code> should list <code class="docutils literal notranslate"><span class="pre">41</span></code> (<code class="docutils literal notranslate"><span class="pre">0x29</span></code>) for each
+channel that has a sensor. For a complete program — a 2-sensor array
+that combines each sensor’s <code class="docutils literal notranslate"><span class="pre">ambient()</span></code> and <code class="docutils literal notranslate"><span class="pre">rgb()</span></code> readings to
+name the colour under it (red / blue / green / yellow / white /
+black) — see <code class="docutils literal notranslate"><span class="pre">examples/color_array.py</span></code>.</p>
+</section>
+<section id="tcs34725-led-pin">
+<h3>TCS34725 LED pin<a class="headerlink" href="#tcs34725-led-pin" title="Link to this heading"></a></h3>
+<p>The colour sensor breakout has two extra pins beyond power and I2C:</p>
+<ul class="simple">
+<li><p><strong>LED</strong> — drives the onboard white illumination LED. On Adafruit
+boards it defaults <strong>on</strong> (tied to VIN through the ADC-enable trace).
+To control it, wire it to a spare GPIO and drive high/low; to force it
+<strong>off</strong>, tie LED to GND. Leave it on for consistent colour readings —
+ambient light alone is unreliable across environments.</p></li>
+<li><p><strong>INT</strong> — the interrupt output. The driver polls, so leave INT
+<strong>unconnected</strong>.</p></li>
+</ul>
+</section>
+</section>
+<section id="serial-bus-servo-notes-st-3032-st-3215">
+<h2>Serial bus servo notes (ST-3032 / ST-3215)<a class="headerlink" href="#serial-bus-servo-notes-st-3032-st-3215" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><strong>Every servo needs a unique bus ID.</strong> Factory default is 1; re-ID
+one servo at a time with <code class="docutils literal notranslate"><span class="pre">examples/st3215_reid.py</span></code> (same protocol —
+it works for the ST-3032 too). The bundled drivebase examples assume
+left = 1, right = 2.</p></li>
+<li><p><strong>Speed limits.</strong> Per the STS3032 datasheet (<code class="docutils literal notranslate"><span class="pre">docs/datasheets/</span></code>),
+no-load top speed at 12V is 148 RPM = 888 °/s; under the rated
+3.3 kg·cm load it drops to roughly ⅔ of that. The driver’s default
+<code class="docutils literal notranslate"><span class="pre">max_dps=600</span></code> clamps requests at the loaded operating point —
+construct with an explicit <code class="docutils literal notranslate"><span class="pre">max_dps=900</span></code> to chase the no-load number.</p></li>
+<li><p><strong>Mixed fleets:</strong> the ST-3215 tolerates lower voltages, but the
+ST-3032 browns out below ~9V. If you daisy-chain both on one URT-2,
+the rail must satisfy the strictest member: 12V.</p></li>
+<li><p><strong>Drivebase:</strong> <code class="docutils literal notranslate"><span class="pre">ST3032Motor</span></code> drops straight into <code class="docutils literal notranslate"><span class="pre">DriveBase</span></code>:</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.st3032</span><span class="w"> </span><span class="kn">import</span> <span class="n">ST3032Motor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.robotics</span><span class="w"> </span><span class="kn">import</span> <span class="n">DriveBase</span>
+
+<span class="n">left</span>  <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">41</span><span class="p">)</span>
+<span class="n">right</span> <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">41</span><span class="p">,</span> <span class="n">invert</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">db</span> <span class="o">=</span> <span class="n">DriveBase</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">wheel_diameter_mm</span><span class="o">=</span><span class="mi">65</span><span class="p">,</span> <span class="n">axle_track_mm</span><span class="o">=</span><span class="mi">120</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Bench-test a fresh build with <code class="docutils literal notranslate"><span class="pre">examples/st3032_drivebase_test.py</span></code>.</p>
+</section>
+<section id="calibrating-the-drivebase">
+<h2>Calibrating the drivebase<a class="headerlink" href="#calibrating-the-drivebase" title="Link to this heading"></a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">wheel_diameter_mm</span></code> and <code class="docutils literal notranslate"><span class="pre">axle_track_mm</span></code> are the two physical parameters that
+matter for straight-line distance and turn accuracy. Measure them with
+calipers or a ruler (wheel contact patch to wheel contact patch for axle
+track, not hub to hub). If <code class="docutils literal notranslate"><span class="pre">straight(1000)</span></code> undershoots, your wheel
+diameter value is too large; if <code class="docutils literal notranslate"><span class="pre">turn(360)</span></code> overshoots, your axle track is
+too small.</p>
+<p>High-torque 12V servos also deliver the default launch profile much more
+stiffly than small DC motors — if the chassis pitches or lifts its rear
+when a move starts, soften the ramp:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">settings</span><span class="p">(</span><span class="n">acceleration</span><span class="o">=</span><span class="mi">180</span><span class="p">)</span>   <span class="c1"># wheel-deg/s²; default 1500</span>
+</pre></div>
+</div>
+</section>
+<section id="alternative-dc-gear-motors-with-encoders">
+<h2>Alternative: DC gear motors with encoders<a class="headerlink" href="#alternative-dc-gear-motors-with-encoders" title="Link to this heading"></a></h2>
+<p>The original starter build — still fully supported. (Both this and
+the serial-servo build run in the MuJoCo simulator via the driver
+shim.)</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Part</p></th>
+<th class="head text-right"><p>Qty</p></th>
+<th class="head"><p>Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>JGB37-520 DC motor with encoder (1:30 gearing)</p></td>
+<td class="text-right"><p>2</p></td>
+<td><p>Pick the 12V version; runs fine off 7.4V 2S LiPo</p></td>
+</tr>
+<tr class="row-odd"><td><p>L298N dual H-bridge module</p></td>
+<td class="text-right"><p>1</p></td>
+<td><p>Cheap and robust. TB6612FNG is a better choice if you can find it</p></td>
+</tr>
+<tr class="row-even"><td><p>2S LiPo (7.4V) + buck converter (→5V, ≥2A)</p></td>
+<td class="text-right"><p>1 each</p></td>
+<td><p>Don’t power the ESP32 from the L298N’s onboard 78M05 regulator — it’s good for ~300 mA and browns out the moment the motors draw current</p></td>
+</tr>
+</tbody>
+</table>
+<p>Wiring topology:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>    [ 2S LiPo 7.4V ]
+        │
+        ├─────────────►  L298N  Vmotor   (motor power)
+        │
+        └──► Buck  ──►  5V rail
+                         │
+                         ├──►  ESP32 VIN
+                         ├──►  L298N  +5V (logic only)
+                         └──►  Sensors via 3.3V regulator on ESP32
+</pre></div>
+</div>
+<p>GPIO map (see <code class="docutils literal notranslate"><span class="pre">examples/esp32_drivebase.py</span></code> for the ESP32-S3 pin
+assignments; the classic-ESP32 equivalents are in git history):</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Function</p></th>
+<th class="head"><p>ESP32-S3 GPIO(s)</p></th>
+<th class="head"><p>Devices on this line</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Left motor dir</p></td>
+<td><p>1, 2</p></td>
+<td><p>L298N / TB6612 IN1, IN2</p></td>
+</tr>
+<tr class="row-odd"><td><p>Left motor PWM</p></td>
+<td><p>18</p></td>
+<td><p>L298N / TB6612 ENA</p></td>
+</tr>
+<tr class="row-even"><td><p>Left encoder A, B</p></td>
+<td><p>7, 8</p></td>
+<td><p>JGB37-520 encoder channels</p></td>
+</tr>
+<tr class="row-odd"><td><p>Right motor dir</p></td>
+<td><p>9, 10</p></td>
+<td><p>L298N / TB6612 IN3, IN4</p></td>
+</tr>
+<tr class="row-even"><td><p>Right motor PWM</p></td>
+<td><p>40</p></td>
+<td><p>L298N / TB6612 ENB</p></td>
+</tr>
+<tr class="row-odd"><td><p>Right encoder A, B</p></td>
+<td><p>42, 47</p></td>
+<td><p>JGB37-520 encoder channels</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>This build and the QTR line-sensor bar are mutually exclusive.</strong> A
+DC drivebase needs ten GPIOs and the S3 does not have ten free ones
+outside the ADC1 bank once the other conventions are honoured, so
+the motor direction and left-encoder lines take six of the bank’s
+pins (GPIO 1, 2, 7, 8, 9, 10) that the
+<a class="reference internal" href="api/drivers_sensors.html#openbricks.drivers.qtr.QTRLineSensor" title="openbricks.drivers.qtr.QTRLineSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.drivers.qtr.QTRLineSensor</span></code></a> window otherwise owns.
+Everything else follows the reference GPIO map unchanged: 11/12/13/17
+stay free for the SPI IMU, 15/16 for I2C sensors, 14/41 for a
+serial-servo arm, and 39/38 for the program / BLE buttons (see
+<a class="reference internal" href="api/hub.html#openbricks.hub.ESP32S3DevkitHub" title="openbricks.hub.ESP32S3DevkitHub"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.hub.ESP32S3DevkitHub</span></code></a> — the launcher polls GPIO 39
+as an input, so a motor driver toggling it would read as button
+presses and stop your program).</p>
+<section id="calibrating-encoder-counts">
+<h3>Calibrating encoder counts<a class="headerlink" href="#calibrating-encoder-counts" title="Link to this heading"></a></h3>
+<p>The default in <code class="docutils literal notranslate"><span class="pre">jgb37_520.py</span></code> is <code class="docutils literal notranslate"><span class="pre">counts_per_output_rev=1320</span></code>, which is
+<code class="docutils literal notranslate"><span class="pre">11</span> <span class="pre">CPR</span> <span class="pre">×</span> <span class="pre">30:1</span> <span class="pre">×</span> <span class="pre">4</span> <span class="pre">(quadrature</span> <span class="pre">edges)</span></code>. If you have a different gearbox
+variant, recompute:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>counts_per_output_rev = encoder_CPR × gear_ratio × 4
+</pre></div>
+</div>
+<p>Or measure empirically: rotate the output shaft by hand exactly one full
+turn and read <code class="docutils literal notranslate"><span class="pre">motor.angle()</span></code>. Whatever it reports is what
+<code class="docutils literal notranslate"><span class="pre">counts_per_output_rev</span></code> should be, scaled so that one turn = 360°.</p>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="install.html" class="btn btn-neutral float-left" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="cli.html" class="btn btn-neutral float-right" title="Command-line tool" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

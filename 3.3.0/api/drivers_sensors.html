@@ -1,0 +1,1089 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sensor drivers &mdash; openbricks 3.3.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/api/drivers_sensors.html" />
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=3eb8911e"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Display &amp; bus drivers" href="drivers_misc.html" />
+    <link rel="prev" title="Motor drivers" href="drivers_motors.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.3.0">firmware&nbsp;v3.3.0</a>
+<a class="obk-pdf-btn" href="../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#servo-dynamometer-two-st-3032s-coupled">Servo dynamometer (two ST-3032s, coupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#servo-soak-test-one-st-3032">Servo soak test (one ST-3032)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../servo-health.html">Servo health &amp; characterisation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#dynamometer-what-does-this-servo-do">Dynamometer: what does <em>this</em> servo do?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#soak-test-is-it-still-good">Soak test: is it still good?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API reference</a></li>
+      <li class="breadcrumb-item active">Sensor drivers</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/1e0ng/openbricks/blob/main/docs/api/drivers_sensors.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="sensor-drivers">
+<h1>Sensor drivers<a class="headerlink" href="#sensor-drivers" title="Link to this heading"></a></h1>
+<p>All sensors construct against a <code class="docutils literal notranslate"><span class="pre">machine.I2C</span></code> bus (or a
+<a class="reference internal" href="drivers_misc.html#openbricks.drivers.tca9548a.TCA9548A" title="openbricks.drivers.tca9548a.TCA9548A"><code class="xref py py-class docutils literal notranslate"><span class="pre">TCA9548A</span></code></a> mux channel, which
+quacks the same) except two: the GPIO-driven HC-SR04, and the
+ICM-45686 IMU, which wires over SPI so the firmware can read it
+inside the 1 kHz control tick.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">machine</span><span class="w"> </span><span class="kn">import</span> <span class="n">I2C</span><span class="p">,</span> <span class="n">Pin</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.icm45686</span><span class="w"> </span><span class="kn">import</span> <span class="n">ICM45686</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.tcs34725</span><span class="w"> </span><span class="kn">import</span> <span class="n">TCS34725</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.tca9548a</span><span class="w"> </span><span class="kn">import</span> <span class="n">TCA9548A</span>
+
+<span class="n">i2c</span> <span class="o">=</span> <span class="n">I2C</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">sda</span><span class="o">=</span><span class="n">Pin</span><span class="p">(</span><span class="mi">15</span><span class="p">),</span> <span class="n">scl</span><span class="o">=</span><span class="n">Pin</span><span class="p">(</span><span class="mi">16</span><span class="p">),</span> <span class="n">freq</span><span class="o">=</span><span class="mi">400_000</span><span class="p">)</span>  <span class="c1"># ESP32-S3 pins</span>
+<span class="n">mux</span> <span class="o">=</span> <span class="n">TCA9548A</span><span class="p">(</span><span class="n">i2c</span><span class="p">)</span>
+
+<span class="n">color</span> <span class="o">=</span> <span class="n">TCS34725</span><span class="p">(</span><span class="n">mux</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>          <span class="c1"># two same-address sensors ...</span>
+<span class="n">color2</span> <span class="o">=</span> <span class="n">TCS34725</span><span class="p">(</span><span class="n">mux</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>         <span class="c1"># ... on separate mux channels</span>
+<span class="n">imu</span> <span class="o">=</span> <span class="n">ICM45686</span><span class="p">(</span><span class="n">sck</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">mosi</span><span class="o">=</span><span class="mi">13</span><span class="p">,</span> <span class="n">miso</span><span class="o">=</span><span class="mi">11</span><span class="p">,</span> <span class="n">cs</span><span class="o">=</span><span class="mi">17</span><span class="p">)</span>   <span class="c1"># SPI, not I2C</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">color</span><span class="o">.</span><span class="n">rgb</span><span class="p">())</span>                <span class="c1"># (r, g, b) each 0-255</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">color</span><span class="o">.</span><span class="n">ambient</span><span class="p">())</span>            <span class="c1"># clear channel, 0-100</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">imu</span><span class="o">.</span><span class="n">heading</span><span class="p">())</span>              <span class="c1"># degrees, CW-positive</span>
+</pre></div>
+</div>
+<section id="module-openbricks.drivers.icm45686">
+<span id="icm-45686-raw-imu-hard-tick-heading"></span><h2>ICM-45686 (raw IMU, hard-tick heading)<a class="headerlink" href="#module-openbricks.drivers.icm45686" title="Link to this heading"></a></h2>
+<p>TDK ICM-45686 raw 6-axis IMU — the hard-tick heading source.</p>
+<p>Unlike the BNO055 (fused heading over I2C, pumped from Python at
+~50-100 Hz during moves), this part is read INSIDE the 1 kHz hard
+tick over SPI (~13 µs per burst): gyro-Z integrates into a
+continuous heading in C (<code class="docutils literal notranslate"><span class="pre">imu_yaw_core</span></code> — stationarity-gated bias
+learning, Pybricks-Prime architecture), and a gyro <code class="docutils literal notranslate"><span class="pre">DriveBase</span></code>
+consumes it every millisecond with no Python in the loop.</p>
+<p>Wiring: 4 free GPIOs to the breakout’s SPI pins (SCLK/MOSI(SDI)/
+MISO(SDO)/CS) — the I2C bus, mux and color sensors are untouched.
+INT/FSYNC/CLKIN stay unwired: the hard tick polls, nothing
+interrupts.</p>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.icm45686</span><span class="w"> </span><span class="kn">import</span> <span class="n">ICM45686</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.st3032</span><span class="w"> </span><span class="kn">import</span> <span class="n">ST3032Motor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.robotics</span><span class="w"> </span><span class="kn">import</span> <span class="n">DriveBase</span>
+
+<span class="n">imu</span> <span class="o">=</span> <span class="n">ICM45686</span><span class="p">(</span><span class="n">sck</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">mosi</span><span class="o">=</span><span class="mi">13</span><span class="p">,</span> <span class="n">miso</span><span class="o">=</span><span class="mi">11</span><span class="p">,</span> <span class="n">cs</span><span class="o">=</span><span class="mi">17</span><span class="p">)</span>
+<span class="n">left</span>  <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">41</span><span class="p">,</span> <span class="n">invert</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">right</span> <span class="o">=</span> <span class="n">ST3032Motor</span><span class="p">(</span><span class="n">servo_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">uart_id</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tx</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">rx</span><span class="o">=</span><span class="mi">41</span><span class="p">)</span>
+<span class="n">db</span> <span class="o">=</span> <span class="n">DriveBase</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">wheel_diameter_mm</span><span class="o">=</span><span class="mi">88</span><span class="p">,</span>
+               <span class="n">axle_track_mm</span><span class="o">=</span><span class="mi">138</span><span class="p">,</span> <span class="n">imu</span><span class="o">=</span><span class="n">imu</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">use_gyro</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>      <span class="c1"># heading now corrects at 1 kHz in C</span>
+</pre></div>
+</div>
+<p>Calibration: gyro bias learns automatically during stillness (fast
+at boot rest, slow tracking after). <code class="docutils literal notranslate"><span class="pre">save_calibration()</span></code> persists
+the learned bias to NVS; the next construction seeds from it (the
+pbio trick), so boot-and-immediately-run starts corrected.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.icm45686.ICM45686">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.icm45686.</span></span><span class="sig-name descname"><span class="pre">ICM45686</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sck</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mosi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">miso</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hz</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">8_000_000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scale</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">-1.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/icm45686.html#ICM45686"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.icm45686.ICM45686" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.icm45686.ICM45686.heading">
+<span class="sig-name descname"><span class="pre">heading</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/icm45686.html#ICM45686.heading"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.icm45686.ICM45686.heading" title="Link to this definition"></a></dt>
+<dd><p>Continuous body heading in degrees, CW-positive — the
+hard-tick integrator’s value. Same contract as
+<code class="docutils literal notranslate"><span class="pre">BNO055.heading()</span></code> except unwrapped (multi-turn) rather
+than [-180, 180); <code class="docutils literal notranslate"><span class="pre">DriveBase</span></code> accepts both.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.icm45686.ICM45686.reset_heading">
+<span class="sig-name descname"><span class="pre">reset_heading</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/icm45686.html#ICM45686.reset_heading"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.icm45686.ICM45686.reset_heading" title="Link to this definition"></a></dt>
+<dd><p>Zero the heading frame (calibration is kept).</p>
+<p>Refused (<code class="docutils literal notranslate"><span class="pre">OSError</span></code> from the yaw binding) while a DriveBase
+steers by this gyro — Pybricks parity: “Can’t reset heading
+while gyro in use”. The controller’s measured frame would
+shift under its held target and the next move veers chasing
+the difference (bench 2026-08-13: straight() after turn(-90)
++ reset_heading() pivoted left). Use <code class="docutils literal notranslate"><span class="pre">db.reset()</span></code> — it
+re-bases the controller and the heading together — or
+<code class="docutils literal notranslate"><span class="pre">use_gyro(False)</span></code> first.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.icm45686.ICM45686.gyro">
+<span class="sig-name descname"><span class="pre">gyro</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/icm45686.html#ICM45686.gyro"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.icm45686.ICM45686.gyro" title="Link to this definition"></a></dt>
+<dd><p>(x, y, z) rates in dps from the last hard-tick sample.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.icm45686.ICM45686.acceleration">
+<span class="sig-name descname"><span class="pre">acceleration</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/icm45686.html#ICM45686.acceleration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.icm45686.ICM45686.acceleration" title="Link to this definition"></a></dt>
+<dd><p>(x, y, z) in g from the last hard-tick sample.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.icm45686.ICM45686.calibrated">
+<span class="sig-name descname"><span class="pre">calibrated</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/icm45686.html#ICM45686.calibrated"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.icm45686.ICM45686.calibrated" title="Link to this definition"></a></dt>
+<dd><p>True once the bias estimator has locked (robot has been
+still for ~0.5 s since boot, or a saved calibration was
+loaded).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.icm45686.ICM45686.save_calibration">
+<span class="sig-name descname"><span class="pre">save_calibration</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/icm45686.html#ICM45686.save_calibration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.icm45686.ICM45686.save_calibration" title="Link to this definition"></a></dt>
+<dd><p>Persist the learned gyro bias to NVS so the next boot
+starts corrected instead of waiting for stillness.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.icm45686.ICM45686.stats">
+<span class="sig-name descname"><span class="pre">stats</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/icm45686.html#ICM45686.stats"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.icm45686.ICM45686.stats" title="Link to this definition"></a></dt>
+<dd><p>(reads_ok, read_errors, configured) — hard-tick health.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.bno055">
+<span id="bno055-imu"></span><h2>BNO055 (IMU)<a class="headerlink" href="#module-openbricks.drivers.bno055" title="Link to this heading"></a></h2>
+<p>BNO055 — re-export of the native <code class="docutils literal notranslate"><span class="pre">BNO055</span></code> C type.</p>
+<p>The implementation lives in <code class="docutils literal notranslate"><span class="pre">native/user_c_modules/openbricks/bno055.c</span></code>
+so the drivebase tick can read <code class="docutils literal notranslate"><span class="pre">imu.heading()</span></code> every ms (when
+<code class="docutils literal notranslate"><span class="pre">use_gyro=True</span></code>) without a Python frame on the hot path. This module
+exists so existing user imports stay the same:</p>
+<blockquote>
+<div><p>from openbricks.drivers.bno055 import BNO055</p>
+</div></blockquote>
+<p>The class itself is implemented in C (so the drivebase can read the
+heading on its 1 kHz tick); its Python-facing API:</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.bno055.BNO055">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.bno055.</span></span><span class="sig-name descname"><span class="pre">BNO055</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i2c</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">address</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0x28</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#openbricks.drivers.bno055.BNO055" title="Link to this definition"></a></dt>
+<dd><p>Bosch BNO055 9-axis IMU in 6-DOF fusion mode (accelerometer +
+gyro; the magnetometer is deliberately unused — motor magnets and
+steel in floors bend the local field, and a drive robot only
+needs <em>relative</em> heading). Heading zeroes where the robot points
+at construction.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>i2c</strong> – <code class="docutils literal notranslate"><span class="pre">machine.I2C</span></code> (or a mux channel).</p></li>
+<li><p><strong>address</strong> – 0x28, or 0x29 on breakouts whose ADR pin straps
+high.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.bno055.BNO055.heading">
+<span class="sig-name descname"><span class="pre">heading</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#openbricks.drivers.bno055.BNO055.heading" title="Link to this definition"></a></dt>
+<dd><p>Body heading in degrees, wrapped to [-180, 180). CW-positive:
+turning right (clockwise viewed from above) increases it —
+compass and Pybricks convention. This is what
+<code class="docutils literal notranslate"><span class="pre">DriveBase(imu=...)</span></code> reads.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.bno055.BNO055.euler">
+<span class="sig-name descname"><span class="pre">euler</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#openbricks.drivers.bno055.BNO055.euler" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">(heading,</span> <span class="pre">roll,</span> <span class="pre">pitch)</span></code> tuple in degrees.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.bno055.BNO055.angular_velocity">
+<span class="sig-name descname"><span class="pre">angular_velocity</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#openbricks.drivers.bno055.BNO055.angular_velocity" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">(x,</span> <span class="pre">y,</span> <span class="pre">z)</span></code> gyro rates in deg/s.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.bno055.BNO055.acceleration">
+<span class="sig-name descname"><span class="pre">acceleration</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#openbricks.drivers.bno055.BNO055.acceleration" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">(x,</span> <span class="pre">y,</span> <span class="pre">z)</span></code> accelerometer in m/s².</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.tcs34725">
+<span id="tcs34725-color"></span><h2>TCS34725 (color)<a class="headerlink" href="#module-openbricks.drivers.tcs34725" title="Link to this heading"></a></h2>
+<p>AMS TCS34725 RGB + clear light-to-digital sensor.</p>
+<p>The TCS34725 returns four 16-bit channels (clear, red, green, blue) over I2C
+at address 0x29. There’s an onboard LED that we leave under user control — some
+breakout boards wire it to the LED pin on reset, others require GPIO control.</p>
+<p>Reference: TCS34725 datasheet (AMS / ams-OSRAM), sections 2.4 and 3.</p>
+<dl class="simple">
+<dt>I2C command byte format (from datasheet):</dt><dd><p>bit 7 (CMD)     = 1 (always for command byte)
+bits 6:5 (TYPE) = 01 (auto-increment) or 00 (single)
+bits 4:0 (ADDR) = register address</p>
+</dd>
+</dl>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.tcs34725.TCS34725">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.tcs34725.</span></span><span class="sig-name descname"><span class="pre">TCS34725</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i2c</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">address</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_ADDR</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">integration_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">2.4</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gain</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">16</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/tcs34725.html#TCS34725"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.tcs34725.TCS34725" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.interfaces.ColorSensor" title="openbricks.interfaces.ColorSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">ColorSensor</span></code></a></p>
+<p>RGB + clear color sensor, fixed at I2C address 0x29.</p>
+<p>Implements the <code class="docutils literal notranslate"><span class="pre">ColorSensor</span></code> contract: <code class="docutils literal notranslate"><span class="pre">rgbc()</span></code> raw 16-bit
+channels, <code class="docutils literal notranslate"><span class="pre">reflection()</span></code> and the calibrated helpers built on
+it. Two or more on one robot need a
+<a class="reference internal" href="drivers_misc.html#openbricks.drivers.tca9548a.TCA9548A" title="openbricks.drivers.tca9548a.TCA9548A"><code class="xref py py-class docutils literal notranslate"><span class="pre">TCA9548A</span></code></a> mux (the address
+is not configurable).</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.tcs34725.TCS34725.raw">
+<span class="sig-name descname"><span class="pre">raw</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/tcs34725.html#TCS34725.raw"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.tcs34725.TCS34725.raw" title="Link to this definition"></a></dt>
+<dd><p>Return the raw (clear, red, green, blue) 16-bit readings.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.tcs34725.TCS34725.rgb">
+<span class="sig-name descname"><span class="pre">rgb</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/tcs34725.html#TCS34725.rgb"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.tcs34725.TCS34725.rgb" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">(r,</span> <span class="pre">g,</span> <span class="pre">b)</span></code> scaled to 0..255 using the clear channel.</p>
+<p>Dividing by the clear channel normalizes for ambient brightness, so a
+white object reports roughly (255, 255, 255) at any light level within
+the sensor’s range.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.tcs34725.TCS34725.ambient">
+<span class="sig-name descname"><span class="pre">ambient</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/tcs34725.html#TCS34725.ambient"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.tcs34725.TCS34725.ambient" title="Link to this definition"></a></dt>
+<dd><p>Return clear-channel brightness scaled to 0..100.</p>
+<p>100 means the clear ADC is saturated <em>for the configured
+integration time</em> — 1024 counts per 2.4 ms cycle, capped at
+65535 (datasheet “MAX COUNT”). Scale non-linearly would be
+nicer but keep it simple.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.qtr">
+<span id="qtr-qtrx-reflectance-array"></span><h2>QTR / QTRX (reflectance array)<a class="headerlink" href="#module-openbricks.drivers.qtr" title="Link to this heading"></a></h2>
+<p>Pololu QTR / QTRX reflectance sensor arrays (analog outputs).</p>
+<p>A row of IR emitter/phototransistor pairs a few millimetres above the
+mat: dark line = high reading, light mat = low. Unlike a pair of
+colour sensors, the array gives a CONTINUOUS line position — a
+weighted centroid across all elements — so a follower steers on a
+real analog error instead of edge-crossings.</p>
+<p>Wiring (QTRX-HD-15A on ESP32-S3): the analog outputs go to ADC1 pins
+(GPIO 1..10 — ADC2 fights the radios). Any subset of the array’s
+channels works; pass the pins left-to-right as mounted, and set
+<code class="docutils literal notranslate"><span class="pre">pitch_mm</span></code> to the spacing of the channels you actually wired
+(4 mm for adjacent QTRX-HD channels, 8 mm if every other one).
+CTRL (emitter enable) may be tied high or given a pin.</p>
+<p>Readings are ratiometric to whatever height and mat you mounted over,
+so the array MUST be calibrated once per session: sweep it across the
+line while <code class="docutils literal notranslate"><span class="pre">calibrate()</span></code> runs. Reading before calibration raises —
+an uncalibrated centroid is a plausible-looking wrong number.</p>
+<p>Example (bench: channels 15..9 left-to-right on ADC1; the stop
+button and servo bus live on GPIO 39 and 14/41, off the bank):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.drivers.qtr</span><span class="w"> </span><span class="kn">import</span> <span class="n">QTRArray</span><span class="p">,</span> <span class="n">QTRChannel</span>
+
+<span class="n">line</span>   <span class="o">=</span> <span class="n">QTRArray</span><span class="p">(</span><span class="n">pins</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="n">pitch_mm</span><span class="o">=</span><span class="mf">4.0</span><span class="p">)</span>
+<span class="n">branch</span> <span class="o">=</span> <span class="n">QTRChannel</span><span class="p">(</span><span class="n">pin</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>        <span class="c1"># array channel 1, far right</span>
+<span class="n">line</span><span class="o">.</span><span class="n">calibrate</span><span class="p">(</span><span class="n">duration_ms</span><span class="o">=</span><span class="mi">3000</span><span class="p">)</span>  <span class="c1"># sweep across the line now</span>
+<span class="n">branch</span><span class="o">.</span><span class="n">calibrate</span><span class="p">(</span><span class="n">duration_ms</span><span class="o">=</span><span class="mi">3000</span><span class="p">)</span>
+<span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+    <span class="n">pos</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">position</span><span class="p">()</span>         <span class="c1"># mm, +right of centre, or None</span>
+</pre></div>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRElement">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.qtr.</span></span><span class="sig-name descname"><span class="pre">QTRElement</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">threshold</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRElement"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRElement" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>One calibrated element reading, as returned by
+<a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.read" title="openbricks.drivers.qtr.QTRArray.read"><code class="xref py py-meth docutils literal notranslate"><span class="pre">QTRArray.read()</span></code></a>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">value</span></code> is the 0 (mat) .. 1000 (line) int; <code class="docutils literal notranslate"><span class="pre">dark()</span></code> /
+<code class="docutils literal notranslate"><span class="pre">white()</span></code> answer per element exactly like
+<a class="reference internal" href="#openbricks.drivers.qtr.QTRChannel.dark" title="openbricks.drivers.qtr.QTRChannel.dark"><code class="xref py py-meth docutils literal notranslate"><span class="pre">QTRChannel.dark()</span></code></a>. Deliberately NOT an int subclass:
+MicroPython cannot reflect-compare <code class="docutils literal notranslate"><span class="pre">int</span></code> against one, so
+<code class="docutils literal notranslate"><span class="pre">max()</span></code> over such readings raises on the hub while passing on
+the desktop — numeric code uses <code class="docutils literal notranslate"><span class="pre">.value</span></code> instead
+(<code class="docutils literal notranslate"><span class="pre">max(e.value</span> <span class="pre">for</span> <span class="pre">e</span> <span class="pre">in</span> <span class="pre">readings)</span></code>).</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRElement.dark">
+<span class="sig-name descname"><span class="pre">dark</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRElement.dark"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRElement.dark" title="Link to this definition"></a></dt>
+<dd><p>True when this element is over the line.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRElement.white">
+<span class="sig-name descname"><span class="pre">white</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRElement.white"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRElement.white" title="Link to this definition"></a></dt>
+<dd><p>True when this element is over the mat.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRElement.ambient">
+<span class="sig-name descname"><span class="pre">ambient</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRElement.ambient"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRElement.ambient" title="Link to this definition"></a></dt>
+<dd><p>Reflected brightness as 0 (black) .. 100 (white) — the
+Pybricks scale, inverted from <code class="docutils literal notranslate"><span class="pre">value</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.qtr.</span></span><span class="sig-name descname"><span class="pre">QTRReading</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">elements</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">array</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>One snapshot of the whole array, as returned by
+<a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.read" title="openbricks.drivers.qtr.QTRArray.read"><code class="xref py py-meth docutils literal notranslate"><span class="pre">QTRArray.read()</span></code></a>.</p>
+<p>Behaves like the list of <a class="reference internal" href="#openbricks.drivers.qtr.QTRElement" title="openbricks.drivers.qtr.QTRElement"><code class="xref py py-class docutils literal notranslate"><span class="pre">QTRElement</span></code></a> it holds (index,
+iterate, <code class="docutils literal notranslate"><span class="pre">len</span></code>) and carries every aggregate view of exactly
+this snapshot — so a control tick reads once and derives
+everything from the same coherent sample:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">r</span> <span class="o">=</span> <span class="n">qtr</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+<span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dark</span><span class="p">()</span>             <span class="c1"># per element</span>
+<span class="n">r</span><span class="o">.</span><span class="n">position</span><span class="p">()</span>            <span class="c1"># global centroid, mm</span>
+<span class="n">r</span><span class="o">.</span><span class="n">left_edge_position</span><span class="p">()</span>  <span class="c1"># the line's left edge, mm</span>
+<span class="n">r</span><span class="o">.</span><span class="n">right_edge_position</span><span class="p">()</span> <span class="c1"># the line's right edge, mm</span>
+<span class="n">r</span><span class="o">.</span><span class="n">edge_error</span><span class="p">()</span>          <span class="c1"># setpoint element's ambient vs 50</span>
+<span class="n">r</span><span class="o">.</span><span class="n">leftmost_position</span><span class="p">()</span>   <span class="c1"># fork clusters</span>
+<span class="n">r</span><span class="o">.</span><span class="n">rightmost_position</span><span class="p">()</span>
+<span class="n">r</span><span class="o">.</span><span class="n">dark_count</span><span class="p">()</span>          <span class="c1"># how many elements on the line</span>
+<span class="n">r</span><span class="o">.</span><span class="n">all_dark</span><span class="p">()</span>            <span class="c1"># whole array on the line</span>
+<span class="n">r</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>                 <span class="c1"># brightest value (phantom gate)</span>
+</pre></div>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.values">
+<span class="sig-name descname"><span class="pre">values</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.values"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.values" title="Link to this definition"></a></dt>
+<dd><p>The plain 0..1000 ints, left to right.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.max">
+<span class="sig-name descname"><span class="pre">max</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.max"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.max" title="Link to this definition"></a></dt>
+<dd><p>The brightest calibrated value in this snapshot — the
+follower’s off-mat phantom gate.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.dark_count">
+<span class="sig-name descname"><span class="pre">dark_count</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.dark_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.dark_count" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.all_dark">
+<span class="sig-name descname"><span class="pre">all_dark</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.all_dark"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.all_dark" title="Link to this definition"></a></dt>
+<dd><p>Every element over the line — with the branch flag dark
+too, the whole crossing is under the robot (the follower’s
+stop condition).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.position">
+<span class="sig-name descname"><span class="pre">position</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.position" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.left_edge_position">
+<span class="sig-name descname"><span class="pre">left_edge_position</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.left_edge_position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.left_edge_position" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.right_edge_position">
+<span class="sig-name descname"><span class="pre">right_edge_position</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.right_edge_position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.right_edge_position" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.edge_error">
+<span class="sig-name descname"><span class="pre">edge_error</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.edge_error"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.edge_error" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.leftmost_position">
+<span class="sig-name descname"><span class="pre">leftmost_position</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.leftmost_position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.leftmost_position" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRReading.rightmost_position">
+<span class="sig-name descname"><span class="pre">rightmost_position</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRReading.rightmost_position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRReading.rightmost_position" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.qtr.</span></span><span class="sig-name descname"><span class="pre">QTRArray</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pins</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pitch_mm</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctrl</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dark_threshold</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">300</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">positions_mm</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Analog QTR/QTRX reflectance array on ESP32 ADC pins.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pins</strong> – ADC-capable GPIO numbers, LEFT to RIGHT as mounted.</p></li>
+<li><p><strong>pitch_mm</strong> – physical spacing between the wired channels.</p></li>
+<li><p><strong>ctrl</strong> – optional emitter-control GPIO (QTRX CTRL). Driven high
+at construction (emitters on). <code class="docutils literal notranslate"><span class="pre">None</span></code> = tied high.</p></li>
+<li><p><strong>dark_threshold</strong> – calibrated value (0..1000) above which an
+element counts as “over the line” for <code class="docutils literal notranslate"><span class="pre">position()</span></code> /
+<code class="docutils literal notranslate"><span class="pre">dark_count()</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.calibrate">
+<span class="sig-name descname"><span class="pre">calibrate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">duration_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">poll_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.calibrate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.calibrate" title="Link to this definition"></a></dt>
+<dd><p>Learn each element’s mat/line extremes.</p>
+<p>Sweep the array across the line while this runs (rotate the
+robot, or slide it by hand). Extends any previous calibration
+rather than replacing it, so repeated calls refine.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.save_calibration">
+<span class="sig-name descname"><span class="pre">save_calibration</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.save_calibration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.save_calibration" title="Link to this definition"></a></dt>
+<dd><p>Persist the calibration to a file on the hub filesystem, so
+one sweep (<code class="docutils literal notranslate"><span class="pre">examples/qtr_calibrate.py</span></code>) serves every later
+run. The wiring is stored with it: a calibration is per-
+element min/max, so loading it onto different pins would
+silently mis-scale every reading.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.load_calibration">
+<span class="sig-name descname"><span class="pre">load_calibration</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.load_calibration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.load_calibration" title="Link to this definition"></a></dt>
+<dd><p>Load a calibration saved by <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.save_calibration" title="openbricks.drivers.qtr.QTRArray.save_calibration"><code class="xref py py-meth docutils literal notranslate"><span class="pre">save_calibration()</span></code></a>.</p>
+<p>Raises with the remedy when the file is missing (run the
+calibrate script), corrupt, or was recorded for DIFFERENT
+wiring. Calibration is height- and mat-dependent — resweep
+after remounting the array or changing mats.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.read">
+<span class="sig-name descname"><span class="pre">read</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.read"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.read" title="Link to this definition"></a></dt>
+<dd><p>One calibrated snapshot: a <a class="reference internal" href="#openbricks.drivers.qtr.QTRReading" title="openbricks.drivers.qtr.QTRReading"><code class="xref py py-class docutils literal notranslate"><span class="pre">QTRReading</span></code></a> holding a
+<a class="reference internal" href="#openbricks.drivers.qtr.QTRElement" title="openbricks.drivers.qtr.QTRElement"><code class="xref py py-class docutils literal notranslate"><span class="pre">QTRElement</span></code></a> per array element, left to right —
+<code class="docutils literal notranslate"><span class="pre">r[i].value</span></code> 0 (mat) .. 1000 (line), <code class="docutils literal notranslate"><span class="pre">r[i].dark()</span></code> /
+<code class="docutils literal notranslate"><span class="pre">r[i].white()</span></code>, and the aggregate views (<code class="docutils literal notranslate"><span class="pre">r.position()</span></code>,
+<code class="docutils literal notranslate"><span class="pre">r.dark_count()</span></code>, …) computed from exactly this
+sample.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.dark_count">
+<span class="sig-name descname"><span class="pre">dark_count</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">readings</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.dark_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.dark_count" title="Link to this definition"></a></dt>
+<dd><p>How many elements are over the line — the intersection /
+stop-bar signal (a full-width bar darkens most of the array,
+a branch stub only one side).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.position">
+<span class="sig-name descname"><span class="pre">position</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">readings</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.position" title="Link to this definition"></a></dt>
+<dd><p>Line centre in mm relative to the array centre; positive =
+line is to the RIGHT. <code class="docutils literal notranslate"><span class="pre">None</span></code> when no element sees the line —
+use <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.last_side" title="openbricks.drivers.qtr.QTRArray.last_side"><code class="xref py py-meth docutils literal notranslate"><span class="pre">last_side()</span></code></a> to know which way it escaped.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.left_edge_position">
+<span class="sig-name descname"><span class="pre">left_edge_position</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">readings</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.left_edge_position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.left_edge_position" title="Link to this definition"></a></dt>
+<dd><p>Millimetre position of the line’s LEFT edge — the
+white→black boundary on the left side of the leftmost dark
+cluster, in the same frame as <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.position" title="openbricks.drivers.qtr.QTRArray.position"><code class="xref py py-meth docutils literal notranslate"><span class="pre">position()</span></code></a> (positive =
+right of the array centre). <code class="docutils literal notranslate"><span class="pre">None</span></code> when nothing is dark.</p>
+<p>The crossing is interpolated between the last white element
+and the first dark one: the point where the calibrated value
+passes <code class="docutils literal notranslate"><span class="pre">dark_threshold</span></code>. An edge follower keeps THIS at 0,
+so the robot straddles the boundary — half the array over
+mat, half over line — instead of centring on the line
+itself. That also makes line width irrelevant to steering.</p>
+<p>When the leftmost element is itself dark the true edge is
+off-array to the left; the estimate saturates half a pitch
+beyond that element, so the error keeps its sign and
+magnitude instead of vanishing.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.right_edge_position">
+<span class="sig-name descname"><span class="pre">right_edge_position</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">readings</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.right_edge_position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.right_edge_position" title="Link to this definition"></a></dt>
+<dd><p>Mirror of <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.left_edge_position" title="openbricks.drivers.qtr.QTRArray.left_edge_position"><code class="xref py py-meth docutils literal notranslate"><span class="pre">left_edge_position()</span></code></a>: the line’s RIGHT
+edge — the black→white boundary on the right side of the
+rightmost dark cluster, in the same mm frame. <code class="docutils literal notranslate"><span class="pre">None</span></code> when
+nothing is dark; a dark rightmost element saturates half a
+pitch off-array to the right.</p>
+<p>A right-edge follower keeps THIS at 0 — the mirror-image
+track discipline of the left-edge follower, same sign
+convention (the P law is symmetric between the two).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.leftmost_position">
+<span class="sig-name descname"><span class="pre">leftmost_position</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">readings</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.leftmost_position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.leftmost_position" title="Link to this definition"></a></dt>
+<dd><p>Centroid of the LEFTMOST contiguous dark cluster, in mm
+(same frame as <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.position" title="openbricks.drivers.qtr.QTRArray.position"><code class="xref py py-meth docutils literal notranslate"><span class="pre">position()</span></code></a>), or <code class="docutils literal notranslate"><span class="pre">None</span></code> when nothing is
+dark.</p>
+<p>At a branch the array sees TWO dark regions and the global
+centroid lands between them — steering into the gap. The
+leftmost cluster is the left line’s own centre: a follower
+that must take the left fork steers on this while its branch
+flag says a second line is present. Computed the same way
+every tick, so switching between the two is jump-free.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.rightmost_position">
+<span class="sig-name descname"><span class="pre">rightmost_position</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">readings</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.rightmost_position"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.rightmost_position" title="Link to this definition"></a></dt>
+<dd><p>Mirror of <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.leftmost_position" title="openbricks.drivers.qtr.QTRArray.leftmost_position"><code class="xref py py-meth docutils literal notranslate"><span class="pre">leftmost_position()</span></code></a>: the RIGHTMOST
+contiguous dark cluster’s centre — the right fork, for a
+route policy that takes it.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.LEFT_SETPOINT_MM">
+<span class="sig-name descname"><span class="pre">LEFT_SETPOINT_MM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0.0</span></span><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.LEFT_SETPOINT_MM" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.RIGHT_SETPOINT_MM">
+<span class="sig-name descname"><span class="pre">RIGHT_SETPOINT_MM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0.0</span></span><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.RIGHT_SETPOINT_MM" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.CENTER_SETPOINT_MM">
+<span class="sig-name descname"><span class="pre">CENTER_SETPOINT_MM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0.0</span></span><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.CENTER_SETPOINT_MM" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.set_mode">
+<span class="sig-name descname"><span class="pre">set_mode</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mode</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.set_mode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.set_mode" title="Link to this definition"></a></dt>
+<dd><p>Select the line-following discipline, a
+<a class="reference internal" href="parameters.html#openbricks.parameters.LineMode" title="openbricks.parameters.LineMode"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.parameters.LineMode</span></code></a>: <code class="docutils literal notranslate"><span class="pre">LEFT</span></code> holds the
+line’s LEFT edge at <code class="docutils literal notranslate"><span class="pre">LEFT_SETPOINT_MM</span></code>, <code class="docutils literal notranslate"><span class="pre">RIGHT</span></code> the RIGHT
+edge at <code class="docutils literal notranslate"><span class="pre">RIGHT_SETPOINT_MM</span></code>, <code class="docutils literal notranslate"><span class="pre">CENTER</span></code> the line’s CENTRE
+(the weighted centroid over every element) at
+<code class="docutils literal notranslate"><span class="pre">CENTER_SETPOINT_MM</span></code>. Takes effect on the next
+<a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.edge_error" title="openbricks.drivers.qtr.QTRArray.edge_error"><code class="xref py py-meth docutils literal notranslate"><span class="pre">edge_error()</span></code></a> — call it again any time to switch
+disciplines mid-run.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.mode">
+<span class="sig-name descname"><span class="pre">mode</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.mode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.mode" title="Link to this definition"></a></dt>
+<dd><p>The selected discipline, or <code class="docutils literal notranslate"><span class="pre">None</span></code> before set_mode.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.edge_error">
+<span class="sig-name descname"><span class="pre">edge_error</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">readings</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.edge_error"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.edge_error" title="Link to this definition"></a></dt>
+<dd><p>Signed steering error for the discipline selected with
+<a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.set_mode" title="openbricks.drivers.qtr.QTRArray.set_mode"><code class="xref py py-meth docutils literal notranslate"><span class="pre">set_mode()</span></code></a>, range -50 .. +50, positive = steer right
+(the <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.position" title="openbricks.drivers.qtr.QTRArray.position"><code class="xref py py-meth docutils literal notranslate"><span class="pre">position()</span></code></a> sign convention) in every mode.</p>
+<p><code class="docutils literal notranslate"><span class="pre">LineMode.LEFT</span></code> / <code class="docutils literal notranslate"><span class="pre">RIGHT</span></code>: how far the mode’s setpoint
+element sits from the black/white boundary, as its ambient
+(0 black .. 100 white) referenced to 50 — zero exactly when
+that element straddles the edge. One element, so the error
+is proportional only within about a pitch of the setpoint
+and rails at +/-50 beyond it.</p>
+<p><code class="docutils literal notranslate"><span class="pre">LineMode.CENTER</span></code>: the line’s centroid over ALL elements
+(<a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.position" title="openbricks.drivers.qtr.QTRArray.position"><code class="xref py py-meth docutils literal notranslate"><span class="pre">position()</span></code></a>) relative to <code class="docutils literal notranslate"><span class="pre">CENTER_SETPOINT_MM</span></code>,
+scaled so +/-50 is the far end of the window — proportional
+across the whole span. With no element dark the line is
+outside the window; the error rails toward the side it
+left through (<a class="reference internal" href="#openbricks.drivers.qtr.QTRArray.last_side" title="openbricks.drivers.qtr.QTRArray.last_side"><code class="xref py py-meth docutils literal notranslate"><span class="pre">last_side()</span></code></a>), and raises if the line
+has never been seen (there is nothing to steer toward).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.last_side">
+<span class="sig-name descname"><span class="pre">last_side</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.last_side"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.last_side" title="Link to this definition"></a></dt>
+<dd><p>+1 if the line was last seen right of centre, -1 left,
+0 if it has never been off-centre. The recovery hint for a
+follower that lost the line entirely.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRArray.emitters">
+<span class="sig-name descname"><span class="pre">emitters</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">on</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRArray.emitters"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRArray.emitters" title="Link to this definition"></a></dt>
+<dd><p>Drive the CTRL pin (no-op when CTRL is tied high).</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRChannel">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.qtr.</span></span><span class="sig-name descname"><span class="pre">QTRChannel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pin</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dark_threshold</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">300</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRChannel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRChannel" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray" title="openbricks.drivers.qtr.QTRArray"><code class="xref py py-class docutils literal notranslate"><span class="pre">QTRArray</span></code></a></p>
+<p>One reflectance element with the array’s calibrate/read
+contract — for a DETECTOR channel wired apart from the line
+cluster (a branch / marker flag).</p>
+<p>Kept out of <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray" title="openbricks.drivers.qtr.QTRArray"><code class="xref py py-class docutils literal notranslate"><span class="pre">QTRArray</span></code></a> on purpose: a flag element folded
+into the steering centroid would yank the position toward every
+marker it passes. Steer on the array; DECIDE on this.</p>
+<p>Example (bench: QTRX channel 1, far right, on GPIO 9):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">branch</span> <span class="o">=</span> <span class="n">QTRChannel</span><span class="p">(</span><span class="n">pin</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+<span class="n">branch</span><span class="o">.</span><span class="n">calibrate</span><span class="p">(</span><span class="n">duration_ms</span><span class="o">=</span><span class="mi">3000</span><span class="p">)</span>   <span class="c1"># same sweep as the array</span>
+<span class="k">if</span> <span class="n">branch</span><span class="o">.</span><span class="n">dark</span><span class="p">():</span>
+    <span class="o">...</span>   <span class="c1"># marker under the flag channel</span>
+</pre></div>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRChannel.value">
+<span class="sig-name descname"><span class="pre">value</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRChannel.value"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRChannel.value" title="Link to this definition"></a></dt>
+<dd><p>Calibrated reading, 0 (mat) .. 1000 (marker/line).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRChannel.dark">
+<span class="sig-name descname"><span class="pre">dark</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRChannel.dark"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRChannel.dark" title="Link to this definition"></a></dt>
+<dd><p>True when the element is over a marker/line.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRChannel.white">
+<span class="sig-name descname"><span class="pre">white</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRChannel.white"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRChannel.white" title="Link to this definition"></a></dt>
+<dd><p>True when the element is over the mat.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRLineSensor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.qtr.</span></span><span class="sig-name descname"><span class="pre">QTRLineSensor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dark_threshold</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">300</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/qtr.html#QTRLineSensor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.qtr.QTRLineSensor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray" title="openbricks.drivers.qtr.QTRArray"><code class="xref py py-class docutils literal notranslate"><span class="pre">QTRArray</span></code></a></p>
+<p>THE bench line sensor: one QTRX-HD-15A window of ten skip-
+pattern channels, pre-wired geometry included — construct it,
+pick a discipline, follow:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">qtr</span> <span class="o">=</span> <span class="n">QTRLineSensor</span><span class="p">()</span>
+<span class="n">qtr</span><span class="o">.</span><span class="n">set_mode</span><span class="p">(</span><span class="n">LineMode</span><span class="o">.</span><span class="n">LEFT</span><span class="p">)</span>            <span class="c1"># or "right", any time</span>
+<span class="n">error</span> <span class="o">=</span> <span class="n">qtr</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">edge_error</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Wiring (detailed table in docs/hardware.md): QTRX channels
+1, 3, 4, 5, 7, 9, 11, 12, 13, 15 left-to-right onto GPIO 1..10
+in order — a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm
+(the pattern is a palindrome, so board orientation only changes
+the channel LABELS, never the geometry). <code class="docutils literal notranslate"><span class="pre">&quot;left&quot;</span></code> mode holds
+the line’s LEFT edge under channel 4 (-16 mm); <code class="docutils literal notranslate"><span class="pre">&quot;right&quot;</span></code>
+holds the RIGHT edge under channel 12 (+16 mm) — both derived
+from the positions table, not repeated by hand. Different
+wiring: use <a class="reference internal" href="#openbricks.drivers.qtr.QTRArray" title="openbricks.drivers.qtr.QTRArray"><code class="xref py py-class docutils literal notranslate"><span class="pre">QTRArray</span></code></a> directly with your own
+pins/positions/setpoints.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRLineSensor.PINS">
+<span class="sig-name descname"><span class="pre">PINS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">(1,</span> <span class="pre">2,</span> <span class="pre">3,</span> <span class="pre">4,</span> <span class="pre">5,</span> <span class="pre">6,</span> <span class="pre">7,</span> <span class="pre">8,</span> <span class="pre">9,</span> <span class="pre">10)</span></span><a class="headerlink" href="#openbricks.drivers.qtr.QTRLineSensor.PINS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRLineSensor.POSITIONS_MM">
+<span class="sig-name descname"><span class="pre">POSITIONS_MM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">(-28.0,</span> <span class="pre">-20.0,</span> <span class="pre">-16.0,</span> <span class="pre">-12.0,</span> <span class="pre">-4.0,</span> <span class="pre">4.0,</span> <span class="pre">12.0,</span> <span class="pre">16.0,</span> <span class="pre">20.0,</span> <span class="pre">28.0)</span></span><a class="headerlink" href="#openbricks.drivers.qtr.QTRLineSensor.POSITIONS_MM" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRLineSensor.LEFT_SETPOINT_MM">
+<span class="sig-name descname"><span class="pre">LEFT_SETPOINT_MM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">-16.0</span></span><a class="headerlink" href="#openbricks.drivers.qtr.QTRLineSensor.LEFT_SETPOINT_MM" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.drivers.qtr.QTRLineSensor.RIGHT_SETPOINT_MM">
+<span class="sig-name descname"><span class="pre">RIGHT_SETPOINT_MM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">16.0</span></span><a class="headerlink" href="#openbricks.drivers.qtr.QTRLineSensor.RIGHT_SETPOINT_MM" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.hcsr04">
+<span id="hc-sr04-ultrasonic-distance"></span><h2>HC-SR04 (ultrasonic distance)<a class="headerlink" href="#module-openbricks.drivers.hcsr04" title="Link to this heading"></a></h2>
+<p>HC-SR04 ultrasonic distance sensor.</p>
+<p>The HC-SR04 has two pins: <code class="docutils literal notranslate"><span class="pre">trig</span></code> (input — we drive it) and <code class="docutils literal notranslate"><span class="pre">echo</span></code>
+(output — it pulls high for as long as the round-trip echo took).
+Sequence:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Drive <code class="docutils literal notranslate"><span class="pre">trig</span></code> high for ~10 µs.</p></li>
+<li><p>Read the duration of the resulting pulse on <code class="docutils literal notranslate"><span class="pre">echo</span></code>.</p></li>
+<li><p>distance_mm = pulse_us × speed_of_sound_mm_per_us / 2.</p></li>
+</ol>
+</div></blockquote>
+<p>Speed of sound in air at room temperature is ~0.343 mm/µs, so a
+60 cm target gives ~3.5 ms of echo pulse — well within the 30 ms
+default timeout.</p>
+<p>This driver is pure Python — there’s no closed-loop control on a
+range sensor, so the 1 kHz hot-path concern doesn’t apply. The
+<code class="docutils literal notranslate"><span class="pre">machine.time_pulse_us</span></code> builtin does the actual measurement;
+typical call latency is ~1 ms (pulse round-trip) which is fine for
+the cold-path use cases (line-following, wall avoidance, mission
+“approach until N mm” loops at &lt;100 Hz).</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.hcsr04.HCSR04">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.hcsr04.</span></span><span class="sig-name descname"><span class="pre">HCSR04</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">trig</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">echo</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timeout_us</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_DEFAULT_TIMEOUT_US</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/hcsr04.html#HCSR04"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.hcsr04.HCSR04" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.distance.DistanceSensor" title="openbricks.distance.DistanceSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">DistanceSensor</span></code></a></p>
+<p>HC-SR04 ultrasonic distance sensor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>trig</strong> – GPIO pin number wired to the sensor’s <code class="docutils literal notranslate"><span class="pre">TRIG</span></code> pin.</p></li>
+<li><p><strong>echo</strong> – GPIO pin number wired to <code class="docutils literal notranslate"><span class="pre">ECHO</span></code>.</p></li>
+<li><p><strong>timeout_us</strong> – how long to wait for the echo. <code class="docutils literal notranslate"><span class="pre">time_pulse_us</span></code>
+returns <code class="docutils literal notranslate"><span class="pre">-1</span></code> past this; we map that to <code class="docutils literal notranslate"><span class="pre">-1</span></code> from
+<a class="reference internal" href="#openbricks.drivers.hcsr04.HCSR04.distance_mm" title="openbricks.drivers.hcsr04.HCSR04.distance_mm"><code class="xref py py-meth docutils literal notranslate"><span class="pre">distance_mm()</span></code></a> to mean “no return”.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.hcsr04.HCSR04.distance_mm">
+<span class="sig-name descname"><span class="pre">distance_mm</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/hcsr04.html#HCSR04.distance_mm"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.hcsr04.HCSR04.distance_mm" title="Link to this definition"></a></dt>
+<dd><p>Return the round-trip distance to the nearest reflector
+ahead, in millimetres, or <code class="docutils literal notranslate"><span class="pre">-1</span></code> if no echo arrived inside
+<code class="docutils literal notranslate"><span class="pre">timeout_us</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.vl53l0x">
+<span id="vl53l0x-laser-distance"></span><h2>VL53L0X (laser distance)<a class="headerlink" href="#module-openbricks.drivers.vl53l0x" title="Link to this heading"></a></h2>
+<p>ST VL53L0X laser time-of-flight distance sensor.</p>
+<p>The VL53L0X talks I2C at default address 0x29. A measurement cycle:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Write 0x01 to <code class="docutils literal notranslate"><span class="pre">SYSRANGE_START</span></code> (register 0x00).</p></li>
+<li><p>Poll <code class="docutils literal notranslate"><span class="pre">RESULT_INTERRUPT_STATUS</span></code> (0x13) bit 0 until set
+(typical 33 ms at 33 Hz default rate).</p></li>
+<li><p>Read <code class="docutils literal notranslate"><span class="pre">RESULT_RANGE_STATUS</span> <span class="pre">+</span> <span class="pre">10</span></code> (0x14 + 10 = 0x1E) as a
+16-bit big-endian integer — the raw distance in millimetres.</p></li>
+<li><p>Write 0x01 to <code class="docutils literal notranslate"><span class="pre">SYSTEM_INTERRUPT_CLEAR</span></code> (0x0B).</p></li>
+</ol>
+</div></blockquote>
+<p>Out of range / blocked targets show as 8190 mm in the raw register;
+we surface that as <code class="docutils literal notranslate"><span class="pre">-1</span></code> to match the <code class="xref py py-class docutils literal notranslate"><span class="pre">DistanceSensor</span></code>
+contract.</p>
+<p>This driver implements the minimum register sequence to get usable
+single-shot readings on a power-on-default VL53L0X. ST’s reference
+API ships an extensive calibration / VHV / measurement-budget setup
+that improves accuracy on tuned hardware — that’s a follow-up
+patch when we have boards to validate against. The default-init
+ranging here is what most off-the-shelf MicroPython VL53L0X drivers
+use, and is good for the WRO use cases (line-of-sight, 30–1500 mm).</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.vl53l0x.VL53L0X">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.vl53l0x.</span></span><span class="sig-name descname"><span class="pre">VL53L0X</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i2c</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">address</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_DEFAULT_ADDR</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timeout_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">200</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/vl53l0x.html#VL53L0X"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.vl53l0x.VL53L0X" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.distance.DistanceSensor" title="openbricks.distance.DistanceSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">DistanceSensor</span></code></a></p>
+<p>ST VL53L0X laser time-of-flight distance sensor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>i2c</strong> – a <code class="docutils literal notranslate"><span class="pre">machine.I2C</span></code> (or compatible) instance.</p></li>
+<li><p><strong>address</strong> – 7-bit I2C address (default 0x29). XSHUT-strapping
+multiple sensors onto one bus requires assigning each
+a unique address before constructing — outside this
+driver’s scope.</p></li>
+<li><p><strong>timeout_ms</strong> – how long to poll for a measurement to finish.
+Default 200 ms; the chip is typically done in 33–50 ms.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.vl53l0x.VL53L0X.distance_mm">
+<span class="sig-name descname"><span class="pre">distance_mm</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/vl53l0x.html#VL53L0X.distance_mm"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.vl53l0x.VL53L0X.distance_mm" title="Link to this definition"></a></dt>
+<dd><p>Distance ahead in millimetres; -1 if no echo / out of range.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.drivers.vl53l1x">
+<span id="vl53l1x-laser-distance-long-range"></span><h2>VL53L1X (laser distance, long range)<a class="headerlink" href="#module-openbricks.drivers.vl53l1x" title="Link to this heading"></a></h2>
+<p>ST VL53L1X laser time-of-flight distance sensor.</p>
+<p>Successor to the VL53L0X with 4 m range (vs 2 m on the L0X) and a
+different register map. I2C default address 0x29 (same as L0X — XSHUT
+strapping needed if both share a bus).</p>
+<p>The chip-ID lives at 16-bit register 0x010F and reads back 0xEACC for
+a VL53L1X (or 0xEBAA for VL53L4CD, an L1X-pin-compatible variant).</p>
+<p>Like the L0X driver this module ships the minimum register sequence
+to get usable single-shot ranging on a power-on-default chip. ST’s
+reference API does an extensive calibration / VHV / SPAD-array
+selection pass for tuned operation; that lives behind a separate
+<code class="docutils literal notranslate"><span class="pre">calibrate()</span></code> method we’ll add when we have hardware to validate
+against.</p>
+<p>Measurement cycle:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Write 0x40 to <code class="docutils literal notranslate"><span class="pre">SYSTEM_INTERRUPT_CLEAR</span></code> (16-bit reg 0x0086).</p></li>
+<li><p>Write 0x40 to <code class="docutils literal notranslate"><span class="pre">SYSTEM_MODE_START</span></code> (16-bit reg 0x0087) — kicks
+a single-shot ranging.</p></li>
+<li><p>Poll <code class="docutils literal notranslate"><span class="pre">GPIO_TIO_HV_STATUS</span></code> (16-bit reg 0x0031) bit 0 until clear.</p></li>
+<li><p>Read <code class="docutils literal notranslate"><span class="pre">RESULT_FINAL_CROSSTALK_CORRECTED_RANGE_MM_SD0</span></code>
+(16-bit reg 0x0096) as a 16-bit big-endian value — distance in mm.</p></li>
+<li><p>Write 0x01 to <code class="docutils literal notranslate"><span class="pre">SYSTEM_INTERRUPT_CLEAR</span></code> (16-bit reg 0x0086).</p></li>
+</ol>
+</div></blockquote>
+<p>VL53L1X registers are 16-bit (vs L0X’s 8-bit) — addresses go through
+two byte-swaps on the I2C wire. The driver wraps that in
+<code class="docutils literal notranslate"><span class="pre">_read_u8_16</span></code> / <code class="docutils literal notranslate"><span class="pre">_write_u8_16</span></code> helpers.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.drivers.vl53l1x.VL53L1X">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.drivers.vl53l1x.</span></span><span class="sig-name descname"><span class="pre">VL53L1X</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i2c</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">address</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">_DEFAULT_ADDR</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timeout_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">200</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/vl53l1x.html#VL53L1X"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.vl53l1x.VL53L1X" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="interfaces.html#openbricks.distance.DistanceSensor" title="openbricks.distance.DistanceSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">DistanceSensor</span></code></a></p>
+<p>ST VL53L1X laser time-of-flight distance sensor (4 m range).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>i2c</strong> – a <code class="docutils literal notranslate"><span class="pre">machine.I2C</span></code> (or compatible) instance.</p></li>
+<li><p><strong>address</strong> – 7-bit I2C address (default 0x29).</p></li>
+<li><p><strong>timeout_ms</strong> – how long to poll for a measurement to finish.
+Default 200 ms; the chip is typically done in ~50 ms.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.drivers.vl53l1x.VL53L1X.distance_mm">
+<span class="sig-name descname"><span class="pre">distance_mm</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/drivers/vl53l1x.html#VL53L1X.distance_mm"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.drivers.vl53l1x.VL53L1X.distance_mm" title="Link to this definition"></a></dt>
+<dd><p>Distance ahead in millimetres; -1 if no echo / out of range.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="drivers_motors.html" class="btn btn-neutral float-left" title="Motor drivers" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="drivers_misc.html" class="btn btn-neutral float-right" title="Display &amp; bus drivers" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
