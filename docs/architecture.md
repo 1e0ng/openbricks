@@ -173,6 +173,12 @@ ships:
   load). An uncaught exception writes its **full traceback**, not just
   the exception's repr — on an untethered run the file is the only
   record, and a bare `OSError(19,)` doesn't say which call failed.
+  Since 3.4.0 a program that ends by itself (clean return or
+  uncaught exception) first **brakes an adopted drive base to rest**
+  under the controller — heading held by the gyro when one is in
+  use — and logs the outcome (`brake: wheels to rest in N ms`)
+  before the torque-off that ends every run; the button's e-stop
+  path keeps its instant torque-off.
 - Log writes are **asynchronous**. `print` only appends to a RAM
   buffer; the bytes reach flash from the launcher's Timer tick
   (`log.pump()`). A `flush()` on littlefs forces a metadata commit

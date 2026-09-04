@@ -2359,6 +2359,147 @@ class LogPumpWiringTests(unittest.TestCase):
         self.assertIsNotNone(self.launch._last_stop_ms)
 
 
+class BrakeToRestTests(unittest.TestCase):
+    """The program-end brake (3.4.0): a program that ends by itself —
+    returns, or dies on an exception — brings adopted wheels to a
+    controlled rest (``db_stop(1)``, then wait for ``db_done``)
+    before the torque-off that ends every run. The stop button and
+    the e-stop latch keep their instant torque-off."""
+
+    def setUp(self):
+        # An earlier button test may leave the latch engaged (MP runs
+        # classes in definition order); the brake must see a clean
+        # one, exactly as run_program's own clear() guarantees.
+        from openbricks import estop
+        estop.clear()
+
+    def _install(self, done_sequence=(True,), with_st_bus=True,
+                 db_stop_raises=None):
+        import sys as _sys
+        calls = []
+        seq = list(done_sequence)
+
+        class _SB:
+            @staticmethod
+            def db_stop(mode=None):
+                calls.append("db_stop:%s" % mode)
+                if db_stop_raises is not None:
+                    raise db_stop_raises
+                return True
+
+            @staticmethod
+            def db_done():
+                calls.append("db_done")
+                if len(seq) > 1:
+                    return seq.pop(0)
+                return seq[0]
+
+            @staticmethod
+            def estop():
+                calls.append("estop")
+                return True
+
+            @staticmethod
+            def reset_runtime():
+                calls.append("sb.reset_runtime")
+
+        class _MP:
+            @staticmethod
+            def stop():
+                calls.append("mp.stop")
+
+            @staticmethod
+            def reset():
+                calls.append("mp.reset")
+
+        class _Mod:
+            pass
+
+        mod = _Mod()
+        mod.motor_process = _MP()
+        if with_st_bus:
+            mod.st_bus = _SB()
+        prev = _sys.modules.get("_openbricks_native")
+        _sys.modules["_openbricks_native"] = mod
+
+        def _restore():
+            if prev is None:
+                _sys.modules.pop("_openbricks_native", None)
+            else:
+                _sys.modules["_openbricks_native"] = prev
+        self.addCleanup(_restore)
+        return calls
+
+    def test_moving_wheels_brake_until_the_ramp_lands(self):
+        calls = self._install(done_sequence=(False, False, False, True))
+        note = launcher._brake_to_rest()
+        self.assertTrue(note.startswith("brake: wheels to rest in"), note)
+        self.assertEqual(calls[0], "db_stop:1")
+        self.assertEqual(calls.count("db_done"), 4)
+
+    def test_wheels_already_at_rest_are_silent(self):
+        calls = self._install(done_sequence=(True,))
+        self.assertIsNone(launcher._brake_to_rest())
+        self.assertEqual(calls, ["db_stop:1", "db_done"])
+
+    def test_blocked_robot_times_out_into_the_torque_off(self):
+        self._install(done_sequence=(False,))
+        prev = launcher._BRAKE_TO_REST_MS
+        launcher._BRAKE_TO_REST_MS = 30
+        try:
+            note = launcher._brake_to_rest()
+        finally:
+            launcher._BRAKE_TO_REST_MS = prev
+        self.assertTrue("not at rest after 30 ms" in note, note)
+
+    def test_engaged_estop_skips_the_brake(self):
+        # A press that landed but whose interrupt has not unwound the
+        # program yet: the e-stop already cut torque; braking under
+        # power now would UNDO it.
+        from openbricks import estop
+        calls = self._install(done_sequence=(False, True))
+        estop.engage()
+        try:
+            self.assertIsNone(launcher._brake_to_rest())
+        finally:
+            estop.clear()
+        self.assertFalse("db_stop:1" in calls, calls)
+
+    def test_no_native_bus_is_silent(self):
+        self._install(with_st_bus=False)
+        self.assertIsNone(launcher._brake_to_rest())
+
+    def test_unreachable_bus_is_noted_not_raised(self):
+        self._install(db_stop_raises=OSError("bus wedged"))
+        note = launcher._brake_to_rest()
+        self.assertTrue(note.startswith("brake: skipped"), note)
+        self.assertTrue("bus wedged" in note, note)
+
+    def test_clean_exit_brakes_before_the_kill(self):
+        calls = self._install(done_sequence=(False, True))
+        path = _write_program("x = 1\n")
+        launcher._exec_program_raw(path, origin="test")
+        self.assertIn("db_stop:1", calls)
+        self.assertLess(calls.index("db_stop:1"), calls.index("estop"))
+
+    def test_exception_exit_brakes_before_the_kill(self):
+        calls = self._install(done_sequence=(False, True))
+        path = _write_program("raise ValueError('boom')\n")
+        launcher._exec_program_raw(path, origin="test")
+        self.assertIn("db_stop:1", calls)
+        self.assertLess(calls.index("db_stop:1"), calls.index("estop"))
+
+    def test_interrupt_exit_keeps_the_instant_torque_off(self):
+        calls = self._install(done_sequence=(False, True))
+        path = _write_program("raise KeyboardInterrupt\n")
+        try:
+            launcher._exec_program_raw(path, origin="test")
+        except KeyboardInterrupt:
+            pass
+        self.assertFalse("db_stop:1" in calls, calls)
+        self.assertIn("estop", calls)
+
+
 class ResetMotorProcessBridgeTests(unittest.TestCase):
     """_reset_motor_process is the program-boundary reset. Since
     1.43.2 it also resets st_bus runtime state (same precedent as
