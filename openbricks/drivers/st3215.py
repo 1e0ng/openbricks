@@ -57,6 +57,8 @@ from machine import UART, Pin
 
 from openbricks import pins
 from openbricks import estop
+from collections import namedtuple
+
 from openbricks.interfaces import Motor, Servo
 from openbricks import parameters
 from openbricks.parameters import Stop, DriveMode
@@ -91,6 +93,47 @@ _REG_PRESENT_LOAD  = 0x3C
 # max-torque register at power-on; run_until_stalled's duty_limit
 # writes it for the duration of the run and restores what it read.
 _REG_TORQUE_LIMIT  = 0x30
+# The health block (SMS_STS memory table, Feetech STS tutorial):
+# present voltage 62 (0.1 V per LSB), temperature 63 (°C), status
+# 65 (protection flags), present current 69/70 (6.5 mA per LSB).
+# One 9-byte read from 0x3E covers all of them on a Python-owned
+# bus; an adopted motor stages them one register at a time.
+_REG_PRESENT_VOLTAGE = 0x3E
+_REG_PRESENT_TEMP    = 0x3F
+_REG_STATUS          = 0x41
+_REG_PRESENT_CURRENT = 0x45
+_CURRENT_LSB_A = 0.0065
+# Status bits, low to high: the protections the datasheet names
+# (over-voltage outside 9-14 V, over-heat above 80 C, over-load
+# above 80 % of stall for 2 s) plus the SDK's sensor/current/angle
+# faults.
+_STATUS_FLAGS = ("voltage", "sensor", "temperature", "current",
+                 "angle", "overload")
+
+ServoHealth = namedtuple("ServoHealth", ("voltage", "temperature",
+                                         "current", "flags", "status"))
+
+
+def _decode_status(status):
+    return tuple(name for bit, name in enumerate(_STATUS_FLAGS)
+                 if status & (1 << bit))
+
+
+def _servo_health(volt_raw, temp_raw, current_raw, status):
+    return ServoHealth(volt_raw / 10.0, float(temp_raw),
+                       (current_raw & 0x7FFF) * _CURRENT_LSB_A,
+                       _decode_status(status), status)
+
+
+def _read_health(bus, servo_id):
+    data = bus.read(servo_id, _REG_PRESENT_VOLTAGE, 9)
+    if data is None:
+        raise OSError(
+            "servo id %s: no reply reading the health registers "
+            "(0x3E-0x46) - check power and the servo bus wiring"
+            % servo_id)
+    return _servo_health(data[0], data[1], data[7] | (data[8] << 8),
+                         data[3])
 
 _MODE_POSITION = 0   # single-turn absolute position (0..4095 = 0..360°)
 _MODE_WHEEL    = 1   # continuous velocity (wheel, servo-internal loop)
@@ -475,6 +518,13 @@ class ST3215(Servo):
             return None
         raw = data[0] | (data[1] << 8)
         return self._raw_to_deg(raw)
+
+    def health(self):
+        """Supply voltage (V), case temperature (°C), supply current
+        (A) and the protection flags, as a ``ServoHealth`` tuple —
+        see ``ST3215Motor.health``. Raises ``OSError`` if the bus is
+        silent."""
+        return _read_health(self._bus, self._id)
 
     def ping(self):
         """``True`` if the servo answers on the bus."""
@@ -1014,6 +1064,26 @@ class ST3215Motor(Motor):
         if self._invert:
             mnm = -mnm
         return mnm
+
+    def health(self):
+        """Supply voltage (V), case temperature (°C), supply current
+        (A) and the servo's protection flags, as a ``ServoHealth``
+        tuple: ``flags`` holds the set names among ``voltage``,
+        ``sensor``, ``temperature``, ``current``, ``angle`` and
+        ``overload`` (empty when healthy), ``status`` the raw byte.
+        From the present-voltage / temperature / status / current
+        registers (0.1 V, °C, 6.5 mA per LSB). Raises ``OSError``
+        when the bus is silent — a health check that returns nothing
+        is the failure it exists to catch. On an adopted motor the
+        four reads are staged through the native pump (a few ms —
+        for a log line, not a control loop)."""
+        if self._native_slot is not None:
+            return _servo_health(
+                self._reg_read_u16(_REG_PRESENT_VOLTAGE, 1),
+                self._reg_read_u16(_REG_PRESENT_TEMP, 1),
+                self._reg_read_u16(_REG_PRESENT_CURRENT, 2),
+                self._reg_read_u16(_REG_STATUS, 1))
+        return _read_health(self._bus, self._id)
 
     def stalled(self):
         """``True`` when the servo is pushing hard (load magnitude at

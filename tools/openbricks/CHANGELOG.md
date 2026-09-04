@@ -3,6 +3,41 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.3.0 — servo health, a servo dynamometer and soak test, tick timing stats, llms.txt
+
+Ideas lifted from Berkeley Humanoid Lite's actuator work (RSS 2025):
+characterise and watch the actuators you have, and say what the
+platform costs.
+
+- `ST3215Motor.health()` / `ST3215.health()` (and the ST-3032
+  classes): supply voltage, case temperature, supply current and
+  the servo's protection flags (`voltage`, `sensor`, `temperature`,
+  `current`, `angle`, `overload`) from the health block the drivers
+  never read before — one 9-byte read on a Python-owned bus, four
+  staged reads on an adopted motor. Raises on a silent bus; never
+  returns nothing. `ST3032Motor` carries the datasheet's electrical
+  constants (`KT_MNM_PER_A`, `NO_LOAD_CURRENT_A`, `STALL_CURRENT_A`).
+- `examples/st3032_dyno.py`: two coupled ST-3032s as a dynamometer —
+  a duty sweep on the load servo, current-derived torque through the
+  motor constant, a fitted torque–speed line giving each unit's
+  no-load speed and stall estimate, plus the pair's gear play. For
+  comparing spares; the sim's servos are ideal, so nothing to feed.
+- `examples/st3032_soak_test.py`: an hour of swings logging health
+  and gear play every N cycles, with the first-to-last drift
+  summarised at the end.
+- `motor_process.hard_tick_stats()`: fires, late fires and the worst
+  gap of the 1 kHz hard tick (firmware builds), measured in C on
+  every fire — the standing regression alarm for anything that joins
+  the tick.
+- docs: a *Servo health & characterisation* page, a priced bill of
+  materials in the hardware guide (≈US$190 for drive base + sensors,
+  sourced and dated), and `/llms.txt` + `/llms-full.txt` on
+  docs.openbricks.dev so an assistant asked about openbricks reads
+  the docs instead of guessing from Pybricks.
+
+Flash 3.3.0 for `health()` on adopted motors and the tick stats; the
+examples and docs need only the CLI.
+
 ## 3.2.0 — brake/hold stops keep the heading loop closed
 
 `stop(then=Stop.BRAKE)` and `Stop.HOLD` used to decelerate through

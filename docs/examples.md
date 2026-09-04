@@ -132,3 +132,26 @@ is left untouched.
 .. literalinclude:: ../examples/full_robot.py
    :language: python
 ```
+
+## Servo dynamometer (two ST-3032s, coupled)
+
+Measures one servo's real no-load speed, stall-torque estimate and
+gear play against a second servo used as the load — the per-unit
+numbers to compare across your spares. Procedure and how to read the
+summary: {doc}`servo-health`.
+
+```{eval-rst}
+.. literalinclude:: ../examples/st3032_dyno.py
+   :language: python
+```
+
+## Servo soak test (one ST-3032)
+
+An hour of swings with voltage, temperature, current and gear play
+logged along the way, and the drift summarised at the end — the
+pre-competition check for a servo you are not sure about.
+
+```{eval-rst}
+.. literalinclude:: ../examples/st3032_soak_test.py
+   :language: python
+```

@@ -74,7 +74,59 @@ TEST(reset_reprimes_wall_tracker) {
     CHECK_EQ_INT(m.virtual_now_ms, m.period_ms);
 }
 
+TEST(tick_stats_first_fire_primes_without_a_gap) {
+    ob_tick_stats_t s;
+    ob_tick_stats_init(&s);
+    ob_tick_stats_update(&s, 5000, 1000, 250);
+    CHECK_EQ_INT(s.fires, 1);
+    CHECK_EQ_INT(s.late, 0);
+    CHECK_EQ_INT(s.worst_dt_us, 0);
+    CHECK_EQ_INT(s.last_dt_us, 0);
+}
+
+TEST(tick_stats_counts_late_fires_and_keeps_the_worst_gap) {
+    ob_tick_stats_t s;
+    ob_tick_stats_init(&s);
+    ob_tick_stats_update(&s, 0, 1000, 250);
+    ob_tick_stats_update(&s, 1000, 1000, 250);      // on time
+    ob_tick_stats_update(&s, 2250, 1000, 250);      // at the tolerance
+    ob_tick_stats_update(&s, 3501, 1000, 250);      // 1 us over: late
+    ob_tick_stats_update(&s, 8000, 1000, 250);      // a 4.5 ms hold-off
+    ob_tick_stats_update(&s, 9000, 1000, 250);
+    CHECK_EQ_INT(s.fires, 6);
+    CHECK_EQ_INT(s.late, 2);
+    CHECK_EQ_INT(s.worst_dt_us, 4499);
+    CHECK_EQ_INT(s.last_dt_us, 1000);
+}
+
+TEST(tick_stats_wrap_through_2_32_is_not_a_gap) {
+    ob_tick_stats_t s;
+    ob_tick_stats_init(&s);
+    ob_tick_stats_update(&s, 0xFFFFFF00u, 1000, 250);
+    ob_tick_stats_update(&s, 0x000002E8u, 1000, 250);   // dt = 1000
+    CHECK_EQ_INT(s.late, 0);
+    CHECK_EQ_INT(s.last_dt_us, 1000);
+    CHECK_EQ_INT(s.worst_dt_us, 1000);
+}
+
+TEST(tick_stats_init_clears_everything) {
+    ob_tick_stats_t s;
+    ob_tick_stats_init(&s);
+    ob_tick_stats_update(&s, 0, 1000, 250);
+    ob_tick_stats_update(&s, 9000, 1000, 250);
+    CHECK_EQ_INT(s.late, 1);
+    ob_tick_stats_init(&s);
+    CHECK_EQ_INT(s.fires, 0);
+    CHECK_EQ_INT(s.late, 0);
+    CHECK_EQ_INT(s.worst_dt_us, 0);
+    CHECK(!s.inited);
+}
+
 int main(void) {
+    RUN(tick_stats_first_fire_primes_without_a_gap);
+    RUN(tick_stats_counts_late_fires_and_keeps_the_worst_gap);
+    RUN(tick_stats_wrap_through_2_32_is_not_a_gap);
+    RUN(tick_stats_init_clears_everything);
     RUN(wall_clock_wraps_through_2_32);
     RUN(wall_clock_clamps_pathological_jumps);
     RUN(starvation_gap_counted_not_dilated);

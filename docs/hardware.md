@@ -11,18 +11,32 @@ can buy on AliExpress / Amazon / Adafruit.
 
 ## Recommended starter robot
 
-| Part | Qty | Notes |
-|------|----:|-------|
-| ESP32-S3 DevKitC-1 | 1 | Any ESP32-S3 board with ≥10 free GPIOs works; classic ESP32 also supported |
-| Feetech STS3032 serial bus servo (12V) | 2 | Drive wheels, continuous-rotation wheel mode. 10 kg·cm, 148 RPM no-load — datasheet in `docs/datasheets/` |
-| URT-2 serial bus adapter | 1 | One half-duplex bus daisy-chains every servo |
-| 3S LiPo battery (11.1V nominal) + balance charger | 1 | Feeds the servo rail directly. ST-3032 brown-out floor is ~9V, so a sagging 2S (7.4V) is not enough |
-| Buck converter (12V → 5V, ≥1A) | 1 | Powers the ESP32-S3 and sensors |
-| TCS34725 breakout | 2–4 | Colour sensor array for line following / zone detection |
-| TCA9548A I2C multiplexer breakout | 1 | Required for more than one TCS34725 — its address is fixed at `0x29` |
-| ICM-45686 breakout | 1 | SPI IMU, read inside the 1 kHz control tick — the heading source for `use_gyro` |
-| ST-3215 serial bus servo | 0–4 | Optional; good for arms / grippers. Same bus and protocol, but do **not** share a 6V rail setup — see servo notes |
-| Jumper wires, M3 standoffs, chassis plate | — | Your robot, your build |
+| Part | Qty | ≈ US$ each | Notes |
+|------|----:|-----------:|-------|
+| ESP32-S3 DevKitC-1 (N16R8) | 1 | 13 | Any ESP32-S3 board with ≥10 free GPIOs works; classic ESP32 also supported |
+| Feetech STS3032 serial bus servo (12V) | 2 | 25 | Drive wheels, continuous-rotation wheel mode. 10 kg·cm, 148 RPM no-load — datasheet in `docs/datasheets/`. $17.55 each from 100 up on Alibaba; boutique resellers ask $40 |
+| Feetech URT-2 serial bus adapter | 1 | 16 | One half-duplex bus daisy-chains every servo (S$22 at Kuriosity) |
+| 3S LiPo battery (11.1V nominal) + balance charger | 1 | 25–40 | Feeds the servo rail directly. ST-3032 brown-out floor is ~9V, so a sagging 2S (7.4V) is not enough. *Typical price* |
+| Buck converter (12V → 5V, ≥1A) | 1 | 3 | Powers the ESP32-S3 and sensors. *Typical price* |
+| Pololu QTRX-HD-15A reflectance array | 1 | 29 | The line-follow bar (ten of its fifteen channels on GPIO 1–10, wiring below); $29.10 at Pololu |
+| TCS34725 breakout | 2–4 | 3–8 | Colour sensor array for zone detection. Adafruit 1334 is discontinued (was $7.95); generic modules are a few dollars on AliExpress / Amazon |
+| TCA9548A I2C multiplexer breakout | 1 | 7 | Required for more than one TCS34725 — its address is fixed at `0x29`. Adafruit 2717 $6.95; clones ≈$1–2 |
+| ICM-45686 breakout | 1 | 32 | SPI IMU, read inside the 1 kHz control tick — the heading source for `use_gyro`. TDK's own EV_ICM-45686 board is $32.45 at DigiKey; generic modules exist on Amazon |
+| ST-3215 serial bus servo | 0–4 | — | Optional; good for arms / grippers. Same bus and protocol, but do **not** share a 6V rail setup — see servo notes |
+| Jumper wires, M3 standoffs, chassis plate | — | — | Your robot, your build |
+
+Drive base, IMU, line bar, two colour sensors and the multiplexer
+come to **roughly US$190** before battery, charger and chassis. Prices
+checked 2026-09-05 at single-unit quantity —
+[Alibaba (STS3032)](https://www.alibaba.com/product-detail/FEETECH-SCS-STS3032-4-5-kg_1600138694717.html),
+[Kuriosity (URT-2)](https://kuriosity.sg/products/feetech-serial-bus-servo-driver),
+[Pololu 4415](https://www.pololu.com/product/4415),
+[Adafruit 2717](https://www.adafruit.com/product/2717),
+[DigiKey EV_ICM-45686](https://www.digikey.com/en/products/detail/tdk-invensense/ICM-45686/24374985),
+[Amazon (ESP32-S3-DevKitC-1 N16R8)](https://www.amazon.com/ESP32-S3-DevKitC-1-Development-Dual-Core-Bluetooth/dp/B0GVSHT2Q2)
+— and they move; treat the column as a budget, not a quote. The same
+parts from Taobao / AliExpress typically land at half to two-thirds
+of these numbers with longer shipping.
 
 A DC-gear-motor build (JGB37-520 / MG370 + H-bridge) is still fully
 supported — see [Alternative: DC gear motors with encoders](#alternative-dc-gear-motors-with-encoders)

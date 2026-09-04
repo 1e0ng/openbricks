@@ -1202,6 +1202,123 @@ class TestPybricksParityFeedback(unittest.TestCase):
         m._bus.read = lambda sid, reg, n: bytes([0xF4, 0x05])  # 500|b10
         self.assertEqual(m.load(), 490.0)   # 500/1000 x 980, positive
 
+    # The health block (3.3.0): 0x3E voltage 0.1 V, 0x3F temperature
+    # C, 0x41 status flags, 0x45/0x46 current 6.5 mA — one 9-byte
+    # read on a Python-owned bus.
+    def _health_block(self, volt=123, temp=41, status=0, current=100):
+        return bytes([volt, temp, 0, status, 1, 0, 0,
+                      current & 0xFF, current >> 8])
+
+    def test_health_decodes_the_feedback_block(self):
+        m = self._motor({})
+        block = self._health_block(status=0b100100)   # temp + overload
+        reads = []
+
+        def fake_read(sid, reg, n):
+            reads.append((sid, reg, n))
+            return block if (reg, n) == (0x3E, 9) else None
+        m._bus.read = fake_read
+        h = m.health()
+        self.assertAlmostEqual(h.voltage, 12.3, delta=1e-9)
+        self.assertEqual(h.temperature, 41.0)
+        self.assertAlmostEqual(h.current, 0.65, delta=1e-9)
+        self.assertEqual(h.flags, ("temperature", "overload"))
+        self.assertEqual(h.status, 0b100100)
+        self.assertEqual(reads, [(1, 0x3E, 9)])       # ONE transaction
+
+    def test_health_is_flagless_when_clean(self):
+        m = self._motor({})
+        m._bus.read = lambda sid, reg, n: self._health_block()
+        h = m.health()
+        self.assertEqual(h.flags, ())
+        self.assertEqual(h.status, 0)
+
+    def test_health_decodes_every_flag_bit(self):
+        m = self._motor({})
+        m._bus.read = lambda sid, reg, n: self._health_block(status=0x3F)
+        self.assertEqual(m.health().flags,
+                         ("voltage", "sensor", "temperature", "current",
+                          "angle", "overload"))
+
+    def test_health_silent_bus_raises_naming_the_servo(self):
+        # A health check that returns nothing is the failure it
+        # exists to catch — never None.
+        m = self._motor({})
+        m._bus.read = lambda sid, reg, n: None
+        try:
+            m.health()
+            self.fail("expected OSError on a silent bus")
+        except OSError as e:
+            self.assertTrue("servo id 1" in str(e) and "health" in str(e),
+                            e)
+
+    def test_health_on_adopted_motor_stages_four_native_reads(self):
+        # The native pump owns the UART: each register is staged and
+        # polled to its verified value (user_len is 1 or 2 bytes).
+        m = self._motor({})
+        regs = {0x3E: 118, 0x3F: 35, 0x41: 0x01, 0x45: 40}
+        staged = []
+        pending = [0]
+
+        class _SB:
+            @staticmethod
+            def servo_user_read(slot, reg, n):
+                staged.append((slot, reg, n))
+                pending[0] = regs[reg]
+                return True
+
+            @staticmethod
+            def servo_user_poll(slot):
+                return (1, pending[0])
+        m._native_slot = 2
+        m._native_sb = _SB()
+        h = m.health()
+        self.assertEqual(staged, [(2, 0x3E, 1), (2, 0x3F, 1),
+                                  (2, 0x45, 2), (2, 0x41, 1)])
+        self.assertAlmostEqual(h.voltage, 11.8, delta=1e-9)
+        self.assertEqual(h.temperature, 35.0)
+        self.assertAlmostEqual(h.current, 0.26, delta=1e-9)
+        self.assertEqual(h.flags, ("voltage",))
+
+    def test_health_on_adopted_motor_lost_read_raises(self):
+        m = self._motor({})
+
+        class _SB:
+            @staticmethod
+            def servo_user_read(slot, reg, n):
+                return True
+
+            @staticmethod
+            def servo_user_poll(slot):
+                return (-1, 0)                      # lost on the wire
+        m._native_slot = 2
+        m._native_sb = _SB()
+        try:
+            m.health()
+            self.fail("expected OSError for a lost native read")
+        except OSError as e:
+            self.assertTrue("0x3E" in str(e), e)
+
+    def test_st3032_carries_its_datasheet_electrical_constants(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        self.assertAlmostEqual(ST3032Motor.KT_MNM_PER_A, 617.9, delta=0.1)
+        self.assertEqual(ST3032Motor.NO_LOAD_CURRENT_A, 0.10)
+        self.assertEqual(ST3032Motor.STALL_CURRENT_A, 1.6)
+        self.assertEqual(ST3032Motor.max_dps_default(), 888.0)
+
+    def test_position_servo_reads_the_same_health_block(self):
+        # ST3215 (position mode) shares the block — a gripper servo
+        # is as worth soak-testing as a wheel.
+        s = ST3215(servo_id=7)
+        s._bus.read = lambda sid, reg, n: (
+            self._health_block(volt=119, temp=52, status=0x04, current=61)
+            if (sid, reg, n) == (7, 0x3E, 9) else None)
+        h = s.health()
+        self.assertAlmostEqual(h.voltage, 11.9, delta=1e-9)
+        self.assertEqual(h.temperature, 52.0)
+        self.assertAlmostEqual(h.current, 61 * 0.0065, delta=1e-9)
+        self.assertEqual(h.flags, ("temperature",))
+
     def test_stalled_true_when_loaded_and_slow(self):
         m = self._motor({_REG_PRESENT_LOAD: 850,        # 85 % of stall
                          _REG_PRESENT_SPEED: 50})       # 5 dps

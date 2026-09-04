@@ -50,6 +50,32 @@ typedef struct {
 #define OB_TICK_MAX_CATCHUP_MS 1000
 
 
+// Tick timing statistics (3.3.0). The 1 kHz hard tick is the control
+// loop's heartbeat: a fire that lands late — an esp_timer task held
+// off by a long ISR or a blocking peripheral call — stretches every
+// dt the controllers integrate over, and nothing else reports it.
+// Fed once per fire with a microsecond timestamp: counts fires,
+// counts LATE fires (gap > period + tolerance) and keeps the worst
+// gap seen. Wrap-safe across the 2^32 us rollover; cheap enough to
+// run on every tick. The regression alarm for the next peripheral
+// that joins the tick.
+typedef struct {
+    uint32_t fires;
+    uint32_t late;
+    uint32_t worst_dt_us;
+    uint32_t last_dt_us;
+    uint32_t last_us;
+    int      inited;
+} ob_tick_stats_t;
+
+void ob_tick_stats_init(ob_tick_stats_t *s);
+
+// Record one fire at ``now_us``. The first fire (and the first after
+// init) primes the timestamp: it counts as a fire, never as a gap.
+void ob_tick_stats_update(ob_tick_stats_t *s, uint32_t now_us,
+                          uint32_t period_us, uint32_t tolerance_us);
+
+
 typedef struct {
     ob_tick_slot_t  c_callbacks[OB_MAX_C_CALLBACKS];
     size_t          n_c_callbacks;

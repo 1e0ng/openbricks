@@ -52,6 +52,7 @@ cli
 simulator
 examples
 measuring
+servo-health
 ```
 
 ```{toctree}

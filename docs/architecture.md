@@ -89,7 +89,11 @@ are direct where they can be.
    a periodic C hook on the esp_timer service task, below the Python
    scheduler entirely — verified on hardware via
    `motor_process.hard_tick_selftest()` /
-   `hard_tick_count()`. Existing controllers still dispatch through
+   `hard_tick_count()`, and watched from then on by
+   `hard_tick_stats()` (3.3.0: fires, late fires, worst gap in µs —
+   the regression alarm for the next peripheral that joins the
+   tick; a fire more than 250 µs past its 1 ms slot counts as late).
+   Existing controllers still dispatch through
    the scheduler (their encoder reads call into Python objects,
    which the hard context must never do); the serial-bus motor path
    lives there: since 1.45.0 `DriveBase` (`openbricks.robotics`)
