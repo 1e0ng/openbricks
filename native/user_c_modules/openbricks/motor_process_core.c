@@ -94,3 +94,37 @@ void ob_motor_process_set_period_ms(ob_motor_process_t *m, int period_ms) {
 size_t ob_motor_process_count_c(const ob_motor_process_t *m) {
     return m->n_c_callbacks;
 }
+
+
+// ---- tick timing statistics -------------------------------------------
+
+void ob_tick_stats_init(ob_tick_stats_t *s) {
+    s->fires       = 0;
+    s->late        = 0;
+    s->worst_dt_us = 0;
+    s->last_dt_us  = 0;
+    s->last_us     = 0;
+    s->inited      = 0;
+}
+
+
+void ob_tick_stats_update(ob_tick_stats_t *s, uint32_t now_us,
+                          uint32_t period_us, uint32_t tolerance_us) {
+    s->fires++;
+    if (!s->inited) {
+        s->inited  = 1;
+        s->last_us = now_us;
+        return;
+    }
+    // Unsigned subtraction is wrap-correct across the 2^32 us
+    // rollover (~71 minutes on a 32-bit microsecond counter).
+    uint32_t dt = now_us - s->last_us;
+    s->last_us    = now_us;
+    s->last_dt_us = dt;
+    if (dt > s->worst_dt_us) {
+        s->worst_dt_us = dt;
+    }
+    if (dt > period_us + tolerance_us) {
+        s->late++;
+    }
+}

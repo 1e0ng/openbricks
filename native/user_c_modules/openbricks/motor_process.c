@@ -192,6 +192,12 @@ extern void ob_hard_tick_uninstall(void);
 extern uint32_t ob_hard_ticks_ms(void);
 
 static volatile uint32_t hard_tick_probe_count;
+// Timing statistics for the hard tick (3.3.0): fires, late fires,
+// worst gap. Written on the esp_timer task, read from Python — a
+// diagnostic, so a torn read of one field is acceptable.
+#define HARD_TICK_PERIOD_US    1000
+#define HARD_TICK_LATE_TOL_US  250
+static ob_tick_stats_t hard_tick_stats;
 
 #if defined(MICROPY_OPENBRICKS_GPIO_SHIM) && MICROPY_OPENBRICKS_GPIO_SHIM
 // Hard-button sampling (st_button_core): the program button handled
@@ -280,6 +286,8 @@ static void hard_tick_dispatch(void *ctx) {
     (void)ctx;
     // Aligned 32-bit increment; read side is a single aligned load.
     hard_tick_probe_count = hard_tick_probe_count + 1;
+    ob_tick_stats_update(&hard_tick_stats, (uint32_t)mp_hal_ticks_us(),
+                         HARD_TICK_PERIOD_US, HARD_TICK_LATE_TOL_US);
     hard_button_tick();          // BEFORE the pump: stop jumps the queue
     if (hard_imu_fn) {
         hard_imu_fn();           // IMU read + yaw feed (~13 us SPI)
@@ -313,6 +321,21 @@ static mp_obj_t mp_hard_tick_count(mp_obj_t self_in) {
     return mp_obj_new_int_from_uint(hard_tick_probe_count);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_tick_count_obj, mp_hard_tick_count);
+
+static mp_obj_t mp_hard_tick_stats(mp_obj_t self_in) {
+    // (fires, late, worst_gap_us, last_gap_us) since boot. A late
+    // fire is a gap longer than the period plus HARD_TICK_LATE_TOL_US;
+    // the worst gap says how long the control loop went blind.
+    (void)self_in;
+    mp_obj_t t[4] = {
+        mp_obj_new_int_from_uint(hard_tick_stats.fires),
+        mp_obj_new_int_from_uint(hard_tick_stats.late),
+        mp_obj_new_int_from_uint(hard_tick_stats.worst_dt_us),
+        mp_obj_new_int_from_uint(hard_tick_stats.last_dt_us),
+    };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mp_hard_tick_stats_obj, mp_hard_tick_stats);
 #endif
 
 // Whether the Timer path advances the clock by real elapsed time
@@ -790,6 +813,7 @@ static const mp_rom_map_elem_t motor_process_locals_dict_table[] = {
     #endif
     #if defined(MICROPY_OPENBRICKS_HARD_TICK) && MICROPY_OPENBRICKS_HARD_TICK
     { MP_ROM_QSTR(MP_QSTR_hard_tick_selftest), MP_ROM_PTR(&mp_hard_tick_selftest_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hard_tick_stats), MP_ROM_PTR(&mp_hard_tick_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_hard_tick_count), MP_ROM_PTR(&mp_hard_tick_count_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_configure),     MP_ROM_PTR(&mp_configure_obj) },

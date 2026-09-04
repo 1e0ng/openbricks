@@ -82,6 +82,20 @@ class ST3032Motor(ST3215Motor):
 
     # ST-3032 @ 12 V: 10 kg·cm ~= 980 mNm (datasheet §5-3).
     STALL_TORQUE_MNM = 980.0
+    # Datasheet electrical constants (ST-3032-C062 A/0, 12 V): the
+    # motor constant turns the present-current register into a shaft
+    # torque estimate — examples/st3032_dyno.py's torque-speed line.
+    # 6.3 kg·cm/A = 617.9 mNm/A.
+    KT_MNM_PER_A = 617.9
+    NO_LOAD_CURRENT_A = 0.10
+    STALL_CURRENT_A = 1.6
+
+    @classmethod
+    def max_dps_default(cls):
+        """The datasheet no-load speed this class defaults ``max_dps``
+        to — the reference a measured no-load speed is compared
+        against."""
+        return ST3032_NO_LOAD_DPS
 
     def __init__(self, servo_id, uart_id=1, tx=14, rx=41,
                  baud=1_000_000, dir_pin=None,

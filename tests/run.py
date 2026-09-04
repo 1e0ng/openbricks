@@ -93,6 +93,8 @@ _TEST_MODULES = [
     "tests.test_qtr",
     "tests.test_qtr_align",
     "tests.test_imu_warmup_probe",
+    "tests.test_st3032_dyno",
+    "tests.test_st3032_soak_test",
     "tests.test_servo_set_id",
     "tests.test_qtr_line_follow",
     "tests.test_axle_track_cal",

@@ -427,6 +427,23 @@ class ShimSerialMotorTests(_ShimTestBase):
         self.assertGreater(m.angle(), start + 10)
         m.coast()
 
+    def test_health_reports_nominal_supply_and_no_flags(self):
+        # Firmware parity (3.3.0): a program that logs motor.health()
+        # runs unchanged in the sim — nominal 12 V, room temperature,
+        # a speed-following current, never a protection flag.
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        h = m.health()
+        self.assertEqual(h.voltage, 12.0)
+        self.assertEqual(h.temperature, 25.0)
+        self.assertEqual(h.flags, ())
+        self.assertEqual(h.status, 0)
+        idle = h.current
+        m.run_speed(200)
+        time.sleep_ms(400)
+        self.assertGreater(m.health().current, idle)
+        m.coast()
+
     def test_run_speed_clamps_to_max_dps(self):
         from openbricks.drivers.st3032 import ST3032Motor
         m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6, max_dps=600)

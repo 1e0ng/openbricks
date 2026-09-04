@@ -234,6 +234,7 @@ class WallClockTests(unittest.TestCase):
         self.assertFalse(motor_process.hard_tick_available())
         self.assertFalse(hasattr(motor_process, "hard_tick_selftest"))
         self.assertFalse(hasattr(motor_process, "hard_tick_count"))
+        self.assertFalse(hasattr(motor_process, "hard_tick_stats"))
 
     def test_hard_button_absent_off_hardware(self):
         # Needs BOTH firmware patches (hard tick + gpio shim); unix

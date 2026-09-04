@@ -34,6 +34,10 @@ extensions = [
     # for a young site with few inbound links. robots.txt (in
     # _extra/) points search engines at it.
     "sphinx_sitemap",
+    # /llms.txt + /llms-full.txt (llmstxt.org): an index and a single
+    # concatenated copy of every page, so an assistant asked about
+    # openbricks reads these docs instead of guessing from Pybricks.
+    "sphinx_llms_txt",
 ]
 
 # MicroPython-only modules that don't exist on the doc-building CPython.

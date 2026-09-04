@@ -1062,6 +1062,17 @@ class ShimST3215Motor:
         # so never None.
         return self._vel_dps()
 
+    def health(self):
+        # Firmware parity surface (ST3215Motor.health, 3.3.0). The sim
+        # wheel has no supply rail or thermal model, so it reports the
+        # datasheet's nominal 12 V, room temperature, a current that
+        # follows the speed it is holding, and never a protection
+        # flag — plausible numbers for a program that logs them, not
+        # a measurement (documented sim limitation).
+        from openbricks.drivers.st3215 import ServoHealth
+        current = 0.02 + 0.5 * abs(self._vel_dps()) / max(self._max_dps, 1.0)
+        return ServoHealth(12.0, 25.0, current, (), 0)
+
     def ping(self):
         return True
 
