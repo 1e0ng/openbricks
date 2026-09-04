@@ -546,12 +546,21 @@ class _SerialNativeEngine:
         boundary: coast is one sync-torque write covering both
         servos, brake one sync-speed write, and hold captures both
         wheel poses at the same instant — instead of one motor at a
-        time, a bus transaction apart."""
+        time, a bus transaction apart.
+
+        ``brake``/``hold`` decelerate as a coupled-controller stop
+        trajectory, so the heading loop — the IMU, in gyro mode —
+        stays closed through the ramp. A soft-pumped IMU gets one
+        pump first: the ramp anchors to the heading of NOW, not of
+        the last ``done()`` poll (a line-follow between the two has
+        rotated the chassis without a single pump)."""
         if then is None:
             self._sb.db_stop()
             return
         parameters.check(Stop, then, "then",
                          allowed=(Stop.COAST, Stop.BRAKE, Stop.HOLD))
+        if then != Stop.COAST and self._use_gyro:
+            self._gyro_pump()
         ok = self._sb.db_stop(then.value)
         if then == Stop.HOLD and not ok:
             raise RuntimeError(

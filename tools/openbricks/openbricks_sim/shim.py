@@ -419,7 +419,14 @@ class _SimStBus:
         self._use_gyro = False
         self._gyro_hard = False
         self._ws_active = False
-        self._ws_stop_pending = 0
+        # End-state a decelerating brake/hold applies when its ramp
+        # lands (firmware st_db_stop_pending): 1 = brake, 2 = hold.
+        self._stop_pending = 0
+        # Firmware parity (st_db_frame_stale, 3.2.0): wheels driven
+        # outside the coupled controller rotate the chassis without
+        # moving its absolute heading target; the next coupled arm
+        # re-anchors the target to the measured heading.
+        self._frame_stale = False
         self._moves = {}
         self._slot_ids = {}
         _sim_st_buses.append(self)
@@ -475,6 +482,7 @@ class _SimStBus:
         self._accel_turn = float(accel)
         self._active = True
         self._db_writing = False
+        self._frame_stale = False
         for m in self._moves.values():
             m.stop()
 
@@ -513,12 +521,37 @@ class _SimStBus:
                        getattr(self._wheels[0], "_target_dps", 0.0),
                        getattr(self._wheels[1], "_target_dps", 0.0))
 
+    def _refresh_frame(self):
+        # Firmware parity (st_db_refresh_frame_locked): every coupled
+        # arm — moves and the decelerating stops — re-anchors the
+        # heading target if the wheels were last driven outside the
+        # controller. A move the controller itself finished keeps its
+        # absolute target (turn residuals must not bank).
+        if self._frame_stale:
+            self._raw.refresh_frame()
+        self._frame_stale = False
+
+    def _apply_stop_end(self):
+        # The brake/hold end-state once the ramp has landed (or at
+        # once when there was nothing to ramp): wheels at 0 with the
+        # velocity loop live (brake), plus the C position holds
+        # anchored where the robot actually stopped (hold). The db
+        # yields.
+        self._wheels[0].run_speed(0.0)
+        self._wheels[1].run_speed(0.0)
+        if self._stop_pending == 2:
+            for slot, w in self._wheels.items():
+                self._move(slot).hold_at(w.angle() * self._STEPS_PER_DEG)
+        self._stop_pending = 0
+        self._db_writing = False
+
     def db_straight(self, mm, mm_s, carry=0):
         for m in self._moves.values():
             m.stop()                      # new command wins
         self._sync_bridges()
+        self._refresh_frame()
         self._ws_active = False        # trajectory supersedes a slew
-        self._ws_stop_pending = 0
+        self._stop_pending = 0
         self._db_writing = True
         self._raw.set_accel(self._accel_straight)
         self._raw.straight(self._rt.now_ms, float(mm), float(mm_s),
@@ -528,8 +561,9 @@ class _SimStBus:
         for m in self._moves.values():
             m.stop()
         self._sync_bridges()
+        self._refresh_frame()
         self._ws_active = False        # trajectory supersedes a slew
-        self._ws_stop_pending = 0
+        self._stop_pending = 0
         self._db_writing = True
         self._raw.set_accel(self._accel_turn)
         self._raw.turn(self._rt.now_ms, float(deg), float(dps))
@@ -538,8 +572,9 @@ class _SimStBus:
         for m in self._moves.values():
             m.stop()
         self._sync_bridges()
+        self._refresh_frame()
         self._ws_active = False        # trajectory supersedes a slew
-        self._ws_stop_pending = 0
+        self._stop_pending = 0
         self._db_writing = True
         self._raw.set_accel(self._accel_straight)
         self._raw.curve(self._rt.now_ms, float(radius_mm), float(deg),
@@ -561,8 +596,9 @@ class _SimStBus:
                         right_steps_per_s / self._STEPS_PER_DEG]
         self._ws_last_ms = self._rt.now_ms
         self._ws_active = True
-        self._ws_stop_pending = 0
+        self._stop_pending = 0
         self._db_writing = True
+        self._frame_stale = True       # the caller's controller steers
         return True
 
     def _ws_tick(self, now_ms):
@@ -575,11 +611,6 @@ class _SimStBus:
             self._ws_cur = list(self._ws_tgt)
             self._ws_active = False
             self._db_writing = False   # ramp done: yield
-            if self._ws_stop_pending == 2:
-                for slot, w in self._wheels.items():
-                    self._move(slot).hold_at(
-                        w.angle() * self._STEPS_PER_DEG)
-            self._ws_stop_pending = 0
         else:
             self._ws_cur = [c + max_step * d / mag_max
                             for c, d in zip(self._ws_cur, diff)]
@@ -591,18 +622,22 @@ class _SimStBus:
         # yield only; 0 = coast (instant — freewheel has no
         # controlled deceleration); 1 = brake and 2 = hold DECELERATE
         # at settings.acceleration first (uniform-accel rule,
-        # 2026-08-14), hold anchoring where the robot actually stops.
+        # 2026-08-14) as a move of the coupled controller, heading
+        # loop closed all the way down (3.2.0) — hold anchoring where
+        # the robot actually stops.
         self._raw.stop()
         if mode == 1 or mode == 2:
             for slot in self._wheels:
                 self._move(slot).stop()
-            self._ws_cur = [getattr(self._wheels[0], "_target_dps", 0.0),
-                            getattr(self._wheels[1], "_target_dps", 0.0)]
-            self._ws_tgt = [0.0, 0.0]
-            self._ws_last_ms = self._rt.now_ms
-            self._ws_active = True
-            self._ws_stop_pending = mode
+            self._sync_bridges()       # entry speeds: what the wheels
+            self._refresh_frame()      # are commanded RIGHT NOW
+            self._ws_active = False
+            self._raw.set_accel(self._accel_straight)
+            self._stop_pending = mode
             self._db_writing = True
+            if not self._raw.stop_decel(self._rt.now_ms,
+                                        self._accel_turn):
+                self._apply_stop_end()
             return True
         self._db_writing = False          # yield to the motor layer
         for slot, w in self._wheels.items():
@@ -635,7 +670,8 @@ class _SimStBus:
             raise RuntimeError("db_reset before db_config")
         if not self._raw.is_done():
             raise RuntimeError(
-                "can't reset while a move is active — stop first")
+                "can't reset while a move is active (a brake/hold stop "
+                "is still decelerating) — stop first, or stop(wait=True)")
         if self._use_gyro:
             if self._gyro_hard:
                 _sim_yaw.reset()
@@ -663,6 +699,7 @@ class _SimStBus:
     def servo_run(self, slot, steps_per_s):
         self._move(slot).stop()           # new command wins
         self._wheels[slot].run_speed(steps_per_s / self._STEPS_PER_DEG)
+        self._frame_stale = True          # every shim slot is a wheel
         return True
 
     def servo_coast(self, slot):
@@ -709,6 +746,7 @@ class _SimStBus:
             self._rt.now_ms,
             self._wheels[slot].angle() * self._STEPS_PER_DEG,
             float(delta_counts), float(speed_cps), float(accel_cps2))
+        self._frame_stale = True
         return True
 
     def servo_hold(self, slot):
@@ -754,8 +792,13 @@ class _SimStBus:
                     self._ws_tick(now_ms)
                 else:
                     lt, rt = self._raw.tick(now_ms, l, r)
-                    self._wheels[0].run_speed(lt)
-                    self._wheels[1].run_speed(rt)
+                    if self._stop_pending and self._raw.is_done():
+                        # The brake/hold ramp has landed: apply the
+                        # end-state instead of the post-move hold.
+                        self._apply_stop_end()
+                    else:
+                        self._wheels[0].run_speed(lt)
+                        self._wheels[1].run_speed(rt)
             else:
                 # Yielded (move_wheels / per-slot moves own the
                 # wheels): keep the bridge odometry live anyway, like

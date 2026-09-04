@@ -404,12 +404,21 @@ class DriveBase:
         staged atomically in the C engine and reaches the wheels at
         the same bus-packet boundary. ``brake`` and ``hold``
         DECELERATE at ``settings(acceleration=...)`` first (the
-        uniform-accel rule) — hold anchors where the robot actually
-        stops; ``coast`` releases torque immediately (a freewheel has
-        no controlled deceleration). On encoder servos ``coast`` /
-        ``brake`` likewise apply to both bridges inside one native
-        call, so the second wheel's 1 kHz control tick can't keep
-        driving while the first is already released.
+        uniform-accel rule) as a move of the coupled controller, so
+        the heading loop stays closed all the way down: with
+        ``use_gyro(True)`` the IMU corrects any yaw the brake induces
+        (one wheel gripping harder than the other) exactly as it does
+        mid-straight, and the robot stops on the heading it had.
+        Hold anchors where the robot actually stops. ``coast``
+        releases torque immediately — a freewheel has no controlled
+        deceleration, and nothing can steer wheels that carry no
+        torque. After ``drive()`` / ``move_wheels`` (a line-follow),
+        a brake/hold — like the next move — takes the heading the
+        follow REACHED as its target rather than steering back to
+        the pre-follow one. On encoder servos ``coast`` / ``brake``
+        likewise apply to both bridges inside one native call, so
+        the second wheel's 1 kHz control tick can't keep driving
+        while the first is already released.
 
         Pybricks parity by default: the call returns immediately
         (their stop/brake do too — verified from their source).

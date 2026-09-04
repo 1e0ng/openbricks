@@ -274,6 +274,24 @@ void ob_drivebase_curve(ob_drivebase_t *db,
 void ob_drivebase_stop(ob_drivebase_t *db);
 
 
+// Decelerate to rest from the CURRENT commanded speeds with both
+// axes closed-loop the whole way down — the controlled half of a
+// brake/hold stop. Each axis lands wherever v0²/2a puts it (a pure
+// decel at the accel limit — ``accel_dps2`` for the forward axis,
+// ``turn_accel_dps2`` for the diff axis) and its expiry lock anchors
+// the hold THERE. In gyro mode the diff axis rides the IMU exactly as
+// it does during a straight, so a wheel that grips harder than the
+// other cannot yaw the chassis while braking. An axis already at
+// rest arms nothing and keeps its hold — in gyro mode ``turn_hold``
+// is the absolute target, and re-capturing measured heading at a
+// finished move's end would bank the arrival residual (the +7.6 deg
+// per-square regression). Returns false when neither axis needed a
+// ramp: the caller applies the end-state at once.
+bool ob_drivebase_stop_decel(ob_drivebase_t *db,
+                             long now_ms,
+                             ob_float_t turn_accel_dps2);
+
+
 // One control tick — see file-top comment for the math. Reads
 // ``observer.pos_hat`` from each servo, writes ``target_dps`` on
 // each. If ``use_gyro`` is set, expects the binding to have written

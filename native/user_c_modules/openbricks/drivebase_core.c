@@ -388,6 +388,78 @@ void ob_drivebase_stop(ob_drivebase_t *db) {
 }
 
 
+// Arm ``traj`` as a pure deceleration from ``v0`` at ``accel``,
+// landing wherever v0²/2a puts the axis. False = nothing armed: the
+// axis is at STANDSTILL by the arrival definition (the residual
+// P-term at a finished move's done latch is a few dps — ramping
+// that would move the hold by a fraction of a degree, banking it in
+// gyro mode, and flip done false for a few ms under the caller's
+// very next call), or there is no accel limit to ramp against.
+static bool db_arm_decel(ob_trajectory_t *traj, ob_float_t pos,
+                         ob_float_t v0, ob_float_t accel) {
+    ob_float_t va = (v0 < 0) ? -v0 : v0;
+    if (va < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS
+        || accel <= (ob_float_t)0.0) {
+        return false;
+    }
+    ob_float_t stop_d = v0 * va / ((ob_float_t)2.0 * accel);
+    ob_trajectory_init_v0(traj, pos, pos + stop_d, va, accel, v0);
+    return true;
+}
+
+
+bool ob_drivebase_stop_decel(ob_drivebase_t *db, long now_ms,
+                             ob_float_t turn_accel_dps2) {
+    ob_float_t sum_pos = db_sum_pos(db);
+    // The diff reference starts at the HELD target, not the measured
+    // heading: in gyro mode that is the absolute frame (a stop
+    // dispatched at a finished move's end must not re-baseline it),
+    // and a stale hold is the caller's to refresh before arming.
+    ob_float_t diff_pos = db->use_gyro ? db->turn_hold
+                                       : db_diff_pos_encoder(db);
+    // Same entry-speed rule as every arm: the outgoing command minus
+    // the integral's share (the integral restarts with the ramp).
+    ob_float_t v0_sum = (db->left->target_dps + db->right->target_dps)
+                        / (ob_float_t)2.0
+                        - db->ki * db->integ_sum;
+    ob_float_t v0_diff = (db->left->target_dps - db->right->target_dps)
+                         / (ob_float_t)2.0
+                         - db->ki * db->integ_diff;
+
+    bool fwd = db_arm_decel(&db->fwd, sum_pos, v0_sum, db->accel_dps2);
+    if (fwd) {
+        db->fwd_start_ms = now_ms;
+        db->fwd_active   = true;
+    } else {
+        db->fwd_hold   = sum_pos;
+        db->fwd_active = false;
+    }
+    bool turn = db_arm_decel(&db->turn, diff_pos, v0_diff,
+                             turn_accel_dps2);
+    if (turn) {
+        db->turn_start_ms = now_ms;
+        db->turn_active   = true;
+    } else {
+        db->turn_hold   = diff_pos;
+        db->turn_active = false;
+    }
+    if (!fwd && !turn) {
+        return false;
+    }
+    db->done     = false;
+    db->settling = false;
+    // A fresh integral and landing budget for the ramp — but NOT the
+    // expiry diagnostics: this stop is dispatched by done() before
+    // the user's move call returns, and db_settle_stats() must still
+    // describe THAT move (the same rule ob_drivebase_stop follows).
+    db->integ_sum        = 0.0;
+    db->integ_diff       = 0.0;
+    db->landing_active   = false;
+    db->landing_best_err = 0.0;
+    return true;
+}
+
+
 // ---------------------------------------------------------------------
 // Per-tick control law
 

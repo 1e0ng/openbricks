@@ -336,5 +336,80 @@ class DriveBaseParityTests(unittest.TestCase):
         self.assertGreater(fast_delta, slow_delta * 3.0)
 
 
+class RawDriveBaseStopDecelTests(unittest.TestCase):
+    """``RawDriveBase.stop_decel`` / ``refresh_frame`` — the shim's
+    half of the 3.2.0 closed-loop brake (firmware ``sb_db_stop``
+    parity), against a synthetic perfect plant: commanded speeds
+    integrate straight into wheel position at 1 kHz."""
+
+    def _raw(self):
+        from openbricks_sim._native import RawDriveBase
+        raw = RawDriveBase(88.0, 136.0)
+        raw.set_accel(400.0)
+        return raw
+
+    @staticmethod
+    def _run(raw, start_ms, ms, l, r):
+        for t in range(ms):
+            lt, rt = raw.tick(start_ms + t, l, r)
+            l += lt * 0.001
+            r += rt * 0.001
+        return l, r
+
+    def test_at_rest_arms_nothing(self):
+        raw = self._raw()
+        raw.sync(0.0, 0.0, 5.0, -5.0)          # a done latch's P-term
+        self.assertFalse(raw.stop_decel(1000, 400.0))
+        self.assertTrue(raw.is_done())
+
+    def test_cruise_ramps_to_rest_with_the_roll_out_physics_demands(self):
+        raw = self._raw()
+        raw.tick(999, 0.0, 0.0)                 # timebase
+        raw.sync(0.0, 0.0, 200.0, 200.0)
+        self.assertTrue(raw.stop_decel(1000, 400.0))
+        self.assertFalse(raw.is_done())
+        l, r = self._run(raw, 1000, 1500, 0.0, 0.0)
+        self.assertTrue(raw.is_done())
+        # v0^2 / 2a = 200^2 / 800 = 50 wheel-deg.
+        self.assertLess(abs((l + r) / 2.0 - 50.0), 3.0)
+
+    def test_gyro_counter_steers_through_the_ramp(self):
+        raw = self._raw()
+        raw.set_use_gyro(True)
+        raw.tick(999, 0.0, 0.0)
+        raw.sync(0.0, 0.0, 200.0, 200.0)
+        self.assertTrue(raw.stop_decel(1000, 400.0))
+        l, r = self._run(raw, 1000, 50, 0.0, 0.0)
+        l0, r0 = l, r
+        raw.set_heading_override(5.0)          # body says: veered right
+        l, r = self._run(raw, 1050, 100, l, r)
+        self.assertFalse(raw.is_done())         # still ramping
+        self.assertGreater(r - r0, (l - l0) + 1.0)
+
+    def test_refresh_frame_adopts_the_measured_heading(self):
+        # After a stale stretch (move_wheels), the next straight must
+        # hold the heading the chassis HAS — override 10 body-deg —
+        # not steer back to the pre-stretch target of 0.
+        raw = self._raw()
+        raw.set_use_gyro(True)
+        raw.set_heading_override(10.0)
+        raw.refresh_frame()
+        raw.sync(0.0, 0.0, 0.0, 0.0)
+        raw.straight(1000, 100.0, 60.0)
+        l, r = self._run(raw, 1001, 300, 0.0, 0.0)
+        self.assertLess(abs(l - r), 1.0)        # no counter-steer
+
+    def test_without_refresh_the_stale_target_counter_steers(self):
+        # The control for the test above: same setup minus the
+        # refresh — the controller chases the old target.
+        raw = self._raw()
+        raw.set_use_gyro(True)
+        raw.set_heading_override(10.0)
+        raw.sync(0.0, 0.0, 0.0, 0.0)
+        raw.straight(1000, 100.0, 60.0)
+        l, r = self._run(raw, 1001, 300, 0.0, 0.0)
+        self.assertGreater(abs(l - r), 5.0)
+
+
 if __name__ == "__main__":
     unittest.main()

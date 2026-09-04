@@ -203,7 +203,24 @@ static long st_db_ws_last_ms;
 // End-state a decelerating stop applies when its ramp completes:
 // 0 = none, 1 = brake (registers at 0, torque on — nothing more to
 // do), 2 = hold (capture poses THERE and arm the per-slot holds).
+// The ramp itself is a coupled-controller stop trajectory
+// (ob_drivebase_stop_decel), NOT the open-loop wheel slew above: the
+// heading loop stays closed all the way down, so in gyro mode the
+// IMU corrects any yaw the brake induces (one wheel gripping harder
+// than the other) — bench ask 2026-09-04, "the angle maintains".
 static uint8_t st_db_stop_pending;
+// The coupled controller's heading target is ABSOLUTE in gyro mode
+// (turn_hold). Wheels driven outside it — db_move_wheels (drive /
+// line-follow) or a per-slot run/move on a wheel slot — rotate the
+// chassis without moving that target, so the next coupled command
+// (a move, or a decelerating brake/hold) would steer back to the
+// stale one: a brake after a line-follow unwound the follow's whole
+// rotation. Set by those paths; the next coupled arm re-anchors the
+// target to the measured heading and clears it. A move the
+// controller itself finished does NOT set it — its hold IS the
+// absolute target, and re-capturing measured there banks every
+// arrival residual (the +7.6 deg square).
+static bool st_db_frame_stale;
 
 static void st_db_ws_clear_locked(void) {
     st_db_ws_active = false;
@@ -218,6 +235,48 @@ static void st_moves_reset_all(void) {
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         ob_smove_init(&st_moves[i]);
     }
+}
+
+static void st_db_mark_frame_stale_locked(int slot) {
+    if (slot >= 0 && (slot == st_db_slot_l || slot == st_db_slot_r)) {
+        st_db_frame_stale = true;
+    }
+}
+
+// Re-anchor the absolute heading target to the measured heading when
+// the wheels were last driven outside the coupled controller. Called
+// by every coupled arm (moves and the decelerating stops) after the
+// bridges are synced; a no-op in encoder mode, where every arm reads
+// the encoder diff afresh anyway.
+static void st_db_refresh_frame_locked(void) {
+    if (st_db_frame_stale && st_db.use_gyro) {
+        st_db.turn_hold = st_db.heading_override_wheel_deg;
+        // Learned against a target that no longer applies.
+        st_db.integ_diff = (ob_float_t)0.0;
+    }
+    st_db_frame_stale = false;
+}
+
+// The end-state of a brake/hold stop, applied once the ramp has
+// landed (or at once when there was nothing to ramp): both wheels'
+// registers at 0 in one sync packet with torque kept on, plus — for
+// hold — both poses captured HERE and the per-slot holds armed. The
+// db yields; brake's zero-speed registers and hold's per-slot moves
+// own the wheels from here.
+static void st_db_apply_stop_end_locked(void) {
+    ob_sservo_t *sv = sservo_get();
+    ob_sservo_set_speed(sv, st_db_slot_l, 0);
+    ob_sservo_set_speed(sv, st_db_slot_r, 0);
+    if (st_db_stop_pending == 2
+        && sv->slots[st_db_slot_l].have_raw
+        && sv->slots[st_db_slot_r].have_raw) {
+        ob_smove_hold_at(&st_moves[st_db_slot_l],
+            (ob_float_t)ob_sservo_counts(sv, st_db_slot_l));
+        ob_smove_hold_at(&st_moves[st_db_slot_r],
+            (ob_float_t)ob_sservo_counts(sv, st_db_slot_r));
+    }
+    st_db_stop_pending = 0;
+    st_db_writing = false;
 }
 
 static void st_db_sync_bridges_locked(void) {
@@ -249,6 +308,16 @@ static void st_db_tick_locked(void) {
         return;
     }
     st_db_sync_bridges_locked();
+    // Hard-source heading is refreshed EVERY tick, yielded or not:
+    // the stop/arm paths capture it while the db is not writing (a
+    // brake after a line-follow re-anchors the frame to it), and a
+    // value last refreshed at the previous move's end would hand
+    // them the heading from before the follow.
+    if (st_db.use_gyro && st_db_gyro_source == 1) {
+        st_db.heading_override_wheel_deg = ob_drivebase_body_to_wheel_diff(
+            &st_db,
+            (ob_float_t)openbricks_hard_yaw_deg() - st_db_yaw_ref);
+    }
     if (!st_db_writing) {
         return;                    // configured but yielded
     }
@@ -307,17 +376,6 @@ static void st_db_tick_locked(void) {
             st_db_ws_cur_r = (ob_float_t)st_db_ws_tgt_r;
             st_db_ws_active = false;   // cur values persist as the
             st_db_writing = false;     // seed for the next command
-            if (st_db_stop_pending == 2
-                && sv->slots[st_db_slot_l].have_raw
-                && sv->slots[st_db_slot_r].have_raw) {
-                // Decelerating hold: anchor where the robot actually
-                // stopped.
-                ob_smove_hold_at(&st_moves[st_db_slot_l],
-                    (ob_float_t)ob_sservo_counts(sv, st_db_slot_l));
-                ob_smove_hold_at(&st_moves[st_db_slot_r],
-                    (ob_float_t)ob_sservo_counts(sv, st_db_slot_r));
-            }
-            st_db_stop_pending = 0;
         } else {
             st_db_ws_cur_l += max_step * diff_l / mag_max;
             st_db_ws_cur_r += max_step * diff_r / mag_max;
@@ -326,12 +384,14 @@ static void st_db_tick_locked(void) {
         ob_sservo_set_speed(sv, st_db_slot_r, (int32_t)st_db_ws_cur_r);
         return;
     }
-    if (st_db.use_gyro && st_db_gyro_source == 1) {
-        st_db.heading_override_wheel_deg = ob_drivebase_body_to_wheel_diff(
-            &st_db,
-            (ob_float_t)openbricks_hard_yaw_deg() - st_db_yaw_ref);
-    }
     ob_drivebase_tick(&st_db, (long)st_db_now_ms);
+    if (st_db_stop_pending && ob_drivebase_is_done(&st_db)) {
+        // The brake/hold ramp has LANDED (arrival, or the settle
+        // forgive for duty-mode stiction): apply the end-state
+        // instead of the controller's post-move hold.
+        st_db_apply_stop_end_locked();
+        return;
+    }
     // Wheel-degree targets -> slot steps/s. set_speed re-applies the
     // slot invert, mirroring how counts un-applied it above.
     ob_sservo_set_speed(sv, st_db_slot_l,
@@ -894,6 +954,9 @@ static mp_obj_t sb_servo_run(mp_obj_t self_in, mp_obj_t slot_in,
         ob_smove_stop(&st_moves[slot]);   // new command wins
     }
     int r = ob_sservo_set_speed(sservo_get(), slot, steps);
+    if (r == 0) {
+        st_db_mark_frame_stale_locked(slot);
+    }
     bus_release();
     return mp_obj_new_bool(r == 0);
 }
@@ -988,6 +1051,7 @@ static mp_obj_t sb_servo_move(size_t n_args, const mp_obj_t *args) {
         ob_smove_start(&st_moves[slot], (long)st_db_now_ms,
                        (ob_float_t)ob_sservo_counts(sservo_get(), slot),
                        delta, speed, accel);
+        st_db_mark_frame_stale_locked(slot);
     }
     bus_release();
     return mp_obj_new_bool(ok);
@@ -1245,6 +1309,7 @@ static mp_obj_t sb_db_config(size_t n_args, const mp_obj_t *args) {
     // free instead of torquing them into a hold at pose zero.
     st_db_writing = false;
     st_db_fault = 0;
+    st_db_frame_stale = false;
     ob_smove_init(&st_moves[st_db_slot_l]);
     ob_smove_init(&st_moves[st_db_slot_r]);
     bus_release();
@@ -1282,6 +1347,7 @@ static mp_obj_t sb_db_straight(size_t n_args, const mp_obj_t *args) {
     // per-slot move, and arms from freshly synced odometry (the
     // yielded tick doesn't run ob_drivebase_tick, so sync here).
     st_db_sync_bridges_locked();
+    st_db_refresh_frame_locked();
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
@@ -1307,6 +1373,7 @@ static mp_obj_t sb_db_turn(mp_obj_t self_in, mp_obj_t deg_in,
                      MP_ERROR_TEXT("db_turn before db_config"));
     }
     st_db_sync_bridges_locked();
+    st_db_refresh_frame_locked();
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
@@ -1331,6 +1398,7 @@ static mp_obj_t sb_db_curve(size_t n_args, const mp_obj_t *args) {
                      MP_ERROR_TEXT("db_curve before db_config"));
     }
     st_db_sync_bridges_locked();
+    st_db_refresh_frame_locked();
     ob_smove_stop(&st_moves[st_db_slot_l]);
     ob_smove_stop(&st_moves[st_db_slot_r]);
     st_db_fault = 0;      // retry re-detects within ~200 ms
@@ -1419,6 +1487,10 @@ static mp_obj_t sb_db_move_wheels(mp_obj_t self_in, mp_obj_t l_in,
         st_db_ws_active = true;
         st_db_writing = true;     // own the wheels while ramping —
         ok = true;                // the tick slews and then yields
+        // The chassis is about to rotate by whatever the caller's
+        // controller decides; the absolute heading target does not
+        // follow it until the next coupled arm re-anchors.
+        st_db_frame_stale = true;
     }
     bus_release();
     return mp_obj_new_bool(ok);
@@ -1453,25 +1525,29 @@ static mp_obj_t sb_db_stop(size_t n_args, const mp_obj_t *args) {
         } else if (mode == 1 || mode == 2) {
             // brake / hold: DECELERATE at settings.acceleration
             // first (the uniform-accel rule — bench directive
-            // 2026-08-14: deceleration follows the same value), via
-            // the same wheel-speed slew move_wheels uses. Hold's
+            // 2026-08-14: deceleration follows the same value), as a
+            // coupled-controller stop trajectory so the heading loop
+            // — the IMU, in gyro mode — stays closed through the
+            // ramp (the open-loop wheel slew it replaced could not
+            // stop a brake from yawing the chassis). Entry speeds
+            // come from the freshly synced bridges: whatever the
+            // wheels are commanded RIGHT NOW, slew or move. Hold's
             // pose capture is deferred to ramp completion — it
             // anchors where the robot actually STOPS, not where the
             // stop was requested mid-motion.
+            st_db_sync_bridges_locked();
+            st_db_refresh_frame_locked();
             ob_smove_stop(&st_moves[st_db_slot_l]);
             ob_smove_stop(&st_moves[st_db_slot_r]);
-            ob_sservo_slot_t *sl = &sv->slots[st_db_slot_l];
-            ob_sservo_slot_t *sr = &sv->slots[st_db_slot_r];
-            st_db_ws_cur_l = (ob_float_t)(sl->invert ? -sl->target_steps
-                                                     : sl->target_steps);
-            st_db_ws_cur_r = (ob_float_t)(sr->invert ? -sr->target_steps
-                                                     : sr->target_steps);
-            st_db_ws_last_ms = (long)st_db_now_ms;
-            st_db_ws_tgt_l = 0;
-            st_db_ws_tgt_r = 0;
-            st_db_ws_active = true;
-            st_db_writing = true;
+            st_db.accel_dps2 = st_db_accel_straight;
             st_db_stop_pending = (uint8_t)mode;
+            st_db_writing = true;
+            if (!ob_drivebase_stop_decel(&st_db, (long)st_db_now_ms,
+                                         st_db_accel_turn)) {
+                // Already at rest (the per-move stop DriveBase's
+                // flow dispatches at every done()): nothing to ramp.
+                st_db_apply_stop_end_locked();
+            }
         } else {
             // coast (and the no-arg yield-only form): instant —
             // torque-off is a freewheel by definition; there is no
@@ -1605,10 +1681,14 @@ static mp_obj_t sb_db_reset(mp_obj_t self_in) {
                      MP_ERROR_TEXT("db_reset before db_config"));
     }
     if (st_db.fwd_active || st_db.turn_active) {
+        // A brake/hold stop is a move too while it decelerates —
+        // stop(then=..., wait=True) returns once it has landed.
         bus_release();
         mp_raise_msg(&mp_type_RuntimeError,
                      MP_ERROR_TEXT("can't reset while a move is "
-                                   "active — stop first"));
+                                   "active (a brake/hold stop is still "
+                                   "decelerating) — stop first, or "
+                                   "stop(wait=True)"));
     }
     if (st_db.use_gyro) {
         if (st_db_gyro_source == 1) {

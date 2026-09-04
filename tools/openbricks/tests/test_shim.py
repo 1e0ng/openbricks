@@ -956,6 +956,35 @@ class SimStBusEngineTests(_ShimTestBase):
         self.assertTrue(abs(drift) < 5.0,
                         "gyro square drifted %+.1f deg" % drift)
 
+    def test_brake_after_a_follow_keeps_the_heading_the_follow_reached(self):
+        # Firmware parity (3.2.0): a brake/hold decelerates as a move
+        # of the coupled controller with the heading loop closed, and
+        # after move_wheels (a line-follow) the heading target
+        # re-anchors to where the follow REACHED — the brake and the
+        # next straight hold that heading instead of unwinding the
+        # follow's rotation back to the pre-follow target.
+        from openbricks_sim.shim import ShimBNO055
+        imu = ShimBNO055(i2c=None, address=0x29)
+        db, _, _ = self._serial_db(imu=imu)
+        db.settings(straight_speed=150, acceleration=360)
+        db.use_gyro(True)                        # absolute target: here
+        h0 = self._heading()
+        db.move_wheels(200, 100)                 # arcing: chassis rotates
+        time.sleep_ms(1500)
+        reached = ((self._heading() - h0 + 180.0) % 360.0) - 180.0
+        self.assertGreater(abs(reached), 6.0,
+                           "arc rotated only %+.1f deg" % reached)
+        db.stop(then=Stop.BRAKE, wait=True)
+        after = ((self._heading() - h0 + 180.0) % 360.0) - 180.0
+        self.assertLess(abs(after - reached), 6.0,
+                        "brake steered from %+.1f to %+.1f deg"
+                        % (reached, after))
+        db.straight(60)
+        end = ((self._heading() - h0 + 180.0) % 360.0) - 180.0
+        self.assertLess(abs(end - after), 5.0,
+                        "straight after the follow steered from %+.1f "
+                        "to %+.1f deg" % (after, end))
+
     def test_servo_feedback_reports_live_wheel_speed(self):
         # The 1.50.0 feedback surface: an adopted motor's speed()
         # reads through servo_feedback; in the sim that's the MuJoCo

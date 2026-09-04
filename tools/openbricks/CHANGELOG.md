@@ -3,6 +3,41 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.2.0 — brake/hold stops keep the heading loop closed
+
+`stop(then=Stop.BRAKE)` and `Stop.HOLD` used to decelerate through
+an open-loop wheel-speed slew: both wheels ramped to zero in
+lockstep on the wire, but nothing watched the chassis — a wheel
+gripping harder than the other yawed the robot on every brake, and
+with the gyro on the IMU could see the yaw and could not act on it.
+The ramp is now a move of the coupled controller (a stop trajectory
+on both axes, `ob_drivebase_stop_decel`), so the heading loop stays
+closed all the way down exactly as it does mid-straight: in gyro
+mode the IMU corrects the yaw as it happens and the robot stops on
+the heading it had. Hold still anchors where the robot actually
+stops; coast is unchanged (torque off at once — nothing can steer
+wheels that carry no torque).
+
+Two things had to follow for that to work after a line-follow.
+`drive()` / `move_wheels` rotate the chassis outside the
+controller's absolute heading target, and a brake — or the next
+move — used to steer back to the pre-follow heading, unwinding the
+follow. The engine now marks the frame stale on those paths and the
+next coupled command re-anchors the target to the heading the
+follow reached (a move the controller itself finished keeps its
+absolute target, so turn residuals still don't bank). And the
+hard-source (ICM-45686) heading is refreshed every tick, yielded or
+not — it used to update only inside the trajectory tick, so the
+re-anchor would have captured the heading from before the follow.
+The soft-pumped IMU gets one pump before a brake/hold for the same
+reason. `reset()` during a decelerating brake/hold raises (it is a
+move until it lands — `stop(then=..., wait=True)` first); earlier
+releases' advice to `reset()` at the line-follow hand-off is no
+longer needed. The simulator's emulated bus gets the same semantics
+(`RawDriveBase.stop_decel` / `refresh_frame`), so a program that
+brakes out of a line-follow behaves the same in MuJoCo and on the
+bench. Flash 3.2.0.
+
 ## 3.1.0 — servo mode writes are verified on the servo, not just on the wire
 
 Fixes the cold-start pivot: power on, press the button within ~5 s,
