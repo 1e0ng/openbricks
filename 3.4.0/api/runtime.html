@@ -1,0 +1,870 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Runtime services &mdash; openbricks 3.4.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/api/runtime.html" />
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=b0e360d0"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Architecture" href="../architecture.html" />
+    <link rel="prev" title="Tools" href="tools.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.4.0">firmware&nbsp;v3.4.0</a>
+<a class="obk-pdf-btn" href="../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#servo-dynamometer-two-st-3032s-coupled">Servo dynamometer (two ST-3032s, coupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#servo-soak-test-one-st-3032">Servo soak test (one ST-3032)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../servo-health.html">Servo health &amp; characterisation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#dynamometer-what-does-this-servo-do">Dynamometer: what does <em>this</em> servo do?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#soak-test-is-it-still-good">Soak test: is it still good?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API reference</a></li>
+      <li class="breadcrumb-item active">Runtime services</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/1e0ng/openbricks/blob/main/docs/api/runtime.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="runtime-services">
+<h1>Runtime services<a class="headerlink" href="#runtime-services" title="Link to this heading"></a></h1>
+<p>These modules run behind the scenes on the hub — the frozen <code class="docutils literal notranslate"><span class="pre">main.py</span></code>
+wires them up at boot. They’re documented here because their behavior
+(button semantics, log rotation, BLE persistence) is user-visible.</p>
+<section id="module-openbricks.pins">
+<span id="reserved-gpio-guard"></span><h2>Reserved-GPIO guard<a class="headerlink" href="#module-openbricks.pins" title="Link to this heading"></a></h2>
+<p>Reserved-GPIO guard: fail pin misuse at construction time, loudly.</p>
+<p>Drivers that take raw GPIO numbers call <a class="reference internal" href="#openbricks.pins.check" title="openbricks.pins.check"><code class="xref py py-func docutils literal notranslate"><span class="pre">check()</span></code></a> before touching
+<code class="docutils literal notranslate"><span class="pre">machine.Pin</span></code>. Two kinds of mistakes are caught:</p>
+<ul class="simple">
+<li><p><strong>Chip-reserved pins</strong> — pins that can never work for user wiring on
+the running chip: nonexistent numbers, the SPI-flash pins, the
+ESP32-S3’s native-USB pair, and (for output roles) the classic
+ESP32’s input-only range. Claiming these either crashes the chip,
+bricks the USB connection, or fails somewhere far from the real
+mistake; the guard names the pin and the reason instead.</p></li>
+<li><p><strong>Pins the firmware runtime already owns</strong> — the program button, the
+Bluetooth-toggle button, and the status LED register themselves via
+<a class="reference internal" href="#openbricks.pins.claim" title="openbricks.pins.claim"><code class="xref py py-func docutils literal notranslate"><span class="pre">claim()</span></code></a> when the hub / launcher wire them at boot. A driver
+constructed on one of those pins gets an error naming the owner
+(“in use as the program button”) plus the constructor argument that
+moves the owner elsewhere.</p></li>
+</ul>
+<p>Chip detection reads <code class="docutils literal notranslate"><span class="pre">os.uname().machine</span></code> and recognizes the two
+supported targets (ESP32, ESP32-S3). Off-chip — CPython tests, the
+MuJoCo sim, unix MicroPython — no chip is detected and the
+chip-reserved rules are skipped (the runtime-claims check still
+applies); pins there are fakes, not wiring. Tests pin a chip
+explicitly with <a class="reference internal" href="#openbricks.pins.set_chip" title="openbricks.pins.set_chip"><code class="xref py py-func docutils literal notranslate"><span class="pre">set_chip()</span></code></a>.</p>
+<p>Strapping pins (0/3/45/46 on the S3) are deliberately <em>not</em> blocked:
+they work as regular GPIOs after boot and are routinely used. The
+wiring guides in <code class="docutils literal notranslate"><span class="pre">docs/hardware.md</span></code> cover the soft cases.</p>
+<dl class="py exception">
+<dt class="sig sig-object py" id="openbricks.pins.ReservedPinError">
+<span class="property"><span class="k"><span class="pre">exception</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.pins.</span></span><span class="sig-name descname"><span class="pre">ReservedPinError</span></span><a class="reference internal" href="../_modules/openbricks/pins.html#ReservedPinError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.pins.ReservedPinError" title="Link to this definition"></a></dt>
+<dd><p>A GPIO was requested that can’t (or shouldn’t) be user-wired.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.pins.set_chip">
+<span class="sig-prename descclassname"><span class="pre">openbricks.pins.</span></span><span class="sig-name descname"><span class="pre">set_chip</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">chip</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/pins.html#set_chip"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.pins.set_chip" title="Link to this definition"></a></dt>
+<dd><p>Force the chip model the guard validates against.</p>
+<p><code class="docutils literal notranslate"><span class="pre">chip</span></code> is <code class="docutils literal notranslate"><span class="pre">&quot;esp32&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;esp32s3&quot;</span></code>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> to return to
+autodetection. Used by tests; harmless elsewhere.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.pins.claim">
+<span class="sig-prename descclassname"><span class="pre">openbricks.pins.</span></span><span class="sig-name descname"><span class="pre">claim</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pin</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">role</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hint</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/pins.html#claim"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.pins.claim" title="Link to this definition"></a></dt>
+<dd><p>Record that the firmware runtime owns <code class="docutils literal notranslate"><span class="pre">pin</span></code> (e.g. a button).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.pins.release">
+<span class="sig-prename descclassname"><span class="pre">openbricks.pins.</span></span><span class="sig-name descname"><span class="pre">release</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pin</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/pins.html#release"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.pins.release" title="Link to this definition"></a></dt>
+<dd><p>Forget a claim — for callers that hand a pin back (e.g. after
+<code class="docutils literal notranslate"><span class="pre">hub.bluetooth_toggle.stop()</span></code>). Unknown pins are a no-op.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.pins.check">
+<span class="sig-prename descclassname"><span class="pre">openbricks.pins.</span></span><span class="sig-name descname"><span class="pre">check</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pin</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">role</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/pins.html#check"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.pins.check" title="Link to this definition"></a></dt>
+<dd><p>Validate that <code class="docutils literal notranslate"><span class="pre">pin</span></code> is usable for <code class="docutils literal notranslate"><span class="pre">role</span></code> on this chip.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pin</strong> – GPIO number the caller is about to wire.</p></li>
+<li><p><strong>role</strong> – human-readable purpose (“L298N IN1”, “HC-SR04 echo”) —
+appears in the error message.</p></li>
+<li><p><strong>output</strong> – the pin must drive (True) or only read (False). Only
+matters on the classic ESP32, where GPIO 34-39 are
+input-only.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#openbricks.pins.ReservedPinError" title="openbricks.pins.ReservedPinError"><strong>ReservedPinError</strong></a> – with the pin, the role, and the reason.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-openbricks.launcher">
+<span id="program-launcher"></span><h2>Program launcher<a class="headerlink" href="#module-openbricks.launcher" title="Link to this heading"></a></h2>
+<p>Button-gated user-program launcher.</p>
+<p>Pybricks-style workflow:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">upload</span></code> stages a script at <code class="docutils literal notranslate"><span class="pre">/program.py</span></code> but
+does not run it — the user presses the program button to launch.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code> stages the same script and triggers the
+launcher immediately. Output streams back to the client; pressing
+the program button stops the program; when the program stops, the
+terminal exits.</p></li>
+</ul>
+<p>Each press is a full press-release cycle. The program button has its
+own GPIO (default <code class="docutils literal notranslate"><span class="pre">39</span></code>), separate from the BLE-toggle button
+watched by <a class="reference internal" href="#module-openbricks.bluetooth_button" title="openbricks.bluetooth_button"><code class="xref py py-mod docutils literal notranslate"><span class="pre">openbricks.bluetooth_button</span></code></a> (default <code class="docutils literal notranslate"><span class="pre">38</span></code>). Two
+pins → no duration-based dispatch — every press on the program pin
+means start-or-stop, and every press on the BLE pin means toggle-BLE.</p>
+<p>Wiring:</p>
+<ul class="simple">
+<li><p>Press while idle → start <code class="docutils literal notranslate"><span class="pre">/program.py</span></code> (on release, with a
+post-stop lockout against bounce).</p></li>
+<li><p>Press while running → the stop fires on press-DOWN: the e-stop
+latch engages (motors halt + motion commands raise — see
+<code class="xref py py-mod docutils literal notranslate"><span class="pre">openbricks.estop</span></code>), and a <code class="docutils literal notranslate"><span class="pre">KeyboardInterrupt</span></code> injection is
+requested and <em>retried</em> until the program is actually dead.</p></li>
+</ul>
+<p>The watcher runs off a <code class="docutils literal notranslate"><span class="pre">machine.Timer</span></code> kept alive for the whole hub
+uptime (we never <code class="docutils literal notranslate"><span class="pre">deinit</span></code> it), so button-press-to-run survives
+<code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code> interrupting the main idle loop.</p>
+<p>Typical <code class="docutils literal notranslate"><span class="pre">main.py</span></code> (the firmware ships a frozen default; users can
+override by writing to <code class="docutils literal notranslate"><span class="pre">/main.py</span></code> in VFS):</p>
+<blockquote>
+<div><p>from openbricks import bluetooth, launcher
+bluetooth.apply_persisted_state()
+launcher.run()          # installs watcher + blocks on the idle loop</p>
+</div></blockquote>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.launcher.</span></span><span class="sig-name descname"><span class="pre">Launcher</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">button</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">program_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_PROGRAM_PATH</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">poll_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_POLL_MS</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/launcher.html#Launcher"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.launcher.Launcher" title="Link to this definition"></a></dt>
+<dd><p>Shared state for the program-button watcher.</p>
+<p>Tests instantiate this directly and drive <code class="docutils literal notranslate"><span class="pre">_tick</span></code> with a fake
+Pin; production code uses <code class="docutils literal notranslate"><span class="pre">_ensure_launcher()</span></code> below, which
+installs a singleton + <code class="docutils literal notranslate"><span class="pre">machine.Timer</span></code>.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher.START_LOCKOUT_MS">
+<span class="sig-name descname"><span class="pre">START_LOCKOUT_MS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">500</span></span><a class="headerlink" href="#openbricks.launcher.Launcher.START_LOCKOUT_MS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher.STOP_RETRY_MS">
+<span class="sig-name descname"><span class="pre">STOP_RETRY_MS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">300</span></span><a class="headerlink" href="#openbricks.launcher.Launcher.STOP_RETRY_MS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher.STARVE_NOTE_MS">
+<span class="sig-name descname"><span class="pre">STARVE_NOTE_MS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">5000</span></span><a class="headerlink" href="#openbricks.launcher.Launcher.STARVE_NOTE_MS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher.DEBOUNCE_TICKS">
+<span class="sig-name descname"><span class="pre">DEBOUNCE_TICKS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></span><a class="headerlink" href="#openbricks.launcher.Launcher.DEBOUNCE_TICKS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher.RUN_START_GRACE_MS">
+<span class="sig-name descname"><span class="pre">RUN_START_GRACE_MS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">400</span></span><a class="headerlink" href="#openbricks.launcher.Launcher.RUN_START_GRACE_MS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher.START_PRESS_OPEN_MS">
+<span class="sig-name descname"><span class="pre">START_PRESS_OPEN_MS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">600</span></span><a class="headerlink" href="#openbricks.launcher.Launcher.START_PRESS_OPEN_MS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher.RELEASE_CHATTER_MS">
+<span class="sig-name descname"><span class="pre">RELEASE_CHATTER_MS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">500</span></span><a class="headerlink" href="#openbricks.launcher.Launcher.RELEASE_CHATTER_MS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.launcher.Launcher.note_external_stop">
+<span class="sig-name descname"><span class="pre">note_external_stop</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/launcher.html#Launcher.note_external_stop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.launcher.Launcher.note_external_stop" title="Link to this definition"></a></dt>
+<dd><p>Attribute a stop delivered OUTSIDE this watcher’s own
+machinery — the hard-button path, or a REPL Ctrl-C.</p>
+<p>The 1.48.2 start gates check state (<cite>_lockout_until_ms</cite>,
+press lifecycle) that only the watcher’s stop path armed.
+When the hard path wins the race (stop in ~2 ms, before the
+watcher’s next 50 ms tick), that state never arms: the
+stopping press’s echoes — PCNT edges, the hard latch’s
+post-disarm confirmation — read as fresh idle presses and
+dispatch a phantom start (bench 2026-08-03, second
+occurrence: gates in place, lockout never armed, next BLE
+session dead again). Called from the program teardown, so
+EVERY interrupt-unwound run arms the same suppression.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.launcher.dump_events">
+<span class="sig-prename descclassname"><span class="pre">openbricks.launcher.</span></span><span class="sig-name descname"><span class="pre">dump_events</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/launcher.html#dump_events"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.launcher.dump_events" title="Link to this definition"></a></dt>
+<dd><p>Print the launcher button-event ring, oldest first.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.launcher.program_running">
+<span class="sig-prename descclassname"><span class="pre">openbricks.launcher.</span></span><span class="sig-name descname"><span class="pre">program_running</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/launcher.html#program_running"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.launcher.program_running" title="Link to this definition"></a></dt>
+<dd><p>True while a user program is executing — whatever started it
+(button press, <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code>, or a scheduled start; all
+paths maintain the same flag).</p>
+<p>This is the hub-wide “robot is running” signal. The BLE toggle
+watcher polls it from its 50 ms tick to flash the status LED
+while a program runs (<code class="docutils literal notranslate"><span class="pre">openbricks.bluetooth_button</span></code>), which is
+why it must stay cheap: one attribute read, no allocation.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.launcher.run">
+<span class="sig-prename descclassname"><span class="pre">openbricks.launcher.</span></span><span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">program_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_PROGRAM_PATH</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">button_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_BUTTON_PIN</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">poll_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_POLL_MS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timer_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/launcher.html#run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.launcher.run" title="Link to this definition"></a></dt>
+<dd><p>Install the button watcher and block on the cooperative drain
+loop. Called from the frozen <code class="docutils literal notranslate"><span class="pre">main.py</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">timer_id=0</span></code> is the first ESP32-S3 hardware timer. The previous
+default <code class="docutils literal notranslate"><span class="pre">-1</span></code> (virtual timer) was supported by older MicroPython
+builds but raises <code class="docutils literal notranslate"><span class="pre">ValueError:</span> <span class="pre">invalid</span> <span class="pre">Timer</span> <span class="pre">number</span></code> on the
+v1.27+ MP we vendor — esp32-s3 only exposes hardware timers 0..3.</p>
+<p>Intentionally blocks forever. If <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code> later sends
+a Ctrl-C over the REPL to interrupt this loop, the Timer stays
+alive (we never <code class="docutils literal notranslate"><span class="pre">deinit</span></code> it) so subsequent <code class="docutils literal notranslate"><span class="pre">run_program</span></code> /
+button-press start continue to work.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.launcher.run_program">
+<span class="sig-prename descclassname"><span class="pre">openbricks.launcher.</span></span><span class="sig-name descname"><span class="pre">run_program</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">program_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_PROGRAM_PATH</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/launcher.html#run_program"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.launcher.run_program" title="Link to this definition"></a></dt>
+<dd><p>Client-triggered entry for <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code>.</p>
+<p>Sets the <code class="docutils literal notranslate"><span class="pre">_running</span></code> flag, then exec’s the program in the main
+thread (<code class="docutils literal notranslate"><span class="pre">_exec_program_raw</span></code> arms the native stop button for the
+duration). Propagates <code class="docutils literal notranslate"><span class="pre">KeyboardInterrupt</span></code> so the raw-REPL
+disconnect signals “stopped” back to the client (which then
+exits).</p>
+<p>The program-boundary native-state wipe (motor_process callbacks +
+st_bus runtime) happens inside <code class="docutils literal notranslate"><span class="pre">_exec_program_raw</span></code>, shared with
+the button-press paths.</p>
+</dd></dl>
+
+</section>
+<section id="module-openbricks.log">
+<span id="run-logs"></span><h2>Run logs<a class="headerlink" href="#module-openbricks.log" title="Link to this heading"></a></h2>
+<p>Per-run log capture: tee <code class="docutils literal notranslate"><span class="pre">print(...)</span></code> output to a file on flash so
+untethered runs can be inspected later via <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">log</span></code>.</p>
+<p>The launcher wraps every program execution with <code class="docutils literal notranslate"><span class="pre">log.session()</span></code> so
+the user’s <code class="docutils literal notranslate"><span class="pre">print</span></code> output streams to <em>both</em> the live USB / BLE
+console (when one’s listening) and a rotating file on flash. With
+nobody listening on the live channel, the file is the only record.
+<code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">log</span></code> reads the most recent files back over BLE.</p>
+<p>Storage layout:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">/</span><span class="n">openbricks_logs</span><span class="o">/</span><span class="n">run_0</span><span class="o">.</span><span class="n">log</span>
+<span class="o">/</span><span class="n">openbricks_logs</span><span class="o">/</span><span class="n">slot_1</span><span class="o">.</span><span class="n">log</span>
+<span class="o">/</span><span class="n">openbricks_logs</span><span class="o">/</span><span class="n">slot_2</span><span class="o">.</span><span class="n">log</span>
+</pre></div>
+</div>
+<p>Each run gets the next index; the index lives in the file’s header
+line (<code class="docutils literal notranslate"><span class="pre">&quot;&lt;epoch&gt;</span> <span class="pre">--</span> <span class="pre">run_N</span> <span class="pre">--&quot;</span></code>), NOT the filename. The
+<code class="docutils literal notranslate"><span class="pre">MAX_RUNS</span></code> slot files are reused in place (<code class="docutils literal notranslate"><span class="pre">run</span> <span class="pre">N</span></code> overwrites
+<code class="docutils literal notranslate"><span class="pre">slot_(N</span> <span class="pre">%</span> <span class="pre">MAX_RUNS)</span></code>) — the earlier delete+create rotation
+churned littlefs directory metadata until every commit’s allocator
+traversal cost ~400 ms (bench 2026-08-09); truncate-reuse keeps
+commits at fresh-filesystem cost. Flash usage stays bounded and
+indices grow monotonically, exactly as before.</p>
+<p>Every line is prefixed with a raw int64 <strong>UTC Unix epoch in
+milliseconds</strong> (e.g. <code class="docutils literal notranslate"><span class="pre">1783950123456</span> <span class="pre">left</span> <span class="pre">ambient:</span> <span class="pre">33</span></code>). No
+formatting, no timezone on the hub — the host CLI converts to the
+user’s local time at display. The ESP32 RTC starts at 2000-01-01 on
+power-up; the CLI syncs it from the host clock on every connect, so
+runs started after any <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code> / <code class="docutils literal notranslate"><span class="pre">log</span></code> / <code class="docutils literal notranslate"><span class="pre">upload</span></code>
+carry real wall-clock stamps (an unsynced run shows year-2000
+dates, which is self-diagnosing).</p>
+<p>The session is also bytes-capped: once a run’s log file passes
+<code class="docutils literal notranslate"><span class="pre">MAX_BYTES</span></code> bytes, further writes are dropped from the file (the
+live console still gets them). This keeps a runaway
+<code class="docutils literal notranslate"><span class="pre">while</span> <span class="pre">True:</span> <span class="pre">print(...)</span></code> from filling the entire flash partition.</p>
+<p>Implementation note: MicroPython doesn’t expose <code class="docutils literal notranslate"><span class="pre">sys.stdout</span></code> as a
+re-bindable attribute on every port, so we tee at the
+<code class="docutils literal notranslate"><span class="pre">builtins.print</span></code> level instead. This catches every <code class="docutils literal notranslate"><span class="pre">print(...)</span></code>
+call — including ones with <code class="docutils literal notranslate"><span class="pre">file=sys.stderr</span></code> — but does not catch
+direct <code class="docutils literal notranslate"><span class="pre">sys.stdout.write()</span></code> calls. User code on the firmware path
+overwhelmingly goes through <code class="docutils literal notranslate"><span class="pre">print()</span></code>, so this trade-off is fine.
+The launcher additionally calls <code class="docutils literal notranslate"><span class="pre">log.write_text(...)</span></code> from its
+exception handler so tracebacks are captured.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.log.note">
+<span class="sig-prename descclassname"><span class="pre">openbricks.log.</span></span><span class="sig-name descname"><span class="pre">note</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">text</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/log.html#note"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.log.note" title="Link to this definition"></a></dt>
+<dd><p>Write one stamped line to the active run’s log file.</p>
+<p>No-op when no program is running (there is no file to write to).
+File only — the live console is deliberately not touched; callers
+that want a console message print one themselves. Used by the
+launcher so every button press that starts or stops a run leaves
+a timestamped entry in that run’s log.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.log.worst_write_ms">
+<span class="sig-prename descclassname"><span class="pre">openbricks.log.</span></span><span class="sig-name descname"><span class="pre">worst_write_ms</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/log.html#worst_write_ms"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.log.worst_write_ms" title="Link to this definition"></a></dt>
+<dd><p>Slowest single filesystem call of the active session, in ms.
+0 when nothing has been written or no session is active. The
+launcher includes this in its tick-starvation note: if the two
+numbers are of the same order, littlefs (block erase under a
+write) owns the starvation; if this stays small while the gaps
+are large, the blocker is elsewhere.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.log.pump">
+<span class="sig-prename descclassname"><span class="pre">openbricks.log.</span></span><span class="sig-name descname"><span class="pre">pump</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/log.html#pump"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.log.pump" title="Link to this definition"></a></dt>
+<dd><p>Drain the active session’s buffered output to its file.</p>
+<p>Called from the launcher’s Timer tick, which is what makes logging
+asynchronous: <code class="docutils literal notranslate"><span class="pre">print</span></code> appends to RAM and returns, this moves the
+bytes to flash off the program’s hot path. No-op when no program
+is running. Never raises — the tick that calls this also owns the
+stop button.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.log.flush">
+<span class="sig-prename descclassname"><span class="pre">openbricks.log.</span></span><span class="sig-name descname"><span class="pre">flush</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/log.html#flush"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.log.flush" title="Link to this definition"></a></dt>
+<dd><p>Commit the active session’s buffered output NOW.</p>
+<p>For the moments durability beats speed: the stop button firing, or
+any other point where the next thing that happens might be a reset.
+No-op when no program is running.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.log.session">
+<span class="sig-prename descclassname"><span class="pre">openbricks.log.</span></span><span class="sig-name descname"><span class="pre">session</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/log.html#session"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.log.session" title="Link to this definition"></a></dt>
+<dd><p>Construct a fresh <code class="xref py py-class docutils literal notranslate"><span class="pre">_LogSession</span></code>.</p>
+<p>Use as a context manager:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">log</span><span class="o">.</span><span class="n">session</span><span class="p">()</span> <span class="k">as</span> <span class="n">sess</span><span class="p">:</span>
+    <span class="n">run_user_program</span><span class="p">()</span>
+    <span class="c1"># sess.write_text(extra) for non-print output if needed.</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.log.list_runs">
+<span class="sig-prename descclassname"><span class="pre">openbricks.log.</span></span><span class="sig-name descname"><span class="pre">list_runs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/log.html#list_runs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.log.list_runs" title="Link to this definition"></a></dt>
+<dd><p>Return a list of <code class="docutils literal notranslate"><span class="pre">(index,</span> <span class="pre">full_path)</span></code> tuples, oldest first.
+Used by the on-hub helper that <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">log</span></code> invokes via
+raw-paste to enumerate available runs. Slot files are listed by
+their header index; legacy <code class="docutils literal notranslate"><span class="pre">run_N.log</span></code> files (pre-slot
+firmware) still appear until the next run’s migration removes
+them.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.log.read_run">
+<span class="sig-prename descclassname"><span class="pre">openbricks.log.</span></span><span class="sig-name descname"><span class="pre">read_run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/log.html#read_run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.log.read_run" title="Link to this definition"></a></dt>
+<dd><p>Read a single run’s log by index. Raises <code class="docutils literal notranslate"><span class="pre">OSError</span></code> if no
+such run exists (the slot was reused by a newer run, or the
+index never happened).</p>
+</dd></dl>
+
+</section>
+<section id="module-openbricks.bluetooth">
+<span id="bluetooth-ble-repl-console"></span><h2>Bluetooth (BLE REPL &amp; console)<a class="headerlink" href="#module-openbricks.bluetooth" title="Link to this heading"></a></h2>
+<p>Persistent Bluetooth on/off state for the hub.</p>
+<p>The firmware ships with BLE compiled in (so <code class="docutils literal notranslate"><span class="pre">mpremote</span></code>-over-BLE
+code transfer works). At runtime we let the user toggle the advertising
+stack on and off; the choice is persisted in NVS so reboots don’t lose
+the state. Default (no key in NVS yet) is <strong>on</strong>.</p>
+<p>Typical usage from <code class="docutils literal notranslate"><span class="pre">main.py</span></code> right after the firmware boots:</p>
+<blockquote>
+<div><p>from openbricks import bluetooth
+bluetooth.apply_persisted_state()</p>
+</div></blockquote>
+<p>Then toggle programmatically (or from the hub’s button — see
+<code class="docutils literal notranslate"><span class="pre">openbricks.hub.ESP32DevkitHub</span></code> once that integration lands):</p>
+<blockquote>
+<div><p>bluetooth.toggle()                # flip current state, persist, apply
+bluetooth.set_enabled(False)      # explicit off</p>
+</div></blockquote>
+<p>Activating BLE requires a hub name (<code class="docutils literal notranslate"><span class="pre">openbricks.HUB_NAME</span></code>) — flash
+the image with <code class="docutils literal notranslate"><span class="pre">scripts/flash_firmware.py</span> <span class="pre">--name</span> <span class="pre">NAME</span></code> first. We
+refuse to advertise with no name rather than defaulting to a shared
+value, since two hubs with the same advertising name can’t be
+individually addressed.</p>
+<p><code class="docutils literal notranslate"><span class="pre">esp32.NVS</span></code> and <code class="docutils literal notranslate"><span class="pre">bluetooth.BLE</span></code> are imported lazily so desktop
+tests running under unix MicroPython don’t need to have the firmware-
+only modules present — they install fakes in <code class="docutils literal notranslate"><span class="pre">tests/_fakes_ble.py</span></code>.</p>
+<dl class="py exception">
+<dt class="sig sig-object py" id="openbricks.bluetooth.HubNameNotSetError">
+<span class="property"><span class="k"><span class="pre">exception</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth.</span></span><span class="sig-name descname"><span class="pre">HubNameNotSetError</span></span><a class="reference internal" href="../_modules/openbricks/bluetooth.html#HubNameNotSetError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth.HubNameNotSetError" title="Link to this definition"></a></dt>
+<dd><p>Raised when the firmware was flashed without <code class="docutils literal notranslate"><span class="pre">--name</span> <span class="pre">NAME</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.bluetooth.is_enabled">
+<span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth.</span></span><span class="sig-name descname"><span class="pre">is_enabled</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth.html#is_enabled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth.is_enabled" title="Link to this definition"></a></dt>
+<dd><p>Return the persisted flag (<code class="docutils literal notranslate"><span class="pre">True</span></code> if no value has ever been written).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.bluetooth.set_enabled">
+<span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth.</span></span><span class="sig-name descname"><span class="pre">set_enabled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">enabled</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth.html#set_enabled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth.set_enabled" title="Link to this definition"></a></dt>
+<dd><p>Persist <code class="docutils literal notranslate"><span class="pre">enabled</span></code> and apply it to the BLE stack immediately.</p>
+<p>Raises <a class="reference internal" href="#openbricks.bluetooth.HubNameNotSetError" title="openbricks.bluetooth.HubNameNotSetError"><code class="xref py py-class docutils literal notranslate"><span class="pre">HubNameNotSetError</span></code></a> when turning BLE on with no hub
+name flashed. Turning BLE off is always allowed — a nameless hub
+can still be silenced.</p>
+<p>When enabling, also starts the NUS REPL bridge (<code class="docutils literal notranslate"><span class="pre">openbricks.ble_repl</span></code>)
+so <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code> / <code class="docutils literal notranslate"><span class="pre">stop</span></code> can push scripts over BLE. When
+disabling, the bridge is torn down first so dupterm isn’t left
+pointing at an inactive stack.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.bluetooth.add_state_listener">
+<span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth.</span></span><span class="sig-name descname"><span class="pre">add_state_listener</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">callback</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth.html#add_state_listener"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth.add_state_listener" title="Link to this definition"></a></dt>
+<dd><p>Register <code class="docutils literal notranslate"><span class="pre">callback(enabled)</span></code> to run after each state change.
+Adding the same callback twice is a no-op.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.bluetooth.remove_state_listener">
+<span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth.</span></span><span class="sig-name descname"><span class="pre">remove_state_listener</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">callback</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth.html#remove_state_listener"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth.remove_state_listener" title="Link to this definition"></a></dt>
+<dd><p>Unregister a callback added with <a class="reference internal" href="#openbricks.bluetooth.add_state_listener" title="openbricks.bluetooth.add_state_listener"><code class="xref py py-func docutils literal notranslate"><span class="pre">add_state_listener()</span></code></a>.
+Unknown callbacks are a no-op.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.bluetooth.toggle">
+<span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth.</span></span><span class="sig-name descname"><span class="pre">toggle</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth.html#toggle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth.toggle" title="Link to this definition"></a></dt>
+<dd><p>Flip the current state. Returns the new (post-toggle) value.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.bluetooth.apply_persisted_state">
+<span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth.</span></span><span class="sig-name descname"><span class="pre">apply_persisted_state</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth.html#apply_persisted_state"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth.apply_persisted_state" title="Link to this definition"></a></dt>
+<dd><p>Read the persisted flag and apply it to the BLE stack.</p>
+<p>Call this at boot (e.g. top of <code class="docutils literal notranslate"><span class="pre">main.py</span></code>) so the BLE radio reflects
+whatever the user last chose before the reboot — or comes up enabled
+on the very first boot.</p>
+<p>Tolerant of a missing hub name: if the persisted state says BLE-on
+but no hub name is flashed (typical on a freshly-flashed chip
+before the first <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">flash</span> <span class="pre">--name</span> <span class="pre">...</span></code> run), prints a
+one-line warning and skips activation. Better than raising
+<code class="docutils literal notranslate"><span class="pre">HubNameNotSetError</span></code> from <code class="docutils literal notranslate"><span class="pre">main.py</span></code>, which (per the
+1.0.4 silent-boot bug) could lose its traceback to USB-Serial-JTAG
+timing and brick the boot.</p>
+</dd></dl>
+
+<p id="module-openbricks.ble_repl">Nordic UART Service bridge for the MicroPython REPL over BLE.</p>
+<p>Vendored from upstream MicroPython’s
+<code class="docutils literal notranslate"><span class="pre">examples/bluetooth/ble_uart_peripheral.py</span></code> (the <code class="docutils literal notranslate"><span class="pre">BLEUART</span></code>
+class) and <code class="docutils literal notranslate"><span class="pre">ble_uart_repl.py</span></code> (the <code class="docutils literal notranslate"><span class="pre">BLEUARTStream</span></code> dupterm
+adapter). Both files are MIT-licensed under MicroPython’s project
+LICENSE. The one structural change is the advertising payload —
+upstream advertises only the device name + appearance; we add the
+NUS 128-bit service UUID so clients filtering by service can find
+us. Everything else (connection-set tracking, append-mode rx
+buffer, scheduled-flush write batching, <code class="docutils literal notranslate"><span class="pre">io.IOBase</span></code> inheritance)
+is the upstream pattern, unmodified.</p>
+<p>Why vendored: writing this from scratch using only the docs (the
+1.0.0-1.1.1 history) produced a long parade of “invisible until
+hardware” bugs — each fix required a hardware reflash + paste
+diagnostic round. Starting from upstream’s working example would
+have caught all of them at once.</p>
+<p>Public surface (what <code class="docutils literal notranslate"><span class="pre">openbricks.bluetooth.apply_persisted_state</span></code>
+calls):</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">start()</span></code> — bring up the NUS bridge. Idempotent.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stop()</span></code>  — tear down. Idempotent.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_running()</span></code> — query.</p></li>
+</ul>
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.ble_repl.log_entries">
+<span class="sig-prename descclassname"><span class="pre">openbricks.ble_repl.</span></span><span class="sig-name descname"><span class="pre">log_entries</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/ble_repl.html#log_entries"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.ble_repl.log_entries" title="Link to this definition"></a></dt>
+<dd><p>The recorded events, oldest first (unwraps the ring).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.ble_repl.dump_log">
+<span class="sig-prename descclassname"><span class="pre">openbricks.ble_repl.</span></span><span class="sig-name descname"><span class="pre">dump_log</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/ble_repl.html#dump_log"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.ble_repl.dump_log" title="Link to this definition"></a></dt>
+<dd><p>Print the in-memory BLE event log over USB-Serial-JTAG.</p>
+<p>Why a helper rather than <code class="docutils literal notranslate"><span class="pre">print(_LOG)</span></code>: <code class="docutils literal notranslate"><span class="pre">print</span></code> routes through
+dupterm which routes through this module’s stream, so a long log
+print adds entries to itself while running. Iterating + printing
+item by item is bounded; the bytes added during the print sit in
+_tx_buf until later and don’t grow the log.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.ble_repl.clear_log">
+<span class="sig-prename descclassname"><span class="pre">openbricks.ble_repl.</span></span><span class="sig-name descname"><span class="pre">clear_log</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/ble_repl.html#clear_log"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.ble_repl.clear_log" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.ble_repl.is_running">
+<span class="sig-prename descclassname"><span class="pre">openbricks.ble_repl.</span></span><span class="sig-name descname"><span class="pre">is_running</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/ble_repl.html#is_running"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.ble_repl.is_running" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.ble_repl.pump_tx">
+<span class="sig-prename descclassname"><span class="pre">openbricks.ble_repl.</span></span><span class="sig-name descname"><span class="pre">pump_tx</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/ble_repl.html#pump_tx"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.ble_repl.pump_tx" title="Link to this definition"></a></dt>
+<dd><p>Re-arm the TX flush if bytes are sitting in the buffer.</p>
+<p>Liveness backstop, called from the launcher’s poll tick. A flush
+chain dies in two ways: <code class="docutils literal notranslate"><span class="pre">micropython.schedule</span></code>’s queue was full
+at re-schedule time, or a notify failed and the retry is
+deliberately paced (see <code class="docutils literal notranslate"><span class="pre">_flush</span></code>). In both cases the buffered
+bytes wait for the <em>next</em> <code class="docutils literal notranslate"><span class="pre">write()</span></code> — which never comes when the
+writer already finished. That was the <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">log</span></code>
+end-of-dump stall: the file content and the raw-REPL terminator
+sat in <code class="docutils literal notranslate"><span class="pre">_tx_buf</span></code> forever while the host timed out. The pump
+gives the chain a fresh start at tick cadence; it is idempotent
+and no-ops when the buffer is empty or the bridge is down.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.ble_repl.start">
+<span class="sig-prename descclassname"><span class="pre">openbricks.ble_repl.</span></span><span class="sig-name descname"><span class="pre">start</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/ble_repl.html#start"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.ble_repl.start" title="Link to this definition"></a></dt>
+<dd><p>Bring up the NUS bridge. Idempotent — second call is a no-op
+if already running.</p>
+<p>Caller must have <code class="docutils literal notranslate"><span class="pre">ble.active(True)</span></code> before calling. Hub name
+comes from <code class="docutils literal notranslate"><span class="pre">openbricks.HUB_NAME</span></code> (NVS-backed); we refuse to
+advertise without one.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.ble_repl.stop">
+<span class="sig-prename descclassname"><span class="pre">openbricks.ble_repl.</span></span><span class="sig-name descname"><span class="pre">stop</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/ble_repl.html#stop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.ble_repl.stop" title="Link to this definition"></a></dt>
+<dd><p>Tear down the NUS bridge. Idempotent.</p>
+</dd></dl>
+
+</section>
+<section id="module-openbricks.bluetooth_button">
+<span id="ble-toggle-button"></span><h2>BLE toggle button<a class="headerlink" href="#module-openbricks.bluetooth_button" title="Link to this heading"></a></h2>
+<p>Short press on the BLE-toggle button toggles BLE on/off.</p>
+<p>Wires a <code class="docutils literal notranslate"><span class="pre">machine.Timer</span></code>-driven poll loop (default 50 ms) against a
+<code class="docutils literal notranslate"><span class="pre">Button</span></code>-conformant object and calls <code class="docutils literal notranslate"><span class="pre">openbricks.bluetooth.toggle()</span></code>
+once per press-release cycle. State is persisted via NVS by the
+<code class="docutils literal notranslate"><span class="pre">bluetooth</span></code> module, so the new value survives reboots.</p>
+<p>The same poll loop doubles as the <strong>run indicator</strong>: while a user
+program is executing (<code class="docutils literal notranslate"><span class="pre">launcher.program_running()</span></code>), the status LED
+flashes at 2 Hz instead of holding a solid colour — blue when BLE is
+on, yellow when it’s off, plain on/off blinking on single-colour
+LEDs. When the program stops, the LED returns to its idle state
+(solid state colour on RGB hubs, dark on single-colour hubs). And it
+renders the <strong>press acknowledgment</strong>: every program-button press
+flashes the LED for a moment — red for the press that starts a run,
+green for the press that stops one (<code class="docutils literal notranslate"><span class="pre">notify_press()</span></code>, called by
+the launcher’s press detectors).</p>
+<p>This is a different physical button from the one <code class="docutils literal notranslate"><span class="pre">openbricks.launcher</span></code>
+watches for program start/stop — the BLE toggle lives on its own
+GPIO (default 38 on the S3, 5 on the classic ESP32 — see <a class="reference internal" href="hub.html#openbricks.hub.Hub" title="openbricks.hub.Hub"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.hub.Hub</span></code></a>) while the program
+button is on GPIO 39. Two pins → no duration-based dispatch, every
+press on this pin means “flip BLE”.</p>
+<p>Usage from <code class="docutils literal notranslate"><span class="pre">main.py</span></code>:</p>
+<blockquote>
+<div><p>from openbricks import bluetooth
+from openbricks.bluetooth_button import BluetoothToggleButton
+from openbricks.hub import ESP32DevkitHub</p>
+<p>bluetooth.apply_persisted_state()
+hub = ESP32DevkitHub()
+BluetoothToggleButton(hub.bluetooth_button).start()</p>
+</div></blockquote>
+<p>The helper is deliberately standalone (not baked into <code class="docutils literal notranslate"><span class="pre">Hub</span></code>) so tests
+can exercise it in isolation, and so boards without a button — or
+users who want to drive the toggle from something other than a
+physical press — can skip it.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="openbricks.bluetooth_button.notify_press">
+<span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth_button.</span></span><span class="sig-name descname"><span class="pre">notify_press</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stop</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth_button.html#notify_press"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth_button.notify_press" title="Link to this definition"></a></dt>
+<dd><p>Record a program-button press. <code class="docutils literal notranslate"><span class="pre">stop=True</span></code> marks it as the
+press that stops a run (green flash); the default is a start
+press (red). The active <a class="reference internal" href="#openbricks.bluetooth_button.BluetoothToggleButton" title="openbricks.bluetooth_button.BluetoothToggleButton"><code class="xref py py-class docutils literal notranslate"><span class="pre">BluetoothToggleButton</span></code></a> renders
+it on its next poll tick. Safe from any context — it only sets
+two module variables.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.bluetooth_button.BluetoothToggleButton">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.bluetooth_button.</span></span><span class="sig-name descname"><span class="pre">BluetoothToggleButton</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">button</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">led</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">poll_ms</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_POLL_MS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timer_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">color_on</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_COLOR_ON</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">color_off</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">DEFAULT_COLOR_OFF</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">program_running</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth_button.html#BluetoothToggleButton"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth_button.BluetoothToggleButton" title="Link to this definition"></a></dt>
+<dd><p>Polls a button and toggles BLE on each press-release cycle.</p>
+<p>Optional RGB LED feedback (blue = BLE on, yellow = off). Call
+<code class="docutils literal notranslate"><span class="pre">start()</span></code> to begin polling on a <code class="docutils literal notranslate"><span class="pre">machine.Timer</span></code>; <code class="docutils literal notranslate"><span class="pre">stop()</span></code>
+releases the timer. The toggled state persists across reboots.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.bluetooth_button.BluetoothToggleButton.start">
+<span class="sig-name descname"><span class="pre">start</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth_button.html#BluetoothToggleButton.start"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth_button.BluetoothToggleButton.start" title="Link to this definition"></a></dt>
+<dd><p>Begin polling. Safe to call repeatedly — the second call is a no-op.</p>
+<p>On first call, paints the LED (if one was provided) to reflect
+the current persisted BLE state, and registers with
+<code class="docutils literal notranslate"><span class="pre">bluetooth.add_state_listener</span></code> so the LED also follows state
+changes made <em>without</em> the button — <code class="docutils literal notranslate"><span class="pre">bluetooth.set_enabled</span></code>
+from user code or a tool over the REPL.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.bluetooth_button.BluetoothToggleButton.stop">
+<span class="sig-name descname"><span class="pre">stop</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/bluetooth_button.html#BluetoothToggleButton.stop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.bluetooth_button.BluetoothToggleButton.stop" title="Link to this definition"></a></dt>
+<dd><p>Stop polling, release the timer, and unregister the LED
+state listener.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="tools.html" class="btn btn-neutral float-left" title="Tools" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../architecture.html" class="btn btn-neutral float-right" title="Architecture" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
