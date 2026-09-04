@@ -1,0 +1,488 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hubs &mdash; openbricks 3.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/api/hub.html" />
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=4f6ddb47"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Tools" href="tools.html" />
+    <link rel="prev" title="Interfaces" href="interfaces.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.2.0">firmware&nbsp;v3.2.0</a>
+<a class="obk-pdf-btn" href="../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API reference</a></li>
+      <li class="breadcrumb-item active">Hubs</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/1e0ng/openbricks/blob/main/docs/api/hub.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="hubs">
+<h1>Hubs<a class="headerlink" href="#hubs" title="Link to this heading"></a></h1>
+<p>Board-level peripherals — the onboard LED and buttons — behind one
+<code class="docutils literal notranslate"><span class="pre">Hub</span></code> object per supported devkit.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">openbricks.hub</span><span class="w"> </span><span class="kn">import</span> <span class="n">ESP32S3DevkitHub</span>
+
+<span class="n">hub</span> <span class="o">=</span> <span class="n">ESP32S3DevkitHub</span><span class="p">()</span>
+<span class="n">hub</span><span class="o">.</span><span class="n">led</span><span class="o">.</span><span class="n">rgb</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">80</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>          <span class="c1"># onboard NeoPixel: dim green</span>
+<span class="k">if</span> <span class="n">hub</span><span class="o">.</span><span class="n">bluetooth_button</span><span class="o">.</span><span class="n">pressed</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"button held at boot"</span><span class="p">)</span>
+</pre></div>
+</div>
+<p id="module-openbricks.hub">Hub — board-level peripherals (status LED, user button) for each
+supported MCU devkit.</p>
+<p>Concrete hubs:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code>    — ESP32 DevKitC-V4: blue LED on GPIO 2.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code>  — ESP32-S3 DevKitC-1: onboard WS2812 RGB LED on
+GPIO 48.</p></li>
+</ul>
+<p>Both hubs expect <strong>two</strong> momentary pushbuttons, each wired between a
+GPIO and GND:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">bluetooth_button_pin</span></code> (classic ESP32 default <strong>GPIO 5</strong>;
+ESP32-S3 default <strong>GPIO 38</strong> — the S3 has only ten analog-capable
+pins, ADC1 = GPIO 1-10, and a button doesn’t need one) —
+short-press toggles BLE on/off. Watched by
+<a class="reference internal" href="runtime.html#openbricks.bluetooth_button.BluetoothToggleButton" title="openbricks.bluetooth_button.BluetoothToggleButton"><code class="xref py py-class docutils literal notranslate"><span class="pre">openbricks.bluetooth_button.BluetoothToggleButton</span></code></a> which
+the hub auto-wires when <code class="docutils literal notranslate"><span class="pre">bluetooth=True</span></code> (the default).</p></li>
+<li><p>The <strong>program button</strong> (default <strong>GPIO 39</strong>) — short-press starts
+or stops <code class="docutils literal notranslate"><span class="pre">/program.py</span></code>. Watched by
+<a class="reference internal" href="runtime.html#module-openbricks.launcher" title="openbricks.launcher"><code class="xref py py-mod docutils literal notranslate"><span class="pre">openbricks.launcher</span></code></a> directly, which the frozen default
+<code class="docutils literal notranslate"><span class="pre">main.py</span></code> starts via <code class="docutils literal notranslate"><span class="pre">launcher.run()</span></code>.</p></li>
+</ul>
+<p>Two pins → no duration-based dispatch. Each button does one thing on
+every short press.</p>
+<p>We deliberately avoid GPIO 0 (BOOT) for either role: holding it
+during reset puts the ESP32 into the ROM bootloader, so sharing that
+pin with an application button would turn an accidental power-glitch
+into a flash-mode drop.</p>
+<p>Both hubs auto-wire the BLE toggle button by default (<code class="docutils literal notranslate"><span class="pre">bluetooth=True</span></code>):
+<strong>constructing a hub</strong> restores the persisted BLE state, installs a
+short-press handler on the <code class="docutils literal notranslate"><span class="pre">bluetooth_button_pin</span></code>, and — on the S3 —
+paints the WS2812 blue (BLE on) or yellow (BLE off). While a user
+program runs, the same LED <strong>flashes</strong> its state colour at 1 Hz as a
+“robot is running” indicator (plain on/off blink on the classic
+ESP32’s single-colour LED), returning to the solid idle colour when
+the program stops. Put
+<code class="docutils literal notranslate"><span class="pre">hub</span> <span class="pre">=</span> <span class="pre">ESP32S3DevkitHub()</span></code> in your <code class="docutils literal notranslate"><span class="pre">main.py</span></code> to turn that on;
+omit the call (or pass <code class="docutils literal notranslate"><span class="pre">bluetooth=False</span></code>) to keep the button free
+for your own use.</p>
+<p>External I2C components like SSD1306 OLEDs are <strong>not</strong> part of the hub
+— they’re wired to any I2C bus the user chooses, instantiated directly
+from <code class="docutils literal notranslate"><span class="pre">openbricks.drivers.ssd1306</span></code> or similar, and used alongside the
+hub rather than through it.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.hub.StatusLED">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.hub.</span></span><span class="sig-name descname"><span class="pre">StatusLED</span></span><a class="reference internal" href="../_modules/openbricks/hub.html#StatusLED"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.StatusLED" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A user-visible status LED on the hub.</p>
+<p>Plain single-colour LEDs implement <code class="docutils literal notranslate"><span class="pre">on</span></code> / <code class="docutils literal notranslate"><span class="pre">off</span></code>. Addressable RGB
+LEDs (WS2812 and friends) additionally implement <code class="docutils literal notranslate"><span class="pre">rgb</span></code>.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.StatusLED.on">
+<span class="sig-name descname"><span class="pre">on</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#StatusLED.on"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.StatusLED.on" title="Link to this definition"></a></dt>
+<dd><p>Turn the LED on (RGB LEDs restore their last colour).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.StatusLED.off">
+<span class="sig-name descname"><span class="pre">off</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#StatusLED.off"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.StatusLED.off" title="Link to this definition"></a></dt>
+<dd><p>Turn the LED off.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.StatusLED.rgb">
+<span class="sig-name descname"><span class="pre">rgb</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">r</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">g</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">b</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#StatusLED.rgb"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.StatusLED.rgb" title="Link to this definition"></a></dt>
+<dd><p>Set colour (each channel 0..255). Raises on non-addressable LEDs.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.hub.Button">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.hub.</span></span><span class="sig-name descname"><span class="pre">Button</span></span><a class="reference internal" href="../_modules/openbricks/hub.html#Button"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.Button" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A momentary pushbutton on the hub.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.Button.pressed">
+<span class="sig-name descname"><span class="pre">pressed</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#Button.pressed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.Button.pressed" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">True</span></code> while the button is held down.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.hub.Hub">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.hub.</span></span><span class="sig-name descname"><span class="pre">Hub</span></span><a class="reference internal" href="../_modules/openbricks/hub.html#Hub"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.Hub" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Board-level peripherals baked into a specific MCU devkit.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.hub.Hub.led">
+<span class="sig-name descname"><span class="pre">led</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#openbricks.hub.Hub.led" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="openbricks.hub.Hub.bluetooth_button">
+<span class="sig-name descname"><span class="pre">bluetooth_button</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#openbricks.hub.Hub.bluetooth_button" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.hub.SimpleLED">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.hub.</span></span><span class="sig-name descname"><span class="pre">SimpleLED</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pin</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">active_high</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#SimpleLED"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.SimpleLED" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.hub.StatusLED" title="openbricks.hub.StatusLED"><code class="xref py py-class docutils literal notranslate"><span class="pre">StatusLED</span></code></a></p>
+<p>Single-colour LED driven by one digital pin.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.SimpleLED.on">
+<span class="sig-name descname"><span class="pre">on</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#SimpleLED.on"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.SimpleLED.on" title="Link to this definition"></a></dt>
+<dd><p>Turn the LED on (RGB LEDs restore their last colour).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.SimpleLED.off">
+<span class="sig-name descname"><span class="pre">off</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#SimpleLED.off"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.SimpleLED.off" title="Link to this definition"></a></dt>
+<dd><p>Turn the LED off.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.hub.NeoPixelLED">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.hub.</span></span><span class="sig-name descname"><span class="pre">NeoPixelLED</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pin</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">brightness</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.2</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#NeoPixelLED"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.NeoPixelLED" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.hub.StatusLED" title="openbricks.hub.StatusLED"><code class="xref py py-class docutils literal notranslate"><span class="pre">StatusLED</span></code></a></p>
+<p>Single-pixel WS2812 / NeoPixel driver — the onboard LED on ESP32-S3
+DevKitC-1 and most modern ESP32-S3 compact boards.</p>
+<p>Unlike <code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code> this one implements <code class="docutils literal notranslate"><span class="pre">rgb(r,</span> <span class="pre">g,</span> <span class="pre">b)</span></code> too, which is
+what the Bluetooth-toggle button uses for blue / yellow feedback.</p>
+<p><code class="docutils literal notranslate"><span class="pre">brightness</span></code> scales every channel on write (0.0 – 1.0). 0.2 is a
+comfortable indoor default — the raw WS2812 at full brightness is
+dazzling.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.NeoPixelLED.on">
+<span class="sig-name descname"><span class="pre">on</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#NeoPixelLED.on"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.NeoPixelLED.on" title="Link to this definition"></a></dt>
+<dd><p>Turn the LED on (RGB LEDs restore their last colour).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.NeoPixelLED.off">
+<span class="sig-name descname"><span class="pre">off</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#NeoPixelLED.off"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.NeoPixelLED.off" title="Link to this definition"></a></dt>
+<dd><p>Turn the LED off.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.NeoPixelLED.rgb">
+<span class="sig-name descname"><span class="pre">rgb</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">r</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">g</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">b</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#NeoPixelLED.rgb"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.NeoPixelLED.rgb" title="Link to this definition"></a></dt>
+<dd><p>Set colour (each channel 0..255). Raises on non-addressable LEDs.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.hub.PushButton">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.hub.</span></span><span class="sig-name descname"><span class="pre">PushButton</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pin</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">active_low</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#PushButton"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.PushButton" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.hub.Button" title="openbricks.hub.Button"><code class="xref py py-class docutils literal notranslate"><span class="pre">Button</span></code></a></p>
+<p>Digital pushbutton with configurable active level and internal pull.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.hub.PushButton.pressed">
+<span class="sig-name descname"><span class="pre">pressed</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#PushButton.pressed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.PushButton.pressed" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">True</span></code> while the button is held down.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.hub.ESP32DevkitHub">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.hub.</span></span><span class="sig-name descname"><span class="pre">ESP32DevkitHub</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">led_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bluetooth_button_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bluetooth</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#ESP32DevkitHub"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.ESP32DevkitHub" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.hub.Hub" title="openbricks.hub.Hub"><code class="xref py py-class docutils literal notranslate"><span class="pre">Hub</span></code></a></p>
+<p>ESP32 DevKitC-V4 onboard hub: blue LED on GPIO 2, BLE-toggle
+button on GPIO 5.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bluetooth</span></code> default True wires the button to a short-press BLE
+toggle and restores the persisted state at boot (see
+<code class="docutils literal notranslate"><span class="pre">openbricks.bluetooth_button</span></code> / <code class="docutils literal notranslate"><span class="pre">openbricks.bluetooth</span></code>). The
+onboard LED is single-colour so no colour feedback on toggle, but
+it still blinks at 1 Hz while a user program runs (dark at idle).
+Pass <code class="docutils literal notranslate"><span class="pre">bluetooth=False</span></code> to skip the wiring entirely, or
+<code class="docutils literal notranslate"><span class="pre">bluetooth_button_pin=&lt;N&gt;</span></code> to use a different GPIO. Wire the
+button between the chosen GPIO and GND; an internal pull-up is
+enabled.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.hub.ESP32S3DevkitHub">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.hub.</span></span><span class="sig-name descname"><span class="pre">ESP32S3DevkitHub</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">led_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">48</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bluetooth_button_pin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">38</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">brightness</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bluetooth</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/hub.html#ESP32S3DevkitHub"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.hub.ESP32S3DevkitHub" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#openbricks.hub.Hub" title="openbricks.hub.Hub"><code class="xref py py-class docutils literal notranslate"><span class="pre">Hub</span></code></a></p>
+<p>ESP32-S3 DevKitC-1 onboard hub: WS2812 RGB LED on GPIO 48,
+BLE-toggle button on GPIO 38.</p>
+<p><code class="docutils literal notranslate"><span class="pre">led_pin</span></code> defaults to 48 (the DevKitC-1 onboard WS2812). Pass
+<code class="docutils literal notranslate"><span class="pre">led_pin=None</span></code> to disable the LED entirely, or any other GPIO for a
+WS2812 wired elsewhere. <code class="docutils literal notranslate"><span class="pre">brightness</span></code> (0.0 – 1.0) scales channel
+values on write; default 0.2 is comfortable indoors.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bluetooth_button_pin</span></code> defaults to 38 (was 5 until 1.66.3): the
+S3 has exactly ten analog-capable pins (ADC1, GPIO 1-10) and a
+button needs none of them — parking the default there cost an
+analog channel the moment a sensor array arrived. GPIO 38 is
+free, non-strapping and digital-only. Wire a momentary switch
+between GPIO 38 and GND; the pin is configured <code class="docutils literal notranslate"><span class="pre">Pin.IN</span></code> with
+<code class="docutils literal notranslate"><span class="pre">PULL_UP</span></code> so no external resistor is needed. Override via
+<code class="docutils literal notranslate"><span class="pre">bluetooth_button_pin=&lt;N&gt;</span></code> (a hub wired to the old default
+passes 5).</p>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="interfaces.html" class="btn btn-neutral float-left" title="Interfaces" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="tools.html" class="btn btn-neutral float-right" title="Tools" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
