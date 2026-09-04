@@ -17,10 +17,38 @@ firmware-targeting code runs unchanged) lands in Phase C3 — for now,
 """
 
 import argparse
+import dataclasses
+import json
 import runpy
 import sys
 
 from openbricks_sim.chassis import ChassisSpec
+
+
+def _chassis_spec(args):
+    """The ChassisSpec for this invocation: ``--chassis FILE`` (a
+    JSON object of ChassisSpec fields, metres / kilograms / degrees)
+    overlaid by whichever of ``--x`` / ``--y`` / ``--yaw`` were given
+    on the command line. Without a file the defaults apply."""
+    fields = {}
+    if args.chassis is not None:
+        with open(args.chassis) as f:
+            fields = json.load(f)
+        if not isinstance(fields, dict):
+            raise SystemExit(
+                "--chassis %s: expected a JSON object of ChassisSpec "
+                "fields, got %s" % (args.chassis, type(fields).__name__))
+        valid = {f.name for f in dataclasses.fields(ChassisSpec)}
+        unknown = sorted(set(fields) - valid)
+        if unknown:
+            raise SystemExit(
+                "--chassis %s: unknown field(s) %s — valid fields: %s"
+                % (args.chassis, ", ".join(unknown), ", ".join(sorted(valid))))
+    for flag, field in (("x", "pos_x"), ("y", "pos_y"), ("yaw", "yaw_deg")):
+        value = getattr(args, flag)
+        if value is not None:
+            fields[field] = value
+    return ChassisSpec(**fields)
 
 
 _BUILTIN_WORLDS = {
@@ -84,7 +112,7 @@ def cmd_preview(args):
     from openbricks_sim import chassis as chassis_mod
     from openbricks_sim.world import load_world
 
-    spec = ChassisSpec(pos_x=args.x, pos_y=args.y)
+    spec = _chassis_spec(args)
 
     world_path = _resolve_world(args.world)
     if world_path is None:
@@ -135,12 +163,15 @@ def cmd_run(args):
     from openbricks_sim.robot import SimRobot
     from openbricks_sim import shim
 
-    spec  = ChassisSpec(pos_x=args.x, pos_y=args.y)
+    spec  = _chassis_spec(args)
     robot = SimRobot(world=args.world, chassis_spec=spec)
     _maybe_randomize(robot.model, robot.data, args)
 
     if not args.no_shim:
         shim.install(robot.runtime)
+
+    if args.trace is not None or args.max_sim_s is not None:
+        _install_run_guard(robot, args.trace, args.max_sim_s)
 
     init_globals = {
         "robot":   robot,
@@ -167,6 +198,67 @@ def cmd_run(args):
     finally:
         if not args.no_shim:
             shim.uninstall()
+
+
+class SimTimeExceeded(SystemExit):
+    """Raised (from inside a sim tick) when ``--max-sim-s`` runs out:
+    the script's loop has not finished in the sim time it was
+    allowed. A ``SystemExit`` so the script's own ``except
+    Exception`` handlers don't swallow it; exit status 3."""
+
+    def __init__(self, limit_s):
+        SystemExit.__init__(self, 3)
+        self.limit_s = limit_s
+
+
+def _install_run_guard(robot, trace_path, max_sim_s):
+    """Per-tick bookkeeping for ``run``: a pose trace (CSV of
+    ``t_ms,x_mm,y_mm,yaw_deg`` every 50 ms of sim time) and the sim-
+    time budget. Both ride on ``SimRuntime.add_tick`` so they cost
+    nothing a script can notice."""
+    trace = open(trace_path, "w") if trace_path is not None else None
+    if trace is not None:
+        trace.write("t_ms,x_mm,y_mm,yaw_deg\n")
+    limit_ms = None if max_sim_s is None else int(max_sim_s * 1000)
+    state = {"next_ms": 0}
+
+    def tick(now_ms):
+        if trace is not None and now_ms >= state["next_ms"]:
+            x, y, yaw = robot.chassis_pose()
+            trace.write("%d,%.1f,%.1f,%.2f\n" % (now_ms, x, y, yaw))
+            state["next_ms"] = now_ms + 50
+        if limit_ms is not None and now_ms > limit_ms:
+            if trace is not None:
+                trace.flush()
+            print("openbricks-sim: --max-sim-s %g reached — the script "
+                  "is still running; stopping it here." % max_sim_s,
+                  file=sys.stderr)
+            raise SimTimeExceeded(max_sim_s)
+
+    robot.runtime.add_tick(tick)
+
+
+def _add_chassis_args(sub):
+    """``--chassis`` / ``--x`` / ``--y`` / ``--yaw`` — the same on
+    ``preview`` and ``run``. The pose flags default to None so a
+    value in the chassis file survives unless the flag is given."""
+    sub.add_argument(
+        "--chassis", default=None, metavar="FILE",
+        help="JSON file of ChassisSpec fields describing YOUR robot: "
+             "wheel_radius / axle_length (m), body size, "
+             "line_sensor_x, color_sensor_x/y (sensor placement, m), "
+             "pos_x / pos_y / yaw_deg (spawn pose). Fields not given "
+             "keep the default chassis values.")
+    sub.add_argument("--x", type=float, default=None,
+                     help="Chassis spawn x (m). Default 0, or the "
+                          "chassis file's pos_x.")
+    sub.add_argument("--y", type=float, default=None,
+                     help="Chassis spawn y (m). Default 0, or the "
+                          "chassis file's pos_y.")
+    sub.add_argument("--yaw", type=float, default=None,
+                     help="Chassis spawn heading (deg, counter-"
+                          "clockwise from +X). Default 0, or the "
+                          "chassis file's yaw_deg.")
 
 
 def _build_parser():
@@ -200,10 +292,7 @@ def _build_parser():
         help="World alias or path. Aliases: empty, wro-2026-elementary, "
              "wro-2026-junior, wro-2026-senior. Default: empty.",
     )
-    p_preview.add_argument("--x", type=float, default=0.0,
-                           help="Chassis spawn x (m).")
-    p_preview.add_argument("--y", type=float, default=0.0,
-                           help="Chassis spawn y (m).")
+    _add_chassis_args(p_preview)
     p_preview.add_argument("--headless", action="store_true",
                            help="Skip the viewer; step ``--duration`` "
                                 "seconds and exit.")
@@ -232,10 +321,7 @@ def _build_parser():
                        help="Path to the Python script to execute.")
     p_run.add_argument("--world", default="empty",
                        help="World alias or path (same set as preview).")
-    p_run.add_argument("--x", type=float, default=0.0,
-                       help="Chassis spawn x (m).")
-    p_run.add_argument("--y", type=float, default=0.0,
-                       help="Chassis spawn y (m).")
+    _add_chassis_args(p_run)
     p_run.add_argument("--viewer", action="store_true",
                        help="Drop into the MuJoCo viewer after the "
                             "script returns so you can orbit the "
@@ -250,6 +336,16 @@ def _build_parser():
     p_run.add_argument("--seed", type=int, default=None,
                        help="Randomization seed (same semantics as "
                             "``preview --seed``).")
+    p_run.add_argument("--trace", default=None, metavar="FILE",
+                       help="Write the chassis pose (t_ms, x_mm, y_mm, "
+                            "yaw_deg) every 50 ms of sim time to this "
+                            "CSV — the run's path, for plotting or "
+                            "asserting on afterwards.")
+    p_run.add_argument("--max-sim-s", type=float, default=None,
+                       help="Stop the script once this much SIM time "
+                            "has elapsed (exit status 3). A mission "
+                            "loop that never sees its stop condition "
+                            "otherwise runs forever.")
 
     return parser
 

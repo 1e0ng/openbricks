@@ -164,9 +164,13 @@
          positions as the 0.10.x placeholders; the F3 randomization
          in randomization.py permutes the 4 random notes (black /
          white / yellow / blue) across slot_1..slot_4 each round. -->
-    <lego_prop name="note_red"    ldr="props/note_red.ldr"    pos="0.50 0.40 0.0" mass="0.020"/>
+    <!-- Red and green never move (rules p7): they stand on the 3rd
+         and 4th note-start squares, x = slot_1 + 2 and 3 pitches of
+         0.1319 m (the mat's six squares are evenly spaced; the other
+         four are randomization.py's slots). -->
+    <lego_prop name="note_red"    ldr="props/note_red.ldr"    pos="0.3137 0.4881 0.0" mass="0.020"/>
     <lego_prop name="note_blue"   ldr="props/note_blue.ldr"   pos="0.65 0.40 0.0" mass="0.020"/>
-    <lego_prop name="note_green"  ldr="props/note_green.ldr"  pos="0.80 0.40 0.0" mass="0.020"/>
+    <lego_prop name="note_green"  ldr="props/note_green.ldr"  pos="0.4456 0.4881 0.0" mass="0.020"/>
     <lego_prop name="note_yellow" ldr="props/note_yellow.ldr" pos="0.95 0.40 0.0" mass="0.020"/>
     <lego_prop name="note_white"  ldr="props/note_white.ldr"  pos="0.50 0.25 0.0" mass="0.020"/>
     <lego_prop name="note_black"  ldr="props/note_black.ldr"  pos="0.80 0.25 0.0" mass="0.020"/>

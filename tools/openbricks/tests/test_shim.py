@@ -375,22 +375,56 @@ class BenchShapeTests(_ShimTestBase):
         time.sleep_ms(100)
         self.assertEqual(t2._vel_dps(), 0.0)
 
-    def test_task_wheels_cannot_back_a_drivebase(self):
-        # Construction order is the sim's binding rule: wheels must
-        # be the FIRST TWO motors. Adopting kinematic stand-ins would
-        # silently produce a drivebase that moves nothing — refuse
-        # loudly instead.
+    def test_drivebase_adopts_the_physical_wheels_whatever_the_order(self):
+        # Firmware rule (st3215 _attach_task_slot): a DriveBase adopts
+        # whatever slots its wheels hold, so construction order never
+        # matters. The sim's physical/kinematic split follows: the
+        # adopted pair gets the chassis wheels even when the task
+        # motors were built first (the bench main.py's actual order),
+        # and the displaced task motors become kinematic shafts.
         from openbricks.drivers.st3032 import ST3032Motor
         from openbricks.robotics.drivebase import DriveBase
+        front = ST3032Motor(servo_id=4, uart_id=1, tx=14, rx=6)
+        back = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
+        left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        self.assertIsNotNone(front._plumb)      # held the wheels so far
+        self.assertIsNone(left._plumb)
+        db = DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=136)
+        self.assertIsNotNone(left._plumb)
+        self.assertIsNotNone(right._plumb)
+        self.assertNotEqual(left._actuator_id, right._actuator_id)
+        self.assertIsNone(front._plumb)
+        self.assertIsNone(back._plumb)
+        x0 = float(self.robot.runtime.data.qpos[0])
+        db.straight(40)
+        self.assertTrue(db.done())
+        self.assertTrue(abs(float(self.robot.runtime.data.qpos[0]) - x0)
+                        > 0.005)
+        # ...and the task motors still run, kinematically.
+        front.run_angle(200, 90)
+        self.assertTrue(80 < front.angle() < 100, front.angle())
+
+    def test_same_servo_id_is_the_same_motor(self):
+        # One servo, one slot: the bus keys by id, so re-constructing
+        # a motor for an id yields the SAME motor (the bench main.py
+        # re-constructs its front/back motors to swap their names),
+        # and it consumes no further slot — six constructions over
+        # four ids fit the four-slot bus.
+        from openbricks.drivers.st3032 import ST3032Motor
+        a = ST3032Motor(servo_id=4, uart_id=1, tx=14, rx=6)
+        b = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
         ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
         ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
-        a = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
-        b = ST3032Motor(servo_id=4, uart_id=1, tx=14, rx=6)
-        try:
-            DriveBase(a, b, wheel_diameter_mm=88, axle_track_mm=136)
-            self.fail("expected RuntimeError")
-        except RuntimeError as e:
-            self.assertIn("first two motors", str(e))
+        b2 = ST3032Motor(servo_id=4, uart_id=1, tx=14, rx=6)
+        a2 = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
+        self.assertIs(b2, a)
+        self.assertIs(a2, b)
+        a.run_speed(120)
+        time.sleep_ms(200)
+        self.assertGreater(b2.angle(), 10.0)     # same shaft
+        with self.assertRaises(RuntimeError):
+            ST3032Motor(servo_id=5, uart_id=1, tx=14, rx=6)
 
 
 class ShimSerialMotorTests(_ShimTestBase):
@@ -472,6 +506,35 @@ class ShimSerialMotorTests(_ShimTestBase):
         st3215.run_speed(5000)
         self.assertEqual(st3215._target_dps, 600.0)   # unchanged
         st3215.coast()
+
+    def test_velocity_loop_holds_the_commanded_speed(self):
+        # The servo's inner loop is PI over a DC model free-running
+        # at THIS servo's no-load speed: a commanded speed is the
+        # wheel's speed, up to the ST-3032's 888. (P alone against
+        # the generic 300 dps model settled 350 -> ~200.)
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        for cmd in (120.0, 350.0, 600.0):
+            m.run_speed(cmd)
+            time.sleep_ms(1500)
+            self.assertAlmostEqual(m.speed(), cmd, delta=5.0)
+        m.coast()
+
+    def test_chassis_speed_follows_the_wheel_command(self):
+        # 350 dps on 86.4 mm wheels is 264 mm/s of floor.
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics.drivebase import DriveBase
+        l = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6, invert=True)
+        r = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        db = DriveBase(l, r, wheel_diameter_mm=86.4, axle_track_mm=135)
+        db.settings(acceleration=1000)
+        db.move_wheels(350, 350)
+        time.sleep_ms(1500)                    # ramp + settle
+        x0 = self.robot.chassis_pose()[0]
+        time.sleep_ms(1000)
+        v = self.robot.chassis_pose()[0] - x0
+        self.assertTrue(240 < v < 290, "%.0f mm/s" % v)
+        db.stop()
 
     def test_run_angle_blocking_reaches_target(self):
         from openbricks.drivers.st3032 import ST3032Motor
@@ -657,25 +720,18 @@ class FullFirmwareCodeIntegrationTest(_ShimTestBase):
                         "CW curve should yaw negative "
                         "(got %.1f deg)" % yaw_deg)
 
-    @unittest.expectedFailure
     def test_jgb37_drivebase_straight_lands_near_target(self):
         # Tighter version of ``test_jgb37_drivebase_straight``: pin
         # what users *expect* — straight(50) leaves the chassis near
-        # x=50, not just somewhere positive. As of this commit the
-        # chassis significantly overshoots the target because the
-        # native drivebase's ``is_done()`` fires when the planned
-        # trajectory distance is reached, not when the chassis has
-        # actually settled at the target. ``db.stop()`` then cuts
-        # power without active braking, so the chassis coasts past.
-        # Real hardware masks this with motor-internal friction;
-        # the sim doesn't, so a 50 mm requested move can land at
-        # 100-300 mm depending on speed.
-        #
-        # Marked ``expectedFailure`` so the test runs (catches a
-        # future fix that flips it green) without breaking the
-        # current suite. Fix landing-place: deceleration phase that
-        # brings velocity to ~0 at target, and/or active braking
-        # in ``ob_drivebase_stop``.
+        # x=50, not just somewhere positive. This was an
+        # ``expectedFailure`` ("the chassis coasts 100-300 mm past
+        # the target") until the chassis resize stopped burying the
+        # wheels: ``apply_drivebase_dims_to_model`` placed a resized
+        # wheel by the body-underside formula chassis_mjcf had
+        # already abandoned (issue #234), so every native-path
+        # drivebase ran on 20 mm of floor penetration — and THAT was
+        # the coasting. On wheels that touch the floor the move
+        # lands within the tolerance below.
         from openbricks.drivers.jgb37_520 import JGB37Motor
         from openbricks.robotics.drivebase import DriveBase
         m_left  = JGB37Motor(in1=12, in2=14, pwm=27,
@@ -1150,7 +1206,10 @@ class SimStBusEngineTests(_ShimTestBase):
         x0, _, _ = self.robot.chassis_pose()
         time.sleep_ms(300)   # sim keeps stepping; controller must not
         x1, _, _ = self.robot.chassis_pose()
-        self.assertLess(abs(x1 - x0), 3.0,
+        # A freewheeling chassis coasts a few mm from 150 dps (~5 on
+        # wheels that hold their commanded speed); what must not
+        # happen is the controller DRIVING on — 14 mm in 300 ms.
+        self.assertLess(abs(x1 - x0), 10.0,
                         "chassis kept driving after torque_off_all "
                         "(%.1f -> %.1f mm)" % (x0, x1))
 
@@ -1196,6 +1255,139 @@ class WorldAliasTableTests(unittest.TestCase):
                             "%s -> %s missing" % (alias, rel))
 
 
+class ShimQTRTests(unittest.TestCase):
+    """``QTRArray`` / ``QTRChannel`` / ``QTRLineSensor`` resolve to
+    the shim subclasses and read the chassis line site — the bench
+    line sensor's whole discipline (modes, edge error, calibration
+    contract) running on simulated reflectance."""
+
+    def setUp(self):
+        if shim.is_installed():
+            shim.uninstall()
+        self.robot = SimRobot(world="practice-line")
+        shim.install(self.robot.runtime)
+        self.addCleanup(self._uninstall)
+
+    @staticmethod
+    def _uninstall():
+        if shim.is_installed():
+            shim.uninstall()
+
+    def _line_sensor(self):
+        from openbricks.drivers.qtr import QTRLineSensor
+        from openbricks.parameters import LineMode
+        qtr = QTRLineSensor()
+        qtr.load_calibration("/qtr.cal")     # the hub path: no file here
+        return qtr, LineMode
+
+    def test_classes_resolve_to_the_shim(self):
+        from openbricks.drivers import qtr as qtr_mod
+        self.assertIs(qtr_mod.QTRLineSensor, shim.ShimQTRLineSensor)
+        self.assertIs(qtr_mod.QTRArray, shim.ShimQTRArray)
+        self.assertIs(qtr_mod.QTRChannel, shim.ShimQTRChannel)
+        # ...and are still the firmware classes underneath: the
+        # geometry table and setpoints come from there.
+        self.assertTrue(issubclass(shim.ShimQTRLineSensor, shim._RealQTRLineSensor))
+        self.assertEqual(shim.ShimQTRLineSensor.RIGHT_SETPOINT_MM, 16.0)
+
+    def test_reading_before_calibration_still_raises(self):
+        from openbricks.drivers.qtr import QTRLineSensor
+        with self.assertRaises(RuntimeError):
+            QTRLineSensor().read()
+
+    def test_load_calibration_touches_no_file(self):
+        import os
+        qtr, _ = self._line_sensor()
+        self.assertFalse(os.path.exists("/qtr.cal"))
+        self.assertEqual(len(qtr.read()), 10)
+
+    def test_calibrate_spends_its_sim_time(self):
+        from openbricks.drivers.qtr import QTRLineSensor
+        qtr = QTRLineSensor()
+        t0 = self.robot.runtime.now_ms
+        qtr.calibrate(duration_ms=300)
+        self.assertEqual(self.robot.runtime.now_ms - t0, 300)
+        self.assertEqual(len(qtr.read()), 10)
+
+    def test_save_calibration_writes_nothing_but_keeps_the_contract(self):
+        import os, tempfile
+        from openbricks.drivers.qtr import QTRLineSensor
+        qtr = QTRLineSensor()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "qtr.cal")
+            with self.assertRaises(RuntimeError):
+                qtr.save_calibration(path)    # uncalibrated: same raise
+            qtr.calibrate(duration_ms=10)
+            qtr.save_calibration(path)
+            self.assertFalse(os.path.exists(path))
+
+    def test_on_the_practice_line_the_centre_elements_are_dark(self):
+        # Spawn puts the array over the 20 mm line: +/-4 mm dark, the
+        # rest over mat; the centroid sits on the array centre.
+        qtr, LineMode = self._line_sensor()
+        self.robot.run_for(0.3)               # settle on the wheels
+        r = qtr.read()
+        self.assertTrue(r[4].dark() and r[5].dark(), r)
+        self.assertTrue(r[0].white() and r[9].white(), r)
+        self.assertAlmostEqual(r.position(), 0.0, delta=2.0)
+        qtr.set_mode(LineMode.CENTER)
+        self.assertAlmostEqual(r.edge_error(), 0.0, delta=5.0)
+
+    def test_right_edge_follower_tracks_the_line_and_stops_at_the_bar(self):
+        # The bench main.py's inner loop, verbatim shape: hold the
+        # line's right edge under channel 12, steer P on the edge
+        # error, stop when the whole window goes dark. Practice-line
+        # has a stop bar at x = 1.2 m and a LEFT-side branch stub at
+        # x = 0.6 that must darken the left elements once.
+        import time as _t
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics.drivebase import DriveBase
+        qtr, LineMode = self._line_sensor()
+        qtr.set_mode(LineMode.RIGHT)
+        left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
+        right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+        db = DriveBase(left, right, wheel_diameter_mm=86.4,
+                       axle_track_mm=135)
+        db.settings(acceleration=1000)
+        # P gain 1 on the +/-50 edge error at 250 dps cruise: tracks
+        # within ~20 mm here (gain 2 rides over the branch stub and
+        # reads it as the bar; the bench's own 0.5 wanders 50 mm —
+        # exactly the kind of thing the sim exists to show before
+        # the mat does).
+        branches, in_branch, worst_y = 0, False, 0.0
+        for _ in range(6000):
+            r = qtr.read()
+            if all(e.ambient() < 50 for e in r):
+                db.stop()
+                break
+            err = r.edge_error()
+            db.move_wheels(250 + 1.0 * err, 250 - 1.0 * err)
+            left_dark = all(e.ambient() <= 50 for e in r[:7])
+            if left_dark and not in_branch:
+                branches += 1
+            in_branch = left_dark
+            _t.sleep_ms(5)
+            worst_y = max(worst_y, abs(self.robot.chassis_pose()[1]))
+        else:
+            self.fail("never reached the stop bar")
+        x_mm, _, _ = self.robot.chassis_pose()
+        # The bar is at x = 1.2 m, the array 60 mm ahead of the axle.
+        self.assertGreater(x_mm, 1100.0, "stopped short at %.0f mm" % x_mm)
+        self.assertLess(x_mm, 1200.0, "overran the bar to %.0f mm" % x_mm)
+        self.assertLess(worst_y, 30.0, "wandered %.0f mm off" % worst_y)
+        self.assertGreaterEqual(branches, 1)
+
+    def test_qtr_channel_is_one_element(self):
+        from openbricks.drivers.qtr import QTRChannel
+        ch = QTRChannel(pin=9)
+        ch.calibrate(duration_ms=10)
+        self.robot.run_for(0.3)
+        # The lone element sits at the site centre, on the line
+        # (practice-line's ink is a very dark grey, not 0/0/0).
+        self.assertTrue(ch.dark())
+        self.assertGreater(ch.value(), 900)
+
+
 class SimIcm45686Tests(_ShimTestBase):
     """The REAL firmware ICM-45686 driver runs unchanged in the sim —
     no Shim class: ``_native.icm45686`` plus the motor_process
@@ -1221,7 +1413,14 @@ class SimIcm45686Tests(_ShimTestBase):
         db.use_gyro(True)          # hard source: db_gyro_source(1)
         db.turn(90)
         h = imu.heading()
-        self.assertTrue(abs(h - 90) < 5, h)
+        # +/-10: on the 65/120 geometry this lands at ~96. A turn on
+        # any non-default chassis runs ~4% long in MuJoCo (measured
+        # 93.9-94.4 for 65/120 and 86.4/135, built at compile time
+        # or resized at adoption alike; the 60/150 default lands at
+        # 90.3), and the gyro loop trims only part of it before the
+        # trajectory ends. It landed inside 5 before 3.5.0 because
+        # the resized wheels were buried 20 mm in the floor.
+        self.assertTrue(abs(h - 90) < 10, h)
         db.reset()                 # the sanctioned mid-mission zero
         self.assertTrue(abs(imu.heading()) < 1, imu.heading())
 

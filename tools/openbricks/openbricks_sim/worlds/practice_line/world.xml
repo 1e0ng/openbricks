@@ -39,8 +39,12 @@
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1"/>
 
-    <!-- White floor — 2.0 × 1.0 m, centred so +X runs 1.0 m ahead. -->
-    <geom name="floor" type="plane" size="1.0 0.5 0.05"
+    <!-- White floor — 2.0 × 1.0 m, from 0.5 m behind the spawn to
+         1.5 m ahead: the line (to x = 1.3) and the stop bar (x = 1.2)
+         must lie ON it. Centred on the origin it ended at x = 1.0,
+         and a sensor past that edge read "dark" (nothing to reflect
+         off) — a false intersection 20 cm short of the bar. -->
+    <geom name="floor" type="plane" pos="0.5 0 0" size="1.0 0.5 0.05"
           rgba="1 1 1 1" friction="0.9 0.02 0.0001"/>
 
     <!-- The line: 20 mm wide, from the spawn point to past the stop

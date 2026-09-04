@@ -25,6 +25,7 @@ Any of them can be overridden when the user instantiates a DriveBase;
 until Phase C wires that through, this default is what lands.
 """
 
+import math
 from dataclasses import dataclass
 
 
@@ -54,10 +55,27 @@ class ChassisSpec:
     motor_ctrlrange_min: float = -0.5
     motor_ctrlrange_max: float =  0.5
 
+    # Sensor placement, chassis frame (metres; +X forward, +Y left,
+    # origin on the axle). The defaults reproduce the historical
+    # layout: every down-facing sensor 10 mm behind the body's front
+    # edge, on the centre line.
+    #   color_sensor_x/y — the centre down camera (``chassis_cam_down``,
+    #       the TCS34725 shim's no-mux binding); the left/right pair
+    #       sits 18 mm either side of it.
+    #   line_sensor_x    — the reflectance-array site (``chassis_line``):
+    #       the QTR shim spreads its elements left/right of this point.
+    color_sensor_x: float = 0.060
+    color_sensor_y: float = 0.0
+    line_sensor_x:  float = 0.060
+
     # Pose: where to drop the chassis in the world. Caller can
     # override by regenerating the fragment with a different origin.
+    # ``yaw_deg`` is the spawn heading about +Z, counter-clockwise
+    # positive seen from above (0 = facing +X) — the same frame
+    # ``SimRobot.chassis_pose()`` / ``set_pose()`` use.
     pos_x: float = 0.0
     pos_y: float = 0.0
+    yaw_deg: float = 0.0
 
 
 def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
@@ -105,7 +123,8 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         '  <worldbody>\n'
         '    <!-- Default openbricks-sim chassis. Override geometry by\n'
         '         calling chassis_mjcf(ChassisSpec(...)) at load time. -->\n'
-        '    <body name="{name}" pos="{px:.4f} {py:.4f} {cz:.4f}">\n'
+        '    <body name="{name}" pos="{px:.4f} {py:.4f} {cz:.4f}"\n'
+        '          euler="0 0 {yaw:.4f}">\n'
         '      <freejoint name="{name}_free"/>\n'
         '      <!-- Inertial tag so MuJoCo doesn\'t derive mass from geoms alone. -->\n'
         '      <inertial pos="0 0 0" mass="{bm:.3f}"\n'
@@ -149,7 +168,7 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         '           xyaxes: image-right = body -Y, image-up = body +X.\n'
         '           Cross product gives camera +Z = body +Z, so the\n'
         '           camera looks along body -Z (straight down). -->\n'
-        '      <camera name="{name}_cam_down" pos="{front:.4f} 0 {cam_z:.4f}"\n'
+        '      <camera name="{name}_cam_down" pos="{csx:.4f} {csy:.4f} {cam_z:.4f}"\n'
         '              xyaxes="0 -1 0 1 0 0" fovy="20"/>\n'
         '      <!-- Left/right pair, offset either side of the centre\n'
         '           line. Line-following is entirely about the\n'
@@ -158,11 +177,16 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         '           zero. Offset is half the mat line width either\n'
         '           way, matching how the real pair is mounted. -->\n'
         '      <camera name="{name}_cam_down_l" fovy="20"\n'
-        '              pos="{front:.4f} {cam_dy:.4f} {cam_z:.4f}"\n'
+        '              pos="{csx:.4f} {csy_l:.4f} {cam_z:.4f}"\n'
         '              xyaxes="0 -1 0 1 0 0"/>\n'
         '      <camera name="{name}_cam_down_r" fovy="20"\n'
-        '              pos="{front:.4f} -{cam_dy:.4f} {cam_z:.4f}"\n'
+        '              pos="{csx:.4f} {csy_r:.4f} {cam_z:.4f}"\n'
         '              xyaxes="0 -1 0 1 0 0"/>\n'
+        '      <!-- Reflectance-array site: the QTR shim casts one ray\n'
+        '           per element down from this point, spread along\n'
+        '           body Y by the array\'s own element positions. -->\n'
+        '      <site name="{name}_line" pos="{lsx:.4f} 0 {cam_z:.4f}"\n'
+        '            size="0.003"/>\n'
         '      <!-- Forward-facing range-sensor site (HC-SR04 /\n'
         '           VL53L0X shims raycast from here along body +X). -->\n'
         '      <site name="{name}_dist" pos="{dist_x:.4f} 0 0"\n'
@@ -173,7 +197,7 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         '  </worldbody>\n'
     ).format(
         name=name,
-        px=spec.pos_x, py=spec.pos_y, cz=chassis_z,
+        px=spec.pos_x, py=spec.pos_y, cz=chassis_z, yaw=spec.yaw_deg,
         bm=spec.body_mass,
         bx=bx, by=by, bz=bz,
         wx=wheel_x, wy=wheel_y,
@@ -181,10 +205,13 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         wm=spec.wheel_mass, wr=spec.wheel_radius, ww=spec.wheel_width / 2,
         cx=caster_x, cz_local=caster_z_local,
         cm=spec.caster_mass, cr=spec.caster_radius,
-        front=bx - 0.010, cam_z=-bz + 0.002,
+        cam_z=-bz + 0.002,
+        csx=spec.color_sensor_x, csy=spec.color_sensor_y,
         # Half the sensor separation. The pair straddles a line, so
         # this is what makes their readings differ at all.
-        cam_dy=0.018,
+        csy_l=spec.color_sensor_y + 0.018,
+        csy_r=spec.color_sensor_y - 0.018,
+        lsx=spec.line_sensor_x,
         dist_x=bx + 0.001,
     )
 
@@ -220,7 +247,9 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
 
 def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
                                   wheel_diameter_mm: float,
-                                  axle_track_mm: float) -> None:
+                                  axle_track_mm: float,
+                                  chassis_spec: ChassisSpec = None,
+                                  data=None) -> None:
     """Resize the chassis wheels + reposition the axles on a compiled
     MuJoCo model so they match the dimensions a user passed to their
     ``DriveBase(wheel_diameter_mm=..., axle_track_mm=...)`` call.
@@ -256,20 +285,37 @@ def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
     * Body length / width / mass stay at the spec defaults — the
       ``DriveBase`` constructor doesn't expose those parameters
       anyway, so the user has no opinion to pass through.
-    * Caster offset stays at default. The chassis pose-on-wheels
-      depends on wheel radius; we adjust the wheel-body Z so the
-      chassis still sits with 5 mm clearance.
+    * Caster offset (behind the axle) stays at default; its height
+      follows the wheels, so the chassis stays level on all three
+      contacts at the same 5 mm clearance.
+    * ``chassis_spec`` is the spec the model was BUILT from (its body
+      height sets where the wheel bodies hang). ``None`` means the
+      default spec — right for every model ``chassis_mjcf()`` built
+      without overrides, wrong for a custom-bodied one, so callers
+      that hold a spec (``SimRuntime.chassis_spec``) pass it.
+    * ``data``, when given, is the live ``MjData`` of a chassis that
+      is ALREADY standing on the floor: its free joint is lifted by
+      the wheel-radius change so the resized wheels land on the
+      floor instead of inside it (a wheel grown 14 mm into the floor
+      rides on penetration-recovery forces — the issue #234 failure
+      mode, reintroduced at adoption time).
     """
     import mujoco
     wheel_radius   = wheel_diameter_mm / 2000.0   # mm → m, diameter → radius
     half_axle      = axle_track_mm / 2000.0       # mm → m, full → half
 
-    spec = ChassisSpec()  # for body half-extents, wheel half-width
-    bz   = spec.body_height / 2
+    spec = chassis_spec if chassis_spec is not None else ChassisSpec()
+    old_radius = None
     ground_clearance = 0.005
-    # Wheel body Z so the wheel bottom sits ground_clearance above z=0
-    # in the chassis frame (same formula chassis_mjcf uses).
-    wz_offset = -bz - (wheel_radius - bz - ground_clearance)
+    # The chassis origin sits at wheel_radius + clearance above the
+    # floor, so a wheel centre is -clearance below it and a caster
+    # centre caster_radius above the floor — the same offsets
+    # chassis_mjcf() writes, re-derived for the new radius. (The
+    # previous formula here measured from the body box's underside
+    # and buried a resized wheel by its radius less 10 mm — the
+    # issue #234 failure mode chassis_mjcf had already left behind.)
+    chassis_z = wheel_radius + ground_clearance
+    wz_offset = -ground_clearance
 
     for side, sign in (("l", +1), ("r", -1)):
         wheel_body = "{}_wheel_{}".format(name, side)
@@ -286,22 +332,51 @@ def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
         # geom_size for cylinder: [radius, half-length, _].
         for gid in range(model.ngeom):
             if int(model.geom_bodyid[gid]) == bid:
+                old_radius = float(model.geom_size[gid, 0])
                 model.geom_size[gid, 0] = wheel_radius
                 # geom_size[1] is half-length — keep at spec default
                 # (wheel width is independent of diameter).
+                half_len = float(model.geom_size[gid, 1])
+                # The compiler's bounding sphere / box are what the
+                # broadphase tests against the floor; left at the
+                # old radius, a grown wheel's bound never reaches
+                # the floor and it rolls in mid-air.
+                model.geom_rbound[gid] = math.sqrt(
+                    wheel_radius ** 2 + half_len ** 2)
+                model.geom_aabb[gid] = (0.0, 0.0, 0.0,
+                                        wheel_radius, wheel_radius, half_len)
                 break
     # The chassis body itself sits at chassis_z = wheel_radius + clearance
     # in the world frame; update it so the chassis doesn't fall through
     # the floor or float when the wheel size changes.
     chassis_bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
     if chassis_bid >= 0:
-        model.body_pos[chassis_bid, 2] = wheel_radius + ground_clearance
+        model.body_pos[chassis_bid, 2] = chassis_z
+    # The caster hangs from the chassis too: keep its ball on the
+    # floor at the new ride height, or the chassis pitches back onto
+    # it (25 degrees for an 88 mm wheel on the 60 mm default).
+    caster_bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY,
+                                   name + "_caster")
+    if caster_bid >= 0:
+        model.body_pos[caster_bid, 2] = spec.caster_radius - chassis_z
 
     # Refresh derived fields (e.g. cached spatial transforms) on the
     # compiled model. ``mj_setConst`` recomputes constants like
     # body_invweight0 from the new positions; without it the next
     # ``mj_step`` would use stale derivations.
     mujoco.mj_setConst(model, mujoco.MjData(model))
+
+    if data is not None and old_radius is not None:
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT,
+                                name + "_free")
+        if jid < 0:
+            raise ValueError(
+                "model has no joint named %r — cannot lift a chassis "
+                "that has no free joint" % (name + "_free"))
+        qadr = int(model.jnt_qposadr[jid])
+        data.qpos[qadr + 2] += wheel_radius - old_radius
+        data.qvel[:] = 0.0
+        mujoco.mj_forward(model, data)
 
 
 def standalone_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:

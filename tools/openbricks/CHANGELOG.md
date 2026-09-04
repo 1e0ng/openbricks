@@ -3,6 +3,61 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.5.0 — the sim runs a QTR line-following robot, and it can be YOUR robot
+
+A bench `main.py` — `QTRLineSensor` on a 86.4 mm-wheel, 135 mm-track
+chassis, ICM-45686 gyro, a colour sensor off to one side, two task
+servos constructed before the wheels — could not run in the sim:
+no reflectance array, a fixed default chassis, wheels bound by
+construction order, and on the serial path a `straight(100)` that
+travelled 70 mm of the default wheel. Now it runs, on the WRO 2026
+Elementary mat.
+
+- `QTRArray` / `QTRChannel` / `QTRLineSensor` are shimmed: the
+  firmware driver (geometry, modes, edge maths, the calibration
+  contract) over `SimReflectanceArray` — one downward ray per spot
+  sample from the new chassis `chassis_line` site, luminance averaged
+  over a 3 mm spot, dark = high. `load_calibration("/qtr.cal")` /
+  `calibrate()` / `save_calibration()` need no file. The floor sampler
+  behind it is shared with the colour sensor (`FloorSampler`).
+- `openbricks sim run/preview --chassis FILE` takes a JSON of
+  `ChassisSpec` fields describing the robot; `--yaw` (and
+  `ChassisSpec.yaw_deg`) sets the spawn heading; `line_sensor_x` /
+  `color_sensor_x` / `color_sensor_y` place the sensors. `--x`/`--y`
+  now default to the file's pose.
+- Serial servos bind by servo id: a second `ST3032Motor(servo_id=4)`
+  is the same motor (the bus's one-slot-per-id rule), and a
+  `DriveBase` adoption gives the physical wheels to the pair it
+  adopts, whatever the construction order. Adoption also resizes
+  the chassis to the drivebase's `wheel_diameter_mm` /
+  `axle_track_mm`, as the native path always did.
+- `apply_drivebase_dims_to_model` placed a resized wheel by the
+  body-underside formula `chassis_mjcf` had already abandoned
+  (issue #234): every native-path drivebase ran on ~20 mm of floor
+  penetration, and the "coasts 100-300 mm past the target" expected
+  failure was that. Wheels now land on the floor, the caster follows
+  the ride height, and the collision bounds follow the radius.
+  Turns on non-default geometry run ~4% long in MuJoCo (the 60/150
+  default lands on 90.3); the gyro-turn test tolerance is now 10.
+- A serial servo's velocity loop is now PI over a DC model that
+  free-runs at THAT servo's no-load speed (`max_dps`: 888 for an
+  ST-3032), so a commanded wheel speed is the wheel's speed. The old
+  P loop against the generic 300 dps model settled a 350 dps command
+  at ~200 (150 mm/s of floor instead of 264 on 86 mm wheels), and
+  every distance and timing in a mission scaled with it.
+- `openbricks sim run --trace FILE` writes the chassis pose every
+  50 ms of sim time (t_ms, x_mm, y_mm, yaw_deg) for plotting or
+  asserting on; `--max-sim-s S` stops a script whose loop never
+  meets its exit condition (exit status 3).
+- Worlds: the practice-line floor now extends under its own stop
+  bar (a sensor past the old floor edge read dark — a false
+  intersection 20 cm short); the Elementary red and green notes
+  stand on their fixed squares (3rd and 4th of the six).
+- The `[sim]` C extension must be rebuilt for each interpreter after
+  the 3.2.0 native changes (`python -m pip install -e 'tools/openbricks[sim]'`
+  or `setup.py build_ext --inplace`) — a stale build fails with
+  `RawDriveBase has no attribute 'refresh_frame'`.
+
 ## 3.4.0 — a program that ends by itself brakes to rest before the torque-off
 
 Every way out of a program ends with a torque-off, and torque-off is
