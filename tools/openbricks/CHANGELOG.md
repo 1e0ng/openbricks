@@ -3,6 +3,19 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.7.0 — the status LED flashes purple during uploads, and faster while running
+
+Two asks from the bench. The run indicator now flashes the BLE-state
+colour at **5 Hz** (100 ms per phase; was 2 Hz — "double" would be
+125 ms, which the 50 ms poll can't render, so it steps to the next
+notch up). And while a host tool is writing to the hub over BLE —
+`openbricks upload`, or `run` staging its program — the LED flashes
+**purple at 10 Hz**, outranking the run blink and yielding only to
+the press flash. The hub detects the transfer itself: every BLE write
+the bridge accepts stamps `ble_repl.host_active()`, which stays true
+for a second after the last byte, so no CLI change was needed and
+older CLIs light it too. Flash 3.7.0.
+
 ## 3.6.0 — the wheel ships the firmware package, so a pipx install can `sim run`
 
 `pipx install 'openbricks[sim]'` followed by `openbricks sim run

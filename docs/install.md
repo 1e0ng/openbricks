@@ -79,10 +79,12 @@ See {doc}`the CLI reference <cli>` for every command, and
 - **Hub doesn't show up in `openbricks list`** — BLE may be toggled
   off. Short-press the Bluetooth button (GPIO 38 on the S3, GPIO 5 on the classic ESP32); on the
   ESP32-S3 the onboard LED turns blue when BLE is on, yellow when off.
-  While a program is running the LED flashes that colour at 2 Hz
+  While a program is running the LED flashes that colour at 5 Hz
   instead of holding it solid — a flashing LED means "robot running",
-  not a different BLE state. A brief flash is the press
-  acknowledgment, shown the moment a program-button press is
+  not a different BLE state. While a host tool is sending to the hub
+  (`openbricks upload`, or `run` staging its program) it flashes
+  **purple** twice as fast, then hands back. A brief flash is the
+  press acknowledgment, shown the moment a program-button press is
   recognized: **red** for the press that starts a run, **green**
   for the press that stops one.
   See {class}`openbricks.hub.ESP32S3DevkitHub`.

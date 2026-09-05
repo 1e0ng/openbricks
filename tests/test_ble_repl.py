@@ -9,6 +9,7 @@ tests focus on the public surface and the openbricks-specific bits
 import tests._fakes       # noqa: F401
 import tests._fakes_ble   # noqa: F401  (installs fake esp32 + bluetooth + os.dupterm)
 
+import time
 import unittest
 
 from tests._fakes_ble import (
@@ -174,6 +175,27 @@ class UartRxTxTests(unittest.TestCase):
         _FakeBLE._char_values[self.rx_handle] = b"sneak"
         _FakeBLE._fire_irq(3, (999, self.rx_handle))   # unknown conn=999
         self.assertEqual(self.uart.read(), b"")
+
+    def test_central_write_marks_the_host_active(self):
+        # The status LED's transfer indicator rides this stamp: every
+        # accepted write refreshes it, and it expires HOST_ACTIVE_MS
+        # after the last one.
+        ble_repl._last_rx_ms = None
+        self.assertFalse(ble_repl.host_active())
+        _FakeBLE._simulate_central_write(1, self.rx_handle, b"paste")
+        self.assertTrue(ble_repl.host_active())
+        time.sleep_ms(ble_repl.HOST_ACTIVE_MS - 100)
+        self.assertTrue(ble_repl.host_active())
+        time.sleep_ms(200)
+        self.assertFalse(ble_repl.host_active())
+
+    def test_dropped_write_does_not_mark_the_host_active(self):
+        # A write from an unknown connection is dropped by the bridge
+        # and must not light the indicator either.
+        ble_repl._last_rx_ms = None
+        _FakeBLE._char_values[self.rx_handle] = b"sneak"
+        _FakeBLE._fire_irq(3, (999, self.rx_handle))
+        self.assertFalse(ble_repl.host_active())
 
     def test_multiple_writes_accumulate(self):
         _FakeBLE._simulate_central_write(1, self.rx_handle, b"foo")
