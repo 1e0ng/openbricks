@@ -97,6 +97,10 @@ class CibuildwheelConfigTests(unittest.TestCase):
             "import the new pillar attribute.")
         cmd = self.cfg.get("test-command", "")
         self.assertIn("TrapezoidalProfile", cmd)
+        # ...and the bundled firmware package (3.6.0): a wheel that
+        # ships without it installs fine and fails on the first
+        # ``sim run`` of a hub-style script.
+        self.assertIn("import openbricks.parameters", cmd)
         self.assertIn("openbricks_sim", cmd)
 
     def test_linux_uses_manylinux_2_28(self):

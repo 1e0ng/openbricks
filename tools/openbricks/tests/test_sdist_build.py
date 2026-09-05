@@ -110,6 +110,18 @@ class SdistBundlesSharedCoresTests(unittest.TestCase):
             "MANIFEST.in must include ``recursive-include "
             "native/_shared *.c *.h``." % missing)
 
+    def test_sdist_contains_the_firmware_package(self):
+        # The wheel-build step runs from the unpacked sdist, where
+        # ``../../openbricks`` doesn't exist: ``_sync_firmware`` must
+        # find the mirror already bundled (MANIFEST.in
+        # ``recursive-include openbricks *.py``).
+        with tempfile.TemporaryDirectory() as tmp:
+            sdist = _build_sdist_into(tmp)
+            rel = _sdist_relpaths(sdist)
+        for wanted in ("openbricks/__init__.py", "openbricks/parameters.py",
+                       "openbricks/drivers/qtr.py"):
+            self.assertIn(wanted, rel)
+
     def test_sdist_contains_native_extension_source(self):
         # Same shape: ``openbricks_sim_native.c`` must be in the
         # sdist too — without it the wheel build can't compile the

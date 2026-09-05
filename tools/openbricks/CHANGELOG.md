@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.6.0 — the wheel ships the firmware package, so a pipx install can `sim run`
+
+`pipx install 'openbricks[sim]'` followed by `openbricks sim run
+main.py` died on the first line of the shim with `No module named
+'openbricks'`: the simulator runs the firmware's own driver code (its
+shim subclasses `openbricks.drivers.*`, and every hub-style script
+imports them), but the wheel carried only `openbricks_dev` and
+`openbricks_sim` and the shim found the firmware package by walking
+three directories up to a repo checkout. 3.4.0 and 3.5.0 alike; only
+editable checkouts ever worked.
+
+- `setup.py::_sync_firmware` mirrors the repo-root `openbricks/`
+  package (`*.py`, no bytecode) into `tools/openbricks/openbricks/`
+  at build time — the same two-mode copy the shared C cores use —
+  and `packages.find` includes it, so the wheel, the sdist
+  (`MANIFEST.in`) and an editable install all carry it. In a checkout
+  the shim still puts the repo root first, so live firmware sources
+  win over the installed copy.
+- cibuildwheel's post-build smoke test now imports
+  `openbricks.parameters` from the installed wheel; the wheel and
+  sdist content tests pin the firmware modules.
+
 ## 3.5.0 — the sim runs a QTR line-following robot, and it can be YOUR robot
 
 A bench `main.py` — `QTRLineSensor` on a 86.4 mm-wheel, 135 mm-track

@@ -95,6 +95,43 @@ def _sync_cores():
 _sync_cores()
 
 
+# The firmware package itself — ``openbricks/`` at the repo root, the
+# code that runs on the hub. The simulator runs THAT code on the
+# desktop (its driver shim subclasses the firmware's drivers and user
+# scripts import ``openbricks.drivers.*``), so the wheel has to carry
+# it; until 3.6.0 it didn't, and a pipx install could not ``sim run``
+# any hub-style script (``No module named 'openbricks'``). Same two
+# build modes as ``_sync_cores``: mirror from the checkout, or trust
+# the copy the sdist bundled. The mirror is rebuilt from scratch so a
+# module deleted upstream doesn't linger in the wheel.
+FIRMWARE_SRC = (HERE / ".." / ".." / "openbricks").resolve()
+FIRMWARE_DST = HERE / "openbricks"
+
+
+def _sync_firmware():
+    """Mirror the firmware package's ``*.py`` files into
+    ``tools/openbricks/openbricks/`` (gitignored) for the wheel."""
+    if FIRMWARE_SRC.is_dir():
+        if FIRMWARE_DST.is_dir():
+            shutil.rmtree(FIRMWARE_DST)
+        for src in sorted(FIRMWARE_SRC.rglob("*.py")):
+            if "__pycache__" in src.parts:
+                continue
+            dst = FIRMWARE_DST / src.relative_to(FIRMWARE_SRC)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+        return
+    # sdist path: the mirror must already be bundled (MANIFEST.in).
+    if not (FIRMWARE_DST / "parameters.py").is_file():
+        raise RuntimeError(
+            "missing firmware package: cannot copy from " +
+            str(FIRMWARE_SRC) + " (upstream unavailable) and " +
+            str(FIRMWARE_DST) + " is not bundled either — broken checkout?")
+
+
+_sync_firmware()
+
+
 # Guide pages bundled for ``openbricks docs`` (offline reading).
 # Same two-mode shape as ``_sync_cores``: repo checkout → copy from
 # the repo-root ``docs/``. The bundle is the SAME Sphinx build as

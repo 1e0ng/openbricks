@@ -40,6 +40,7 @@ coverage.xml
 robot.local.json
 *.so
 tools/openbricks/native/_shared/
+tools/openbricks/openbricks/
 docs/_build/
 # _docs/ was generated at build time (guides synced from docs/), so it
 # was ignored wholesale. The offline manual bundle is now COMMITTED —

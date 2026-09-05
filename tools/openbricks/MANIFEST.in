@@ -13,6 +13,12 @@ include native/openbricks_sim_native.c
 # (which runs from the unpacked sdist) compile cleanly.
 recursive-include native/_shared *.c *.h
 
+# The firmware package, mirrored into ./openbricks/ by
+# ``setup.py::_sync_firmware`` (the sim runs the hub's own driver
+# code). Same reason as the cores: the wheel-build step runs from the
+# unpacked sdist, where ../../openbricks doesn't exist.
+recursive-include openbricks *.py
+
 # Worlds now live INSIDE the ``openbricks_sim`` package (see
 # ``[tool.setuptools.package-data]`` in pyproject.toml), so they
 # ride along into both sdist and wheel automatically. This used to
