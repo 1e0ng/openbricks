@@ -56,14 +56,13 @@ except ImportError:
 try:
     import time as _TIME
     _TICKS = _TIME.ticks_ms
-    _TICKS_DIFF = _TIME.ticks_diff
 except (ImportError, AttributeError):
     import time as _TIME
     def _TICKS():
         return int(_TIME.monotonic() * 1000)
-
-    def _TICKS_DIFF(a, b):
-        return a - b
+# Wrap-safe on MicroPython (ticks_diff); a plain difference where the
+# monotonic fallback above is the clock.
+_TICKS_DIFF = getattr(_TIME, "ticks_diff", None) or (lambda a, b: a - b)
 
 
 # ---- Host activity (3.7.0) --------------------------------------------

@@ -108,12 +108,8 @@ def _launcher_program_running():
 def _ble_host_active():
     """Default transfer probe: ``ble_repl.host_active()`` — a BLE
     central wrote to the hub within the last second. Lazy for the same
-    reason as the launcher probe; a host without the BLE stack reads
-    as never active."""
-    try:
-        from openbricks import ble_repl
-    except ImportError:
-        return False
+    reason as the launcher probe."""
+    from openbricks import ble_repl
     return ble_repl.host_active()
 
 
