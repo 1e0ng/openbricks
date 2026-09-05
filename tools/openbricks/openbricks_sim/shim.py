@@ -47,7 +47,20 @@ Slot allocation is sequential: the first motor constructed —
 ``_r`` pair. The third and fourth bind KINEMATIC task-motor slots
 (no chassis body — the shaft integrates its commanded speed), so a
 real robot's four-servo ``main.py`` constructs and runs; a fifth
-raises ``RuntimeError``.
+raises ``RuntimeError``. Two firmware rules ride on top for the
+serial servos: a servo id is an identity (constructing
+``ST3032Motor(servo_id=4)`` twice yields the same motor, as the bus
+has one slot per id), and a ``DriveBase`` always gets the two
+physical wheels for the pair it adopts, whatever the construction
+order — a script that builds its task motors first runs unchanged.
+
+  * Reflectance arrays — ``QTRArray`` / ``QTRChannel`` /
+    ``QTRLineSensor`` are replaced at the class level by subclasses
+    that read a :class:`SimReflectanceArray` (one downward ray per
+    element from the chassis ``chassis_line`` site, spot-averaged)
+    instead of ADC pins. The geometry, modes, edge maths and
+    calibration contract are the firmware's own code; only the
+    analog read and the calibration file are simulated.
 
 After ``install(runtime)``, calling ``uninstall()`` restores the
 original ``sys.modules`` + ``time`` state so back-to-back tests can
@@ -67,7 +80,8 @@ from typing import Optional
 from openbricks_sim import _native as _sim_native
 from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
                                      SimIMU, SimColorSensor,
-                                     SimDistanceSensor)
+                                     SimDistanceSensor,
+                                     SimReflectanceArray)
 
 # The firmware package (``openbricks``) is not part of the wheel: the
 # sim runs against a checkout, whose root is three directories up.
@@ -78,6 +92,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from openbricks.parameters import Stop, DriveMode  # noqa: E402
+# Pure-Python reflectance-array driver: the shim subclasses it (the
+# geometry / mode / edge maths are the firmware's, only the analog
+# read is simulated), so it must resolve at class-body time too.
+from openbricks.drivers.qtr import (  # noqa: E402
+    QTRArray as _RealQTRArray, QTRChannel as _RealQTRChannel,
+    QTRLineSensor as _RealQTRLineSensor)
 
 
 # Module-level state — only one shim can be installed at a time, but
@@ -97,6 +117,9 @@ class _ShimState:
         self.prev_driver_attrs:   dict = {}   # ("module.attr", prev_value)
         self.runtime: Optional[SimRuntime] = None
         self.motor_idx: int = 0
+        # Serial-bus motors by servo id — the bus has one slot per
+        # id, so a second construction for an id is the same motor.
+        self.serial_by_id: dict = {}
 
 
 # ---------------------------------------------------------------------
@@ -829,82 +852,83 @@ class ShimST3215Motor:
     Motor API (``run_speed`` + ``angle``) from MuJoCo.
 
     A real STS32xx runs its own internal wheel-mode velocity loop, so
-    the shim implements one too: a per-tick P controller on the exact
-    MuJoCo joint velocity (``data.qvel``). Deliberately *not* routed
-    through :class:`SimMotor`'s count-based servo core — integer
-    encoder-count quantisation at 1 kHz makes that observer's velocity
-    estimate swing thousands of dps around a ~250 dps wheel, and the
-    resulting bang-bang torque never accumulates the wheel rotation
-    the drivebase's position check waits for. ``qvel`` is exact,
-    and a plain P loop on it is flat at every gain we tested.
+    the shim implements one too: a per-tick PI controller on the exact
+    MuJoCo joint velocity (``data.qvel``), driving :class:`SimMotor`'s
+    DC-motor model with THIS servo's no-load speed (``max_dps`` —
+    888 for an ST-3032, 600 for an ST-3215) as the model's free-run
+    speed. Deliberately *not* routed through :class:`SimMotor`'s
+    count-based servo core — integer encoder-count quantisation at
+    1 kHz makes that observer's velocity estimate swing thousands of
+    dps around a ~250 dps wheel, and the resulting bang-bang torque
+    never accumulates the wheel rotation the drivebase's position
+    check waits for. ``qvel`` is exact. The integral term is what
+    makes a commanded speed the wheel's actual speed: P alone against
+    the model's back-EMF settled an 86 mm-wheel chassis asked for
+    350 dps at 200 dps (150 mm/s instead of 264), and every distance
+    and timing in a mission script scaled with it.
 
-    Two firmware arguments are deliberately ignored as wiring
-    concerns (like ``tx=`` / ``rx=`` / ``dir_pin=``):
+    Firmware arguments that are wiring concerns (``tx=`` / ``rx=`` /
+    ``uart_id`` / ``baud`` / ``dir_pin=``) are accepted and ignored,
+    and so is ``invert=`` — it compensates for mirrored physical
+    mounting, but the sim chassis defines both wheel hinges on the
+    same axis, so +speed is already "forward" on both sides and
+    honouring the flag would spin the robot in place.
 
-    * ``invert=`` — compensates for mirrored physical mounting. The
-      sim chassis defines both wheel hinges on the same axis, so
-      +speed is already "forward" on both sides; honouring the flag
-      would spin the robot in place.
-    * bus identity (``servo_id`` / ``uart_id`` / ``baud``) — slot
-      binding is by construction order (first constructed = left),
-      same convention as :class:`ShimServo`.
+    ``servo_id`` IS honoured, as the identity it is on the bus:
+    constructing a motor for an id that already has one returns
+    that same object (the firmware's "one servo, one slot" —
+    ``_attach_task_slot`` adopts the held slot). Slots bind by
+    construction order (first distinct id = left wheel, second =
+    right, third and fourth kinematic), but a ``DriveBase`` adoption
+    re-binds the two physical wheels to the pair it adopts, so the
+    order a script constructs its motors in doesn't matter.
 
     ``max_dps`` *is* honoured — the firmware driver clamps every
     speed command to it, and scripts tuned against that clamp should
     behave identically here.
 
-    Scale caveat: wheel *rotation* tracks commands exactly, but
-    millimetre travel reflects the sim model's wheel size. The
-    serial path can't resize the chassis to the script's
-    ``wheel_diameter_mm`` the way the native :class:`ShimDriveBase`
-    path does (the openbricks wrapper never constructs a shim
-    drivebase on this path), so treat sim distances as behavioural,
-    not calibrated.
+    Scale: adoption also resizes the chassis wheels and axle to the
+    ``DriveBase``'s ``wheel_diameter_mm`` / ``axle_track_mm`` (see
+    ``chassis.apply_drivebase_dims_to_model``), so a ``straight(100)``
+    travels 100 mm of MuJoCo floor. A serial motor used outside a
+    drivebase still turns the default 60 mm wheel.
     """
 
-    # Velocity-loop P gain, power-% per dps of error. Empirically
-    # flat from 0.005 through 1.0 on the default chassis; 0.5 tracks
-    # a 150 dps command to within ~1 dps.
+    # Velocity-loop gains: power-% per dps of error (P) and per
+    # dps-second of accumulated error (I). With the DC model's
+    # back-EMF the P term alone leaves a steady-state error of
+    # (w / no-load) * 100 / KP dps; the integral removes it. Anti-
+    # windup: the integrator holds while the power is saturated.
     _KP_VEL = 0.5
+    _KI_VEL = 10.0
     # run_angle approach shaping: decelerate so v² = 2·a·remaining,
     # with a crawl floor so friction can't stall short of the target.
     _DECEL_DPS2 = 720.0
     _MIN_APPROACH_DPS = 15.0
 
+    def __new__(cls, servo_id, *args, **kwargs):
+        # One servo, one slot: the firmware's bus keyed by id, so a
+        # second ``ST3032Motor(servo_id=4)`` is a second handle on
+        # the same motor. ``__init__`` sees ``_bound`` and returns.
+        if _INSTALLED is not None:
+            existing = _INSTALLED.serial_by_id.get(servo_id)
+            if existing is not None:
+                return existing
+        return object.__new__(cls)
+
     def __init__(self, servo_id, uart_id=1, tx=17, rx=16,
                  baud=1_000_000, dir_pin=None,
                  invert=False, max_dps=600.0, **_ignored):
+        if getattr(self, "_bound", False):
+            return                      # re-constructed by id: same motor
         slot = _next_motor_slot()
         rt = _INSTALLED.runtime
         self._rt = rt
-        # Kinematic integrator state — used only when this motor got
-        # a task-motor slot (no MuJoCo actuator); defined always so
-        # the tick can branch on _plumb alone.
-        self._kin_angle   = 0.0
-        self._kin_vel     = 0.0
-        self._kin_last_ms = None
-        if slot is None:
-            # Task-motor slot (third/fourth constructed): the default
-            # chassis has two physical wheels, so this shaft
-            # INTEGRATES its commanded speed instead of driving a
-            # MuJoCo joint. run/run_angle/angle()/done() all behave;
-            # load stays 0 and nothing pushes back — behavioural, not
-            # physical, exactly like the bench robot's gripper motors
-            # need for the script to run end-to-end.
-            self._plumb = None
-            self._dof = None
-            self._actuator_id = None
-        else:
-            sensor_name, actuator_name = slot
-            # Reuse SimMotor purely for the (sensor, actuator)
-            # plumbing — ids, ctrl scale, raw angle read. Its servo
-            # core is never ticked (see class docstring for why).
-            self._plumb = SimMotor(rt, sensor_name, actuator_name)
-            joint_id  = int(rt.model.sensor_objid[self._plumb._sensor_id])
-            self._dof = int(rt.model.jnt_dofadr[joint_id])
-            self._actuator_id = self._plumb._actuator_id
-
+        self._servo_id = servo_id
         self._max_dps      = float(max_dps)
+        self._bind(slot)
+        self._bound = True
+        _INSTALLED.serial_by_id[servo_id] = self
         self._angle_offset = 0.0
         # Control mode for the per-tick loop:
         #   "speed" — hold self._target_dps (0.0 == active brake/hold)
@@ -916,6 +940,70 @@ class ShimST3215Motor:
         self._target_dps = 0.0
         self._move       = None
         self._attached   = False
+
+    def _bind(self, slot):
+        """Bind this motor to a chassis wheel slot (a (sensor,
+        actuator) name pair) or, with ``None``, to a kinematic
+        task-motor shaft.
+
+        A physical slot reuses SimMotor purely for the (sensor,
+        actuator) plumbing — ids, ctrl scale, raw angle read. Its
+        servo core is never ticked (see class docstring for why).
+
+        A kinematic shaft (the third/fourth motor of a four-servo
+        script) INTEGRATES its commanded speed instead of driving a
+        MuJoCo joint. run/run_angle/angle()/done() all behave; load
+        stays 0 and nothing pushes back — behavioural, not physical,
+        exactly like the bench robot's gripper motors need for the
+        script to run end-to-end.
+        """
+        self._slot = slot
+        # Kinematic integrator state — used only on a task-motor
+        # shaft; defined always so the tick can branch on _plumb.
+        self._kin_angle   = 0.0
+        self._kin_vel     = 0.0
+        self._kin_last_ms = None
+        # Velocity-loop integrator (physical slots), power-%.
+        self._v_int       = 0.0
+        self._v_last_ms   = None
+        if slot is None:
+            self._plumb = None
+            self._dof = None
+            self._actuator_id = None
+            return
+        rt = self._rt
+        sensor_name, actuator_name = slot
+        self._plumb = SimMotor(rt, sensor_name, actuator_name)
+        # This servo's DC model free-runs at ITS no-load speed, not
+        # the generic encoder motor's 300 dps.
+        self._plumb.RATED_DPS = self._max_dps
+        joint_id  = int(rt.model.sensor_objid[self._plumb._sensor_id])
+        self._dof = int(rt.model.jnt_dofadr[joint_id])
+        self._actuator_id = self._plumb._actuator_id
+
+    @staticmethod
+    def _rebind_wheels(left, right):
+        """Give ``left`` / ``right`` the two physical wheel slots,
+        whatever they and the other serial motors currently hold —
+        the firmware's rule that a DriveBase adopts its own motors'
+        slots, with the sim's physical/kinematic split moved to
+        follow. Displaced motors become kinematic task shafts."""
+        wanted = {id(left): _MOTOR_SLOTS[0], id(right): _MOTOR_SLOTS[1]}
+        motors = list(_INSTALLED.serial_by_id.values())
+        for m in (left, right):
+            if m not in motors:
+                raise RuntimeError(
+                    "sim DriveBase wheels must be shim serial motors "
+                    "constructed under this shim install")
+        for m in (left, right):
+            slot = wanted[id(m)]
+            if m._slot == slot:
+                continue
+            holder = next((o for o in motors if o._slot == slot), None)
+            freed = m._slot
+            if holder is not None:
+                holder._bind(freed)
+            m._bind(slot)
 
     # ----- tick loop -------------------------------------------------
 
@@ -945,10 +1033,19 @@ class ShimST3215Motor:
         if self._plumb is not None:
             if v_cmd is None:
                 self._rt.data.ctrl[self._actuator_id] = 0.0
+                self._v_int = 0.0
+                self._v_last_ms = None
                 return
-            power = self._KP_VEL * (v_cmd - self._vel_dps())
+            err = v_cmd - self._vel_dps()
+            dt = 0.0
+            if self._v_last_ms is not None:
+                dt = (now_ms - self._v_last_ms) / 1000.0
+            self._v_last_ms = now_ms
+            power = self._KP_VEL * err + self._v_int
             if power >  100.0: power =  100.0
-            if power < -100.0: power = -100.0
+            elif power < -100.0: power = -100.0
+            else:
+                self._v_int += self._KI_VEL * err * dt
             # Through the shared DC-motor model — a serial servo's
             # inner loop is still a DC motor behind a controller.
             self._plumb.apply_power(power)
@@ -999,14 +1096,21 @@ class ShimST3215Motor:
                               axle_track_mm, imu=None, accel_dps2=400.0,
                               drive=DriveMode.DUTY):
         """DriveBase adoption hook, sim edition: the engine runs
-        UNCHANGED against the emulated bus."""
+        UNCHANGED against the emulated bus.
+
+        The adopted pair gets the chassis's two physical wheels
+        (whatever was constructed first — see ``_rebind_wheels``),
+        and the chassis is resized to the drivebase's wheel diameter
+        and axle track, so the script's geometry is the sim's."""
         from openbricks.robotics.native_drivebase import _SerialNativeEngine
-        if self._plumb is None or right._plumb is None:
-            raise RuntimeError(
-                "sim DriveBase wheels must be the first two motors "
-                "constructed — the third and fourth are kinematic "
-                "task-motor stand-ins with no chassis body (the sim "
-                "binds motors by construction order, not servo id)")
+        from openbricks_sim.chassis import apply_drivebase_dims_to_model
+        self._rebind_wheels(self, right)
+        apply_drivebase_dims_to_model(
+            self._rt.model,
+            wheel_diameter_mm=float(wheel_diameter_mm),
+            axle_track_mm=float(axle_track_mm),
+            chassis_spec=self._rt.chassis_spec,
+            data=self._rt.data)
         emu = _SimStBus(self, right, self._rt)
         return _SerialNativeEngine(
             left_id=1, right_id=2,
@@ -1216,6 +1320,87 @@ class ShimTCS34725:
                 int(g8 * scale), int(b8 * scale))
 
 
+class ShimQTRArray(_RealQTRArray):
+    """Drop-in for ``openbricks.drivers.qtr.QTRArray``.
+
+    The firmware class, with its analog read pointed at a
+    :class:`SimReflectanceArray` on the chassis ``chassis_line``
+    site: element geometry (``pins`` / ``pitch_mm`` /
+    ``positions_mm``), the dark threshold, ``read()`` /
+    ``position()`` / edge maths / ``set_mode`` / ``edge_error`` are
+    all the real driver's code. ``pins`` are accepted for the
+    firmware signature and otherwise ignored (no ADC on the host);
+    ``ctrl`` builds a no-op Pin.
+
+    Calibration: the sim's reflectance is already normalised (0 =
+    white mat, full scale = black), so the array is born calibrated
+    with a full-scale span on every element. ``calibrate()`` still
+    spends its ``duration_ms`` of sim time — the firmware's sweep is
+    a blocking wait a script may pace on — and ``load_calibration``
+    / ``save_calibration`` touch no file: the hub path a script
+    passes (``"/qtr.cal"``) means nothing on the host.
+    """
+
+    def __init__(self, pins, pitch_mm=4.0, ctrl=None,
+                 dark_threshold=300, positions_mm=None):
+        if _INSTALLED is None:
+            raise RuntimeError(
+                "shim not installed; call install(runtime) first")
+        _RealQTRArray.__init__(self, pins, pitch_mm=pitch_mm, ctrl=ctrl,
+                               dark_threshold=dark_threshold,
+                               positions_mm=positions_mm)
+        self._sim = SimReflectanceArray(_INSTALLED.runtime, self._x_mm)
+
+    @staticmethod
+    def _check_adc_capable(pin):
+        return None                     # no ADC bank on the host
+
+    @staticmethod
+    def _make_adc(pin):
+        return None                     # reads come from _sim
+
+    def _read_u16(self):
+        return self._sim.read_u16()
+
+    def _sim_calibrated(self):
+        n = len(self._x_mm)
+        self._cal_min = [0] * n
+        self._cal_max = [SimReflectanceArray.FULL_SCALE] * n
+
+    def calibrate(self, duration_ms=3000, poll_ms=5):
+        self._sim_calibrated()
+        _real_time.sleep_ms(int(duration_ms))
+
+    def save_calibration(self, path):
+        self._check_calibration()       # same contract: raises uncalibrated
+
+    def load_calibration(self, path):
+        self._sim_calibrated()
+
+
+class ShimQTRChannel(ShimQTRArray, _RealQTRChannel):
+    """Drop-in for ``openbricks.drivers.qtr.QTRChannel`` — a
+    one-element :class:`ShimQTRArray`; ``value`` / ``dark`` /
+    ``white`` are the firmware's."""
+
+    def __init__(self, pin, dark_threshold=300):
+        ShimQTRArray.__init__(self, pins=(pin,),
+                              dark_threshold=dark_threshold)
+
+
+class ShimQTRLineSensor(ShimQTRArray, _RealQTRLineSensor):
+    """Drop-in for ``openbricks.drivers.qtr.QTRLineSensor`` — the
+    bench window (ten QTRX-HD-15A channels, 56 mm, skip pattern)
+    over the simulated array. ``PINS`` / ``POSITIONS_MM`` / the mode
+    setpoints are inherited from the firmware class, so the sim
+    follows exactly the geometry the robot does."""
+
+    def __init__(self, dark_threshold=300):
+        ShimQTRArray.__init__(self, pins=self.PINS,
+                              positions_mm=self.POSITIONS_MM,
+                              dark_threshold=dark_threshold)
+
+
 class _ShimDistanceSensorBase:
     """Common shim for any distance-sensor driver.
 
@@ -1313,7 +1498,9 @@ class ShimDriveBase:
         apply_drivebase_dims_to_model(
             _INSTALLED.runtime.model,
             wheel_diameter_mm=float(wheel_diameter_mm),
-            axle_track_mm=float(axle_track_mm))
+            axle_track_mm=float(axle_track_mm),
+            chassis_spec=_INSTALLED.runtime.chassis_spec,
+            data=_INSTALLED.runtime.data)
         self._db = SimDriveBase(
             _INSTALLED.runtime, left._adapter, right._adapter,
             wheel_diameter_mm=float(wheel_diameter_mm),
@@ -1571,6 +1758,11 @@ def _patch_pure_python_drivers(state: "_ShimState") -> None:
         # as hardware.
         ("openbricks.drivers.st3215",   "ST3215Motor", ShimST3215Motor),
         ("openbricks.drivers.st3032",   "ST3032Motor", ShimST3032Motor),
+        # Reflectance arrays read ADC pins directly; the shim
+        # subclasses point the read at the chassis line-sensor site.
+        ("openbricks.drivers.qtr",      "QTRArray",      ShimQTRArray),
+        ("openbricks.drivers.qtr",      "QTRChannel",    ShimQTRChannel),
+        ("openbricks.drivers.qtr",      "QTRLineSensor", ShimQTRLineSensor),
     ]
     for mod_name, attr, replacement in targets:
         try:

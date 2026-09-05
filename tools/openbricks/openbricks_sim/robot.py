@@ -125,7 +125,7 @@ class SimRobot:
         self.model        = model
         self.data         = data
         self.chassis_spec = spec
-        self.runtime      = SimRuntime(model, data)
+        self.runtime      = SimRuntime(model, data, chassis_spec=spec)
 
         # Bind the two drive motors. Names match the chassis MJCF
         # generator — see openbricks_sim/chassis.py.

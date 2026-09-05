@@ -16,8 +16,16 @@ class ParserTests(unittest.TestCase):
         args = self.parser.parse_args(["preview"])
         self.assertEqual(args.command, "preview")
         self.assertEqual(args.world, "empty")
-        self.assertEqual(args.x, 0.0)
-        self.assertEqual(args.y, 0.0)
+        # Pose flags default to None so a chassis file's pos_x /
+        # pos_y / yaw_deg survive unless the flag is given; the spec
+        # they resolve to is still the origin, facing +X.
+        self.assertIsNone(args.x)
+        self.assertIsNone(args.y)
+        self.assertIsNone(args.yaw)
+        self.assertIsNone(args.chassis)
+        spec = cli._chassis_spec(args)
+        self.assertEqual((spec.pos_x, spec.pos_y, spec.yaw_deg),
+                         (0.0, 0.0, 0.0))
         self.assertFalse(args.headless)
         self.assertEqual(args.duration, 2.0)
 
@@ -32,6 +40,45 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(args.y, -0.42)
         self.assertTrue(args.headless)
         self.assertEqual(args.duration, 0.5)
+
+    def test_chassis_file_and_pose_flags(self):
+        # A robot description file sets the geometry AND may carry
+        # the spawn pose; a pose flag given on the command line wins
+        # over the file's value for that field only.
+        import json, os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "car.json")
+            with open(path, "w") as f:
+                json.dump({"wheel_radius": 0.0432, "axle_length": 0.135,
+                           "line_sensor_x": 0.09,
+                           "pos_x": -0.55, "pos_y": -0.15, "yaw_deg": 90},
+                          f)
+            args = self.parser.parse_args(
+                ["run", "main.py", "--chassis", path, "--y", "0.25"])
+            spec = cli._chassis_spec(args)
+        self.assertEqual(spec.wheel_radius, 0.0432)
+        self.assertEqual(spec.axle_length, 0.135)
+        self.assertEqual(spec.line_sensor_x, 0.09)
+        self.assertEqual((spec.pos_x, spec.pos_y, spec.yaw_deg),
+                         (-0.55, 0.25, 90))
+        self.assertEqual(spec.body_length, 0.140)   # untouched default
+
+    def test_chassis_file_unknown_field_is_named(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "car.json")
+            with open(path, "w") as f:
+                f.write('{"wheel_diameter": 0.0864}')
+            args = self.parser.parse_args(["preview", "--chassis", path])
+            with self.assertRaises(SystemExit) as ctx:
+                cli._chassis_spec(args)
+        self.assertIn("wheel_diameter", str(ctx.exception))
+        self.assertIn("wheel_radius", str(ctx.exception))
+
+    def test_yaw_flag_parses(self):
+        args = self.parser.parse_args(["run", "main.py", "--yaw", "-90"])
+        self.assertEqual(args.yaw, -90.0)
+        self.assertEqual(cli._chassis_spec(args).yaw_deg, -90.0)
 
     def test_missing_subcommand_exits(self):
         with self.assertRaises(SystemExit):
@@ -205,6 +252,49 @@ class RunSubcommandTests(unittest.TestCase):
             mock.assert_called_once()
         finally:
             os.unlink(path)
+
+
+class RunGuardTests(unittest.TestCase):
+    """``--trace`` records the path; ``--max-sim-s`` ends a runaway
+    script with exit status 3."""
+
+    def test_trace_records_the_pose_and_max_sim_s_stops_a_runaway(self):
+        import os, tempfile
+        script = (
+            "import time\n"
+            "from openbricks.drivers.st3032 import ST3032Motor\n"
+            "from openbricks.robotics import DriveBase\n"
+            "l = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)\n"
+            "r = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41)\n"
+            "db = DriveBase(l, r, wheel_diameter_mm=86.4, axle_track_mm=135)\n"
+            "db.drive(100, 0)\n"
+            "while True:\n"
+            "    time.sleep_ms(10)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "runaway.py")
+            with open(path, "w") as f:
+                f.write(script)
+            trace = os.path.join(tmp, "trace.csv")
+            with patch("sys.stderr", new_callable=io.StringIO) as err:
+                rc = cli.main(["run", path, "--world", "empty",
+                               "--trace", trace, "--max-sim-s", "1.5"])
+            self.assertEqual(rc, 3)
+            self.assertIn("--max-sim-s 1.5 reached", err.getvalue())
+            with open(trace) as f:
+                rows = f.read().splitlines()
+        self.assertEqual(rows[0], "t_ms,x_mm,y_mm,yaw_deg")
+        # One row per 50 ms of the 1.5 s budget (+/- one tick), and
+        # the drive(100, 0) shows as advancing x.
+        self.assertTrue(28 <= len(rows) - 1 <= 32, len(rows))
+        last = rows[-1].split(",")
+        self.assertEqual(len(last), 4)
+        self.assertGreater(float(last[1]), 60.0, rows[-1])
+
+    def test_parser_defaults_off(self):
+        args = cli._build_parser().parse_args(["run", "x.py"])
+        self.assertIsNone(args.trace)
+        self.assertIsNone(args.max_sim_s)
 
 
 class ShippedExamplesTests(unittest.TestCase):

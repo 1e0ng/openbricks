@@ -63,10 +63,19 @@ class SimRuntime:
     physics step.
     """
 
-    def __init__(self, model: mujoco.MjModel, data: mujoco.MjData):
+    def __init__(self, model: mujoco.MjModel, data: mujoco.MjData,
+                 chassis_spec=None):
         self.model      = model
         self.data       = data
         self.now_ms     = 0
+        # The ChassisSpec the model's chassis was built from — what
+        # the shim resizes wheels against and reads sensor placement
+        # from. ``None`` means "the default spec": every model
+        # ``chassis_mjcf()`` built without overrides.
+        if chassis_spec is None:
+            from openbricks_sim.chassis import ChassisSpec
+            chassis_spec = ChassisSpec()
+        self.chassis_spec = chassis_spec
         # Tick period in ms. Pulled from MuJoCo's timestep so the
         # virtual clock matches the physics clock exactly.
         self.timestep_ms = max(1, int(round(model.opt.timestep * 1000.0)))
@@ -436,18 +445,17 @@ class SimIMU:
                 float(sd[self._accel_addr + 2]))
 
 
-class SimColorSensor:
-    """Down-facing colour sensor, MuJoCo-side.
+class FloorSampler:
+    """Shared "what colour is the floor at this point?" service for
+    every down-facing sensor model.
 
-    Casts a ray from the camera position straight down (world -Z) and
-    returns the colour of whatever geom it hits. The look direction
-    is hard-coded to world -Z rather than the camera's actual local
+    Casts a ray from a world point straight down (world -Z) and
+    resolves the colour of whatever geom it hits. The look direction
+    is hard-coded to world -Z rather than the sensor's actual local
     -Z so a slightly-pitched chassis (e.g. ~6.7° wheel-settle) still
     samples the floor directly under the sensor — the cosine error
-    against camera-frame Z is < 1% at that tilt, which is well below
-    the colour-sensor's quantisation in any case. Real TCS34725
-    sensors integrate over a small FOV; this is a single-point
-    approximation.
+    against body-frame Z is < 1% at that tilt, which is well below
+    any sensor's quantisation.
 
     Surface-colour resolution dispatches on what the ray hit:
 
@@ -455,10 +463,9 @@ class SimColorSensor:
         coordinate corresponding to the world hit point. This is the
         path the WRO mat takes: ``mat.png`` is loaded by MuJoCo as
         an RGB texture, the printed colour at any (x, y) on the mat
-        is what the real TCS34725 would see.
+        is what the real sensor would see.
       * **Untextured material** — the material's ``rgba`` (a single
-        flat colour). What the previous implementation returned for
-        every surface.
+        flat colour).
       * **No material** — the geom's own ``rgba``.
 
     Texture sampling is CPU-side: read ``model.tex_data`` directly,
@@ -467,13 +474,7 @@ class SimColorSensor:
     Windows identically. The trade-off is that we don't simulate
     lighting, shadows, or geom layering: a flat printed mat is
     rendered byte-accurately, but a translucent overlay above it
-    would not be composited. For the WRO mats — the actual driver of
-    this work — that's exactly the right model.
-
-    Methods match :class:`openbricks.interfaces.ColorSensor`:
-
-      * ``rgb()`` returns ``(r, g, b)`` ints in 0..255.
-      * ``ambient()`` returns a 0..100 luminance score (BT.601).
+    would not be composited.
     """
 
     # MuJoCo texture-role indices into ``mat_texid[mat_id, role]``.
@@ -484,16 +485,9 @@ class SimColorSensor:
     _TEXROLE_RGB  = 1
     _TEXROLE_RGBA = 8
 
-    def __init__(self,
-                 runtime: SimRuntime,
-                 camera_name: str = "chassis_cam_down",
+    def __init__(self, runtime: SimRuntime,
                  chassis_body_name: str = "chassis") -> None:
         self.runtime = runtime
-        self._cam_id = mujoco.mj_name2id(
-            runtime.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
-        if self._cam_id < 0:
-            raise ValueError("no camera named " + repr(camera_name) +
-                             " in model")
         # Exclude the chassis itself from raycasts so we don't
         # self-hit the chassis body geom.
         self._chassis_body_id = mujoco.mj_name2id(
@@ -502,25 +496,17 @@ class SimColorSensor:
             raise ValueError("no body named " + repr(chassis_body_name) +
                              " in model")
 
-    # ------------- raycast -------------
-
-    def _hit_rgba(self):
-        """Return the rgba (4 floats, 0..1) of the geom under the
-        camera, or None if the ray missed."""
+    def rgba_below(self, pnt):
+        """Return the rgba (4 floats, 0..1) of the geom straight
+        below world point ``pnt``, or None if the ray missed."""
         # Lazy-import numpy at call-site; mujoco depends on it so it's
         # always available, but keeping the runtime module's top-level
         # imports minimal helps cold-start time.
         import numpy as np
 
-        # Force a forward pass so cam_xpos reflects the latest qpos.
-        # (mj_step does this; explicit forward is for cases where the
-        # caller queries before stepping.)
-        mujoco.mj_forward(self.runtime.model, self.runtime.data)
-
-        pnt = np.array(self.runtime.data.cam_xpos[self._cam_id],
-                        dtype=np.float64)
+        pnt = np.asarray(pnt, dtype=np.float64)
         # World -Z. See class docstring for why we use world axis
-        # rather than the camera's local -Z.
+        # rather than the sensor's local -Z.
         vec = np.array([0.0, 0.0, -1.0], dtype=np.float64)
         geom_id = np.zeros(1, dtype=np.int32)
         dist = mujoco.mj_ray(self.runtime.model, self.runtime.data,
@@ -620,9 +606,8 @@ class SimColorSensor:
         """Look up the pixel at ``(u, v) ∈ [0,1]²`` in texture
         ``tex_id``. Returns ``(r, g, b, a)`` floats in [0, 1].
         Nearest-neighbour sampling — MuJoCo's renderer interpolates
-        bilinearly, but for a 2 mm camera spot on a high-resolution
+        bilinearly, but for a 2 mm sensor spot on a high-resolution
         printed mat the difference is below the colour quantisation."""
-        import numpy as np
         m = self.runtime.model
 
         w     = int(m.tex_width[tex_id])
@@ -646,6 +631,47 @@ class SimColorSensor:
         lum = px[0] / 255.0
         return (lum, lum, lum, 1.0)
 
+
+def _luma(r, g, b):
+    """BT.601 luma of rgb components in [0, 1]."""
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+class SimColorSensor:
+    """Down-facing colour sensor, MuJoCo-side.
+
+    Samples the floor straight under a chassis camera through
+    :class:`FloorSampler` (see it for the raycast + surface-colour
+    rules). Real TCS34725 sensors integrate over a small FOV; this
+    is a single-point approximation.
+
+    Methods match :class:`openbricks.interfaces.ColorSensor`:
+
+      * ``rgb()`` returns ``(r, g, b)`` ints in 0..255.
+      * ``ambient()`` returns a 0..100 luminance score (BT.601).
+    """
+
+    def __init__(self,
+                 runtime: SimRuntime,
+                 camera_name: str = "chassis_cam_down",
+                 chassis_body_name: str = "chassis") -> None:
+        self.runtime = runtime
+        self._cam_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
+        if self._cam_id < 0:
+            raise ValueError("no camera named " + repr(camera_name) +
+                             " in model")
+        self._floor = FloorSampler(runtime, chassis_body_name)
+
+    def _hit_rgba(self):
+        """Return the rgba (4 floats, 0..1) of the geom under the
+        camera, or None if the ray missed."""
+        # Force a forward pass so cam_xpos reflects the latest qpos.
+        # (mj_step does this; explicit forward is for cases where the
+        # caller queries before stepping.)
+        mujoco.mj_forward(self.runtime.model, self.runtime.data)
+        return self._floor.rgba_below(self.runtime.data.cam_xpos[self._cam_id])
+
     def rgb(self):
         rgba = self._hit_rgba()
         if rgba is None:
@@ -659,8 +685,82 @@ class SimColorSensor:
     def ambient(self):
         r, g, b = self.rgb()
         # BT.601 luma, scaled 0..100.
-        lum = 0.299 * r + 0.587 * g + 0.114 * b
+        lum = _luma(r, g, b)
         return int(min(100, max(0, lum * 100.0 / 255.0)))
+
+
+class SimReflectanceArray:
+    """Down-facing reflectance array (QTR / QTRX), MuJoCo-side — the
+    sensor model behind the QTR driver shim.
+
+    One element per entry of ``positions_mm`` (left to right, the
+    array's own frame), spread along body -Y from a chassis site
+    (``chassis_line`` on the default chassis: +Y is the robot's left,
+    so an element at +x_mm sits at body y = -x_mm). Each element
+    averages the floor luminance over a small square spot — a real
+    QTRX element sees a few millimetres of mat, and that spot is
+    what makes an edge read as a gradient instead of a step, which
+    is the whole basis of proportional edge following. ``spot_mm``
+    is the spot's side, ``samples`` the grid resolution per side.
+
+    ``read_u16()`` returns what the driver's ``_read_u16`` would:
+    one 16-bit reading per element, dark = high (a line reflects
+    nothing, so the phototransistor's node stays high), full scale
+    for a ray that hits nothing at all (nothing to reflect off).
+    """
+
+    FULL_SCALE = 65535
+
+    def __init__(self, runtime: SimRuntime, positions_mm,
+                 site_name: str = "chassis_line",
+                 chassis_body_name: str = "chassis",
+                 spot_mm: float = 3.0, samples: int = 3) -> None:
+        if len(positions_mm) < 1:
+            raise ValueError("at least one element position required")
+        if samples < 1:
+            raise ValueError("samples must be >= 1")
+        self.runtime = runtime
+        self._site_id = mujoco.mj_name2id(
+            runtime.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
+        if self._site_id < 0:
+            raise ValueError("no site named " + repr(site_name) +
+                             " in model")
+        self._floor = FloorSampler(runtime, chassis_body_name)
+        self._positions_m = [float(x) / 1000.0 for x in positions_mm]
+        # Spot sample offsets in the site frame (x forward, y left).
+        half = float(spot_mm) / 2000.0
+        if samples == 1:
+            steps = [0.0]
+        else:
+            steps = [-half + 2.0 * half * i / (samples - 1)
+                     for i in range(samples)]
+        self._offsets = [(dx, dy) for dx in steps for dy in steps]
+
+    def luminance(self):
+        """Per-element floor luminance in [0, 1], left to right —
+        the spot-averaged BT.601 luma of what each element sees. A
+        ray that misses everything counts as 0 (nothing reflects)."""
+        import numpy as np
+        mujoco.mj_forward(self.runtime.model, self.runtime.data)
+        d = self.runtime.data
+        origin = np.asarray(d.site_xpos[self._site_id], dtype=np.float64)
+        rot = np.asarray(d.site_xmat[self._site_id],
+                         dtype=np.float64).reshape(3, 3)
+        out = []
+        for x in self._positions_m:
+            total = 0.0
+            for dx, dy in self._offsets:
+                local = np.array([dx, -x + dy, 0.0], dtype=np.float64)
+                rgba = self._floor.rgba_below(origin + rot @ local)
+                if rgba is not None:
+                    total += _luma(rgba[0], rgba[1], rgba[2])
+            out.append(total / len(self._offsets))
+        return out
+
+    def read_u16(self):
+        """One 16-bit reading per element, dark = high."""
+        return [int(round((1.0 - lum) * self.FULL_SCALE))
+                for lum in self.luminance()]
 
 
 class SimDistanceSensor:
