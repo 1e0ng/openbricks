@@ -60,6 +60,31 @@ except (ImportError, AttributeError):
     import time as _TIME
     def _TICKS():
         return int(_TIME.monotonic() * 1000)
+# Wrap-safe on MicroPython (ticks_diff); a plain difference where the
+# monotonic fallback above is the clock.
+_TICKS_DIFF = getattr(_TIME, "ticks_diff", None) or (lambda a, b: a - b)
+
+
+# ---- Host activity (3.7.0) --------------------------------------------
+#
+# Every byte a central writes to the RX characteristic stamps
+# ``_last_rx_ms``; ``host_active()`` says whether one landed within
+# HOST_ACTIVE_MS. The status LED's transfer indicator (purple, fast)
+# rides this: an ``openbricks upload`` / ``run`` paste is a stream of
+# such writes, and a one-second hold-off bridges the pauses between
+# the CLI's staging steps. No protocol change, so every CLI version
+# lights it — and a stray REPL keystroke costs one second of purple,
+# which is the honest answer to "is the host talking to my hub".
+HOST_ACTIVE_MS = 1000
+_last_rx_ms = None
+
+
+def host_active(window_ms=HOST_ACTIVE_MS):
+    """True while a BLE central has written to the hub within
+    ``window_ms`` — an upload, a run's staging paste, a keystroke."""
+    if _last_rx_ms is None:
+        return False
+    return _TICKS_DIFF(_TICKS(), _last_rx_ms) < window_ms
 
 
 # ---- In-memory event log (1.2.1) -------------------------------------
@@ -276,6 +301,7 @@ class _BLEUART:
         # Log EVERY event — including ones we don't expect — so we can
         # tell "CONNECT never fired" from "CONNECT fired but with weird
         # data" from "some other event we silently dropped".
+        global _last_rx_ms
         _log("irq", event)
         if event == _IRQ_CENTRAL_CONNECT:
             conn_handle, _, _ = data
@@ -294,6 +320,7 @@ class _BLEUART:
             if in_set and value_handle == self._rx_handle:
                 buf = self._ble.gatts_read(self._rx_handle)
                 self._rx_buffer += buf
+                _last_rx_ms = _TICKS()
                 _log("GATTS_WRITE_OK", conn_handle, len(buf), bytes(buf[:8]))
                 if self._handler:
                     self._handler()

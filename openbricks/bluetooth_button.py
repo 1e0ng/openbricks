@@ -9,14 +9,18 @@ once per press-release cycle. State is persisted via NVS by the
 
 The same poll loop doubles as the **run indicator**: while a user
 program is executing (``launcher.program_running()``), the status LED
-flashes at 2 Hz instead of holding a solid colour — blue when BLE is
+flashes at 5 Hz instead of holding a solid colour — blue when BLE is
 on, yellow when it's off, plain on/off blinking on single-colour
 LEDs. When the program stops, the LED returns to its idle state
-(solid state colour on RGB hubs, dark on single-colour hubs). And it
-renders the **press acknowledgment**: every program-button press
-flashes the LED for a moment — red for the press that starts a run,
-green for the press that stops one (``notify_press()``, called by
-the launcher's press detectors).
+(solid state colour on RGB hubs, dark on single-colour hubs). It
+renders the **transfer indicator**: while a host tool is writing to
+the hub over BLE (``openbricks upload`` / ``run`` staging a program —
+``ble_repl.host_active()``), the LED flashes purple at 10 Hz,
+outranking the run blink. And it renders the **press
+acknowledgment**: every program-button press flashes the LED for a
+moment — red for the press that starts a run, green for the press
+that stops one (``notify_press()``, called by the launcher's press
+detectors) — outranking both.
 
 This is a different physical button from the one ``openbricks.launcher``
 watches for program start/stop — the BLE toggle lives on its own
@@ -52,11 +56,20 @@ DEFAULT_COLOR_ON  = (0, 0, 255)       # blue
 DEFAULT_COLOR_OFF = (255, 200, 0)     # yellow
 
 # Run-indicator blink: while a program runs the LED alternates
-# state-colour / off, switching phase every RUN_BLINK_MS. 250 ms per
-# phase = 2 Hz — visibly busier than the solid idle colour (was
-# 500 ms/1 Hz until 1.80.0; raised so "running" reads as activity at
-# a glance).
-RUN_BLINK_MS = 250
+# state-colour / off, switching phase every RUN_BLINK_MS. 100 ms per
+# phase = 5 Hz (3.7.0, asked as "double the 2 Hz": 125 ms is not a
+# multiple of the 50 ms poll, so the nearest step up from 250 is 100
+# — read as double-plus; was 500 ms/1 Hz until 1.80.0, 250 ms/2 Hz
+# until 3.7.0).
+RUN_BLINK_MS = 100
+
+# Transfer indicator: while a host tool writes to the hub over BLE
+# (an upload or a run's staging paste — ``ble_repl.host_active``),
+# the LED alternates purple / off every TRANSFER_BLINK_MS. One poll
+# tick per phase = 10 Hz, the fastest the poll can render and
+# unmistakably busier than the run blink it outranks.
+TRANSFER_BLINK_MS = 50
+TRANSFER_COLOR = (160, 0, 255)      # purple
 
 # Press acknowledgment: every program-button press paints the LED
 # for PRESS_FLASH_MS before the normal presentation resumes — RED
@@ -92,6 +105,14 @@ def _launcher_program_running():
     return launcher.program_running()
 
 
+def _ble_host_active():
+    """Default transfer probe: ``ble_repl.host_active()`` — a BLE
+    central wrote to the hub within the last second. Lazy for the same
+    reason as the launcher probe."""
+    from openbricks import ble_repl
+    return ble_repl.host_active()
+
+
 class BluetoothToggleButton:
     """Polls a button and toggles BLE on each press-release cycle.
 
@@ -104,7 +125,8 @@ class BluetoothToggleButton:
                  poll_ms=DEFAULT_POLL_MS, timer_id=1,
                  color_on=DEFAULT_COLOR_ON,
                  color_off=DEFAULT_COLOR_OFF,
-                 program_running=None):
+                 program_running=None,
+                 host_active=None):
         """
         Args:
             button: any object with a ``.pressed() -> bool`` method
@@ -129,10 +151,15 @@ class BluetoothToggleButton:
             color_on, color_off: ``(r, g, b)`` tuples the LED is set to
                 when BLE is enabled / disabled. Defaults: blue / yellow.
             program_running: zero-arg callable returning True while a
-                user program executes — drives the 2 Hz run-indicator
+                user program executes — drives the 5 Hz run-indicator
                 blink. Defaults to ``launcher.program_running`` (the
                 flag every exec path maintains); tests inject their
                 own probe.
+            host_active: zero-arg callable returning True while a
+                host tool is writing to the hub — drives the purple
+                10 Hz transfer indicator. Defaults to
+                ``ble_repl.host_active`` (stamped by every BLE write
+                the bridge accepts); tests inject their own probe.
         """
         self._button = button
         self._led    = led
@@ -143,6 +170,8 @@ class BluetoothToggleButton:
         self._timer         = None
         self._program_running = (program_running if program_running
                                  is not None else _launcher_program_running)
+        self._host_active = (host_active if host_active is not None
+                             else _ble_host_active)
         # Run-indicator blink state. ``_blink_ticks`` converts the
         # wall-clock phase length into poll ticks (≥1 so a huge
         # poll_ms still blinks rather than dividing to zero).
@@ -150,6 +179,11 @@ class BluetoothToggleButton:
         self._blink_count  = 0
         self._blink_lit    = True
         self._running_seen = False
+        # Transfer-indicator blink state, same shape.
+        self._transfer_ticks = max(1, TRANSFER_BLINK_MS // self._poll_ms)
+        self._transfer_count = 0
+        self._transfer_lit   = True
+        self._transfer_seen  = False
         # Press-flash state: consume notify_press() events by counter
         # comparison (no shared flags to clear from other contexts).
         self._press_seen       = _press_events
@@ -202,6 +236,9 @@ class BluetoothToggleButton:
         self._blink_count  = 0
         self._blink_lit    = True
         self._running_seen = False
+        self._transfer_count = 0
+        self._transfer_lit   = True
+        self._transfer_seen  = False
         self._press_flash_left = 0
 
     # ---- tick body ----
@@ -223,11 +260,14 @@ class BluetoothToggleButton:
             # Release after a press — fire once.
             self._was_pressed = False
             self._fire()
-        # The red press flash outranks the run indicator for its
-        # short window; the indicator rides every other tick —
-        # including ticks where the button is held, so a press
-        # mid-run doesn't freeze the blink.
+        # Precedence: the press flash outranks everything for its
+        # short window, the transfer indicator outranks the run
+        # blink, and the indicators ride every other tick — including
+        # ticks where the button is held, so a press mid-run doesn't
+        # freeze the blink.
         if self._press_flash_tick():
+            return
+        if self._transfer_indicator_tick():
             return
         self._run_indicator_tick()
 
@@ -250,9 +290,11 @@ class BluetoothToggleButton:
         self._press_flash_left -= 1
         if self._press_flash_left:
             return True
-        # Window over: hand the LED back. Clearing _running_seen
-        # makes the run indicator re-enter with a fresh lit phase on
-        # this same tick; at idle, repaint the solid state colour.
+        # Window over: hand the LED back. Clearing the seen flags
+        # makes the transfer / run indicators re-enter with a fresh
+        # lit phase on this same tick; at idle, repaint the solid
+        # state colour.
+        self._transfer_seen = False
         if self._program_running():
             self._running_seen = False
         else:
@@ -265,7 +307,47 @@ class BluetoothToggleButton:
         except NotImplementedError:
             self._led.on()
 
-    # ---- run indicator (2 Hz blink while a program executes) ----
+    # ---- transfer indicator (purple 10 Hz while the host writes) ----
+
+    def _transfer_indicator_tick(self):
+        """Flash purple while a host tool is writing to the hub.
+        Returns True while the indicator owns the LED; when the
+        transfer ends it hands back exactly like the press flash —
+        the run blink re-enters with a fresh lit phase, or the idle
+        colour is repainted."""
+        if self._led is None:
+            return False
+        if not self._host_active():
+            if self._transfer_seen:
+                self._transfer_seen = False
+                if self._program_running():
+                    self._running_seen = False
+                else:
+                    self._restore_idle_led()
+            return False
+        if not self._transfer_seen:
+            self._transfer_seen  = True
+            self._transfer_count = 0
+            self._transfer_lit   = True
+            self._transfer_show()
+            return True
+        self._transfer_count += 1
+        if self._transfer_count >= self._transfer_ticks:
+            self._transfer_count = 0
+            self._transfer_lit = not self._transfer_lit
+            self._transfer_show()
+        return True
+
+    def _transfer_show(self):
+        if not self._transfer_lit:
+            self._led.off()
+            return
+        try:
+            self._led.rgb(*TRANSFER_COLOR)
+        except NotImplementedError:
+            self._led.on()
+
+    # ---- run indicator (5 Hz blink while a program executes) ----
 
     def _run_indicator_tick(self):
         """Blink the LED while a user program runs; restore the idle
