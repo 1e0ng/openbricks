@@ -83,7 +83,7 @@ dependencies = [
     # format version at load, so 1.28's compiler feeds 1.29 fine;
     # tests/test_mpycompile.py canaries the header. Revisit this pin
     # on every MicroPython submodule bump.
-    "mpy-cross == 1.28.0.post2",
+    "mpy-cross == 1.29.0.post2",
 ]
 
 [project.optional-dependencies]
