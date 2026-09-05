@@ -1,0 +1,2195 @@
+---
+myst:
+  html_meta:
+    description: "openbricks is a Pybricks-style MicroPython firmware for open hardware: commodity ESP32 boards, off-the-shelf motors and sensors, and a clean Python robotics API."
+---
+
+# openbricks documentation
+
+**openbricks** is a Pybricks-style MicroPython firmware for **open
+hardware** — commodity MCUs, commodity motors, commodity sensors.
+
+*Prefer offline reading? This documentation is also available as a
+single* **[PDF download](https://docs.openbricks.dev/openbricks-docs.pdf)**,
+*rebuilt on every deploy. The sidebar names the firmware version these
+pages document; its version menu lists the archived docs (and PDF) of
+every earlier firmware release, frozen at `/X.Y.Z/`.*
+
+Like Pybricks, openbricks is a *firmware you flash to an MCU*, not a
+library you `pip install` on top of stock MicroPython. The firmware owns
+the runtime: the 1 kHz motor scheduler, trajectory planner, state
+observer, and drivebase controller run as native C code inside the
+image, and the three-layer Python API (drivers → interfaces → robotics)
+is what `import openbricks` gives you out of the box.
+
+```python
+from openbricks.drivers.st3032 import ST3032Motor
+from openbricks.robotics import DriveBase
+
+left = ST3032Motor(servo_id=1, tx=14, rx=41)
+right = ST3032Motor(servo_id=2, tx=14, rx=41, invert=True)
+
+db = DriveBase(left, right, wheel_diameter_mm=56, axle_track_mm=114)
+db.straight(500)   # mm
+db.turn(90)        # degrees
+```
+
+- **Firmware images**: ESP32-S3 (primary) and classic ESP32, prebuilt on
+  every [release](https://github.com/1e0ng/openbricks/releases).
+- **Host tooling**: `pipx install openbricks` gets you the
+  {doc}`openbricks CLI <cli>` (flash / run / upload / stop / log over
+  BLE) and, with the `[sim]` extra, a MuJoCo-backed {doc}`simulator
+  <simulator>`.
+- **Source**: [github.com/1e0ng/openbricks](https://github.com/1e0ng/openbricks), MIT licensed.
+
+```{toctree}
+:caption: Getting started
+:maxdepth: 1
+
+install
+hardware
+cli
+simulator
+examples
+measuring
+servo-health
+```
+
+```{toctree}
+:caption: API reference
+:maxdepth: 2
+
+api/index
+```
+
+```{toctree}
+:caption: Internals
+:maxdepth: 1
+
+architecture
+build
+```
+
+
+---
+myst:
+  html_meta:
+    description: "Install the openbricks host tools with pipx, download prebuilt firmware, and flash your ESP32 hub with a single command: openbricks flash --name."
+---
+
+# Installation
+
+Two things get installed: the **host tooling** on your computer (a CLI
+that flashes firmware and talks to hubs over BLE) and the **firmware**
+on the hub itself.
+
+## 1. Install the host tooling
+
+```console
+$ pipx install 'openbricks[sim]'   # CLI + MuJoCo simulator
+```
+
+or, lighter:
+
+```console
+$ pipx install openbricks          # CLI only (flash / run / log)
+```
+
+`pip install` works too; `pipx` is recommended on modern macOS / Linux
+to avoid the "externally managed environment" error. The package is on
+PyPI: <https://pypi.org/project/openbricks/>.
+
+The `[sim]` extra adds `mujoco` (~50 MB, native OpenGL) and `numpy`.
+If you only want to flash and run code on real hardware, skip it —
+`openbricks sim …` will print an install hint instead of crashing.
+
+## 2. Get a firmware image
+
+Grab a prebuilt image from the
+[Releases page](https://github.com/1e0ng/openbricks/releases):
+
+- `openbricks-esp32s3-firmware-<version>.bin` — ESP32-S3 boards (primary target)
+- `openbricks-esp32-firmware-<version>.bin` — classic ESP32 boards
+
+(You can also {doc}`build the firmware from source <build>`.)
+
+## 3. Flash the hub
+
+Connect the board over USB, then flash and name the hub in one step:
+
+```console
+$ openbricks flash --name RobotA
+```
+
+That's the whole command: the serial port is auto-detected (when
+exactly one ESP device is connected), the chip type is probed, and
+the newest matching firmware release is downloaded automatically
+(cached under `~/.cache/openbricks/firmware`).
+
+- `--name` is the BLE advertising identifier you'll use later with
+  `openbricks run -n …`; pick a unique one per hub.
+- With several serial devices connected, pass `--port` explicitly
+  (`/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS, `COM5`
+  on Windows).
+- To flash a specific/downloaded image instead of the newest
+  release, pass `--firmware path/to/firmware.bin`.
+
+Skip this step entirely if you only want to run code in the
+{doc}`simulator <simulator>`.
+
+## 4. Run your first program
+
+```console
+$ openbricks list                  # find your hub over BLE
+$ openbricks run -n RobotA main.py # push a script and stream its output
+```
+
+See {doc}`the CLI reference <cli>` for every command, and
+{doc}`examples` for programs to start from.
+
+## Troubleshooting
+
+- **Hub doesn't show up in `openbricks list`** — BLE may be toggled
+  off. Short-press the Bluetooth button (GPIO 38 on the S3, GPIO 5 on the classic ESP32); on the
+  ESP32-S3 the onboard LED turns blue when BLE is on, yellow when off.
+  While a program is running the LED flashes that colour at 2 Hz
+  instead of holding it solid — a flashing LED means "robot running",
+  not a different BLE state. A brief flash is the press
+  acknowledgment, shown the moment a program-button press is
+  recognized: **red** for the press that starts a run, **green**
+  for the press that stops one.
+  See {class}`openbricks.hub.ESP32S3DevkitHub`.
+- **Serial port permission errors on Linux** — add yourself to the
+  `dialout` group (`sudo usermod -aG dialout $USER`) and re-login.
+- **Flash succeeds but the program doesn't start** — check the run log
+  with `openbricks log -n RobotA` for the traceback of the last run.
+
+
+---
+myst:
+  html_meta:
+    description: "Supported hardware for openbricks: ESP32-S3 and ESP32 boards, ST-3032/ST-3215 serial bus servos, DC gear motors, IMUs, color and distance sensors, with wiring guides."
+---
+
+# Hardware guide
+
+A starter parts list and wiring notes. Everything here is commodity stuff you
+can buy on AliExpress / Amazon / Adafruit.
+
+## Recommended starter robot
+
+| Part | Qty | ≈ US$ each | Notes |
+|------|----:|-----------:|-------|
+| ESP32-S3 DevKitC-1 (N16R8) | 1 | 13 | Any ESP32-S3 board with ≥10 free GPIOs works; classic ESP32 also supported |
+| Feetech STS3032 serial bus servo (12V) | 2 | 25 | Drive wheels, continuous-rotation wheel mode. 10 kg·cm, 148 RPM no-load — datasheet in `docs/datasheets/`. $17.55 each from 100 up on Alibaba; boutique resellers ask $40 |
+| Feetech URT-2 serial bus adapter | 1 | 16 | One half-duplex bus daisy-chains every servo (S$22 at Kuriosity) |
+| 3S LiPo battery (11.1V nominal) + balance charger | 1 | 25–40 | Feeds the servo rail directly. ST-3032 brown-out floor is ~9V, so a sagging 2S (7.4V) is not enough. *Typical price* |
+| Buck converter (12V → 5V, ≥1A) | 1 | 3 | Powers the ESP32-S3 and sensors. *Typical price* |
+| Pololu QTRX-HD-15A reflectance array | 1 | 29 | The line-follow bar (ten of its fifteen channels on GPIO 1–10, wiring below); $29.10 at Pololu |
+| TCS34725 breakout | 2–4 | 3–8 | Colour sensor array for zone detection. Adafruit 1334 is discontinued (was $7.95); generic modules are a few dollars on AliExpress / Amazon |
+| TCA9548A I2C multiplexer breakout | 1 | 7 | Required for more than one TCS34725 — its address is fixed at `0x29`. Adafruit 2717 $6.95; clones ≈$1–2 |
+| ICM-45686 breakout | 1 | 32 | SPI IMU, read inside the 1 kHz control tick — the heading source for `use_gyro`. TDK's own EV_ICM-45686 board is $32.45 at DigiKey; generic modules exist on Amazon |
+| ST-3215 serial bus servo | 0–4 | — | Optional; good for arms / grippers. Same bus and protocol, but do **not** share a 6V rail setup — see servo notes |
+| Jumper wires, M3 standoffs, chassis plate | — | — | Your robot, your build |
+
+Drive base, IMU, line bar, two colour sensors and the multiplexer
+come to **roughly US$190** before battery, charger and chassis. Prices
+checked 2026-09-05 at single-unit quantity —
+[Alibaba (STS3032)](https://www.alibaba.com/product-detail/FEETECH-SCS-STS3032-4-5-kg_1600138694717.html),
+[Kuriosity (URT-2)](https://kuriosity.sg/products/feetech-serial-bus-servo-driver),
+[Pololu 4415](https://www.pololu.com/product/4415),
+[Adafruit 2717](https://www.adafruit.com/product/2717),
+[DigiKey EV_ICM-45686](https://www.digikey.com/en/products/detail/tdk-invensense/ICM-45686/24374985),
+[Amazon (ESP32-S3-DevKitC-1 N16R8)](https://www.amazon.com/ESP32-S3-DevKitC-1-Development-Dual-Core-Bluetooth/dp/B0GVSHT2Q2)
+— and they move; treat the column as a budget, not a quote. The same
+parts from Taobao / AliExpress typically land at half to two-thirds
+of these numbers with longer shipping.
+
+A DC-gear-motor build (JGB37-520 / MG370 + H-bridge) is still fully
+supported — see [Alternative: DC gear motors with encoders](#alternative-dc-gear-motors-with-encoders)
+at the bottom.
+
+## Power budget
+
+Two rails, one battery:
+
+```
+    [ 3S LiPo 11.1V ]
+        │
+        ├─────────────►  URT-2 servo rail   (all ST-3032 / ST-3215 power)
+        │
+        └──► Buck  ──►  5V rail
+                         │
+                         ├──►  ESP32-S3 VIN (5V pin)
+                         └──►  Sensors via 3.3V regulator on the board
+```
+
+- Never power the servos from the ESP32's 5V pin or USB — a single
+  ST-3032 stall pulls more than a dev board can source.
+- The ST-3032's brown-out floor is ~9V. A 3S pack sags to ~9.9V near
+  empty, which still clears it; a 2S pack does not.
+- Tie all grounds together: battery, buck, URT-2, ESP32, sensor
+  breakouts. This sounds obvious but it's the #1 reason new builds
+  misbehave.
+
+## GPIO map (ESP32-S3)
+
+The serial-bus build needs very few pins — that's most of its charm:
+
+| Function          | GPIO(s) | Devices on this line |
+|-------------------|---------|----------------------|
+| Analog sensors    | 1–10    | The FULL ADC1 bank — the {class}`openbricks.drivers.qtr.QTRLineSensor` window (wiring below). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable |
+| I2C0 (SDA, SCL)   | 15, 16  | TCA9548A mux (0x70) + colour sensors behind it, shared bus (an I2C BNO055 IMU at 0x28 fits here too) |
+| UART1 (TX, RX)    | 14, 41  | URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained (RX was GPIO 6 until 1.71.0; it moved so the analog bank stays whole) |
+| Program button    | 39      | Start/stop, polled with an internal pull-up (was GPIO 4 until 1.71.0) |
+| BLE-toggle button | 38      | Bluetooth on/off (was GPIO 5 until 1.66.3) |
+| WS2812 data       | 21      | Addressable RGB LED strip / ×8 stick DIN ({mod}`openbricks.drivers.ws2812`) — on boards that break out the header corner next to 5 V/GND, this is the free pin beside the reserved 19/20 USB pair |
+| SPI (SCK, MOSI, MISO, CS) | 12, 13, 11, 17 | ICM-45686 IMU breakout ({class}`openbricks.drivers.icm45686.ICM45686`) — 3V3 + GND + these four; INT and the other breakout pins stay unwired (the 1 kHz hard tick polls) |
+
+Pin gotchas on the ESP32-S3:
+
+- **GPIO 22–25 don't exist** — the pin list is 0–21 then 26–48.
+- **GPIO 26–32 (and 33–37 on octal-PSRAM modules) are flash/PSRAM.**
+  Do not use them.
+- **GPIO 19/20 are the native-USB D-/D+** and **0/3/45/46 are
+  strapping pins.**
+- I2C and UART route through the GPIO matrix, so none of these
+  assignments are fixed — they're the convention the bundled examples
+  use. On a **classic ESP32**, the usual equivalents are I2C on
+  21/22 and any two free pins for the UART.
+
+The firmware enforces the hard cases at construction time: a driver
+asked to wire a nonexistent, flash, or USB pin — or a pin the runtime
+already owns, like the program button — raises
+{class}`openbricks.pins.ReservedPinError` naming the pin, the role,
+and the reason, instead of failing somewhere far from the mistake.
+See {mod}`openbricks.pins`.
+
+### QTRLineSensor wiring (the standard line-follow window)
+
+{class}`openbricks.drivers.qtr.QTRLineSensor` bakes the whole rig
+geometry into the firmware — pins, element positions, and the mode
+setpoints — so programs just construct it and pick a discipline:
+
+```python
+from openbricks.drivers.qtr import QTRLineSensor
+from openbricks.parameters import LineMode
+qtr = QTRLineSensor()
+qtr.set_mode(LineMode.LEFT)     # or RIGHT / CENTER; switchable mid-run
+error = qtr.read().edge_error()
+```
+
+Ten channels of a QTRX-HD-15A (4 mm pitch) in a skip pattern, left
+to right as mounted, onto GPIO 1..10 **in order**:
+
+| QTR channel | 1 | 3 | 4 | 5 | 7 | 9 | 11 | 12 | 13 | 15 |
+|-------------|---|---|---|---|---|---|----|----|----|----|
+| GPIO        | 1 | 2 | 3 | 4 | 5 | 6 | 7  | 8  | 9  | 10 |
+| x (mm)      | −28 | −20 | −16 | −12 | −4 | +4 | +12 | +16 | +20 | +28 |
+
+That spans a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm (the
+driver's `positions_mm` carries the true coordinates, so edge
+interpolation is exact across the unequal gaps). The three modes:
+
+- **`LineMode.LEFT`** — holds the line's LEFT edge under **channel 4**
+  (x = −16 mm)
+- **`LineMode.RIGHT`** — holds the line's RIGHT edge under **channel 12**
+  (x = +16 mm)
+- **`LineMode.CENTER`** — holds the line's CENTRE at x = 0, steering on
+  the weighted centroid of **all ten channels**
+
+`edge_error()` is signed so positive steers right in every mode,
+range −50 .. +50. In the two edge modes it is how far the mode's
+channel sits from the black/white boundary — that element's
+ambient (0 black .. 100 white) referenced to 50, reading 0 exactly
+when the channel straddles the edge. That is one element, so the
+error is proportional only within about a pitch of the setpoint
+and rails at ±50 beyond it. In `LineMode.CENTER` mode it is the line's
+centroid position scaled so ±50 is the far end of the window
+(±28 mm) — proportional across the whole span, which is what you
+want through sharp corners and after a branch. When no channel
+sees the line, center mode rails toward the side the line left
+through (`last_side()`), and raises if the line was never seen.
+Examples: `qtr_line_follow_left.py` / `_right.py` / `_center.py`,
+one shared law pinned to each mode.
+
+The skip pattern is a palindrome, so if the board is mounted the
+other way round, only these channel labels swap — GPIO order and
+geometry stay identical.
+
+Either way the ~20 mm line sits inside the middle of the window
+with ≥3 channels of mat visible on the far side — those far-side
+elements are the branch watch in the bundled followers, and the
+whole window going dark is the intersection/ending signal.
+
+One board-level note: **GPIO 3 (= channel 4, the left-mode
+setpoint channel) is a strapping pin**, and on the
+ESP32-S3-COREBOARD V1.4 it optionally carries a 10 kΩ pull-up
+through the `USB-JTAG` 0 Ω link. Harmless (per-element calibration
+absorbs the bias), but if `qtr_calibrate.py` shows element `[2]`
+with a conspicuously narrower span than its neighbours, that link
+is populated — desoldering it is safe if you never use pin-JTAG.
+
+The QTRX board's CTRL (emitter enable) can stay tied high; VCC to
+3V3, GND to GND.
+
+### If the status LED never lights
+
+The onboard WS2812 speaks a write-only protocol — the firmware can't
+tell a dead LED from a working one, so a blown pixel looks like
+software silently failing. Run `examples/led_probe.py` on the hub: it
+drives full white at both timings across every plausible RGB pin
+(48/38/47/21) plus a raw `machine.bitstream` write. If nothing lights
+through all of that, the problem is physical. The decisive check is a
+**power-off ohmmeter reading from the LED's data pin (or its GPIO) to
+GND**: a WS2812 whose DI input has failed as an internal short reads
+~0 Ω there and clamps the GPIO — the pin measures millivolts even
+when driven high, every write "succeeds" into the short, and the
+symptom history is "worked once, then went dark for good". Lift the
+data link to free the pin. Also check the schematic for **population
+options in the LED circuit**. The ESP32-S3-COREBOARD V1.4
+(`docs/datasheets/esp32s3_coreboard_v1.4_schematic.pdf`) routes
+GPIO 48 to the WS2812 through a 0 Ω `RGB` link and feeds the LED's
+VDD from the **5 V rail** through a second optional link — if either
+link is unpopulated (or the board is powered via 3.3 V only, leaving
+the 5 V rail dead), the LED never lights while every write succeeds.
+Bridge the link / feed 5 V, or wire any external WS2812 to
+3.3V / GND / GPIO 48 — it becomes the status LED with no firmware
+change.
+
+## Sensor wiring (I2C)
+
+The colour sensor is the TCS34725. Its I2C address is fixed at `0x29`
+— there are no address-select pins — which decides how you wire it:
+
+| Sensors | Mode | Extra part |
+|---------|------|------------|
+| 1 | [Direct](#mode-1-direct-to-the-esp32) — straight onto the ESP32's I2C pins | none |
+| 2 or more | [Via TCA9548A](#mode-2-via-a-tca9548a-multiplexer) — one sensor per mux channel | TCA9548A breakout |
+
+The IMU in the baseline build is the SPI-wired ICM-45686 (see the
+GPIO map above) and doesn't share this bus. If you use the I2C BNO055
+instead, it sits at `0x28` and connects straight to GPIO 15/16 in
+either mode — `0x28` and `0x29` coexist fine.
+
+Both modes use the same driver call. `mux[n]` behaves like an I2C
+bus, so the only difference between the two is what you pass to
+`TCS34725(...)`.
+
+### Mode 1: direct to the ESP32
+
+One colour sensor, no multiplexer:
+
+| TCS34725 pin | Connect to | Notes |
+|--------------|------------|-------|
+| VIN (or VCC) | 3.3V       | The breakout has an onboard regulator, but the board's 3.3V is cleanest |
+| GND          | GND        | Common ground with everything else |
+| SDA          | GPIO 15    | ESP32-S3 (classic ESP32: GPIO 21) |
+| SCL          | GPIO 16    | ESP32-S3 (classic ESP32: GPIO 22) |
+| LED / INT    | see [below](#tcs34725-led-pin) | |
+
+```python
+from machine import I2C, Pin
+from openbricks.drivers.tcs34725 import TCS34725
+
+i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3
+sensor = TCS34725(i2c)
+```
+
+Check the wiring with `i2c.scan()` — it should list `41` (`0x29`).
+A complete program is `examples/read_color.py`.
+
+If you want **exactly two** sensors without a mux, the ESP32's second
+hardware I2C controller also works: `I2C(1, sda=..., scl=...)` on any
+two free pins, one sensor per bus. Beyond two, use Mode 2.
+
+### Mode 2: via a TCA9548A multiplexer
+
+Two or more colour sensors (a line-follower / zone-detection array).
+The TCA9548A sits at `0x70` and fans the bus out to eight isolated
+channels; each sensor lives on its own channel at its own `0x29`.
+
+Wire the mux to the ESP32-S3, then each sensor to a mux channel:
+
+| TCA9548A pin | Connect to | Notes |
+|--------------|------------|-------|
+| VIN          | 3.3V       | |
+| GND          | GND        | Common ground with everything else |
+| SDA / SCL    | GPIO 15 / 16 | The main bus (classic ESP32: 21 / 22) |
+| SD0/SC0 … SD7/SC7 | one TCS34725 each | Isolated channels |
+| A0 / A1 / A2 | leave open | Default address `0x70`; only needed for a second mux |
+
+| TCS34725 pin | Connect to | Notes |
+|--------------|------------|-------|
+| VIN (or VCC) | 3.3V       | |
+| GND          | GND        | |
+| SDA / SCL    | mux channel `SDn` / `SCn` | Not the ESP32 pins |
+| LED / INT    | see [below](#tcs34725-led-pin) | |
+
+The Adafruit breakouts include ~10 kΩ SDA/SCL pull-ups, so for a
+handful of devices you don't need to add your own.
+
+```python
+from machine import I2C, Pin
+from openbricks.drivers.tca9548a import TCA9548A
+from openbricks.drivers.tcs34725 import TCS34725
+
+i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3
+mux = TCA9548A(i2c)                                    # 0x70 by default
+sensors = [TCS34725(mux[ch]) for ch in range(3)]       # left, mid, right
+```
+
+Check the wiring with `i2c.scan()` — it should list `112` (`0x70`)
+for the mux; `mux[n].scan()` should list `41` (`0x29`) for each
+channel that has a sensor. For a complete program — a 2-sensor array
+that combines each sensor's ``ambient()`` and ``rgb()`` readings to
+name the colour under it (red / blue / green / yellow / white /
+black) — see `examples/color_array.py`.
+
+### TCS34725 LED pin
+
+The colour sensor breakout has two extra pins beyond power and I2C:
+
+- **LED** — drives the onboard white illumination LED. On Adafruit
+  boards it defaults **on** (tied to VIN through the ADC-enable trace).
+  To control it, wire it to a spare GPIO and drive high/low; to force it
+  **off**, tie LED to GND. Leave it on for consistent colour readings —
+  ambient light alone is unreliable across environments.
+- **INT** — the interrupt output. The driver polls, so leave INT
+  **unconnected**.
+
+## Serial bus servo notes (ST-3032 / ST-3215)
+
+- **Every servo needs a unique bus ID.** Factory default is 1; re-ID
+  one servo at a time with `examples/st3215_reid.py` (same protocol —
+  it works for the ST-3032 too). The bundled drivebase examples assume
+  left = 1, right = 2.
+- **Speed limits.** Per the STS3032 datasheet (`docs/datasheets/`),
+  no-load top speed at 12V is 148 RPM = 888 °/s; under the rated
+  3.3 kg·cm load it drops to roughly ⅔ of that. The driver's default
+  `max_dps=600` clamps requests at the loaded operating point —
+  construct with an explicit `max_dps=900` to chase the no-load number.
+- **Mixed fleets:** the ST-3215 tolerates lower voltages, but the
+  ST-3032 browns out below ~9V. If you daisy-chain both on one URT-2,
+  the rail must satisfy the strictest member: 12V.
+- **Drivebase:** `ST3032Motor` drops straight into `DriveBase`:
+
+```python
+from openbricks.drivers.st3032 import ST3032Motor
+from openbricks.robotics import DriveBase
+
+left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
+db = DriveBase(left, right, wheel_diameter_mm=65, axle_track_mm=120)
+```
+
+Bench-test a fresh build with `examples/st3032_drivebase_test.py`.
+
+## Calibrating the drivebase
+
+`wheel_diameter_mm` and `axle_track_mm` are the two physical parameters that
+matter for straight-line distance and turn accuracy. Measure them with
+calipers or a ruler (wheel contact patch to wheel contact patch for axle
+track, not hub to hub). If `straight(1000)` undershoots, your wheel
+diameter value is too large; if `turn(360)` overshoots, your axle track is
+too small.
+
+High-torque 12V servos also deliver the default launch profile much more
+stiffly than small DC motors — if the chassis pitches or lifts its rear
+when a move starts, soften the ramp:
+
+```python
+db.settings(acceleration=180)   # wheel-deg/s²; default 1500
+```
+
+## Alternative: DC gear motors with encoders
+
+The original starter build — still fully supported. (Both this and
+the serial-servo build run in the MuJoCo simulator via the driver
+shim.)
+
+| Part | Qty | Notes |
+|------|----:|-------|
+| JGB37-520 DC motor with encoder (1:30 gearing) | 2 | Pick the 12V version; runs fine off 7.4V 2S LiPo |
+| L298N dual H-bridge module | 1 | Cheap and robust. TB6612FNG is a better choice if you can find it |
+| 2S LiPo (7.4V) + buck converter (→5V, ≥2A) | 1 each | Don't power the ESP32 from the L298N's onboard 78M05 regulator — it's good for ~300 mA and browns out the moment the motors draw current |
+
+Wiring topology:
+
+```
+    [ 2S LiPo 7.4V ]
+        │
+        ├─────────────►  L298N  Vmotor   (motor power)
+        │
+        └──► Buck  ──►  5V rail
+                         │
+                         ├──►  ESP32 VIN
+                         ├──►  L298N  +5V (logic only)
+                         └──►  Sensors via 3.3V regulator on ESP32
+```
+
+GPIO map (see `examples/esp32_drivebase.py` for the ESP32-S3 pin
+assignments; the classic-ESP32 equivalents are in git history):
+
+| Function          | ESP32-S3 GPIO(s) | Devices on this line |
+|-------------------|------------------|----------------------|
+| Left motor dir    | 1, 2             | L298N / TB6612 IN1, IN2 |
+| Left motor PWM    | 18               | L298N / TB6612 ENA |
+| Left encoder A, B | 7, 8             | JGB37-520 encoder channels |
+| Right motor dir   | 9, 10            | L298N / TB6612 IN3, IN4 |
+| Right motor PWM   | 40               | L298N / TB6612 ENB |
+| Right encoder A, B| 42, 47           | JGB37-520 encoder channels |
+
+**This build and the QTR line-sensor bar are mutually exclusive.** A
+DC drivebase needs ten GPIOs and the S3 does not have ten free ones
+outside the ADC1 bank once the other conventions are honoured, so
+the motor direction and left-encoder lines take six of the bank's
+pins (GPIO 1, 2, 7, 8, 9, 10) that the
+{class}`openbricks.drivers.qtr.QTRLineSensor` window otherwise owns.
+Everything else follows the reference GPIO map unchanged: 11/12/13/17
+stay free for the SPI IMU, 15/16 for I2C sensors, 14/41 for a
+serial-servo arm, and 39/38 for the program / BLE buttons (see
+{class}`openbricks.hub.ESP32S3DevkitHub` — the launcher polls GPIO 39
+as an input, so a motor driver toggling it would read as button
+presses and stop your program).
+
+### Calibrating encoder counts
+
+The default in `jgb37_520.py` is `counts_per_output_rev=1320`, which is
+`11 CPR × 30:1 × 4 (quadrature edges)`. If you have a different gearbox
+variant, recompute:
+
+    counts_per_output_rev = encoder_CPR × gear_ratio × 4
+
+Or measure empirically: rotate the output shaft by hand exactly one full
+turn and read `motor.angle()`. Whatever it reports is what
+`counts_per_output_rev` should be, scaled so that one turn = 360°.
+
+
+---
+myst:
+  html_meta:
+    description: "The openbricks command-line tool: flash firmware, list hubs over BLE, run and upload programs, stop them, and pull logs — with port and firmware auto-detection."
+---
+
+# Command-line tool
+
+`pipx install openbricks` installs one console script, `openbricks`,
+which mirrors the `pybricksdev` workflow: flash firmware over USB, then
+run / upload / stop programs and pull logs over BLE. With the `[sim]`
+extra installed, `openbricks sim …` forwards to the
+{doc}`MuJoCo-backed simulator <simulator>`.
+
+A typical session:
+
+```console
+$ openbricks flash --name RobotA     # port, chip and newest firmware auto-detected
+$ openbricks list                    # hubs in BLE range
+$ openbricks run -n RobotA main.py   # push + stream output
+$ openbricks upload -n RobotA main.py  # stage; start it with the hub button
+$ openbricks stop -n RobotA          # Ctrl-C a running program
+$ openbricks log -n RobotA           # dump the most recent run log
+$ openbricks docs hardware           # open this manual offline in your browser
+```
+
+## Firmware versions and provenance
+
+`openbricks flash` first reports the firmware already on the chip —
+version plus an `(official)` / `(customized)` suffix — before it
+looks up the newest release. Flashing the **same version** again, or
+an **older** one, asks for confirmation first; pass `--yes` to skip
+the prompt in scripts.
+
+The default output is step-level (probe, download, erase, write,
+hub name, marker, reboot); pass `--verbose` / `-v` to also echo
+every underlying `mpremote` / `esptool` command line and the
+firmware cache paths — useful when reporting a flash problem.
+
+Every firmware image published by CI is signed (Ed25519), and the
+CLI ships the matching public key. An image whose `.bin.sig`
+verifies is labeled `(official)`; anything else — a self-built
+image, a missing or wrong signature — is `(customized)`. Customized
+firmware flashes normally: the suffix is provenance, not a gate.
+After each flash the verdict is stored on the hub, which is how the
+next `openbricks flash` labels the current firmware.
+
+The suffix follows the version everywhere it reaches you: the
+`firmware 1.79.0 (official)` banner at the top of every
+`openbricks run`, the `started:` header line in every run log
+(`openbricks log`), and the flash preflight above. On the hub,
+`openbricks.firmware_label()` returns the same string.
+
+## Programs are compiled on the host
+
+Since 1.92.0, `openbricks run` and `openbricks upload` cross-compile
+your script with `mpy-cross` **before** connecting, and stage
+compiled bytecode instead of source (like Pybricks). Three things
+get better:
+
+- **syntax errors surface in milliseconds**, on your terminal,
+  naming your file and line and quoting the offending source line —
+  no BLE scan, no connect, no upload round-trip;
+- **programs start faster**: the hub loads bytecode directly and
+  skips its on-device parse/compile step;
+- **tracebacks name your real file and line** (`File "square.py",
+  line 12`) instead of `File "<string>"`.
+
+No flags, nothing to configure. Firmware older than 1.92.0 can't run
+compiled programs, so the CLI probes the hub's version in-session and
+sends plain source instead — announced on stderr, never silently.
+`upload --path` (custom boot flows) always stages your file verbatim,
+uncompiled, at the path you give.
+
+`run` is an **upload-then-run** (since 2.7.0, deliberately
+different from Pybricks): it stages your script at the button's
+`/program.mpy` before executing it, so even a run that fails midway
+leaves the program on the hub — press the start button to rerun it,
+no BLE round trip needed. The flip side: running a calibration or a
+one-shot diagnostic replaces the button's program too, so re-upload
+your mission after such tools (`upload` alone stages without
+running).
+
+`flash --with-qtr-init` additionally stores a starter QTR
+line-sensor calibration at `/qtr.cal` (recorded on the reference
+bench, default pins 1-10), so the line-follow examples work on a
+fresh hub out of the box. Heights, mats and lighting differ — run
+`examples/qtr_calibrate.py` once for a calibration measured on your
+own rig.
+
+## Reference
+
+The reference below is generated from the CLI's own argument parser, so
+it always matches the installed version.
+
+```{eval-rst}
+.. argparse::
+   :module: openbricks_dev.cli
+   :func: _build_parser
+   :prog: openbricks
+```
+
+
+---
+myst:
+  html_meta:
+    description: "Run the same openbricks robot code without hardware in a MuJoCo-backed simulator, including WRO competition worlds and a live 3D viewer."
+---
+
+# Simulator
+
+The `[sim]` extra ships a MuJoCo-backed physics simulator, so you can
+develop robot programs without a hub on the desk:
+
+```console
+$ pipx install 'openbricks[sim]'
+$ openbricks sim run examples/full_robot.py --viewer
+```
+
+The sim runs the **same script you'd push to the hub** — a driver shim
+maps the `openbricks` API onto simulated motors and sensors, so
+`ST3032Motor`, `DriveBase`, color sensors, and distance sensors behave
+like their hardware counterparts.
+
+## Commands
+
+```console
+$ openbricks sim preview [--world WORLD] [--x X] [--y Y] [--headless] [--duration S] [--seed N]
+```
+
+Loads the named world (an alias or a path to an MJCF file), splices in
+the default chassis, and opens the MuJoCo viewer so you can inspect the
+scene. `--headless` steps the physics for `--duration` seconds without
+opening a window — useful as a smoke test.
+
+```console
+$ openbricks sim run SCRIPT [--world WORLD] [--chassis FILE] [--x X] [--y Y] [--yaw DEG] [--viewer] [--no-shim] [--seed N]
+```
+
+Loads the world plus the chassis and executes `SCRIPT` against the
+simulated robot. `--viewer` opens the interactive MuJoCo window;
+without it the sim runs headless (CI-friendly). `--seed` makes
+randomized worlds reproducible.
+
+Run `openbricks sim --help` for the full, always-current option list.
+
+## Describing your robot
+
+The default chassis is a 60 mm-wheel, 150 mm-axle box with every
+down-facing sensor 60 mm ahead of the axle. A real robot differs, and
+those differences decide whether a mission script's numbers work:
+`--chassis FILE` loads a JSON object of `ChassisSpec` fields (metres,
+kilograms, degrees) that describe the robot the script was written
+for. Fields not given keep the defaults.
+
+```json
+{
+  "wheel_radius": 0.0432,   "axle_length": 0.135,
+  "body_length": 0.16,      "body_width": 0.12,
+  "line_sensor_x": 0.06,
+  "color_sensor_x": 0.06,   "color_sensor_y": 0.184,
+  "pos_x": -0.547,          "pos_y": -0.15,        "yaw_deg": 90
+}
+```
+
+- `wheel_radius` / `axle_length` size the chassis at load time. The
+  `DriveBase(wheel_diameter_mm=…, axle_track_mm=…)` in the script
+  resizes it again at adoption, so the script's geometry always wins
+  — set them here so a `preview` shows the same robot.
+- `line_sensor_x` places the reflectance-array site (`chassis_line`)
+  ahead of the axle; `color_sensor_x` / `color_sensor_y` place the
+  centre down camera (`chassis_cam_down`, the no-mux `TCS34725`),
+  and the left/right camera pair rides 18 mm either side of it.
+- `pos_x` / `pos_y` / `yaw_deg` are the spawn pose; `--x` / `--y` /
+  `--yaw` on the command line override them one at a time. `yaw_deg`
+  is counter-clockwise from +X seen from above (0 = facing +X).
+
+## What the shim simulates
+
+| Firmware class | Sim binding |
+|---|---|
+| `ST3032Motor` / `ST3215Motor` | The first two servo ids become the chassis wheels, the third and fourth kinematic task shafts (a gripper motor that turns but pushes nothing). A `DriveBase` always gets the physical wheels for the pair it adopts, whatever order the script constructed its motors in, and re-constructing a motor for a servo id yields the same motor — both firmware rules. |
+| `DriveBase` | The firmware engine over an emulated `st_bus`; `use_gyro(True)` reads the chassis's true yaw. |
+| `ICM45686` / `BNO055` | Ground-truth chassis heading; the ICM's bias estimator reports calibrated at once. |
+| `TCS34725` | One downward ray from the centre camera (no mux) or the left/right pair (mux channels 1 / 0); prop colours and mat texels resolve to what the sensor would see. |
+| `QTRLineSensor` / `QTRArray` / `QTRChannel` | The firmware driver over a reflectance model: one element per array position, spread left-to-right from the `chassis_line` site, each averaging the floor over a 3 mm spot so an edge reads as a gradient (the basis of `edge_error`). `load_calibration("/qtr.cal")` and `calibrate()` need no file — the sim's reflectance is born normalised. |
+| Distance sensors | A forward ray from the `chassis_dist` site. |
+
+Nothing above has a load: task motors don't grip, and a prop is only
+pushed when the chassis body drives into it.
+
+## Notes
+
+- The sim needs the `[sim]` extra (`mujoco`, `numpy`). Without it,
+  `openbricks sim …` prints an install hint instead of crashing.
+- The wheel carries the firmware package (`openbricks.drivers.*`,
+  `openbricks.parameters`, …) since 3.6.0, so a plain
+  `pipx install 'openbricks[sim]'` runs hub-style scripts; earlier
+  releases needed a repo checkout for that.
+- Firmware-only users never need the simulator — it's strictly
+  host-side tooling.
+
+
+---
+myst:
+  html_meta:
+    description: "Example programs for openbricks robots: drivebase squares, gyro-corrected driving, line following (edge and center modes), color sensing (direct or via a TCA9548A mux), color sorting, and distance-based wall avoidance."
+---
+
+# Examples
+
+The repo ships runnable example programs in
+[`examples/`](https://github.com/1e0ng/openbricks/tree/main/examples).
+Push any of them to a hub with `openbricks run -n <name> <script>` or
+try them in the simulator with `openbricks sim run <script>`.
+
+Two representative ones are reproduced below.
+
+## Drive a square (ST-3032 drivebase)
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/st3032_drivebase_square.py
+   :language: python
+```
+
+## Gyro-corrected square (ICM-45686)
+
+With an ICM-45686 attached, `use_gyro(True)` moves heading control
+off the encoders and onto measured body rotation — corrected every
+millisecond inside the firmware's 1 kHz control tick, with no Python
+in the loop. This script drives the same square twice, encoders-only
+and gyro-corrected, and prints each pass's heading drift so the
+difference is a number, not an impression. On the reference bench the
+gyro pass returns within ~0.6° over all four turns; wheel slip that
+would bend the encoder pass simply gets steered back out.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/icm45686_square.py
+   :language: python
+```
+
+Wiring for the IMU is four SPI pins plus power — see
+{doc}`/hardware`. The first still half-second learns the gyro bias;
+`save_calibration()` persists it so later boots skip the wait.
+
+## Rounded square (DriveBase.curve)
+
+`curve(radius, angle)` follows the Pybricks contract — positional
+order, parameter names, and sign semantics: positive `angle` arcs
+right (clockwise), a negative `radius` drives the arc backward, and
+`curve(0, angle)` degrades to a turn in place. The forward and turn
+profiles run with proportionally scaled speed *and* acceleration, so
+the path is a true circle even through the ramps, and the outer
+wheel is automatically capped at the `straight_speed` setting.
+(One deviation: `then` defaults to `Stop.COAST` like every openbricks
+move; pass `then=Stop.HOLD` for the Pybricks end state.)
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/st3032_drivebase_curve.py
+   :language: python
+```
+
+## Colour sensor, direct to the ESP32 (one TCS34725)
+
+Mode 1 from the {doc}`hardware guide </hardware>`: a single TCS34725
+on GPIO 15/16, no multiplexer. The driver is handed the bus itself.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/read_color.py
+   :language: python
+```
+
+## Colour sensor array via a TCA9548A (two TCS34725s)
+
+Mode 2: the TCS34725's address is fixed at `0x29`, so two or more go
+through a TCA9548A multiplexer, one per channel. `mux[n]` behaves
+like an I2C bus, so the driver call is the same as above — only the
+bus argument changes. Each loop combines `ambient()` and `rgb()` to
+name the colour under every sensor.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/color_array.py
+   :language: python
+```
+
+## Line following (QTR sensor bar, center mode)
+
+The QTRLineSensor's `LineMode.CENTER` mode steers on the weighted centroid
+of all ten elements, so `edge_error()` is proportional across the
+whole 56 mm window. The same control law ships pinned to
+`LineMode.LEFT` and `LineMode.RIGHT` in `examples/qtr_line_follow_left.py` /
+`_right.py` — see {doc}`/hardware` for what each mode holds.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/qtr_line_follow_center.py
+   :language: python
+```
+
+## Square up on a line (QTR sensor bar)
+
+The classic align move on the `QTRLineSensor` window: each half of
+the ten-element bar acts as one virtual corner sensor, in two
+passes. Seek: drive slowly toward the line — the wheel whose half
+reaches it first stops while the other keeps rolling, pivoting the
+chassis square. Edge: servo each wheel proportionally — the
+follower's KP discipline — until its half reads ambient of about
+50, the elements straddling the black/white boundary, parked
+right ON the line's edge.
+Calibrate once with `examples/qtr_calibrate.py` first; mount the
+bar ahead of the wheels.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/qtr_align.py
+   :language: python
+```
+
+## Square up on a line (two color sensors)
+
+The same maneuver with a corner-mounted color sensor per side, for
+rigs without the QTR bar.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/line_align.py
+   :language: python
+```
+
+## Full robot (ST-3032 drivebase + IMU + colour sensor + arm)
+
+Everything from the reference build on one bus map — the wheels and
+the optional ST-3215 arm share the serial bus (IDs 1, 2 and 3), the
+IMU is on SPI, the colour sensor on I2C, and the QTR bank (GPIO 1-10)
+is left untouched.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/full_robot.py
+   :language: python
+```
+
+## Servo dynamometer (two ST-3032s, coupled)
+
+Measures one servo's real no-load speed, stall-torque estimate and
+gear play against a second servo used as the load — the per-unit
+numbers to compare across your spares. Procedure and how to read the
+summary: {doc}`servo-health`.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/st3032_dyno.py
+   :language: python
+```
+
+## Servo soak test (one ST-3032)
+
+An hour of swings with voltage, temperature, current and gear play
+logged along the way, and the drift summarised at the end — the
+pre-competition check for a servo you are not sure about.
+
+```{eval-rst}
+.. literalinclude:: https://docs.openbricks.dev/../examples/st3032_soak_test.py
+   :language: python
+```
+
+
+---
+myst:
+  html_meta:
+    description: "How to measure and calibrate wheel diameter and axle track for an openbricks DriveBase — two short test drives instead of guesswork."
+---
+
+# Measuring wheel diameter & axle track
+
+`DriveBase` converts your commands from millimeters and body-degrees
+into wheel rotations using exactly two numbers:
+
+```python
+db = DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=138)
+```
+
+* **`wheel_diameter_mm`** — how far one wheel rotation moves the robot.
+  Every `straight()` distance scales linearly with it.
+* **`axle_track_mm`** — the distance between the two wheels' *contact
+  points* with the floor. Every `turn()` angle scales linearly with it.
+
+Getting these two right is worth more than any controller tuning: a 2 %
+diameter error is 20 mm of error on a 1 m drive, and a 2 % track error
+is ~7° of error on a full spin. A ruler gets you close; the two test
+drives below get you to a few tenths of a percent.
+
+Calibrate **wheel diameter first, then axle track** — the turn
+calculation uses the wheel diameter, so a diameter error contaminates
+the track measurement.
+
+## Step 1 — wheel diameter, from a straight drive
+
+Start from the nominal value (caliper across the tire, or the
+manufacturer's spec). Then:
+
+1. Put a strip of masking tape on the floor and align a marked point of
+   the robot (e.g. the axle center) with its edge.
+2. Run a long straight — the longer the drive, the better the
+   resolution:
+
+   ```python
+   db.settings(straight_speed=150)
+   db.straight(1000)
+   ```
+
+3. Measure the distance actually traveled, from tape edge to the same
+   marked point, in millimeters.
+4. Scale the diameter by how far the robot *really* went:
+
+   ```text
+   new_diameter = old_diameter × measured_mm / 1000
+   ```
+
+   Traveled 1023 mm with `wheel_diameter_mm=88`? Then
+   `88 × 1023 / 1000 = 90.0` is your real diameter.
+
+Repeat once with the new value: the measured distance should now land
+within a few millimeters of the command. Soft tires compress under the
+robot's weight, so the *effective* diameter is often ~1-3 % smaller
+than the caliper says — the test drive measures reality, load included.
+
+## Step 2 — axle track, from an in-place spin
+
+With the wheel diameter calibrated, the fastest way is to let an
+attached ICM-45686 measure the spin for you:
+`examples/icm45686_axle_track.py` commands ten encoder-only turns
+(the drivebase's gyro stays off — the point is to measure what the
+*encoders* produce), reads the true rotation off the IMU, and prints
+the corrected `axle_track_mm` to paste into your `DriveBase(...)`
+call. Ten turns make each 0.1° of gyro error only 0.003 % of track.
+
+No IMU on the robot? The manual version:
+
+1. Align the robot against a straightedge (a wall or ruler touching
+   both wheels works well) and note its exact heading.
+2. Command several full spins in place — more turns amplify the error
+   so it's easier to measure:
+
+   ```python
+   db.settings(turn_rate=120)
+   db.turn(3600)        # ten full clockwise spins
+   ```
+
+3. Measure the final heading error `err_deg` against your straightedge:
+   positive if the robot rotated *past* the start alignment, negative
+   if it stopped short. A protractor or a phone compass app is plenty —
+   over ten spins, each degree of final error is only 0.1 % of track.
+4. Scale the track by how far the robot really rotated:
+
+   ```text
+   new_track = old_track × 3600 / (3600 + err_deg)
+   ```
+
+   Overshot by 18° with `axle_track_mm=138`? Then
+   `138 × 3600 / 3618 = 137.3` is your real track.
+
+Note the direction: if the robot turns **too far**, the real track is
+**smaller** than configured (each wheel-degree of travel produced
+*more* body rotation than the math assumed), so the correction
+*decreases* the configured value. Stopping short means the opposite —
+increase it.
+
+The contact *points* matter, not the wheel centers: wide, soft tires
+effectively touch the ground inboard of their centerline, so the real
+track is usually a few millimeters less than what you measure
+center-to-center with a ruler.
+
+## Checking the result
+
+Drive a square and see how close the robot returns to its start pose:
+
+```python
+for _ in range(4):
+    db.straight(300)
+    db.turn(90)
+```
+
+With both values calibrated, the return error on a 300 mm square is
+typically under 1 cm and a few degrees. Do the calibration on the same
+surface the robot will compete on — carpet, foam mats, and wood all
+load the tires differently.
+
+## What about the gyro?
+
+`use_gyro(True)` (with an `imu=` attached) makes turns terminate on
+*measured* body rotation, so heading no longer depends on the axle
+track being exact — wheel slip included. Calibrate the track anyway:
+the controller still uses it to shape the commanded wheel speeds, and
+encoder-only operation (gyro off, or no IMU on the robot) depends on
+it entirely.
+
+How much the gyro buys depends on which IMU: an ICM-45686 read
+inside the 1 kHz control tick returned a four-turn square within
+**+0.6° total** on the reference bench, versus +0.5° to +1.8° *per
+turn* for a Python-pumped BNO055 and a few degrees encoder-only.
+`examples/icm45686_square.py` measures all of this on your own robot
+— run it and read the two drift numbers.
+
+
+---
+myst:
+  html_meta:
+    description: "Read an ST-3032/ST-3215 servo's voltage, temperature, current and protection flags; characterise a servo on a two-servo dynamometer; soak-test it before a competition."
+---
+
+# Servo health & characterisation
+
+Every Feetech STS servo reports its own supply voltage, case
+temperature, supply current and a byte of protection flags, next to
+the position/speed/load block the drivers already read. Since 3.3.0
+that block is one call away, and two bundled programs turn it into
+the two questions a team actually asks about a servo: *what does
+this particular unit do*, and *is it still doing it*.
+
+## `health()`
+
+```python
+from openbricks.drivers.st3032 import ST3032Motor
+
+m = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=41)
+h = m.health()
+print(h.voltage, "V", h.temperature, "C", h.current, "A", h.flags)
+```
+
+`health()` returns a `ServoHealth` tuple:
+
+| Field | Meaning |
+|-------|---------|
+| `voltage` | supply rail at the servo, volts (0.1 V resolution) |
+| `temperature` | case temperature, °C |
+| `current` | supply current, amps (6.5 mA resolution) |
+| `flags` | the protection flags currently set, as names — `voltage`, `sensor`, `temperature`, `current`, `angle`, `overload`; empty when healthy |
+| `status` | the raw status byte |
+
+It works on position servos (`ST3215` / `ST3032`) and wheel-mode
+motors alike, adopted by a `DriveBase` or on their own bus. It
+**raises `OSError`** when the bus is silent rather than returning
+nothing — a health check that can't reach the servo is the failure
+it exists to catch. On an adopted motor the four registers are staged
+through the native bus pump, which takes a few milliseconds: read it
+for a log line, not inside a control loop.
+
+The ST-3032's own protections, from its datasheet, are the numbers
+to read the fields against: it cuts torque above **80 °C**, flags
+**over-voltage** outside 9–14 V, and latches **overload** after 2 s
+above 80 % of stall (re-issuing a command clears it). Nominal current
+is 100 mA free-running, 500 mA at rated load, 1.6 A stalled.
+
+## Dynamometer: what does *this* servo do?
+
+`examples/st3032_dyno.py` characterises one servo against a second
+one, the way actuator labs do it with a load motor — minus the load
+cells. Couple two ST-3032s horn to horn with a rigid coupler and bolt
+the pair down. The servo under test drives at a fixed duty; the load
+servo opposes it with a duty that steps up from 0 to 30 %; at each
+step the program averages the driven servo's speed and supply
+current. The current above the unloaded baseline, times the motor
+constant (6.3 kg·cm/A, `ST3032Motor.KT_MNM_PER_A`), is the shaft
+torque, so the sweep yields a torque–speed line, and a DC motor
+behind a gearbox droops linearly — the fit's intercepts are the
+unit's **no-load speed** and **stall torque** at that duty, scaled
+to 100 % in the summary. A gentle reversal against the held load
+servo at the end measures the pair's combined **gear play**.
+
+```text
+load_duty_pct,speed_dps,current_a,torque_mnm
+0,262.4,0.118,0.0
+5,251.0,0.151,20.4
+...
+# --- dyno summary ---
+servo 1 at 30 % duty: no-load 263 dps, stall 226 mNm (2.30 kg.cm), droop -1.16 dps per mNm
+scaled to 100 % duty: stall ~753 mNm, datasheet 980; no-load ~877 dps, datasheet 888
+combined gear play of the pair: 0.95 deg (datasheet <= 1.0 per servo)
+```
+
+Run it on every servo you own and keep the summary lines. The
+numbers are not lab-grade — the torque rides on a datasheet
+constant, and the stall figure is an extrapolation from a 30 % sweep
+(the bench cap; raise `DUTY` and `LOAD_STEPS` only with the pair
+bolted down) — but they are *consistent*, which is what matters:
+the unit whose no-load speed or stall sits well off its siblings is
+the one to keep out of the drive pair, and a pair that measures
+alike will track alike under `DriveBase`. The simulator's servos are
+ideal velocity loops, so there is nothing to feed these numbers
+into; they are for choosing and comparing hardware.
+
+## Soak test: is it still good?
+
+`examples/st3032_soak_test.py` runs one servo through ±90° swings
+for an hour (`DURATION_MIN`) and every `REPORT_EVERY` cycles logs
+`health()` plus the servo's gear play — one target approached from
+below and from above under hold, the difference between the two rest
+angles. The summary is the drift from the first report to the last:
+
+```text
+# --- soak summary ---
+1780 cycles: temperature +14 C (peak 46 C, shutdown at 80), current +0.021 A, play +0.08 deg, supply dipped to 11.4 V
+```
+
+What to look for: a temperature that keeps climbing instead of
+levelling off, play that grows through the run, current that rises
+at the same speed and load, or any protection flag at all. Each is a
+servo to retire — or a wiring/battery problem to fix — before it
+shows up on the mat. Feetech's own life test is 50 000 cycles at a
+fifth of stall torque; an hour is a couple of thousand, enough to
+expose a unit that is already going.
+
+
+API reference
+=============
+
+Everything below ships frozen into the firmware image — ``import
+openbricks`` on the hub gives you all of it. The pages are generated
+from the package's docstrings.
+
+The API is layered:
+
+- **Drivers** (``openbricks.drivers.*``) — one module per supported
+  component. Construct these with your wiring's pins / IDs.
+- **Interfaces** (``openbricks.interfaces``,
+  ``openbricks.distance``) — the abstract contracts drivers implement.
+  Higher layers depend only on these, which is what makes the system
+  plug-and-play.
+- **Robotics** (``openbricks.robotics``) — building blocks composed
+  from interfaces, like the two-wheel ``DriveBase``.
+- **Parameters** (``openbricks.parameters``) — the enums every
+  option argument takes (``Stop``, ``DriveMode``, ``LineMode``).
+- **Hub & runtime** — board-level peripherals, BLE, program launching,
+  and log capture.
+
+.. toctree::
+   :maxdepth: 2
+
+   robotics
+   parameters
+   drivers_motors
+   drivers_sensors
+   drivers_misc
+   interfaces
+   hub
+   tools
+   runtime
+
+
+``robotics`` — DriveBase
+========================
+
+Drive a robot, not two motors: ``DriveBase`` couples a left and a
+right motor into one chassis with moves in millimeters and
+body-degrees.
+
+.. code-block:: python
+
+    from openbricks.drivers.st3032 import ST3032Motor
+    from openbricks.robotics import DriveBase
+
+    left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+    right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
+
+    db = DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=138)
+    db.settings(straight_speed=250, turn_rate=200,
+                acceleration=1000, turn_acceleration=800)
+
+    for _ in range(4):          # a 300 mm square
+        db.straight(300)
+        db.turn(90)
+
+Moves block by default. Pass ``wait=False`` to return immediately
+and poll ``done()`` — the Pybricks pattern for driving while
+reading sensors; any new move command supersedes the pending one::
+
+    db.straight(600, wait=False)
+    while not db.done():
+        if bumper_pressed():
+            db.stop()
+            break
+        time.sleep_ms(10)
+
+For direct control of each wheel — line-following, tank-style
+teleop, or any controller that computes its own per-wheel outputs —
+``move_wheels`` takes two speeds in wheel-deg/s:
+
+.. code-block:: python
+
+    db.move_wheels(200, 120)     # gentle right-hand arc
+    time.sleep_ms(500)
+    db.stop()
+
+Both setpoints leave in a single sync-write packet on serial-bus
+motors, so the wheels change speed at the same packet boundary.
+Reach for this rather than a :class:`~openbricks.drivers.st3215.SyncServoGroup`
+over the wheels: a DriveBase hands their UART to the native bus
+driver when it adopts them, so a SyncServoGroup can't drive them at
+all.
+
+Moves take a ``then=`` end state — a
+:class:`~openbricks.parameters.Stop` member, never a string (3.0.0):
+``Stop.COAST`` (the default) decelerates to rest and free-wheels;
+``Stop.BRAKE`` / ``Stop.HOLD`` end actively. ``then=Stop.NONE`` on
+``straight`` and ``curve`` does NOT decelerate at the end: the move
+finishes at cruise speed and the wheels keep it until the next
+command, so chained segments flow through their seams::
+
+    from openbricks.parameters import Stop
+
+    db.straight(300, then=Stop.NONE)   # ends AT cruise
+    db.curve(150, 90, then=Stop.NONE)  # picks the speed up
+    db.straight(300)                   # decelerates to rest
+
+Move endings are SHAPED all the way down (2.6.0): the controller
+runs position integral action (pbio's integrator rules — the same
+control law Pybricks uses) so tracking error is squeezed out near
+the target, and any residual left when a profile expires is closed
+by a small landing trajectory under the same acceleration limit as
+every other motion — never a raw feedback step. A robot that ends a
+mission simply comes to rest on its mark; a genuinely stuck robot
+still refuses to report ``done()`` and the stall watchdog raises.
+
+``stop()`` is Pybricks parity: it coasts and returns immediately.
+``then`` picks the end state (``Stop.COAST``, ``Stop.BRAKE``,
+``Stop.HOLD``). ``Stop.BRAKE`` and ``Stop.HOLD`` decelerate at the
+``acceleration`` setting as a move of the coupled controller, with
+the heading loop closed all the way down — with ``use_gyro(True)``
+the IMU corrects any yaw the brake induces (one wheel gripping
+harder than the other), so the robot stops on the heading it had
+(3.2.0). Coast cannot: it releases torque at once, and nothing can
+steer wheels that carry no torque — so to end a line-follow on
+heading, brake:
+
+.. code-block:: python
+
+    while not at_the_marker():
+        db.drive(SPEED, KP * sensor.edge_error())
+    db.stop(then=Stop.BRAKE)   # gyro-held deceleration
+    db.straight(200)           # holds the heading the follow reached
+
+A program that ends by itself — returns, or dies on an exception —
+gets the same brake for free (3.4.0): the launcher decelerates an
+adopted drive base to rest under the controller before the torque-off
+that ends every run, so a mission that finishes mid-move no longer
+rolls out on friction (or away, on a ramp). The stop button keeps its
+instant torque-off — an e-stop must not spend half a second driving
+under power. The run log records the outcome (``brake: wheels to rest
+in 412 ms``, or the time-out that hands a blocked robot to the
+torque-off).
+
+Short moves armed while the robot is already fast raise their own
+deceleration to land at rest exactly on target, so you rarely need
+more — but ``wait=True`` is available to block until both wheels'
+measured speeds read ~0 (the decel ramp plus settle for brake/hold,
+the physical freewheel decay for coast). It raises ``ValueError`` on
+open-loop pairs (no measured speed) and, if the wheels never settle
+within 5 s, ``RuntimeError`` naming the measured speeds — a stopped
+robot that is still moving is a fault, not a detail to hide.
+
+A wheel that stops answering the bus — no power, a knocked-loose
+TX/RX wire, the wrong ``servo_id`` — raises instead of quietly doing
+nothing, and the error names the motor:
+
+.. code-block:: text
+
+    OSError: motor is not responding on the bus: right wheel
+    (servo id 1, slot 1) on UART1 tx=14 rx=6 — 0 replies, 137 failed
+    reads (137 in a row). Check the servo's power and TX/RX wiring,
+    and that it really has that bus id — `openbricks servo-id --scan`
+    lists the ids actually answering on the bus.
+
+(``openbricks servo-id`` talks through the URT-2's USB port. With
+the servo already wired to the hub,
+``openbricks run -n NAME examples/servo_set_id.py`` scans and
+re-IDs through the hub instead — same safety contract.)
+
+Both wheels are verified when the DriveBase is constructed, and on
+every move afterwards. If one goes silent mid-move the controller
+halts immediately rather than winding that wheel's command to the
+rail — a frozen odometry reading would otherwise look like "infinite
+error" to the heading loop. ``db.check_motors()`` runs the same check
+on demand.
+
+With an IMU attached, ``use_gyro(True)`` steers by measured body
+rotation instead of the encoder differential — immune to wheel slip.
+The preferred IMU is the :class:`~openbricks.drivers.icm45686.ICM45686`:
+it is read *inside* the 1 kHz control tick over SPI, so the heading
+correction runs every millisecond in C with no Python in the loop
+(bench: +0.6° total drift over a four-turn square):
+
+.. code-block:: python
+
+    from openbricks.drivers.icm45686 import ICM45686
+
+    imu = ICM45686(sck=12, mosi=13, miso=11, cs=17)
+    db = DriveBase(left, right, wheel_diameter_mm=88,
+                   axle_track_mm=138, imu=imu)
+    db.use_gyro(True)
+
+(A legacy :class:`~openbricks.drivers.bno055.BNO055` on I2C still
+works — its fused heading is pumped from Python between ticks,
+which corrects noticeably slower, typically +0.5° to +1.8° per
+turn. New builds should use the ICM-45686.)
+
+The heading target is absolute: each move steers to where the plan
+says the robot should be, so a turn's arrival residual is corrected
+by the next move instead of accumulating. ``drive()`` /
+``move_wheels`` (a line-follow) sit outside that plan — they rotate
+the chassis by whatever your controller decides — so the next
+coupled command after one (a move, or a brake/hold stop) takes the
+heading the follow *reached* as its target rather than steering back
+to the pre-follow one (3.2.0; earlier releases needed ``reset()`` at
+that hand-off).
+
+To re-zero the heading frame mid-mission (say, after squaring up on
+a line), call ``db.reset()`` between moves — afterwards the robot's
+CURRENT pose is heading zero for both the drive base and
+``imu.heading()``, atomically:
+
+.. code-block:: python
+
+    db.straight(100)
+    db.turn(-90)
+    db.reset()          # here, now = heading zero
+    db.straight(130)    # drives straight along the NEW zero
+
+``imu.reset_heading()`` refuses (``OSError``) while a drive base
+steers by the gyro — same rule as Pybricks ("can't reset heading
+while gyro in use"): zeroing the integrator under an armed heading
+controller shifts the measurement out from under the held target,
+and the next move veers chasing the old frame. Use ``db.reset()``,
+or ``use_gyro(False)`` first. ``db.reset()`` itself raises while a
+move is in progress — stop first (a brake/hold stop counts as a move
+until its ramp has landed: ``stop(then=Stop.BRAKE, wait=True)``).
+
+Accurate ``wheel_diameter_mm`` / ``axle_track_mm`` values matter more
+than any tuning — calibrate both with two short test drives:
+:doc:`/measuring`.
+
+.. automodule:: openbricks.robotics.drivebase
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+Parameters
+==========
+
+Enumerated options — the Pybricks ``pybricks.parameters`` pattern.
+Every API argument that selects one of a fixed set of behaviours
+takes one of these members, never a string::
+
+    from openbricks.parameters import Stop, DriveMode, LineMode
+
+    db.straight(300, then=Stop.BRAKE)
+    db = DriveBase(left, right, 88, 136, drive=DriveMode.WHEEL)
+    qtr.set_mode(LineMode.CENTER)
+
+A string is rejected at the call with a ``TypeError`` that names the
+members, so a typo or a drifted spelling can never silently select a
+different behaviour.
+
+.. automodule:: openbricks.parameters
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+Motor drivers
+=============
+
+Every motor class implements the same ``Motor`` contract
+(:doc:`interfaces`), so higher layers — and your code — swap motor
+types without changes. Speeds are output-shaft degrees per second,
+angles are degrees, ``dc()`` duty is -100..100.
+
+.. code-block:: python
+
+    from openbricks.drivers.st3032 import ST3032Motor
+
+    m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+    m.run_speed(120)          # wheel mode: spin at 120 deg/s
+    print(m.angle())          # multi-turn accumulated degrees
+    m.coast()
+
+    from openbricks.drivers.jgb37_520 import JGB37Motor
+
+    e = JGB37Motor(in1=12, in2=14, pwm=27, encoder_a=18, encoder_b=19)
+    e.run_angle(360, 720)     # two turns at 360 deg/s, blocking
+
+Serial bus servos (recommended)
+-------------------------------
+
+ST-3032
+^^^^^^^
+
+.. automodule:: openbricks.drivers.st3032
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+ST-3215
+^^^^^^^
+
+.. automodule:: openbricks.drivers.st3215
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+DC gear motors with encoders
+----------------------------
+
+JGB37-520
+^^^^^^^^^
+
+.. automodule:: openbricks.drivers.jgb37_520
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+MG370
+^^^^^
+
+.. automodule:: openbricks.drivers.mg370
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+H-bridge drivers (open loop)
+----------------------------
+
+L298N
+^^^^^
+
+.. automodule:: openbricks.drivers.l298n
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+TB6612FNG
+^^^^^^^^^
+
+.. automodule:: openbricks.drivers.tb6612
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+Sensor drivers
+==============
+
+All sensors construct against a ``machine.I2C`` bus (or a
+:class:`~openbricks.drivers.tca9548a.TCA9548A` mux channel, which
+quacks the same) except two: the GPIO-driven HC-SR04, and the
+ICM-45686 IMU, which wires over SPI so the firmware can read it
+inside the 1 kHz control tick.
+
+.. code-block:: python
+
+    from machine import I2C, Pin
+    from openbricks.drivers.icm45686 import ICM45686
+    from openbricks.drivers.tcs34725 import TCS34725
+    from openbricks.drivers.tca9548a import TCA9548A
+
+    i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)  # ESP32-S3 pins
+    mux = TCA9548A(i2c)
+
+    color = TCS34725(mux[0])          # two same-address sensors ...
+    color2 = TCS34725(mux[1])         # ... on separate mux channels
+    imu = ICM45686(sck=12, mosi=13, miso=11, cs=17)   # SPI, not I2C
+
+    print(color.rgb())                # (r, g, b) each 0-255
+    print(color.ambient())            # clear channel, 0-100
+    print(imu.heading())              # degrees, CW-positive
+
+ICM-45686 (raw IMU, hard-tick heading)
+--------------------------------------
+
+.. automodule:: openbricks.drivers.icm45686
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+BNO055 (IMU)
+------------
+
+.. automodule:: openbricks.drivers.bno055
+
+The class itself is implemented in C (so the drivebase can read the
+heading on its 1 kHz tick); its Python-facing API:
+
+.. py:class:: BNO055(i2c, address=0x28)
+
+   Bosch BNO055 9-axis IMU in 6-DOF fusion mode (accelerometer +
+   gyro; the magnetometer is deliberately unused — motor magnets and
+   steel in floors bend the local field, and a drive robot only
+   needs *relative* heading). Heading zeroes where the robot points
+   at construction.
+
+   :param i2c: ``machine.I2C`` (or a mux channel).
+   :param address: 0x28, or 0x29 on breakouts whose ADR pin straps
+      high.
+
+   .. py:method:: heading()
+
+      Body heading in degrees, wrapped to [-180, 180). CW-positive:
+      turning right (clockwise viewed from above) increases it —
+      compass and Pybricks convention. This is what
+      ``DriveBase(imu=...)`` reads.
+
+   .. py:method:: euler()
+
+      ``(heading, roll, pitch)`` tuple in degrees.
+
+   .. py:method:: angular_velocity()
+
+      ``(x, y, z)`` gyro rates in deg/s.
+
+   .. py:method:: acceleration()
+
+      ``(x, y, z)`` accelerometer in m/s².
+
+TCS34725 (color)
+----------------
+
+.. automodule:: openbricks.drivers.tcs34725
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+QTR / QTRX (reflectance array)
+------------------------------
+
+.. automodule:: openbricks.drivers.qtr
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+HC-SR04 (ultrasonic distance)
+-----------------------------
+
+.. automodule:: openbricks.drivers.hcsr04
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+VL53L0X (laser distance)
+------------------------
+
+.. automodule:: openbricks.drivers.vl53l0x
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+VL53L1X (laser distance, long range)
+------------------------------------
+
+.. automodule:: openbricks.drivers.vl53l1x
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+Display & bus drivers
+=====================
+
+SSD1306 (OLED display)
+----------------------
+
+.. automodule:: openbricks.drivers.ssd1306
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+WS2812 / WS2812B (RGB LED strip)
+--------------------------------
+
+.. automodule:: openbricks.drivers.ws2812
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+TCA9548A (I2C multiplexer)
+--------------------------
+
+.. automodule:: openbricks.drivers.tca9548a
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+Interfaces
+==========
+
+Core interfaces
+---------------
+
+.. automodule:: openbricks.interfaces
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Distance sensors
+----------------
+
+.. automodule:: openbricks.distance
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+Hubs
+====
+
+Board-level peripherals — the onboard LED and buttons — behind one
+``Hub`` object per supported devkit.
+
+.. code-block:: python
+
+    from openbricks.hub import ESP32S3DevkitHub
+
+    hub = ESP32S3DevkitHub()
+    hub.led.rgb(0, 80, 0)          # onboard NeoPixel: dim green
+    if hub.bluetooth_button.pressed():
+        print("button held at boot")
+
+.. automodule:: openbricks.hub
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+Tools
+=====
+
+Small user-facing utilities mirroring ``pybricks.tools``.
+
+.. automodule:: openbricks.tools
+   :members:
+   :undoc-members:
+
+
+Runtime services
+================
+
+These modules run behind the scenes on the hub — the frozen ``main.py``
+wires them up at boot. They're documented here because their behavior
+(button semantics, log rotation, BLE persistence) is user-visible.
+
+Reserved-GPIO guard
+-------------------
+
+.. automodule:: openbricks.pins
+   :members:
+   :undoc-members:
+
+Program launcher
+----------------
+
+.. automodule:: openbricks.launcher
+   :members:
+   :undoc-members:
+
+Run logs
+--------
+
+.. automodule:: openbricks.log
+   :members:
+   :undoc-members:
+
+Bluetooth (BLE REPL & console)
+------------------------------
+
+.. automodule:: openbricks.bluetooth
+   :members:
+   :undoc-members:
+
+.. automodule:: openbricks.ble_repl
+   :members:
+   :undoc-members:
+
+BLE toggle button
+-----------------
+
+.. automodule:: openbricks.bluetooth_button
+   :members:
+   :undoc-members:
+
+
+---
+myst:
+  html_meta:
+    description: "How openbricks works: a custom MicroPython firmware with a 1 kHz native-C motor hot path and a three-layer Python API (drivers, interfaces, robotics)."
+---
+
+# Architecture
+
+A short tour of how `openbricks` is organized and why. If you've read Pybricks'
+`pbio` codebase, a lot of this will look familiar — the layering is borrowed
+directly, and for the same reason: openbricks ships as a **custom MicroPython
+firmware**, not a library you install on top of stock MicroPython. Pybricks does
+exactly this for LEGO hubs; we do it for commodity MCUs.
+
+Owning the firmware shapes several decisions:
+
+- Background control loops (`MotorProcess`) can run always-on off a hardware
+  timer — nobody else is contending for that peripheral.
+- Platform selection means picking which firmware image to flash, not
+  runtime-dispatching between adapters.
+- Hot control code can be compiled in as a native C extension later without
+  a separate install step.
+- We can extend or add `machine`-level primitives (custom timers, a hub
+  abstraction) because we build the `machine` module.
+
+## Four layers
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  User code     (main.py, robotics.DriveBase, …)          │
+├─────────────────────────────────────────────────────────┤
+│  Abstract interfaces   (Motor, Servo, IMU, ColorSensor)  │
+├─────────────────────────────────────────────────────────┤
+│  Concrete drivers      (st3032, icm45686, tcs34725, …)   │
+├─────────────────────────────────────────────────────────┤
+│  MicroPython HAL       (machine.Pin, I2C, UART, PWM)     │
+├─────────────────────────────────────────────────────────┤
+│  openbricks firmware image — custom MicroPython build    │
+│  for this specific MCU, with all the above baked in      │
+└─────────────────────────────────────────────────────────┘
+```
+
+The two middle layers are what make this different from "a pile of MicroPython
+scripts." Interfaces (`openbricks/interfaces.py`) define the contract each
+family of component obeys; drivers implement that contract; everything above
+the interface line depends only on interfaces, not on specific chips. That's
+why swapping a JGB37-520 DC motor for an ST-3032 serial servo only changes the driver
+you instantiate — the `DriveBase` class asks for "a `Motor`" and doesn't
+know or care what's underneath.
+
+This is the same split Pybricks has: `pbio/include/pbio/*.h` is the interface,
+`pbio/src/*.c` is the library, `pbio/drv/*` is the driver layer. We take the
+same approach in C — `native/user_c_modules/openbricks/` holds the hot control
+code that runs at the scheduler tick rate. Targeted pbio-parity on control
+quality is the reason that code is C and not Python.
+
+## Pybricks-parity control, in C
+
+All four of the big pbio control-quality items are ported and shipped in
+`native/user_c_modules/openbricks/`. Each corresponds to a pbio source
+file and keeps its structure close — `pbio` is MIT-licensed so the ports
+are direct where they can be.
+
+1. **State observer** (pbio `observer.c`) — our `observer.c` is a
+   two-state α-β filter. Less capable than pbio's full model-based
+   observer (no motor model, no PWM coupling, no current/flux
+   estimation) but a ~60× variance reduction over raw
+   finite-differencing for little code. Upgrading to a model-based
+   observer is later roadmap work.
+2. **Trajectory planning** (pbio `trajectory.c`) — our `trajectory.c`
+   computes trapezoidal (and triangular fall-through) speed profiles
+   with explicit accel / cruise / decel phases. `servo.run_target()`
+   and `DriveBase.straight()` / `.turn()` sample it each tick.
+3. **Cooperative multitasking** (pbio `motor_process.c` + `os.c`) —
+   our `motor_process.c`. Always-on 1 kHz tick off a `machine.Timer`.
+   Native subscribers (`Servo`, `DriveBase`) register via a fast
+   C-function-pointer path (~1 µs/tick); Python callables are still
+   accepted on a slower dispatch path for user extensibility.
+   Honesty note: on esp32, `machine.Timer` callbacks are dispatched
+   through `micropython.schedule`'s bounded queue — a main thread
+   blocked in one long C call delays or silently drops ticks, so
+   1 kHz is nominal, not guaranteed (unlike pbio, whose loop runs
+   under the VM). Since 1.37.0 the controllers' **clock** is immune
+   to that: on real hardware the tick advances `now_ms` by measured
+   `mp_hal_ticks_ms` deltas (wall time, enabled by the frozen
+   `boot.py`), so dropped ticks cost control updates but no longer
+   dilate trajectory time. Since 1.38.0 the firmware also carries a
+   **hard tick** (`native/patches/esp32-openbricks-hard-tick.patch`):
+   a periodic C hook on the esp_timer service task, below the Python
+   scheduler entirely — verified on hardware via
+   `motor_process.hard_tick_selftest()` /
+   `hard_tick_count()`, and watched from then on by
+   `hard_tick_stats()` (3.3.0: fires, late fires, worst gap in µs —
+   the regression alarm for the next peripheral that joins the
+   tick; a fire more than 250 µs past its 1 ms slot counts as late).
+   Existing controllers still dispatch through
+   the scheduler (their encoder reads call into Python objects,
+   which the hard context must never do); the serial-bus motor path
+   lives there: since 1.45.0 `DriveBase` (`openbricks.robotics`)
+   **adopts** serial-bus Motor objects transparently onto the
+   hard-tick engine — it releases their `machine.UART` (explicit
+   ownership handover, no peripheral double-claim) and runs the
+   2-DOF controller inside the hard tick on serial-bus servo slots
+   (~220 Hz odometry per wheel, floor-verified 0.3% odometry closure
+   on a square), with `use_gyro(True)` fed by the ICM-45686 read
+   inside the hard tick itself (1 kHz heading correction, no Python
+   in the loop; bench-verified +0.6° over a four-turn square) — or,
+   for an I2C IMU like the BNO055, by a Python outer loop at
+   ~50-100 Hz. Since 1.89.0 the wheels themselves run "dumb mode"
+   by default: the servo is switched to its open-loop duty mode and
+   the engine's own integer FF+PI closes the speed loop over raw
+   duty sync-packets — every layer of the drive loop is openbricks
+   code (`DriveBase(..., drive=DriveMode.WHEEL)` restores the servo's
+   internal speed controller). There is exactly ONE drivebase class
+   and NO Python control loop: on a runtime with neither the native
+   bus nor the sim's emulated bus, constructing a serial-bus
+   `DriveBase` raises instead of silently degrading. The sim emulates the `st_bus`
+   surface (`_SimStBus` over MuJoCo wheels), so the same controller
+   code path runs everywhere.
+4. **Drivebase coupling** (pbio `drivebase.c`) — our `drivebase.c`
+   runs two coupled controllers in (sum, diff) coordinates with
+   position feedback on both. Exit criterion: asymmetric-friction
+   test (one wheel at 0.9× commanded speed) keeps heading error
+   under 5% of forward distance — the pure-Kp M1 fallback fails it.
+
+## Host tooling
+
+Everything above describes what runs on the hub. There's a parallel
+host-side surface — a single PyPI package called `openbricks` that
+ships:
+
+- A console CLI: `openbricks flash | list | run | upload | stop |
+  log` for hub interaction over BLE / USB. See
+  `tools/openbricks/openbricks_dev/`.
+- A MuJoCo-backed simulator: `openbricks sim {preview, run}` opens a
+  physics sim with the same C control cores as the firmware
+  (`*_core.c` files compile into both targets, so the sim's hot-path
+  math is byte-identical). Lives under `tools/openbricks/openbricks_sim/`.
+  Optional via `pip install openbricks[sim]`.
+- A driver shim that lets `from openbricks.drivers.st3032 import
+  ST3032Motor` (and ST3215Motor / JGB37Motor / BNO055 / TCS34725 /
+  HC-SR04 / VL53L0X / VL53L1X) run unchanged in MuJoCo — `openbricks sim run main.py` installs
+  no-op `machine` fakes and replaces the I2C driver classes with
+  sim-aware versions.
+- Per-run log capture on the hub: every program execution tee'd to
+  `/openbricks_logs/slot_N.log` (10 slot files reused in place,
+  64 KB each; run `N` overwrites slot `N % 10` and carries its run
+  index in the file's header line — truncate-reuse instead of
+  delete+create keeps littlefs commits at fresh-filesystem cost.
+  Ten slots are enough that a few diagnostic `openbricks run -c`
+  sessions don't rotate away the failing run they're
+  investigating). Each
+  line is prefixed with a raw UTC Unix-epoch-milliseconds stamp;
+  `openbricks log -n NAME` reads the file back over BLE and renders
+  the stamp as `[YYYY-MM-DD HH:MM:SS.mmm]` in your local timezone —
+  useful for untethered runs where no live console was attached. The
+  CLI syncs the hub's RTC from the host clock on every connect
+  (run / upload / log), so runs started after any connect carry real
+  wall-clock time; a hub that powered up and never saw a connect
+  stamps from 2000-01-01, which is self-diagnosing. Button presses
+  leave stamped entries too: a run's log opens with a header line —
+  `started: button press | firmware 1.12.0 | program /program.py |
+  uptime N ms | free N B` — and a stop press writes `button pressed
+  -> stop` the moment it lands, followed by `estop engaged` and a
+  final `stopped: KeyboardInterrupt (N ms after press, M retries)`
+  debrief, so a misbehaving stop chain is diagnosable from the log
+  alone. Since 1.44.0 the stop chain is also **bounded**: the
+  program button is sampled on the hard tick (core 0) — a debounced
+  press while a program runs fires the `KeyboardInterrupt` injection
+  and the native-bus torque-off from C within ~2 ms, regardless of
+  scheduler state (the Python watcher, which stays as defence in
+  depth and as the classic-bus e-stop, measured gaps to 981 ms under
+  load). An uncaught exception writes its **full traceback**, not just
+  the exception's repr — on an untethered run the file is the only
+  record, and a bare `OSError(19,)` doesn't say which call failed.
+  Since 3.4.0 a program that ends by itself (clean return or
+  uncaught exception) first **brakes an adopted drive base to rest**
+  under the controller — heading held by the gyro when one is in
+  use — and logs the outcome (`brake: wheels to rest in N ms`)
+  before the torque-off that ends every run; the button's e-stop
+  path keeps its instant torque-off.
+- Log writes are **asynchronous**. `print` only appends to a RAM
+  buffer; the bytes reach flash from the launcher's Timer tick
+  (`log.pump()`). A `flush()` on littlefs forces a metadata commit
+  measured at ~60-90 ms on the ESP32 bench, and doing that per line
+  ran synchronously on the main thread between the user program's own
+  bytecodes — logging cost more than the work it logged and distorted
+  the timing of whatever the robot was controlling. Real commits are
+  paid where durability matters: program end, the stop button, and
+  every `write_text` (the `started:` / `stopped:` / `Exception:` lines
+  and button notes). So a hard reset can lose recent `print` output —
+  never the run's framing. Measure it on your own hub with
+  `openbricks run -n NAME examples/log_write_benchmark.py`.
+- The **wired UART console is asynchronous too** (a build-time patch,
+  `native/patches/esp32-uart-repl-tx-nonblocking.patch`). Upstream's
+  UART stdout busy-waits until every byte has left the wire — ~5.1 ms
+  for a typical line at 115200, paid by `print()` on the calling
+  thread even with nothing attached to the UART pins. With the patch,
+  `print` copies into a 2 KB ring and the UART interrupt drains it in
+  the background; a print storm deeper than the ring drops the
+  remainder **on the wired console only** — BLE and the run log
+  (both already asynchronous) keep every line. Net effect: a `print`
+  costs string formatting plus three RAM buffer appends, ~1 ms,
+  regardless of what is or isn't listening on any transport.
+
+The Python module names on the host are deliberately split
+(`openbricks_dev` for the CLI, `openbricks_sim` for the sim) so they
+don't shadow the firmware-side `openbricks` package, which is
+sometimes imported on the host by the sim's driver shim.
+
+## Status
+
+All foundational milestones are landed. Roadmap items completed:
+
+- **M1** — always-on 1 kHz scheduler in C (`motor_process.c`).
+- **M2** — observer + trajectory + servo state machine, all in C.
+- **M3** — 2-DOF coupled drivebase in C, with optional gyro-feedback
+  (`use_gyro(True)`) for slip-immune heading via an attached IMU.
+- **M4** — `hub` abstraction (status LED, user button) + SSD1306 OLED.
+  ESP32 + ESP32-S3 firmware images both build from the same codebase.
+- **M5** — per-platform firmware images auto-published on every
+  push to `main` (rolling `latest`) and on `v*` tags (versioned).
+
+Sim phases (host-side): A (chassis + worlds) → B (shared C cores) →
+C (runtime + driver shim) → D (sensors + scenario reset / scoring)
+all landed. Phase E1 — pixel-accurate colour-sensor texture
+sampling — landed via CPU-side sampling: the sensor reads
+``model.tex_data`` directly, computes UV from the geom-local hit
+point, and indexes the texel. No offscreen GL context, no platform
+divergence, works on macOS / Linux / Windows. Originally scoped as
+"Linux EGL headless rendering" but the EGL machinery is only needed
+for scenes with shadows / lighting / overlays over the textured
+plane — the WRO use case is a flat printed mat where the texture IS
+the answer.
+
+Phase F (WRO 2026 RoboMission, 0.10.8 → 0.10.12) is feature-complete:
+
+- **F1** — high-fidelity mat textures rasterised at 150 dpi
+  (~14000×6750 px) from the official "Game Mat Printing File"
+  PDFs. Drives Phase E1's sensor sampling against the real
+  printed artwork. ``scripts/regen-wro-mat-textures.sh``
+  re-fetches and re-rasterises when WRO updates the source PDFs.
+- **F2** — every visible LEGO prop in all three age categories
+  (Elementary, Junior, Senior) modelled as LDraw assemblies. Per-
+  prop ``.ldr`` files are the source of truth; ``world.py``
+  expands ``<lego_prop ldr=".../*.ldr"/>`` placeholders into MJCF
+  bodies at load time via ``openbricks_sim.lego_mjcf``. 13 LDraw
+  part types in the registry today; new parts plug in by adding
+  one ``_PartSpec`` entry. Senior also wires the WRO-published
+  3D-printed "mosaic frame" STL as a static MuJoCo ``<mesh>``.
+- **F3** — per-round randomization (WRO General Rules glossary
+  "Robot Round" definition). Same seed → same layout. Specs are
+  per-world tuples of ``_RandomizationSpec`` driven by one
+  shared seeded RNG, so a Senior round shuffles all four cement
+  colour groups deterministically from a single ``seed=N``.
+- **F4 + F5** — closed the F2 deferreds (mosaic frame mesh, dual-
+  colour Senior barriers) and lifted Junior + Senior randomization
+  slot coordinates from estimates to mat-extracted positions
+  (same pixel-inspection flow Elementary used in 0.10.10).
+
+Remaining in Phase E: broader worlds library, more example
+walkthroughs. EGL offscreen rendering would unlock simulation of
+scenes more complex than a printed mat (e.g. coloured 3D obstacles
+that cast shadows onto the colour sensor's view); not yet
+prioritised.
+
+Upgrading the α-β observer to a pbio-style model-based observer
+(voltage/current coupling + motor model) is on the longer-term list —
+a precision lift we pick up once we have real hardware to measure
+against.
+
+
+---
+myst:
+  html_meta:
+    description: "Build the openbricks MicroPython firmware from source with ESP-IDF, flash it to ESP32/ESP32-S3, and run the test suite against the unix MicroPython port."
+---
+
+# Building the firmware
+
+openbricks is a custom MicroPython firmware. Users flash the resulting image to their MCU; the openbricks Python package is frozen into the image and the motor-control hot path (scheduler, trajectory, observer, servo, drivebase) lives in a compiled C extension.
+
+See `native/README.md` for the directory layout.
+
+## One-time setup
+
+### 1. Initialise all submodules
+
+```
+git submodule update --init --recursive
+```
+
+The MicroPython source tracks a master commit under `native/micropython/`. Bumps should be deliberate and tested on real hardware — `motor_process.c` and the other native modules assume a specific MP ABI. The current pin is documented in `.gitmodules` / `native/micropython` HEAD.
+
+### 2. Install the target toolchain
+
+#### ESP32 / ESP32-S3 (current targets)
+
+Install **ESP-IDF v5.5.4** (or newer in the 5.5 line). MicroPython master supports ESP-IDF 5.3 through 5.5; we recommend 5.5.4 because that's what CI builds against and what the maintainer tests on hardware.
+
+```
+mkdir -p ~/esp && cd ~/esp
+git clone -b v5.5.4 --recursive https://github.com/espressif/esp-idf.git esp-idf-v5.5
+cd esp-idf-v5.5 && ./install.sh esp32,esp32s3
+source export.sh          # sets $IDF_PATH; needs to happen in every shell
+```
+
+Verify:
+
+```
+echo $IDF_PATH       # /Users/<you>/esp/esp-idf-v5.5
+idf.py --version     # ESP-IDF v5.5.4
+```
+
+> **Note.** If you're running an older MicroPython pin (e.g. v1.28.0), you'll need ESP-IDF v5.2.x — v1.28 pre-dates the MP commits that add 5.4+ support. Check `git -C native/micropython log --oneline -1` first.
+
+## Building
+
+From the repo root:
+
+```
+./scripts/build_firmware.sh esp32      # original ESP32 (Xtensa LX6)
+./scripts/build_firmware.sh esp32s3    # ESP32-S3  (Xtensa LX7, native USB)
+```
+
+The script checks `native/micropython` is populated and `$IDF_PATH` is set, then builds `mpy-cross` once and produces the image for the selected target with `BOARD=openbricks_<target>` and `USER_C_MODULES=$(pwd)/native/user_c_modules`.
+
+Output tree: `native/micropython/ports/esp32/build-openbricks_<target>/`
+
+| File | Purpose |
+|---|---|
+| `firmware.bin` | complete flash image (everything below combined) |
+| `bootloader/bootloader.bin` | second-stage bootloader |
+| `partition_table/partition-table.bin` | partition map |
+| `micropython.bin` | application partition only |
+
+## Flashing
+
+Use `openbricks flash`. It drives `esptool.py` to write the image and then writes the hub's BLE advertising name into NVS. The name is **per-hub**, set at flash time (not build time) — one firmware image is reused across every hub, and each hub gets its own identity here. `--name` is mandatory: two hubs that answer to the same name can't be individually addressed over BLE.
+
+```
+pipx install openbricks             # one-time; or `pip install openbricks`
+
+openbricks flash \
+    --name RobotA \
+    --firmware native/micropython/ports/esp32/build-openbricks_esp32s3/firmware.bin
+```
+
+`--port` is auto-detected when exactly one ESP device is connected;
+pass it explicitly with several devices attached. (`--firmware` is
+optional too — omitted, the newest **released** image for the
+detected chip is downloaded — but when flashing a local build like
+here, point it at your build output.)
+
+The command erases flash, writes `firmware.bin` at the offset the image was built for — `0x0` on the S3, `0x1000` on the classic ESP32, detected from the partition-table position inside the image itself — waits for the device to boot, then pokes the name into `esp32.NVS("openbricks").hub_name` via `mpremote` and reads it back to verify. Cross-platform — works on macOS, Linux, Windows (use `COM5` etc. for `--port`).
+
+If you'd rather use `esptool.py` directly (e.g. mass-flashing with a fixture, no name needed yet), the raw commands:
+
+```
+# Classic ESP32 — bootloader at 0x1000
+esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX erase_flash
+esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX --baud 460800 \
+    write_flash -z 0x1000 openbricks-esp32-firmware-v0.9.0.bin
+
+# ESP32-S3 — bootloader at 0x0
+esptool.py --chip esp32s3 --port /dev/tty.usbmodemXXXX erase_flash
+esptool.py --chip esp32s3 --port /dev/tty.usbmodemXXXX --baud 460800 \
+    write_flash -z 0x0 openbricks-esp32s3-firmware-v0.9.0.bin
+```
+
+A hub flashed this way boots fine but has no name; `openbricks.bluetooth.set_enabled(True)` will raise `HubNameNotSetError` until you write one via `mpremote`:
+
+```
+mpremote connect PORT exec "
+import esp32
+nvs = esp32.NVS('openbricks')
+nvs.set_blob('hub_name', b'RobotA')
+nvs.commit()
+"
+```
+
+> **Common footgun.** Flashing the S3 `firmware.bin` at `0x1000` (classic-ESP32 offset) leaves `0x0..0xFFF` untouched; the S3 ROM boots from `0x0` and fails with `Invalid image block, can't boot`. Always match the offset to the chip.
+
+Or, if you built with `idf.py`:
+
+```
+cd native/micropython/ports/esp32/build-openbricks_esp32
+idf.py -p /dev/tty.usbserial-XXXX flash monitor
+```
+
+## Verifying the image at the REPL
+
+Connect over the USB UART (e.g. `mpremote connect /dev/tty.usbserial-XXXX`) and at the REPL:
+
+```python
+from openbricks._native import motor_process, Servo, TrapezoidalProfile, Observer, DriveBase
+motor_process.is_running()    # False initially; True once a motor attaches
+```
+
+The openbricks Python package is frozen into the image, so `import openbricks.*` works without copying any files. The first time a closed-loop motor calls `run_speed`, it registers its control step with the scheduler and the 1 kHz timer ISR comes online.
+
+## Running tests
+
+Tests exercise the real C module under the unix MicroPython binary — the same build as firmware, minus the ESP32 port:
+
+```
+make -C native/micropython/mpy-cross -j
+make -C native/micropython/ports/unix \
+    VARIANT=standard \
+    USER_C_MODULES=$(pwd)/native/user_c_modules -j
+./native/micropython/ports/unix/build-standard/micropython tests/run.py
+```
+
+The runner spawns one MP subprocess per test module for state isolation (the module list lives in `tests/run.py::_TEST_MODULES`). Expected final line: `all modules passed.`
+
+## CI
+
+GitHub Actions runs several job groups on every push / PR (see `.github/workflows/ci.yaml`):
+
+- **`test`** — builds the unix MP binary with the `_openbricks_native` user_c_module and runs `tests/run.py`. No ESP-IDF needed. This is the merge gate for firmware changes.
+- **`cpython-tests`** / **`openbricks-py`** — the CPython-compatible subset of the firmware tests under stock CPython (catches MP/CPython interpreter divergence), the latter with coverage upload.
+- **`openbricks-host`** — the host CLI + sim test suite (`tools/openbricks/tests`) with coverage, plus a `--help` smoke test of every subcommand and a headless preview of every shipped sim world.
+- **`coverage`** — the firmware suite again on the gcov-instrumented unix MP build; uploads C-core coverage.
+- **`firmware`** — a matrix job (targets: `esp32`, `esp32s3`) that builds each image inside the `espressif/idf:v5.5.4` container and uploads `firmware.bin` + bootloader + partition-table per target as a workflow artifact.
+- **`qemu-smoke`** — boots the just-built ESP32-S3 image in Espressif's QEMU and asserts the bootloader reaches app entry with no panic markers.
+- **`release`** / **`build-openbricks-sdist`** / **`build-openbricks-wheels`** / **`publish-openbricks`** — firmware GitHub Releases (rolling `latest` on main pushes, versioned on `v*` tags) and the PyPI sdist + cibuildwheel wheels published on `cli/v*` tags (releases up to 0.10.24 used `openbricks/v*`).
+
+Successful PRs produce a flashable image downloadable from the Actions run.
+
+## Troubleshooting
+
+**"IDF_PATH is not set"** — source `export.sh` in the shell that runs the build script. Each new shell needs it.
+
+**Build fails at `modbluetooth_nimble.c`** — BLE (NimBLE) is *enabled* on both boards via `boards/sdkconfig.ble` in each board's `mpconfigboard.cmake` `SDKCONFIG_DEFAULTS` list; it's what `openbricks run` / `upload` / `stop` ride on, so don't disable it. A failure here usually means an ESP-IDF / MicroPython version mismatch — see the `WIFI_AUTH_MAX` entry below. (WiFi, by contrast, *is* deliberately disabled in `sdkconfig.board` + `mpconfigboard.h`.)
+
+**Build fails at `network_wlan.c` with a `_Static_assert` about `WIFI_AUTH_MAX`** — ESP-IDF / MP version mismatch. Either bump ESP-IDF into the supported range (5.3–5.5 for current MP master) or bump the MP submodule.
+
+**Submodule is empty** — `git submodule update --init --recursive`.
+
+**Link error "undefined reference to `mp_register_module__openbricks_native`"** — the user_c_module isn't being built into the image. Check `./scripts/build_firmware.sh` is passing `USER_C_MODULES=$(pwd)/native/user_c_modules` to `idf.py`.
+

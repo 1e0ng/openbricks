@@ -1,0 +1,823 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openbricks.log &mdash; openbricks 3.6.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/_modules/openbricks/log.html" />
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=5349f462"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.6.0">firmware&nbsp;v3.6.0</a>
+<a class="obk-pdf-btn" href="../../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#describing-your-robot">Describing your robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#what-the-shim-simulates">What the shim simulates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#servo-dynamometer-two-st-3032s-coupled">Servo dynamometer (two ST-3032s, coupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples.html#servo-soak-test-one-st-3032">Servo soak test (one ST-3032)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../servo-health.html">Servo health &amp; characterisation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../servo-health.html#health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../servo-health.html#dynamometer-what-does-this-servo-do">Dynamometer: what does <em>this</em> servo do?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../servo-health.html#soak-test-is-it-still-good">Soak test: is it still good?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">openbricks.log</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for openbricks.log</h1><div class="highlight"><pre>
+<span></span><span class="c1"># SPDX-License-Identifier: MIT</span>
+<span class="sd">"""</span>
+<span class="sd">Per-run log capture: tee ``print(...)`` output to a file on flash so</span>
+<span class="sd">untethered runs can be inspected later via ``openbricks log``.</span>
+
+<span class="sd">The launcher wraps every program execution with ``log.session()`` so</span>
+<span class="sd">the user's ``print`` output streams to *both* the live USB / BLE</span>
+<span class="sd">console (when one's listening) and a rotating file on flash. With</span>
+<span class="sd">nobody listening on the live channel, the file is the only record.</span>
+<span class="sd">``openbricks log`` reads the most recent files back over BLE.</span>
+
+<span class="sd">Storage layout::</span>
+
+<span class="sd">    /openbricks_logs/run_0.log</span>
+<span class="sd">    /openbricks_logs/slot_1.log</span>
+<span class="sd">    /openbricks_logs/slot_2.log</span>
+
+<span class="sd">Each run gets the next index; the index lives in the file's header</span>
+<span class="sd">line (``"&lt;epoch&gt; -- run_N --"``), NOT the filename. The</span>
+<span class="sd">``MAX_RUNS`` slot files are reused in place (``run N`` overwrites</span>
+<span class="sd">``slot_(N % MAX_RUNS)``) — the earlier delete+create rotation</span>
+<span class="sd">churned littlefs directory metadata until every commit's allocator</span>
+<span class="sd">traversal cost ~400 ms (bench 2026-08-09); truncate-reuse keeps</span>
+<span class="sd">commits at fresh-filesystem cost. Flash usage stays bounded and</span>
+<span class="sd">indices grow monotonically, exactly as before.</span>
+
+<span class="sd">Every line is prefixed with a raw int64 **UTC Unix epoch in</span>
+<span class="sd">milliseconds** (e.g. ``1783950123456 left ambient: 33``). No</span>
+<span class="sd">formatting, no timezone on the hub — the host CLI converts to the</span>
+<span class="sd">user's local time at display. The ESP32 RTC starts at 2000-01-01 on</span>
+<span class="sd">power-up; the CLI syncs it from the host clock on every connect, so</span>
+<span class="sd">runs started after any ``openbricks run`` / ``log`` / ``upload``</span>
+<span class="sd">carry real wall-clock stamps (an unsynced run shows year-2000</span>
+<span class="sd">dates, which is self-diagnosing).</span>
+
+<span class="sd">The session is also bytes-capped: once a run's log file passes</span>
+<span class="sd">``MAX_BYTES`` bytes, further writes are dropped from the file (the</span>
+<span class="sd">live console still gets them). This keeps a runaway</span>
+<span class="sd">``while True: print(...)`` from filling the entire flash partition.</span>
+
+<span class="sd">Implementation note: MicroPython doesn't expose ``sys.stdout`` as a</span>
+<span class="sd">re-bindable attribute on every port, so we tee at the</span>
+<span class="sd">``builtins.print`` level instead. This catches every ``print(...)``</span>
+<span class="sd">call — including ones with ``file=sys.stderr`` — but does not catch</span>
+<span class="sd">direct ``sys.stdout.write()`` calls. User code on the firmware path</span>
+<span class="sd">overwhelmingly goes through ``print()``, so this trade-off is fine.</span>
+<span class="sd">The launcher additionally calls ``log.write_text(...)`` from its</span>
+<span class="sd">exception handler so tracebacks are captured.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">builtins</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+
+<span class="n">LOG_DIR</span>    <span class="o">=</span> <span class="s2">"/openbricks_logs"</span>
+<span class="c1"># 10, was 3. Three slots twice destroyed the evidence they existed to</span>
+<span class="c1"># keep: an intermittent won't-start is diagnosed by comparing the</span>
+<span class="c1"># FAILING run's log against a working one, but every diagnostic</span>
+<span class="c1"># session (``openbricks run -c`` state dumps, bus scans) is itself a</span>
+<span class="c1"># run that takes a slot — by the time the bench report arrived, the</span>
+<span class="c1"># failing runs had been rotated out by the tools investigating them.</span>
+<span class="c1"># Worst case 10 x 64 KB = 640 KB of a 16 MB flash.</span>
+<span class="n">MAX_RUNS</span>   <span class="o">=</span> <span class="mi">10</span>
+<span class="n">MAX_BYTES</span>  <span class="o">=</span> <span class="mi">64</span> <span class="o">*</span> <span class="mi">1024</span>
+
+<span class="c1"># Writes are ASYNCHRONOUS. ``print`` only appends to a RAM buffer; the</span>
+<span class="c1"># file write and its flush happen off the hot path, driven by the</span>
+<span class="c1"># launcher's Timer tick calling ``log.pump()`` (the same shape</span>
+<span class="c1"># ``ble_repl`` uses for TX: buffer on write, drain on a scheduled</span>
+<span class="c1"># callback, with the launcher tick as the liveness backstop).</span>
+<span class="c1">#</span>
+<span class="c1"># Why: ``flush()`` on littlefs forces a metadata commit, measured at</span>
+<span class="c1"># ~60-90 ms on the ESP32 bench — PER LINE. The tee runs synchronously</span>
+<span class="c1"># on the main thread between the user program's own bytecodes, so</span>
+<span class="c1"># every ``print()`` stalled the robot for a tenth of a second (a</span>
+<span class="c1"># 29-line ``dump_events`` took 1.9 s). Logging cost more than the work</span>
+<span class="c1"># it was logging, and it distorted the timing of whatever the program</span>
+<span class="c1"># was controlling.</span>
+<span class="c1">#</span>
+<span class="c1"># Durability is preserved where it matters. The buffer is committed:</span>
+<span class="c1">#   * when the program ends (``__exit__``),</span>
+<span class="c1">#   * when the stop button fires (launcher ``_fire_stop``),</span>
+<span class="c1">#   * on every ``write_text`` — "started:", "stopped:", "Exception:"</span>
+<span class="c1">#     and the launcher's button notes. Those are the crash-adjacent</span>
+<span class="c1">#     lines a post-mortem needs, and they are rare enough that paying</span>
+<span class="c1">#     a commit for each costs nothing measurable.</span>
+<span class="c1"># So a hard reset (brownout, WDT, panic) can lose only ordinary</span>
+<span class="c1"># ``print`` output since the last pump — never the run's framing.</span>
+<span class="c1">#</span>
+<span class="c1"># PENDING_MAX bounds the RAM buffer: past it, ``_append`` writes</span>
+<span class="c1"># through synchronously rather than growing without limit. The pump</span>
+<span class="c1"># runs every launcher tick, so reaching it takes a genuine print</span>
+<span class="c1"># storm — and hitting it costs a write, never a dropped line.</span>
+<span class="n">PENDING_MAX</span> <span class="o">=</span> <span class="mi">4096</span>
+
+<span class="c1"># MicroPython embedded ports count time from 2000-01-01 UTC; the unix</span>
+<span class="c1"># port and CPython from 1970-01-01. Detect once so stored stamps are</span>
+<span class="c1"># true Unix epoch regardless of runtime.</span>
+<span class="n">_EPOCH_OFFSET_MS</span> <span class="o">=</span> <span class="mi">946684800000</span> <span class="k">if</span> <span class="n">time</span><span class="o">.</span><span class="n">gmtime</span><span class="p">(</span><span class="mi">0</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">2000</span> <span class="k">else</span> <span class="mi">0</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_epoch_ms</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Current UTC Unix epoch in milliseconds (int)."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">time</span><span class="o">.</span><span class="n">time_ns</span><span class="p">()</span> <span class="o">//</span> <span class="mi">1000000</span> <span class="o">+</span> <span class="n">_EPOCH_OFFSET_MS</span>
+    <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+        <span class="c1"># No time_ns on this runtime — whole-second resolution.</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">())</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="n">_EPOCH_OFFSET_MS</span>
+
+
+<span class="c1"># Resolved once at import; module-level so tests can patch either the</span>
+<span class="c1"># function or these lookups (the fallback branch is otherwise dead on</span>
+<span class="c1"># every test runtime — both MP and the CPython fakes provide ticks_*).</span>
+<span class="n">_TICKS_FN</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">time</span><span class="p">,</span> <span class="s2">"ticks_ms"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<span class="n">_DIFF_FN</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">time</span><span class="p">,</span> <span class="s2">"ticks_diff"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ticks_ms</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Monotonic ms — ``time.ticks_ms`` where available, wall-clock</span>
+<span class="sd">    fallback otherwise."""</span>
+    <span class="k">if</span> <span class="n">_TICKS_FN</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_TICKS_FN</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ticks_diff</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">_DIFF_FN</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_DIFF_FN</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">a</span> <span class="o">-</span> <span class="n">b</span>
+
+
+<span class="c1"># ---- internal helpers ------------------------------------------------</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ensure_log_dir</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Create LOG_DIR if it doesn't exist. Silent on EEXIST."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">LOG_DIR</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_list_existing</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Sorted list of ``(index, filename)`` for valid log files in</span>
+<span class="sd">    LOG_DIR. Files that don't fit ``run_&lt;int&gt;.log`` are ignored."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">entries</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">LOG_DIR</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">"run_"</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">".log"</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">idx_str</span> <span class="o">=</span> <span class="n">name</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="s2">"run_"</span><span class="p">):</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="s2">".log"</span><span class="p">)]</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">idx</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">idx_str</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">idx</span><span class="p">,</span> <span class="n">name</span><span class="p">))</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="n">_SLOT_PREFIX</span> <span class="o">=</span> <span class="s2">"slot_"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_parse_header_line</span><span class="p">(</span><span class="n">line</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The run index from a slot file's header line</span>
+<span class="sd">    (``"&lt;epoch&gt; -- run_N --"``), or ``None``."""</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+    <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">4</span> <span class="ow">and</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"--"</span> <span class="ow">and</span> <span class="n">parts</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"--"</span>
+            <span class="ow">and</span> <span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">"run_"</span><span class="p">)):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">4</span><span class="p">:])</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_slot_runs</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Sorted ``(index, filename)`` for slot files carrying a valid</span>
+<span class="sd">    header. A truncated/corrupt slot (crash mid-write) parses to</span>
+<span class="sd">    nothing and is simply skipped — its slot gets reused."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">entries</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">LOG_DIR</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+        <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">name</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">_SLOT_PREFIX</span><span class="p">)</span>
+                <span class="ow">or</span> <span class="ow">not</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">".log"</span><span class="p">)):</span>
+            <span class="k">continue</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">LOG_DIR</span> <span class="o">+</span> <span class="s2">"/"</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">idx</span> <span class="o">=</span> <span class="n">_parse_header_line</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">readline</span><span class="p">())</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">OSError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">idx</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">idx</span><span class="p">,</span> <span class="n">name</span><span class="p">))</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_next_run</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""``(path, index)`` for the next run.</span>
+
+<span class="sd">    The ``MAX_RUNS`` files are REUSED in place (truncate-on-open),</span>
+<span class="sd">    never deleted and recreated: littlefs pays for directory churn</span>
+<span class="sd">    forever — after ~70 delete+create rotation cycles every commit's</span>
+<span class="sd">    allocator traversal crawled the accumulated metadata at ~400 ms</span>
+<span class="sd">    per flush (bench run_68, 2026-08-09; reproduced on unix MP as</span>
+<span class="sd">    8k+ block reads per commit vs ~40 on a fresh filesystem, and</span>
+<span class="sd">    slot reuse returns it to ~40). The run INDEX keeps counting up —</span>
+<span class="sd">    it lives in each slot's header line, not the filename."""</span>
+    <span class="n">_ensure_log_dir</span><span class="p">()</span>
+    <span class="n">runs</span> <span class="o">=</span> <span class="n">_slot_runs</span><span class="p">()</span>
+    <span class="n">legacy</span> <span class="o">=</span> <span class="n">_list_existing</span><span class="p">()</span>
+    <span class="n">next_idx</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="n">runs</span><span class="p">:</span>
+        <span class="n">next_idx</span> <span class="o">=</span> <span class="n">runs</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="k">if</span> <span class="n">legacy</span><span class="p">:</span>
+        <span class="c1"># Numbering continues from pre-slot firmware's runs.</span>
+        <span class="n">next_idx</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">next_idx</span><span class="p">,</span> <span class="n">legacy</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="c1"># One-time migration: legacy per-run files are exactly the churn</span>
+    <span class="c1"># this scheme removes. Logs are ephemeral diagnostics; drop them.</span>
+    <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">legacy</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">LOG_DIR</span> <span class="o">+</span> <span class="s2">"/"</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+            <span class="k">pass</span>
+    <span class="k">return</span> <span class="p">(</span><span class="s2">"</span><span class="si">%s</span><span class="s2">/</span><span class="si">%s%d</span><span class="s2">.log"</span> <span class="o">%</span> <span class="p">(</span><span class="n">LOG_DIR</span><span class="p">,</span> <span class="n">_SLOT_PREFIX</span><span class="p">,</span>
+                             <span class="n">next_idx</span> <span class="o">%</span> <span class="n">MAX_RUNS</span><span class="p">),</span>
+            <span class="n">next_idx</span><span class="p">)</span>
+
+
+<span class="c1"># ---- public session API ---------------------------------------------</span>
+
+<span class="c1"># The session currently teeing prints (one program runs at a time).</span>
+<span class="c1"># ``note()`` uses it to drop button-event lines into the run's log.</span>
+<span class="n">_ACTIVE</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="note">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.log.note">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">note</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write one stamped line to the active run's log file.</span>
+
+<span class="sd">    No-op when no program is running (there is no file to write to).</span>
+<span class="sd">    File only — the live console is deliberately not touched; callers</span>
+<span class="sd">    that want a console message print one themselves. Used by the</span>
+<span class="sd">    launcher so every button press that starts or stops a run leaves</span>
+<span class="sd">    a timestamped entry in that run's log."""</span>
+    <span class="n">sess</span> <span class="o">=</span> <span class="n">_ACTIVE</span>
+    <span class="k">if</span> <span class="n">sess</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">text</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">):</span>
+        <span class="n">text</span> <span class="o">+=</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span>
+    <span class="n">sess</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">text</span><span class="p">)</span></div>
+
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_LogSession</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Context manager. ``__enter__`` opens the next run log file and</span>
+<span class="sd">    swaps in a wrapped ``builtins.print`` that writes to it; ``__exit__``</span>
+<span class="sd">    restores ``builtins.print`` and closes the file."""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_file</span>          <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_path</span>          <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_index</span>         <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_prev_print</span>    <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_budget</span>        <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_at_line_start</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="c1"># Stamped text not yet handed to the filesystem. A list of</span>
+        <span class="c1"># str, joined at pump time — repeated ``+=`` on a str is</span>
+        <span class="c1"># quadratic, and this buffer is appended to once per print.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span>       <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending_len</span>   <span class="o">=</span> <span class="mi">0</span>
+        <span class="c1"># Instrumentation for the tick-starvation hunt: the slowest</span>
+        <span class="c1"># single filesystem call this session, in ms. littlefs writes</span>
+        <span class="c1"># occasionally trigger block erases/relocation, and a flash</span>
+        <span class="c1"># erase suspends the CPU cache — a repeated ~100 ms-class</span>
+        <span class="c1"># main-thread block is exactly what silently drops scheduler</span>
+        <span class="c1"># ticks. The launcher's starvation note prints this so a</span>
+        <span class="c1"># bench log can convict or exonerate the flash path without</span>
+        <span class="c1"># another instrumented build.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_worst_write_ms</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">pump</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Drain the RAM buffer to the file. Called off the print hot</span>
+<span class="sd">        path — from the launcher's Timer tick — so ``print`` itself</span>
+<span class="sd">        never touches flash.</span>
+
+<span class="sd">        ``force`` additionally commits (``flush``), which is the</span>
+<span class="sd">        expensive part on littlefs; the tick pumps without it and lets</span>
+<span class="sd">        the filesystem cache batch, while program-end / stop-press /</span>
+<span class="sd">        ``write_text`` force a real commit.</span>
+
+<span class="sd">        Returns True if anything reached the file. Never raises: a</span>
+<span class="sd">        logging failure must not propagate into the tick that owns the</span>
+<span class="sd">        stop button, nor into the program being logged."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_file</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">t0</span> <span class="o">=</span> <span class="n">_ticks_ms</span><span class="p">()</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span><span class="p">:</span>
+                <span class="n">text</span> <span class="o">=</span> <span class="s2">""</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_pending</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_pending_len</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="ow">not</span> <span class="n">force</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">False</span>
+            <span class="k">if</span> <span class="n">force</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_file</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+            <span class="n">dt</span> <span class="o">=</span> <span class="n">_ticks_diff</span><span class="p">(</span><span class="n">_ticks_ms</span><span class="p">(),</span> <span class="n">t0</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">dt</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_worst_write_ms</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_worst_write_ms</span> <span class="o">=</span> <span class="n">dt</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="c1"># Flash error — drop the bytes rather than wedge the tick.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pending_len</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_append</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">payload</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Stamp, budget-check, and write ``payload`` to the file.</span>
+
+<span class="sd">        Every new file line is prefixed with ``"&lt;epoch_ms&gt; "`` — a raw</span>
+<span class="sd">        int64 UTC Unix-epoch-milliseconds number, converted to local</span>
+<span class="sd">        time only by the host CLI at display. A ``print(..., end='')``</span>
+<span class="sd">        continuation lands mid-line and is NOT re-stamped; blank lines</span>
+<span class="sd">        carry no stamp. May raise on flash errors — callers decide</span>
+<span class="sd">        whether that is swallowed."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_file</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_budget</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MAX_BYTES</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">stamp</span> <span class="o">=</span> <span class="s2">"</span><span class="si">%d</span><span class="s2"> "</span> <span class="o">%</span> <span class="n">_epoch_ms</span><span class="p">()</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">payload</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span>
+        <span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">n</span><span class="p">:</span>
+            <span class="n">seg</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">seg</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_at_line_start</span><span class="p">:</span>
+                    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stamp</span><span class="p">)</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">seg</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_at_line_start</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">n</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_at_line_start</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="s2">""</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+        <span class="n">remaining</span> <span class="o">=</span> <span class="n">MAX_BYTES</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_budget</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">remaining</span><span class="p">:</span>
+            <span class="n">text</span> <span class="o">=</span> <span class="n">text</span><span class="p">[:</span><span class="n">remaining</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_budget</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+        <span class="c1"># The hot path ends here: buffer only, no filesystem call.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pending_len</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">force</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending_len</span> <span class="o">&gt;=</span> <span class="n">PENDING_MAX</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pump</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="n">force</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_make_tee_print</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">original_print</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Build the replacement ``print`` function."""</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_tee_print</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="n">original_print</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="c1"># Reproduce print's stringification: sep / end default</span>
+                <span class="c1"># to " " and "\n". We don't honour file= here — every</span>
+                <span class="c1"># print, including ones aimed at stderr, lands in the</span>
+                <span class="c1"># log file too (which is the whole point).</span>
+                <span class="n">sep</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sep"</span><span class="p">,</span> <span class="s2">" "</span><span class="p">)</span>
+                <span class="n">end</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"end"</span><span class="p">,</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_append</span><span class="p">(</span><span class="n">sep</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">args</span><span class="p">)</span> <span class="o">+</span> <span class="n">end</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="c1"># Flash error / OOM — drop the bytes; live print</span>
+                <span class="c1"># already happened.</span>
+                <span class="k">pass</span>
+        <span class="k">return</span> <span class="n">_tee_print</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_path</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_index</span> <span class="o">=</span> <span class="n">_next_run</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_file</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span>
+            <span class="c1"># Header line: carries the run index (the filename no</span>
+            <span class="c1"># longer does — slots are reused). Stamped like every</span>
+            <span class="c1"># other line so dumps render it naturally.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">"</span><span class="si">%d</span><span class="s2"> -- run_</span><span class="si">%d</span><span class="s2"> --</span><span class="se">\n</span><span class="s2">"</span>
+                             <span class="o">%</span> <span class="p">(</span><span class="n">_epoch_ms</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_index</span><span class="p">))</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_file</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_path</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="bp">self</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_prev_print</span> <span class="o">=</span> <span class="n">builtins</span><span class="o">.</span><span class="n">print</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_budget</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_at_line_start</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">builtins</span><span class="o">.</span><span class="n">print</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_make_tee_print</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_prev_print</span><span class="p">)</span>
+        <span class="k">global</span> <span class="n">_ACTIVE</span>
+        <span class="n">_ACTIVE</span> <span class="o">=</span> <span class="bp">self</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_type</span><span class="p">,</span> <span class="n">exc_value</span><span class="p">,</span> <span class="n">exc_tb</span><span class="p">):</span>
+        <span class="k">global</span> <span class="n">_ACTIVE</span>
+        <span class="k">if</span> <span class="n">_ACTIVE</span> <span class="ow">is</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="n">_ACTIVE</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prev_print</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">builtins</span><span class="o">.</span><span class="n">print</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prev_print</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_prev_print</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_file</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Program ended — commit whatever print output is still</span>
+            <span class="c1"># buffered before the file goes away.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pump</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_file</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="k">pass</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_file</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="kc">False</span>   <span class="c1"># do not suppress exceptions</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">path</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Absolute path of the file this session is writing to, or</span>
+<span class="sd">        ``None`` if we couldn't open one."""</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_path</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">write_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">s</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Append text to the log file directly, bypassing ``print``</span>
+<span class="sd">        (lines still get the epoch-ms stamp). Used by the launcher's</span>
+<span class="sd">        exception handler so the traceback (which goes through</span>
+<span class="sd">        ``sys.print_exception``, not ``print``) lands in the file</span>
+<span class="sd">        too.</span>
+
+<span class="sd">        Committed immediately, unlike ``print``: every caller of this</span>
+<span class="sd">        is crash-adjacent ("started:", "stopped:", "Exception:", the</span>
+<span class="sd">        launcher's button notes), so these lines must survive a reset</span>
+<span class="sd">        that the buffered print output legitimately may not."""</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_append</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+
+<div class="viewcode-block" id="worst_write_ms">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.log.worst_write_ms">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">worst_write_ms</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Slowest single filesystem call of the active session, in ms.</span>
+<span class="sd">    0 when nothing has been written or no session is active. The</span>
+<span class="sd">    launcher includes this in its tick-starvation note: if the two</span>
+<span class="sd">    numbers are of the same order, littlefs (block erase under a</span>
+<span class="sd">    write) owns the starvation; if this stays small while the gaps</span>
+<span class="sd">    are large, the blocker is elsewhere."""</span>
+    <span class="n">sess</span> <span class="o">=</span> <span class="n">_ACTIVE</span>
+    <span class="k">if</span> <span class="n">sess</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="k">return</span> <span class="n">sess</span><span class="o">.</span><span class="n">_worst_write_ms</span></div>
+
+
+
+<div class="viewcode-block" id="pump">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.log.pump">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">pump</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Drain the active session's buffered output to its file.</span>
+
+<span class="sd">    Called from the launcher's Timer tick, which is what makes logging</span>
+<span class="sd">    asynchronous: ``print`` appends to RAM and returns, this moves the</span>
+<span class="sd">    bytes to flash off the program's hot path. No-op when no program</span>
+<span class="sd">    is running. Never raises — the tick that calls this also owns the</span>
+<span class="sd">    stop button."""</span>
+    <span class="n">sess</span> <span class="o">=</span> <span class="n">_ACTIVE</span>
+    <span class="k">if</span> <span class="n">sess</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">sess</span><span class="o">.</span><span class="n">pump</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="flush">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.log.flush">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">flush</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Commit the active session's buffered output NOW.</span>
+
+<span class="sd">    For the moments durability beats speed: the stop button firing, or</span>
+<span class="sd">    any other point where the next thing that happens might be a reset.</span>
+<span class="sd">    No-op when no program is running."""</span>
+    <span class="n">sess</span> <span class="o">=</span> <span class="n">_ACTIVE</span>
+    <span class="k">if</span> <span class="n">sess</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">sess</span><span class="o">.</span><span class="n">pump</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="session">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.log.session">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">session</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Construct a fresh :class:`_LogSession`.</span>
+
+<span class="sd">    Use as a context manager::</span>
+
+<span class="sd">        with log.session() as sess:</span>
+<span class="sd">            run_user_program()</span>
+<span class="sd">            # sess.write_text(extra) for non-print output if needed.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_LogSession</span><span class="p">()</span></div>
+
+
+
+<span class="c1"># ---- public read API (used by openbricks log) -------------------</span>
+
+
+<div class="viewcode-block" id="list_runs">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.log.list_runs">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">list_runs</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return a list of ``(index, full_path)`` tuples, oldest first.</span>
+<span class="sd">    Used by the on-hub helper that ``openbricks log`` invokes via</span>
+<span class="sd">    raw-paste to enumerate available runs. Slot files are listed by</span>
+<span class="sd">    their header index; legacy ``run_N.log`` files (pre-slot</span>
+<span class="sd">    firmware) still appear until the next run's migration removes</span>
+<span class="sd">    them."""</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[(</span><span class="n">idx</span><span class="p">,</span> <span class="n">LOG_DIR</span> <span class="o">+</span> <span class="s2">"/"</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
+           <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">_list_existing</span><span class="p">()]</span>
+    <span class="n">out</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">idx</span><span class="p">,</span> <span class="n">LOG_DIR</span> <span class="o">+</span> <span class="s2">"/"</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">_slot_runs</span><span class="p">()]</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">out</span></div>
+
+
+
+<div class="viewcode-block" id="read_run">
+<a class="viewcode-back" href="../../api/runtime.html#openbricks.log.read_run">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">read_run</span><span class="p">(</span><span class="n">index</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Read a single run's log by index. Raises ``OSError`` if no</span>
+<span class="sd">    such run exists (the slot was reused by a newer run, or the</span>
+<span class="sd">    index never happened)."""</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="s2">"</span><span class="si">%s</span><span class="s2">/</span><span class="si">%s%d</span><span class="s2">.log"</span> <span class="o">%</span> <span class="p">(</span><span class="n">LOG_DIR</span><span class="p">,</span> <span class="n">_SLOT_PREFIX</span><span class="p">,</span> <span class="n">index</span> <span class="o">%</span> <span class="n">MAX_RUNS</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">first</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">_parse_header_line</span><span class="p">(</span><span class="n">first</span><span class="p">)</span> <span class="o">==</span> <span class="n">index</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">first</span> <span class="o">+</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="c1"># Legacy layout (pre-slot firmware) — or a clean OSError.</span>
+    <span class="k">return</span> <span class="nb">open</span><span class="p">(</span><span class="s2">"</span><span class="si">%s</span><span class="s2">/run_</span><span class="si">%d</span><span class="s2">.log"</span> <span class="o">%</span> <span class="p">(</span><span class="n">LOG_DIR</span><span class="p">,</span> <span class="n">index</span><span class="p">))</span><span class="o">.</span><span class="n">read</span><span class="p">()</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
