@@ -1,0 +1,673 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="The openbricks command-line tool: flash firmware, list hubs over BLE, run and upload programs, stop them, and pull logs — with port and firmware auto-detection." name="description" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Command-line tool &mdash; openbricks 3.7.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/cli.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=229cbe3b"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="_static/version-switcher.js?v=16d832ff"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Simulator" href="simulator.html" />
+    <link rel="prev" title="Hardware guide" href="hardware.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.7.0">firmware&nbsp;v3.7.0</a>
+<a class="obk-pdf-btn" href="openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simulator.html#describing-your-robot">Describing your robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simulator.html#what-the-shim-simulates">What the shim simulates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#servo-dynamometer-two-st-3032s-coupled">Servo dynamometer (two ST-3032s, coupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#servo-soak-test-one-st-3032">Servo soak test (one ST-3032)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="servo-health.html">Servo health &amp; characterisation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="servo-health.html#health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="servo-health.html#dynamometer-what-does-this-servo-do">Dynamometer: what does <em>this</em> servo do?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="servo-health.html#soak-test-is-it-still-good">Soak test: is it still good?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/interfaces.html">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/interfaces.html#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/interfaces.html#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Command-line tool</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/1e0ng/openbricks/blob/main/docs/cli.md" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="command-line-tool">
+<h1>Command-line tool<a class="headerlink" href="#command-line-tool" title="Link to this heading"></a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">pipx</span> <span class="pre">install</span> <span class="pre">openbricks</span></code> installs one console script, <code class="docutils literal notranslate"><span class="pre">openbricks</span></code>,
+which mirrors the <code class="docutils literal notranslate"><span class="pre">pybricksdev</span></code> workflow: flash firmware over USB, then
+run / upload / stop programs and pull logs over BLE. With the <code class="docutils literal notranslate"><span class="pre">[sim]</span></code>
+extra installed, <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">sim</span> <span class="pre">…</span></code> forwards to the
+<a class="reference internal" href="simulator.html"><span class="doc">MuJoCo-backed simulator</span></a>.</p>
+<p>A typical session:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openbricks<span class="w"> </span>flash<span class="w"> </span>--name<span class="w"> </span>RobotA<span class="w">     </span><span class="c1"># port, chip and newest firmware auto-detected</span>
+<span class="gp">$ </span>openbricks<span class="w"> </span>list<span class="w">                    </span><span class="c1"># hubs in BLE range</span>
+<span class="gp">$ </span>openbricks<span class="w"> </span>run<span class="w"> </span>-n<span class="w"> </span>RobotA<span class="w"> </span>main.py<span class="w">   </span><span class="c1"># push + stream output</span>
+<span class="gp">$ </span>openbricks<span class="w"> </span>upload<span class="w"> </span>-n<span class="w"> </span>RobotA<span class="w"> </span>main.py<span class="w">  </span><span class="c1"># stage; start it with the hub button</span>
+<span class="gp">$ </span>openbricks<span class="w"> </span>stop<span class="w"> </span>-n<span class="w"> </span>RobotA<span class="w">          </span><span class="c1"># Ctrl-C a running program</span>
+<span class="gp">$ </span>openbricks<span class="w"> </span>log<span class="w"> </span>-n<span class="w"> </span>RobotA<span class="w">           </span><span class="c1"># dump the most recent run log</span>
+<span class="gp">$ </span>openbricks<span class="w"> </span>docs<span class="w"> </span>hardware<span class="w">           </span><span class="c1"># open this manual offline in your browser</span>
+</pre></div>
+</div>
+<section id="firmware-versions-and-provenance">
+<h2>Firmware versions and provenance<a class="headerlink" href="#firmware-versions-and-provenance" title="Link to this heading"></a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">flash</span></code> first reports the firmware already on the chip —
+version plus an <code class="docutils literal notranslate"><span class="pre">(official)</span></code> / <code class="docutils literal notranslate"><span class="pre">(customized)</span></code> suffix — before it
+looks up the newest release. Flashing the <strong>same version</strong> again, or
+an <strong>older</strong> one, asks for confirmation first; pass <code class="docutils literal notranslate"><span class="pre">--yes</span></code> to skip
+the prompt in scripts.</p>
+<p>The default output is step-level (probe, download, erase, write,
+hub name, marker, reboot); pass <code class="docutils literal notranslate"><span class="pre">--verbose</span></code> / <code class="docutils literal notranslate"><span class="pre">-v</span></code> to also echo
+every underlying <code class="docutils literal notranslate"><span class="pre">mpremote</span></code> / <code class="docutils literal notranslate"><span class="pre">esptool</span></code> command line and the
+firmware cache paths — useful when reporting a flash problem.</p>
+<p>Every firmware image published by CI is signed (Ed25519), and the
+CLI ships the matching public key. An image whose <code class="docutils literal notranslate"><span class="pre">.bin.sig</span></code>
+verifies is labeled <code class="docutils literal notranslate"><span class="pre">(official)</span></code>; anything else — a self-built
+image, a missing or wrong signature — is <code class="docutils literal notranslate"><span class="pre">(customized)</span></code>. Customized
+firmware flashes normally: the suffix is provenance, not a gate.
+After each flash the verdict is stored on the hub, which is how the
+next <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">flash</span></code> labels the current firmware.</p>
+<p>The suffix follows the version everywhere it reaches you: the
+<code class="docutils literal notranslate"><span class="pre">firmware</span> <span class="pre">1.79.0</span> <span class="pre">(official)</span></code> banner at the top of every
+<code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code>, the <code class="docutils literal notranslate"><span class="pre">started:</span></code> header line in every run log
+(<code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">log</span></code>), and the flash preflight above. On the hub,
+<code class="docutils literal notranslate"><span class="pre">openbricks.firmware_label()</span></code> returns the same string.</p>
+</section>
+<section id="programs-are-compiled-on-the-host">
+<h2>Programs are compiled on the host<a class="headerlink" href="#programs-are-compiled-on-the-host" title="Link to this heading"></a></h2>
+<p>Since 1.92.0, <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code> and <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">upload</span></code> cross-compile
+your script with <code class="docutils literal notranslate"><span class="pre">mpy-cross</span></code> <strong>before</strong> connecting, and stage
+compiled bytecode instead of source (like Pybricks). Three things
+get better:</p>
+<ul class="simple">
+<li><p><strong>syntax errors surface in milliseconds</strong>, on your terminal,
+naming your file and line and quoting the offending source line —
+no BLE scan, no connect, no upload round-trip;</p></li>
+<li><p><strong>programs start faster</strong>: the hub loads bytecode directly and
+skips its on-device parse/compile step;</p></li>
+<li><p><strong>tracebacks name your real file and line</strong> (<code class="docutils literal notranslate"><span class="pre">File</span> <span class="pre">&quot;square.py&quot;,</span> <span class="pre">line</span> <span class="pre">12</span></code>) instead of <code class="docutils literal notranslate"><span class="pre">File</span> <span class="pre">&quot;&lt;string&gt;&quot;</span></code>.</p></li>
+</ul>
+<p>No flags, nothing to configure. Firmware older than 1.92.0 can’t run
+compiled programs, so the CLI probes the hub’s version in-session and
+sends plain source instead — announced on stderr, never silently.
+<code class="docutils literal notranslate"><span class="pre">upload</span> <span class="pre">--path</span></code> (custom boot flows) always stages your file verbatim,
+uncompiled, at the path you give.</p>
+<p><code class="docutils literal notranslate"><span class="pre">run</span></code> is an <strong>upload-then-run</strong> (since 2.7.0, deliberately
+different from Pybricks): it stages your script at the button’s
+<code class="docutils literal notranslate"><span class="pre">/program.mpy</span></code> before executing it, so even a run that fails midway
+leaves the program on the hub — press the start button to rerun it,
+no BLE round trip needed. The flip side: running a calibration or a
+one-shot diagnostic replaces the button’s program too, so re-upload
+your mission after such tools (<code class="docutils literal notranslate"><span class="pre">upload</span></code> alone stages without
+running).</p>
+<p><code class="docutils literal notranslate"><span class="pre">flash</span> <span class="pre">--with-qtr-init</span></code> additionally stores a starter QTR
+line-sensor calibration at <code class="docutils literal notranslate"><span class="pre">/qtr.cal</span></code> (recorded on the reference
+bench, default pins 1-10), so the line-follow examples work on a
+fresh hub out of the box. Heights, mats and lighting differ — run
+<code class="docutils literal notranslate"><span class="pre">examples/qtr_calibrate.py</span></code> once for a calibration measured on your
+own rig.</p>
+</section>
+<section id="reference">
+<h2>Reference<a class="headerlink" href="#reference" title="Link to this heading"></a></h2>
+<p>The reference below is generated from the CLI’s own argument parser, so
+it always matches the installed version.</p>
+<p><p>Host-side CLI for flashing and running code on openbricks hubs, plus a MuJoCo-backed simulator (<code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">sim</span> <span class="pre">…</span></code>).</p>
+</p>
+<div class="highlight-default notranslate" id="openbricks"><div class="highlight"><pre><span></span><span class="n">usage</span><span class="p">:</span> <span class="n">openbricks</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">version</span><span class="p">]</span> <span class="n">COMMAND</span> <span class="o">...</span>
+</pre></div>
+</div>
+<section id="openbricks-positional-arguments">
+<span id="openbricks_dev.cli-_build_parser-positional-arguments"></span><h3>Positional Arguments<a class="headerlink" href="#openbricks-positional-arguments" title="Link to this heading"></a></h3>
+<dl class="option-list">
+<dt><kbd>COMMAND</kbd></dt>
+<dd><p>Possible choices: flash, run, upload, stop, list, log, servo-id, paste-probe, docs, doc, sim</p>
+</dd>
+</dl>
+</section>
+<section id="openbricks-named-arguments">
+<span id="openbricks_dev.cli-_build_parser-named-arguments"></span><h3>Named Arguments<a class="headerlink" href="#openbricks-named-arguments" title="Link to this heading"></a></h3>
+<dl class="option-list">
+<dt><kbd>--version</kbd></dt>
+<dd><p>Print the openbricks package version and exit.</p>
+</dd>
+</dl>
+</section>
+<section id="Sub-commands">
+<h3>Sub-commands<a class="headerlink" href="#Sub-commands" title="Link to this heading"></a></h3>
+<section id="openbricks-flash">
+<span id="flash"></span><h4>flash<a class="headerlink" href="#openbricks-flash" title="Link to this heading"></a></h4>
+<p>Flash a firmware image onto a hub (via esptool) and write the hub’s BLE advertising name into NVS (via mpremote). –name is mandatory so every hub gets a unique identifier — two hubs with the same name can’t be individually addressed over BLE.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">flash</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="o">--</span><span class="n">name</span> <span class="n">NAME</span> <span class="p">[</span><span class="o">--</span><span class="n">port</span> <span class="n">PORT</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">firmware</span> <span class="n">FIRMWARE</span><span class="p">]</span>
+                 <span class="p">[</span><span class="o">--</span><span class="n">chip</span> <span class="n">CHIP</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">baud</span> <span class="n">BAUD</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="k">with</span><span class="o">-</span><span class="n">qtr</span><span class="o">-</span><span class="n">init</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">skip</span><span class="o">-</span><span class="n">erase</span><span class="p">]</span>
+                 <span class="p">[</span><span class="o">--</span><span class="n">yes</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">verbose</span><span class="p">]</span>
+</pre></div>
+</div>
+<section id="openbricks-flash-named-arguments">
+<span id="-named-arguments"></span><h5>Named Arguments<a class="headerlink" href="#openbricks-flash-named-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>--name</kbd></dt>
+<dd><p>Hub identifier for BLE (required, &lt;=20 chars recommended).</p>
+</dd>
+<dt><kbd>--port</kbd></dt>
+<dd><p>Serial port (/dev/ttyUSB0, /dev/cu.usbserial-XXXX, COM5 …). Omit to auto-detect — works when exactly ONE ESP device is connected (Espressif native USB or a CP210x/CH340/FTDI bridge).</p>
+</dd>
+<dt><kbd>--firmware</kbd></dt>
+<dd><p>Path to firmware.bin produced by scripts/build_firmware.sh or downloaded from the Releases page. Omit to download the newest release automatically for the detected chip (cached under ~/.cache/openbricks/firmware).</p>
+</dd>
+<dt><kbd>--chip</kbd></dt>
+<dd><p>esptool –chip value (esp32, esp32s3, auto). Default: auto.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">'auto'</span></code></p>
+</dd>
+<dt><kbd>--baud</kbd></dt>
+<dd><p>esptool flash baud rate. Default: 460800.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">'460800'</span></code></p>
+</dd>
+<dt><kbd>--with-qtr-init</kbd></dt>
+<dd><p>After flashing, store a starter QTR line-sensor calibration at /qtr.cal (recorded on the reference bench, default pins 1-10) so line-follow examples work out of the box. Re-run examples/qtr_calibrate.py for a calibration measured on your own mat and lighting.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">False</span></code></p>
+</dd>
+<dt><kbd>--skip-erase</kbd></dt>
+<dd><p>Skip erase_flash (faster dev loop; leaves stale NVS keys).</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">False</span></code></p>
+</dd>
+<dt><kbd>--yes</kbd></dt>
+<dd><p>Skip the confirmation prompt when the target firmware is the same version as (or older than) the current one.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">False</span></code></p>
+</dd>
+<dt><kbd>--verbose, -v</kbd></dt>
+<dd><p>Echo every subprocess command line (mpremote/esptool) and cache paths. Default output is step-level only.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">False</span></code></p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-run">
+<span id="run"></span><h4>run<a class="headerlink" href="#openbricks-run" title="Link to this heading"></a></h4>
+<p>Connect to the named hub over BLE, push SCRIPT to its REPL (via paste mode), and stream stdout/stderr back to this terminal until the script finishes. Ctrl-C interrupts the remote program.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">run</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="o">-</span><span class="n">n</span> <span class="n">NAME</span> <span class="p">[</span><span class="o">-</span><span class="n">c</span> <span class="n">CODE</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">scan</span><span class="o">-</span><span class="n">timeout</span> <span class="n">SCAN_TIMEOUT</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">debug</span><span class="p">]</span>
+               <span class="p">[</span><span class="n">SCRIPT</span><span class="p">]</span>
+</pre></div>
+</div>
+<section id="openbricks-run-positional-arguments">
+<span id="-positional-arguments"></span><h5>Positional Arguments<a class="headerlink" href="#openbricks-run-positional-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>SCRIPT</kbd></dt>
+<dd><p>Path to the local Python script to run on the hub. Mutually exclusive with -c.</p>
+</dd>
+</dl>
+</section>
+<section id="openbricks-run-named-arguments">
+<span id="-named-arguments_repeat1"></span><h5>Named Arguments<a class="headerlink" href="#openbricks-run-named-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>-n, --name</kbd></dt>
+<dd><p>Hub name baked in at flash time (<code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">flash</span> <span class="pre">--name</span></code>).</p>
+</dd>
+<dt><kbd>-c, --code</kbd></dt>
+<dd><p>Inline Python code to run on the hub (analogous to <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-c</span> <span class="pre">CODE</span></code>). Useful for quick diagnostics — e.g. <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span> <span class="pre">-n</span> <span class="pre">ls</span> <span class="pre">-c</span> <span class="pre">'import</span> <span class="pre">openbricks;</span> <span class="pre">print(openbricks.__version__)'</span></code>. Mutually exclusive with the SCRIPT positional.</p>
+</dd>
+<dt><kbd>--scan-timeout</kbd></dt>
+<dd><p>How long to scan for the named hub before giving up. Default: 5.0 s.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">5.0</span></code></p>
+</dd>
+<dt><kbd>--debug</kbd></dt>
+<dd><p>Print every BLE notify packet (timestamp + hex + ascii) to stderr as it arrives. Use to diagnose ‘timed out reading from hub’ errors — tells you whether the hub is sending anything at all.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">False</span></code></p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-upload">
+<span id="upload"></span><h4>upload<a class="headerlink" href="#openbricks-upload" title="Link to this heading"></a></h4>
+<p>Upload SCRIPT to the hub’s filesystem (default path <code class="docutils literal notranslate"><span class="pre">/program.py</span></code>). The uploaded code does NOT run automatically — the hub’s frozen main.py watches the hub button and exec’s the staged script on each short press. Second short-press stops a running program. (Pybricks calls this same operation <code class="docutils literal notranslate"><span class="pre">download</span></code> from the hub’s perspective; we name by direction-of-data-travel — bytes flow <em>up</em> to the hub.)</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">upload</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="o">-</span><span class="n">n</span> <span class="n">NAME</span> <span class="p">[</span><span class="o">--</span><span class="n">path</span> <span class="n">PATH</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">scan</span><span class="o">-</span><span class="n">timeout</span> <span class="n">SCAN_TIMEOUT</span><span class="p">]</span>
+                  <span class="n">SCRIPT</span>
+</pre></div>
+</div>
+<section id="openbricks-upload-positional-arguments">
+<span id="-positional-arguments_repeat1"></span><h5>Positional Arguments<a class="headerlink" href="#openbricks-upload-positional-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>SCRIPT</kbd></dt>
+<dd><p>Path to the local Python script to stage.</p>
+</dd>
+</dl>
+</section>
+<section id="openbricks-upload-named-arguments">
+<span id="-named-arguments_repeat2"></span><h5>Named Arguments<a class="headerlink" href="#openbricks-upload-named-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>-n, --name</kbd></dt>
+<dd><p>Hub name baked in at flash time.</p>
+</dd>
+<dt><kbd>--path</kbd></dt>
+<dd><p>Destination path on the hub’s filesystem; the file is staged VERBATIM there (no compilation) for custom boot flows. Default: compile with mpy-cross and stage /program.mpy (which the frozen launcher runs; older firmware gets the source at /program.py).</p>
+</dd>
+<dt><kbd>--scan-timeout</kbd></dt>
+<dd><p>BLE scan timeout. Default: 5.0 s.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">5.0</span></code></p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-stop">
+<span id="stop"></span><h4>stop<a class="headerlink" href="#openbricks-stop" title="Link to this heading"></a></h4>
+<p>Connect to the named hub over BLE and send a single Ctrl-C, which MicroPython surfaces as KeyboardInterrupt. Use when a long-running <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code> has already ended and you just want the hub to idle again.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">stop</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="o">-</span><span class="n">n</span> <span class="n">NAME</span> <span class="p">[</span><span class="o">--</span><span class="n">scan</span><span class="o">-</span><span class="n">timeout</span> <span class="n">SCAN_TIMEOUT</span><span class="p">]</span>
+</pre></div>
+</div>
+<section id="openbricks-stop-named-arguments">
+<span id="-named-arguments_repeat3"></span><h5>Named Arguments<a class="headerlink" href="#openbricks-stop-named-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>-n, --name</kbd></dt>
+<dd><p>Hub name.</p>
+</dd>
+<dt><kbd>--scan-timeout</kbd></dt>
+<dd><p>BLE scan timeout. Default: 5.0 s.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">5.0</span></code></p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-list">
+<span id="list"></span><h4>list<a class="headerlink" href="#openbricks-list" title="Link to this heading"></a></h4>
+<p>Run a BLE scan and print every device found, sorted by RSSI (strongest first). Unnamed devices are shown with a placeholder so you can still spot a hub whose name wasn’t flashed.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="nb">list</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">timeout</span> <span class="n">TIMEOUT</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="nb">all</span><span class="p">]</span>
+</pre></div>
+</div>
+<section id="openbricks-list-named-arguments">
+<span id="-named-arguments_repeat4"></span><h5>Named Arguments<a class="headerlink" href="#openbricks-list-named-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>--timeout</kbd></dt>
+<dd><p>Scan duration in seconds. Default: 5.0.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">5.0</span></code></p>
+</dd>
+<dt><kbd>--all</kbd></dt>
+<dd><p>Show every BLE device, not just those with names. Useful when debugging a hub that came up without a flashed name.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">False</span></code></p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-log">
+<span id="log"></span><h4>log<a class="headerlink" href="#openbricks-log" title="Link to this heading"></a></h4>
+<p>Every program executed via the launcher (button press OR <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">run</span></code>) gets its stdout / stderr tee’d to a flash file under <code class="docutils literal notranslate"><span class="pre">/openbricks_logs/</span></code>. Ten rotating slots are kept. With no flags this prints the most recent run; <code class="docutils literal notranslate"><span class="pre">--list</span></code> shows the index; <code class="docutils literal notranslate"><span class="pre">--run</span> <span class="pre">N</span></code> selects a specific slot. Useful for post-mortem on an untethered run where no live console was attached.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">log</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="o">-</span><span class="n">n</span> <span class="n">NAME</span> <span class="p">[</span><span class="o">--</span><span class="nb">list</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">run</span> <span class="n">RUN</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">scan</span><span class="o">-</span><span class="n">timeout</span> <span class="n">SCAN_TIMEOUT</span><span class="p">]</span>
+</pre></div>
+</div>
+<section id="openbricks-log-named-arguments">
+<span id="-named-arguments_repeat5"></span><h5>Named Arguments<a class="headerlink" href="#openbricks-log-named-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>-n, --name</kbd></dt>
+<dd><p>Hub name baked in at flash time.</p>
+</dd>
+<dt><kbd>--list</kbd></dt>
+<dd><p>List the available run indices + their on-flash size, instead of dumping a run’s contents.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">False</span></code></p>
+</dd>
+<dt><kbd>--run</kbd></dt>
+<dd><p>Specific run index to dump. Defaults to the most recent.</p>
+</dd>
+<dt><kbd>--scan-timeout</kbd></dt>
+<dd><p>BLE scan timeout. Default: 5.0 s.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">5.0</span></code></p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-servo-id">
+<span id="servo-id"></span><h4>servo-id<a class="headerlink" href="#openbricks-servo-id" title="Link to this heading"></a></h4>
+<p>Scans the bus (IDs 0..253), rewrites the servo’s EEPROM ID register, and verifies the result. With several servos attached, –old-id is required so the tool never guesses which one to re-ID. Wire the servo to a USB half-duplex adapter (e.g. the URT-2 board) — this talks directly to the adapter’s serial port, no hub involved.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">servo</span><span class="o">-</span><span class="nb">id</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="p">[</span><span class="o">-</span><span class="n">p</span> <span class="n">PORT</span><span class="p">]</span> <span class="p">[</span><span class="o">-</span><span class="n">n</span> <span class="n">NAME</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">tx</span> <span class="n">TX</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">rx</span> <span class="n">RX</span><span class="p">]</span>
+                    <span class="p">[</span><span class="o">--</span><span class="n">scan</span><span class="o">-</span><span class="n">timeout</span> <span class="n">SCAN_TIMEOUT</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">scan</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">old</span><span class="o">-</span><span class="nb">id</span> <span class="n">OLD_ID</span><span class="p">]</span>
+                    <span class="p">[</span><span class="o">--</span><span class="n">baudrate</span> <span class="n">BAUDRATE</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="n">timeout</span> <span class="n">TIMEOUT</span><span class="p">]</span>
+                    <span class="p">[</span><span class="n">new_id</span><span class="p">]</span>
+</pre></div>
+</div>
+<section id="openbricks-servo-id-positional-arguments">
+<span id="-positional-arguments_repeat2"></span><h5>Positional Arguments<a class="headerlink" href="#openbricks-servo-id-positional-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>new_id</kbd></dt>
+<dd><p>Bus ID to assign (0..253). Omit with –scan.</p>
+</dd>
+</dl>
+</section>
+<section id="openbricks-servo-id-named-arguments">
+<span id="-named-arguments_repeat6"></span><h5>Named Arguments<a class="headerlink" href="#openbricks-servo-id-named-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>-p, --port</kbd></dt>
+<dd><p>Serial port of the USB adapter, e.g. /dev/cu.usbmodem123. Omitted (and no -n): auto-detected when exactly one USB serial device is connected.</p>
+</dd>
+<dt><kbd>-n, --name</kbd></dt>
+<dd><p>Hub name: run the scan/re-ID THROUGH THE HUB over BLE instead of a USB adapter — the servo stays wired to the robot. Mutually exclusive with -p.</p>
+</dd>
+<dt><kbd>--tx</kbd></dt>
+<dd><p>Hub path only: servo-bus TX pin (default 14).</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">14</span></code></p>
+</dd>
+<dt><kbd>--rx</kbd></dt>
+<dd><p>Hub path only: servo-bus RX pin (default 41).</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">41</span></code></p>
+</dd>
+<dt><kbd>--scan-timeout</kbd></dt>
+<dd><p>Hub path only: BLE scan timeout. Default: 5.0 s.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">5.0</span></code></p>
+</dd>
+<dt><kbd>--scan</kbd></dt>
+<dd><p>Just list the IDs that answer on the bus; change nothing.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">False</span></code></p>
+</dd>
+<dt><kbd>--old-id</kbd></dt>
+<dd><p>Current ID of the servo to re-ID. Required when more than one servo is attached; otherwise auto-detected.</p>
+</dd>
+<dt><kbd>--baudrate</kbd></dt>
+<dd><p>Bus baudrate. Default: 1000000 (Feetech factory).</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">1000000</span></code></p>
+</dd>
+<dt><kbd>--timeout</kbd></dt>
+<dd><p>Per-ping serial read timeout in seconds. Default: 0.02 (a full 254-ID scan takes ~5 s).</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">0.02</span></code></p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-paste-probe">
+<span id="paste-probe"></span><h4>paste-probe<a class="headerlink" href="#openbricks-paste-probe" title="Link to this heading"></a></h4>
+<p>Pastes padded no-op programs of increasing size through the real raw-paste path and reports the largest that completes, plus how each failure presents (truncated vs hung). Use before changing the firmware’s MICROPY_REPL_STDIN_BUFFER_MAX: two windows may be in flight at once, so that setting is only safe at or below the measured limit.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">paste</span><span class="o">-</span><span class="n">probe</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="o">-</span><span class="n">n</span> <span class="n">NAME</span> <span class="p">[</span><span class="o">--</span><span class="n">scan</span><span class="o">-</span><span class="n">timeout</span> <span class="n">SCAN_TIMEOUT</span><span class="p">]</span> <span class="p">[</span><span class="o">--</span><span class="nb">max</span> <span class="n">MAX</span><span class="p">]</span>
+                       <span class="p">[</span><span class="o">--</span><span class="n">timeout</span> <span class="n">TIMEOUT</span><span class="p">]</span>
+</pre></div>
+</div>
+<section id="openbricks-paste-probe-named-arguments">
+<span id="-named-arguments_repeat7"></span><h5>Named Arguments<a class="headerlink" href="#openbricks-paste-probe-named-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>-n, --name</kbd></dt>
+<dd><p>Hub BLE name.</p>
+</dd>
+<dt><kbd>--scan-timeout</kbd></dt>
+<dd><p>BLE scan timeout in seconds. Default: 5.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">5.0</span></code></p>
+</dd>
+<dt><kbd>--max</kbd></dt>
+<dd><p>Largest size to try, bytes. Default: 8192.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">8192</span></code></p>
+</dd>
+<dt><kbd>--timeout</kbd></dt>
+<dd><p>Per-size timeout in seconds. Default: 15.</p>
+<p>Default: <code class="docutils literal notranslate"><span class="pre">15.0</span></code></p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-docs-doc">
+<span id="docs (doc)"></span><h4>docs (doc)<a class="headerlink" href="#openbricks-docs-doc" title="Link to this heading"></a></h4>
+<p>Opens the full manual in your browser — the same Sphinx build as docs.openbricks.dev, API reference included, bundled and served from disk so no internet is needed. Pass a topic to jump straight to that page.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">docs</span> <span class="p">[</span><span class="o">-</span><span class="n">h</span><span class="p">]</span> <span class="p">[</span><span class="n">topic</span><span class="p">]</span>
+</pre></div>
+</div>
+<section id="openbricks-docs-doc-positional-arguments">
+<span id="-positional-arguments_repeat3"></span><h5>Positional Arguments<a class="headerlink" href="#openbricks-docs-doc-positional-arguments" title="Link to this heading"></a></h5>
+<dl class="option-list">
+<dt><kbd>topic</kbd></dt>
+<dd><p>Page to open (e.g. install, hardware, robotics). Guides and API pages both work. Omit for the index.</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="openbricks-sim">
+<span id="sim"></span><h4>sim<a class="headerlink" href="#openbricks-sim" title="Link to this heading"></a></h4>
+<p>Forwards all remaining arguments to the MuJoCo-backed simulator’s CLI. Use <code class="docutils literal notranslate"><span class="pre">openbricks</span> <span class="pre">sim</span> <span class="pre">--help</span></code> to see the sim’s own subcommand list.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">openbricks</span> <span class="n">sim</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="hardware.html" class="btn btn-neutral float-left" title="Hardware guide" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="simulator.html" class="btn btn-neutral float-right" title="Simulator" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
