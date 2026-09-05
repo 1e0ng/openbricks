@@ -1,0 +1,566 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interfaces &mdash; openbricks 3.5.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=02ece223" />
+
+  
+    <link rel="canonical" href="https://docs.openbricks.dev/api/interfaces.html" />
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=c1362a89"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script type="module" src="../_static/firebase-analytics.js?v=7cb5551c"></script>
+      <script src="../_static/version-switcher.js?v=16d832ff"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Hubs" href="hub.html" />
+    <link rel="prev" title="Display &amp; bus drivers" href="drivers_misc.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            openbricks
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+<a id="obk-version" class="obk-version" href="#"
+   data-version="3.5.0">firmware&nbsp;v3.5.0</a>
+<a class="obk-pdf-btn" href="../openbricks-docs.pdf">
+  &#8595;&nbsp;Download docs as PDF
+</a>
+
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../install.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#install-the-host-tooling">1. Install the host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#get-a-firmware-image">2. Get a firmware image</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#flash-the-hub">3. Flash the hub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#run-your-first-program">4. Run your first program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../hardware.html">Hardware guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#recommended-starter-robot">Recommended starter robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#power-budget">Power budget</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#gpio-map-esp32-s3">GPIO map (ESP32-S3)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#qtrlinesensor-wiring-the-standard-line-follow-window">QTRLineSensor wiring (the standard line-follow window)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#if-the-status-led-never-lights">If the status LED never lights</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#sensor-wiring-i2c">Sensor wiring (I2C)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-1-direct-to-the-esp32">Mode 1: direct to the ESP32</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#mode-2-via-a-tca9548a-multiplexer">Mode 2: via a TCA9548A multiplexer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#tcs34725-led-pin">TCS34725 LED pin</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#serial-bus-servo-notes-st-3032-st-3215">Serial bus servo notes (ST-3032 / ST-3215)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#calibrating-the-drivebase">Calibrating the drivebase</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hardware.html#alternative-dc-gear-motors-with-encoders">Alternative: DC gear motors with encoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../hardware.html#calibrating-encoder-counts">Calibrating encoder counts</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line tool</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#firmware-versions-and-provenance">Firmware versions and provenance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#programs-are-compiled-on-the-host">Programs are compiled on the host</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#reference">Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-positional-arguments">Positional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#openbricks-named-arguments">Named Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#Sub-commands">Sub-commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../simulator.html">Simulator</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#describing-your-robot">Describing your robot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#what-the-shim-simulates">What the shim simulates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simulator.html#notes">Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#drive-a-square-st-3032-drivebase">Drive a square (ST-3032 drivebase)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#gyro-corrected-square-icm-45686">Gyro-corrected square (ICM-45686)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#rounded-square-drivebase-curve">Rounded square (DriveBase.curve)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-direct-to-the-esp32-one-tcs34725">Colour sensor, direct to the ESP32 (one TCS34725)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#colour-sensor-array-via-a-tca9548a-two-tcs34725s">Colour sensor array via a TCA9548A (two TCS34725s)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#line-following-qtr-sensor-bar-center-mode">Line following (QTR sensor bar, center mode)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-qtr-sensor-bar">Square up on a line (QTR sensor bar)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#square-up-on-a-line-two-color-sensors">Square up on a line (two color sensors)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#full-robot-st-3032-drivebase-imu-colour-sensor-arm">Full robot (ST-3032 drivebase + IMU + colour sensor + arm)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#servo-dynamometer-two-st-3032s-coupled">Servo dynamometer (two ST-3032s, coupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples.html#servo-soak-test-one-st-3032">Servo soak test (one ST-3032)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../measuring.html">Measuring wheel diameter &amp; axle track</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-1-wheel-diameter-from-a-straight-drive">Step 1 — wheel diameter, from a straight drive</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#step-2-axle-track-from-an-in-place-spin">Step 2 — axle track, from an in-place spin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#checking-the-result">Checking the result</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../measuring.html#what-about-the-gyro">What about the gyro?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../servo-health.html">Servo health &amp; characterisation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#dynamometer-what-does-this-servo-do">Dynamometer: what does <em>this</em> servo do?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../servo-health.html#soak-test-is-it-still-good">Soak test: is it still good?</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="robotics.html"><code class="docutils literal notranslate"><span class="pre">robotics</span></code> — DriveBase</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="robotics.html#openbricks.robotics.drivebase.DriveBase"><code class="docutils literal notranslate"><span class="pre">DriveBase</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="parameters.html">Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.Stop"><code class="docutils literal notranslate"><span class="pre">Stop</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.DriveMode"><code class="docutils literal notranslate"><span class="pre">DriveMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.LineMode"><code class="docutils literal notranslate"><span class="pre">LineMode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="parameters.html#openbricks.parameters.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_motors.html">Motor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#serial-bus-servos-recommended">Serial bus servos (recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#dc-gear-motors-with-encoders">DC gear motors with encoders</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_motors.html#h-bridge-drivers-open-loop">H-bridge drivers (open loop)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_sensors.html">Sensor drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.icm45686">ICM-45686 (raw IMU, hard-tick heading)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.bno055">BNO055 (IMU)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.tcs34725">TCS34725 (color)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.qtr">QTR / QTRX (reflectance array)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.hcsr04">HC-SR04 (ultrasonic distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l0x">VL53L0X (laser distance)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_sensors.html#module-openbricks.drivers.vl53l1x">VL53L1X (laser distance, long range)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="drivers_misc.html">Display &amp; bus drivers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ssd1306">SSD1306 (OLED display)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.ws2812">WS2812 / WS2812B (RGB LED strip)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="drivers_misc.html#module-openbricks.drivers.tca9548a">TCA9548A (I2C multiplexer)</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Interfaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.interfaces">Core interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-openbricks.distance">Distance sensors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="hub.html">Hubs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.StatusLED"><code class="docutils literal notranslate"><span class="pre">StatusLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Button"><code class="docutils literal notranslate"><span class="pre">Button</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.Hub"><code class="docutils literal notranslate"><span class="pre">Hub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.SimpleLED"><code class="docutils literal notranslate"><span class="pre">SimpleLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.NeoPixelLED"><code class="docutils literal notranslate"><span class="pre">NeoPixelLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.PushButton"><code class="docutils literal notranslate"><span class="pre">PushButton</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32DevkitHub</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="hub.html#openbricks.hub.ESP32S3DevkitHub"><code class="docutils literal notranslate"><span class="pre">ESP32S3DevkitHub</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="tools.html">Tools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.wait"><code class="docutils literal notranslate"><span class="pre">wait()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="tools.html#openbricks.tools.StopWatch"><code class="docutils literal notranslate"><span class="pre">StopWatch</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="runtime.html">Runtime services</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.pins">Reserved-GPIO guard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.launcher">Program launcher</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.log">Run logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth">Bluetooth (BLE REPL &amp; console)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="runtime.html#module-openbricks.bluetooth_button">BLE toggle button</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Internals</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#four-layers">Four layers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#pybricks-parity-control-in-c">Pybricks-parity control, in C</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#host-tooling">Host tooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html#status">Status</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Building the firmware</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#one-time-setup">One-time setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#initialise-all-submodules">1. Initialise all submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../build.html#install-the-target-toolchain">2. Install the target toolchain</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#building">Building</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#flashing">Flashing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#verifying-the-image-at-the-repl">Verifying the image at the REPL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#running-tests">Running tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../build.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">openbricks</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API reference</a></li>
+      <li class="breadcrumb-item active">Interfaces</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/1e0ng/openbricks/blob/main/docs/api/interfaces.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="interfaces">
+<h1>Interfaces<a class="headerlink" href="#interfaces" title="Link to this heading"></a></h1>
+<section id="module-openbricks.interfaces">
+<span id="core-interfaces"></span><h2>Core interfaces<a class="headerlink" href="#module-openbricks.interfaces" title="Link to this heading"></a></h2>
+<p>Abstract interfaces for openbricks components.</p>
+<p>MicroPython doesn’t ship full <code class="docutils literal notranslate"><span class="pre">typing.Protocol</span></code> support, so these are plain
+base classes. Drivers should subclass the appropriate interface and fill in
+every method. The higher-level modules (<code class="docutils literal notranslate"><span class="pre">robotics</span></code>, <code class="docutils literal notranslate"><span class="pre">config</span></code>) only depend
+on these interfaces, never on concrete drivers — that’s what makes the system
+plug-and-play.</p>
+<p>If you add a new category of component (e.g. a distance sensor), add its
+interface here.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.interfaces.</span></span><span class="sig-name descname"><span class="pre">Motor</span></span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A bidirectional motor.</p>
+<p>Implementations range from an open-loop H-bridge driver (L298N) to a
+closed-loop geared motor with quadrature encoder (JGB37-520).</p>
+<p>The method names and semantics follow the Pybricks Prime
+<code class="docutils literal notranslate"><span class="pre">Motor</span></code> API (1.21.0): <code class="docutils literal notranslate"><span class="pre">run(speed)</span></code> is degrees per second,
+closed loop; the raw-duty command is <code class="docutils literal notranslate"><span class="pre">dc(duty)</span></code>. Additional
+openbricks methods (<code class="docutils literal notranslate"><span class="pre">coast</span></code>, <code class="docutils literal notranslate"><span class="pre">run_speed</span></code>) remain as aliases.</p>
+<section id="units">
+<h3>Units<a class="headerlink" href="#units" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">duty</span></code> is -100..100 (percent duty cycle, sign = direction).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">speed</span></code> is degrees per second at the output shaft (closed-loop only).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">angle</span></code> is degrees at the output shaft (closed-loop only).</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">speed</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.run" title="Link to this definition"></a></dt>
+<dd><p>Run at <code class="docutils literal notranslate"><span class="pre">speed</span></code> degrees per second, closed loop —
+Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.run()</span></code>. Non-blocking. Concrete: delegates
+to <code class="docutils literal notranslate"><span class="pre">run_speed()</span></code> (the openbricks alias), so open-loop
+drivers surface its <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code>.</p>
+<p>BREAKING (1.21.0): before Pybricks parity this method took
+percent power. That command is now <code class="docutils literal notranslate"><span class="pre">dc(duty)</span></code> — a script
+still calling <code class="docutils literal notranslate"><span class="pre">run(30)</span></code> for power gets 30 deg/s instead
+(slow, not dangerous) or <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> on
+open-loop drivers.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.dc">
+<span class="sig-name descname"><span class="pre">dc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">duty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.dc"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.dc" title="Link to this definition"></a></dt>
+<dd><p>Run at a fixed raw duty cycle (-100..100), open loop —
+Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.dc()</span></code>. Non-blocking. This is the pre-1.21.0
+<code class="docutils literal notranslate"><span class="pre">run()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.stop">
+<span class="sig-name descname"><span class="pre">stop</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.stop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.stop" title="Link to this definition"></a></dt>
+<dd><p>Stop and let the motor spin freely; it gradually stops
+from friction. Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.stop()</span></code> semantics — the
+default of the three stop flavours (stop/brake/hold), and a
+concrete method: it delegates to <code class="docutils literal notranslate"><span class="pre">coast()</span></code>, so every driver
+gets it for free.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.brake">
+<span class="sig-name descname"><span class="pre">brake</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.brake"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.brake" title="Link to this definition"></a></dt>
+<dd><p>Stop with active braking (both terminals shorted).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.coast">
+<span class="sig-name descname"><span class="pre">coast</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.coast"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.coast" title="Link to this definition"></a></dt>
+<dd><p>Stop by cutting drive power (motor free-wheels).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.hold">
+<span class="sig-name descname"><span class="pre">hold</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.hold"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.hold" title="Link to this definition"></a></dt>
+<dd><p>Stop and actively hold the current shaft angle via closed-loop
+control. Only motors with position-mode hardware (e.g. ST-3215) or
+a software position loop implement this; open-loop drivers raise
+<code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> — pick <code class="docutils literal notranslate"><span class="pre">brake</span></code> or <code class="docutils literal notranslate"><span class="pre">coast</span></code> instead.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.angle">
+<span class="sig-name descname"><span class="pre">angle</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.angle" title="Link to this definition"></a></dt>
+<dd><p>Return the current shaft angle in degrees.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.reset_angle">
+<span class="sig-name descname"><span class="pre">reset_angle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">angle</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.reset_angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.reset_angle" title="Link to this definition"></a></dt>
+<dd><p>Set the current angle to <code class="docutils literal notranslate"><span class="pre">angle</span></code> degrees.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.run_speed">
+<span class="sig-name descname"><span class="pre">run_speed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deg_per_s</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.run_speed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.run_speed" title="Link to this definition"></a></dt>
+<dd><p>Hold a target speed (closed loop).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.run_angle">
+<span class="sig-name descname"><span class="pre">run_angle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deg_per_s</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_angle</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.run_angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.run_angle" title="Link to this definition"></a></dt>
+<dd><p>Rotate by <code class="docutils literal notranslate"><span class="pre">target_angle</span></code> degrees at <code class="docutils literal notranslate"><span class="pre">deg_per_s</span></code>. Blocks
+if <code class="docutils literal notranslate"><span class="pre">wait</span></code>; otherwise returns immediately and the caller polls
+<code class="docutils literal notranslate"><span class="pre">done()</span></code> to advance the move and detect completion.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.done">
+<span class="sig-name descname"><span class="pre">done</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.done"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.done" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">True</span></code> if no non-blocking move is in flight or
+the active <code class="docutils literal notranslate"><span class="pre">run_angle(wait=False)</span></code> move has reached its
+target. Drivers that don’t support non-blocking moves always
+return <code class="docutils literal notranslate"><span class="pre">True</span></code> (a wait=True call is finished before
+returning to the caller, by definition).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.speed">
+<span class="sig-name descname"><span class="pre">speed</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.speed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.speed" title="Link to this definition"></a></dt>
+<dd><p>Measured shaft speed in degrees per second — Pybricks
+<code class="docutils literal notranslate"><span class="pre">Motor.speed()</span></code>. Closed-loop drivers implement it (encoder
+observer / servo present-speed register).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.load">
+<span class="sig-name descname"><span class="pre">load</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.load"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.load" title="Link to this definition"></a></dt>
+<dd><p>Measured torque at the shaft in mNm — Pybricks
+<code class="docutils literal notranslate"><span class="pre">Motor.load()</span></code>. Drivers with load feedback (serial servos)
+implement it; the value is derived from the servo’s load
+register and its datasheet stall torque, so treat it as an
+estimate.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.stalled">
+<span class="sig-name descname"><span class="pre">stalled</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.stalled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.stalled" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">True</span></code> when the motor is pushing as hard as it can but
+cannot reach its commanded speed — Pybricks
+<code class="docutils literal notranslate"><span class="pre">Motor.stalled()</span></code>. Drivers with load feedback implement
+it.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.run_time">
+<span class="sig-name descname"><span class="pre">run_time</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">speed</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">time_ms</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">then</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Stop.HOLD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.run_time"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.run_time" title="Link to this definition"></a></dt>
+<dd><p>Run at <code class="docutils literal notranslate"><span class="pre">speed</span></code> deg/s for <code class="docutils literal notranslate"><span class="pre">time_ms</span></code> ms, then stop with
+the <code class="docutils literal notranslate"><span class="pre">then</span></code> flavour — Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.run_time()</span></code>.
+<code class="docutils literal notranslate"><span class="pre">wait=False</span></code> is not supported (no background timer is
+allocated for it); pass <code class="docutils literal notranslate"><span class="pre">wait=True</span></code> or sequence it
+yourself.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.run_target">
+<span class="sig-name descname"><span class="pre">run_target</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">speed</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_angle</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">then</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Stop.HOLD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.run_target"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.run_target" title="Link to this definition"></a></dt>
+<dd><p>Run to the ABSOLUTE <code class="docutils literal notranslate"><span class="pre">target_angle</span></code> (degrees, in the
+<code class="docutils literal notranslate"><span class="pre">reset_angle</span></code> frame) at up to <code class="docutils literal notranslate"><span class="pre">speed</span></code> deg/s — Pybricks
+<code class="docutils literal notranslate"><span class="pre">Motor.run_target()</span></code>. Built on the relative <code class="docutils literal notranslate"><span class="pre">run_angle</span></code>:
+the delta is measured from <code class="docutils literal notranslate"><span class="pre">angle()</span></code> at call time.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Motor.run_until_stalled">
+<span class="sig-name descname"><span class="pre">run_until_stalled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">speed</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">then</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Stop.COAST</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">duty_limit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Motor.run_until_stalled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Motor.run_until_stalled" title="Link to this definition"></a></dt>
+<dd><p>Run at <code class="docutils literal notranslate"><span class="pre">speed</span></code> deg/s until <code class="docutils literal notranslate"><span class="pre">stalled()</span></code>, apply the
+<code class="docutils literal notranslate"><span class="pre">then</span></code> flavour, and return the angle where it stalled —
+Pybricks <code class="docutils literal notranslate"><span class="pre">Motor.run_until_stalled()</span></code> (its default <code class="docutils literal notranslate"><span class="pre">then</span></code>
+== Stop.COAST).</p>
+<p><code class="docutils literal notranslate"><span class="pre">duty_limit</span></code> (percent, 0 &lt; limit &lt;= 100) caps the motor’s
+torque for the duration of the run — the Pybricks gripper-
+homing pattern: drive gently into the end stop without
+crushing it. The cap is applied before the motion starts and
+restored afterwards, stall or not. Drivers opt in via
+<code class="docutils literal notranslate"><span class="pre">_duty_limit_push</span></code> / <code class="docutils literal notranslate"><span class="pre">_duty_limit_pop</span></code> (the ST3215/
+ST3032 serial servos implement it as a temporary torque-
+limit register write; their stall detection scales to the
+cap).</p>
+</dd></dl>
+
+</section>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.interfaces.Servo">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.interfaces.</span></span><span class="sig-name descname"><span class="pre">Servo</span></span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Servo"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Servo" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A position-controlled servo (angle-addressable).</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Servo.move_to">
+<span class="sig-name descname"><span class="pre">move_to</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">angle_deg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">speed</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Servo.move_to"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Servo.move_to" title="Link to this definition"></a></dt>
+<dd><p>Move to absolute angle in degrees.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.Servo.angle">
+<span class="sig-name descname"><span class="pre">angle</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#Servo.angle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.Servo.angle" title="Link to this definition"></a></dt>
+<dd><p>Read back the current angle.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.interfaces.IMU">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.interfaces.</span></span><span class="sig-name descname"><span class="pre">IMU</span></span><a class="reference internal" href="../_modules/openbricks/interfaces.html#IMU"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.IMU" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A 3-axis inertial measurement unit.</p>
+<dl class="simple">
+<dt>The expected unit convention is:</dt><dd><ul class="simple">
+<li><p>heading/yaw/pitch/roll in degrees</p></li>
+<li><p>angular_velocity in degrees / second</p></li>
+<li><p>acceleration in m / s^2</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.IMU.heading">
+<span class="sig-name descname"><span class="pre">heading</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#IMU.heading"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.IMU.heading" title="Link to this definition"></a></dt>
+<dd><p>Return heading (yaw) in degrees, wrapped to [-180, 180).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.IMU.angular_velocity">
+<span class="sig-name descname"><span class="pre">angular_velocity</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#IMU.angular_velocity"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.IMU.angular_velocity" title="Link to this definition"></a></dt>
+<dd><p>Return (wx, wy, wz) in deg/s.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.IMU.acceleration">
+<span class="sig-name descname"><span class="pre">acceleration</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#IMU.acceleration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.IMU.acceleration" title="Link to this definition"></a></dt>
+<dd><p>Return (ax, ay, az) in m/s^2.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.interfaces.ColorSensor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.interfaces.</span></span><span class="sig-name descname"><span class="pre">ColorSensor</span></span><a class="reference internal" href="../_modules/openbricks/interfaces.html#ColorSensor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.ColorSensor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>An RGB-ish color sensor.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.ColorSensor.rgb">
+<span class="sig-name descname"><span class="pre">rgb</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#ColorSensor.rgb"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.ColorSensor.rgb" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">(r,</span> <span class="pre">g,</span> <span class="pre">b)</span></code> each in 0..255.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.interfaces.ColorSensor.ambient">
+<span class="sig-name descname"><span class="pre">ambient</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/interfaces.html#ColorSensor.ambient"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.interfaces.ColorSensor.ambient" title="Link to this definition"></a></dt>
+<dd><p>Return ambient / clear-channel intensity in 0..100.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-openbricks.distance">
+<span id="distance-sensors"></span><h2>Distance sensors<a class="headerlink" href="#module-openbricks.distance" title="Link to this heading"></a></h2>
+<p>Distance-sensor interface, kept separate from <code class="docutils literal notranslate"><span class="pre">interfaces.py</span></code>.</p>
+<p>Why split: <code class="docutils literal notranslate"><span class="pre">openbricks/__init__.py</span></code> eagerly imports the four core
+interfaces (Motor / Servo / IMU / ColorSensor) so that every
+<code class="docutils literal notranslate"><span class="pre">import</span> <span class="pre">openbricks</span></code> pays them. The observer’s variance test runs
+close to the MicroPython heap ceiling, so adding even a small class
+to <code class="docutils literal notranslate"><span class="pre">interfaces.py</span></code> tips it over. Distance-sensor users explicitly
+import this module.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="openbricks.distance.DistanceSensor">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">openbricks.distance.</span></span><span class="sig-name descname"><span class="pre">DistanceSensor</span></span><a class="reference internal" href="../_modules/openbricks/distance.html#DistanceSensor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.distance.DistanceSensor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>A forward-facing range sensor (HC-SR04 / VL53L0X).</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="openbricks.distance.DistanceSensor.distance_mm">
+<span class="sig-name descname"><span class="pre">distance_mm</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/openbricks/distance.html#DistanceSensor.distance_mm"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#openbricks.distance.DistanceSensor.distance_mm" title="Link to this definition"></a></dt>
+<dd><p>Distance ahead in millimetres; -1 if no echo / out of range.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="drivers_misc.html" class="btn btn-neutral float-left" title="Display &amp; bus drivers" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="hub.html" class="btn btn-neutral float-right" title="Hubs" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, the openbricks contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
