@@ -90,5 +90,9 @@ pushed when the chassis body drives into it.
 
 - The sim needs the `[sim]` extra (`mujoco`, `numpy`). Without it,
   `openbricks sim …` prints an install hint instead of crashing.
+- The wheel carries the firmware package (`openbricks.drivers.*`,
+  `openbricks.parameters`, …) since 3.6.0, so a plain
+  `pipx install 'openbricks[sim]'` runs hub-style scripts; earlier
+  releases needed a repo checkout for that.
 - Firmware-only users never need the simulator — it's strictly
   host-side tooling.

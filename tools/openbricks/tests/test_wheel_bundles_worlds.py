@@ -74,6 +74,32 @@ class WheelBundlesWorldsTests(unittest.TestCase):
                 "install via ``pip install build`` (already in the "
                 "[dev] extras of ``openbricks``)")
 
+    def test_wheel_contains_the_firmware_package(self):
+        # 3.6.0: the sim runs the FIRMWARE'S driver code (its shim
+        # subclasses openbricks.drivers.*, user scripts import them),
+        # so the wheel must carry the ``openbricks`` package that
+        # lives at the repo root. Wheels up to 3.5.0 didn't, and a
+        # pipx install could not ``sim run`` any hub-style script
+        # (``No module named 'openbricks'``). Pin the modules the shim
+        # itself imports plus the ones every bench script does.
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = _build_wheel_into(tmp)
+            with zipfile.ZipFile(wheel) as zf:
+                names = zf.namelist()
+        for wanted in ("openbricks/__init__.py",
+                       "openbricks/parameters.py",
+                       "openbricks/drivers/__init__.py",
+                       "openbricks/drivers/qtr.py",
+                       "openbricks/drivers/st3032.py",
+                       "openbricks/drivers/tcs34725.py",
+                       "openbricks/robotics/drivebase.py"):
+            self.assertIn(wanted, names,
+                          "wheel lacks %s — setup.py::_sync_firmware / "
+                          "packages.find include" % wanted)
+        # ...and no bytecode caches from the checkout.
+        self.assertFalse([n for n in names if "__pycache__" in n
+                          and n.startswith("openbricks/")])
+
     def test_wheel_contains_world_xml_for_each_alias(self):
         with tempfile.TemporaryDirectory() as tmp:
             wheel = _build_wheel_into(tmp)

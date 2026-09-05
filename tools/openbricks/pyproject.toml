@@ -112,11 +112,16 @@ openbricks = "openbricks_dev.cli:main"
 [tool.setuptools.dynamic]
 version = { attr = "openbricks_dev.__version__" }
 
-# Both the CLI module (``openbricks_dev``, kept as a Python module
-# name to avoid colliding with the firmware-side ``openbricks``
-# package on the hub) and the sim module ship in the same wheel.
+# Three packages ship in the one wheel: the CLI module
+# (``openbricks_dev``, kept as a Python module name so it can sit
+# beside the firmware package), the sim module, and — since 3.6.0 —
+# the firmware package ``openbricks`` itself, mirrored into
+# ``tools/openbricks/openbricks/`` by ``setup.py::_sync_firmware`` at
+# build time. The simulator runs the firmware's own driver code and
+# user scripts import ``openbricks.drivers.*``; without the package in
+# the wheel, ``openbricks sim run`` only worked from a repo checkout.
 [tool.setuptools.packages.find]
-include = ["openbricks_dev*", "openbricks_sim*"]
+include = ["openbricks_dev*", "openbricks_sim*", "openbricks", "openbricks.*"]
 
 # Non-Python data inside the sim package — the WRO + practice
 # worlds. ``setuptools.packages.find`` only catches ``*.py``
@@ -187,9 +192,10 @@ skip = [
     "*-win32",
 ]
 # After each wheel builds, install it into a clean venv and import
-# the C extension. Catches a broken wheel at build time instead of
+# the C extension AND the bundled firmware package (the sim's driver
+# shim needs it). Catches a broken wheel at build time instead of
 # after publish.
-test-command = 'python -c "from openbricks_sim import _native; assert hasattr(_native, \"TrapezoidalProfile\"); print(_native.__file__)"'
+test-command = 'python -c "from openbricks_sim import _native; assert hasattr(_native, \"TrapezoidalProfile\"); import openbricks.parameters; print(_native.__file__)"'
 # Don't test the x86_64 slice of the universal2 macOS wheel. The arm64
 # runner would run that test under Rosetta (`arch -x86_64 pip install`),
 # and installing our deps pulls in `cryptography`, which ships only

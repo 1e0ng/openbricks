@@ -83,11 +83,14 @@ from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
                                      SimDistanceSensor,
                                      SimReflectanceArray)
 
-# The firmware package (``openbricks``) is not part of the wheel: the
-# sim runs against a checkout, whose root is three directories up.
-# Rigged here at import (``install()`` repeats it idempotently) because
-# the shim's own signatures default to ``openbricks.parameters``
-# members (``then=Stop.COAST``), which must resolve at class-body time.
+# The firmware package (``openbricks``) ships in the wheel since 3.6.0
+# (``setup.py::_sync_firmware``). In a repo checkout the root — three
+# directories up — goes FIRST on sys.path so the live firmware sources
+# win over any installed copy; in an installed wheel that path holds
+# no package and the bundled copy is found in site-packages. Rigged
+# here at import (``install()`` repeats it idempotently) because the
+# shim's own signatures default to ``openbricks.parameters`` members
+# (``then=Stop.COAST``), which must resolve at class-body time.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -1718,10 +1721,11 @@ def install(runtime: SimRuntime) -> None:
         state.prev_time_attrs[attr] = getattr(_real_time, attr, _MISSING)
         setattr(_real_time, attr, patched)
 
-    # 3. Make ``import openbricks`` work from within a sim run by
-    # adding the repo root to sys.path. The openbricks-sim package
-    # lives at ``<repo>/tools/openbricks-sim/openbricks_sim/`` so
-    # the repo root is three directories up.
+    # 3. In a repo checkout, make ``import openbricks`` resolve to the
+    # live firmware sources by putting the repo root first on
+    # sys.path (``<repo>/tools/openbricks/openbricks_sim/`` is three
+    # directories down). An installed wheel carries its own copy of
+    # the firmware package (3.6.0+), so there this is a no-op path.
     state.prev_sys_path = list(sys.path)
     repo_root = Path(__file__).resolve().parents[3]
     if str(repo_root) not in sys.path:
