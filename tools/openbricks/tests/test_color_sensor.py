@@ -207,6 +207,80 @@ class TexturedPlaneSamplingTests(unittest.TestCase):
 # End-to-end: construct via the shim using the real openbricks
 # ColorSensor interface.
 
+# A level, side-looking camera on the robot's left flank and a blue
+# LEGO-brick-sized column standing 0.2 m to the left. The column is
+# 16 x 16 mm, 40 mm tall, its top at the camera's height.
+_SIDE_TEMPLATE = """\
+<mujoco model="color_sensor_side_test">
+  <option timestep="0.001" gravity="0 0 -9.81"/>
+  <worldbody>
+    <body name="chassis" pos="0 0 0.05">
+      <freejoint name="chassis_free"/>
+      <inertial pos="0 0 0" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
+      <geom name="chassis_body" type="box" size="0.02 0.02 0.01"/>
+      <camera name="chassis_cam_down" pos="0 0.06 -0.03"
+              xyaxes="{xyaxes}" fovy="20"/>
+    </body>
+    <geom name="floor" type="plane" size="0.5 0.5 0.1" rgba="1 1 1 1"/>
+    {brick}
+  </worldbody>
+</mujoco>
+"""
+_BRICK = ('<geom name="brick" type="box" pos="0 {y} 0.02" '
+          'size="0.008 0.008 0.02" rgba="0.1 0.3 0.8 1"/>')
+
+
+def _make_side_runtime(brick_y=0.20, brick=True):
+    from openbricks_sim.chassis import camera_xyaxes
+    xml = _SIDE_TEMPLATE.format(
+        xyaxes=camera_xyaxes(90.0, 0.0),
+        brick=_BRICK.format(y=brick_y) if brick else "")
+    model = mujoco.MjModel.from_xml_string(xml)
+    return SimRuntime(model, mujoco.MjData(model))
+
+
+class SideFacingSensorTests(unittest.TestCase):
+    """The camera's own axis is the look direction (not world -Z),
+    a range cuts the ray, and a field of view averages a cone."""
+
+    def test_single_ray_reads_the_brick_it_is_aimed_at(self):
+        cs = SimColorSensor(_make_side_runtime())
+        self.assertEqual(cs.rgb(), (25, 76, 204))
+
+    def test_nothing_within_range_reads_black(self):
+        cs = SimColorSensor(_make_side_runtime(), range_m=0.10)   # brick at 0.14
+        self.assertEqual(cs.rgb(), (0, 0, 0))
+        self.assertEqual(cs.ambient(), 0)
+
+    def test_no_brick_is_a_miss_not_the_floor(self):
+        # Level ray over a flat floor hits nothing: a down-only model
+        # would have reported white.
+        cs = SimColorSensor(_make_side_runtime(brick=False))
+        self.assertEqual(cs.rgb(), (0, 0, 0))
+
+    def test_narrow_cone_is_the_brick_wide_cone_is_a_tinted_scene(self):
+        # A 16 mm brick 140 mm away subtends ~6.5 degrees: it fills a
+        # 4-degree cone, while a 40-degree cone from 20 mm up mostly
+        # sees the white floor. Ambient light has no distance falloff
+        # (radiance), so the wide reading is the plain scene average:
+        # lighter than the brick, and — the signal a classifier lives
+        # on — tinted toward the brick relative to the same cone with
+        # no brick in it.
+        narrow = SimColorSensor(_make_side_runtime(), fov_deg=4.0)
+        wide = SimColorSensor(_make_side_runtime(), fov_deg=40.0)
+        empty = SimColorSensor(_make_side_runtime(brick=False), fov_deg=40.0)
+        self.assertEqual(narrow.rgb(), (25, 76, 204))
+        rw, gw, bw = wide.rgb()
+        r0, g0, b0 = empty.rgb()
+        self.assertGreater(wide.ambient(), narrow.ambient())   # floor in view
+        self.assertLess(rw, 255)                                # brick in view
+        self.assertGreater(bw - rw, (b0 - r0) + 5, ((rw, gw, bw), (r0, g0, b0)))
+
+    def test_rejects_non_positive_range(self):
+        with self.assertRaises(ValueError):
+            SimColorSensor(_make_side_runtime(), range_m=0.0)
+
+
 class ShimTCS34725Tests(unittest.TestCase):
 
     def setUp(self):
@@ -242,6 +316,43 @@ class ShimTCS34725Tests(unittest.TestCase):
         self.assertGreaterEqual(amb, 0); self.assertLessEqual(amb, 100)
         c, r16, g16, b16 = sensor.raw()
         self.assertGreaterEqual(c, 0); self.assertLessEqual(c, 65535)
+
+    def test_is_the_firmware_driver_over_a_synthesised_raw(self):
+        # rgb()/ambient() must be the driver's own arithmetic: the
+        # class inherits them and only raw() is the sim's.
+        from openbricks.drivers.tcs34725 import TCS34725
+        from openbricks_sim.shim import ShimTCS34725, _RealTCS34725
+        self.assertTrue(issubclass(ShimTCS34725, _RealTCS34725))
+        self.assertIs(ShimTCS34725.rgb, _RealTCS34725.rgb)
+        self.assertIs(ShimTCS34725.ambient, _RealTCS34725.ambient)
+        s = TCS34725(None, integration_ms=24)
+        self.assertEqual(s._full_scale, 10240)      # 10 cycles x 1024
+        c, r, g, b = s.raw()
+        self.assertEqual(c, r + g + b)
+
+    def test_white_reads_grey_thirds_and_saturates_clear(self):
+        # The checker floor under the default spawn is light grey
+        # (0.8 / 0.9): channel/clear puts every channel near 85 and
+        # ambient near the surface brightness — NOT (255, 255, 255).
+        from openbricks.drivers.tcs34725 import TCS34725
+        s = TCS34725(None)
+        r, g, b = s.rgb()
+        for v in (r, g, b):
+            self.assertTrue(80 <= v <= 90, (r, g, b))
+        self.assertTrue(75 <= s.ambient() <= 95, s.ambient())
+
+    def test_a_red_slab_is_red_dominant_by_ratio(self):
+        from openbricks_sim import shim
+        from openbricks_sim.robot import SimRobot
+        from openbricks.drivers.tcs34725 import TCS34725
+        shim.uninstall()
+        robot = SimRobot(world="practice-zones")
+        shim.install(robot.runtime)
+        robot.set_pose(400.0, 0.0)                     # over the red zone
+        r, g, b = TCS34725(None).rgb()
+        # zone rgba (230, 25, 25)/255 -> r/(r+g+b) = 0.82 -> ~209
+        self.assertTrue(195 <= r <= 220, (r, g, b))
+        self.assertLess(g, 40); self.assertLess(b, 40)
 
 
 if __name__ == "__main__":

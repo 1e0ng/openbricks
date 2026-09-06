@@ -449,13 +449,9 @@ class FloorSampler:
     """Shared "what colour is the floor at this point?" service for
     every down-facing sensor model.
 
-    Casts a ray from a world point straight down (world -Z) and
-    resolves the colour of whatever geom it hits. The look direction
-    is hard-coded to world -Z rather than the sensor's actual local
-    -Z so a slightly-pitched chassis (e.g. ~6.7° wheel-settle) still
-    samples the floor directly under the sensor — the cosine error
-    against body-frame Z is < 1% at that tilt, which is well below
-    any sensor's quantisation.
+    Casts a ray from a world point along a direction (``rgba_hit``;
+    ``rgba_below`` is the straight-down case the reflectance array
+    uses) and resolves the colour of whatever geom it hits first.
 
     Surface-colour resolution dispatches on what the ray hit:
 
@@ -499,15 +495,19 @@ class FloorSampler:
     def rgba_below(self, pnt):
         """Return the rgba (4 floats, 0..1) of the geom straight
         below world point ``pnt``, or None if the ray missed."""
+        return self.rgba_hit(pnt, (0.0, 0.0, -1.0))
+
+    def rgba_hit(self, pnt, vec, max_dist=math.inf):
+        """Return the rgba (4 floats, 0..1) of the first geom a ray
+        from world point ``pnt`` along ``vec`` hits within
+        ``max_dist``, or None if it hits nothing that close."""
         # Lazy-import numpy at call-site; mujoco depends on it so it's
         # always available, but keeping the runtime module's top-level
         # imports minimal helps cold-start time.
         import numpy as np
 
         pnt = np.asarray(pnt, dtype=np.float64)
-        # World -Z. See class docstring for why we use world axis
-        # rather than the sensor's local -Z.
-        vec = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+        vec = np.asarray(vec, dtype=np.float64)
         geom_id = np.zeros(1, dtype=np.int32)
         dist = mujoco.mj_ray(self.runtime.model, self.runtime.data,
                               pnt, vec,
@@ -515,7 +515,7 @@ class FloorSampler:
                               1,                       # flg_static (include static)
                               self._chassis_body_id,   # bodyexclude
                               geom_id)
-        if geom_id[0] < 0 or dist < 0:
+        if geom_id[0] < 0 or dist < 0 or dist > max_dist:
             return None
         gid = int(geom_id[0])
         m = self.runtime.model
@@ -637,40 +637,97 @@ def _luma(r, g, b):
     return 0.299 * r + 0.587 * g + 0.114 * b
 
 
-class SimColorSensor:
-    """Down-facing colour sensor, MuJoCo-side.
+def _cone_directions(fov_deg):
+    """Camera-frame unit vectors sampling a cone of full angle
+    ``fov_deg`` about the camera's look axis (-Z): the axis alone for
+    a zero cone, else the axis plus rings at a third, two thirds and
+    the full half-angle (6 + 12 + 18 rays, 37 in all — fine enough
+    that a 16 mm brick 110 mm off inside a 40-degree cone is a few
+    rays, not a coin toss). Equal weights — a bare photodiode
+    integrates its field of view roughly uniformly."""
+    dirs = [(0.0, 0.0, -1.0)]
+    if fov_deg <= 0.0:
+        return dirs
+    half = math.radians(fov_deg) / 2.0
+    for tilt, count in ((half / 3.0, 6), (half * 2.0 / 3.0, 12), (half, 18)):
+        for i in range(count):
+            phi = 2.0 * math.pi * i / count
+            dirs.append((math.sin(tilt) * math.cos(phi),
+                         math.sin(tilt) * math.sin(phi),
+                         -math.cos(tilt)))
+    return dirs
 
-    Samples the floor straight under a chassis camera through
-    :class:`FloorSampler` (see it for the raycast + surface-colour
-    rules). Real TCS34725 sensors integrate over a small FOV; this
-    is a single-point approximation.
+
+class SimColorSensor:
+    """Colour sensor, MuJoCo-side: what a TCS34725 mounted at one of
+    the chassis cameras sees.
+
+    Looks along the camera's own axis (a MuJoCo camera looks down
+    its -Z; ``chassis.camera_xyaxes`` aims it), so the sensor can
+    face the floor, a wall, or a LEGO brick standing beside the
+    robot. Rays start at the camera and stop at ``range_m``; the
+    first geom hit gives the colour through :class:`FloorSampler`
+    (mat texels on a textured plane, material or geom rgba
+    otherwise).
+
+    ``fov_deg`` > 0 integrates a cone instead of one ray: the
+    returned colour is the plain average over the sampled
+    directions, a miss counting as black (nothing reflected). That
+    keeps the colour RATIOS of a brick that fills part of the field
+    while its brightness scales with coverage — the behaviour the
+    real sensor's ratio-normalised ``rgb()`` and clear-channel
+    ``ambient()`` are built on.
 
     Methods match :class:`openbricks.interfaces.ColorSensor`:
 
-      * ``rgb()`` returns ``(r, g, b)`` ints in 0..255.
+      * ``rgb()`` returns ``(r, g, b)`` ints in 0..255 (surface
+        reflectance; the TCS34725 shim converts to the driver's
+        channel/clear form on top of this).
       * ``ambient()`` returns a 0..100 luminance score (BT.601).
     """
 
     def __init__(self,
                  runtime: SimRuntime,
                  camera_name: str = "chassis_cam_down",
-                 chassis_body_name: str = "chassis") -> None:
+                 chassis_body_name: str = "chassis",
+                 fov_deg: float = 0.0,
+                 range_m: float = 10.0) -> None:
         self.runtime = runtime
         self._cam_id = mujoco.mj_name2id(
             runtime.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
         if self._cam_id < 0:
             raise ValueError("no camera named " + repr(camera_name) +
                              " in model")
+        if range_m <= 0.0:
+            raise ValueError("range_m must be positive")
         self._floor = FloorSampler(runtime, chassis_body_name)
+        self._dirs = _cone_directions(float(fov_deg))
+        self._range = float(range_m)
 
     def _hit_rgba(self):
-        """Return the rgba (4 floats, 0..1) of the geom under the
-        camera, or None if the ray missed."""
-        # Force a forward pass so cam_xpos reflects the latest qpos.
-        # (mj_step does this; explicit forward is for cases where the
-        # caller queries before stepping.)
+        """Return the rgba (4 floats, 0..1) the sensor sees: the one
+        ray's hit for a zero cone (None on a miss), else the average
+        over the cone with misses as black."""
+        import numpy as np
+        # Force a forward pass so cam_xpos/cam_xmat reflect the latest
+        # qpos. (mj_step does this; explicit forward is for cases
+        # where the caller queries before stepping.)
         mujoco.mj_forward(self.runtime.model, self.runtime.data)
-        return self._floor.rgba_below(self.runtime.data.cam_xpos[self._cam_id])
+        origin = np.asarray(self.runtime.data.cam_xpos[self._cam_id],
+                            dtype=np.float64)
+        rot = np.asarray(self.runtime.data.cam_xmat[self._cam_id],
+                         dtype=np.float64).reshape(3, 3)
+        if len(self._dirs) == 1:
+            return self._floor.rgba_hit(
+                origin, rot @ np.asarray(self._dirs[0]), self._range)
+        total = np.zeros(3)
+        for d in self._dirs:
+            rgba = self._floor.rgba_hit(origin, rot @ np.asarray(d),
+                                        self._range)
+            if rgba is not None:
+                total += rgba[:3]
+        avg = total / len(self._dirs)
+        return (float(avg[0]), float(avg[1]), float(avg[2]), 1.0)
 
     def rgb(self):
         rgba = self._hit_rgba()

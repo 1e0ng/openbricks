@@ -59,13 +59,31 @@ class ChassisSpec:
     # origin on the axle). The defaults reproduce the historical
     # layout: every down-facing sensor 10 mm behind the body's front
     # edge, on the centre line.
-    #   color_sensor_x/y — the centre down camera (``chassis_cam_down``,
-    #       the TCS34725 shim's no-mux binding); the left/right pair
-    #       sits 18 mm either side of it.
+    #   color_sensor_x/y/z — the centre colour camera (``chassis_cam_down``,
+    #       the TCS34725 shim's no-mux binding). z is chassis-frame too:
+    #       the floor is at -(wheel_radius + 0.005); the default is
+    #       2 mm above the body's underside.
+    #   color_sensor_yaw/pitch — where that camera LOOKS, degrees in
+    #       the chassis frame: yaw counter-clockwise about +Z (0 =
+    #       forward, 90 = left), pitch elevation (-90 = straight down,
+    #       0 = level). Default: straight down, the historical layout.
+    #       A sensor bolted to the robot's flank reading note bricks
+    #       beside the line is yaw 90, pitch 0, at brick height.
+    #   color_sensor_fov — full cone angle the sensor integrates over,
+    #       degrees; 0 = a single ray. A bare TCS34725 sees a wide
+    #       patch, which is what lets it read a 16 mm brick 10 cm off.
+    #   color_sensor_range — metres beyond which nothing reflects.
+    #   The left/right down-camera pair sits 18 mm either side of
+    #       (color_sensor_x, color_sensor_y), always looking down.
     #   line_sensor_x    — the reflectance-array site (``chassis_line``):
     #       the QTR shim spreads its elements left/right of this point.
-    color_sensor_x: float = 0.060
-    color_sensor_y: float = 0.0
+    color_sensor_x:     float = 0.060
+    color_sensor_y:     float = 0.0
+    color_sensor_z:     float = -0.023
+    color_sensor_yaw:   float = 0.0
+    color_sensor_pitch: float = -90.0
+    color_sensor_fov:   float = 0.0
+    color_sensor_range: float = 10.0
     line_sensor_x:  float = 0.060
 
     # Pose: where to drop the chassis in the world. Caller can
@@ -76,6 +94,34 @@ class ChassisSpec:
     pos_x: float = 0.0
     pos_y: float = 0.0
     yaw_deg: float = 0.0
+
+
+def camera_xyaxes(yaw_deg: float, pitch_deg: float) -> str:
+    """MJCF ``xyaxes`` for a camera that LOOKS along the body-frame
+    direction (yaw, pitch): yaw counter-clockwise about +Z from +X,
+    pitch elevation (-90 = down). A MuJoCo camera looks along its
+    own -Z, so the camera's Z is the reverse of the look direction;
+    its X ("image right") is look x up, with body +Z as up except
+    when looking straight up or down, where body +X takes over — the
+    historical down camera comes out as ``0 -1 0 1 0 0`` exactly."""
+    a, e = math.radians(yaw_deg), math.radians(pitch_deg)
+    d = (math.cos(e) * math.cos(a), math.cos(e) * math.sin(a), math.sin(e))
+    up = (0.0, 0.0, 1.0) if abs(d[2]) < 0.99 else (1.0, 0.0, 0.0)
+
+    def cross(u, v):
+        return (u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0])
+
+    x = cross(d, up)
+    n = math.sqrt(sum(c * c for c in x))
+    x = tuple(c / n for c in x)
+    y = cross(x, d)
+
+    def fmt(v):
+        v = round(v, 4)
+        return "%.4f" % (0.0 if v == 0 else v)
+    return " ".join(fmt(c) for c in x + y)
 
 
 def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
@@ -164,12 +210,12 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         '              rgba="0.60 0.60 0.60 1.0"\n'
         '              friction="0.3 0.02 0.0001"/>\n'
         '      </body>\n'
-        '      <!-- Downward colour-sensor camera (for TCS34725 shim).\n'
-        '           xyaxes: image-right = body -Y, image-up = body +X.\n'
-        '           Cross product gives camera +Z = body +Z, so the\n'
-        '           camera looks along body -Z (straight down). -->\n'
-        '      <camera name="{name}_cam_down" pos="{csx:.4f} {csy:.4f} {cam_z:.4f}"\n'
-        '              xyaxes="0 -1 0 1 0 0" fovy="20"/>\n'
+        '      <!-- Colour-sensor camera (for the TCS34725 shim): placed\n'
+        '           and aimed by ChassisSpec.color_sensor_* (default\n'
+        '           straight down: xyaxes 0 -1 0 1 0 0, camera +Z =\n'
+        '           body +Z, so it looks along body -Z). -->\n'
+        '      <camera name="{name}_cam_down" pos="{csx:.4f} {csy:.4f} {csz:.4f}"\n'
+        '              xyaxes="{cs_xyaxes}" fovy="20"/>\n'
         '      <!-- Left/right pair, offset either side of the centre\n'
         '           line. Line-following is entirely about the\n'
         '           DIFFERENCE between two sensors straddling a line,\n'
@@ -207,6 +253,8 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         cm=spec.caster_mass, cr=spec.caster_radius,
         cam_z=-bz + 0.002,
         csx=spec.color_sensor_x, csy=spec.color_sensor_y,
+        csz=spec.color_sensor_z,
+        cs_xyaxes=camera_xyaxes(spec.color_sensor_yaw, spec.color_sensor_pitch),
         # Half the sensor separation. The pair straddles a line, so
         # this is what makes their readings differ at all.
         csy_l=spec.color_sensor_y + 0.018,

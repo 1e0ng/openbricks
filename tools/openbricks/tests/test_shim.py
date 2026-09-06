@@ -1388,6 +1388,74 @@ class ShimQTRTests(unittest.TestCase):
         self.assertGreater(ch.value(), 900)
 
 
+class SideColourSensorOnTheMatTests(unittest.TestCase):
+    """A TCS34725 on the robot's left flank, level, 35 mm up (the
+    bench robot's mount), 60 mm ahead of the axle: with the robot on
+    the note line it looks across 110 mm of mat at the note brick
+    standing on its square — or, between stubs, at the border wall
+    200 mm away. Readings are the driver's channel-over-clear."""
+
+    SPEC = dict(wheel_radius=0.0432, axle_length=0.135, caster_offset=0.12,
+                line_sensor_x=0.095,
+                color_sensor_x=0.06, color_sensor_y=0.07, color_sensor_z=-0.013,
+                color_sensor_yaw=90.0, color_sensor_pitch=0.0,
+                color_sensor_range=0.30)
+    RED_X, GREEN_X = 313.7, 445.6      # fixed notes' squares (mm)
+    LINE_Y = 304.4                     # chassis y on the right-edge follow
+
+    def setUp(self):
+        if shim.is_installed():
+            shim.uninstall()
+        self.addCleanup(lambda: shim.is_installed() and shim.uninstall())
+
+    def _sensor(self, fov):
+        from openbricks_sim.chassis import ChassisSpec
+        self.robot = SimRobot(world="wro-2026-elementary",
+                              chassis_spec=ChassisSpec(color_sensor_fov=fov,
+                                                       pos_y=self.LINE_Y / 1000.0,
+                                                       **self.SPEC))
+        shim.install(self.robot.runtime)
+        # Imported AFTER install: that is when the name resolves to
+        # the shim class, as it does for a script the CLI runs.
+        from openbricks.drivers.tcs34725 import TCS34725
+        return TCS34725(None)
+
+    def _at(self, sensor_x_mm):
+        # The camera sits 60 mm ahead of the chassis origin.
+        self.robot.set_pose(sensor_x_mm - 60.0, self.LINE_Y)
+
+    def test_single_ray_reads_the_brick_ratio_normalised(self):
+        s = self._sensor(fov=0.0)
+        self._at(self.RED_X)
+        # lego_red rgba (0.85, 0.10, 0.10): r/(r+g+b) = 0.81 -> 207.
+        self.assertEqual(s.rgb(), (207, 23, 23))
+        self.assertTrue(30 <= s.ambient() <= 40, s.ambient())
+        self._at(self.GREEN_X)
+        r, g, b = s.rgb()
+        self.assertGreater(g, 3 * r); self.assertGreater(g, 2 * b)
+
+    def test_between_notes_the_ray_meets_only_the_wall(self):
+        s = self._sensor(fov=0.0)
+        self._at(380.0)
+        # The 0.9-grey border wall, 200 mm off: white by ratio.
+        self.assertEqual(s.rgb(), (85, 85, 85))
+        self.assertGreater(s.ambient(), 80)
+
+    def test_cone_reads_each_brick_as_a_shift_against_the_scene(self):
+        # A 20-degree cone takes in mat and wall around the brick; the
+        # brick is a colour shift on that scene — what a classifier
+        # comparing the six branches actually uses.
+        s = self._sensor(fov=20.0)
+        self._at(380.0)
+        r0, g0, b0 = s.rgb()
+        self._at(self.RED_X)
+        r, g, b = s.rgb()
+        self.assertGreater((r - g) - (r0 - g0), 25, ((r, g, b), (r0, g0, b0)))
+        self._at(self.GREEN_X)
+        r, g, b = s.rgb()
+        self.assertGreater((g - r) - (g0 - r0), 25, ((r, g, b), (r0, g0, b0)))
+
+
 class SimIcm45686Tests(_ShimTestBase):
     """The REAL firmware ICM-45686 driver runs unchanged in the sim —
     no Shim class: ``_native.icm45686`` plus the motor_process

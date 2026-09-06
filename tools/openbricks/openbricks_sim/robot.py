@@ -153,8 +153,11 @@ class SimRobot:
         # calls heading() / angular_velocity() / acceleration().
         self.imu = SimIMU(self.runtime)
 
-        # Down-facing colour sensor — raycast against the floor.
-        self.color_sensor = SimColorSensor(self.runtime)
+        # Colour sensor at the chassis's colour camera, aimed and
+        # sized (cone, range) by the spec.
+        self.color_sensor = SimColorSensor(
+            self.runtime, fov_deg=spec.color_sensor_fov,
+            range_m=spec.color_sensor_range)
 
         # Forward-facing distance sensor (HC-SR04 / VL53L0X equivalent).
         # Raycasts from the chassis_dist site along body +X.

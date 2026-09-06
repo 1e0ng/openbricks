@@ -3,6 +3,29 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.8.0 — the sim's colour sensor can be mounted anywhere, aimed anywhere, and reads like the driver
+
+The bench robot's TCS34725 sits on its left flank at brick height
+and looks sideways at the note bricks standing beside the line. The
+sim's colour sensor was a single ray straight down from a fixed
+front camera, and its `rgb()` was the surface colour scaled to 255
+per channel — so it read printed squares instead of bricks, and a
+white brick came out as the bluest thing on the mat.
+
+- `ChassisSpec.color_sensor_z / _yaw / _pitch` place and aim the
+  centre colour camera (`chassis.camera_xyaxes` does the MJCF);
+  `color_sensor_fov` integrates a cone (0 = one ray) with misses as
+  black, so a brick filling part of the view keeps its colour ratios
+  while brightness follows coverage; `color_sensor_range` bounds the
+  ray. `SimColorSensor` casts along the camera's own axis
+  (`FloorSampler.rgba_hit`), not world -Z.
+- `ShimTCS34725` is now the firmware `TCS34725` class over a
+  synthesised `raw()` (channels proportional to the reflectance
+  seen, clear their sum, `integration_ms` setting the driver's
+  full-scale exactly as on hardware): `rgb()` and `ambient()` are the
+  driver's own code, channel over clear.
+- Defaults reproduce the historical down camera and pair.
+
 ## 3.7.0 — the status LED flashes purple during uploads, and faster while running
 
 Two asks from the bench. The run indicator now flashes the BLE-state

@@ -101,6 +101,9 @@ from openbricks.parameters import Stop, DriveMode  # noqa: E402
 from openbricks.drivers.qtr import (  # noqa: E402
     QTRArray as _RealQTRArray, QTRChannel as _RealQTRChannel,
     QTRLineSensor as _RealQTRLineSensor)
+# The colour driver too: the shim subclasses it so rgb()/ambient()
+# are the firmware's own arithmetic over a synthesised raw() read.
+from openbricks.drivers.tcs34725 import TCS34725 as _RealTCS34725  # noqa: E402
 
 
 # Module-level state — only one shim can be installed at a time, but
@@ -1256,18 +1259,34 @@ class ShimST3032Motor(ShimST3215Motor):
                          max_dps=max_dps, **_ignored)
 
 
-class ShimTCS34725:
+class ShimTCS34725(_RealTCS34725):
     """Drop-in for ``openbricks.drivers.tcs34725.TCS34725``.
 
-    Constructor accepts the firmware shape (``i2c=, address=,
-    integration_ms=, gain=``); arguments are kept for documentation
-    but ignored — the shim binds straight to the chassis
-    :class:`SimColorSensor` regardless.
+    The firmware class with its I2C read replaced: ``raw()`` is
+    synthesised from what the chassis colour camera sees, and
+    ``rgb()`` / ``ambient()`` are inherited — the driver's own
+    arithmetic, so a script tuned on the robot reads the same
+    numbers here. That matters: the driver's ``rgb()`` divides each
+    channel by the CLEAR channel, so a white brick reads about
+    (85, 85, 85) and a blue one has the largest ``b`` of all — the
+    facts colour classifiers on the bench are built on; the surface
+    colour scaled to 255 per channel (what the sim reports below
+    the shim) would make white "the bluest thing on the mat".
 
-    ``rgb()`` and ``ambient()`` proxy directly. ``raw()`` returns a
-    synthetic 4-tuple ``(c, r, g, b)`` in the 16-bit range that the
-    real driver would produce, so user code that calls ``raw()``
-    sees realistic-looking values.
+    Constructor accepts the firmware shape (``i2c=, address=,
+    integration_ms=, gain=``). The bus argument picks the camera:
+    a mux channel maps to the left/right down pair, no mux is the
+    centre camera — the one ``ChassisSpec.color_sensor_*`` places
+    and aims (down by default; on the robot's flank, level, for a
+    sensor that reads bricks beside the line). ``integration_ms``
+    sets the driver's full-scale count exactly as on hardware, so
+    ``ambient()`` saturates where the real part would.
+
+    Raw model: each channel count is proportional to the surface
+    reflectance the camera averages over its field of view (a miss
+    counting as black), and the clear count is their sum — the real
+    part's clear photodiode sees all three bands. A white surface
+    filling the view saturates clear at full scale.
     """
 
     # Mux channel -> chassis camera. Real code addresses the two
@@ -1278,12 +1297,12 @@ class ShimTCS34725:
     # camera, which is what every existing script and test expects.
     _CHANNEL_CAMERAS = {0: "chassis_cam_down_r", 1: "chassis_cam_down_l"}
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, i2c=None, address=0x29, integration_ms=2.4,
+                 gain=16, **_ignored):
         if _INSTALLED is None:
             raise RuntimeError(
                 "shim not installed; call install(runtime) first")
-        bus = kwargs.get("i2c", args[0] if args else None)
-        channel = getattr(bus, "_channel", None)
+        channel = getattr(i2c, "_channel", None)
         if channel is None:
             # No mux: the single documented default camera.
             camera = "chassis_cam_down"
@@ -1301,26 +1320,27 @@ class ShimTCS34725:
                 "the sensor." % (channel,
                                  sorted(self._CHANNEL_CAMERAS)))
         self._channel = channel
-        self._cs = SimColorSensor(_INSTALLED.runtime, camera_name=camera)
-
-    def rgb(self):
-        return self._cs.rgb()
-
-    def ambient(self):
-        return self._cs.ambient()
+        self._i2c = i2c
+        self._addr = address
+        spec = _INSTALLED.runtime.chassis_spec
+        self._cs = SimColorSensor(_INSTALLED.runtime, camera_name=camera,
+                                  fov_deg=spec.color_sensor_fov,
+                                  range_m=spec.color_sensor_range)
+        # The driver's full-scale count for this integration time
+        # (datasheet MAX COUNT = 1024 x cycles, capped at 65535) —
+        # the same clamped ATIME arithmetic as the hardware path.
+        atime = 256 - int(integration_ms / 2.4)
+        atime = 0 if atime < 0 else (255 if atime > 255 else atime)
+        self._full_scale = min(65535, 1024 * (256 - atime))
 
     def raw(self):
-        # Synthesise a (clear, R, G, B) 16-bit reading from the
-        # raycast result. The real TCS34725 has independent C / R /
-        # G / B ADCs; the sim reduces RGB to a clear-channel via
-        # luminance and scales each channel to 0..65535. Plenty
-        # accurate enough for tests that check "is the sensor over a
-        # red zone yet".
+        """(clear, red, green, blue) counts as the driver would read
+        them: channels proportional to the reflectance seen, clear
+        their sum, white filling the view = full scale."""
         r8, g8, b8 = self._cs.rgb()
-        c8 = self._cs.ambient() * 255 // 100
-        scale = 65535 / 255
-        return (int(c8 * scale), int(r8 * scale),
-                int(g8 * scale), int(b8 * scale))
+        scale = self._full_scale / (3.0 * 255.0)
+        r, g, b = int(r8 * scale), int(g8 * scale), int(b8 * scale)
+        return (r + g + b, r, g, b)
 
 
 class ShimQTRArray(_RealQTRArray):
