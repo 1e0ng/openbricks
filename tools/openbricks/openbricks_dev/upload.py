@@ -32,6 +32,7 @@ import os
 import sys
 
 from openbricks_dev._nus import NUSLink, NUSError
+from openbricks_dev._uplock import UploadLock, UploadInProgress
 from openbricks_dev import mpycompile
 from openbricks_dev import run as run_mod
 
@@ -106,33 +107,48 @@ async def _upload_async(name, script_path, target_path, scan_timeout):
         mpy_bytes = mpycompile.compile_source(
             user_bytes, os.path.basename(script_path))
 
-    print("connecting to %r ..." % name, file=sys.stderr)
+    # One transfer per hub per machine (3.10.0): the OS shares the BLE
+    # link between processes, so a second run/upload from another
+    # terminal used to interleave its paste with this one. Refuse at
+    # once — before the scan — while another transfer is in flight.
+    # Held for the whole session: an upload IS its transfer.
     try:
-        link = await NUSLink.connect(name, scan_timeout=scan_timeout)
-    except NUSError as e:
+        upload_lock = UploadLock(name)
+        upload_lock.acquire()
+    except UploadInProgress as e:
         raise UploadError(str(e))
 
-    async with link:
-        blink = run_mod._BufferedLink(link)
-        await run_mod._enter_raw_repl(blink, link)
+    try:
+        print("connecting to %r ..." % name, file=sys.stderr)
         try:
-            if default_flow:
-                target_path, use_mpy, remove_stale = (
-                    await run_mod._pick_staging(blink, link))
-                payload = mpy_bytes if use_mpy else user_bytes
-            else:
-                payload, remove_stale = user_bytes, None
-            confirm_program = _compose_confirm_program(
-                target_path, len(payload), remove_stale)
-            await run_mod._stage_file(blink, link, target_path, payload,
-                                      name)
-            await run_mod._raw_paste_upload(blink, link, confirm_program)
-            await run_mod._stream_output(blink, link, sys.stdout)
-        finally:
+            link = await NUSLink.connect(name, scan_timeout=scan_timeout)
+        except NUSError as e:
+            raise UploadError(str(e))
+
+        async with link:
+            blink = run_mod._BufferedLink(link)
+            await run_mod._enter_raw_repl(blink, link)
             try:
-                await run_mod._restore_idle_loop(link)
-            except Exception:
-                pass
+                if default_flow:
+                    target_path, use_mpy, remove_stale = (
+                        await run_mod._pick_staging(blink, link))
+                    payload = mpy_bytes if use_mpy else user_bytes
+                else:
+                    payload, remove_stale = user_bytes, None
+                confirm_program = _compose_confirm_program(
+                    target_path, len(payload), remove_stale)
+                await run_mod._stage_file(blink, link, target_path,
+                                          payload, name)
+                await run_mod._raw_paste_upload(blink, link,
+                                                confirm_program)
+                await run_mod._stream_output(blink, link, sys.stdout)
+            finally:
+                try:
+                    await run_mod._restore_idle_loop(link)
+                except Exception:
+                    pass
+    finally:
+        upload_lock.release()
     return target_path
 
 

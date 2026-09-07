@@ -325,5 +325,58 @@ def tearDownModule():
     _rm._RESTORE_WAIT_S = _ORIG_RESTORE_WAIT
 
 
+
+class UploadGuardTests(unittest.TestCase):
+    """3.10.0: a second transfer to a hub another process is still
+    transferring to is refused at once, before any scan."""
+
+    def setUp(self):
+        from openbricks_dev import _uplock
+        self.dir = tempfile.mkdtemp()
+        p = patch.object(_uplock, "LOCK_DIR", self.dir)
+        p.start()
+        self.addCleanup(p.stop)
+        self.tmp = tempfile.NamedTemporaryFile("w", suffix=".py",
+                                               delete=False)
+        self.tmp.write("print('x')\n")
+        self.tmp.close()
+        self.addCleanup(os.unlink, self.tmp.name)
+
+    def test_second_upload_while_a_transfer_is_ongoing_fails_at_once(self):
+        from openbricks_dev import _uplock
+        connects = []
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            connects.append(name)
+            raise AssertionError("must not scan while an upload is ongoing")
+
+        with _uplock.UploadLock("RobotA"), \
+             patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(ul.UploadError) as cm:
+                ul.run(argparse.Namespace(
+                    name="RobotA", script=self.tmp.name, path=None,
+                    scan_timeout=5.0))
+        self.assertTrue(str(cm.exception).startswith("an upload is ongoing"),
+                        cm.exception)
+        self.assertIn("'RobotA'", str(cm.exception))
+        self.assertEqual(connects, [])
+
+    def test_a_failed_connect_releases_the_lock(self):
+        from openbricks_dev import _uplock
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            raise NUSError("hub not found")
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(ul.UploadError):
+                ul.run(argparse.Namespace(
+                    name="RobotA", script=self.tmp.name, path=None,
+                    scan_timeout=5.0))
+        with _uplock.UploadLock("RobotA"):
+            pass
+
+
 if __name__ == "__main__":
     unittest.main()

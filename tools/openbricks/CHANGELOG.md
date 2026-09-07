@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.10.0 — one upload at a time: a second run/upload to a busy hub fails at once
+
+`openbricks run` and `openbricks upload` push a program through the
+same raw-paste channel, and the OS shares one BLE link between every
+process that connects to the same hub, so two transfers from two
+terminals interleaved their bytes on the hub's REPL — and the hub,
+seeing one connection, could not tell them apart.
+
+- The host now holds a per-hub OS file lock for the duration of a
+  transfer (`flock` / `msvcrt.locking` on a file in the temp dir); a
+  second `run` / `upload` to the same hub from this machine fails
+  immediately, before any scan, with `error: an upload is ongoing
+  (another openbricks run/upload is transferring to 'RobotA'; wait
+  for it to finish)`.
+- `upload` holds the lock until its confirmation returns; `run`
+  releases it the moment the program is staged and started, so a
+  later `run` while the first is only streaming supersedes it the
+  way a button press would. A killed CLI leaves no stale lock — the
+  kernel releases it with the process. `openbricks stop` and other
+  hubs are unaffected.
+
 ## 3.9.0 — the exit torque-off is verified per servo, and a fire-and-forget move ends in the state it asked for
 
 Bench 2026-09-07: a program finished cleanly and one task motor kept
