@@ -29,6 +29,7 @@ import time
 
 from openbricks_dev import mpycompile
 from openbricks_dev._nus import NUSLink, NUSError
+from openbricks_dev._uplock import UploadLock, UploadInProgress
 
 
 class RunError(Exception):
@@ -671,6 +672,16 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
     _sigint_installed = _install_sigint(
         loop, _make_sigint_handler(asyncio.current_task()))
 
+    # One transfer per hub per machine (3.10.0): the OS shares the BLE
+    # link between processes, so a second run/upload from another
+    # terminal used to interleave its paste with this one. Refuse at
+    # once — before the scan — while another transfer is in flight.
+    upload_lock = UploadLock(name)
+    try:
+        upload_lock.acquire()
+    except UploadInProgress as e:
+        raise RunError(str(e))
+
     print("connecting to %r ..." % name, file=sys.stderr)
     try:
         try:
@@ -679,8 +690,9 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
         except NUSError as e:
             raise RunError(str(e))
 
-        await _run_session(link, name, user_bytes, mpy_bytes)
+        await _run_session(link, name, user_bytes, mpy_bytes, upload_lock)
     finally:
+        upload_lock.release()       # idempotent: staged runs freed it
         if _sigint_installed:
             loop.remove_signal_handler(signal.SIGINT)
 
@@ -736,7 +748,7 @@ async def _pick_staging(blink, link, mpy_target=_MPY_TARGET_PATH,
     return src_target, False, None
 
 
-async def _run_session(link, name, user_bytes, mpy_bytes):
+async def _run_session(link, name, user_bytes, mpy_bytes, upload_lock):
     async with link:
         blink = _BufferedLink(link)
         blink._step = "scan + connect"
@@ -748,6 +760,11 @@ async def _run_session(link, name, user_bytes, mpy_bytes):
             runner = _compose_runner(target, remove_stale)
             await _stage_file(blink, link, target, payload, name)
             await _raw_paste_upload(blink, link, runner)
+            # The program is staged and running: the transfer is over.
+            # Streaming needs no lock — a later run/upload from another
+            # terminal supersedes this program the way a button press
+            # would, and must not be told an upload is ongoing.
+            upload_lock.release()
             out = sys.stdout
             try:
                 await _stream_output(blink, link, out)

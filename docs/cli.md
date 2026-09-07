@@ -88,6 +88,30 @@ fresh hub out of the box. Heights, mats and lighting differ — run
 `examples/qtr_calibrate.py` once for a calibration measured on your
 own rig.
 
+## One upload at a time
+
+`openbricks run` and `openbricks upload` push a program through the
+same raw-paste channel, and the operating system shares a single BLE
+link between every process that connects to the same hub (macOS,
+Linux and Windows all multiplex). Two transfers started from two
+terminals used to interleave their bytes on the hub's REPL — a
+corrupted program, or both terminals reading each other's output —
+and the hub, which sees one connection, could not tell them apart.
+Since 3.10.0 the host refuses at once, before any scan:
+
+```
+$ openbricks run -n RobotA main.py
+error: an upload is ongoing (another openbricks run/upload is transferring to 'RobotA'; wait for it to finish)
+```
+
+The guard is a per-hub OS file lock held for the transfer: `upload`
+holds it until its confirmation returns, `run` releases it the moment
+the program is staged and started, so a second `run` while the first
+is only streaming output supersedes it the way a button press would.
+A CLI that crashes or is killed mid-transfer leaves nothing behind —
+the kernel releases the lock with the process. Other hubs are
+unaffected, and so is `openbricks stop`.
+
 ## Reference
 
 The reference below is generated from the CLI's own argument parser, so

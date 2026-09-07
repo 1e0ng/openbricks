@@ -107,7 +107,10 @@ def _build_parser():
         description="Connect to the named hub over BLE, push SCRIPT to its "
                     "REPL (via paste mode), and stream stdout/stderr back "
                     "to this terminal until the script finishes. Ctrl-C "
-                    "interrupts the remote program.",
+                    "interrupts the remote program. While another "
+                    "``openbricks run`` / ``upload`` from this machine is "
+                    "still transferring to the same hub, this one refuses "
+                    "at once with ``error: an upload is ongoing``.",
     )
     p_run.add_argument(
         "-n", "--name", required=True,
@@ -155,7 +158,10 @@ def _build_parser():
                     "program. (Pybricks calls this same operation "
                     "``download`` from the hub's perspective; we name "
                     "by direction-of-data-travel — bytes flow *up* to "
-                    "the hub.)",
+                    "the hub.) While another ``openbricks run`` / "
+                    "``upload`` from this machine is still transferring "
+                    "to the same hub, this one refuses at once with "
+                    "``error: an upload is ongoing``.",
     )
     p_upload.add_argument(
         "-n", "--name", required=True,

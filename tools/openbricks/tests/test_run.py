@@ -1347,5 +1347,105 @@ def tearDownModule():
     _rm._RESTORE_WAIT_S = _ORIG_RESTORE_WAIT
 
 
+
+class UploadGuardTests(unittest.TestCase):
+    """3.10.0: one transfer per hub per machine. A second ``run`` while
+    another process is still transferring fails at once, before any
+    scan; the lock is released the moment the program is staged."""
+
+    _standard_responses = RunFlowTests._standard_responses
+    _probe_round = staticmethod(RunFlowTests._probe_round)
+    _stage_round = staticmethod(RunFlowTests._stage_round)
+
+    def setUp(self):
+        from openbricks_dev import _uplock
+        self.dir = tempfile.mkdtemp()
+        p = patch.object(_uplock, "LOCK_DIR", self.dir)
+        p.start()
+        self.addCleanup(p.stop)
+        self.tmp = tempfile.NamedTemporaryFile("w", suffix=".py",
+                                               delete=False)
+        self.tmp.write("print('hello from hub')\n")
+        self.tmp.close()
+        self.addCleanup(os.unlink, self.tmp.name)
+
+    def test_second_run_while_a_transfer_is_ongoing_fails_at_once(self):
+        from openbricks_dev import _uplock
+        connects = []
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            connects.append(name)
+            raise AssertionError("must not scan while an upload is ongoing")
+
+        with _uplock.UploadLock("RobotA"), \
+             patch.object(run_mod.NUSLink, "connect",
+                          side_effect=_fake_connect), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(run_mod.RunError) as cm:
+                run_mod.run(_args(script=self.tmp.name))
+        self.assertTrue(str(cm.exception).startswith("an upload is ongoing"),
+                        cm.exception)
+        self.assertIn("'RobotA'", str(cm.exception))
+        self.assertEqual(connects, [])
+
+    def test_run_holds_the_lock_through_staging_and_frees_it_to_stream(self):
+        from openbricks_dev import _uplock
+        fake = _ScriptedLink(self._standard_responses(b"hello from hub\r\n"))
+        seen = []
+
+        def _probe(tag):
+            try:
+                with _uplock.UploadLock("RobotA"):
+                    seen.append(tag + ":free")
+            except _uplock.UploadInProgress:
+                seen.append(tag + ":held")
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            _probe("connect")
+            return fake
+
+        orig_paste = run_mod._raw_paste_upload
+
+        async def _paste(blink, link, script_bytes):
+            _probe("paste")               # every transfer chunk: held
+            return await orig_paste(blink, link, script_bytes)
+
+        orig_stream = run_mod._stream_output
+
+        async def _stream(blink, link, out):
+            _probe("stream")              # the program runs: free
+            return await orig_stream(blink, link, out)
+
+        with patch.object(run_mod.NUSLink, "connect",
+                          side_effect=_fake_connect), \
+             patch.object(run_mod, "_raw_paste_upload", _paste), \
+             patch.object(run_mod, "_stream_output", _stream), \
+             patch("sys.stdout", new_callable=io.StringIO), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            rc = run_mod.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen[0], "connect:held")
+        pastes = [s for s in seen if s.startswith("paste:")]
+        self.assertTrue(pastes, seen)
+        self.assertTrue(all(s == "paste:held" for s in pastes), seen)
+        self.assertEqual(seen[-1], "stream:free")
+        with _uplock.UploadLock("RobotA"):
+            pass
+
+    def test_a_failed_connect_releases_the_lock(self):
+        from openbricks_dev import _uplock
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            raise NUSError("hub not found")
+
+        with patch.object(run_mod.NUSLink, "connect",
+                          side_effect=_fake_connect), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(run_mod.RunError):
+                run_mod.run(_args(script=self.tmp.name))
+        with _uplock.UploadLock("RobotA"):
+            pass
+
+
 if __name__ == "__main__":
     unittest.main()
