@@ -83,6 +83,58 @@ class ChassisFragmentTests(unittest.TestCase):
         self.assertIn('pos="0.0200 0.1620', frag)
 
 
+class CameraPoseTests(unittest.TestCase):
+    """``color_sensor_z/yaw/pitch`` place and aim the centre colour
+    camera; the default reproduces the historical down camera."""
+
+    def test_default_is_the_historical_down_camera(self):
+        from openbricks_sim.chassis import camera_xyaxes
+        self.assertEqual(camera_xyaxes(0.0, -90.0),
+                         "0.0000 -1.0000 0.0000 1.0000 0.0000 0.0000")
+        frag = chassis_mjcf()
+        self.assertIn('camera name="chassis_cam_down" pos="0.0600 0.0000 -0.0230"',
+                      frag)
+        self.assertIn('xyaxes="0.0000 -1.0000 0.0000 1.0000 0.0000 0.0000" fovy="20"',
+                      frag)
+
+    def test_side_facing_level_camera(self):
+        from openbricks_sim.chassis import camera_xyaxes
+        # Looking along body +Y: image-right = body +X, image-up = +Z.
+        self.assertEqual(camera_xyaxes(90.0, 0.0),
+                         "1.0000 0.0000 0.0000 0.0000 0.0000 1.0000")
+        frag = chassis_mjcf(ChassisSpec(color_sensor_x=0.06,
+                                        color_sensor_y=0.07,
+                                        color_sensor_z=-0.003,
+                                        color_sensor_yaw=90.0,
+                                        color_sensor_pitch=0.0))
+        self.assertIn('camera name="chassis_cam_down" pos="0.0600 0.0700 -0.0030"',
+                      frag)
+        self.assertIn('xyaxes="1.0000 0.0000 0.0000 0.0000 0.0000 1.0000"', frag)
+        # The down pair is untouched by the aim.
+        self.assertIn('pos="0.0600 0.0880', frag)
+        self.assertIn('xyaxes="0 -1 0 1 0 0"', frag)
+
+    def test_tilted_side_camera(self):
+        from openbricks_sim.chassis import camera_xyaxes
+        # Left and 45 degrees down: image-up tilts back with it.
+        self.assertEqual(camera_xyaxes(90.0, -45.0),
+                         "1.0000 0.0000 0.0000 0.0000 0.7071 0.7071")
+
+    def test_camera_frame_is_right_handed_and_looks_along_the_aim(self):
+        import math
+        from openbricks_sim.chassis import camera_xyaxes
+        for yaw, pitch in ((0, -90), (90, 0), (-90, -30), (180, 10), (45, -60)):
+            x = [float(v) for v in camera_xyaxes(yaw, pitch).split()]
+            xa, ya = x[:3], x[3:]
+            za = (xa[1] * ya[2] - xa[2] * ya[1], xa[2] * ya[0] - xa[0] * ya[2],
+                  xa[0] * ya[1] - xa[1] * ya[0])
+            a, e = math.radians(yaw), math.radians(pitch)
+            look = (math.cos(e) * math.cos(a), math.cos(e) * math.sin(a), math.sin(e))
+            # camera -Z is the look direction
+            for zc, lc in zip(za, look):
+                self.assertAlmostEqual(-zc, lc, places=3)
+
+
 class ResizeTests(unittest.TestCase):
     """``apply_drivebase_dims_to_model`` puts a resized wheel ON the
     floor, keeps the caster there too, and refreshes the collision

@@ -65,9 +65,15 @@ for. Fields not given keep the defaults.
   resizes it again at adoption, so the script's geometry always wins
   — set them here so a `preview` shows the same robot.
 - `line_sensor_x` places the reflectance-array site (`chassis_line`)
-  ahead of the axle; `color_sensor_x` / `color_sensor_y` place the
-  centre down camera (`chassis_cam_down`, the no-mux `TCS34725`),
-  and the left/right camera pair rides 18 mm either side of it.
+  ahead of the axle. `color_sensor_x` / `_y` / `_z` place the centre
+  colour camera (`chassis_cam_down`, the no-mux `TCS34725`) in the
+  chassis frame (the floor is at `-(wheel_radius + 0.005)`);
+  `color_sensor_yaw` / `_pitch` aim it (default straight down; a
+  sensor on the robot's left flank reading bricks beside the line is
+  `yaw 90, pitch 0` at brick height); `color_sensor_fov` is the cone
+  it integrates (degrees, 0 = one ray) and `color_sensor_range` how
+  far it sees. The left/right down pair rides 18 mm either side of
+  (`color_sensor_x`, `color_sensor_y`).
 - `pos_x` / `pos_y` / `yaw_deg` are the spawn pose; `--x` / `--y` /
   `--yaw` on the command line override them one at a time. `yaw_deg`
   is counter-clockwise from +X seen from above (0 = facing +X).
@@ -79,7 +85,7 @@ for. Fields not given keep the defaults.
 | `ST3032Motor` / `ST3215Motor` | The first two servo ids become the chassis wheels, the third and fourth kinematic task shafts (a gripper motor that turns but pushes nothing). A `DriveBase` always gets the physical wheels for the pair it adopts, whatever order the script constructed its motors in, and re-constructing a motor for a servo id yields the same motor — both firmware rules. |
 | `DriveBase` | The firmware engine over an emulated `st_bus`; `use_gyro(True)` reads the chassis's true yaw. |
 | `ICM45686` / `BNO055` | Ground-truth chassis heading; the ICM's bias estimator reports calibrated at once. |
-| `TCS34725` | One downward ray from the centre camera (no mux) or the left/right pair (mux channels 1 / 0); prop colours and mat texels resolve to what the sensor would see. |
+| `TCS34725` | The firmware driver class over a synthesised raw read: the centre camera (no mux) or the left/right pair (mux channels 1 / 0) casts along its own axis — optionally a cone, with a range — and the first geom hit (a mat texel, a LEGO brick's material) gives the reflectance; `rgb()` / `ambient()` are the driver's channel-over-clear arithmetic, so white reads about (85, 85, 85) and a blue brick has the largest `b`, as on the robot. |
 | `QTRLineSensor` / `QTRArray` / `QTRChannel` | The firmware driver over a reflectance model: one element per array position, spread left-to-right from the `chassis_line` site, each averaging the floor over a 3 mm spot so an edge reads as a gradient (the basis of `edge_error`). `load_calibration("/qtr.cal")` and `calibrate()` need no file — the sim's reflectance is born normalised. |
 | Distance sensors | A forward ray from the `chassis_dist` site. |
 
