@@ -66,6 +66,67 @@ class UploadLockTests(unittest.TestCase):
             with open(lock.path) as f:
                 self.assertEqual(int(f.read().strip()), os.getpid())
 
+    def test_pid_note_failure_does_not_cost_the_lock(self):
+        # The note is a courtesy; the lock is the guard.
+        with patch.object(os, "ftruncate", side_effect=OSError("ro")):
+            lock = _uplock.UploadLock("ls")
+            lock.acquire()
+        try:
+            with self.assertRaises(_uplock.UploadInProgress):
+                _uplock.UploadLock("ls").acquire()
+        finally:
+            lock.release()
+
+    def test_posix_unlock_failure_still_closes_the_descriptor(self):
+        import fcntl
+        lock = _uplock.UploadLock("ls")
+        lock.acquire()
+        with patch.object(fcntl, "flock", side_effect=OSError("gone")):
+            lock.release()
+        self.assertIsNone(lock._fd)
+        with _uplock.UploadLock("ls"):        # the close freed it
+            pass
+
+    def _fake_msvcrt(self, refuse_lock=False, unlock_raises=False):
+        calls = []
+
+        class _Msvcrt:
+            LK_NBLCK = 2
+            LK_UNLCK = 0
+
+            @staticmethod
+            def locking(fd, mode, nbytes):
+                calls.append((mode, nbytes))
+                if mode == _Msvcrt.LK_NBLCK and refuse_lock:
+                    raise OSError("locked by another process")
+                if mode == _Msvcrt.LK_UNLCK and unlock_raises:
+                    raise OSError("already unlocked")
+        p = patch.dict(sys.modules, {"msvcrt": _Msvcrt})
+        p.start()
+        self.addCleanup(p.stop)
+        q = patch.object(_uplock, "_WINDOWS", True)
+        q.start()
+        self.addCleanup(q.stop)
+        return calls
+
+    def test_windows_branch_locks_one_byte_non_blocking(self):
+        calls = self._fake_msvcrt()
+        with _uplock.UploadLock("ls"):
+            pass
+        self.assertEqual(calls, [(2, 1), (0, 1)])     # LK_NBLCK, LK_UNLCK
+
+    def test_windows_branch_refusal_is_the_same_error(self):
+        self._fake_msvcrt(refuse_lock=True)
+        with self.assertRaises(_uplock.UploadInProgress):
+            _uplock.UploadLock("ls").acquire()
+
+    def test_windows_branch_unlock_failure_is_swallowed(self):
+        self._fake_msvcrt(unlock_raises=True)
+        lock = _uplock.UploadLock("ls")
+        lock.acquire()
+        lock.release()
+        self.assertIsNone(lock._fd)
+
     def test_a_holder_in_another_process_is_seen_and_dies_with_it(self):
         # The real case: two terminals. And the lock is the kernel's,
         # so a killed CLI leaves nothing stale behind.

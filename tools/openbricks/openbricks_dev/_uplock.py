@@ -28,6 +28,11 @@ import tempfile
 # Tests point this at a scratch directory; None = the platform temp dir.
 LOCK_DIR = None
 
+# Which locking primitive to use. A module flag rather than an inline
+# platform check so the Windows branch is exercised (with a fake
+# msvcrt) on every CI platform, not only where it happens to run.
+_WINDOWS = sys.platform == "win32"
+
 MESSAGE = "an upload is ongoing"
 
 
@@ -52,7 +57,7 @@ def lock_path(name):
 def _try_lock(fd):
     """Non-blocking exclusive lock on ``fd``; True when taken."""
     os.lseek(fd, 0, os.SEEK_SET)
-    if sys.platform == "win32":
+    if _WINDOWS:
         import msvcrt
         try:
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
@@ -69,7 +74,7 @@ def _try_lock(fd):
 
 def _unlock(fd):
     os.lseek(fd, 0, os.SEEK_SET)
-    if sys.platform == "win32":
+    if _WINDOWS:
         import msvcrt
         try:
             msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
