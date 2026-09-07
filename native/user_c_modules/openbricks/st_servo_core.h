@@ -100,6 +100,11 @@ typedef enum {
     OB_SOP_CONFIG_VERIFY,   // config step 3: read op_mode back — the
                             // slot is configured only when the wire
                             // CONFIRMS the mode, not when it ACKs it
+    OB_SOP_KILL_WRITE,      // verified kill (3.9.0): a unicast torque-
+                            // off to ONE servo — the e-stop
+                            // broadcast's ACKed follow-up
+    OB_SOP_KILL_READ,       // verified kill: torque read back — the
+                            // servo is dead when the wire says 0
 } ob_sservo_op_kind_t;
 
 typedef struct {
@@ -195,6 +200,25 @@ typedef struct {
     uint8_t  user_done;     // result ready, waiting for Python's poll
     uint8_t  user_failed;   // latched after CONFIG_TRIES losses
     uint8_t  user_fails;    // consecutive losses of the current txn
+    // Verified kill (3.9.0). The e-stop's broadcast torque-off gets
+    // no reply by protocol AND is fired into whatever transaction
+    // the pump has in flight — a servo mid-reply cannot hear it, and
+    // one that missed it keeps its last speed under torque. Bench
+    // 2026-09-07: a task motor crept on for minutes after a program
+    // ended, at the small hold speed it had been shipped a tick
+    // before the kill. The broadcast stays (fastest possible first
+    // strike); every configured slot is then killed INDIVIDUALLY —
+    // a unicast torque-off (ACKed), then the register read back
+    // (0 on the wire, not merely transmitted), retried and finally
+    // latched like a config write. A loss is never silent: Python
+    // reads the outcome per servo (ob_sservo_kill_state) and names
+    // the one that did not confirm.
+    uint8_t  kill_step;     // 0 idle, 1 write pending, 2 read pending
+    uint8_t  kill_fails;    // consecutive losses of the current step
+    uint8_t  kill_failed;   // latched after CONFIG_TRIES losses
+    uint8_t  kill_confirmed;// the read-back reported torque 0
+    uint8_t  kill_val;      // the torque the read-back reported (when
+                            // the servo answered with it still on)
 } ob_sservo_slot_t;
 
 typedef struct {
@@ -210,6 +234,8 @@ typedef struct {
     int      user_in_flight;  // slot whose USER txn is on the bus, or -1
     int      verify_in_flight; // slot whose config-verify READ is on
                                // the bus, or -1
+    int      kill_in_flight;   // slot whose kill write/read is on the
+                               // bus, or -1
     // Cold slots still get an occasional turn: skipping them
     // entirely would let angle()/speed() drift arbitrarily stale
     // while still reporting themselves fresh.
@@ -336,6 +362,35 @@ void ob_sservo_config_verify_result(ob_sservo_t *s, int ok,
 void ob_sservo_config_state(const ob_sservo_t *s, int slot,
                             uint8_t *fails, uint8_t *failed,
                             uint8_t *mismatch, uint8_t *val);
+
+// Verified kill (3.9.0), call under the bus lock right after the
+// broadcast torque-off: voids every in-use slot's staged commands
+// (target, pending torque, recorded torque-on) and arms the per-
+// servo verified torque-off on every CONFIGURED slot. Slots still
+// inside their config sequence are not armed — step 1 of that
+// sequence IS a verified torque-off, and torque-on ships only to
+// configured slots. Re-arming while a kill is pending restarts it.
+void ob_sservo_kill_all(ob_sservo_t *s);
+
+// Result routing for the kill's two steps (mirrors the config
+// write / verify pair: verified outcome only, retries ride
+// next_op). A read-back that answers with torque still ON re-issues
+// the write; each loss or non-zero answer counts toward the
+// CONFIG_TRIES latch.
+void ob_sservo_kill_write_result(ob_sservo_t *s, int ok);
+void ob_sservo_kill_read_result(ob_sservo_t *s, int ok,
+                                const uint8_t *payload, uint8_t len);
+
+// Per-slot kill outcome: 0 = nothing armed (slot unused, or never
+// configured), 1 = pending, 2 = confirmed (torque read back 0),
+// 3 = failed (latched). *val is the torque the servo last reported
+// when it answered non-zero, *fails the loss count of the current
+// (or final) step.
+int  ob_sservo_kill_state(const ob_sservo_t *s, int slot,
+                          uint8_t *val, uint8_t *fails);
+
+// 1 while any slot's kill is still pending.
+int  ob_sservo_kill_pending(const ob_sservo_t *s);
 
 // Signed unwrapped position in encoder counts.
 int32_t ob_sservo_counts(const ob_sservo_t *s, int slot);

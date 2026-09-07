@@ -195,9 +195,10 @@ class _FakeBus:
         self.calls.append(("servo_feedback", slot))
         return getattr(self, "feedback", (0, 0, True))
 
-    def servo_move(self, slot, delta_counts, speed_cps, accel_cps2):
+    def servo_move(self, slot, delta_counts, speed_cps, accel_cps2,
+                   then=2):
         self.calls.append(("servo_move", slot, delta_counts,
-                           speed_cps, accel_cps2))
+                           speed_cps, accel_cps2, then))
         self.move_refuse = getattr(self, "move_refuse", False)
         if self.move_refuse:
             return False
@@ -585,31 +586,52 @@ class AdoptionTests(_Base):
         left.run_angle(100, 90)
         moves = [c for c in self.bus.calls if c[0] == "servo_move"]
         self.assertEqual(len(moves), 1)
-        _, slot, delta, speed, accel = moves[0]
+        _, slot, delta, speed, accel, then = moves[0]
         self.assertEqual(slot, 0)
         self.assertAlmostEqual(delta, 90 * 4096 / 360.0, places=3)
         self.assertAlmostEqual(speed, 100 * 4096 / 360.0, places=3)
         self.assertGreater(accel, 0)
-        # Default then=Stop.COAST: end-of-move dispatch coasts the slot.
-        self.assertIn(("servo_coast", 0), self.bus.calls)
+        # Default then=Stop.COAST rides WITH the move (3.9.0): the C
+        # tick coasts the slot at arrival; Python dispatches nothing.
+        self.assertEqual(then, 0)
+        self.assertFalse(("servo_coast", 0) in self.bus.calls)
 
     def test_adopted_run_angle_then_hold_leaves_the_c_hold(self):
         db, left, _ = self._drivebase()
         left.run_angle(100, 90, then=Stop.HOLD)
+        moves = [c for c in self.bus.calls if c[0] == "servo_move"]
+        self.assertEqual(moves[0][5], 2)
         # No coast, no zero-speed write after the move: the C move's
         # own position hold is the end state. (assertFalse/in — MP's
         # unittest has no assertNotIn.)
         self.assertFalse(("servo_coast", 0) in self.bus.calls)
         self.assertFalse(("servo_run", 0, 0) in self.bus.calls)
 
-    def test_adopted_run_angle_wait_false_defers_then_to_done(self):
+    def test_adopted_run_angle_then_brake_rides_with_the_move(self):
+        db, left, _ = self._drivebase()
+        left.run_angle(100, 90, then=Stop.BRAKE)
+        moves = [c for c in self.bus.calls if c[0] == "servo_move"]
+        self.assertEqual(moves[0][5], 1)
+        # The zero-speed end-state is the C tick's job now, not a
+        # Python write after the wait loop.
+        self.assertFalse(("servo_run", 0, 0) in self.bus.calls)
+
+    def test_adopted_run_angle_wait_false_then_rides_with_the_move(self):
+        # Bench 2026-09-07: a task motor's fire-and-forget run_angle
+        # whose ``then=COAST`` waited for a ``done()`` poll the
+        # program never made held under power for the rest of the
+        # run. The end-state is armed in C at launch; ``done()`` only
+        # reads the arrival flag and clears the pending watch.
         db, left, _ = self._drivebase()
         left.run_angle(100, 90, wait=False)
+        moves = [c for c in self.bus.calls if c[0] == "servo_move"]
+        self.assertEqual(moves[0][5], 0)
         self.assertFalse(("servo_coast", 0) in self.bus.calls)
         while not left.done():
             pass
-        self.assertIn(("servo_coast", 0), self.bus.calls)
-        self.assertTrue(left.done())    # idempotent after dispatch
+        self.assertFalse(("servo_coast", 0) in self.bus.calls)
+        self.assertIsNone(left._native_pending)
+        self.assertTrue(left.done())    # idempotent after arrival
 
     def _timeout_msg(self, moved_counts, motor_kw=None):
         """Force the stall path with a chosen amount of travel and

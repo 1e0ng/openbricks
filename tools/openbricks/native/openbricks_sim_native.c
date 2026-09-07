@@ -1064,6 +1064,37 @@ static PyObject *RawServoMove_is_active(RawServoMoveObject *self,
 }
 
 
+static PyObject *RawServoMove_set_then(RawServoMoveObject *self,
+                                       PyObject *arg) {
+    long then = PyLong_AsLong(arg);
+    if (then == -1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    if (then < 0 || then > OB_SMOVE_THEN_HOLD) {
+        PyErr_SetString(PyExc_ValueError,
+                        "then must be 0 (coast), 1 (brake) or 2 (hold)");
+        return NULL;
+    }
+    ob_smove_set_then(&self->core, (unsigned char)then);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *RawServoMove_then(RawServoMoveObject *self,
+                                   PyObject *Py_UNUSED(ignored)) {
+    return PyLong_FromLong((long)self->core.then);
+}
+
+
+static PyObject *RawServoMove_take_end(RawServoMoveObject *self,
+                                       PyObject *Py_UNUSED(ignored)) {
+    if (ob_smove_take_end(&self->core)) {
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+
+
 static PyMethodDef RawServoMove_methods[] = {
     {"start",     (PyCFunction)RawServoMove_start,     METH_VARARGS,
      "start(now_ms, from_counts, delta_counts, speed_cps, accel_cps2)."},
@@ -1073,6 +1104,14 @@ static PyMethodDef RawServoMove_methods[] = {
      "Back to IDLE — no further output."},
     {"tick",      (PyCFunction)RawServoMove_tick,      METH_VARARGS,
      "tick(now_ms, meas_counts) -> commanded counts/s."},
+    {"set_then",  (PyCFunction)RawServoMove_set_then,  METH_O,
+     "set_then(0 coast | 1 brake | 2 hold): end-state applied at "
+     "arrival. Set AFTER start (start resets it to hold)."},
+    {"then",      (PyCFunction)RawServoMove_then,      METH_NOARGS,
+     "The armed end-state code."},
+    {"take_end",  (PyCFunction)RawServoMove_take_end,  METH_NOARGS,
+     "True exactly once, the tick a coast/brake move arrives: the "
+     "move goes idle (done stays latched); apply the end-state."},
     {"is_done",   (PyCFunction)RawServoMove_is_done,   METH_NOARGS,
      "True iff arrived (profile expired AND |err| < tol), latched."},
     {"is_active", (PyCFunction)RawServoMove_is_active, METH_NOARGS,

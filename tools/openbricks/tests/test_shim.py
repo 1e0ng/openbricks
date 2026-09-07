@@ -954,6 +954,41 @@ class SimStBusEngineTests(_ShimTestBase):
         db.stop()
         self.assertTrue(sb.servo_move(0, 1000.0, 1000.0, 4000.0))
 
+    def test_servo_move_then_coast_or_brake_hands_the_wheel_back_at_arrival(self):
+        # Firmware parity (3.9.0): the end-state rides with the move
+        # and applies the tick the arrival latches, polled or not —
+        # the C core's set_then/take_end handshake through the sim's
+        # RawServoMove. Coast idles the shim wheel (its velocity loop
+        # detached); brake keeps the loop active at zero speed.
+        for then, mode in ((0, "idle"), (1, "speed")):
+            self.setUp()
+            db, _, _ = self._serial_db()
+            sb = db._serial_engine._sb
+            c0 = sb.servo_counts(0)
+            self.assertTrue(sb.servo_move(0, 2048.0, 2000.0, 8000.0, then))
+            self.assertEqual(sb._moves[0].then(), then)
+            time.sleep_ms(4500)
+            self.assertTrue(sb.servo_move_done(0))    # a late poll reads it
+            self.assertFalse(sb._moves[0].is_active())
+            self.assertEqual(sb._wheels[0]._mode, mode, then)
+            self.assertLess(abs(sb.servo_counts(0) - c0 - 2048), 80)
+
+    def test_servo_move_default_hold_keeps_the_wheel_under_control(self):
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        self.assertTrue(sb.servo_move(0, 2048.0, 2000.0, 8000.0))
+        self.assertEqual(sb._moves[0].then(), 2)
+        time.sleep_ms(4500)
+        self.assertTrue(sb.servo_move_done(0))
+        self.assertTrue(sb._moves[0].is_active())      # the hold stays
+        self.assertEqual(sb._wheels[0]._mode, "speed")  # still driven
+
+    def test_servo_move_then_is_validated(self):
+        db, _, _ = self._serial_db()
+        sb = db._serial_engine._sb
+        with self.assertRaises(ValueError):
+            sb.servo_move(0, 100.0, 100.0, 100.0, 7)
+
     def test_then_continue_chains_without_stopping(self):
         # then=Stop.NONE (Pybricks Stop.NONE): the first leg ends AT
         # speed and the second leg takes it over — the wheels never

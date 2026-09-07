@@ -709,7 +709,7 @@ class Launcher:
 
 # ---- emergency stop ----
 
-def _stop_all_motors():
+def _stop_all_motors(confirm=True):
     """Best-effort: cut drive to every motor we can reach, regardless of
     the user program's structure.
 
@@ -730,6 +730,14 @@ def _stop_all_motors():
     avenue even if one bus is wedged — a failure to reach one motor must
     not prevent stopping the others. This is the one place a broad
     ``except`` is correct rather than papering over a bug.
+
+    Returns a one-line note for the run log with the outcome of the
+    native bus's VERIFIED kill (3.9.0) — which servos confirmed their
+    torque-off on the wire, or which one did not — or ``None`` when
+    there was nothing to confirm (no native bus, no servos attached).
+    ``confirm=False`` skips the wait and the note: the button path,
+    where the motors must die before anything else and the finally
+    that follows confirms and logs.
     """
     try:
         from _openbricks_native import motor_process
@@ -740,13 +748,24 @@ def _stop_all_motors():
     # driver and empties ST3215._buses, so the broadcast below can't
     # reach the wheels — and an active drivebase or per-slot move
     # would re-stage torque anyway. st_bus.estop() is the same kill
-    # the hard button uses: writers dead first, then broadcast
-    # torque-off on the native bus.
+    # the hard button uses: writers dead and the broadcast torque-off
+    # in one critical section, then the per-servo verified follow-up
+    # the pump carries out on the hard tick.
+    note = None
     try:
         from _openbricks_native import st_bus
-        st_bus.estop()
-    except Exception:
-        pass
+    except ImportError:
+        st_bus = None            # unix / sim: no native bus
+    if st_bus is not None:
+        try:
+            st_bus.estop()
+            if confirm:
+                note = _confirm_kill(st_bus)
+        except Exception as e:
+            # Loud, never silent: the e-stop's own failure is the one
+            # line a post-mortem needs most.
+            note = "torque-off: native kill raised %r" % (e,)
+            print("openbricks: " + note)
     try:
         from openbricks.drivers.st3215 import (
             ST3215, _REG_TORQUE, _BROADCAST_ID)
@@ -757,6 +776,58 @@ def _stop_all_motors():
                 pass
     except Exception:
         pass
+    return note
+
+
+# How long the exit kill waits for every servo's torque-off to be
+# CONFIRMED on the wire before the run log records the outcome. The
+# verified follow-up is one ACKed write plus one read-back per servo
+# (~2 ms each on the 1 kHz pump), retried up to 8 times on loss; four
+# servos that all need every retry fit in ~70 ms. Only a servo that
+# never confirms spends the whole budget.
+_KILL_CONFIRM_MS = 300
+
+
+def _confirm_kill(st_bus):
+    """Poll the native bus's verified kill to its outcome and word it
+    for the run log. Every servo named, every failure named with the
+    register and the value the servo answered — the same rule as any
+    lost ACK: a loss is never a silent shrug."""
+    t0 = _now_ms()
+    while True:
+        states = st_bus.estop_state()
+        pending = False
+        for sid, st, val, fails in states:
+            if st == 1:
+                pending = True
+        if not pending or _ticks_diff(_now_ms(), t0) >= _KILL_CONFIRM_MS:
+            break
+        time.sleep_ms(5)
+    elapsed = _ticks_diff(_now_ms(), t0)
+    confirmed = []
+    bad = []
+    for sid, st, val, fails in states:
+        if st == 2:
+            confirmed.append(str(sid))
+        elif st == 1:
+            bad.append("servo id %d still unconfirmed after %d ms"
+                       % (sid, elapsed))
+        elif st == 3:
+            if val:
+                bad.append("servo id %d answered torque register 0x28 "
+                           "= %d after %d attempts" % (sid, val, fails))
+            else:
+                bad.append("servo id %d never acknowledged its "
+                           "torque-off (%d attempts)" % (sid, fails))
+    if bad:
+        note = ("torque-off NOT confirmed: " + "; ".join(bad)
+                + " - check power and the servo bus wiring")
+        print("openbricks: " + note)
+        return note
+    if not confirmed:
+        return None                  # nothing attached: nothing to say
+    return "torque-off confirmed: servo ids %s in %d ms" % (
+        ", ".join(confirmed), elapsed)
 
 
 # Program-end brake budget. A ramp from the ST-3032's 888 dps top
@@ -1221,6 +1292,7 @@ def _exec_program_raw(program_path, origin=None):
     # into this exec; disarm in the finally so an idle press can't tear
     # down the boot/idle loop.
     _arm_stop_button(True)
+    killed = False
     try:
         with _log.session() as sess:
             started_ms = _now_ms()
@@ -1266,8 +1338,10 @@ def _exec_program_raw(program_path, origin=None):
                         pass
                 # Then stop every motor before propagating so the robot
                 # halts no matter how the program was running.
-                # Idempotent if already stopped.
-                _stop_all_motors()
+                # Idempotent if already stopped. No confirmation wait
+                # here — the motors must die before the log write; the
+                # finally below confirms and logs the outcome.
+                _stop_all_motors(confirm=False)
                 # Safe to write now: the button is disarmed, so no
                 # further injection can land inside this file write.
                 sess.write_text(
@@ -1296,17 +1370,31 @@ def _exec_program_raw(program_path, origin=None):
                 note = _brake_to_rest()
                 if note is not None:
                     sess.write_text(note + "\n")
+            finally:
+                # EVERY way out stops the motors — not just the button
+                # path. A program ending naturally (or dying on an
+                # exception) with a motor still commanded left the
+                # robot driving at its last setpoint until someone
+                # pressed stop. Same kill the e-stop uses (native
+                # scheduler halt + serial torque-off, broadcast then
+                # VERIFIED per servo), idempotent when the
+                # KeyboardInterrupt path already ran it — and, on the
+                # self-ended paths, after _brake_to_rest has already
+                # brought adopted wheels to a controlled stop. The
+                # outcome is the run's last line (3.9.0): which servos
+                # confirmed their torque-off on the wire, or which one
+                # did not — bench 2026-09-07, a task motor crept on
+                # for minutes after "finished: clean exit".
+                note = _stop_all_motors()
+                killed = True
+                if note is not None:
+                    sess.write_text(note + "\n")
     finally:
         _arm_stop_button(False)
-        # EVERY way out stops the motors — not just the button path.
-        # A program ending naturally (or dying on an exception) with
-        # a motor still commanded left the robot driving at its last
-        # setpoint until someone pressed stop. Same kill the e-stop
-        # uses (native scheduler halt + serial torque-off broadcast),
-        # idempotent when the KeyboardInterrupt path already ran it —
-        # and, on the self-ended paths, after _brake_to_rest has
-        # already brought adopted wheels to a controlled stop.
-        _stop_all_motors()
+        # Belt and braces for a run whose log session never opened:
+        # the same kill, unlogged.
+        if not killed:
+            _stop_all_motors(confirm=False)
 
 
 MPY_PROGRAM_PATH = "/program.mpy"

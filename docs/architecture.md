@@ -178,7 +178,27 @@ ships:
   under the controller — heading held by the gyro when one is in
   use — and logs the outcome (`brake: wheels to rest in N ms`)
   before the torque-off that ends every run; the button's e-stop
-  path keeps its instant torque-off.
+  path keeps its instant torque-off. Since 3.9.0 that torque-off is
+  **verified per servo**: the broadcast that kills every servo in
+  one packet gets no reply by protocol, and it is fired into
+  whatever transaction the 1 kHz pump has in flight — a servo
+  mid-reply on the half-duplex line cannot hear it, and one that
+  missed it keeps its last speed under torque (bench 2026-09-07: a
+  task motor crept on for minutes after `finished: clean exit`). The
+  broadcast stays as the first strike; the pump then writes
+  torque-off to each configured servo individually (a unicast write
+  is acknowledged) and reads the register back until the wire says
+  0, retrying and finally latching like a config write. The run's
+  last line is the outcome — `torque-off confirmed: servo ids 2, 1,
+  3, 4 in 9 ms`, or `torque-off NOT confirmed: servo id 4 answered
+  torque register 0x28 = 1 after 8 attempts - check power and the
+  servo bus wiring`, also printed to the console — so a servo that
+  did not die is named, never silent. The same rule now governs
+  `run_angle(..., wait=False)` on an adopted motor: the `then=`
+  end-state rides with the move and the C tick applies it the
+  moment the move arrives, so a fire-and-forget move that the
+  program never polls ends in the state it asked for instead of
+  holding under power until the kill.
 - Log writes are **asynchronous**. `print` only appends to a RAM
   buffer; the bytes reach flash from the launcher's Timer tick
   (`log.pump()`). A `flush()` on littlefs forces a metadata commit

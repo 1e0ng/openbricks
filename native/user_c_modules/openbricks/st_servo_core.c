@@ -16,6 +16,7 @@ void ob_sservo_init(ob_sservo_t *s) {
     s->write_in_flight = -1;
     s->user_in_flight = -1;
     s->verify_in_flight = -1;
+    s->kill_in_flight = -1;
     for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
         s->slots[i].torque_cmd = -1;
     }
@@ -64,6 +65,9 @@ void ob_sservo_detach(ob_sservo_t *s, int slot) {
     }
     if (s->verify_in_flight == slot) {
         s->verify_in_flight = -1;
+    }
+    if (s->kill_in_flight == slot) {
+        s->kill_in_flight = -1;
     }
     memset(&s->slots[slot], 0, sizeof(s->slots[slot]));
     s->slots[slot].torque_cmd = -1;
@@ -304,6 +308,29 @@ void ob_sservo_next_op(ob_sservo_t *s, ob_sservo_op_t *op) {
     op->kind = OB_SOP_NONE;
     op->slot = -1;
 
+    // 0. A pending verified kill outranks everything (3.9.0): the
+    //    broadcast that preceded it was unverified by protocol, and
+    //    until each servo has ACKed its own torque-off AND read it
+    //    back as 0, nothing else belongs on the wire. One servo per
+    //    op — a unicast write is what gets a status reply.
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        ob_sservo_slot_t *sl = &s->slots[i];
+        if (!sl->in_use || sl->kill_step == 0 || sl->kill_failed) {
+            continue;
+        }
+        op->slot = i;
+        op->id = sl->id;
+        op->reg = OB_SREG_TORQUE;
+        op->data_len = 1;
+        if (sl->kill_step == 1) {
+            op->kind = OB_SOP_KILL_WRITE;
+            op->data[0] = 0;
+        } else {
+            op->kind = OB_SOP_KILL_READ;
+        }
+        return;
+    }
+
     // 1. Torque changes first — coast is the e-stop-adjacent path and
     //    must never queue behind feedback reads. ONE sync-write
     //    covers every pending slot, so a drivebase stop releases
@@ -527,6 +554,10 @@ void ob_sservo_op_started(ob_sservo_t *s, const ob_sservo_op_t *op) {
             break;
         case OB_SOP_CONFIG_VERIFY:
             s->verify_in_flight = op->slot;
+            break;
+        case OB_SOP_KILL_WRITE:
+        case OB_SOP_KILL_READ:
+            s->kill_in_flight = op->slot;
             break;
         case OB_SOP_SYNC_SPEED:
             s->last_was_sync = 1;
@@ -761,6 +792,121 @@ void ob_sservo_config_verify_result(ob_sservo_t *s, int ok,
     }
     sl->config_step = 0;
     sl->config_cooldown = OB_SSERVO_VERIFY_COOLDOWN;
+}
+
+
+void ob_sservo_kill_all(ob_sservo_t *s) {
+    s->kill_in_flight = -1;
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        ob_sservo_slot_t *sl = &s->slots[i];
+        if (!sl->in_use) {
+            continue;
+        }
+        // Void every staged command so nothing re-drives the servo
+        // (the pre-3.9.0 e-stop's whole per-slot action).
+        sl->target_steps = 0;
+        sl->target_dirty = 0;
+        sl->torque_cmd = -1;
+        sl->torque_on = 0;    // next run re-arms torque
+        sl->kill_fails = 0;
+        sl->kill_failed = 0;
+        sl->kill_confirmed = 0;
+        sl->kill_val = 0;
+        // Only a configured slot can have had torque shipped ON (the
+        // sync-torque path requires it); one mid-config gets its
+        // verified torque-off from config step 1 anyway.
+        sl->kill_step = (sl->config_step >= OB_SSERVO_CONFIGURED) ? 1 : 0;
+    }
+}
+
+
+static void kill_loss(ob_sservo_slot_t *sl) {
+    sl->writes_failed++;
+    if (++sl->kill_fails >= OB_SSERVO_CONFIG_TRIES) {
+        sl->kill_failed = 1;
+        sl->kill_step = 0;
+    }
+}
+
+
+void ob_sservo_kill_write_result(ob_sservo_t *s, int ok) {
+    int slot = s->kill_in_flight;
+    s->kill_in_flight = -1;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
+        return;             // nothing in flight (abandoned / detached)
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    if (!sl->in_use || sl->kill_step != 1) {
+        return;             // detached or re-armed mid-flight
+    }
+    if (!ok) {
+        kill_loss(sl);      // step unchanged: next_op reissues it
+        return;
+    }
+    sl->kill_step = 2;      // ACKed: now make the servo SAY so
+}
+
+
+void ob_sservo_kill_read_result(ob_sservo_t *s, int ok,
+                                const uint8_t *payload, uint8_t len) {
+    int slot = s->kill_in_flight;
+    s->kill_in_flight = -1;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS) {
+        return;
+    }
+    ob_sservo_slot_t *sl = &s->slots[slot];
+    if (!sl->in_use || sl->kill_step != 2) {
+        return;
+    }
+    if (!ok || len < 1) {
+        kill_loss(sl);      // the READ was lost: retry the read
+        return;
+    }
+    if (payload[0] == 0) {
+        sl->kill_step = 0;
+        sl->kill_fails = 0;
+        sl->kill_confirmed = 1;
+        return;
+    }
+    // The servo answered — with torque still on. The ACK proved the
+    // transport, not the state (the cold-boot EEPROM lesson, applied
+    // to the one register whose state matters most): write it
+    // again, and count the round toward the latch.
+    sl->kill_val = payload[0];
+    kill_loss(sl);
+    if (!sl->kill_failed) {
+        sl->kill_step = 1;
+    }
+}
+
+
+int ob_sservo_kill_state(const ob_sservo_t *s, int slot,
+                         uint8_t *val, uint8_t *fails) {
+    *val = 0;
+    *fails = 0;
+    if (slot < 0 || slot >= OB_SSERVO_SLOTS || !s->slots[slot].in_use) {
+        return 0;
+    }
+    const ob_sservo_slot_t *sl = &s->slots[slot];
+    *val = sl->kill_val;
+    *fails = sl->kill_fails;
+    if (sl->kill_failed) {
+        return 3;
+    }
+    if (sl->kill_step != 0) {
+        return 1;
+    }
+    return sl->kill_confirmed ? 2 : 0;
+}
+
+
+int ob_sservo_kill_pending(const ob_sservo_t *s) {
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        if (s->slots[i].in_use && s->slots[i].kill_step != 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 

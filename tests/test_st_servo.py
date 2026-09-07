@@ -393,6 +393,102 @@ class EStopTests(_Base):
         sb.servo_pump()              # starts a read; leave it hanging
         self.assertTrue(sb.torque_off_all())   # must not wait/queue
 
+    # ---- the verified kill (3.9.0) ----
+
+    def _two_configured(self):
+        sb.servo_attach(0, 2, True, 45)
+        sb.servo_attach(1, 1, False, 45)
+        self.wire.settle()
+
+    def _drain_broadcast(self):
+        # estop() transmits the broadcast at once; take it off the
+        # test io so the wire's one-packet-per-pump parser sees the
+        # follow-ups cleanly.
+        tx = sb.take_tx()
+        self.assertEqual(tx[2], 0xFE)
+        self.assertEqual(tx[4], 0x03)
+        self.assertEqual(tx[5], 0x28)
+        self.assertEqual(tx[6], 0)
+
+    def test_estop_state_is_idle_until_a_kill(self):
+        self._two_configured()
+        st = sb.estop_state()
+        self.assertEqual(len(st), 4)
+        self.assertEqual(st[0], (2, 0, 0, 0))
+        self.assertEqual(st[1], (1, 0, 0, 0))
+        self.assertEqual(st[2][0], -1)         # unused slot
+        self.assertEqual(st[3][1], 0)
+
+    def test_estop_follows_the_broadcast_with_a_verified_kill_per_servo(self):
+        # The broadcast is unverified by protocol. A servo that was
+        # mid-reply on the half-duplex line cannot hear it, and one
+        # that missed it keeps its last speed under torque — bench
+        # 2026-09-07, a task motor creeping on after "finished".
+        # Model the miss: the fake commits only UNICAST writes, so a
+        # torque it saw switched on by sync stays 1 in its register
+        # map until a unicast torque-off lands.
+        self._two_configured()
+        sb.servo_run(0, 1000)
+        self.wire.settle(3)
+        self.wire.regs[(2, 0x28)] = 1
+        self.wire.regs[(1, 0x28)] = 1
+        self.assertTrue(sb.estop())
+        self._drain_broadcast()
+        states = {sid: st for sid, st, _, _ in sb.estop_state()}
+        self.assertEqual((states[2], states[1]), (1, 1))     # pending
+        # The very next thing on the wire is a servo's OWN torque-off
+        # (id, LEN 4, WRITE, 0x28, 0) — ahead of every read or sync.
+        sb.servo_pump()
+        tx = sb.take_tx()
+        self.assertEqual(bytes(tx[2:7]), bytes([2, 4, 0x03, 0x28, 0x00]))
+        self.wire.regs[(2, 0x28)] = 0
+        sb.feed_rx(_reply(2, 0))
+        self.wire.settle(12)
+        self.assertEqual(self.wire.regs[(2, 0x28)], 0)
+        self.assertEqual(self.wire.regs[(1, 0x28)], 0)
+        rep = {sid: (st, val, fails)
+               for sid, st, val, fails in sb.estop_state()}
+        self.assertEqual(rep[2], (2, 0, 0))
+        self.assertEqual(rep[1], (2, 0, 0))
+        # Each write was followed by its read-back (id, 4, READ,
+        # 0x28, 1 byte) — the servo SAID 0, it did not merely ACK.
+        log = self.wire.tx_log
+        for sid in (2, 1):
+            w = log.rfind(bytes([sid, 4, 0x03, 0x28, 0x00]))
+            r = log.rfind(bytes([sid, 4, 0x02, 0x28, 0x01]))
+            self.assertTrue(0 <= w < r, (sid, w, r))
+
+    def test_estop_names_a_servo_that_acks_but_stays_on(self):
+        # ACKed-but-not-applied (the cold-boot EEPROM lesson, on the
+        # one register that matters most): the read-back answers 1,
+        # the write is re-issued, and after CONFIG_TRIES rounds the
+        # slot latches FAILED with the value as evidence.
+        self._two_configured()
+        self.wire.regs[(2, 0x28)] = 1
+        self.wire.regs[(1, 0x28)] = 1
+        self.wire.apply_writes = False
+        self.assertTrue(sb.estop())
+        self._drain_broadcast()
+        self.wire.settle(80)
+        rep = {sid: (st, val, fails)
+               for sid, st, val, fails in sb.estop_state()}
+        self.assertEqual(rep[2], (3, 1, 8))
+        self.assertEqual(rep[1], (3, 1, 8))
+
+    def test_estop_kill_write_lost_is_retried_to_confirmation(self):
+        self._two_configured()
+        self.wire.regs[(2, 0x28)] = 1
+        self.wire.drop_writes = 2            # eaten whole: no ACK
+        before = sb.servo_write_stats(0)[0]
+        self.assertTrue(sb.estop())
+        self._drain_broadcast()
+        self.wire.settle(120)                # two write timeouts + the rest
+        rep = {sid: st for sid, st, _, _ in sb.estop_state()}
+        self.assertEqual(rep[2], 2)
+        self.assertEqual(rep[1], 2)
+        self.assertEqual(self.wire.regs[(2, 0x28)], 0)
+        self.assertTrue(sb.servo_write_stats(0)[0] >= before + 2)
+
 
 class ProgramBoundaryResetTests(_Base):
     def test_launcher_boundary_reset_frees_previous_programs_claims(self):

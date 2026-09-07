@@ -118,6 +118,8 @@ static uint8_t tick_txn_is_swrite;  // single-servo write (config) —
 static uint8_t tick_txn_is_uwrite;  // user-staged register write
 static uint8_t tick_txn_is_uread;   // user-staged register read
 static uint8_t tick_txn_is_vread;   // config-verify op_mode read
+static uint8_t tick_txn_is_kwrite;  // verified kill: unicast torque-off
+static uint8_t tick_txn_is_kread;   // verified kill: torque read-back
 
 static ob_sservo_t *sservo_get(void) {
     if (!sservo_inited) {
@@ -422,6 +424,20 @@ static void st_moves_tick_locked(void) {
         ob_float_t cmd = ob_smove_tick(&st_moves[i], (long)st_db_now_ms,
                                        (ob_float_t)ob_sservo_counts(sv, i));
         ob_sservo_set_speed(sv, i, (int32_t)cmd);
+        // Arrival with a COAST/BRAKE end-state (3.9.0): the move
+        // hands the servo back THIS tick — Python's ``then=`` no
+        // longer waits for a ``done()`` poll that a fire-and-forget
+        // move may never make. Coast is the verified-at-next-run
+        // torque-off staged like any coast; brake is zero speed
+        // under torque (the servo's own loop holds it).
+        unsigned char then = st_moves[i].then;
+        if (ob_smove_take_end(&st_moves[i])) {
+            if (then == OB_SMOVE_THEN_COAST) {
+                ob_sservo_coast(sv, i);
+            } else {
+                ob_sservo_set_speed(sv, i, 0);
+            }
+        }
     }
 }
 
@@ -469,6 +485,11 @@ static void servo_pump_locked(ob_bus_t *b) {
             ob_sservo_config_verify_result(sservo_get(),
                                            st == OB_BUS_DONE,
                                            payload, plen);
+        } else if (tick_txn_is_kwrite) {
+            ob_sservo_kill_write_result(sservo_get(), st == OB_BUS_DONE);
+        } else if (tick_txn_is_kread) {
+            ob_sservo_kill_read_result(sservo_get(), st == OB_BUS_DONE,
+                                       payload, plen);
         }
         tick_txn = 0;
         tick_txn_is_read = 0;
@@ -476,6 +497,8 @@ static void servo_pump_locked(ob_bus_t *b) {
         tick_txn_is_uwrite = 0;
         tick_txn_is_uread = 0;
         tick_txn_is_vread = 0;
+        tick_txn_is_kwrite = 0;
+        tick_txn_is_kread = 0;
     }
     if (b->state != OB_BUS_IDLE) {
         return;
@@ -520,6 +543,14 @@ static void servo_pump_locked(ob_bus_t *b) {
             started = (ob_bus_start_read(b, op.id, op.reg, op.data_len,
                                          OB_SSERVO_READ_TICKS) == 0);
             break;
+        case OB_SOP_KILL_WRITE:
+            started = (ob_bus_start_write(b, op.id, op.reg,
+                                          op.data, op.data_len) == 0);
+            break;
+        case OB_SOP_KILL_READ:
+            started = (ob_bus_start_read(b, op.id, op.reg, op.data_len,
+                                         OB_SSERVO_READ_TICKS) == 0);
+            break;
         default:
             return;
     }
@@ -530,8 +561,75 @@ static void servo_pump_locked(ob_bus_t *b) {
         tick_txn_is_uwrite = (op.kind == OB_SOP_USER_WRITE);
         tick_txn_is_uread = (op.kind == OB_SOP_USER_READ);
         tick_txn_is_vread = (op.kind == OB_SOP_CONFIG_VERIFY);
+        tick_txn_is_kwrite = (op.kind == OB_SOP_KILL_WRITE);
+        tick_txn_is_kread = (op.kind == OB_SOP_KILL_READ);
         ob_sservo_op_started(sservo_get(), &op);
     }
+}
+
+// ---- the kill (3.9.0) --------------------------------------------
+//
+// One routine behind the hard button's from-tick e-stop, Python's
+// st_bus.estop() (the launcher's every-exit kill) and
+// torque_off_all(). Under the bus lock:
+//
+//   1. Abandon whatever transaction is in flight. An e-stop must not
+//      queue behind a feedback read; the pump's next iteration
+//      recovers, and the stale-RX flush before TX re-frames the bus.
+//   2. Broadcast torque-off — the fastest possible first strike,
+//      one packet for every servo. No reply by protocol.
+//   3. Arm the VERIFIED follow-up (ob_sservo_kill_all): the pump
+//      then writes torque-off to each configured servo INDIVIDUALLY
+//      (a unicast write gets a status reply) and reads the register
+//      back until the wire says 0, retrying like a config write.
+//
+// Step 3 is what makes the kill a guarantee instead of a hope. The
+// broadcast of step 2 goes out while a servo may still be sending
+// the reply step 1 abandoned — on the half-duplex line a servo that
+// is transmitting cannot hear it — and before 3.9.0 nothing ever
+// checked. Bench 2026-09-07: a task motor, alone under an active
+// hold at exit, kept creeping at its last shipped hold speed.
+static int st_kill_locked(ob_bus_t *b) {
+    if (b->state == OB_BUS_AWAIT_REPLY) {
+        b->state = OB_BUS_IDLE;
+        tick_txn = 0;
+        tick_txn_is_read = 0;
+        tick_txn_is_swrite = 0;
+        tick_txn_is_uwrite = 0;
+        tick_txn_is_uread = 0;
+        tick_txn_is_vread = 0;
+        tick_txn_is_kwrite = 0;
+        tick_txn_is_kread = 0;
+        // The abandoned transaction's slot must not soak up the NEXT
+        // single-write's result.
+        ob_sservo_t *sv = sservo_get();
+        sv->write_in_flight = -1;
+        sv->user_in_flight = -1;
+        sv->verify_in_flight = -1;
+        sv->kill_in_flight = -1;
+    }
+    uint8_t off = 0;
+    int r = ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1);
+    // Broadcast completes immediately; consume so the pump can go on.
+    if (r == 0) {
+        ob_bus_take_result(b, NULL, NULL);
+    }
+    ob_sservo_kill_all(sservo_get());
+    return r;
+}
+
+// The writers, dead: an active drivebase tick re-stages torque via
+// set_speed, and an in-flight per-slot move does the same — both
+// must die BEFORE the kill or the next tick re-drives the wheels.
+// st_db_fault deliberately NOT cleared: a latched dead-wheel
+// diagnosis must survive the stop that follows it, or a post-mortem
+// db_fault() reads healthy (diagnostics must not destroy evidence).
+// The next db_straight/db_turn clears it.
+static void st_writers_dead_locked(void) {
+    st_db_active = false;
+    st_db_writing = false;
+    st_db_ws_clear_locked();
+    st_moves_reset_all();
 }
 
 // ---- Python-facing methods (module-singleton style, like
@@ -575,40 +673,8 @@ void ob_st_bus_estop_from_tick(void) {
         return;
     }
     bus_take();
-    ob_bus_t *b = &test_bus;
-    if (b->state == OB_BUS_AWAIT_REPLY) {
-        b->state = OB_BUS_IDLE;
-        tick_txn = 0;
-        tick_txn_is_read = 0;
-        tick_txn_is_swrite = 0;
-        tick_txn_is_uwrite = 0;
-        tick_txn_is_uread = 0;
-        tick_txn_is_vread = 0;
-        // The abandoned transaction's slot must not soak up the NEXT
-        // single-write's result.
-        sservo_get()->write_in_flight = -1;
-        sservo_get()->user_in_flight = -1;
-        sservo_get()->verify_in_flight = -1;
-    }
-    uint8_t off = 0;
-    if (ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1) == 0) {
-        ob_bus_take_result(b, NULL, NULL);
-    }
-    st_db_active = false;
-    st_db_writing = false;
-    // st_db_fault deliberately NOT cleared: a latched dead-wheel
-    // diagnosis must survive the button stop that follows it, or a
-    // post-mortem db_fault() reads healthy (diagnostics must not
-    // destroy evidence). The next db_straight/db_turn clears it.
-    st_moves_reset_all();
-    ob_sservo_t *sv = sservo_get();
-    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
-        if (sv->slots[i].in_use) {
-            sv->slots[i].target_dirty = 0;
-            sv->slots[i].torque_cmd = -1;
-            sv->slots[i].torque_on = 0;
-        }
-    }
+    st_writers_dead_locked();
+    (void)st_kill_locked(&test_bus);
     bus_release();
 }
 
@@ -653,6 +719,8 @@ static mp_obj_t sb_test_reset(mp_obj_t self_in) {
     tick_txn_is_uwrite = 0;
     tick_txn_is_uread = 0;
     tick_txn_is_vread = 0;
+    tick_txn_is_kwrite = 0;
+    tick_txn_is_kread = 0;
     st_db_gyro_source = 0;
     st_db_active = false;
     st_db_writing = false;
@@ -1039,24 +1107,32 @@ static bool smove_slot_ready_locked(int slot) {
 }
 
 static mp_obj_t sb_servo_move(size_t n_args, const mp_obj_t *args) {
-    // (self, slot, delta_counts, speed_cps, accel_cps2) -> bool
-    (void)n_args;
+    // (self, slot, delta_counts, speed_cps, accel_cps2[, then]) -> bool
+    // then: 0 = coast, 1 = brake, 2 = hold (default) — applied by
+    // the tick the moment the arrival latches (3.9.0), so a
+    // wait=False move that Python never polls still ends in the
+    // state it asked for instead of holding under power forever.
     int slot = mp_obj_get_int(args[1]);
     ob_float_t delta = (ob_float_t)mp_obj_get_float(args[2]);
     ob_float_t speed = (ob_float_t)mp_obj_get_float(args[3]);
     ob_float_t accel = (ob_float_t)mp_obj_get_float(args[4]);
+    int then = (n_args >= 6) ? mp_obj_get_int(args[5]) : OB_SMOVE_THEN_HOLD;
+    if (then < 0 || then > OB_SMOVE_THEN_HOLD) {
+        mp_raise_ValueError(MP_ERROR_TEXT("then must be 0 (coast), 1 (brake) or 2 (hold)"));
+    }
     bus_take();
     bool ok = smove_slot_ready_locked(slot);
     if (ok) {
         ob_smove_start(&st_moves[slot], (long)st_db_now_ms,
                        (ob_float_t)ob_sservo_counts(sservo_get(), slot),
                        delta, speed, accel);
+        ob_smove_set_then(&st_moves[slot], (unsigned char)then);
         st_db_mark_frame_stale_locked(slot);
     }
     bus_release();
     return mp_obj_new_bool(ok);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_move_obj, 5, 5, sb_servo_move);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sb_servo_move_obj, 5, 6, sb_servo_move);
 
 static mp_obj_t sb_servo_hold(mp_obj_t self_in, mp_obj_t slot_in) {
     (void)self_in;
@@ -1215,38 +1291,14 @@ static mp_obj_t sb_servo_encode(mp_obj_t self_in, mp_obj_t steps_in) {
 static MP_DEFINE_CONST_FUN_OBJ_2(sb_servo_encode_obj, sb_servo_encode);
 
 static mp_obj_t sb_torque_off_all(mp_obj_t self_in) {
-    // E-stop path: broadcast torque-off NOW, jumping any in-flight
-    // transaction (an emergency stop must not queue behind feedback
-    // reads). Consuming whatever was in flight is acceptable damage:
-    // the pump's next iteration recovers, and the stale-RX flush
-    // before TX (st3215.py's drain rule) re-frames the bus.
+    // Broadcast torque-off NOW, jumping any in-flight transaction,
+    // then the verified per-servo follow-up (st_kill_locked). Staged
+    // commands are voided so nothing re-drives the motors; the
+    // drivebase and per-slot writers are NOT touched (estop() is
+    // the whole kill).
     (void)self_in;
-    uint8_t off = 0;
     bus_take();
-    ob_bus_t *b = bus_get();
-    if (b->state == OB_BUS_AWAIT_REPLY) {
-        b->state = OB_BUS_IDLE;   // abandon; flush-before-TX re-frames
-        tick_txn = 0;
-        tick_txn_is_read = 0;
-        tick_txn_is_swrite = 0;
-        tick_txn_is_uwrite = 0;
-        tick_txn_is_uread = 0;
-        tick_txn_is_vread = 0;
-    }
-    int r = ob_bus_start_write(b, 0xFE, OB_SREG_TORQUE, &off, 1);
-    // Broadcast completes immediately; consume so the pump can go on.
-    if (r == 0) {
-        ob_bus_take_result(b, NULL, NULL);
-    }
-    // Void every staged command so nothing re-drives the motors.
-    ob_sservo_t *sv = sservo_get();
-    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
-        if (sv->slots[i].in_use) {
-            sv->slots[i].target_dirty = 0;
-            sv->slots[i].torque_cmd = -1;
-            sv->slots[i].torque_on = 0;   // next run re-arms torque
-        }
-    }
+    int r = st_kill_locked(bus_get());
     bus_release();
     return mp_obj_new_bool(r == 0);
 }
@@ -1258,19 +1310,51 @@ static mp_obj_t sb_estop(mp_obj_t self_in) {
     // from Python at program exit. Torque-off alone is NOT enough:
     // an active drivebase tick re-stages torque via set_speed, and
     // an in-flight per-slot move does the same — both writers must
-    // die first. Slot attachments and the db slot binding survive
-    // (motors keep their slots across the program boundary); the
-    // fault latch is preserved (diagnostics must not destroy
-    // evidence).
+    // die first. ONE critical section for both halves (3.9.0):
+    // before, the writers died in one and the broadcast went out in
+    // another, and the hard tick between them could ship a slot's
+    // last staged speed — a fresh non-zero setpoint on the wire, its
+    // ACK still in flight when the broadcast collided with it. Slot
+    // attachments and the db slot binding survive (motors keep their
+    // slots across the program boundary); the fault latch is
+    // preserved (diagnostics must not destroy evidence).
+    (void)self_in;
     bus_take();
-    st_db_active = false;
-    st_db_writing = false;
-    st_db_ws_clear_locked();
-    st_moves_reset_all();
+    st_writers_dead_locked();
+    int r = st_kill_locked(bus_get());
     bus_release();
-    return sb_torque_off_all(self_in);
+    return mp_obj_new_bool(r == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_estop_obj, sb_estop);
+
+static mp_obj_t sb_estop_state(mp_obj_t self_in) {
+    // The verified kill's outcome, one 4-tuple per slot:
+    // (servo_id, state, torque_val, fails) with state 0 = nothing
+    // armed (slot unused / never configured), 1 = pending,
+    // 2 = confirmed (torque read back 0), 3 = failed (latched after
+    // CONFIG_TRIES losses); torque_val is what the servo last
+    // reported when it answered with torque still on. The launcher
+    // polls this after estop() and names the servo that did not
+    // confirm — a loss is never silent.
+    (void)self_in;
+    mp_obj_t items[OB_SSERVO_SLOTS];
+    bus_take();
+    const ob_sservo_t *sv = sservo_get();
+    for (int i = 0; i < OB_SSERVO_SLOTS; i++) {
+        uint8_t val = 0, fails = 0;
+        int st = ob_sservo_kill_state(sv, i, &val, &fails);
+        mp_obj_t t[4] = {
+            mp_obj_new_int(sv->slots[i].in_use ? sv->slots[i].id : -1),
+            mp_obj_new_int(st),
+            mp_obj_new_int(val),
+            mp_obj_new_int(fails),
+        };
+        items[i] = mp_obj_new_tuple(4, t);
+    }
+    bus_release();
+    return mp_obj_new_tuple(OB_SSERVO_SLOTS, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_estop_state_obj, sb_estop_state);
 
 // ---- native drivebase bindings ----
 
@@ -1795,6 +1879,8 @@ static mp_obj_t sb_reset_runtime(mp_obj_t self_in) {
     tick_txn_is_uwrite = 0;
     tick_txn_is_uread = 0;
     tick_txn_is_vread = 0;
+    tick_txn_is_kwrite = 0;
+    tick_txn_is_kread = 0;
     // ABANDON any transaction the previous program left in flight.
     //
     // The hard tick pumps right up to the instant a program ends, so
@@ -1870,6 +1956,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_servo_encode),     MP_ROM_PTR(&sb_servo_encode_obj) },
     { MP_ROM_QSTR(MP_QSTR_torque_off_all),   MP_ROM_PTR(&sb_torque_off_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_estop),            MP_ROM_PTR(&sb_estop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_estop_state),      MP_ROM_PTR(&sb_estop_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset_runtime),    MP_ROM_PTR(&sb_reset_runtime_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_config),        MP_ROM_PTR(&sb_db_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_disable),       MP_ROM_PTR(&sb_db_disable_obj) },
