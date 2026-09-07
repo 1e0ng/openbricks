@@ -768,13 +768,19 @@ class _SimStBus:
         return slot in self._wheels and not (self._active
                                              and self._db_writing)
 
-    def servo_move(self, slot, delta_counts, speed_cps, accel_cps2):
+    def servo_move(self, slot, delta_counts, speed_cps, accel_cps2,
+                   then=2):
         if not self._slot_ready(slot):
             return False
-        self._move(slot).start(
+        m = self._move(slot)
+        m.start(
             self._rt.now_ms,
             self._wheels[slot].angle() * self._STEPS_PER_DEG,
             float(delta_counts), float(speed_cps), float(accel_cps2))
+        # Firmware parity (3.9.0): the end-state rides with the move
+        # and the tick applies it at arrival (set AFTER start — start
+        # resets it to hold, like the C core).
+        m.set_then(int(then))
         self._frame_stale = True
         return True
 
@@ -843,6 +849,15 @@ class _SimStBus:
                              self._wheels[slot].angle()
                              * self._STEPS_PER_DEG)
                 self._wheels[slot].run_speed(cmd / self._STEPS_PER_DEG)
+                # Firmware parity (3.9.0): a coast/brake move hands
+                # the wheel back the tick it arrives — st_bus.c's
+                # st_moves_tick_locked, same handshake.
+                then = m.then()
+                if m.take_end():
+                    if then == 0:
+                        self._wheels[slot].coast()
+                    else:
+                        self._wheels[slot].run_speed(0.0)
 
 
 class ShimST3215Motor:

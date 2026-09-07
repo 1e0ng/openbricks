@@ -3,6 +3,40 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.9.0 — the exit torque-off is verified per servo, and a fire-and-forget move ends in the state it asked for
+
+Bench 2026-09-07: a program finished cleanly and one task motor kept
+creeping, slowly, for minutes. Every torque command on the native
+bus — the e-stop broadcast included — shipped as a broadcast
+sync-write, which gets no reply by protocol, and the exit kill was
+fired into whatever transaction the 1 kHz pump had in flight: a
+servo mid-reply on the half-duplex line cannot hear it, and one
+that missed it keeps its last speed under torque. Nothing checked.
+The creeping motor was the one servo still under an active hold at
+exit — its `run_angle(150, 144, wait=False)` had a `then=COAST` that
+only a `done()` poll could dispatch, and the program never polled.
+
+- **Verified kill.** The broadcast stays as the first strike; the
+  pump then writes torque-off to each configured servo individually
+  (a unicast write is ACKed) and reads the register back until the
+  wire says 0, retrying and finally latching like a config write.
+  The hard button's from-tick e-stop, the launcher's every-exit kill
+  and `st_bus.torque_off_all()` all arm it; `st_bus.estop_state()`
+  reports the outcome per slot. The launcher's kill is now ONE
+  critical section (the writers used to die in one and the
+  broadcast go out in another, and the hard tick between them could
+  ship a slot's last staged speed).
+- **The run log's last line says which servos died.** `torque-off
+  confirmed: servo ids 2, 1, 3, 4 in 9 ms`, or `torque-off NOT
+  confirmed: servo id 4 answered torque register 0x28 = 1 after 8
+  attempts - check power and the servo bus wiring` (also printed to
+  the console). The button path still kills first and logs after.
+- **`then=` at arrival.** On an adopted motor `run_angle`'s end-state
+  rides with the move (`st_bus.servo_move(..., then)`) and the C
+  tick applies it the moment the arrival latches — coast, brake or
+  hold — whether or not `done()` is ever called. The sim's
+  `RawServoMove` grew `set_then` / `take_end` for the same handshake.
+
 ## 3.8.0 — the sim's colour sensor can be mounted anywhere, aimed anywhere, and reads like the driver
 
 The bench robot's TCS34725 sits on its left flank at brick height

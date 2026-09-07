@@ -48,6 +48,20 @@ typedef enum {
     OB_SMOVE_HOLD,
 } ob_smove_state_t;
 
+// End-state of a move once it has ARRIVED (3.9.0) — the Python
+// ``then=`` argument, applied here on the hard tick rather than by a
+// Python ``done()`` poll that a fire-and-forget ``run_angle(...,
+// wait=False)`` may never make. Bench 2026-09-07: a task motor
+// whose deferred coast was never dispatched sat in this hold, under
+// power, for the rest of the run — and was the one servo with a
+// fresh non-zero speed on the wire when the unverified exit kill
+// went out. HOLD keeps the position lock (the pre-3.9.0 behaviour
+// for every ``then``); COAST and BRAKE hand the servo back to the
+// caller via ``ob_smove_take_end`` the tick the arrival latches.
+#define OB_SMOVE_THEN_COAST 0
+#define OB_SMOVE_THEN_BRAKE 1
+#define OB_SMOVE_THEN_HOLD  2
+
 typedef struct {
     ob_smove_state_t state;
     bool             done;         // arrival reached (latched)
@@ -56,6 +70,7 @@ typedef struct {
     ob_float_t       goal_counts;  // profile endpoint / hold target
     ob_float_t       kp;
     ob_float_t       tol_counts;
+    unsigned char    then;         // OB_SMOVE_THEN_*; HOLD by default
 } ob_smove_t;
 
 void ob_smove_init(ob_smove_t *m);
@@ -75,6 +90,21 @@ void ob_smove_hold_at(ob_smove_t *m, ob_float_t counts);
 void ob_smove_stop(ob_smove_t *m);
 
 bool ob_smove_is_done(const ob_smove_t *m);
+
+// Set the end-state applied at arrival (OB_SMOVE_THEN_*). ``start``
+// and ``hold_at`` reset it to HOLD, so set it AFTER arming. Values
+// outside the three are clamped to HOLD — the safe reading of a
+// bad argument is "keep doing what every move did before".
+void ob_smove_set_then(ob_smove_t *m, unsigned char then);
+
+// The arrival handshake for COAST/BRAKE ends. Returns true exactly
+// once per move: the first call after ``done`` latched on a move
+// whose ``then`` is not HOLD — the move goes IDLE (no further
+// output) but ``done`` STAYS true, so a ``done()`` poll that comes
+// later still reads the arrival. The caller applies the end-state
+// on the servo. Always false for HOLD moves, for IDLE, and before
+// arrival.
+bool ob_smove_take_end(ob_smove_t *m);
 
 // One tick: returns the commanded speed in counts/s for the current
 // measured position (0 when IDLE). The caller stages it on the bus.

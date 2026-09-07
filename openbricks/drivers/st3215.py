@@ -1471,12 +1471,11 @@ class ST3215Motor(Motor):
             ideal_s = 2.0 * (travel / accel_dps2) ** 0.5
         return int(ideal_s * 4000.0 + 1000.0)
 
-    def _native_dispatch_then(self, then):
-        if then == Stop.COAST:
-            self._native_sb.servo_coast(self._native_slot)
-        elif then == Stop.BRAKE:
-            self._native_sb.servo_run(self._native_slot, 0)
-        # Stop.HOLD: the C move already parks in a position hold.
+    # ``then=`` as the C move core spells it (st_move_core.h's
+    # OB_SMOVE_THEN_*): applied by the hard tick the moment the move
+    # arrives, so a ``wait=False`` move the program never polls still
+    # ends in the state it asked for (3.9.0).
+    _NATIVE_THEN = {Stop.COAST: 0, Stop.BRAKE: 1, Stop.HOLD: 2}
 
     def _native_run_angle(self, deg_per_s, target_angle, wait, then):
         max_dps = abs(float(deg_per_s))
@@ -1485,12 +1484,17 @@ class ST3215Motor(Motor):
         capped = max_dps if max_dps < self._max_dps else self._max_dps
         accel = self._accel_dps2 if self._accel_dps2 > 0 else 1500.0
         # User-frame delta; the slot carries this motor's invert, same
-        # convention as servo_run.
+        # convention as servo_run. The end-state rides along: the C
+        # controller applies it at arrival itself — Python no longer
+        # dispatches it from ``done()``, a poll a fire-and-forget move
+        # may never make (bench 2026-09-07: a task motor whose coast
+        # never dispatched held under power for the rest of the run).
         ok = self._native_sb.servo_move(
             self._native_slot,
             float(target_angle) * _COUNTS_PER_REV / 360.0,
             capped * self._steps_per_dps,
-            accel * self._steps_per_dps)
+            accel * self._steps_per_dps,
+            self._NATIVE_THEN[then])
         if not ok:
             raise RuntimeError(
                 "run_angle refused: wheel is owned by an in-flight "
@@ -1552,7 +1556,6 @@ class ST3215Motor(Motor):
                 self._report_stall(report)
                 return False
             time.sleep_ms(10)
-        self._native_dispatch_then(then)
         return True
 
     def _native_check_bus_alive(self):
@@ -1699,8 +1702,9 @@ class ST3215Motor(Motor):
         first step.
 
         On an adopted motor the C controller advances the move on the
-        hard tick; ``done()`` just checks the arrival flag and runs
-        the deferred ``then=`` dispatch."""
+        hard tick AND applies the ``then=`` end-state itself the tick
+        the move arrives (3.9.0) — whether or not ``done()`` is ever
+        called; ``done()`` just checks the arrival flag."""
         if self._native_slot is not None:
             if self._native_pending is None:
                 return True
@@ -1731,9 +1735,7 @@ class ST3215Motor(Motor):
                     self._report_stall(report)
                     return True     # move is over; wheel stopped
                 return False
-            then = st["then"]
             self._native_pending = None
-            self._native_dispatch_then(then)
             return True
         if self._pending is None:
             return True
@@ -1958,9 +1960,15 @@ class ST3215Motor(Motor):
         too. For a move within ±7 turns the whole thing is one step
         write and ``done()`` simply reports convergence; for a larger
         move ``done()`` issues each subsequent ±7-turn step once the
-        previous one parks, so you must keep polling. The end-state
-        ``then=`` dispatch is deferred until ``done()`` reports the
-        final step has converged.
+        previous one parks, so you must keep polling. On this
+        (Python-driven) path the end-state ``then=`` dispatch is
+        deferred until ``done()`` reports the final step has
+        converged. On an ADOPTED motor (the wheels and task shafts of
+        a native drive base) the C controller applies ``then=`` the
+        tick the move arrives, polled or not — a ``run_angle(...,
+        wait=False)`` your program fires and forgets ends in the
+        state it asked for instead of holding under power for the
+        rest of the run (3.9.0).
 
         Any subsequent motion command (``run``, ``run_speed``, ``brake``,
         ``coast``, ``hold``, ``run_angle``) supersedes a pending

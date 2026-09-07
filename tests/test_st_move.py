@@ -136,5 +136,66 @@ class ArbitrationTests(_Base):
         self.assertTrue(sb.db_done())
 
 
+class ThenAtArrivalTests(_Base):
+    """``servo_move(..., then)`` (3.9.0): the end-state is applied by
+    the tick the moment the arrival latches — whether or not anyone
+    ever polls ``servo_move_done``. Bench 2026-09-07: a task motor's
+    fire-and-forget run_angle, whose Python-side coast waited for a
+    ``done()`` the program never called, held under power for the
+    rest of the run."""
+
+    def test_default_hold_keeps_correcting_after_arrival(self):
+        self.assertTrue(sb.servo_move(1, 4096.0, 2000.0, 8000.0))
+        self.w.advance(3500)
+        self.assertTrue(sb.servo_move_done(1))
+        self.assertEqual(self.w.torque[1], 1)
+        self.w.pos[1] += 400.0                  # shove the shaft
+        self.w.advance(5)
+        self.assertTrue(abs(self.w.spd[1]) > 0)  # the hold answers
+
+    def test_then_coast_cuts_torque_at_arrival_unpolled(self):
+        self.assertTrue(sb.servo_move(1, 4096.0, 2000.0, 8000.0, 0))
+        self.w.advance(3500)
+        self.assertTrue(sb.servo_move_done(1))   # a late poll still
+                                                  # reads the arrival
+        self.assertEqual(self.w.torque[1], 0)
+        self.assertEqual(self.w.spd[1], 0)
+        self.w.pos[1] += 400.0
+        self.w.advance(50)
+        self.assertEqual(self.w.spd[1], 0)       # no hold left
+        self.assertEqual(self.w.torque[1], 0)
+        self.assertTrue(sb.servo_move_done(1))
+
+    def test_then_brake_zeroes_speed_under_torque(self):
+        self.assertTrue(sb.servo_move(1, 4096.0, 2000.0, 8000.0, 1))
+        self.w.advance(3500)
+        self.assertTrue(sb.servo_move_done(1))
+        self.assertEqual(self.w.torque[1], 1)
+        self.assertEqual(self.w.spd[1], 0)
+        self.w.pos[1] += 400.0
+        self.w.advance(50)
+        self.assertEqual(self.w.spd[1], 0)       # brake, not a hold
+        self.assertEqual(self.w.torque[1], 1)
+
+    def test_then_is_validated(self):
+        try:
+            sb.servo_move(1, 100.0, 100.0, 100.0, 5)
+            self.fail("expected ValueError")
+        except ValueError:
+            pass
+
+    def test_a_new_move_after_a_coast_end_reads_not_done_then_done(self):
+        self.assertTrue(sb.servo_move(1, 4096.0, 2000.0, 8000.0, 0))
+        self.w.advance(3500)
+        self.assertTrue(sb.servo_move_done(1))
+        self.assertTrue(sb.servo_move(1, 1024.0, 2000.0, 8000.0, 0))
+        self.assertFalse(sb.servo_move_done(1))
+        self.w.advance(5)
+        self.assertEqual(self.w.torque[1], 1)    # re-armed for the move
+        self.w.advance(2000)
+        self.assertTrue(sb.servo_move_done(1))
+        self.assertEqual(self.w.torque[1], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

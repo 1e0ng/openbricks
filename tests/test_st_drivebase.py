@@ -57,6 +57,10 @@ class _PerfectWheels:
         # of (servo_id, value) pairs that shared that ONE packet —
         # the atomic-stop tests assert both wheels appear together.
         self.torque_pkts = []
+        # Servo ids that cannot hear a BROADCAST write (3.9.0): a
+        # servo mid-reply on the half-duplex line. Unicast writes to
+        # it still land — that is what the verified kill relies on.
+        self.deaf_to_broadcast = set()
 
     def pump(self):
         self.now += 1
@@ -98,15 +102,20 @@ class _PerfectWheels:
             elif instr == 0x03 and pid != 0xFE:        # WRITE
                 if pkt[5] == 0x28 and pid in self.torque:   # TORQUE
                     self.torque[pid] = pkt[6]
+                    if pkt[6] == 0:
+                        self.spd[pid] = 0    # coasting wheel
                 for k in range(6, 4 + ln - 1):
                     self.regs[(pid, pkt[5] + k - 6)] = pkt[k]
                 sb.feed_rx(_reply(pid, 0))
             elif instr == 0x03 and pid == 0xFE:        # BROADCAST write
                 # Torque-off broadcast (the e-stop): applies to every
-                # servo, no reply by protocol.
+                # servo that can hear it, no reply by protocol.
                 if pkt[5] == 0x28:
                     for sid in self.torque:
+                        if sid in self.deaf_to_broadcast:
+                            continue
                         self.torque[sid] = pkt[6]
+                        self.regs[(sid, 0x28)] = pkt[6]
                         if pkt[6] == 0:
                             self.spd[sid] = 0
             elif instr == 0x83:                        # SYNC write
@@ -141,6 +150,7 @@ class _PerfectWheels:
                         entries.append((sid, val))
                         if sid in self.torque:
                             self.torque[sid] = val
+                            self.regs[(sid, 0x28)] = val   # read-back truth
                             if val == 0:
                                 self.spd[sid] = 0    # coasting wheel
                         j += 1 + dl
@@ -1334,6 +1344,47 @@ class EstopBindingTests(_Base):
         self.w.advance(300)
         self.assertEqual(self.w.spd[2], 0)
         self.assertEqual(self.w.torque[2], 0)
+
+    def test_estop_is_verified_per_servo_and_reaches_one_deaf_to_the_broadcast(self):
+        # 3.9.0. The broadcast is unverified by protocol; a servo
+        # mid-reply on the half-duplex line cannot hear it, and one
+        # that missed it keeps its last speed under torque — the
+        # bench's creeping task motor (2026-09-07). Model it: id 2
+        # is deaf to broadcasts, and under an active move.
+        self.w.deaf_to_broadcast = {2}
+        self.assertTrue(sb.servo_move(0, 40960.0, 2000.0, 8000.0))
+        self.w.advance(50)
+        self.assertTrue(abs(self.w.spd[2]) > 0)
+        self.assertEqual(self.w.torque[2], 1)
+        self.assertTrue(sb.estop())
+        # The broadcast alone reached only id 1...
+        self.assertEqual(self.w.torque[1], 0)
+        self.assertEqual(self.w.torque[2], 1)
+        self.assertTrue(abs(self.w.spd[2]) > 0)     # the creep
+        # ...the per-servo verified follow-up reaches id 2 within a
+        # few ticks: its own torque-off write, ACKed, then read back.
+        self.w.advance(20)
+        self.assertEqual(self.w.torque[2], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        rep = {sid: (st, val, fails)
+               for sid, st, val, fails in sb.estop_state()}
+        self.assertEqual(rep[2], (2, 0, 0))
+        self.assertEqual(rep[1], (2, 0, 0))
+        # And nothing re-drives it afterwards.
+        self.w.advance(300)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque[2], 0)
+
+    def test_estop_state_names_wheels_before_and_after(self):
+        rep = {sid: st for sid, st, _, _ in sb.estop_state()}
+        self.assertEqual(rep, {2: 0, 1: 0, -1: 0})
+        sb.db_straight(400.0, 150.0)
+        self.w.advance(200)
+        self.assertTrue(sb.estop())
+        self.w.advance(20)
+        rep = {sid: st for sid, st, _, _ in sb.estop_state()}
+        self.assertEqual(rep[2], 2)
+        self.assertEqual(rep[1], 2)
 
 
 class HeadingResetParityTests(_Base):

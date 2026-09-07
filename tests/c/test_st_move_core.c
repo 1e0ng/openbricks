@@ -142,7 +142,75 @@ TEST(zero_delta_move_is_immediately_done_hold) {
     CHECK(ob_smove_tick(&m, 2, 650.0) > 0.0);
 }
 
+// ---- then= at arrival (3.9.0) ---------------------------------------
+
+TEST(then_defaults_to_hold_and_hold_never_hands_back) {
+    ob_smove_t m;
+    ob_smove_init(&m);
+    CHECK_EQ_INT(m.then, OB_SMOVE_THEN_HOLD);
+    ob_smove_start(&m, 0, 0.0, 2048.0, 1000.0, 4000.0);
+    ob_smove_set_then(&m, OB_SMOVE_THEN_COAST);
+    CHECK_EQ_INT(m.then, OB_SMOVE_THEN_COAST);
+    CHECK(!ob_smove_take_end(&m));          // not arrived: nothing yet
+    // start resets the end-state (set it AFTER arming, like the
+    // bindings do); an out-of-range code clamps to hold.
+    ob_smove_start(&m, 0, 0.0, 2048.0, 1000.0, 4000.0);
+    CHECK_EQ_INT(m.then, OB_SMOVE_THEN_HOLD);
+    ob_smove_set_then(&m, 7);
+    CHECK_EQ_INT(m.then, OB_SMOVE_THEN_HOLD);
+    (void)run_plant(&m, 0, 4000, 0.0);
+    CHECK(ob_smove_is_done(&m));
+    CHECK(!ob_smove_take_end(&m));          // hold keeps the lock
+    CHECK_EQ_INT(m.state, OB_SMOVE_HOLD);
+    // IDLE never hands back either.
+    ob_smove_stop(&m);
+    ob_smove_set_then(&m, OB_SMOVE_THEN_COAST);
+    CHECK(!ob_smove_take_end(&m));
+}
+
+TEST(coast_and_brake_hand_back_once_at_arrival_and_stay_done) {
+    for (unsigned char then = OB_SMOVE_THEN_COAST;
+         then <= OB_SMOVE_THEN_BRAKE; then++) {
+        ob_smove_t m;
+        ob_smove_init(&m);
+        ob_smove_start(&m, 0, 0.0, 2048.0, 1000.0, 4000.0);
+        ob_smove_set_then(&m, then);
+        ob_float_t pos = 0.0;
+        int handed = 0;
+        long t;
+        for (t = 0; t < 4000; t++) {
+            ob_float_t cmd = ob_smove_tick(&m, t, pos);
+            pos += cmd * (ob_float_t)0.001;
+            if (ob_smove_take_end(&m)) {
+                handed++;
+                CHECK(ob_smove_is_done(&m));   // arrived, then handed
+            }
+        }
+        CHECK_EQ_INT(handed, 1);                // exactly once
+        CHECK(ob_smove_is_done(&m));            // a late poll still
+                                                // reads the arrival
+        CHECK_EQ_INT(m.state, OB_SMOVE_IDLE);
+        CHECK(ob_smove_tick(&m, t, pos + 500.0) == 0.0);  // silent
+        CHECK(!ob_smove_take_end(&m));
+        CHECK(fabs(pos - 2048.0) < OB_SMOVE_DONE_TOL_COUNTS);
+    }
+}
+
+TEST(hold_at_resets_then_to_hold) {
+    ob_smove_t m;
+    ob_smove_init(&m);
+    ob_smove_start(&m, 0, 0.0, 100.0, 1000.0, 4000.0);
+    ob_smove_set_then(&m, OB_SMOVE_THEN_BRAKE);
+    ob_smove_hold_at(&m, 50.0);
+    CHECK_EQ_INT(m.then, OB_SMOVE_THEN_HOLD);
+    CHECK(ob_smove_is_done(&m));
+    CHECK(!ob_smove_take_end(&m));
+}
+
 int main(void) {
+    RUN(then_defaults_to_hold_and_hold_never_hands_back);
+    RUN(coast_and_brake_hand_back_once_at_arrival_and_stay_done);
+    RUN(hold_at_resets_then_to_hold);
     RUN(idle_outputs_zero_and_not_done);
     RUN(move_converges_on_relative_goal);
     RUN(negative_move_converges);

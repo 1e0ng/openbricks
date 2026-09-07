@@ -392,7 +392,7 @@ class DisarmBeforeCleanupTests(unittest.TestCase):
         orig_stop_motors = launcher._stop_all_motors
         launcher._arm_stop_button = lambda armed: order.append(
             ("arm", armed))
-        launcher._stop_all_motors = lambda: order.append(("motors",))
+        launcher._stop_all_motors = lambda *a, **k: order.append(("motors",))
         self.addCleanup(
             setattr, launcher, "_arm_stop_button", orig_arm)
         self.addCleanup(
@@ -1978,7 +1978,7 @@ class EmergencyStopTests(unittest.TestCase):
     def _record_motor_stops(self):
         calls = []
         orig = launcher._stop_all_motors
-        launcher._stop_all_motors = lambda: calls.append(1)
+        launcher._stop_all_motors = lambda *a, **k: calls.append(1)
         self.addCleanup(setattr, launcher, "_stop_all_motors", orig)
         return calls
 
@@ -1994,6 +1994,10 @@ class EmergencyStopTests(unittest.TestCase):
             def estop():
                 calls.append("estop")
                 return True
+
+            @staticmethod
+            def estop_state():
+                return ()
 
         class _MP:
             @staticmethod
@@ -2181,7 +2185,7 @@ class EmergencyStopTests(unittest.TestCase):
     def test_exec_program_raw_stops_motors_on_keyboard_interrupt(self):
         calls = []
         original = launcher._stop_all_motors
-        launcher._stop_all_motors = lambda: calls.append(1)
+        launcher._stop_all_motors = lambda *a, **k: calls.append(1)
         path = _write_program("raise KeyboardInterrupt\n")
         try:
             with self.assertRaises(KeyboardInterrupt):
@@ -2398,6 +2402,10 @@ class BrakeToRestTests(unittest.TestCase):
             def estop():
                 calls.append("estop")
                 return True
+
+            @staticmethod
+            def estop_state():
+                return ()
 
             @staticmethod
             def reset_runtime():
@@ -3230,6 +3238,206 @@ class ExecAttributionTests(unittest.TestCase):
         self.assertTrue(any(t == "exec-start" for t, a in tags), tags)
         self.assertFalse(any(t in ("exec-missing", "exec-oserror")
                              for t, a in tags), tags)
+
+
+
+class KillConfirmTests(unittest.TestCase):
+    """``_stop_all_motors`` (3.9.0): the native bus's kill is VERIFIED
+    per servo, and the launcher words the outcome for the run log —
+    every servo named, a failure named with the register and the
+    value the servo answered. Bench 2026-09-07: a task motor crept
+    on for minutes after "finished: clean exit", and the log had no
+    line that could have said so."""
+
+    def setUp(self):
+        from openbricks import estop
+        estop.clear()
+
+    def _install(self, states_seq, estop_raises=None):
+        import sys as _sys
+        calls = []
+        seq = list(states_seq)
+
+        class _SB:
+            @staticmethod
+            def estop():
+                calls.append("estop")
+                if estop_raises is not None:
+                    raise estop_raises
+                return True
+
+            @staticmethod
+            def estop_state():
+                calls.append("estop_state")
+                if len(seq) > 1:
+                    return seq.pop(0)
+                return seq[0]
+
+            @staticmethod
+            def reset_runtime():
+                pass
+
+            @staticmethod
+            def db_stop(mode=None):
+                return True
+
+            @staticmethod
+            def db_done():
+                return True
+
+        class _MP:
+            @staticmethod
+            def stop():
+                calls.append("mp.stop")
+
+            @staticmethod
+            def reset():
+                pass
+
+        class _Mod:
+            pass
+        mod = _Mod()
+        mod.st_bus = _SB()
+        mod.motor_process = _MP()
+        orig = _sys.modules.get("_openbricks_native")
+        _sys.modules["_openbricks_native"] = mod
+
+        def restore():
+            if orig is None:
+                _sys.modules.pop("_openbricks_native", None)
+            else:
+                _sys.modules["_openbricks_native"] = orig
+        self.addCleanup(restore)
+        return calls
+
+    _NONE = (-1, 0, 0, 0)
+
+    def test_all_confirmed_names_every_servo(self):
+        calls = self._install([
+            ((2, 1, 0, 0), (1, 1, 0, 0), self._NONE, self._NONE),
+            ((2, 2, 0, 0), (1, 2, 0, 0), self._NONE, self._NONE),
+        ])
+        note = launcher._stop_all_motors()
+        self.assertTrue(
+            note.startswith("torque-off confirmed: servo ids 2, 1 in"),
+            note)
+        self.assertEqual(calls[:2], ["mp.stop", "estop"])
+        self.assertTrue(calls.count("estop_state") >= 2)
+
+    def test_servo_that_stays_on_is_named_with_register_and_value(self):
+        self._install([
+            ((2, 2, 0, 0), (1, 2, 0, 0), (4, 3, 1, 8), self._NONE),
+        ])
+        note = launcher._stop_all_motors()
+        self.assertTrue(note.startswith("torque-off NOT confirmed:"), note)
+        self.assertTrue("servo id 4 answered torque register 0x28 = 1 "
+                        "after 8 attempts" in note, note)
+        self.assertTrue("check power and the servo bus wiring" in note,
+                        note)
+
+    def test_servo_that_never_acks_is_named(self):
+        self._install([((4, 3, 0, 8), self._NONE, self._NONE, self._NONE)])
+        note = launcher._stop_all_motors()
+        self.assertTrue("servo id 4 never acknowledged its torque-off "
+                        "(8 attempts)" in note, note)
+
+    def test_still_pending_past_the_budget_is_reported(self):
+        self._install([((3, 1, 0, 2), self._NONE, self._NONE, self._NONE)])
+        prev = launcher._KILL_CONFIRM_MS
+        launcher._KILL_CONFIRM_MS = 20
+        self.addCleanup(setattr, launcher, "_KILL_CONFIRM_MS", prev)
+        note = launcher._stop_all_motors()
+        self.assertTrue(note.startswith("torque-off NOT confirmed:"), note)
+        self.assertTrue("servo id 3 still unconfirmed after" in note, note)
+
+    def test_nothing_attached_says_nothing(self):
+        self._install([(self._NONE,) * 4])
+        self.assertIsNone(launcher._stop_all_motors())
+
+    def test_confirm_false_kills_without_waiting(self):
+        calls = self._install([((2, 1, 0, 0), self._NONE, self._NONE,
+                                self._NONE)])
+        self.assertIsNone(launcher._stop_all_motors(confirm=False))
+        self.assertIn("estop", calls)
+        self.assertFalse("estop_state" in calls)
+
+    def test_native_kill_raising_is_loud_not_silent(self):
+        self._install([()], estop_raises=OSError("bus wedged"))
+        note = launcher._stop_all_motors()
+        self.assertTrue("native kill raised" in note, note)
+        self.assertTrue("bus wedged" in note, note)
+
+    def _run_and_read_log(self, source, raw=False):
+        import tests.test_log as tlog
+        from openbricks import log as log_mod
+        tlog._wipe(tlog._TEST_LOG_DIR)
+        prev_dir = log_mod.LOG_DIR
+        log_mod.LOG_DIR = tlog._TEST_LOG_DIR
+        prog = tlog._TEST_LOG_DIR + "_kill_prog.py"
+        try:
+            with open(prog, "w") as f:
+                f.write(source)
+            if raw:
+                try:
+                    launcher._exec_program_raw(prog, origin="test")
+                except KeyboardInterrupt:
+                    pass
+            else:
+                launcher._exec_program(prog, origin="button press")
+            runs = log_mod.list_runs()
+            return log_mod.read_run(runs[0][0])
+        finally:
+            log_mod.LOG_DIR = prev_dir
+            tlog._wipe(tlog._TEST_LOG_DIR)
+            try:
+                os.remove(prog)
+            except OSError:
+                pass
+
+    def test_clean_exit_logs_the_kill_outcome_last(self):
+        self._install([((2, 2, 0, 0), (1, 2, 0, 0), self._NONE,
+                        self._NONE)])
+        data = self._run_and_read_log("print('mission complete')\n")
+        lines = [l for l in data.split("\n") if l]
+        # Log lines carry a timestamp prefix; the kill's outcome is
+        # the run's LAST line.
+        self.assertTrue(
+            "torque-off confirmed: servo ids 2, 1 in" in lines[-1], data)
+        self.assertTrue(data.index("finished: clean exit")
+                        < data.index("torque-off confirmed"), data)
+
+    def test_a_run_whose_log_never_opened_is_still_killed_once(self):
+        # The belt-and-braces outer finally: when the log session
+        # itself fails to open, the program never ran, but the same
+        # kill still goes out (unlogged — there is no log) and the
+        # error propagates.
+        from openbricks import log as log_mod
+        calls = []
+        orig_stop = launcher._stop_all_motors
+        launcher._stop_all_motors = lambda *a, **k: calls.append(k)
+        self.addCleanup(setattr, launcher, "_stop_all_motors", orig_stop)
+        orig_session = log_mod.session
+
+        def boom():
+            raise OSError("flash full")
+        log_mod.session = boom
+        self.addCleanup(setattr, log_mod, "session", orig_session)
+        path = _write_program("x = 1\n")
+        try:
+            launcher._exec_program_raw(path, origin="test")
+            self.fail("expected the session failure to propagate")
+        except OSError:
+            pass
+        self.assertEqual(calls, [{"confirm": False}])
+
+    def test_interrupt_exit_logs_stopped_then_the_kill_outcome(self):
+        self._install([((4, 3, 1, 8), self._NONE, self._NONE, self._NONE)])
+        data = self._run_and_read_log("raise KeyboardInterrupt\n", raw=True)
+        self.assertTrue("stopped: KeyboardInterrupt" in data, data)
+        self.assertTrue(data.index("stopped: KeyboardInterrupt")
+                        < data.index("torque-off NOT confirmed"), data)
+        self.assertTrue("servo id 4 answered torque register 0x28 = 1"
+                        in data, data)
 
 
 if __name__ == "__main__":

@@ -1026,7 +1026,227 @@ TEST(duty_and_wheel_sync_kinds_alternate) {
     CHECK_EQ_INT(saw_speed, 2);
 }
 
+// ---- verified kill (3.9.0) ------------------------------------------
+
+static void configured(int slot, uint8_t id) {
+    ob_sservo_attach(&sv, slot, id, 0, 45);
+    sv.slots[slot].config_step = OB_SSERVO_CONFIGURED;
+}
+
+TEST(kill_all_arms_write_then_read_back_on_configured_slots) {
+    reset();
+    configured(0, 7);
+    ob_sservo_attach(&sv, 1, 8, 0, 45);
+    sv.slots[1].config_step = 1;        // mid-config: step 1 IS its
+                                        // verified torque-off
+    ob_sservo_set_speed(&sv, 0, 500);   // torque-on + speed staged
+    ob_sservo_kill_all(&sv);
+    // Every staged command voided (the pre-3.9.0 e-stop's action)...
+    CHECK_EQ_INT(sv.slots[0].target_dirty, 0);
+    CHECK_EQ_INT(sv.slots[0].target_steps, 0);
+    CHECK_EQ_INT(sv.slots[0].torque_cmd, -1);
+    CHECK_EQ_INT(sv.slots[0].torque_on, 0);
+    // ...and the verified follow-up armed on the configured slot only.
+    CHECK_EQ_INT(sv.slots[0].kill_step, 1);
+    CHECK_EQ_INT(sv.slots[1].kill_step, 0);
+    CHECK(ob_sservo_kill_pending(&sv));
+
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_KILL_WRITE);
+    CHECK_EQ_INT(op.id, 7);
+    CHECK_EQ_INT(op.reg, OB_SREG_TORQUE);
+    CHECK_EQ_INT(op.data[0], 0);
+    CHECK_EQ_INT(op.data_len, 1);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.kill_in_flight, 0);
+    ob_sservo_kill_write_result(&sv, 1);          // ACKed
+    CHECK_EQ_INT(sv.kill_in_flight, -1);
+    CHECK_EQ_INT(sv.slots[0].kill_step, 2);
+
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_KILL_READ);
+    CHECK_EQ_INT(op.id, 7);
+    CHECK_EQ_INT(op.reg, OB_SREG_TORQUE);
+    CHECK_EQ_INT(op.data_len, 1);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t zero = 0;
+    ob_sservo_kill_read_result(&sv, 1, &zero, 1);  // the wire says 0
+    uint8_t val = 9, fails = 9;
+    CHECK_EQ_INT(ob_sservo_kill_state(&sv, 0, &val, &fails), 2);
+    CHECK_EQ_INT(val, 0);
+    CHECK_EQ_INT(fails, 0);
+    CHECK(!ob_sservo_kill_pending(&sv));
+    // Nothing armed on the mid-config slot: state 0, and the bus is
+    // free for its config write again.
+    CHECK_EQ_INT(ob_sservo_kill_state(&sv, 1, &val, &fails), 0);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_WRITE);
+    CHECK_EQ_INT(op.id, 8);
+}
+
+TEST(kill_outranks_every_other_op_and_covers_every_configured_slot) {
+    reset();
+    configured(0, 7);
+    configured(1, 8);
+    configured(2, 9);
+    ob_sservo_kill_all(&sv);
+    // Commands staged AFTER the kill (a program still unwinding)
+    // queue behind it: torque-on, a speed, a user read.
+    ob_sservo_set_speed(&sv, 1, 300);
+    CHECK_EQ_INT(ob_sservo_user_stage(&sv, 2, 2, 0x3E, 0, 1), 0);
+    ob_sservo_op_t op;
+    for (int slot = 0; slot < 3; slot++) {
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_KILL_WRITE);
+        CHECK_EQ_INT(op.slot, slot);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_kill_write_result(&sv, 1);
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_KILL_READ);
+        CHECK_EQ_INT(op.slot, slot);
+        ob_sservo_op_started(&sv, &op);
+        uint8_t zero = 0;
+        ob_sservo_kill_read_result(&sv, 1, &zero, 1);
+    }
+    CHECK(!ob_sservo_kill_pending(&sv));
+    ob_sservo_next_op(&sv, &op);
+    CHECK(op.kind != OB_SOP_KILL_WRITE && op.kind != OB_SOP_KILL_READ);
+}
+
+TEST(kill_write_lost_retries_then_latches_failed) {
+    reset();
+    configured(0, 7);
+    ob_sservo_kill_all(&sv);
+    ob_sservo_op_t op;
+    for (int i = 0; i < OB_SSERVO_CONFIG_TRIES; i++) {
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_KILL_WRITE);   // same step reissued
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_kill_write_result(&sv, 0);        // no ACK
+    }
+    uint8_t val = 9, fails = 0;
+    CHECK_EQ_INT(ob_sservo_kill_state(&sv, 0, &val, &fails), 3);
+    CHECK_EQ_INT(val, 0);                           // never answered
+    CHECK_EQ_INT(fails, OB_SSERVO_CONFIG_TRIES);
+    CHECK_EQ_INT(sv.slots[0].writes_failed, OB_SSERVO_CONFIG_TRIES);
+    CHECK(!ob_sservo_kill_pending(&sv));
+    // A dead servo frees the bus instead of retrying forever.
+    ob_sservo_next_op(&sv, &op);
+    CHECK(op.kind != OB_SOP_KILL_WRITE && op.kind != OB_SOP_KILL_READ);
+}
+
+TEST(kill_read_back_still_on_rewrites_and_latches_with_evidence) {
+    reset();
+    configured(0, 7);
+    ob_sservo_kill_all(&sv);
+    ob_sservo_op_t op;
+    uint8_t on = 1;
+    uint8_t val = 0, fails = 0;
+    for (int round = 1; round <= OB_SSERVO_CONFIG_TRIES; round++) {
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_KILL_WRITE);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_kill_write_result(&sv, 1);        // ACKed...
+        ob_sservo_next_op(&sv, &op);
+        CHECK_EQ_INT(op.kind, OB_SOP_KILL_READ);
+        ob_sservo_op_started(&sv, &op);
+        ob_sservo_kill_read_result(&sv, 1, &on, 1); // ...not applied
+        if (round < OB_SSERVO_CONFIG_TRIES) {
+            CHECK_EQ_INT(ob_sservo_kill_state(&sv, 0, &val, &fails), 1);
+            CHECK_EQ_INT(sv.slots[0].kill_step, 1);   // write again
+            CHECK_EQ_INT(val, 1);
+            CHECK_EQ_INT(fails, round);
+        }
+    }
+    CHECK_EQ_INT(ob_sservo_kill_state(&sv, 0, &val, &fails), 3);
+    CHECK_EQ_INT(val, 1);                           // the evidence
+    CHECK_EQ_INT(fails, OB_SSERVO_CONFIG_TRIES);
+}
+
+TEST(kill_read_lost_or_short_retries_the_read_then_confirms) {
+    reset();
+    configured(0, 7);
+    ob_sservo_kill_all(&sv);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_kill_write_result(&sv, 1);
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_KILL_READ);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_kill_read_result(&sv, 0, NULL, 0);    // lost
+    CHECK_EQ_INT(sv.slots[0].kill_step, 2);         // read again
+    ob_sservo_next_op(&sv, &op);
+    CHECK_EQ_INT(op.kind, OB_SOP_KILL_READ);
+    ob_sservo_op_started(&sv, &op);
+    uint8_t zero = 0;
+    ob_sservo_kill_read_result(&sv, 1, &zero, 0);   // short reply
+    CHECK_EQ_INT(sv.slots[0].kill_step, 2);
+    CHECK_EQ_INT(sv.slots[0].kill_fails, 2);
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    ob_sservo_kill_read_result(&sv, 1, &zero, 1);   // there it is
+    uint8_t val = 9, fails = 9;
+    CHECK_EQ_INT(ob_sservo_kill_state(&sv, 0, &val, &fails), 2);
+    CHECK_EQ_INT(fails, 0);
+}
+
+TEST(kill_routing_is_inert_when_nothing_matches) {
+    reset();
+    configured(0, 7);
+    // Results with nothing in flight.
+    ob_sservo_kill_write_result(&sv, 1);
+    uint8_t zero = 0;
+    ob_sservo_kill_read_result(&sv, 1, &zero, 1);
+    CHECK_EQ_INT(sv.slots[0].kill_step, 0);
+    CHECK_EQ_INT(sv.slots[0].kill_confirmed, 0);
+    // Re-armed mid-flight: the old routing is dropped, the stale
+    // result ignored, the sequence restarts from the write.
+    ob_sservo_kill_all(&sv);
+    ob_sservo_op_t op;
+    ob_sservo_next_op(&sv, &op);
+    ob_sservo_op_started(&sv, &op);
+    CHECK_EQ_INT(sv.kill_in_flight, 0);
+    ob_sservo_kill_all(&sv);
+    CHECK_EQ_INT(sv.kill_in_flight, -1);
+    ob_sservo_kill_write_result(&sv, 1);
+    CHECK_EQ_INT(sv.slots[0].kill_step, 1);
+    // A read result landing while the slot is back at the write step
+    // (or a write result at the read step) changes nothing.
+    sv.kill_in_flight = 0;
+    ob_sservo_kill_read_result(&sv, 1, &zero, 1);
+    CHECK_EQ_INT(sv.slots[0].kill_step, 1);
+    CHECK_EQ_INT(sv.slots[0].kill_confirmed, 0);
+    sv.slots[0].kill_step = 2;
+    sv.kill_in_flight = 0;
+    ob_sservo_kill_write_result(&sv, 1);
+    CHECK_EQ_INT(sv.slots[0].kill_step, 2);
+    // Detach mid-kill clears the routing and the state; bounds hold.
+    sv.kill_in_flight = 0;
+    ob_sservo_detach(&sv, 0);
+    CHECK_EQ_INT(sv.kill_in_flight, -1);
+    uint8_t val = 9, fails = 9;
+    CHECK_EQ_INT(ob_sservo_kill_state(&sv, 0, &val, &fails), 0);
+    CHECK_EQ_INT(val, 0);
+    CHECK_EQ_INT(ob_sservo_kill_state(&sv, -1, &val, &fails), 0);
+    CHECK_EQ_INT(ob_sservo_kill_state(&sv, OB_SSERVO_SLOTS, &val, &fails), 0);
+    CHECK(!ob_sservo_kill_pending(&sv));
+    // Out-of-range in-flight slots are ignored by both result paths.
+    sv.kill_in_flight = OB_SSERVO_SLOTS;
+    ob_sservo_kill_write_result(&sv, 1);
+    sv.kill_in_flight = OB_SSERVO_SLOTS;
+    ob_sservo_kill_read_result(&sv, 1, &zero, 1);
+    CHECK_EQ_INT(sv.kill_in_flight, -1);
+}
+
 int main(void) {
+    RUN(kill_all_arms_write_then_read_back_on_configured_slots);
+    RUN(kill_outranks_every_other_op_and_covers_every_configured_slot);
+    RUN(kill_write_lost_retries_then_latches_failed);
+    RUN(kill_read_back_still_on_rewrites_and_latches_with_evidence);
+    RUN(kill_read_lost_or_short_retries_the_read_then_confirms);
+    RUN(kill_routing_is_inert_when_nothing_matches);
     RUN(widened_feedback_decodes_speed_and_load);
     RUN(inverted_slot_flips_feedback_to_user_frame);
     RUN(short_reply_keeps_position_but_no_feedback_freshness);
