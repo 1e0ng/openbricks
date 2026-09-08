@@ -971,22 +971,72 @@ class StopAndGyroTests(_Base):
                         "6 x turn(20) + brake landed at %.1f body-deg "
                         "(banked residuals?)" % body)
 
-    def test_reset_refuses_while_a_brake_is_still_decelerating(self):
-        # A decelerating brake is a move of the controller: zeroing
-        # the frame under it would jerk the diff axis. The error says
-        # what to wait for.
+    def test_reset_during_a_brake_lands_it_and_re_zeroes(self):
+        # Competition, 2026-09-08 (firmware 3.9.0): stop(then=BRAKE,
+        # wait=True) then reset() raised "can't reset while a move is
+        # active (a brake/hold stop is still decelerating)" and the
+        # mission died 2.7 s in. A pending stop is NOT a move to
+        # reset(): the binding lands it — zero-speed registers under
+        # torque — yields, and re-zeroes.
         sb.db_use_gyro(True)
         sb.db_straight(500.0, 150.0)
         self.w.advance(400)
         self.assertTrue(sb.db_stop(1))
         self.w.advance(50)
-        try:
-            sb.db_reset()
-            self.fail("expected RuntimeError mid-brake")
-        except RuntimeError as e:
-            self.assertTrue("decelerating" in str(e), e)
-        self.w.advance(1500)                   # landed
-        sb.db_reset()
+        self.assertEqual(sb.db_stop_pending(), 1)
+        self.assertFalse(sb.db_done())
+        sb.db_reset()                          # mid-ramp: lands, no raise
+        self.assertEqual(sb.db_stop_pending(), 0)
+        self.assertTrue(sb.db_done())
+        self.w.advance(5)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque[1], 1)   # brake: at rest under torque
+        self.assertEqual(self.w.torque[2], 1)
+
+    def test_competition_pattern_align_brake_reset_never_raises(self):
+        # The exact sequence of the bench's line_align(): a slew loop
+        # of move_wheels, move_wheels(0, 0), an immediate brake (the
+        # slew still mid-ramp: a non-zero entry speed), 35 ms of
+        # quiet-wheel polling, then reset().
+        sb.db_use_gyro(True)
+        for _ in range(20):
+            self.assertTrue(sb.db_move_wheels(400, -400))
+            self.w.advance(5)
+        self.assertTrue(sb.db_move_wheels(0, 0))
+        self.assertTrue(sb.db_stop(1))
+        self.w.advance(35)
+        sb.db_reset()                          # never raises
+        self.assertTrue(sb.db_done())
+        self.assertEqual(sb.db_stop_pending(), 0)
+
+    def test_a_brake_lands_when_the_wheels_rest_not_after_the_settle_cap(self):
+        # Laggy wheels (60 % tracking) stop short of the ramp's
+        # landing point: a residual that used to hold the stop
+        # "active" for the 400 ms settle cap. The engine now lands a
+        # stop the moment both axes are measured at rest.
+        self.w.track = 0.6
+        sb.db_straight(500.0, 150.0)
+        self.w.advance(600)
+        # The ramp from the speed on the wire right now, at 400 dps²:
+        # an upper bound on the ramp time (the integral's share only
+        # shortens it).
+        v0_dps = abs(self.w.spd[1]) / (4096.0 / 360.0)
+        ramp_ms = int(v0_dps / 400.0 * 1000.0)
+        self.assertTrue(sb.db_stop(1))
+        t_done = None
+        for t in range(1, 2000):
+            self.w.advance(1)
+            if sb.db_done():
+                t_done = t
+                break
+        self.assertIsNotNone(t_done)
+        # Landed within a beat of the ramp's end — not 400 ms later.
+        self.assertTrue(t_done <= ramp_ms + 150, (t_done, ramp_ms))
+        self.assertEqual(sb.db_stop_pending(), 0)
+        self.w.advance(5)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
 
     def test_torque_starvation_regression(self):
         # The OTHER planner regression: set_speed re-staging torque

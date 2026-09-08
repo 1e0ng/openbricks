@@ -3,6 +3,38 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.10.1 — a brake lands when the wheels stop, and `reset()` after a stop never raises
+
+Competition incident (2026-09-08, firmware 3.9.0): `robot.stop(then=
+Stop.BRAKE, wait=True)` followed by `robot.reset()` raised `can't
+reset while a move is active (a brake/hold stop is still
+decelerating)` and the mission died 2.7 s in. Since 3.2.0 a brake is
+a decelerating move of the coupled controller, and duty-mode stiction
+could keep it "active" for the 400 ms settle window after the wheels
+had physically stopped — while `stop(wait=True)` watched only the
+measured speeds and returned in ~30 ms. Before 3.2.0 a brake was an
+instant register write and this pattern never raised. Three layers,
+each sufficient on its own:
+
+- **The engine lands a stop when the robot has stopped.** For a
+  brake/hold stop the controller's arrival rule is now "ramps expired
+  and both axes measured at rest", whatever the position residual
+  (`ob_drivebase_t.stopping`); the landing re-arm that pushes a move
+  back to its target is skipped for a stop. No 400 ms window, and a
+  brake that stopped short by more than the forgive limit no longer
+  stays "active" forever.
+- **`reset()` never raises for a stop.** A pending brake/hold stop is
+  not a move: `reset()` waits for it to land (bounded at 1.5 s,
+  pumping a soft gyro meanwhile) and lands it itself at the bound
+  (`st_bus.db_stop_pending()` is new). The refusal remains for a real
+  move armed with `wait=False` and not yet done, worded as such.
+- **`stop(wait=True)` waits for the landing**, not just for quiet
+  measured speeds, pumping a soft gyro through the ramp so the heading
+  loop stays closed on BNO055-class IMUs too; the 5 s budget and the
+  loud `RuntimeError` on a stop that never lands are unchanged.
+
+The sim mirrors all three (`RawDriveBase` runs the same core).
+
 ## 3.10.0 — one upload at a time: a second run/upload to a busy hub fails at once
 
 `openbricks run` and `openbricks upload` push a program through the

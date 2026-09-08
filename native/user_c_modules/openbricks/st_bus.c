@@ -1764,15 +1764,24 @@ static mp_obj_t sb_db_reset(mp_obj_t self_in) {
         mp_raise_msg(&mp_type_RuntimeError,
                      MP_ERROR_TEXT("db_reset before db_config"));
     }
+    if (st_db_stop_pending) {
+        // A brake/hold stop still on its ramp is NOT a move to
+        // reset(): the caller is declaring "stationary, here". The
+        // Python layer waited for the landing first (bounded); land
+        // it now — zero-speed registers / hold capture — yield, and
+        // re-zero. Refusing here raised mid-competition (2026-09-08)
+        // after a stop(wait=True) that had returned on quiet wheels.
+        st_db_apply_stop_end_locked();
+        ob_drivebase_stop(&st_db);
+    }
     if (st_db.fwd_active || st_db.turn_active) {
-        // A brake/hold stop is a move too while it decelerates —
-        // stop(then=..., wait=True) returns once it has landed.
+        // A real move (straight/turn/curve armed with wait=False) is
+        // in flight: zeroing the frame under it would jerk the axis.
         bus_release();
         mp_raise_msg(&mp_type_RuntimeError,
                      MP_ERROR_TEXT("can't reset while a move is "
-                                   "active (a brake/hold stop is still "
-                                   "decelerating) — stop first, or "
-                                   "stop(wait=True)"));
+                                   "active — wait for done() or "
+                                   "stop first"));
     }
     if (st_db.use_gyro) {
         if (st_db_gyro_source == 1) {
@@ -1794,6 +1803,18 @@ static mp_obj_t sb_db_done(mp_obj_t self_in) {
     return mp_obj_new_bool(d);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_done_obj, sb_db_done);
+
+static mp_obj_t sb_db_stop_pending(mp_obj_t self_in) {
+    // 0 = no brake/hold stop on its ramp; 1 = brake, 2 = hold still
+    // decelerating (3.10.1). reset() waits on this, bounded, instead
+    // of tripping over the ramp.
+    (void)self_in;
+    bus_take();
+    int p = st_db_stop_pending;
+    bus_release();
+    return mp_obj_new_int(p);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sb_db_stop_pending_obj, sb_db_stop_pending);
 
 static mp_obj_t sb_db_set_accel(mp_obj_t self_in, mp_obj_t dps2_in) {
     // settings(acceleration=...) parity for the serial-native path:
@@ -1967,6 +1988,7 @@ static const mp_rom_map_elem_t st_bus_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_db_move_wheels),   MP_ROM_PTR(&sb_db_move_wheels_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_fault),         MP_ROM_PTR(&sb_db_fault_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_done),          MP_ROM_PTR(&sb_db_done_obj) },
+    { MP_ROM_QSTR(MP_QSTR_db_stop_pending),  MP_ROM_PTR(&sb_db_stop_pending_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_gyro_source),  MP_ROM_PTR(&sb_db_gyro_source_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_gyro_in_use),  MP_ROM_PTR(&sb_db_gyro_in_use_obj) },
     { MP_ROM_QSTR(MP_QSTR_db_settle_stats), MP_ROM_PTR(&sb_db_settle_stats_obj) },

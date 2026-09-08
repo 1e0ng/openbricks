@@ -430,6 +430,12 @@ class _SerialNativeEngine:
             # Selecting source 1 captures the frame reference in C.
             gyro_source(1 if self._hard_gyro else 0)
 
+    # How long reset() waits for a brake/hold stop still on its ramp
+    # to land before landing it itself. A ramp from the ST-3032's top
+    # speed at the default accel is ~0.6 s; the engine lands a stop
+    # the moment the wheels are measured at rest (3.10.1).
+    _RESET_STOP_WAIT_MS = 1500
+
     def reset(self):
         """Re-zero the heading frame — yaw integrator, engine
         reference, and held target together in one locked C section
@@ -437,8 +443,26 @@ class _SerialNativeEngine:
         to declare "current pose is heading zero" mid-mission;
         ``imu.reset_heading()`` refuses while the gyro steers a
         drive base precisely because it can't do this atomically.
-        Raises ``RuntimeError`` while a move is active — stop first.
+        Raises ``RuntimeError`` while a MOVE is active (a ``wait=False``
+        straight/turn/curve not yet done) — wait for it or stop first.
+
+        A brake/hold stop still on its ramp is NOT a move to reset():
+        this waits for it to land (bounded), pumping a soft gyro so
+        the heading loop stays closed through the ramp, and the C
+        binding lands it itself at the bound. ``stop()`` then
+        ``reset()`` never raises, with or without ``wait=True``
+        (3.10.1 — a 3.2.0–3.10.0 firmware raised here when duty-mode
+        stiction kept the brake "active" after the wheels had stopped,
+        and a mission died on it mid-competition).
         """
+        if self._sb.db_stop_pending():
+            t0 = time.ticks_ms()
+            while (self._sb.db_stop_pending()
+                   and time.ticks_diff(time.ticks_ms(), t0)
+                       < self._RESET_STOP_WAIT_MS):
+                if self._use_gyro:
+                    self._gyro_pump()
+                time.sleep_ms(5)
         self._sb.db_reset()
         if self._use_gyro and not self._hard_gyro:
             # Soft-pump IMUs: restart the continuous frame at zero.

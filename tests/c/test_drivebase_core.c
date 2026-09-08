@@ -447,7 +447,79 @@ TEST(gyro_mode_holds_the_absolute_target_across_moves) {
     CHECK(fabs((double)(body - 120.0)) < 3.0);
 }
 
+
+// ---- a stop lands when the robot has stopped (3.10.1) ---------------
+
+TEST(stop_lands_when_the_wheels_rest_whatever_the_residual) {
+    // Competition trap (2026-09-08): a brake that stops short of its
+    // v0²/2a landing point — duty-mode stiction, a wheel against a
+    // wall — is DONE when the robot has stopped: not after the 400 ms
+    // settle cap, and not never (a residual past the forgive limit).
+    ob_drivebase_t db; ob_servo_t l, r;
+    setup(&db, &l, &r);
+    l.target_dps = r.target_dps = 300.0;
+    CHECK(ob_drivebase_stop_decel(&db, 0, 400.0));
+    CHECK(db.stopping);
+    // The ramp 300 -> 0 at 400 takes 750 ms. Track it for 400 ms,
+    // then the plant FREEZES: ~24 wheel-deg short, twice the forgive
+    // limit — a 3.2.0–3.10.0 core never latched done here.
+    run_plant_track(&db, 1, 400, 1.0);
+    CHECK(!ob_drivebase_is_done(&db));
+    int ms_to_done = -1;
+    for (int i = 0; i < 2000; i++) {
+        ob_drivebase_tick(&db, 401 + i);       // frozen plant: at rest
+        if (ob_drivebase_is_done(&db)) {
+            ms_to_done = i;
+            break;
+        }
+    }
+    CHECK(ms_to_done >= 0);
+    CHECK(ms_to_done < 420);                   // the ramp's remainder + a beat
+    CHECK(!db.landing_active);                 // a stop never re-arms a landing
+    CHECK_EQ_INT(db.landings, 0);
+    ob_float_t landing = db.fwd.start
+                         + db.fwd.direction * fabs((double)db.fwd.distance);
+    CHECK(fabs((double)(sum_pos(&db) - landing))
+          > OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG);
+}
+
+TEST(a_move_stopped_short_past_the_forgive_limit_stays_not_done) {
+    // The stop rule is a STOP rule: a move whose plant freezes is a
+    // move that didn't happen — done stays false (the caller's
+    // watchdog names it) and it still tries its landing.
+    ob_drivebase_t db; ob_servo_t l, r;
+    setup(&db, &l, &r);
+    ob_drivebase_straight(&db, 0, 200.0, 150.0, false);
+    CHECK(!db.stopping);
+    run_plant_track(&db, 1, 300, 1.0);
+    run_plant_track(&db, 301, 3000, 0.0);      // frozen
+    CHECK(!ob_drivebase_is_done(&db));
+    CHECK(db.landings > 0);
+}
+
+TEST(stopping_is_cleared_by_the_yield_by_arms_and_by_a_stop_at_rest) {
+    ob_drivebase_t db; ob_servo_t l, r;
+    setup(&db, &l, &r);
+    l.target_dps = r.target_dps = 150.0;
+    CHECK(ob_drivebase_stop_decel(&db, 0, 400.0));
+    CHECK(db.stopping);
+    ob_drivebase_stop(&db);                    // the yield
+    CHECK(!db.stopping);
+    CHECK(ob_drivebase_stop_decel(&db, 0, 400.0));
+    CHECK(db.stopping);
+    ob_drivebase_straight(&db, 10, 100.0, 150.0, false);
+    CHECK(!db.stopping);
+    l.target_dps = r.target_dps = 0.0;
+    db.integ_sum = db.integ_diff = 0.0;
+    CHECK(!ob_drivebase_stop_decel(&db, 20, 400.0));   // at rest: nothing armed
+    CHECK(!db.stopping);
+    CHECK(ob_drivebase_is_done(&db));
+}
+
 int main(void) {
+    RUN(stop_lands_when_the_wheels_rest_whatever_the_residual);
+    RUN(a_move_stopped_short_past_the_forgive_limit_stays_not_done);
+    RUN(stopping_is_cleared_by_the_yield_by_arms_and_by_a_stop_at_rest);
     RUN(straight_converges_then_stop_clears_the_move);
     RUN(reverse_straight_and_post_move_hold_bleed_the_integral);
     RUN(straight_with_carry_keeps_the_reference_advancing);

@@ -158,6 +158,15 @@ typedef struct {
     long       settle_start_ms;
     ob_float_t settle_best_err;
 
+    // The active ramps are a brake/hold STOP (ob_drivebase_stop_decel;
+    // 3.10.1): it lands when both axes are measured at rest after the
+    // ramps expire, whatever the position residual, and never re-arms
+    // a landing — a stop is done when the robot has stopped. Holding
+    // it "active" through the settle window (or forever, past the
+    // forgive limit) trapped reset() after stop(wait=True) mid-
+    // competition. Cleared by every move arm and by ob_drivebase_stop.
+    bool       stopping;
+
     // PID integral state (2.6.0) — wheel-deg * seconds, per axis.
     ob_float_t integ_sum;
     ob_float_t integ_diff;

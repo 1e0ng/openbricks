@@ -459,22 +459,42 @@ class DriveBase:
                     "stop(wait=True) needs measured wheel speeds - "
                     "%s has no speed()" % type(m).__name__)
             readers.append(fn)
+        # On an adopted drive base the stop is a move of the engine
+        # (a brake/hold ramp): wait for it to LAND, not only for the
+        # wheels to read quiet — duty-mode stiction can leave the
+        # ramp "active" after the wheels stop, and a reset() right
+        # after a wait=True that returned on quiet wheels raised
+        # mid-competition (3.10.1). Pump a soft gyro meanwhile so the
+        # heading loop stays closed through the ramp.
+        eng = self._serial_engine
         quiet = 0
         speeds = []
+        landed = eng is None
         for _ in range(self._STOP_WAIT_POLLS):
+            if eng is not None:
+                if eng._use_gyro:
+                    eng._gyro_pump()
+                landed = eng.done()
             speeds = [r() for r in readers]
             if all(v is not None and abs(v) < self._STOP_WAIT_TOL_DPS
                    for v in speeds):
                 quiet += 1
-                if quiet >= self._STOP_WAIT_QUIET:
+                if quiet >= self._STOP_WAIT_QUIET and landed:
                     return
             else:
                 quiet = 0
             time.sleep_ms(self._STOP_WAIT_POLL_MS)
+        budget_ms = self._STOP_WAIT_POLLS * self._STOP_WAIT_POLL_MS
+        if not landed:
+            raise RuntimeError(
+                "stop(wait=True): the stop never landed after %d ms - "
+                "measured speeds %r dps (None = bus silent); the robot "
+                "is being pushed, or a wheel is blocked mid-ramp"
+                % (budget_ms, speeds))
         raise RuntimeError(
             "stop(wait=True): wheels still moving after %d ms - "
             "measured speeds %r dps (None = bus silent)"
-            % (self._STOP_WAIT_POLLS * self._STOP_WAIT_POLL_MS, speeds))
+            % (budget_ms, speeds))
 
     def _dispatch_stop(self, then):
         if self._serial_engine is not None:
