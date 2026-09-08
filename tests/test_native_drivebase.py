@@ -167,6 +167,16 @@ class _FakeBus:
         self._left = left - 1
         return left <= 0
 
+    def db_stop_pending(self):
+        # 3.10.1: a brake/hold stop on its ramp, for the next N polls.
+        left = getattr(self, "_stop_pending_left", 0)
+        self._stop_pending_left = left - 1
+        self.calls.append(("db_stop_pending",))
+        return 1 if left > 0 else 0
+
+    def db_reset(self):
+        self.calls.append(("db_reset",))
+
     def db_use_gyro(self, on):
         self.calls.append(("db_use_gyro", on))
 
@@ -1605,6 +1615,83 @@ class AdoptedDutyLimitTests(_Base):
             self.fail("expected OSError")
         except OSError as e:
             self.assertTrue("timed out" in str(e), e)
+
+
+
+class StopLandingTests(_Base):
+    """3.10.1 — the competition trap. ``stop(wait=True)`` waits for the
+    engine's stop to LAND, not only for quiet wheels; ``reset()``
+    waits out a pending brake/hold stop instead of raising."""
+
+    _motors = AdoptionTests._motors
+
+    def _drivebase(self, **kw):
+        from openbricks.robotics import DriveBase
+        left, right = self._motors()
+        db = DriveBase(left, right, wheel_diameter_mm=88,
+                       axle_track_mm=138, **kw)
+        return db, left, right
+
+    def _imu(self):
+        return _FakeIMU()
+
+    def test_reset_waits_for_a_pending_stop_then_resets(self):
+        db, _, _ = self._drivebase()
+        self.bus._stop_pending_left = 3
+        db.reset()
+        names = [c[0] for c in self.bus.calls]
+        self.assertIn("db_reset", names)
+        polls = names.count("db_stop_pending")
+        self.assertTrue(polls >= 3, polls)
+        # The reset came AFTER the last poll.
+        self.assertTrue(names.index("db_reset")
+                        > len(names) - 1 - names[::-1].index("db_stop_pending"))
+
+    def test_reset_lands_the_stop_itself_at_the_bound(self):
+        db, _, _ = self._drivebase()
+        self.bus._stop_pending_left = 10 ** 6         # never lands on its own
+        prev = _SerialNativeEngine._RESET_STOP_WAIT_MS
+        _SerialNativeEngine._RESET_STOP_WAIT_MS = 30
+        self.addCleanup(setattr, _SerialNativeEngine,
+                        "_RESET_STOP_WAIT_MS", prev)
+        db.reset()                                      # bounded: no hang
+        self.assertIn(("db_reset",), self.bus.calls)
+
+    def test_reset_pumps_a_soft_gyro_while_it_waits(self):
+        db, _, _ = self._drivebase(imu=self._imu())
+        db.use_gyro(True)
+        before = len(self.bus.headings)
+        self.bus._stop_pending_left = 4
+        db.reset()
+        self.assertTrue(len(self.bus.headings) > before)
+
+    def test_stop_wait_true_waits_for_the_engine_to_land(self):
+        db, _, _ = self._drivebase()
+        self.bus._left = 6                              # done() false 6 polls
+        db.stop(then=Stop.BRAKE, wait=True)
+        self.assertTrue(self.bus._left <= 0)
+
+    def test_stop_wait_true_raises_when_the_stop_never_lands(self):
+        from openbricks.robotics import drivebase as dbm
+        db, _, _ = self._drivebase()
+        self.bus._left = 10 ** 6
+        prev = dbm.DriveBase._STOP_WAIT_POLLS
+        dbm.DriveBase._STOP_WAIT_POLLS = 6
+        self.addCleanup(setattr, dbm.DriveBase, "_STOP_WAIT_POLLS", prev)
+        try:
+            db.stop(then=Stop.BRAKE, wait=True)
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("never landed" in str(e), e)
+
+    def test_competition_pattern_brake_wait_then_reset_never_raises(self):
+        db, _, _ = self._drivebase(imu=self._imu())
+        db.use_gyro(True)
+        self.bus._left = 5
+        self.bus._stop_pending_left = 5
+        db.stop(then=Stop.BRAKE, wait=True)
+        db.reset()
+        self.assertIn(("db_reset",), self.bus.calls)
 
 
 if __name__ == "__main__":

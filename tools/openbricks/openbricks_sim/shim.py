@@ -679,6 +679,10 @@ class _SimStBus:
     def db_done(self):
         return bool(self._raw.is_done())
 
+    def db_stop_pending(self):
+        # Firmware parity (3.10.1): 0 = no brake/hold stop on its ramp.
+        return self._stop_pending
+
     def db_use_gyro(self, enable):
         self._use_gyro = bool(enable)
         self._raw.set_use_gyro(bool(enable))
@@ -697,10 +701,15 @@ class _SimStBus:
         # move is active.
         if not self._active:
             raise RuntimeError("db_reset before db_config")
+        if self._stop_pending:
+            # Firmware parity (3.10.1): a brake/hold stop still on its
+            # ramp is not a move to reset() — land it and yield.
+            self._apply_stop_end()
+            self._raw.stop()
         if not self._raw.is_done():
             raise RuntimeError(
-                "can't reset while a move is active (a brake/hold stop "
-                "is still decelerating) — stop first, or stop(wait=True)")
+                "can't reset while a move is active — wait for done() "
+                "or stop first")
         if self._use_gyro:
             if self._gyro_hard:
                 _sim_yaw.reset()

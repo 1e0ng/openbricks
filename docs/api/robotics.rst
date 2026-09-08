@@ -102,12 +102,18 @@ torque-off).
 
 Short moves armed while the robot is already fast raise their own
 deceleration to land at rest exactly on target, so you rarely need
-more — but ``wait=True`` is available to block until both wheels'
-measured speeds read ~0 (the decel ramp plus settle for brake/hold,
-the physical freewheel decay for coast). It raises ``ValueError`` on
-open-loop pairs (no measured speed) and, if the wheels never settle
-within 5 s, ``RuntimeError`` naming the measured speeds — a stopped
-robot that is still moving is a fault, not a detail to hide.
+more — but ``wait=True`` is available to block until the stop has
+LANDED: both wheels' measured speeds read ~0 and, on an adopted
+drive base, the engine reports the stop finished (the decel ramp for
+brake/hold, the physical freewheel decay for coast). A brake or hold
+lands the moment the wheels are measured at rest after its ramp,
+whatever the position residual — a stop is done when the robot has
+stopped (3.10.1; before, duty-mode stiction could keep it "active"
+for the 400 ms settle window, and a ``reset()`` in that window
+raised). It raises ``ValueError`` on open-loop pairs (no measured
+speed) and, if the stop never lands within 5 s, ``RuntimeError``
+naming the measured speeds — a stopped robot that is still moving
+is a fault, not a detail to hide.
 
 A wheel that stops answering the bus — no power, a knocked-loose
 TX/RX wire, the wrong ``servo_id`` — raises instead of quietly doing
@@ -182,8 +188,15 @@ while gyro in use"): zeroing the integrator under an armed heading
 controller shifts the measurement out from under the held target,
 and the next move veers chasing the old frame. Use ``db.reset()``,
 or ``use_gyro(False)`` first. ``db.reset()`` itself raises while a
-move is in progress — stop first (a brake/hold stop counts as a move
-until its ramp has landed: ``stop(then=Stop.BRAKE, wait=True)``).
+MOVE is in progress (a ``straight`` / ``turn`` / ``curve`` armed
+with ``wait=False`` and not yet done) — wait for it or stop first. A
+brake/hold stop still on its ramp is NOT a move to ``reset()``: it
+waits for the stop to land (up to 1.5 s, pumping a soft gyro
+meanwhile) and lands it itself at the bound, so ``stop()`` followed
+by ``reset()`` never raises, with or without ``wait=True`` (3.10.1
+— a 3.2.0–3.10.0 firmware raised here when duty-mode stiction kept
+the brake "active" after the wheels had stopped; a mission died on
+it mid-competition).
 
 Accurate ``wheel_diameter_mm`` / ``axle_track_mm`` values matter more
 than any tuning — calibrate both with two short test drives:

@@ -971,22 +971,72 @@ class StopAndGyroTests(_Base):
                         "6 x turn(20) + brake landed at %.1f body-deg "
                         "(banked residuals?)" % body)
 
-    def test_reset_refuses_while_a_brake_is_still_decelerating(self):
-        # A decelerating brake is a move of the controller: zeroing
-        # the frame under it would jerk the diff axis. The error says
-        # what to wait for.
+    def test_reset_during_a_brake_lands_it_and_re_zeroes(self):
+        # Competition, 2026-09-08 (firmware 3.9.0): stop(then=BRAKE,
+        # wait=True) then reset() raised "can't reset while a move is
+        # active (a brake/hold stop is still decelerating)" and the
+        # mission died 2.7 s in. A pending stop is NOT a move to
+        # reset(): the binding lands it — zero-speed registers under
+        # torque — yields, and re-zeroes.
         sb.db_use_gyro(True)
         sb.db_straight(500.0, 150.0)
         self.w.advance(400)
         self.assertTrue(sb.db_stop(1))
         self.w.advance(50)
-        try:
-            sb.db_reset()
-            self.fail("expected RuntimeError mid-brake")
-        except RuntimeError as e:
-            self.assertTrue("decelerating" in str(e), e)
-        self.w.advance(1500)                   # landed
-        sb.db_reset()
+        self.assertEqual(sb.db_stop_pending(), 1)
+        self.assertFalse(sb.db_done())
+        sb.db_reset()                          # mid-ramp: lands, no raise
+        self.assertEqual(sb.db_stop_pending(), 0)
+        self.assertTrue(sb.db_done())
+        self.w.advance(5)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
+        self.assertEqual(self.w.torque[1], 1)   # brake: at rest under torque
+        self.assertEqual(self.w.torque[2], 1)
+
+    def test_competition_pattern_align_brake_reset_never_raises(self):
+        # The exact sequence of the bench's line_align(): a slew loop
+        # of move_wheels, move_wheels(0, 0), an immediate brake (the
+        # slew still mid-ramp: a non-zero entry speed), 35 ms of
+        # quiet-wheel polling, then reset().
+        sb.db_use_gyro(True)
+        for _ in range(20):
+            self.assertTrue(sb.db_move_wheels(400, -400))
+            self.w.advance(5)
+        self.assertTrue(sb.db_move_wheels(0, 0))
+        self.assertTrue(sb.db_stop(1))
+        self.w.advance(35)
+        sb.db_reset()                          # never raises
+        self.assertTrue(sb.db_done())
+        self.assertEqual(sb.db_stop_pending(), 0)
+
+    def test_a_brake_lands_when_the_wheels_rest_not_after_the_settle_cap(self):
+        # Laggy wheels (60 % tracking) stop short of the ramp's
+        # landing point: a residual that used to hold the stop
+        # "active" for the 400 ms settle cap. The engine now lands a
+        # stop the moment both axes are measured at rest.
+        self.w.track = 0.6
+        sb.db_straight(500.0, 150.0)
+        self.w.advance(600)
+        # The ramp from the speed on the wire right now, at 400 dps²:
+        # an upper bound on the ramp time (the integral's share only
+        # shortens it).
+        v0_dps = abs(self.w.spd[1]) / (4096.0 / 360.0)
+        ramp_ms = int(v0_dps / 400.0 * 1000.0)
+        self.assertTrue(sb.db_stop(1))
+        t_done = None
+        for t in range(1, 2000):
+            self.w.advance(1)
+            if sb.db_done():
+                t_done = t
+                break
+        self.assertIsNotNone(t_done)
+        # Landed within a beat of the ramp's end — not 400 ms later.
+        self.assertTrue(t_done <= ramp_ms + 150, (t_done, ramp_ms))
+        self.assertEqual(sb.db_stop_pending(), 0)
+        self.w.advance(5)
+        self.assertEqual(self.w.spd[1], 0)
+        self.assertEqual(self.w.spd[2], 0)
 
     def test_torque_starvation_regression(self):
         # The OTHER planner regression: set_speed re-staging torque
@@ -1385,6 +1435,62 @@ class EstopBindingTests(_Base):
         rep = {sid: st for sid, st, _, _ in sb.estop_state()}
         self.assertEqual(rep[2], 2)
         self.assertEqual(rep[1], 2)
+
+
+class BindingGuardTests(_Base):
+    """Binding edges the bench mapping never exercises."""
+
+    def test_db_config_rejects_a_bad_slot_pair(self):
+        for pair in ((0, 0), (-1, 1), (0, 9), (4, 1)):
+            try:
+                sb.db_config(pair[0], pair[1], 88.0, 136.0, 400.0)
+                self.fail("expected ValueError for %r" % (pair,))
+            except ValueError as e:
+                self.assertTrue("bad slot pair" in str(e), e)
+
+    def test_a_stalled_tick_clamps_its_dt(self):
+        # A 5 s gap between ticks (a stalled scheduler) must not feed
+        # a 5 s integral step: dt is clamped and the move still lands.
+        sb.db_straight(200.0, 150.0)
+        self.w.advance(100)
+        self.w.now += 5000
+        self.w.pump()
+        self.assertTrue(abs(self.w.spd[1]) < 400 * 4096 / 360)
+        self.w.advance(4000)
+        self.assertTrue(sb.db_done())
+
+    def test_a_carry_profile_sampled_past_its_end_holds_the_end_speed(self):
+        # then=Stop.NONE: the profile ends AT speed; sampled long
+        # after its end the ramp clamps at that end speed, never
+        # below.
+        sb.db_straight(100.0, 150.0, 1)
+        self.w.advance(3000)
+        self.assertTrue(abs(self.w.spd[1]) > 0)
+        self.assertTrue(abs(self.w.spd[2]) > 0)
+
+
+class MirroredMappingTests(unittest.TestCase):
+    """The bench inverts the LEFT slot; a build that inverts the RIGHT
+    one drives the mirror branches of every invert un-apply."""
+
+    def setUp(self):
+        if sb is None:
+            raise unittest.SkipTest("st_bus is firmware/unix-MP only")
+        sb.test_reset()
+        self.w = _PerfectWheels()
+        sb.servo_attach(0, 2, False, 45)
+        sb.servo_attach(1, 1, True, 45)
+        self.w.advance(50)
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+
+    def test_move_wheels_chains_mid_ramp_through_the_right_invert(self):
+        self.assertTrue(sb.db_move_wheels(600, 600))
+        self.w.advance(30)                     # mid-slew
+        self.assertTrue(sb.db_move_wheels(300, 300))
+        self.w.advance(300)
+        self.assertTrue(abs(self.w.spd[2]) > 0)
+        self.assertTrue(abs(self.w.spd[1]) > 0)
+        sb.db_stop(0)
 
 
 class HeadingResetParityTests(_Base):

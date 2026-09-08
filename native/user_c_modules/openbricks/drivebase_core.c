@@ -51,6 +51,7 @@ void ob_drivebase_init(ob_drivebase_t *db,
     db->heading_override_wheel_deg = 0.0;
     db->done                       = true;
     db->settling                   = false;
+    db->stopping                   = false;
     db->settle_start_ms            = 0;
 
     db->integ_sum       = 0.0;
@@ -168,6 +169,7 @@ void ob_drivebase_straight(ob_drivebase_t *db,
 
     db->done = false;
     db->settling = false;
+    db->stopping = false;
     db_move_state_reset(db);
 }
 
@@ -245,6 +247,7 @@ void ob_drivebase_turn(ob_drivebase_t *db,
 
     db->done = false;
     db->settling = false;
+    db->stopping = false;
     db_move_state_reset(db);
 }
 
@@ -362,6 +365,7 @@ void ob_drivebase_curve(ob_drivebase_t *db,
 
     db->done = false;
     db->settling = false;
+    db->stopping = false;
     db_move_state_reset(db);
 }
 
@@ -371,6 +375,7 @@ void ob_drivebase_stop(ob_drivebase_t *db) {
     db->turn_active = false;
     db->done        = true;
     db->settling    = false;
+    db->stopping    = false;
     // Integrals and the landing budget die with the move — but NOT
     // the settle diagnostics: done() dispatches stop() before the
     // user's move call even returns, so wiping expiry stats here
@@ -444,10 +449,14 @@ bool ob_drivebase_stop_decel(ob_drivebase_t *db, long now_ms,
         db->turn_active = false;
     }
     if (!fwd && !turn) {
+        // Nothing to ramp: the stop is complete here and now.
+        db->stopping = false;
+        db->done     = true;
         return false;
     }
     db->done     = false;
     db->settling = false;
+    db->stopping = true;
     // A fresh integral and landing budget for the ramp — but NOT the
     // expiry diagnostics: this stop is dispatched by done() before
     // the user's move call returns, and db_settle_stats() must still
@@ -733,9 +742,11 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
                 db->landings == 0
                 || worst < db->landing_best_err
                    - (ob_float_t)OB_DRIVEBASE_SETTLE_PROGRESS_WHEEL_DEG;
+            // A stop never re-arms a landing: its endpoint is where
+            // the ramp put the robot, not a target to push back to.
             if (worst >= (ob_float_t)OB_DRIVEBASE_DONE_TOL_WHEEL_DEG
                 && db->landings < OB_DRIVEBASE_MAX_LANDINGS
-                && landing_progress) {
+                && landing_progress && !db->stopping) {
                 db->landing_best_err = worst;
                 db->landings++;
                 ob_float_t landing_v = db->accel_dps2 > 0
@@ -816,7 +827,18 @@ void ob_drivebase_tick(ob_drivebase_t *db, long now_ms) {
                                >= (long)OB_DRIVEBASE_SETTLE_MS
                            && worst < (ob_float_t)
                                   OB_DRIVEBASE_SETTLE_FORGIVE_WHEEL_DEG;
-            if (arrived || capped) {
+            // A STOP lands when the robot has stopped (3.10.1): both
+            // axes measured at rest after the ramps, whatever the
+            // position residual. That residual is how far short of
+            // v0²/2a the brake stopped — not a move that didn't
+            // happen — and keeping the stop "active" for the settle
+            // window (or forever, past the forgive limit) is what
+            // raised in reset() after stop(wait=True) at a
+            // competition (2026-09-08).
+            bool stopped = db->stopping
+                && amv_sum  < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS
+                && amv_diff < (ob_float_t)OB_DRIVEBASE_ARRIVAL_SPEED_TOL_DPS;
+            if (arrived || capped || stopped) {
                 db->done = true;
             }
         }

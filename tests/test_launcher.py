@@ -2378,7 +2378,7 @@ class BrakeToRestTests(unittest.TestCase):
         estop.clear()
 
     def _install(self, done_sequence=(True,), with_st_bus=True,
-                 db_stop_raises=None):
+                 db_stop_raises=None, db_stop_result=True):
         import sys as _sys
         calls = []
         seq = list(done_sequence)
@@ -2389,7 +2389,7 @@ class BrakeToRestTests(unittest.TestCase):
                 calls.append("db_stop:%s" % mode)
                 if db_stop_raises is not None:
                     raise db_stop_raises
-                return True
+                return db_stop_result
 
             @staticmethod
             def db_done():
@@ -2459,6 +2459,14 @@ class BrakeToRestTests(unittest.TestCase):
         finally:
             launcher._BRAKE_TO_REST_MS = prev
         self.assertTrue("not at rest after 30 ms" in note, note)
+
+    def test_a_refused_stop_is_nothing_to_brake(self):
+        # The binding refuses a stop before slot odometry is live: no
+        # ramp was armed, nothing to wait for, no log line.
+        calls = self._install(db_stop_result=False)
+        self.assertIsNone(launcher._brake_to_rest())
+        self.assertIn("db_stop:1", calls)
+        self.assertFalse("db_done" in calls, calls)
 
     def test_engaged_estop_skips_the_brake(self):
         # A press that landed but whose interrupt has not unwound the

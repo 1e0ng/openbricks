@@ -1556,6 +1556,48 @@ class SimIcm45686Tests(_ShimTestBase):
         db.stop()
         db.reset()                 # idle again: allowed
 
+    def test_db_reset_right_after_a_brake_lands_it(self):
+        # 3.10.1 (competition trap): a brake/hold stop still on its
+        # ramp is not a move to reset() — it lands and re-zeroes.
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        sb = db._serial_engine._sb
+        db.straight(300, wait=False)
+        time.sleep_ms(300)
+        db.stop(then=Stop.BRAKE)   # ramp in flight
+        self.assertEqual(sb.db_stop_pending(), 1)
+        db.reset()                 # lands it: no raise
+        self.assertEqual(sb.db_stop_pending(), 0)
+        self.assertTrue(sb.db_done())
+
+    def test_sim_bus_db_reset_lands_a_stop_still_on_its_ramp(self):
+        # The shim's own landing branch, reached deterministically:
+        # the engine's reset() first waits for the ramp (and in real
+        # time it lands first), so drive the bus surface directly with
+        # the stop still pending — the firmware binding's contract.
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        sb = db._serial_engine._sb
+        db.straight(300, wait=False)
+        time.sleep_ms(300)
+        self.assertTrue(sb.db_stop(1))
+        self.assertEqual(sb.db_stop_pending(), 1)
+        sb.db_reset()                          # lands + yields, no raise
+        self.assertEqual(sb.db_stop_pending(), 0)
+        self.assertTrue(sb.db_done())
+        db.straight(50)                        # and drives on normally
+
+    def test_brake_wait_true_then_reset_never_raises(self):
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        db.straight(300, wait=False)
+        time.sleep_ms(300)
+        db.stop(then=Stop.BRAKE, wait=True)
+        db.reset()
+
     def test_straight_after_turn_and_reset_goes_straight(self):
         # The bench script, end to end in physics: straight, turn
         # -90, reset, straight — the last leg must hold the NEW zero,
