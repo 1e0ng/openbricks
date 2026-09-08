@@ -370,6 +370,51 @@ class OdometryTests(_Base):
         self.assertTrue(s0[2] > 0 or s1[2] > 0)     # stale visible
 
 
+class VerifyResultRoutingTests(_Base):
+    """The config-verify reply arriving after the slot changed under it."""
+
+    def _pump_to_verify_read(self, sid):
+        # Drive the config sequence until the op_mode read-back (reg
+        # 0x21) is on the wire, leaving it unanswered.
+        for _ in range(40):
+            sb.servo_pump()
+            tx = sb.take_tx()
+            if len(tx) >= 8 and tx[4] == 0x02 and tx[5] == 0x21:
+                return tx
+            if len(tx) >= 6 and tx[4] == 0x03 and tx[2] != 0xFE:
+                self.wire.regs[(tx[2], tx[5])] = tx[6]
+                sb.feed_rx(_reply(tx[2], 0))
+            elif len(tx) >= 8 and tx[4] == 0x02:
+                sb.feed_rx(_pos_reply(tx[2], 0))
+        self.fail("verify read never went out")
+
+    def test_reply_after_detach_is_dropped(self):
+        sb.servo_attach(0, 2, True, 45)
+        self._pump_to_verify_read(2)
+        sb.servo_detach(0)                      # routing cleared
+        sb.feed_rx(_reply(2, 0, b"\x01"))
+        sb.servo_pump()                         # consumes: nothing to route to
+        self.assertEqual(sb.servo_slot_of(2), -1)
+
+    def test_reply_after_reattach_does_not_configure_the_new_slot(self):
+        sb.servo_attach(0, 2, True, 45)
+        self._pump_to_verify_read(2)
+        sb.servo_detach(0)
+        sb.servo_attach(0, 2, True, 45)         # fresh: config_step 0
+        sb.feed_rx(_reply(2, 0, b"\x01"))      # the OLD verify answer
+        sb.servo_pump()
+        fails, failed, mismatch, val = sb.servo_config_state(0)
+        self.assertEqual((failed, mismatch), (0, 0))
+        # The new slot runs its own sequence from the top.
+        tx = b""
+        for _ in range(3):
+            sb.servo_pump()
+            tx += sb.take_tx()
+            if tx:
+                break
+        self.assertTrue(tx and tx[4] == 0x03 and tx[5] == 0x21, tx)
+
+
 class EStopTests(_Base):
     def test_torque_off_all_is_broadcast_and_immediate(self):
         sb.servo_attach(0, 2, True, 45)

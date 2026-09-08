@@ -1437,6 +1437,62 @@ class EstopBindingTests(_Base):
         self.assertEqual(rep[1], 2)
 
 
+class BindingGuardTests(_Base):
+    """Binding edges the bench mapping never exercises."""
+
+    def test_db_config_rejects_a_bad_slot_pair(self):
+        for pair in ((0, 0), (-1, 1), (0, 9), (4, 1)):
+            try:
+                sb.db_config(pair[0], pair[1], 88.0, 136.0, 400.0)
+                self.fail("expected ValueError for %r" % (pair,))
+            except ValueError as e:
+                self.assertTrue("bad slot pair" in str(e), e)
+
+    def test_a_stalled_tick_clamps_its_dt(self):
+        # A 5 s gap between ticks (a stalled scheduler) must not feed
+        # a 5 s integral step: dt is clamped and the move still lands.
+        sb.db_straight(200.0, 150.0)
+        self.w.advance(100)
+        self.w.now += 5000
+        self.w.pump()
+        self.assertTrue(abs(self.w.spd[1]) < 400 * 4096 / 360)
+        self.w.advance(4000)
+        self.assertTrue(sb.db_done())
+
+    def test_a_carry_profile_sampled_past_its_end_holds_the_end_speed(self):
+        # then=Stop.NONE: the profile ends AT speed; sampled long
+        # after its end the ramp clamps at that end speed, never
+        # below.
+        sb.db_straight(100.0, 150.0, 1)
+        self.w.advance(3000)
+        self.assertTrue(abs(self.w.spd[1]) > 0)
+        self.assertTrue(abs(self.w.spd[2]) > 0)
+
+
+class MirroredMappingTests(unittest.TestCase):
+    """The bench inverts the LEFT slot; a build that inverts the RIGHT
+    one drives the mirror branches of every invert un-apply."""
+
+    def setUp(self):
+        if sb is None:
+            raise unittest.SkipTest("st_bus is firmware/unix-MP only")
+        sb.test_reset()
+        self.w = _PerfectWheels()
+        sb.servo_attach(0, 2, False, 45)
+        sb.servo_attach(1, 1, True, 45)
+        self.w.advance(50)
+        sb.db_config(0, 1, 88.0, 136.0, 400.0)
+
+    def test_move_wheels_chains_mid_ramp_through_the_right_invert(self):
+        self.assertTrue(sb.db_move_wheels(600, 600))
+        self.w.advance(30)                     # mid-slew
+        self.assertTrue(sb.db_move_wheels(300, 300))
+        self.w.advance(300)
+        self.assertTrue(abs(self.w.spd[2]) > 0)
+        self.assertTrue(abs(self.w.spd[1]) > 0)
+        sb.db_stop(0)
+
+
 class HeadingResetParityTests(_Base):
     """``db_reset()``: Pybricks ``DriveBase.reset()`` parity.
 
