@@ -1571,6 +1571,24 @@ class SimIcm45686Tests(_ShimTestBase):
         self.assertEqual(sb.db_stop_pending(), 0)
         self.assertTrue(sb.db_done())
 
+    def test_sim_bus_db_reset_lands_a_stop_still_on_its_ramp(self):
+        # The shim's own landing branch, reached deterministically:
+        # the engine's reset() first waits for the ramp (and in real
+        # time it lands first), so drive the bus surface directly with
+        # the stop still pending — the firmware binding's contract.
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        sb = db._serial_engine._sb
+        db.straight(300, wait=False)
+        time.sleep_ms(300)
+        self.assertTrue(sb.db_stop(1))
+        self.assertEqual(sb.db_stop_pending(), 1)
+        sb.db_reset()                          # lands + yields, no raise
+        self.assertEqual(sb.db_stop_pending(), 0)
+        self.assertTrue(sb.db_done())
+        db.straight(50)                        # and drives on normally
+
     def test_brake_wait_true_then_reset_never_raises(self):
         imu = self._icm()
         db, _, _ = self._serial_db(imu=imu)
