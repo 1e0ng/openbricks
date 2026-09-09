@@ -1,0 +1,400 @@
+---
+myst:
+  html_meta:
+    description: "Supported hardware for openbricks: ESP32-S3 and ESP32 boards, ST-3032/ST-3215 serial bus servos, DC gear motors, IMUs, color and distance sensors, with wiring guides."
+---
+
+# Hardware guide
+
+A starter parts list and wiring notes. Everything here is commodity stuff you
+can buy on AliExpress / Amazon / Adafruit.
+
+## Recommended starter robot
+
+| Part | Qty | ≈ US$ each | Notes |
+|------|----:|-----------:|-------|
+| ESP32-S3 DevKitC-1 (N16R8) | 1 | 13 | Any ESP32-S3 board with ≥10 free GPIOs works; classic ESP32 also supported |
+| Feetech STS3032 serial bus servo (12V) | 2 | 25 | Drive wheels, continuous-rotation wheel mode. 10 kg·cm, 148 RPM no-load — datasheet in `docs/datasheets/`. $17.55 each from 100 up on Alibaba; boutique resellers ask $40 |
+| Feetech URT-2 serial bus adapter | 1 | 16 | One half-duplex bus daisy-chains every servo (S$22 at Kuriosity) |
+| 3S LiPo battery (11.1V nominal) + balance charger | 1 | 25–40 | Feeds the servo rail directly. ST-3032 brown-out floor is ~9V, so a sagging 2S (7.4V) is not enough. *Typical price* |
+| Buck converter (12V → 5V, ≥1A) | 1 | 3 | Powers the ESP32-S3 and sensors. *Typical price* |
+| Pololu QTRX-HD-15A reflectance array | 1 | 29 | The line-follow bar (ten of its fifteen channels on GPIO 1–10, wiring below); $29.10 at Pololu |
+| TCS34725 breakout | 2–4 | 3–8 | Colour sensor array for zone detection. Adafruit 1334 is discontinued (was $7.95); generic modules are a few dollars on AliExpress / Amazon |
+| TCA9548A I2C multiplexer breakout | 1 | 7 | Required for more than one TCS34725 — its address is fixed at `0x29`. Adafruit 2717 $6.95; clones ≈$1–2 |
+| ICM-45686 breakout | 1 | 32 | SPI IMU, read inside the 1 kHz control tick — the heading source for `use_gyro`. TDK's own EV_ICM-45686 board is $32.45 at DigiKey; generic modules exist on Amazon |
+| ST-3215 serial bus servo | 0–4 | — | Optional; good for arms / grippers. Same bus and protocol, but do **not** share a 6V rail setup — see servo notes |
+| Jumper wires, M3 standoffs, chassis plate | — | — | Your robot, your build |
+
+Drive base, IMU, line bar, two colour sensors and the multiplexer
+come to **roughly US$190** before battery, charger and chassis. Prices
+checked 2026-09-05 at single-unit quantity —
+[Alibaba (STS3032)](https://www.alibaba.com/product-detail/FEETECH-SCS-STS3032-4-5-kg_1600138694717.html),
+[Kuriosity (URT-2)](https://kuriosity.sg/products/feetech-serial-bus-servo-driver),
+[Pololu 4415](https://www.pololu.com/product/4415),
+[Adafruit 2717](https://www.adafruit.com/product/2717),
+[DigiKey EV_ICM-45686](https://www.digikey.com/en/products/detail/tdk-invensense/ICM-45686/24374985),
+[Amazon (ESP32-S3-DevKitC-1 N16R8)](https://www.amazon.com/ESP32-S3-DevKitC-1-Development-Dual-Core-Bluetooth/dp/B0GVSHT2Q2)
+— and they move; treat the column as a budget, not a quote. The same
+parts from Taobao / AliExpress typically land at half to two-thirds
+of these numbers with longer shipping.
+
+A DC-gear-motor build (JGB37-520 / MG370 + H-bridge) is still fully
+supported — see [Alternative: DC gear motors with encoders](#alternative-dc-gear-motors-with-encoders)
+at the bottom.
+
+## Power budget
+
+Two rails, one battery:
+
+```
+    [ 3S LiPo 11.1V ]
+        │
+        ├─────────────►  URT-2 servo rail   (all ST-3032 / ST-3215 power)
+        │
+        └──► Buck  ──►  5V rail
+                         │
+                         ├──►  ESP32-S3 VIN (5V pin)
+                         └──►  Sensors via 3.3V regulator on the board
+```
+
+- Never power the servos from the ESP32's 5V pin or USB — a single
+  ST-3032 stall pulls more than a dev board can source.
+- The ST-3032's brown-out floor is ~9V. A 3S pack sags to ~9.9V near
+  empty, which still clears it; a 2S pack does not.
+- Tie all grounds together: battery, buck, URT-2, ESP32, sensor
+  breakouts. This sounds obvious but it's the #1 reason new builds
+  misbehave.
+
+## GPIO map (ESP32-S3)
+
+The serial-bus build needs very few pins — that's most of its charm:
+
+| Function          | GPIO(s) | Devices on this line |
+|-------------------|---------|----------------------|
+| Analog sensors    | 1–10    | The FULL ADC1 bank — the {class}`openbricks.drivers.qtr.QTRLineSensor` window (wiring below). Buttons and UARTs deliberately live elsewhere so all ten stay analog-capable |
+| I2C0 (SDA, SCL)   | 15, 16  | TCA9548A mux (0x70) + colour sensors behind it, shared bus (an I2C BNO055 IMU at 0x28 fits here too) |
+| UART1 (TX, RX)    | 14, 41  | URT-2 serial bus — every ST-3032 / ST-3215 daisy-chained (RX was GPIO 6 until 1.71.0; it moved so the analog bank stays whole) |
+| Program button    | 39      | Start/stop, polled with an internal pull-up (was GPIO 4 until 1.71.0) |
+| BLE-toggle button | 38      | Bluetooth on/off (was GPIO 5 until 1.66.3) |
+| WS2812 data       | 21      | Addressable RGB LED strip / ×8 stick DIN ({mod}`openbricks.drivers.ws2812`) — on boards that break out the header corner next to 5 V/GND, this is the free pin beside the reserved 19/20 USB pair |
+| SPI (SCK, MOSI, MISO, CS) | 12, 13, 11, 17 | ICM-45686 IMU breakout ({class}`openbricks.drivers.icm45686.ICM45686`) — 3V3 + GND + these four; INT and the other breakout pins stay unwired (the 1 kHz hard tick polls) |
+
+Pin gotchas on the ESP32-S3:
+
+- **GPIO 22–25 don't exist** — the pin list is 0–21 then 26–48.
+- **GPIO 26–32 (and 33–37 on octal-PSRAM modules) are flash/PSRAM.**
+  Do not use them.
+- **GPIO 19/20 are the native-USB D-/D+** and **0/3/45/46 are
+  strapping pins.**
+- I2C and UART route through the GPIO matrix, so none of these
+  assignments are fixed — they're the convention the bundled examples
+  use. On a **classic ESP32**, the usual equivalents are I2C on
+  21/22 and any two free pins for the UART.
+
+The firmware enforces the hard cases at construction time: a driver
+asked to wire a nonexistent, flash, or USB pin — or a pin the runtime
+already owns, like the program button — raises
+{class}`openbricks.pins.ReservedPinError` naming the pin, the role,
+and the reason, instead of failing somewhere far from the mistake.
+See {mod}`openbricks.pins`.
+
+
+### QTRLineSensor wiring (the standard line-follow window)
+
+{class}`openbricks.drivers.qtr.QTRLineSensor` bakes the whole rig
+geometry into the firmware — pins, element positions, and the mode
+setpoints — so programs just construct it and pick a discipline:
+
+```python
+from openbricks.drivers.qtr import QTRLineSensor
+from openbricks.parameters import LineMode
+qtr = QTRLineSensor()
+qtr.set_mode(LineMode.LEFT)     # or RIGHT / CENTER; switchable mid-run
+error = qtr.read().edge_error()
+```
+
+Ten channels of a QTRX-HD-15A (4 mm pitch) in a skip pattern, left
+to right as mounted, onto GPIO 1..10 **in order**:
+
+| QTR channel | 1 | 3 | 4 | 5 | 7 | 9 | 11 | 12 | 13 | 15 |
+|-------------|---|---|---|---|---|---|----|----|----|----|
+| GPIO        | 1 | 2 | 3 | 4 | 5 | 6 | 7  | 8  | 9  | 10 |
+| x (mm)      | −28 | −20 | −16 | −12 | −4 | +4 | +12 | +16 | +20 | +28 |
+
+That spans a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm (the
+driver's `positions_mm` carries the true coordinates, so edge
+interpolation is exact across the unequal gaps). The three modes:
+
+- **`LineMode.LEFT`** — holds the line's LEFT edge under **channel 4**
+  (x = −16 mm)
+- **`LineMode.RIGHT`** — holds the line's RIGHT edge under **channel 12**
+  (x = +16 mm)
+- **`LineMode.CENTER`** — holds the line's CENTRE at x = 0, steering on
+  the weighted centroid of **all ten channels**
+
+`edge_error()` is signed so positive steers right in every mode,
+range −50 .. +50. In the two edge modes it is how far the mode's
+channel sits from the black/white boundary — that element's
+ambient (0 black .. 100 white) referenced to 50, reading 0 exactly
+when the channel straddles the edge. That is one element, so the
+error is proportional only within about a pitch of the setpoint
+and rails at ±50 beyond it. In `LineMode.CENTER` mode it is the line's
+centroid position scaled so ±50 is the far end of the window
+(±28 mm) — proportional across the whole span, which is what you
+want through sharp corners and after a branch. When no channel
+sees the line, center mode rails toward the side the line left
+through (`last_side()`), and raises if the line was never seen.
+Examples: `qtr_line_follow_left.py` / `_right.py` / `_center.py`,
+one shared law pinned to each mode.
+
+The skip pattern is a palindrome, so if the board is mounted the
+other way round, only these channel labels swap — GPIO order and
+geometry stay identical.
+
+Either way the ~20 mm line sits inside the middle of the window
+with ≥3 channels of mat visible on the far side — those far-side
+elements are the branch watch in the bundled followers, and the
+whole window going dark is the intersection/ending signal.
+
+One board-level note: **GPIO 3 (= channel 4, the left-mode
+setpoint channel) is a strapping pin**, and on the
+ESP32-S3-COREBOARD V1.4 it optionally carries a 10 kΩ pull-up
+through the `USB-JTAG` 0 Ω link. Harmless (per-element calibration
+absorbs the bias), but if `qtr_calibrate.py` shows element `[2]`
+with a conspicuously narrower span than its neighbours, that link
+is populated — desoldering it is safe if you never use pin-JTAG.
+
+The QTRX board's CTRL (emitter enable) can stay tied high; VCC to
+3V3, GND to GND.
+
+### If the status LED never lights
+
+The onboard WS2812 speaks a write-only protocol — the firmware can't
+tell a dead LED from a working one, so a blown pixel looks like
+software silently failing. Run `examples/led_probe.py` on the hub: it
+drives full white at both timings across every plausible RGB pin
+(48/38/47/21) plus a raw `machine.bitstream` write. If nothing lights
+through all of that, the problem is physical. The decisive check is a
+**power-off ohmmeter reading from the LED's data pin (or its GPIO) to
+GND**: a WS2812 whose DI input has failed as an internal short reads
+~0 Ω there and clamps the GPIO — the pin measures millivolts even
+when driven high, every write "succeeds" into the short, and the
+symptom history is "worked once, then went dark for good". Lift the
+data link to free the pin. Also check the schematic for **population
+options in the LED circuit**. The ESP32-S3-COREBOARD V1.4
+(`docs/datasheets/esp32s3_coreboard_v1.4_schematic.pdf`) routes
+GPIO 48 to the WS2812 through a 0 Ω `RGB` link and feeds the LED's
+VDD from the **5 V rail** through a second optional link — if either
+link is unpopulated (or the board is powered via 3.3 V only, leaving
+the 5 V rail dead), the LED never lights while every write succeeds.
+Bridge the link / feed 5 V, or wire any external WS2812 to
+3.3V / GND / GPIO 48 — it becomes the status LED with no firmware
+change.
+
+## Sensor wiring (I2C)
+
+The colour sensor is the TCS34725. Its I2C address is fixed at `0x29`
+— there are no address-select pins — which decides how you wire it:
+
+| Sensors | Mode | Extra part |
+|---------|------|------------|
+| 1 | [Direct](#mode-1-direct-to-the-esp32) — straight onto the ESP32's I2C pins | none |
+| 2 or more | [Via TCA9548A](#mode-2-via-a-tca9548a-multiplexer) — one sensor per mux channel | TCA9548A breakout |
+
+The IMU in the baseline build is the SPI-wired ICM-45686 (see the
+GPIO map above) and doesn't share this bus. If you use the I2C BNO055
+instead, it sits at `0x28` and connects straight to GPIO 15/16 in
+either mode — `0x28` and `0x29` coexist fine.
+
+Both modes use the same driver call. `mux[n]` behaves like an I2C
+bus, so the only difference between the two is what you pass to
+`TCS34725(...)`.
+
+### Mode 1: direct to the ESP32
+
+One colour sensor, no multiplexer:
+
+| TCS34725 pin | Connect to | Notes |
+|--------------|------------|-------|
+| VIN (or VCC) | 3.3V       | The breakout has an onboard regulator, but the board's 3.3V is cleanest |
+| GND          | GND        | Common ground with everything else |
+| SDA          | GPIO 15    | ESP32-S3 (classic ESP32: GPIO 21) |
+| SCL          | GPIO 16    | ESP32-S3 (classic ESP32: GPIO 22) |
+| LED / INT    | see [below](#tcs34725-led-pin) | |
+
+```python
+from machine import I2C, Pin
+from openbricks.drivers.tcs34725 import TCS34725
+
+i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3
+sensor = TCS34725(i2c)
+```
+
+Check the wiring with `i2c.scan()` — it should list `41` (`0x29`).
+A complete program is `examples/read_color.py`.
+
+If you want **exactly two** sensors without a mux, the ESP32's second
+hardware I2C controller also works: `I2C(1, sda=..., scl=...)` on any
+two free pins, one sensor per bus. Beyond two, use Mode 2.
+
+### Mode 2: via a TCA9548A multiplexer
+
+Two or more colour sensors (a line-follower / zone-detection array).
+The TCA9548A sits at `0x70` and fans the bus out to eight isolated
+channels; each sensor lives on its own channel at its own `0x29`.
+
+Wire the mux to the ESP32-S3, then each sensor to a mux channel:
+
+| TCA9548A pin | Connect to | Notes |
+|--------------|------------|-------|
+| VIN          | 3.3V       | |
+| GND          | GND        | Common ground with everything else |
+| SDA / SCL    | GPIO 15 / 16 | The main bus (classic ESP32: 21 / 22) |
+| SD0/SC0 … SD7/SC7 | one TCS34725 each | Isolated channels |
+| A0 / A1 / A2 | leave open | Default address `0x70`; only needed for a second mux |
+
+| TCS34725 pin | Connect to | Notes |
+|--------------|------------|-------|
+| VIN (or VCC) | 3.3V       | |
+| GND          | GND        | |
+| SDA / SCL    | mux channel `SDn` / `SCn` | Not the ESP32 pins |
+| LED / INT    | see [below](#tcs34725-led-pin) | |
+
+The Adafruit breakouts include ~10 kΩ SDA/SCL pull-ups, so for a
+handful of devices you don't need to add your own.
+
+```python
+from machine import I2C, Pin
+from openbricks.drivers.tca9548a import TCA9548A
+from openbricks.drivers.tcs34725 import TCS34725
+
+i2c = I2C(0, sda=Pin(15), scl=Pin(16), freq=400_000)   # ESP32-S3
+mux = TCA9548A(i2c)                                    # 0x70 by default
+sensors = [TCS34725(mux[ch]) for ch in range(3)]       # left, mid, right
+```
+
+Check the wiring with `i2c.scan()` — it should list `112` (`0x70`)
+for the mux; `mux[n].scan()` should list `41` (`0x29`) for each
+channel that has a sensor. For a complete program — a 2-sensor array
+that combines each sensor's ``ambient()`` and ``rgb()`` readings to
+name the colour under it (red / blue / green / yellow / white /
+black) — see `examples/color_array.py`.
+
+### TCS34725 LED pin
+
+The colour sensor breakout has two extra pins beyond power and I2C:
+
+- **LED** — drives the onboard white illumination LED. On Adafruit
+  boards it defaults **on** (tied to VIN through the ADC-enable trace).
+  To control it, wire it to a spare GPIO and drive high/low; to force it
+  **off**, tie LED to GND. Leave it on for consistent colour readings —
+  ambient light alone is unreliable across environments.
+- **INT** — the interrupt output. The driver polls, so leave INT
+  **unconnected**.
+
+## Serial bus servo notes (ST-3032 / ST-3215)
+
+- **Every servo needs a unique bus ID.** Factory default is 1; re-ID
+  one servo at a time with `examples/st3215_reid.py` (same protocol —
+  it works for the ST-3032 too). The bundled drivebase examples assume
+  left = 1, right = 2.
+- **Speed limits.** Per the STS3032 datasheet (`docs/datasheets/`),
+  no-load top speed at 12V is 148 RPM = 888 °/s; under the rated
+  3.3 kg·cm load it drops to roughly ⅔ of that. The driver's default
+  `max_dps=600` clamps requests at the loaded operating point —
+  construct with an explicit `max_dps=900` to chase the no-load number.
+- **Mixed fleets:** the ST-3215 tolerates lower voltages, but the
+  ST-3032 browns out below ~9V. If you daisy-chain both on one URT-2,
+  the rail must satisfy the strictest member: 12V.
+- **Drivebase:** `ST3032Motor` drops straight into `DriveBase`:
+
+```python
+from openbricks.drivers.st3032 import ST3032Motor
+from openbricks.robotics import DriveBase
+
+left  = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
+right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
+db = DriveBase(left, right, wheel_diameter_mm=65, axle_track_mm=120)
+```
+
+Bench-test a fresh build with `examples/st3032_drivebase_test.py`.
+
+## Calibrating the drivebase
+
+`wheel_diameter_mm` and `axle_track_mm` are the two physical parameters that
+matter for straight-line distance and turn accuracy. Measure them with
+calipers or a ruler (wheel contact patch to wheel contact patch for axle
+track, not hub to hub). If `straight(1000)` undershoots, your wheel
+diameter value is too large; if `turn(360)` overshoots, your axle track is
+too small.
+
+High-torque 12V servos also deliver the default launch profile much more
+stiffly than small DC motors — if the chassis pitches or lifts its rear
+when a move starts, soften the ramp:
+
+```python
+db.settings(acceleration=180)   # wheel-deg/s²; default 1500
+```
+
+## Alternative: DC gear motors with encoders
+
+The original starter build — still fully supported. (Both this and
+the serial-servo build run in the MuJoCo simulator via the driver
+shim.)
+
+| Part | Qty | Notes |
+|------|----:|-------|
+| JGB37-520 DC motor with encoder (1:30 gearing) | 2 | Pick the 12V version; runs fine off 7.4V 2S LiPo |
+| L298N dual H-bridge module | 1 | Cheap and robust. TB6612FNG is a better choice if you can find it |
+| 2S LiPo (7.4V) + buck converter (→5V, ≥2A) | 1 each | Don't power the ESP32 from the L298N's onboard 78M05 regulator — it's good for ~300 mA and browns out the moment the motors draw current |
+
+Wiring topology:
+
+```
+    [ 2S LiPo 7.4V ]
+        │
+        ├─────────────►  L298N  Vmotor   (motor power)
+        │
+        └──► Buck  ──►  5V rail
+                         │
+                         ├──►  ESP32 VIN
+                         ├──►  L298N  +5V (logic only)
+                         └──►  Sensors via 3.3V regulator on ESP32
+```
+
+GPIO map (see `examples/esp32_drivebase.py` for the ESP32-S3 pin
+assignments; the classic-ESP32 equivalents are in git history):
+
+| Function          | ESP32-S3 GPIO(s) | Devices on this line |
+|-------------------|------------------|----------------------|
+| Left motor dir    | 1, 2             | L298N / TB6612 IN1, IN2 |
+| Left motor PWM    | 18               | L298N / TB6612 ENA |
+| Left encoder A, B | 7, 8             | JGB37-520 encoder channels |
+| Right motor dir   | 9, 10            | L298N / TB6612 IN3, IN4 |
+| Right motor PWM   | 40               | L298N / TB6612 ENB |
+| Right encoder A, B| 42, 47           | JGB37-520 encoder channels |
+
+**This build and the QTR line-sensor bar are mutually exclusive.** A
+DC drivebase needs ten GPIOs and the S3 does not have ten free ones
+outside the ADC1 bank once the other conventions are honoured, so
+the motor direction and left-encoder lines take six of the bank's
+pins (GPIO 1, 2, 7, 8, 9, 10) that the
+{class}`openbricks.drivers.qtr.QTRLineSensor` window otherwise owns.
+Everything else follows the reference GPIO map unchanged: 11/12/13/17
+stay free for the SPI IMU, 15/16 for I2C sensors, 14/41 for a
+serial-servo arm, and 39/38 for the program / BLE buttons (see
+{class}`openbricks.hub.ESP32S3DevkitHub` — the launcher polls GPIO 39
+as an input, so a motor driver toggling it would read as button
+presses and stop your program).
+
+### Calibrating encoder counts
+
+The default in `jgb37_520.py` is `counts_per_output_rev=1320`, which is
+`11 CPR × 30:1 × 4 (quadrature edges)`. If you have a different gearbox
+variant, recompute:
+
+    counts_per_output_rev = encoder_CPR × gear_ratio × 4
+
+Or measure empirically: rotate the output shaft by hand exactly one full
+turn and read `motor.angle()`. Whatever it reports is what
+`counts_per_output_rev` should be, scaled so that one turn = 360°.
