@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.10.2 — one press starts the run; a held start press never stops it
+
+Bench 2026-09-09: sometimes a single press of the start button started
+the program and stopped it 324 ms later (`started: button press` …
+`button pressed -> stop`). The hard-button start path — the one that
+wins when the press's falling edge lands inside the post-stop lockout
+and its hard confirmation, a tick later, does not — dispatched the run
+without marking the press as the one still under the finger, so the
+press's own level confirmation read as a mid-run stop.
+
+- The hard-button start path now sets the same marks the counter path
+  sets (press held, release to consume), so a held start press's
+  confirmation and release belong to it, never to the run it started.
+- Belt under every path: a button-started run that comes up with the
+  button DOWN marks that press as its own at run start, whichever
+  detector dispatched it.
+
 ## 3.10.1 — a brake lands when the wheels stop, and `reset()` after a stop never raises
 
 Competition incident (2026-09-08, firmware 3.9.0): `robot.stop(then=

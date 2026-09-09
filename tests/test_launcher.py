@@ -2640,6 +2640,186 @@ class HardButtonBridgeTests(unittest.TestCase):
         self.assertEqual(len(starts), 1)
 
 
+class HeldStartPressTests(unittest.TestCase):
+    """3.10.2 — one press, and the robot stops (bench 2026-09-09:
+    ``started`` … 324 ms … ``button pressed -> stop``). The hard-button
+    start path dispatched a run without marking the press as the one
+    still under the finger, so the press's own level confirmation
+    read as a mid-run stop. Every start path now marks it, and a run
+    that comes up with the button down marks it too."""
+
+    def _install(self, start_pending=False):
+        import sys as _sys
+
+        class _MP:
+            @staticmethod
+            def reset():
+                pass
+
+            @staticmethod
+            def hard_button_arm(on):
+                pass
+
+            _pending = [start_pending]
+
+            @classmethod
+            def hard_button_take_start(cls):
+                p, cls._pending[0] = cls._pending[0], False
+                return p
+
+        class _Mod:
+            pass
+        mod = _Mod()
+        mod.motor_process = _MP()
+        mod.set_stop_armed = lambda _: None
+        prev = _sys.modules.get("_openbricks_native")
+        _sys.modules["_openbricks_native"] = mod
+
+        def _restore():
+            if prev is None:
+                _sys.modules.pop("_openbricks_native", None)
+            else:
+                _sys.modules["_openbricks_native"] = prev
+        self.addCleanup(_restore)
+        return _MP
+
+    def setUp(self):
+        from openbricks import estop
+        estop.clear()
+        self.addCleanup(estop.clear)
+        self.starts = []
+        self.stops = []
+        orig_start, orig_stop = launcher._request_start, launcher._request_stop
+        launcher._request_start = lambda inst: self.starts.append(inst)
+        launcher._request_stop = lambda inst: self.stops.append(inst)
+        self.addCleanup(setattr, launcher, "_request_start", orig_start)
+        self.addCleanup(setattr, launcher, "_request_stop", orig_stop)
+
+    def _ticks(self, launch, n):
+        for _ in range(n):
+            launch._tick()
+            advance_ms(50)
+
+    def _program_comes_up(self, launch):
+        launch._sync_press_counter()
+        launch._run_started_ms = launcher._now_ms()
+        launch._running = True
+        launch._mark_press_at_run_start()
+
+    def test_hard_start_marks_the_held_press_and_its_echoes_never_stop(self):
+        self._install(start_pending=True)
+        btn = _make_button(0)                   # finger on the button
+        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
+        launch._tick()                          # the hard tick's start
+        self.assertEqual(len(self.starts), 1)
+        self.assertTrue(launch._start_press_held)
+        self.assertIsNotNone(launch._start_press_open_ms)
+        self._program_comes_up(launch)
+        self._ticks(launch, 3)                  # level confirms the SAME press
+        self.assertEqual(self.stops, [])
+        self.assertTrue(launch._press_consume_release)
+        btn._value = 1                          # release, 300 ms in
+        self._ticks(launch, 3)
+        self.assertEqual(self.stops, [])
+        self.assertFalse(launch._press_consume_release)
+        self.assertFalse(launch._start_press_held)
+        # A NEW press after that is a real stop.
+        btn._value = 0
+        self._ticks(launch, 3)
+        self.assertEqual(len(self.stops), 1)
+
+    def test_edge_swallowed_by_the_lockout_then_hard_confirmation_starts_marked(self):
+        # The race that reaches the hard path first: the press's
+        # falling edge lands inside the post-stop lockout (counter
+        # edge swallowed), its hard confirmation a tick later does not.
+        mp = self._install(start_pending=False)
+        btn = _make_button(1)
+        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
+        pcnt = _FakePressCounter()
+        launch._press_pcnt = pcnt
+        launch._sync_press_counter()
+        launch._lockout_until_ms = launcher._now_ms() + 60
+        pcnt.count += 1                         # the edge, inside the lockout
+        btn._value = 0
+        launch._tick()
+        self.assertEqual(self.starts, [])       # swallowed
+        advance_ms(50)
+        advance_ms(50)                          # lockout over
+        mp._pending[0] = True                   # the hard confirmation
+        launch._tick()
+        self.assertEqual(len(self.starts), 1)
+        # Marked as the start press — either still awaiting its level
+        # confirmation, or (the confirmation landed this same tick)
+        # already consumed with its release to follow.
+        self.assertTrue(launch._start_press_held
+                        or launch._press_consume_release)
+        self._program_comes_up(launch)
+        self._ticks(launch, 4)                  # still held: no stop
+        self.assertEqual(self.stops, [])
+        btn._value = 1
+        self._ticks(launch, 3)                  # released: no stop
+        self.assertEqual(self.stops, [])
+
+    def test_run_start_with_the_button_down_marks_the_press(self):
+        self._install()
+        btn = _make_button(0)
+        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
+        self.assertFalse(launch._start_press_held)
+        launch._mark_press_at_run_start()
+        self.assertTrue(launch._start_press_held)
+        self.assertIsNotNone(launch._start_press_open_ms)
+
+    def test_run_start_with_the_button_up_marks_nothing(self):
+        self._install()
+        btn = _make_button(1)
+        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
+        launch._mark_press_at_run_start()
+        self.assertFalse(launch._start_press_held)
+        self.assertIsNone(launch._start_press_open_ms)
+
+    def test_run_start_mark_survives_a_button_that_cannot_be_read(self):
+        self._install()
+        btn = _make_button(1)
+        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
+
+        def _boom():
+            raise OSError("pin gone")
+        btn.value = _boom
+        launch._mark_press_at_run_start()       # must not raise
+        self.assertFalse(launch._start_press_held)
+
+    def test_belt_consumes_the_release_of_a_press_the_level_path_saw_at_idle(self):
+        # The level path confirmed the press at idle (no start marks:
+        # the pre-fix hard path), then the run came up mid-hold. The
+        # release must be consumed, not read as the "remote start
+        # mid-hold" stop.
+        self._install()
+        btn = _make_button(0)
+        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
+        self._ticks(launch, 3)                  # idle: press-down seen
+        self.assertTrue(launch._was_pressed)
+        self._program_comes_up(launch)
+        self.assertTrue(launch._press_consume_release)
+        btn._value = 1
+        self._ticks(launch, 3)
+        self.assertEqual(self.stops, [])
+        self.assertEqual(self.starts, [])       # and no re-dispatch
+
+    def test_belt_alone_saves_an_unmarked_start(self):
+        # A start dispatched by a path that set no marks (the pre-fix
+        # hard path): the run comes up with the button down, the belt
+        # marks it, and its confirmation is consumed.
+        self._install()
+        btn = _make_button(0)
+        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
+        self._program_comes_up(launch)
+        self._ticks(launch, 3)
+        self.assertEqual(self.stops, [])
+        btn._value = 1
+        self._ticks(launch, 3)
+        self.assertEqual(self.stops, [])
+
+
 class TracebackInLogTests(unittest.TestCase):
     """A bench ENODEV landed in the run log as bare
     ``Exception: OSError(19,)`` — no line, no call, so the mux write
