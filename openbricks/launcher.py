@@ -168,6 +168,30 @@ class Launcher:
             print("openbricks: discarded a start queued while the "
                   "idle loop was down — press again to run.")
 
+    def _mark_press_at_run_start(self):
+        """A button that is DOWN when a button-started run comes up is
+        the press that started it, whichever detector dispatched the
+        start — its level confirmation and release must be consumed,
+        never read as a mid-run stop. The belt under the per-path
+        marks (3.10.2): every start path sets them, but the run's own
+        start is the one moment that can vouch for all of them."""
+        try:
+            down = self._btn.value() == 0
+        except Exception:
+            return
+        if down:
+            if self._was_pressed:
+                # The level path already confirmed this press at idle:
+                # its release is the echo left to consume.
+                self._press_consume_release = True
+                self._press_stopped = False
+            else:
+                self._start_press_held = True
+                self._held_up_ticks = 0
+            if self._start_press_open_ms is None:
+                self._start_press_open_ms = _now_ms()
+            _event("start-press-down-at-run-start")
+
     def _sync_press_counter(self):
         """Mark the hardware press counter's current value as
         consumed. Called at idle and before each run starts, so edges
@@ -526,6 +550,22 @@ class Launcher:
                     swallow = self._start_gate_verdict(now)
                     if swallow is None:
                         _event("hard-start-latch")
+                        # The press is physically DOWN right now (the
+                        # hard tick confirmed 17 ms of it): its later
+                        # echoes — level confirmation, release — belong
+                        # to it, not to the run it starts. The SAME
+                        # marks the counter path sets below. Without
+                        # them a held start press stopped the run it
+                        # had started at the first tick that confirmed
+                        # it (bench 2026-09-09: "button pressed ->
+                        # stop" 324 ms after "started", one press).
+                        # This path wins over the counter when the
+                        # press's falling edge landed inside a start
+                        # gate (the post-stop lockout) and its hard
+                        # confirmation, a tick later, did not.
+                        self._start_press_open_ms = now
+                        self._start_press_held = True
+                        self._held_up_ticks = 0
                         _request_start(self)
                     else:
                         _event("hard-start-swallowed", swallow)
@@ -695,6 +735,7 @@ class Launcher:
             self._sync_press_counter()
             self._run_started_ms = _now_ms()
             self._running = True
+            self._mark_press_at_run_start()
             try:
                 _exec_program(self._program_path, origin="button press")
             finally:
