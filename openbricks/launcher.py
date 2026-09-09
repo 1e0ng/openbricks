@@ -168,29 +168,31 @@ class Launcher:
             print("openbricks: discarded a start queued while the "
                   "idle loop was down — press again to run.")
 
-    def _mark_press_at_run_start(self):
-        """A button that is DOWN when a button-started run comes up is
-        the press that started it, whichever detector dispatched the
-        start — its level confirmation and release must be consumed,
-        never read as a mid-run stop. The belt under the per-path
-        marks (3.10.2): every start path sets them, but the run's own
-        start is the one moment that can vouch for all of them."""
+    # Which detector dispatched the last start: "pcnt" (counter edge),
+    # "hard" (the hard tick's confirmation), "release" (the level
+    # path's release at idle). Written into the run log's header so a
+    # run that dies at birth names its own dispatcher (3.10.3).
+    _last_start_path = "none"
+
+    def _press_state(self):
+        """The watcher's press-lifecycle state, one short token each,
+        for the run log: which marks are set when a start is
+        dispatched and when a stop decision is taken. A run killed by
+        its own start press (bench 2026-09-09) left no way to tell
+        WHICH mark was missing; now every such line says."""
         try:
-            down = self._btn.value() == 0
+            btn = 0 if self._btn.value() == 0 else 1
         except Exception:
-            return
-        if down:
-            if self._was_pressed:
-                # The level path already confirmed this press at idle:
-                # its release is the echo left to consume.
-                self._press_consume_release = True
-                self._press_stopped = False
-            else:
-                self._start_press_held = True
-                self._held_up_ticks = 0
-            if self._start_press_open_ms is None:
-                self._start_press_open_ms = _now_ms()
-            _event("start-press-down-at-run-start")
+            btn = -1
+        open_ms = self._start_press_open_ms
+        return ("held=%d consume=%d open=%s was=%d stopped=%d btn=%d"
+                % (1 if self._start_press_held else 0,
+                   1 if self._press_consume_release else 0,
+                   "-" if open_ms is None
+                   else "%d" % _ticks_diff(_now_ms(), open_ms),
+                   1 if self._was_pressed else 0,
+                   1 if self._press_stopped else 0,
+                   btn))
 
     def _sync_press_counter(self):
         """Mark the hardware press counter's current value as
@@ -514,7 +516,14 @@ class Launcher:
                         self._press_count_seen = n
                         self._press_stopped = True  # consume the release
                         _event("latch-stop")
-                        _note("button press latched by hardware counter -> stop")
+                        _note("button press latched by hardware counter "
+                              "-> stop [edges %d->%d, %d ms into the run; %s]"
+                              % (self._press_count_seen, n,
+                                 _ticks_diff(_now_ms(),
+                                             self._run_started_ms)
+                                 if self._run_started_ms is not None
+                                 else -1,
+                                 self._press_state()))
                         self._fire_stop()
             if self._stop_retry_ms is not None and _ticks_diff(
                     _now_ms(), self._stop_retry_ms) >= self.STOP_RETRY_MS:
@@ -550,22 +559,7 @@ class Launcher:
                     swallow = self._start_gate_verdict(now)
                     if swallow is None:
                         _event("hard-start-latch")
-                        # The press is physically DOWN right now (the
-                        # hard tick confirmed 17 ms of it): its later
-                        # echoes — level confirmation, release — belong
-                        # to it, not to the run it starts. The SAME
-                        # marks the counter path sets below. Without
-                        # them a held start press stopped the run it
-                        # had started at the first tick that confirmed
-                        # it (bench 2026-09-09: "button pressed ->
-                        # stop" 324 ms after "started", one press).
-                        # This path wins over the counter when the
-                        # press's falling edge landed inside a start
-                        # gate (the post-stop lockout) and its hard
-                        # confirmation, a tick later, did not.
-                        self._start_press_open_ms = now
-                        self._start_press_held = True
-                        self._held_up_ticks = 0
+                        self._last_start_path = "hard"
                         _request_start(self)
                     else:
                         _event("hard-start-swallowed", swallow)
@@ -606,6 +600,7 @@ class Launcher:
                         self._start_press_held = True
                         self._held_up_ticks = 0
                         _event("start-latch")
+                        self._last_start_path = "pcnt"
                         _request_start(self)
             if (self._start_press_open_ms is not None
                     and _ticks_diff(now, self._start_press_open_ms)
@@ -663,7 +658,8 @@ class Launcher:
                         # _fire_stop: the injection request is not
                         # pending yet, so no KeyboardInterrupt can land
                         # inside this file write.
-                        _note("button pressed -> stop")
+                        _note("button pressed -> stop [press-down while "
+                              "running; %s]" % self._press_state())
                         self._fire_stop()
                 else:
                     self._press_stopped = False
@@ -702,7 +698,8 @@ class Launcher:
             # Program came up between press-down and release (remote
             # start mid-hold) — a button event during a run means stop.
             if self._stop_retry_ms is None:
-                _note("button pressed -> stop")
+                _note("button pressed -> stop [release while running; %s]"
+                      % self._press_state())
                 self._fire_stop()
             return
         if self._lockout_until_ms is not None:
@@ -717,6 +714,7 @@ class Launcher:
                 return
             self._lockout_until_ms = None
         _event("release", "start")
+        self._last_start_path = "release"
         _request_start(self)
 
     def _drain_pending(self):
@@ -735,9 +733,10 @@ class Launcher:
             self._sync_press_counter()
             self._run_started_ms = _now_ms()
             self._running = True
-            self._mark_press_at_run_start()
             try:
-                _exec_program(self._program_path, origin="button press")
+                _exec_program(self._program_path,
+                              origin="button press [%s; %s]"
+                              % (self._last_start_path, self._press_state()))
             finally:
                 self._running = False
                 estop.clear()
