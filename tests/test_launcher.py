@@ -664,10 +664,12 @@ class ButtonPressLogEntryTests(unittest.TestCase):
         finally:
             log_mod.note = orig_note
             launcher._request_stop = orig_stop
-        self.assertEqual(
-            notes,
-            ["button pressed -> stop",
-             "estop engaged: motors killed, motion latched"])
+        self.assertEqual(len(notes), 2, notes)
+        self.assertTrue(notes[0].startswith(
+            "button pressed -> stop [press-down while running; held="),
+            notes)
+        self.assertEqual(notes[1],
+                         "estop engaged: motors killed, motion latched")
 
     def test_note_failure_does_not_kill_the_tick(self):
         from openbricks import log as log_mod
@@ -825,7 +827,8 @@ class HardwarePressLatchTests(unittest.TestCase):
         _tick_debounced(self.launcher)                 # release
         self.assertEqual(len(self.stops), 1)
         self.assertTrue(
-            any(n == "button pressed -> stop" for n in self.notes),
+            any(n.startswith("button pressed -> stop [release while "
+                             "running;") for n in self.notes),
             self.notes)
 
     def test_counter_failure_does_not_kill_tick_or_level_path(self):
@@ -1122,6 +1125,83 @@ class StartPressLifecycleTests(unittest.TestCase):
                          "start press's own confirmation stopped the "
                          "newborn run (the 1.15.4 bench bug)")
         self.assertTrue(self.launcher._running)
+
+    # -- 3.10.3: the run log names the dispatcher and the press state --
+
+    def _capture_notes(self):
+        notes = []
+        orig = launcher._note
+        launcher._note = notes.append
+        self.addCleanup(setattr, launcher, "_note", orig)
+        return notes
+
+    def test_counter_dispatch_is_named_for_the_run_header(self):
+        self.assertEqual(self.launcher._last_start_path, "none")
+        self._counter_press_down()
+        self._tick()
+        self.assertEqual(self.launcher._last_start_path, "pcnt")
+        state = self.launcher._press_state()
+        for token in ("held=1", "consume=0", "was=0", "stopped=0", "btn=0"):
+            self.assertIn(token, state)
+        self.assertIn("open=", state)
+        self.assertFalse("open=-" in state, state)   # dispatched: open stamped
+
+    def test_release_dispatch_is_named(self):
+        self.launcher._press_pcnt = None            # level path only
+        self.btn._value = 0
+        self._tick(2)                               # press-down at idle
+        self.btn._value = 1
+        self._tick(2)                               # release -> start
+        self.assertEqual(len(self.starts), 1)
+        self.assertEqual(self.launcher._last_start_path, "release")
+        self.assertIn("btn=1", self.launcher._press_state())
+
+    def test_press_state_when_the_button_cannot_be_read(self):
+        def _boom():
+            raise OSError("pin gone")
+        self.btn.value = _boom
+        self.assertIn("btn=-1", self.launcher._press_state())
+
+    def test_latch_stop_note_carries_the_edges_and_the_state(self):
+        notes = self._capture_notes()
+        self._counter_press_down()
+        self._tick()
+        self._program_comes_up()
+        self.btn._value = 1
+        self._tick(3)                               # released, consumed
+        advance_ms(launcher.Launcher.RUN_START_GRACE_MS
+                   + launcher.Launcher.RELEASE_CHATTER_MS + 100)
+        self.pcnt.count += 1                        # a NEW edge, past grace
+        self._tick()
+        self.assertEqual(len(self.stops), 1)
+        latch = [n for n in notes if n.startswith(
+            "button press latched by hardware counter -> stop [edges")]
+        self.assertEqual(len(latch), 1, notes)
+        self.assertIn("ms into the run; held=0 consume=0", latch[0])
+
+    def test_press_down_stop_note_carries_the_state(self):
+        notes = self._capture_notes()
+        self.launcher._press_pcnt = None
+        self._program_comes_up()                    # remote start, idle button
+        self.btn._value = 0
+        self._tick(2)                               # a real press-down
+        self.assertEqual(len(self.stops), 1)
+        self.assertTrue(any(n.startswith(
+            "button pressed -> stop [press-down while running; held=0")
+            for n in notes), notes)
+
+    def test_release_stop_note_carries_the_state(self):
+        notes = self._capture_notes()
+        self.launcher._press_pcnt = None
+        self.btn._value = 0
+        self._tick(2)                               # press-down at idle
+        self._program_comes_up()                    # came up mid-hold
+        self.btn._value = 1
+        self._tick(2)                               # release while running
+        self.assertEqual(len(self.stops), 1)
+        self.assertTrue(any(n.startswith(
+            "button pressed -> stop [release while running; held=0")
+            for n in notes), notes)
 
     def test_consumed_confirmation_is_ring_visible(self):
         del launcher._EVENTS[:]
@@ -2638,186 +2718,6 @@ class HardButtonBridgeTests(unittest.TestCase):
             _make_button(), program_path="/nonexistent.py", poll_ms=50)
         launch._tick()
         self.assertEqual(len(starts), 1)
-
-
-class HeldStartPressTests(unittest.TestCase):
-    """3.10.2 — one press, and the robot stops (bench 2026-09-09:
-    ``started`` … 324 ms … ``button pressed -> stop``). The hard-button
-    start path dispatched a run without marking the press as the one
-    still under the finger, so the press's own level confirmation
-    read as a mid-run stop. Every start path now marks it, and a run
-    that comes up with the button down marks it too."""
-
-    def _install(self, start_pending=False):
-        import sys as _sys
-
-        class _MP:
-            @staticmethod
-            def reset():
-                pass
-
-            @staticmethod
-            def hard_button_arm(on):
-                pass
-
-            _pending = [start_pending]
-
-            @classmethod
-            def hard_button_take_start(cls):
-                p, cls._pending[0] = cls._pending[0], False
-                return p
-
-        class _Mod:
-            pass
-        mod = _Mod()
-        mod.motor_process = _MP()
-        mod.set_stop_armed = lambda _: None
-        prev = _sys.modules.get("_openbricks_native")
-        _sys.modules["_openbricks_native"] = mod
-
-        def _restore():
-            if prev is None:
-                _sys.modules.pop("_openbricks_native", None)
-            else:
-                _sys.modules["_openbricks_native"] = prev
-        self.addCleanup(_restore)
-        return _MP
-
-    def setUp(self):
-        from openbricks import estop
-        estop.clear()
-        self.addCleanup(estop.clear)
-        self.starts = []
-        self.stops = []
-        orig_start, orig_stop = launcher._request_start, launcher._request_stop
-        launcher._request_start = lambda inst: self.starts.append(inst)
-        launcher._request_stop = lambda inst: self.stops.append(inst)
-        self.addCleanup(setattr, launcher, "_request_start", orig_start)
-        self.addCleanup(setattr, launcher, "_request_stop", orig_stop)
-
-    def _ticks(self, launch, n):
-        for _ in range(n):
-            launch._tick()
-            advance_ms(50)
-
-    def _program_comes_up(self, launch):
-        launch._sync_press_counter()
-        launch._run_started_ms = launcher._now_ms()
-        launch._running = True
-        launch._mark_press_at_run_start()
-
-    def test_hard_start_marks_the_held_press_and_its_echoes_never_stop(self):
-        self._install(start_pending=True)
-        btn = _make_button(0)                   # finger on the button
-        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
-        launch._tick()                          # the hard tick's start
-        self.assertEqual(len(self.starts), 1)
-        self.assertTrue(launch._start_press_held)
-        self.assertIsNotNone(launch._start_press_open_ms)
-        self._program_comes_up(launch)
-        self._ticks(launch, 3)                  # level confirms the SAME press
-        self.assertEqual(self.stops, [])
-        self.assertTrue(launch._press_consume_release)
-        btn._value = 1                          # release, 300 ms in
-        self._ticks(launch, 3)
-        self.assertEqual(self.stops, [])
-        self.assertFalse(launch._press_consume_release)
-        self.assertFalse(launch._start_press_held)
-        # A NEW press after that is a real stop.
-        btn._value = 0
-        self._ticks(launch, 3)
-        self.assertEqual(len(self.stops), 1)
-
-    def test_edge_swallowed_by_the_lockout_then_hard_confirmation_starts_marked(self):
-        # The race that reaches the hard path first: the press's
-        # falling edge lands inside the post-stop lockout (counter
-        # edge swallowed), its hard confirmation a tick later does not.
-        mp = self._install(start_pending=False)
-        btn = _make_button(1)
-        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
-        pcnt = _FakePressCounter()
-        launch._press_pcnt = pcnt
-        launch._sync_press_counter()
-        launch._lockout_until_ms = launcher._now_ms() + 60
-        pcnt.count += 1                         # the edge, inside the lockout
-        btn._value = 0
-        launch._tick()
-        self.assertEqual(self.starts, [])       # swallowed
-        advance_ms(50)
-        advance_ms(50)                          # lockout over
-        mp._pending[0] = True                   # the hard confirmation
-        launch._tick()
-        self.assertEqual(len(self.starts), 1)
-        # Marked as the start press — either still awaiting its level
-        # confirmation, or (the confirmation landed this same tick)
-        # already consumed with its release to follow.
-        self.assertTrue(launch._start_press_held
-                        or launch._press_consume_release)
-        self._program_comes_up(launch)
-        self._ticks(launch, 4)                  # still held: no stop
-        self.assertEqual(self.stops, [])
-        btn._value = 1
-        self._ticks(launch, 3)                  # released: no stop
-        self.assertEqual(self.stops, [])
-
-    def test_run_start_with_the_button_down_marks_the_press(self):
-        self._install()
-        btn = _make_button(0)
-        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
-        self.assertFalse(launch._start_press_held)
-        launch._mark_press_at_run_start()
-        self.assertTrue(launch._start_press_held)
-        self.assertIsNotNone(launch._start_press_open_ms)
-
-    def test_run_start_with_the_button_up_marks_nothing(self):
-        self._install()
-        btn = _make_button(1)
-        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
-        launch._mark_press_at_run_start()
-        self.assertFalse(launch._start_press_held)
-        self.assertIsNone(launch._start_press_open_ms)
-
-    def test_run_start_mark_survives_a_button_that_cannot_be_read(self):
-        self._install()
-        btn = _make_button(1)
-        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
-
-        def _boom():
-            raise OSError("pin gone")
-        btn.value = _boom
-        launch._mark_press_at_run_start()       # must not raise
-        self.assertFalse(launch._start_press_held)
-
-    def test_belt_consumes_the_release_of_a_press_the_level_path_saw_at_idle(self):
-        # The level path confirmed the press at idle (no start marks:
-        # the pre-fix hard path), then the run came up mid-hold. The
-        # release must be consumed, not read as the "remote start
-        # mid-hold" stop.
-        self._install()
-        btn = _make_button(0)
-        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
-        self._ticks(launch, 3)                  # idle: press-down seen
-        self.assertTrue(launch._was_pressed)
-        self._program_comes_up(launch)
-        self.assertTrue(launch._press_consume_release)
-        btn._value = 1
-        self._ticks(launch, 3)
-        self.assertEqual(self.stops, [])
-        self.assertEqual(self.starts, [])       # and no re-dispatch
-
-    def test_belt_alone_saves_an_unmarked_start(self):
-        # A start dispatched by a path that set no marks (the pre-fix
-        # hard path): the run comes up with the button down, the belt
-        # marks it, and its confirmation is consumed.
-        self._install()
-        btn = _make_button(0)
-        launch = launcher.Launcher(btn, program_path="/x.py", poll_ms=50)
-        self._program_comes_up(launch)
-        self._ticks(launch, 3)
-        self.assertEqual(self.stops, [])
-        btn._value = 1
-        self._ticks(launch, 3)
-        self.assertEqual(self.stops, [])
 
 
 class TracebackInLogTests(unittest.TestCase):

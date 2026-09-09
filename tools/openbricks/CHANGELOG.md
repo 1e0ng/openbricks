@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 3.10.3 — 3.10.2's start-press change reverted; the run log now names the dispatcher and the press state
+
+On the bench 3.10.2 stopped EVERY run at its own start press (`started`
+… 26 to 618 ms … `button pressed -> stop`), the opposite of what it
+set out to fix, and neither the fake-button tests nor a read of the
+code explain it. The launcher's button logic is back to 3.10.1's
+(which only had the rare stop-then-quick-restart trap), and the run
+log now carries the evidence the next occurrence needs:
+
+- The `started:` header names the detector that dispatched the start
+  (`pcnt` edge, `hard` confirmation, level-path `release`) and the
+  watcher's press marks at that moment.
+- Every button stop line says which decision fired it — a press-down
+  while running, a release while running, or a counter edge past the
+  start grace (with the edge counts and the time into the run) — and
+  the same marks.
+
+RAM-only evidence (`launcher.dump_events()`) cannot be read through
+`openbricks run`, which soft-resets the hub before it pastes.
+
 ## 3.10.2 — one press starts the run; a held start press never stops it
 
 Bench 2026-09-09: sometimes a single press of the start button started
