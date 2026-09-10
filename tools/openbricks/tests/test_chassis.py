@@ -66,6 +66,34 @@ class ChassisFragmentTests(unittest.TestCase):
         frag = chassis_mjcf(ChassisSpec(line_sensor_x=0.095))
         self.assertIn('<site name="chassis_line" pos="0.0950 0', frag)
 
+    def test_has_second_line_sensor_site_behind_the_axle(self):
+        # The second array a script constructs reads from here:
+        # 30 mm behind the axle on the centre line by default, at
+        # the same height as the front site.
+        self.assertIn('<site name="chassis_line2" pos="-0.0300 0.0000',
+                      self.fragment)
+        frag = chassis_mjcf(ChassisSpec(line_sensor_2_x=0.045,
+                                        line_sensor_2_y=-0.020))
+        self.assertIn('<site name="chassis_line2" pos="0.0450 -0.0200', frag)
+        self.assertIn('<site name="chassis_line" pos="0.0600 0', frag)
+
+    def test_both_line_sites_compile_at_their_spec_positions(self):
+        spec = ChassisSpec(line_sensor_x=0.080, line_sensor_2_x=-0.040,
+                           line_sensor_2_y=0.015)
+        model = mujoco.MjModel.from_xml_string(standalone_mjcf(spec))
+        front = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE,
+                                  "chassis_line")
+        rear = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE,
+                                 "chassis_line2")
+        self.assertGreaterEqual(front, 0)
+        self.assertGreaterEqual(rear, 0)
+        self.assertAlmostEqual(float(model.site_pos[front][0]), 0.080)
+        self.assertAlmostEqual(float(model.site_pos[front][1]), 0.0)
+        self.assertAlmostEqual(float(model.site_pos[rear][0]), -0.040)
+        self.assertAlmostEqual(float(model.site_pos[rear][1]), 0.015)
+        self.assertAlmostEqual(float(model.site_pos[rear][2]),
+                               float(model.site_pos[front][2]))
+
     def test_colour_sensor_placement_moves_all_three_cameras(self):
         # Defaults reproduce the historical layout (front centre, the
         # pair 18 mm either side)...

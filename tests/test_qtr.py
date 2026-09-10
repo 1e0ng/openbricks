@@ -13,8 +13,8 @@ import unittest
 
 from machine import ADC
 from openbricks import pins as _pins
-from openbricks.drivers.qtr import QTRArray, QTRElement
-from openbricks.parameters import LineMode
+from openbricks.drivers.qtr import (
+    QTRArray, QTRChannel, QTRElement, QTRLineSensor)
 
 
 _PINS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
@@ -94,7 +94,6 @@ class ConstructionTests(unittest.TestCase):
     def test_single_element_has_no_position(self):
         # One element is a detector flag, not a line: its "centroid"
         # would always read centre. QTRChannel is the API for it.
-        from openbricks.drivers.qtr import QTRChannel
         flip = [False]
 
         def swing():
@@ -277,16 +276,17 @@ class ReadingTests(unittest.TestCase):
         _script(dark_pins=(5, 6))
         self.assertEqual(self.qtr.position(), 4.0)   # midpoint, 8/2
 
-    def test_lost_line_returns_none_and_remembers_the_side(self):
+    def test_lost_line_returns_none(self):
+        # All mat: the line is outside the window. The driver says
+        # so with None; which side it left through is the program's
+        # to remember (the centre follower keeps the last sign).
         _script(dark_pins=(9,))                 # rightmost, then gone
         self.assertTrue(self.qtr.position() > 0)
-        _script(dark_pins=())                   # all mat
+        _script(dark_pins=())
         self.assertIsNone(self.qtr.position())
-        self.assertEqual(self.qtr.last_side(), 1)
+        self.assertIsNone(self.qtr.read().position())
         _script(dark_pins=(1,))                 # reappears far left
         self.assertTrue(self.qtr.position() < 0)
-        _script(dark_pins=())
-        self.assertEqual(self.qtr.last_side(), -1)
 
     def test_cluster_positions_split_a_fork(self):
         # Two dark clusters (a branch): the global centroid lands
@@ -430,13 +430,13 @@ class ReadingTests(unittest.TestCase):
         self.assertTrue("dark" in repr(reading[4]), repr(reading[4]))
 
     def test_channel_white_mirrors_dark(self):
-        from openbricks.drivers.qtr import QTRChannel
-        ADC.reads = {9: _swing()}
-        ch = QTRChannel(pin=9)
+        # GPIO 10: the one ADC1 pin setUp's nine-pin array left free.
+        ADC.reads = {10: _swing()}
+        ch = QTRChannel(pin=10)
         ch.calibrate(duration_ms=100)
-        ADC.reads = {9: _LINE}
+        ADC.reads = {10: _LINE}
         self.assertTrue(ch.dark()); self.assertFalse(ch.white())
-        ADC.reads = {9: _MAT}
+        ADC.reads = {10: _MAT}
         self.assertTrue(ch.white()); self.assertFalse(ch.dark())
 
     def test_dark_count_is_the_intersection_signal(self):
@@ -536,10 +536,10 @@ class PositionsMmTests(unittest.TestCase):
         self.assertEqual(q._x_mm, [-8.0, -4.0, 0.0, 4.0, 8.0])
 
 
-class ModeAndLineSensorTests(unittest.TestCase):
-    """set_mode / edge_error and the firmware-configured
-    QTRLineSensor: the geometry (pins, positions, setpoints) lives
-    in the driver so user code never carries the numbers."""
+class PositionsAccessorTests(unittest.TestCase):
+    """``positions_mm`` — the element x coordinates, left to right, so
+    programs and docs name elements by where they sit instead of
+    carrying the numbers."""
 
     def setUp(self):
         _pins._claims_reset()
@@ -548,206 +548,262 @@ class ModeAndLineSensorTests(unittest.TestCase):
         ADC.reads = {}
         _pins._claims_reset()
 
-    def _base_array(self):
-        ADC.reads = {p: _swing() for p in _PINS}
+    def test_uniform_array_reports_its_derived_coordinates(self):
+        ADC.reads = {p: _MAT for p in _PINS}
         qtr = QTRArray(pins=_PINS, pitch_mm=8.0)
-        qtr.calibrate(duration_ms=100, poll_ms=5)
-        return qtr
+        self.assertEqual(qtr.positions_mm,
+                         (-32.0, -24.0, -16.0, -8.0, 0.0,
+                          8.0, 16.0, 24.0, 32.0))
+        self.assertTrue(isinstance(qtr.positions_mm, tuple))
 
-    def test_set_mode_validates(self):
-        qtr = self._base_array()
-        # A string — even the right word — is not a mode: the
-        # error names the members and calls the string out.
-        for bad in ("middle", "left"):
-            try:
-                qtr.set_mode(bad)
-                self.fail("expected TypeError")
-            except TypeError as e:
-                self.assertTrue("LineMode.LEFT" in str(e)
-                                and "LineMode.RIGHT" in str(e)
-                                and "LineMode.CENTER" in str(e), e)
-                self.assertTrue(repr(bad) in str(e), e)
-        self.assertTrue(qtr.mode() is None)
-        for mode in LineMode.members():
-            qtr.set_mode(mode)
-            self.assertTrue(qtr.mode() is mode)
+    def test_explicit_positions_come_back_verbatim(self):
+        ADC.reads = {p: _MAT for p in (1, 2, 3)}
+        qtr = QTRArray(pins=(1, 2, 3), positions_mm=(-12, -4, 12))
+        self.assertEqual(qtr.positions_mm, (-12.0, -4.0, 12.0))
 
-    def test_edge_error_before_set_mode_raises_with_remedy(self):
-        qtr = self._base_array()
-        _script(dark_pins=(5,))
-        try:
-            qtr.edge_error()
-            self.fail("expected RuntimeError")
-        except RuntimeError as e:
-            self.assertTrue("set_mode" in str(e), e)
+    def test_accessor_is_a_snapshot(self):
+        ADC.reads = {p: _MAT for p in (1, 2)}
+        qtr = QTRArray(pins=(1, 2), pitch_mm=8.0)
+        first = qtr.positions_mm
+        self.assertEqual(first, qtr.positions_mm)
+        self.assertEqual(qtr.position, qtr.position)   # no rebinding
 
-    def test_base_array_setpoints_default_to_centre(self):
-        # Setpoint 0.0 on the 9-pin rig picks the middle element
-        # (pin 5, index 4) for both modes; fully dark there means
-        # ambient 0 -> full-scale error, mode-signed.
-        qtr = self._base_array()
-        _script(dark_pins=(5,))
-        qtr.set_mode(LineMode.LEFT)
-        self.assertEqual(qtr.edge_error(), -50)
-        qtr.set_mode(LineMode.RIGHT)
-        self.assertEqual(qtr.edge_error(), 50)
+    def test_channel_has_one_coordinate(self):
+        ADC.reads = {9: _MAT}
+        self.assertEqual(QTRChannel(pin=9).positions_mm, (0.0,))
 
-    def test_edge_error_rails_toward_the_line_when_all_white(self):
-        # Nothing dark: the setpoint element reads ambient 100 and
-        # the error rails at the sign that steers back toward the
-        # line's side (right of the edge in left mode, left of it
-        # in right mode).
-        qtr = self._base_array()
-        _script(dark_pins=())
-        qtr.set_mode(LineMode.LEFT)
-        self.assertEqual(qtr.edge_error(), 50)
-        qtr.set_mode(LineMode.RIGHT)
-        self.assertEqual(qtr.edge_error(), -50)
 
-    def _line_sensor(self):
-        from openbricks.drivers.qtr import QTRLineSensor
+class LineSensorTests(unittest.TestCase):
+    """The firmware-configured QTRLineSensor: both layouts' pins and
+    geometry live in the driver so user code never carries the
+    numbers. Steering is the program's job from the element
+    readings (docs/hardware.md); the driver only owns geometry."""
+
+    def setUp(self):
+        _pins._claims_reset()
+
+    def tearDown(self):
+        ADC.reads = {}
+        _pins._claims_reset()
+
+    def _line_sensor(self, **kwargs):
         ADC.reads = {p: _swing() for p in QTRLineSensor.PINS}
-        qtr = QTRLineSensor()
+        qtr = QTRLineSensor(**kwargs)
         qtr.calibrate(duration_ms=100, poll_ms=5)
         return qtr
 
-    def _script10(self, dark_pins):
-        from openbricks.drivers.qtr import QTRLineSensor
+    def _script_pins(self, pins, dark_pins):
         ADC.reads = {p: (_LINE if p in dark_pins else _MAT)
-                     for p in QTRLineSensor.PINS}
+                     for p in pins}
 
-    def test_line_sensor_geometry_is_the_bench_window(self):
-        from openbricks.drivers.qtr import QTRLineSensor
+    def test_default_is_the_ten_channel_bench_window(self):
         qtr = self._line_sensor()
         self.assertEqual(qtr._pins, (1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
-        self.assertEqual(qtr._x_mm,
-                         [-28.0, -20.0, -16.0, -12.0, -4.0,
-                          4.0, 12.0, 16.0, 20.0, 28.0])
-        # Setpoints DERIVE from the positions table: channel 12 is
-        # window index 2, channel 4 is index 7.
-        self.assertEqual(QTRLineSensor.LEFT_SETPOINT_MM,
-                         QTRLineSensor.POSITIONS_MM[2])
-        self.assertEqual(QTRLineSensor.RIGHT_SETPOINT_MM,
-                         QTRLineSensor.POSITIONS_MM[7])
-        self.assertEqual(QTRLineSensor.LEFT_SETPOINT_MM, -16.0)
-        self.assertEqual(QTRLineSensor.RIGHT_SETPOINT_MM, 16.0)
-        # The setpoint ELEMENTS resolve to those indices too.
-        self.assertEqual(qtr._left_idx, 2)
-        self.assertEqual(qtr._right_idx, 7)
+        self.assertEqual(qtr.positions_mm,
+                         (-28.0, -20.0, -16.0, -12.0, -4.0,
+                          4.0, 12.0, 16.0, 20.0, 28.0))
+        self.assertEqual(QTRLineSensor.PINS, qtr._pins)
+        self.assertEqual(QTRLineSensor.POSITIONS_MM, qtr.positions_mm)
+        self.assertEqual(len(qtr.read()), 10)
 
-    def test_line_sensor_error_is_the_setpoint_elements_ambient(self):
-        # Left mode watches GPIO 3 (window index 2): fully dark
-        # there -> ambient 0 -> error -50; a raw reading midway
-        # between the calibration extremes -> ambient 50 -> error 0
-        # (the element straddles the edge).
+    def test_channels_10_is_the_default_spelled_out(self):
+        qtr = self._line_sensor(channels=10)
+        self.assertEqual(qtr._pins, QTRLineSensor.PINS)
+        self.assertEqual(qtr.positions_mm, QTRLineSensor.POSITIONS_MM)
+
+    def test_eight_channel_layout_leaves_gpio_9_and_10(self):
+        # Every other QTRX channel (1,3,5,...,15) on GPIO 1..8: the
+        # same 56 mm window at a uniform 8 mm pitch, with the last
+        # two ADC1 pins free for a second array.
+        ADC.reads = {p: _swing() for p in QTRLineSensor.PINS_8}
+        qtr = QTRLineSensor(channels=8)
+        qtr.calibrate(duration_ms=100, poll_ms=5)
+        self.assertEqual(qtr._pins, (1, 2, 3, 4, 5, 6, 7, 8))
+        self.assertEqual(qtr.positions_mm,
+                         (-28.0, -20.0, -12.0, -4.0,
+                          4.0, 12.0, 20.0, 28.0))
+        self.assertEqual(QTRLineSensor.PINS_8, qtr._pins)
+        self.assertEqual(QTRLineSensor.POSITIONS_MM_8, qtr.positions_mm)
+        self.assertEqual(len(qtr.read()), 8)
+        self.assertFalse(9 in qtr._pins)
+        self.assertFalse(10 in qtr._pins)
+        # The edge elements named in the docs: right edge under
+        # index 5 (+12 mm), left under index 2 (-12 mm), two
+        # mat-side elements beyond each for the branch watch.
+        self.assertEqual(qtr.positions_mm[5], 12.0)
+        self.assertEqual(qtr.positions_mm[2], -12.0)
+        self.assertEqual(len(qtr.positions_mm[6:]), 2)
+        self.assertEqual(len(qtr.positions_mm[:2]), 2)
+
+    def test_ten_channel_edge_elements_named_in_the_docs(self):
         qtr = self._line_sensor()
-        qtr.set_mode(LineMode.LEFT)
-        self._script10((3,))
-        self.assertEqual(qtr.edge_error(), -50)
-        self._script10(())
-        ADC.reads[3] = (_MAT + _LINE) // 2
-        self.assertEqual(qtr.edge_error(), 0)
+        self.assertEqual(qtr.positions_mm[7], 16.0)
+        self.assertEqual(qtr.positions_mm[2], -16.0)
+        self.assertEqual(len(qtr.positions_mm[8:]), 2)
+        self.assertEqual(len(qtr.positions_mm[:2]), 2)
 
-    def test_line_sensor_switches_modes_mid_run(self):
-        # Same snapshot, both disciplines: dark under both setpoint
-        # elements (GPIO 3 and GPIO 8) reads as "onto the line" in
-        # left mode and "onto the line" from the other side in
-        # right mode — opposite signs, no reconstruction.
+    def test_eight_channel_geometry_reads_like_the_driver(self):
+        ADC.reads = {p: _swing() for p in QTRLineSensor.PINS_8}
+        qtr = QTRLineSensor(channels=8)
+        qtr.calibrate(duration_ms=100, poll_ms=5)
+        self._script_pins(QTRLineSensor.PINS_8, (6,))     # index 5
+        self.assertEqual(qtr.position(), 12.0)
+        self._script_pins(QTRLineSensor.PINS_8, (4, 5))   # -4, +4
+        self.assertEqual(qtr.position(), 0.0)
+        self._script_pins(QTRLineSensor.PINS_8, (1,))
+        self.assertEqual(qtr.position(), -28.0)
+
+    def test_channels_must_be_8_or_10(self):
+        for bad in (0, 7, 9, 12, "8"):
+            _pins._claims_reset()
+            try:
+                QTRLineSensor(channels=bad)
+                self.fail("expected ValueError for %r" % (bad,))
+            except ValueError as e:
+                self.assertTrue("8" in str(e) and "10" in str(e), e)
+                self.assertTrue(repr(bad) in str(e), e)
+        # A refused construction claims nothing.
+        ADC.reads = {p: _MAT for p in QTRLineSensor.PINS}
+        QTRLineSensor()
+
+    def test_right_edge_error_is_the_documented_pattern(self):
+        # The docs' right-edge law on the ten-channel window:
+        # 50 - r[7].ambient(). Element 7 (GPIO 8, +16 mm) fully
+        # dark -> the robot drifted LEFT of the edge -> +50 (steer
+        # right); fully white -> -50; midway -> 0.
         qtr = self._line_sensor()
-        self._script10((3, 8))
-        reading = qtr.read()
-        qtr.set_mode(LineMode.LEFT)
-        self.assertEqual(qtr.edge_error(reading), -50)
-        qtr.set_mode(LineMode.RIGHT)
-        self.assertEqual(qtr.edge_error(reading), 50)
+        self._script_pins(QTRLineSensor.PINS, (8,))
+        self.assertEqual(50 - qtr.read()[7].ambient(), 50)
+        self._script_pins(QTRLineSensor.PINS, ())
+        self.assertEqual(50 - qtr.read()[7].ambient(), -50)
+        ADC.reads[8] = (_MAT + _LINE) // 2
+        self.assertEqual(50 - qtr.read()[7].ambient(), 0)
 
-    # ---- center mode: all ten elements ----
-
-    def test_center_error_is_zero_on_a_centred_line(self):
+    def test_left_edge_error_is_the_mirror(self):
         qtr = self._line_sensor()
-        qtr.set_mode(LineMode.CENTER)
-        self._script10((5, 6))          # x = -4 and +4: centroid 0
-        self.assertEqual(qtr.edge_error(), 0.0)
+        self._script_pins(QTRLineSensor.PINS, (3,))
+        self.assertEqual(qtr.read()[2].ambient() - 50, -50)
+        self._script_pins(QTRLineSensor.PINS, ())
+        self.assertEqual(qtr.read()[2].ambient() - 50, 50)
 
-    def test_center_error_is_proportional_across_the_window(self):
-        # One dark element at a time, left to right: the error must
-        # rise monotonically through zero and reach the rails at the
-        # outermost elements (x = -28 / +28 mm -> -50 / +50).
-        from openbricks.drivers.qtr import QTRLineSensor
+    def test_mode_api_is_gone(self):
         qtr = self._line_sensor()
-        qtr.set_mode(LineMode.CENTER)
-        errs = []
-        for pin in QTRLineSensor.PINS:
-            self._script10((pin,))
-            errs.append(qtr.edge_error())
-        for a, b in zip(errs, errs[1:]):
-            self.assertTrue(b > a, errs)
-        self.assertEqual(errs[0], -50.0)
-        self.assertEqual(errs[-1], 50.0)
-        # The left-five scenario: right edge over the left half of
-        # the window is a distinct, graded error — not a rail.
-        self.assertTrue(-50.0 < errs[3] < errs[4] < 0.0, errs)
-        # Scale: element at +16 mm (GPIO 8) reads 50 * 16 / 28.
-        self.assertAlmostEqual(errs[7], 50.0 * 16.0 / 28.0, places=6)
+        for name in ("set_mode", "mode", "edge_error", "last_side",
+                     "LEFT_SETPOINT_MM", "RIGHT_SETPOINT_MM",
+                     "CENTER_SETPOINT_MM"):
+            self.assertFalse(hasattr(qtr, name), name)
+        self.assertFalse(hasattr(qtr.read(), "edge_error"))
 
-    def test_center_error_sign_matches_position(self):
-        qtr = self._line_sensor()
-        qtr.set_mode(LineMode.CENTER)
-        self._script10((9,))            # +20 mm: line right -> +
-        self.assertTrue(qtr.edge_error() > 0)
-        self.assertTrue(qtr.position() > 0)
-        self._script10((2,))            # -20 mm: line left -> -
-        self.assertTrue(qtr.edge_error() < 0)
 
-    def test_center_error_rails_toward_the_escape_side(self):
-        qtr = self._line_sensor()
-        qtr.set_mode(LineMode.CENTER)
-        self._script10((10,))           # seen far right...
-        qtr.edge_error()
-        self._script10(())              # ...then gone
-        self.assertEqual(qtr.edge_error(), 50.0)
-        self._script10((1,))            # seen far left, then gone
-        qtr.edge_error()
-        self._script10(())
-        self.assertEqual(qtr.edge_error(), -50.0)
+class TwoArrayTests(unittest.TestCase):
+    """A second array on the pins the front leaves free: disjoint
+    arrays coexist, each with its own calibration file; a shared pin
+    is refused at construction naming both arrays."""
 
-    def test_center_error_raises_when_line_never_seen(self):
-        qtr = self._line_sensor()
-        qtr.set_mode(LineMode.CENTER)
-        self._script10(())
+    FRONT_CAL = "qtr_front_test.cal"
+    REAR_CAL = "qtr_rear_test.cal"
+
+    def setUp(self):
+        _pins._claims_reset()
+
+    def tearDown(self):
+        ADC.reads = {}
+        _pins._claims_reset()
+        import os
+        for path in (self.FRONT_CAL, self.REAR_CAL):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def _script(self, dark_pins):
+        ADC.reads = {p: (_LINE if p in dark_pins else _MAT)
+                     for p in range(1, 11)}
+
+    def test_eight_channel_front_and_rear_pair_coexist(self):
+        ADC.reads = {p: _swing() for p in range(1, 11)}
+        front = QTRLineSensor(channels=8)
+        rear = QTRArray(pins=(9, 10), pitch_mm=8.0)
+        front.calibrate(duration_ms=100, poll_ms=5)
+        rear.calibrate(duration_ms=100, poll_ms=5)
+        self.assertEqual(rear.positions_mm, (-4.0, 4.0))
+        self._script((9, 10))
+        self.assertTrue(rear.read().all_dark())
+        self.assertFalse(front.read().all_dark())
+        self.assertEqual(front.read().dark_count(), 0)
+        self._script((6,))
+        self.assertEqual(front.read().position(), 12.0)
+        self.assertIsNone(rear.read().position())
+
+    def test_two_probes_on_the_free_pins(self):
+        ADC.reads = {p: _swing() for p in range(1, 11)}
+        QTRLineSensor(channels=8)
+        a = QTRChannel(pin=9)
+        b = QTRChannel(pin=10)
+        a.calibrate(duration_ms=100, poll_ms=5)
+        b.calibrate(duration_ms=100, poll_ms=5)
+        self._script((10,))
+        self.assertFalse(a.dark())
+        self.assertTrue(b.dark())
+
+    def test_shared_pin_is_refused_naming_both_arrays(self):
+        # The default ten-channel window owns GPIO 9 and 10: a rear
+        # array on them collides, and the error names the pin, the
+        # array asking, and the array holding it.
+        ADC.reads = {p: _MAT for p in range(1, 11)}
+        QTRLineSensor()
         try:
-            qtr.edge_error()
+            QTRArray(pins=(9, 10), pitch_mm=8.0)
+            self.fail("expected ReservedPinError")
+        except _pins.ReservedPinError as e:
+            msg = str(e)
+        self.assertTrue("GPIO 9" in msg, msg)
+        self.assertTrue("QTR array on GPIO 9,10" in msg, msg)
+        self.assertTrue("QTR array on GPIO 1,2,3,4,5,6,7,8,9,10" in msg,
+                        msg)
+        with self.assertRaises(ValueError):
+            QTRChannel(pin=10)
+
+    def test_refused_construction_claims_nothing(self):
+        # A rear array refused on its SECOND pin must not leave its
+        # first pin claimed: the retry with the right pins works.
+        ADC.reads = {p: _MAT for p in range(1, 11)}
+        QTRLineSensor(channels=8)
+        with self.assertRaises(ValueError):
+            QTRArray(pins=(9, 8), pitch_mm=8.0)
+        QTRArray(pins=(9, 10), pitch_mm=8.0)
+
+    def test_same_wiring_may_be_rebuilt(self):
+        # Re-constructing the same array (a program's second Hub-
+        # style re-check of its own pins) is not a collision.
+        ADC.reads = {p: _MAT for p in range(1, 11)}
+        QTRLineSensor()
+        QTRLineSensor()
+
+    def test_each_array_keeps_its_own_calibration_file(self):
+        ADC.reads = {p: _swing() for p in range(1, 11)}
+        front = QTRLineSensor(channels=8)
+        rear = QTRArray(pins=(9, 10), pitch_mm=8.0)
+        front.calibrate(duration_ms=100, poll_ms=5)
+        rear.calibrate(duration_ms=100, poll_ms=5)
+        front.save_calibration(self.FRONT_CAL)
+        rear.save_calibration(self.REAR_CAL)
+        _pins._claims_reset()
+        front2 = QTRLineSensor(channels=8)
+        rear2 = QTRArray(pins=(9, 10), pitch_mm=8.0)
+        front2.load_calibration(self.FRONT_CAL)
+        rear2.load_calibration(self.REAR_CAL)
+        self._script((6, 10))
+        self.assertEqual(front2.read().position(), 12.0)
+        self.assertEqual(rear2.read().position(), 4.0)
+        # The files carry their wiring: swapping them is refused.
+        try:
+            rear2.load_calibration(self.FRONT_CAL)
             self.fail("expected RuntimeError")
         except RuntimeError as e:
-            self.assertTrue("never been seen" in str(e), e)
-
-    def test_center_mode_on_the_base_array_uses_its_own_span(self):
-        # 9 uniform 8 mm pins: half-span 32 mm; the end pins rail.
-        qtr = self._base_array()
-        qtr.set_mode(LineMode.CENTER)
-        _script(dark_pins=(1,))
-        self.assertEqual(qtr.edge_error(), -50.0)
-        _script(dark_pins=(9,))
-        self.assertEqual(qtr.edge_error(), 50.0)
-        _script(dark_pins=(5,))
-        self.assertEqual(qtr.edge_error(), 0.0)
-
-    def test_center_error_switches_mid_run_on_one_snapshot(self):
-        qtr = self._line_sensor()
-        self._script10((3, 4, 5, 6, 7, 8))   # -16 .. +16: centred
-        reading = qtr.read()
-        qtr.set_mode(LineMode.CENTER)
-        self.assertEqual(qtr.edge_error(reading), 0.0)
-        qtr.set_mode(LineMode.LEFT)
-        self.assertEqual(qtr.edge_error(reading), -50)
-
-    def test_reading_edge_error_delegates(self):
-        qtr = self._line_sensor()
-        qtr.set_mode(LineMode.LEFT)
-        self._script10((4, 5, 6))
-        reading = qtr.read()
-        self.assertEqual(reading.edge_error(),
-                         qtr.edge_error(reading))
+            self.assertTrue("wired to (9, 10)" in str(e), e)
+        with self.assertRaises(RuntimeError):
+            front2.load_calibration(self.REAR_CAL)
 
 
 if __name__ == "__main__":

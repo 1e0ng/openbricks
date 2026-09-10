@@ -16,7 +16,7 @@ The API is layered:
 - **Robotics** (``openbricks.robotics``) — building blocks composed
   from interfaces, like the two-wheel ``DriveBase``.
 - **Parameters** (``openbricks.parameters``) — the enums every
-  option argument takes (``Stop``, ``DriveMode``, ``LineMode``).
+  option argument takes (``Stop``, ``DriveMode``).
 - **Hub & runtime** — board-level peripherals, BLE, program launching,
   and log capture.
 

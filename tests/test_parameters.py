@@ -7,20 +7,20 @@ members, and ``Stop`` carries the native stop codes as values."""
 import unittest
 
 from openbricks import parameters
-from openbricks.parameters import Stop, DriveMode, LineMode
+from openbricks.parameters import Stop, DriveMode
 
 
 class EnumSurfaceTests(unittest.TestCase):
 
     def test_members_are_singletons_of_their_class(self):
-        for cls in (Stop, DriveMode, LineMode):
+        for cls in (Stop, DriveMode):
             for m in cls.members():
                 self.assertTrue(isinstance(m, cls))
                 self.assertTrue(getattr(cls, m.name) is m)
 
     def test_repr_is_pybricks_style(self):
         self.assertEqual(repr(Stop.COAST), "Stop.COAST")
-        self.assertEqual(str(LineMode.CENTER), "LineMode.CENTER")
+        self.assertEqual(str(DriveMode.DUTY), "DriveMode.DUTY")
         self.assertEqual("%s" % DriveMode.WHEEL, "DriveMode.WHEEL")
 
     def test_strings_never_compare_equal(self):
@@ -62,8 +62,11 @@ class EnumSurfaceTests(unittest.TestCase):
     def test_member_lists(self):
         self.assertEqual([m.name for m in DriveMode.members()],
                          ["DUTY", "WHEEL"])
-        self.assertEqual([m.name for m in LineMode.members()],
-                         ["LEFT", "RIGHT", "CENTER"])
+
+    def test_no_line_mode(self):
+        # 4.0.0: line following is written from element readings
+        # (docs/hardware.md); the enum went with set_mode/edge_error.
+        self.assertFalse(hasattr(parameters, "LineMode"))
 
 
 class CheckTests(unittest.TestCase):
@@ -86,10 +89,10 @@ class CheckTests(unittest.TestCase):
 
     def test_wrong_enum_class_is_rejected(self):
         try:
-            parameters.check(Stop, LineMode.LEFT, "then")
+            parameters.check(Stop, DriveMode.WHEEL, "then")
             self.fail("expected TypeError")
         except TypeError as e:
-            self.assertTrue("LineMode.LEFT" in str(e), e)
+            self.assertTrue("DriveMode.WHEEL" in str(e), e)
 
     def test_subset_restricts_the_accepted_members(self):
         allowed = (Stop.COAST, Stop.BRAKE, Stop.HOLD)

@@ -77,6 +77,10 @@ class ChassisSpec:
     #       (color_sensor_x, color_sensor_y), always looking down.
     #   line_sensor_x    — the reflectance-array site (``chassis_line``):
     #       the QTR shim spreads its elements left/right of this point.
+    #   line_sensor_2_x/y — a SECOND reflectance site (``chassis_line2``,
+    #       same height): the second array a script constructs reads
+    #       here. Default 30 mm behind the axle on the centre line —
+    #       a rear array for a marker or a reversing follower.
     color_sensor_x:     float = 0.060
     color_sensor_y:     float = 0.0
     color_sensor_z:     float = -0.023
@@ -85,6 +89,8 @@ class ChassisSpec:
     color_sensor_fov:   float = 0.0
     color_sensor_range: float = 10.0
     line_sensor_x:  float = 0.060
+    line_sensor_2_x: float = -0.030
+    line_sensor_2_y: float = 0.0
 
     # Pose: where to drop the chassis in the world. Caller can
     # override by regenerating the fragment with a different origin.
@@ -233,6 +239,11 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         '           body Y by the array\'s own element positions. -->\n'
         '      <site name="{name}_line" pos="{lsx:.4f} 0 {cam_z:.4f}"\n'
         '            size="0.003"/>\n'
+        '      <!-- Second reflectance-array site: the second QTR array\n'
+        '           a script constructs reads from here (construction\n'
+        '           order binds _line first, then _line2). -->\n'
+        '      <site name="{name}_line2" pos="{ls2x:.4f} {ls2y:.4f} {cam_z:.4f}"\n'
+        '            size="0.003"/>\n'
         '      <!-- Forward-facing range-sensor site (HC-SR04 /\n'
         '           VL53L0X shims raycast from here along body +X). -->\n'
         '      <site name="{name}_dist" pos="{dist_x:.4f} 0 0"\n'
@@ -260,6 +271,7 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         csy_l=spec.color_sensor_y + 0.018,
         csy_r=spec.color_sensor_y - 0.018,
         lsx=spec.line_sensor_x,
+        ls2x=spec.line_sensor_2_x, ls2y=spec.line_sensor_2_y,
         dist_x=bx + 0.001,
     )
 

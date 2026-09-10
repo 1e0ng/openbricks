@@ -3,6 +3,69 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.0.0 — the QTR driver drops its mode API; steering is the program's job, and a second array fits on GPIO 9/10
+
+Breaking. `LineMode`, `QTRArray.set_mode()` / `mode()` /
+`edge_error()` / `last_side()`, `QTRReading.edge_error()` and the
+`LEFT_SETPOINT_MM` / `RIGHT_SETPOINT_MM` / `CENTER_SETPOINT_MM`
+constants are gone. The driver reports what each element sees —
+`read()`, `position()`, the edge positions, per-element `ambient()`
+/ `dark()` / `white()` — and the follower's discipline is written in
+the program over those readings, where it can be tuned, mixed and
+switched without a driver release. One accessor is new:
+`QTRArray.positions_mm`, the element x coordinates in mm left to
+right, so elements can be named by position.
+
+- **`QTRLineSensor(channels=8)`** — the same QTRX-HD-15A window on
+  eight pins: channels 1, 3, 5, 7, 9, 11, 13, 15 (every other one,
+  8 mm pitch) onto GPIO 1..8, positions −28, −20, −12, −4, +4, +12,
+  +20, +28 mm. `QTRLineSensor()` is the ten-channel bench window
+  exactly as before; `channels` must be 8 or 10 (`ValueError` names
+  both). Class constants `PINS_8` / `POSITIONS_MM_8` join `PINS` /
+  `POSITIONS_MM`.
+- **A second array** — the eight-channel layout leaves GPIO 9 and
+  10, the last two ADC1 pins on the ESP32-S3, for
+  `QTRArray(pins=(9, 10), pitch_mm=…)` (or two `QTRChannel` probes).
+  No new class. Each array calibrates and keeps its own file
+  (`/qtr_front.cal`, `/qtr_rear.cal`); the pin registry keeps the
+  two disjoint and refuses a shared pin at construction.
+- **The sim's second site** — `ChassisSpec.line_sensor_2_x` (default
+  −0.030, 30 mm behind the axle) and `line_sensor_2_y` (0.0) place
+  a second reflectance site, `<name>_line2`, at the line site's
+  height; both are plain chassis-JSON fields. Arrays bind sites in
+  construction order within a run: the first `QTRArray` /
+  `QTRLineSensor` / `QTRChannel` reads `<name>_line`, the second
+  `<name>_line2`, a third raises `RuntimeError` naming the
+  two-site limit. The counter resets when the shim is installed.
+  `ShimQTRLineSensor` takes `channels=` like the firmware class.
+- The three follower examples are rewritten on the element pattern
+  (`EDGE_INDEX = 7` right / `2` left on the ten-channel window;
+  centre on `position()` with the last-seen side kept in the
+  program); `docs/hardware.md` carries both wiring tables and the
+  element indices per layout.
+
+### Migration
+
+| 3.x | 4.0.0 |
+|-----|-------|
+| `qtr.set_mode(LineMode.RIGHT)` + `steer = KP * r.edge_error()` | `steer = KP * (50 - r[7].ambient())` on the ten-channel window, `r[5]` on eight (the element just inside the right edge: +16 mm / +12 mm) |
+| `qtr.set_mode(LineMode.LEFT)` + `steer = KP * r.edge_error()` | `steer = KP * (r[2].ambient() - 50)` on either layout (−16 mm / −12 mm) |
+| `qtr.set_mode(LineMode.CENTER)` + `edge_error()` | `steer = KP_MM * r.position()` (mm, positive = line right of centre; `None` when the line is outside the window) |
+| `qtr.last_side()` | keep it yourself: record the sign of `position()` whenever it is not `None`, and steer that way when it is |
+| branch on the far side | the elements beyond the followed edge going dark: `r[8].dark() or r[9].dark()` (ten, right edge), `r[6].dark() or r[7].dark()` (eight) |
+| `from openbricks.parameters import LineMode` | delete the import; `Stop` and `DriveMode` are unchanged |
+
+`all_dark()`, `dark_count()`, `position()`, `left_edge_position()`
+/ `right_edge_position()`, `leftmost_position()` /
+`rightmost_position()`, `calibrate()` / `save_calibration()` /
+`load_calibration()` and `emitters()` are unchanged. Flash 4.0.0.
+
+Also in this release: the `sim` extra pins `mujoco < 3.13`. MuJoCo
+3.13.0 changes contact behaviour enough that the two-colour-sensor
+follower drifts off the practice line and overruns the stop bar in
+the physics test; 3.12 tracks it. The bound lifts once the chassis
+contact model is re-tuned against 3.13.
+
 ## 3.10.3 — 3.10.2's start-press change reverted; the run log now names the dispatcher and the press state
 
 On the bench 3.10.2 stopped EVERY run at its own start press (`started`

@@ -1292,9 +1292,10 @@ class WorldAliasTableTests(unittest.TestCase):
 
 class ShimQTRTests(unittest.TestCase):
     """``QTRArray`` / ``QTRChannel`` / ``QTRLineSensor`` resolve to
-    the shim subclasses and read the chassis line site — the bench
-    line sensor's whole discipline (modes, edge error, calibration
-    contract) running on simulated reflectance."""
+    the shim subclasses and read the chassis line sites — the bench
+    line sensor's whole discipline (element readings, position,
+    calibration contract, two sites in construction order) running
+    on simulated reflectance."""
 
     def setUp(self):
         if shim.is_installed():
@@ -1308,22 +1309,50 @@ class ShimQTRTests(unittest.TestCase):
         if shim.is_installed():
             shim.uninstall()
 
-    def _line_sensor(self):
+    def _line_sensor(self, channels=10):
         from openbricks.drivers.qtr import QTRLineSensor
-        from openbricks.parameters import LineMode
-        qtr = QTRLineSensor()
-        qtr.load_calibration("/qtr.cal")     # the hub path: no file here
-        return qtr, LineMode
+        qtr = QTRLineSensor(channels=channels)
+        qtr.load_calibration("/qtr_front.cal")   # the hub path: no file here
+        return qtr
+
+    def test_line_sensor_refuses_before_install(self):
+        # The preset, like every shim class, needs a runtime to read
+        # from: constructing it with the shim down names the fix.
+        shim.uninstall()
+        try:
+            shim.ShimQTRLineSensor()
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("shim not installed" in str(e), e)
+
+    def test_site_binding_is_exactly_once_per_array(self):
+        # The firmware constructor chain can reach the binder twice
+        # for one array (the preset's __init__ and the patched base
+        # class); a second bind must keep the first site and must not
+        # consume the second one, or the next array has nowhere to go.
+        from openbricks.drivers.qtr import QTRArray
+        first = QTRArray(pins=(1,))
+        site = first.site_name
+        self.assertEqual(site, "chassis_line")
+        first._bind_line_site()
+        self.assertEqual(first.site_name, site)
+        second = QTRArray(pins=(2,))
+        self.assertEqual(second.site_name, "chassis_line2")
 
     def test_classes_resolve_to_the_shim(self):
         from openbricks.drivers import qtr as qtr_mod
         self.assertIs(qtr_mod.QTRLineSensor, shim.ShimQTRLineSensor)
         self.assertIs(qtr_mod.QTRArray, shim.ShimQTRArray)
         self.assertIs(qtr_mod.QTRChannel, shim.ShimQTRChannel)
-        # ...and are still the firmware classes underneath: the
-        # geometry table and setpoints come from there.
+        # ...and are still the firmware classes underneath: both
+        # geometry tables come from there, not from a sim copy.
         self.assertTrue(issubclass(shim.ShimQTRLineSensor, shim._RealQTRLineSensor))
-        self.assertEqual(shim.ShimQTRLineSensor.RIGHT_SETPOINT_MM, 16.0)
+        self.assertIs(shim.ShimQTRLineSensor.POSITIONS_MM,
+                      shim._RealQTRLineSensor.POSITIONS_MM)
+        self.assertIs(shim.ShimQTRLineSensor.POSITIONS_MM_8,
+                      shim._RealQTRLineSensor.POSITIONS_MM_8)
+        self.assertIs(shim.ShimQTRLineSensor.PINS_8,
+                      shim._RealQTRLineSensor.PINS_8)
 
     def test_reading_before_calibration_still_raises(self):
         from openbricks.drivers.qtr import QTRLineSensor
@@ -1332,8 +1361,8 @@ class ShimQTRTests(unittest.TestCase):
 
     def test_load_calibration_touches_no_file(self):
         import os
-        qtr, _ = self._line_sensor()
-        self.assertFalse(os.path.exists("/qtr.cal"))
+        qtr = self._line_sensor()
+        self.assertFalse(os.path.exists("/qtr_front.cal"))
         self.assertEqual(len(qtr.read()), 10)
 
     def test_calibrate_spends_its_sim_time(self):
@@ -1356,29 +1385,73 @@ class ShimQTRTests(unittest.TestCase):
             qtr.save_calibration(path)
             self.assertFalse(os.path.exists(path))
 
+    def test_default_window_is_the_ten_channel_bench_layout(self):
+        qtr = self._line_sensor()
+        # ONE site for one array, whichever class the firmware
+        # constructor's QTRArray.__init__ chain resolved to (the
+        # patched module global on a first install, the real class
+        # after a re-import) — a double bind would put the first
+        # array on the rear site and refuse the second.
+        self.assertEqual(qtr.site_name, "chassis_line")
+        self.assertEqual(shim._INSTALLED.line_site_idx, 1)
+        self.assertEqual(qtr.positions_mm, shim._RealQTRLineSensor.POSITIONS_MM)
+        self.assertEqual(len(qtr.positions_mm), 10)
+        self.assertEqual(qtr.positions_mm[7], 16.0)     # the right-edge element
+        self.assertEqual(qtr.positions_mm[2], -16.0)    # the left-edge element
+
+    def test_eight_channel_window_inherits_the_firmware_geometry(self):
+        # channels=8 is the front layout that leaves GPIO 9/10 for a
+        # second array: every other QTRX channel, 8 mm pitch, 56 mm.
+        qtr = self._line_sensor(channels=8)
+        self.assertEqual(qtr.site_name, "chassis_line")
+        self.assertEqual(shim._INSTALLED.line_site_idx, 1)
+        self.assertEqual(qtr.positions_mm, shim._RealQTRLineSensor.POSITIONS_MM_8)
+        self.assertEqual(len(qtr.positions_mm), 8)
+        self.assertEqual(qtr.positions_mm[5], 12.0)     # right edge under index 5
+        self.assertEqual(qtr.positions_mm[2], -12.0)    # left edge under index 2
+        self.robot.run_for(0.3)
+        r = qtr.read()
+        self.assertEqual(len(r), 8)
+        # Over the 20 mm line: only the +/-4 mm elements (indices 3, 4).
+        self.assertTrue(r[3].dark() and r[4].dark(), r)
+        self.assertTrue(r[2].white() and r[5].white(), r)
+        self.assertAlmostEqual(r.position(), 0.0, delta=2.0)
+
+    def test_channels_must_be_8_or_10(self):
+        from openbricks.drivers.qtr import QTRLineSensor
+        with self.assertRaises(ValueError) as cm:
+            QTRLineSensor(channels=9)
+        self.assertTrue("8" in str(cm.exception) and "10" in str(cm.exception))
+        # A refused construction binds no site: the next array is
+        # still the first.
+        self.assertEqual(QTRLineSensor().site_name, "chassis_line")
+
     def test_on_the_practice_line_the_centre_elements_are_dark(self):
         # Spawn puts the array over the 20 mm line: +/-4 mm dark, the
         # rest over mat; the centroid sits on the array centre.
-        qtr, LineMode = self._line_sensor()
+        qtr = self._line_sensor()
         self.robot.run_for(0.3)               # settle on the wheels
         r = qtr.read()
         self.assertTrue(r[4].dark() and r[5].dark(), r)
         self.assertTrue(r[0].white() and r[9].white(), r)
         self.assertAlmostEqual(r.position(), 0.0, delta=2.0)
-        qtr.set_mode(LineMode.CENTER)
-        self.assertAlmostEqual(r.edge_error(), 0.0, delta=5.0)
+        # The right-edge element (+16 mm) sees mat: a right-edge
+        # follower centred on the line steers LEFT to bring the edge
+        # under it, and the left-edge one (-16 mm) mirrors that.
+        self.assertLess(50 - r[7].ambient(), -40)
+        self.assertGreater(r[2].ambient() - 50, 40)
 
     def test_right_edge_follower_tracks_the_line_and_stops_at_the_bar(self):
         # The bench main.py's inner loop, verbatim shape: hold the
-        # line's right edge under channel 12, steer P on the edge
-        # error, stop when the whole window goes dark. Practice-line
-        # has a stop bar at x = 1.2 m and a LEFT-side branch stub at
-        # x = 0.6 that must darken the left elements once.
+        # line's right edge under index 7 (+16 mm), steer P on that
+        # element's ambient, stop when the whole window goes dark.
+        # Practice-line has a stop bar at x = 1.2 m and a LEFT-side
+        # branch stub at x = 0.6 that must darken the left elements
+        # once.
         import time as _t
         from openbricks.drivers.st3032 import ST3032Motor
         from openbricks.robotics.drivebase import DriveBase
-        qtr, LineMode = self._line_sensor()
-        qtr.set_mode(LineMode.RIGHT)
+        qtr = self._line_sensor()
         left = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=41, invert=True)
         right = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=41)
         db = DriveBase(left, right, wheel_diameter_mm=86.4,
@@ -1389,13 +1462,18 @@ class ShimQTRTests(unittest.TestCase):
         # reads it as the bar; the bench's own 0.5 wanders 50 mm —
         # exactly the kind of thing the sim exists to show before
         # the mat does).
+        # The stop test is "every element well into the ink", not
+        # all_dark(): the branch stub is a 70 mm blob beside the
+        # line, so at x = 0.6 m the whole 56 mm window is over ink
+        # or stub at threshold-level darkness and all_dark() would
+        # call it the bar 600 mm early.
         branches, in_branch, worst_y = 0, False, 0.0
         for _ in range(6000):
             r = qtr.read()
             if all(e.ambient() < 50 for e in r):
                 db.stop()
                 break
-            err = r.edge_error()
+            err = 50 - r[7].ambient()
             db.move_wheels(250 + 1.0 * err, 250 - 1.0 * err)
             left_dark = all(e.ambient() <= 50 for e in r[:7])
             if left_dark and not in_branch:
@@ -1421,6 +1499,70 @@ class ShimQTRTests(unittest.TestCase):
         # (practice-line's ink is a very dark grey, not 0/0/0).
         self.assertTrue(ch.dark())
         self.assertGreater(ch.value(), 900)
+
+    def test_arrays_bind_the_two_sites_in_construction_order(self):
+        # The first array reads the front site, the second the rear
+        # one (30 mm behind the axle): park the chassis across the
+        # line, facing +Y, with the front site ON the line — every
+        # front element runs along the ink, every rear element sees
+        # mat 90 mm off it. Same script, two very different spots.
+        from openbricks.drivers.qtr import QTRLineSensor, QTRArray
+        front = QTRLineSensor(channels=8)
+        rear = QTRArray(pins=(9, 10), pitch_mm=8.0)
+        self.assertEqual(front.site_name, "chassis_line")
+        self.assertEqual(rear.site_name, "chassis_line2")
+        front.load_calibration("/qtr_front.cal")
+        rear.load_calibration("/qtr_rear.cal")
+        self.robot.set_pose(200.0, -60.0, 90.0)
+        self.assertTrue(front.read().all_dark(), front.read())
+        self.assertEqual(rear.read().dark_count(), 0)
+        self.assertIsNone(rear.read().position())
+        # Drive the chassis so the REAR site is on the line instead.
+        self.robot.set_pose(200.0, 30.0, 90.0)
+        self.assertTrue(rear.read().all_dark(), rear.read())
+        self.assertEqual(front.read().dark_count(), 0)
+
+    def test_a_third_array_has_no_site_and_says_so(self):
+        from openbricks.drivers.qtr import QTRArray, QTRChannel
+        QTRArray(pins=(1, 2, 3, 4), pitch_mm=8.0)
+        QTRChannel(pin=9)
+        with self.assertRaises(RuntimeError) as cm:
+            QTRChannel(pin=10)
+        msg = str(cm.exception)
+        self.assertTrue("chassis_line2" in msg, msg)
+        self.assertTrue("2 reflectance sites" in msg, msg)
+
+    def test_the_site_order_resets_when_the_shim_is_installed(self):
+        from openbricks.drivers.qtr import QTRChannel
+        QTRChannel(pin=9)
+        self.assertEqual(QTRChannel(pin=10).site_name, "chassis_line2")
+        shim.uninstall()
+        shim.install(self.robot.runtime)
+        self.assertEqual(QTRChannel(pin=9).site_name, "chassis_line")
+
+    def test_a_shared_pin_is_refused_within_one_run(self):
+        # The firmware's pin registry runs under the shim too: two
+        # arrays on one GPIO is the wiring mistake, not a sim quirk.
+        from openbricks.drivers.qtr import QTRArray, QTRChannel
+        QTRArray(pins=(9, 10), pitch_mm=8.0)
+        # The registry (and its error class) is the module object the
+        # shim's driver import holds, not a re-import's.
+        with self.assertRaises(shim._pins.ReservedPinError) as cm:
+            QTRChannel(pin=10)
+        self.assertTrue("in use as the QTR array" in str(cm.exception),
+                        str(cm.exception))
+
+    def test_a_run_s_pin_claims_die_with_uninstall(self):
+        # Every install() is a hub boot: the pins the previous run's
+        # arrays claimed are free again, so back-to-back runs in one
+        # process (this suite) don't inherit a stale wiring.
+        from openbricks.drivers.qtr import QTRLineSensor
+        QTRLineSensor()
+        self.assertTrue(1 in shim._pins._claims)
+        shim.uninstall()
+        self.assertFalse(1 in shim._pins._claims)
+        shim.install(self.robot.runtime)
+        self.assertEqual(QTRLineSensor().site_name, "chassis_line")
 
 
 class SideColourSensorOnTheMatTests(unittest.TestCase):
