@@ -91,7 +91,12 @@ dependencies = [
 # MuJoCo is ~50 MB with native OpenGL deps, so it's opt-in: most
 # users (flash + run + log) don't need it.
 sim = [
-    "mujoco >= 3.2",
+    # < 3.13: MuJoCo 3.13.0 (2026-09) changes contact behaviour enough
+    # that the two-colour-sensor follower drifts 15 cm off the practice
+    # line and overruns the stop bar (tests/test_line_follow_sim.py);
+    # 3.12 tracks it. Lift the bound once the chassis/contact model is
+    # re-tuned against 3.13 - a physics job, not a packaging one.
+    "mujoco >= 3.2, < 3.13",
     "numpy >= 1.24",
 ]
 dev = ["pytest", "coverage", "build"]

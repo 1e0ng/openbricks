@@ -60,6 +60,12 @@ right, so elements can be named by position.
 `rightmost_position()`, `calibrate()` / `save_calibration()` /
 `load_calibration()` and `emitters()` are unchanged. Flash 4.0.0.
 
+Also in this release: the `sim` extra pins `mujoco < 3.13`. MuJoCo
+3.13.0 changes contact behaviour enough that the two-colour-sensor
+follower drifts off the practice line and overruns the stop bar in
+the physics test; 3.12 tracks it. The bound lifts once the chassis
+contact model is re-tuned against 3.13.
+
 ## 3.10.3 — 3.10.2's start-press change reverted; the run log now names the dispatcher and the press state
 
 On the bench 3.10.2 stopped EVERY run at its own start press (`started`
