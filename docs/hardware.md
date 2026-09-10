@@ -101,63 +101,113 @@ See {mod}`openbricks.pins`.
 
 ### QTRLineSensor wiring (the standard line-follow window)
 
-{class}`openbricks.drivers.qtr.QTRLineSensor` bakes the whole rig
-geometry into the firmware — pins, element positions, and the mode
-setpoints — so programs just construct it and pick a discipline:
+{class}`openbricks.drivers.qtr.QTRLineSensor` bakes the rig geometry
+into the firmware — pins and element positions — so programs just
+construct it, pick an element, and follow:
 
 ```python
 from openbricks.drivers.qtr import QTRLineSensor
-from openbricks.parameters import LineMode
-qtr = QTRLineSensor()
-qtr.set_mode(LineMode.LEFT)     # or RIGHT / CENTER; switchable mid-run
-error = qtr.read().edge_error()
+qtr = QTRLineSensor()                     # ten channels, GPIO 1..10
+qtr.load_calibration("/qtr.cal")
+r = qtr.read()
+steer = KP * (50 - r[7].ambient())        # right edge under +16 mm
 ```
 
-Ten channels of a QTRX-HD-15A (4 mm pitch) in a skip pattern, left
-to right as mounted, onto GPIO 1..10 **in order**:
+Two layouts, selected with `channels=`:
 
-| QTR channel | 1 | 3 | 4 | 5 | 7 | 9 | 11 | 12 | 13 | 15 |
-|-------------|---|---|---|---|---|---|----|----|----|----|
-| GPIO        | 1 | 2 | 3 | 4 | 5 | 6 | 7  | 8  | 9  | 10 |
-| x (mm)      | −28 | −20 | −16 | −12 | −4 | +4 | +12 | +16 | +20 | +28 |
+**Ten channels (the default, `QTRLineSensor()`).** Ten channels of a
+QTRX-HD-15A (4 mm pitch) in a skip pattern, left to right as
+mounted, onto GPIO 1..10 **in order**:
+
+| Element index | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---------------|---|---|---|---|---|---|---|---|---|---|
+| QTR channel   | 1 | 3 | 4 | 5 | 7 | 9 | 11 | 12 | 13 | 15 |
+| GPIO          | 1 | 2 | 3 | 4 | 5 | 6 | 7  | 8  | 9  | 10 |
+| x (mm)        | −28 | −20 | −16 | −12 | −4 | +4 | +12 | +16 | +20 | +28 |
 
 That spans a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm (the
 driver's `positions_mm` carries the true coordinates, so edge
-interpolation is exact across the unequal gaps). The three modes:
+interpolation is exact across the unequal gaps). It uses the whole
+ADC1 bank.
 
-- **`LineMode.LEFT`** — holds the line's LEFT edge under **channel 4**
-  (x = −16 mm)
-- **`LineMode.RIGHT`** — holds the line's RIGHT edge under **channel 12**
-  (x = +16 mm)
-- **`LineMode.CENTER`** — holds the line's CENTRE at x = 0, steering on
-  the weighted centroid of **all ten channels**
+**Eight channels (`QTRLineSensor(channels=8)`).** Every other
+channel of the same board (8 mm pitch) onto GPIO 1..8, the same
+56 mm window on eight pins:
 
-`edge_error()` is signed so positive steers right in every mode,
-range −50 .. +50. In the two edge modes it is how far the mode's
-channel sits from the black/white boundary — that element's
-ambient (0 black .. 100 white) referenced to 50, reading 0 exactly
-when the channel straddles the edge. That is one element, so the
-error is proportional only within about a pitch of the setpoint
-and rails at ±50 beyond it. In `LineMode.CENTER` mode it is the line's
-centroid position scaled so ±50 is the far end of the window
-(±28 mm) — proportional across the whole span, which is what you
-want through sharp corners and after a branch. When no channel
-sees the line, center mode rails toward the side the line left
-through (`last_side()`), and raises if the line was never seen.
-Examples: `qtr_line_follow_left.py` / `_right.py` / `_center.py`,
-one shared law pinned to each mode.
+| Element index | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---------------|---|---|---|---|---|---|---|---|
+| QTR channel   | 1 | 3 | 5 | 7 | 9 | 11 | 13 | 15 |
+| GPIO          | 1 | 2 | 3 | 4 | 5 | 6 | 7  | 8  |
+| x (mm)        | −28 | −20 | −12 | −4 | +4 | +12 | +20 | +28 |
 
-The skip pattern is a palindrome, so if the board is mounted the
-other way round, only these channel labels swap — GPIO order and
-geometry stay identical.
+The point of the eight-channel layout is what it leaves free: GPIO 9
+and 10 are the last two ADC1 pins on the ESP32-S3, and they take a
+**second array** — no new class, a plain
+{class}`openbricks.drivers.qtr.QTRArray` on those pins (or two
+{class}`openbricks.drivers.qtr.QTRChannel` probes). `pitch_mm` is the
+distance between the two QTRX channels you chose, 4 mm per channel
+step:
+
+| Array | Class | GPIO | Notes |
+|-------|-------|------|-------|
+| Front window | `QTRLineSensor(channels=8)` | 1–8 | QTRX channels 1, 3, 5, 7, 9, 11, 13, 15 |
+| Second array | `QTRArray(pins=(9, 10), pitch_mm=8.0)` | 9, 10 | any two channels of a second QTRX board, e.g. 7 and 9 (8 mm apart); a marker array behind the axle, or a reversing follower |
+
+`channels` must be 8 or 10; anything else raises `ValueError`
+naming both. The class constants `PINS` / `POSITIONS_MM` (ten) and
+`PINS_8` / `POSITIONS_MM_8` (eight) carry the layouts, and every
+array exposes `positions_mm`, its element x coordinates left to
+right, so a program can name an element by position:
+`r[qtr.positions_mm.index(12.0)]`.
+
+**Steering from elements.** The driver reports what each element
+sees; the discipline is the program's. `ambient()` is 0 black ..
+100 white after calibration. The canonical patterns:
+
+- **Right edge** — pick the element the line's right edge should
+  sit under and hold it at half grey: `steer = KP * (50 -
+  r[i].ambient())`. That element reads darker as the robot drifts
+  left (steer right, positive), whiter as it drifts right. On the
+  ten-channel window `i = 7` (+16 mm); on the eight-channel window
+  `i = 5` (+12 mm). Either leaves two mat-side elements beyond the
+  edge (indices 8–9, or 6–7).
+- **Left edge** — the mirror: `steer = KP * (r[i].ambient() - 50)`
+  with `i = 2` on either layout (−16 mm on ten channels, −12 mm on
+  eight), elements 0–1 on the mat beyond.
+- **Centre** — `steer = KP_MM * r.position()`, the dark-weighted
+  centroid in mm (positive = line right of centre), proportional
+  across the whole window — what you want through sharp corners and
+  after a branch. `position()` is `None` when no element is dark:
+  the line has left the window, so the program keeps the side it was
+  last seen on and steers hard that way.
+- **Intersection** — `r.all_dark()`, the whole window on the line.
+- **Branch marker** — the far-side elements (the ones beyond the
+  edge you follow) going dark: `r[8].dark() or r[9].dark()` for the
+  ten-channel right edge, `r[6].dark() or r[7].dark()` on eight.
+
+An edge error is one element's reading, so it is proportional only
+within about a pitch of that element and rails at ±50 beyond; the
+centroid is proportional across the span but blind to which edge is
+which. Examples: `qtr_line_follow_right.py` / `_left.py` /
+`_center.py`.
 
 Either way the ~20 mm line sits inside the middle of the window
-with ≥3 channels of mat visible on the far side — those far-side
-elements are the branch watch in the bundled followers, and the
-whole window going dark is the intersection/ending signal.
+with ≥2 channels of mat visible on the far side.
 
-One board-level note: **GPIO 3 (= channel 4, the left-mode
-setpoint channel) is a strapping pin**, and on the
+**Calibration is per array.** Each array is ratiometric to its own
+height and mat, so each one is swept over the line with
+`calibrate()` and keeps its own file — `"/qtr_front.cal"` and
+`"/qtr_rear.cal"`, say — loaded with `load_calibration()` at the top
+of every program. Two arrays with disjoint pins coexist; a pin
+claimed twice is refused at construction by the pin registry.
+
+The ten-channel skip pattern is a palindrome, so if the board is
+mounted the other way round, only the channel labels swap — GPIO
+order and geometry stay identical. The same holds for the
+eight-channel layout.
+
+One board-level note: **GPIO 3 (= element 2, the left-edge element
+on both layouts) is a strapping pin**, and on the
 ESP32-S3-COREBOARD V1.4 it optionally carries a 10 kΩ pull-up
 through the `USB-JTAG` 0 Ω link. Harmless (per-element calibration
 absorbs the bias), but if `qtr_calibrate.py` shows element `[2]`

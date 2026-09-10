@@ -57,10 +57,15 @@ order — a script that builds its task motors first runs unchanged.
   * Reflectance arrays — ``QTRArray`` / ``QTRChannel`` /
     ``QTRLineSensor`` are replaced at the class level by subclasses
     that read a :class:`SimReflectanceArray` (one downward ray per
-    element from the chassis ``chassis_line`` site, spot-averaged)
-    instead of ADC pins. The geometry, modes, edge maths and
+    element from a chassis reflectance site, spot-averaged) instead
+    of ADC pins. The geometry, the position / edge maths and the
     calibration contract are the firmware's own code; only the
-    analog read and the calibration file are simulated.
+    analog read and the calibration file are simulated. The chassis
+    carries TWO sites, bound in construction order: the first array
+    a run constructs reads ``chassis_line`` (ahead of the axle), the
+    second ``chassis_line2`` (``ChassisSpec.line_sensor_2_x/_y``,
+    30 mm behind the axle by default), a third raises
+    ``RuntimeError``. The counter resets with ``install()``.
 
 After ``install(runtime)``, calling ``uninstall()`` restores the
 original ``sys.modules`` + ``time`` state so back-to-back tests can
@@ -101,6 +106,12 @@ from openbricks.parameters import Stop, DriveMode  # noqa: E402
 from openbricks.drivers.qtr import (  # noqa: E402
     QTRArray as _RealQTRArray, QTRChannel as _RealQTRChannel,
     QTRLineSensor as _RealQTRLineSensor)
+# The firmware's pin registry — the SAME module object the QTR driver
+# above claims its ADC pins in (both imported before any install, so
+# uninstall's eviction of ``openbricks.*`` never splits them). A run's
+# claims are handed back at ``uninstall()``: on the hub they die with
+# the boot, and the next ``install()`` is the next boot.
+from openbricks import pins as _pins  # noqa: E402
 # The colour driver too: the shim subclasses it so rgb()/ambient()
 # are the firmware's own arithmetic over a synthesised raw() read.
 from openbricks.drivers.tcs34725 import TCS34725 as _RealTCS34725  # noqa: E402
@@ -126,6 +137,12 @@ class _ShimState:
         # Serial-bus motors by servo id — the bus has one slot per
         # id, so a second construction for an id is the same motor.
         self.serial_by_id: dict = {}
+        # Reflectance arrays bind the chassis line sites in
+        # construction order (see ``_LINE_SITES``).
+        self.line_site_idx: int = 0
+        # Pins already claimed in the firmware registry when the shim
+        # went in; anything claimed after that belongs to this run.
+        self.prev_pin_claims: set = set()
 
 
 # ---------------------------------------------------------------------
@@ -1367,17 +1384,26 @@ class ShimTCS34725(_RealTCS34725):
         return (r + g + b, r, g, b)
 
 
+# The chassis's reflectance sites, in the order arrays bind them: a
+# script's first QTRArray / QTRLineSensor / QTRChannel reads the
+# front site, its second the rear one (a marker array, a reversing
+# follower). Two sites is the chassis's limit — a third array has
+# nowhere to read from and says so at construction.
+_LINE_SITES = ("chassis_line", "chassis_line2")
+
+
 class ShimQTRArray(_RealQTRArray):
     """Drop-in for ``openbricks.drivers.qtr.QTRArray``.
 
     The firmware class, with its analog read pointed at a
-    :class:`SimReflectanceArray` on the chassis ``chassis_line``
-    site: element geometry (``pins`` / ``pitch_mm`` /
-    ``positions_mm``), the dark threshold, ``read()`` /
-    ``position()`` / edge maths / ``set_mode`` / ``edge_error`` are
-    all the real driver's code. ``pins`` are accepted for the
-    firmware signature and otherwise ignored (no ADC on the host);
-    ``ctrl`` builds a no-op Pin.
+    :class:`SimReflectanceArray` on one of the chassis reflectance
+    sites (``_LINE_SITES``, bound in construction order; the bound
+    site's name is ``site_name``): element geometry (``pins`` /
+    ``pitch_mm`` / ``positions_mm``), the dark threshold, ``read()``
+    / ``position()`` / the edge maths are all the real driver's
+    code. ``pins`` are accepted for the firmware signature and
+    otherwise ignored (no ADC on the host); ``ctrl`` builds a no-op
+    Pin.
 
     Calibration: the sim's reflectance is already normalised (0 =
     white mat, full scale = black), so the array is born calibrated
@@ -1396,7 +1422,35 @@ class ShimQTRArray(_RealQTRArray):
         _RealQTRArray.__init__(self, pins, pitch_mm=pitch_mm, ctrl=ctrl,
                                dark_threshold=dark_threshold,
                                positions_mm=positions_mm)
-        self._sim = SimReflectanceArray(_INSTALLED.runtime, self._x_mm)
+        self._bind_line_site()
+
+    def _bind_line_site(self):
+        """Take the next chassis reflectance site for this array
+        (construction order), or refuse when both are taken.
+
+        Exactly once per array. A firmware subclass constructor
+        (``QTRLineSensor.__init__``) chains into ``QTRArray.__init__``
+        through its module's global — which is THIS class while the
+        module is patched (first install in a process) and the real
+        class once ``uninstall()`` has evicted that module and a later
+        install patched a re-import. The shim subclass binds after the
+        chain either way, so an array already holding a site keeps
+        it: binding again would hand the first array the SECOND site
+        (30 mm behind the axle, readings mirrored) and refuse the
+        second array outright."""
+        if getattr(self, "_sim", None) is not None:
+            return
+        state = _INSTALLED
+        if state.line_site_idx >= len(_LINE_SITES):
+            raise RuntimeError(
+                "the sim chassis has %d reflectance sites (%s), both "
+                "bound by earlier arrays — a third QTRArray / "
+                "QTRLineSensor / QTRChannel has nowhere to read from"
+                % (len(_LINE_SITES), ", ".join(_LINE_SITES)))
+        self.site_name = _LINE_SITES[state.line_site_idx]
+        state.line_site_idx += 1
+        self._sim = SimReflectanceArray(state.runtime, self._x_mm,
+                                        site_name=self.site_name)
 
     @staticmethod
     def _check_adc_capable(pin):
@@ -1437,15 +1491,21 @@ class ShimQTRChannel(ShimQTRArray, _RealQTRChannel):
 
 class ShimQTRLineSensor(ShimQTRArray, _RealQTRLineSensor):
     """Drop-in for ``openbricks.drivers.qtr.QTRLineSensor`` — the
-    bench window (ten QTRX-HD-15A channels, 56 mm, skip pattern)
-    over the simulated array. ``PINS`` / ``POSITIONS_MM`` / the mode
-    setpoints are inherited from the firmware class, so the sim
+    bench window (``channels=10``: ten QTRX-HD-15A channels, 56 mm,
+    skip pattern) or the eight-channel front layout (``channels=8``:
+    every other channel, 8 mm pitch, GPIO 9/10 left for a second
+    array) over the simulated array. The firmware constructor picks
+    the layout (``PINS`` / ``POSITIONS_MM``, ``PINS_8`` /
+    ``POSITIONS_MM_8``) and validates ``channels``, so the sim
     follows exactly the geometry the robot does."""
 
-    def __init__(self, dark_threshold=300):
-        ShimQTRArray.__init__(self, pins=self.PINS,
-                              positions_mm=self.POSITIONS_MM,
-                              dark_threshold=dark_threshold)
+    def __init__(self, channels=10, dark_threshold=300):
+        if _INSTALLED is None:
+            raise RuntimeError(
+                "shim not installed; call install(runtime) first")
+        _RealQTRLineSensor.__init__(self, channels=channels,
+                                    dark_threshold=dark_threshold)
+        self._bind_line_site()          # no-op if the chain already did
 
 
 class _ShimDistanceSensorBase:
@@ -1737,6 +1797,7 @@ def install(runtime: SimRuntime) -> None:
         raise RuntimeError("shim already installed; call uninstall() first")
     state = _ShimState()
     state.runtime = runtime
+    state.prev_pin_claims = set(_pins._claims)
 
     # 1. machine + _openbricks_native fakes.
     for name, factory in [
@@ -1864,6 +1925,14 @@ def uninstall() -> None:
     # 4. Driver classes patched in step 4 of install.
     for _key, (mod, attr, prev) in state.prev_driver_attrs.items():
         setattr(mod, attr, prev)
+
+    # 5. Pins the run's drivers claimed (a QTR array's ADC pins): a
+    # hub forgets them at reboot, and the next install() is a reboot
+    # — without this a second run in one process finds "GPIO 1 ...
+    # in use as the QTR array" from the first.
+    for pin in [p for p in list(_pins._claims)
+                if p not in state.prev_pin_claims]:
+        _pins.release(pin)
 
     _INSTALLED = None
 

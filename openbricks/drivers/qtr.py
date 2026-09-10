@@ -20,24 +20,46 @@ so the array MUST be calibrated once per session: sweep it across the
 line while ``calibrate()`` runs. Reading before calibration raises —
 an uncalibrated centroid is a plausible-looking wrong number.
 
-Example (bench: channels 15..9 left-to-right on ADC1; the stop
-button and servo bus live on GPIO 39 and 14/41, off the bank)::
+Steering is the program's job, from the element readings. The three
+canonical patterns (``ambient()`` is 0 black .. 100 white after
+calibration):
 
-    from openbricks.drivers.qtr import QTRArray, QTRChannel
+* Edge following — pick the element the line's edge should sit
+  under: ``steer = KP * (50 - r[i].ambient())`` for a RIGHT edge
+  (element i just inside the right edge reads darker as the robot
+  drifts left), ``steer = KP * (r[i].ambient() - 50)`` for a LEFT
+  edge. The error is proportional within about one pitch of that
+  element and rails beyond.
+* Centre following — ``steer = KP_MM * r.position()`` (mm, positive
+  = line right of centre); ``position()`` is ``None`` when the line
+  is outside the window, so the program keeps the side it was last
+  seen on and steers that way.
+* Intersection — ``r.all_dark()``. Branch marker — the far-side
+  elements (the ones beyond the edge you follow) going dark.
 
-    line   = QTRArray(pins=(1, 2, 3, 7, 8, 9, 10), pitch_mm=4.0)
-    branch = QTRChannel(pin=5)        # array channel 1, far right
-    line.calibrate(duration_ms=3000)  # sweep across the line now
-    branch.calibrate(duration_ms=3000)
+Example (the front window on GPIO 1..8, a two-element rear array on
+GPIO 9/10, each with its own calibration file)::
+
+    from openbricks.drivers.qtr import QTRArray, QTRLineSensor
+
+    front = QTRLineSensor(channels=8)        # -28..+28 mm, 8 mm pitch
+    rear = QTRArray(pins=(9, 10), pitch_mm=8.0)
+    front.load_calibration("/qtr_front.cal")
+    rear.load_calibration("/qtr_rear.cal")
     while True:
-        pos = line.position()         # mm, +right of centre, or None
+        r = front.read()
+        steer = KP * (50 - r[5].ambient())   # right edge under +12 mm
+        if r.all_dark():
+            break                            # intersection
+        if r[6].dark() or r[7].dark():
+            pass                             # branch on the far side
+        if rear.read().all_dark():
+            pass                             # the rear crossed it too
 """
 
 import time
 
 from openbricks import pins as _pins
-from openbricks import parameters
-from openbricks.parameters import LineMode
 
 _FULL_SCALE = 1000
 
@@ -68,7 +90,9 @@ class QTRElement:
 
     def ambient(self):
         """Reflected brightness as 0 (black) .. 100 (white) — the
-        Pybricks scale, inverted from ``value``."""
+        Pybricks scale, inverted from ``value``. The edge follower's
+        error: ``50 - ambient()`` is zero exactly when the element
+        straddles the black/white boundary."""
         return (_FULL_SCALE - self.value) * 100 // _FULL_SCALE
 
     def __repr__(self):
@@ -87,10 +111,10 @@ class QTRReading:
 
         r = qtr.read()
         r[0].dark()             # per element
+        r[7].ambient()          # 0 black .. 100 white (edge error)
         r.position()            # global centroid, mm
         r.left_edge_position()  # the line's left edge, mm
         r.right_edge_position() # the line's right edge, mm
-        r.edge_error()          # setpoint element's ambient vs 50
         r.leftmost_position()   # fork clusters
         r.rightmost_position()
         r.dark_count()          # how many elements on the line
@@ -145,9 +169,6 @@ class QTRReading:
     def right_edge_position(self):
         return self._array.right_edge_position(self)
 
-    def edge_error(self):
-        return self._array.edge_error(self)
-
     def leftmost_position(self):
         return self._array.leftmost_position(self)
 
@@ -170,8 +191,15 @@ class QTRArray:
         dark_threshold: calibrated value (0..1000) above which an
             element counts as "over the line" for ``position()`` /
             ``dark_count()``.
-    """
 
+    Each array owns its pins for the run: a second array (or
+    :class:`QTRChannel`) naming a pin this one already holds is
+    refused at construction, by GPIO number and both arrays. Two
+    arrays on disjoint pins coexist — the front window on GPIO 1..8
+    and a rear pair on GPIO 9/10 — and each calibrates and stores its
+    own file (:meth:`save_calibration` records the wiring, so the
+    files cannot be swapped by accident).
+    """
 
     def __init__(self, pins, pitch_mm=4.0, ctrl=None,
                  dark_threshold=300, positions_mm=None):
@@ -182,14 +210,16 @@ class QTRArray:
         8/4/4/8/8/8/4/4/8 mm span a 56 mm window on ten pins). The
         origin is wherever the caller puts it; centring the tuple on
         0 keeps ``position()`` symmetric. When given, ``pitch_mm``
-        only seeds the secondary uses (the last-side hysteresis band
-        and the off-array edge saturation) via the MEAN spacing; all
-        real geometry comes from the positions."""
+        only seeds the off-array edge saturation via the MEAN
+        spacing; all real geometry comes from the positions."""
         if len(pins) < 1:
             raise ValueError("at least one element required")
+        role = "QTR array on GPIO %s" % ",".join(str(int(p)) for p in pins)
         for p in pins:
-            _pins.check(p, "QTR analog input", output=False)
+            _pins.check(p, role, output=False)
             self._check_adc_capable(p)
+        for p in pins:
+            _pins.claim(p, role)
         self._pins = tuple(int(p) for p in pins)
         self._threshold = int(dark_threshold)
         self._adcs = [self._make_adc(p) for p in pins]
@@ -219,28 +249,14 @@ class QTRArray:
                           for i in range(n)]
         self._cal_min = None
         self._cal_max = None
-        # Which side the line last left through (+1 right, -1 left):
-        # when every element reads mat, the line is OUTSIDE the span
-        # and this is the only information left. Follower logic uses
-        # it to steer back instead of guessing.
-        self._last_side = 0
-        # Edge-following discipline, selected via set_mode(), and
-        # the element each mode holds on the edge: the one nearest
-        # its setpoint x.
-        self._mode = None
-        self._left_idx = self._nearest_index(self.LEFT_SETPOINT_MM)
-        self._right_idx = self._nearest_index(self.RIGHT_SETPOINT_MM)
-        # Center mode scales the centroid so the farthest element
-        # from the setpoint reads +/-50.
-        self._half_span = max(abs(x - self.CENTER_SETPOINT_MM)
-                              for x in self._x_mm) or 1.0
 
-    def _nearest_index(self, x_mm):
-        best = 0
-        for i in range(1, len(self._x_mm)):
-            if abs(self._x_mm[i] - x_mm) < abs(self._x_mm[best] - x_mm):
-                best = i
-        return best
+    @property
+    def positions_mm(self):
+        """The element x coordinates in mm, left to right — the same
+        frame as :meth:`position`. Name elements by where they sit:
+        ``r[qtr.positions_mm.index(12.0)]`` is the element 12 mm
+        right of centre."""
+        return tuple(self._x_mm)
 
     @staticmethod
     def _check_adc_capable(pin):
@@ -332,7 +348,9 @@ class QTRArray:
         one sweep (``examples/qtr_calibrate.py``) serves every later
         run. The wiring is stored with it: a calibration is per-
         element min/max, so loading it onto different pins would
-        silently mis-scale every reading."""
+        silently mis-scale every reading. One file per array — the
+        front window and a rear pair each keep their own
+        (``"/qtr_front.cal"``, ``"/qtr_rear.cal"``)."""
         self._check_calibration()
         import json
         with open(path, "w") as f:
@@ -377,9 +395,9 @@ class QTRArray:
         """One calibrated snapshot: a :class:`QTRReading` holding a
         :class:`QTRElement` per array element, left to right —
         ``r[i].value`` 0 (mat) .. 1000 (line), ``r[i].dark()`` /
-        ``r[i].white()``, and the aggregate views (``r.position()``,
-        ``r.dark_count()``, ...) computed from exactly this
-        sample."""
+        ``r[i].white()`` / ``r[i].ambient()``, and the aggregate
+        views (``r.position()``, ``r.dark_count()``, ...) computed
+        from exactly this sample."""
         self._check_calibration()
         out = []
         for i, v in enumerate(self._read_u16()):
@@ -403,7 +421,9 @@ class QTRArray:
     def position(self, readings=None):
         """Line centre in mm relative to the array centre; positive =
         line is to the RIGHT. ``None`` when no element sees the line —
-        use :meth:`last_side` to know which way it escaped.
+        it is outside the window, and the program steers toward the
+        side it last saw the line on (keep that yourself from the
+        sign of the last non-``None`` value).
         """
         if len(self._adcs) < 2:
             raise RuntimeError(
@@ -421,15 +441,7 @@ class QTRArray:
             moment += r.value * x
         if not seen:
             return None
-        pos = moment / weight_sum
-        # Remember the escape side while the line is still visible:
-        # strictly by sign, so a centred line keeps the previous
-        # memory instead of flapping.
-        if pos > self._pitch / 2:
-            self._last_side = 1
-        elif pos < -self._pitch / 2:
-            self._last_side = -1
-        return pos
+        return moment / weight_sum
 
     def _cluster_position(self, readings, rightmost):
         """Centroid of the leftmost (or rightmost) contiguous dark
@@ -554,77 +566,6 @@ class QTRArray:
         readings = self.read() if readings is None else readings
         return self._cluster_position(readings, rightmost=True)
 
-    # Edge-following setpoints, mm in the array frame — where each
-    # discipline HOLDS its boundary. 0 on a plain array (edge under
-    # the array centre); rig classes like :class:`QTRLineSensor`
-    # override with their geometry so user code never carries the
-    # numbers.
-    LEFT_SETPOINT_MM = 0.0
-    RIGHT_SETPOINT_MM = 0.0
-    CENTER_SETPOINT_MM = 0.0
-
-    def set_mode(self, mode):
-        """Select the line-following discipline, a
-        :class:`openbricks.parameters.LineMode`: ``LEFT`` holds the
-        line's LEFT edge at ``LEFT_SETPOINT_MM``, ``RIGHT`` the RIGHT
-        edge at ``RIGHT_SETPOINT_MM``, ``CENTER`` the line's CENTRE
-        (the weighted centroid over every element) at
-        ``CENTER_SETPOINT_MM``. Takes effect on the next
-        :meth:`edge_error` — call it again any time to switch
-        disciplines mid-run."""
-        parameters.check(LineMode, mode, "mode")
-        self._mode = mode
-
-    def mode(self):
-        """The selected discipline, or ``None`` before set_mode."""
-        return self._mode
-
-    def edge_error(self, readings=None):
-        """Signed steering error for the discipline selected with
-        :meth:`set_mode`, range -50 .. +50, positive = steer right
-        (the :meth:`position` sign convention) in every mode.
-
-        ``LineMode.LEFT`` / ``RIGHT``: how far the mode's setpoint
-        element sits from the black/white boundary, as its ambient
-        (0 black .. 100 white) referenced to 50 — zero exactly when
-        that element straddles the edge. One element, so the error
-        is proportional only within about a pitch of the setpoint
-        and rails at +/-50 beyond it.
-
-        ``LineMode.CENTER``: the line's centroid over ALL elements
-        (:meth:`position`) relative to ``CENTER_SETPOINT_MM``,
-        scaled so +/-50 is the far end of the window — proportional
-        across the whole span. With no element dark the line is
-        outside the window; the error rails toward the side it
-        left through (:meth:`last_side`), and raises if the line
-        has never been seen (there is nothing to steer toward)."""
-        if readings is None:
-            readings = self.read()
-        if self._mode == LineMode.LEFT:
-            return readings[self._left_idx].ambient() - 50
-        if self._mode == LineMode.RIGHT:
-            return 50 - readings[self._right_idx].ambient()
-        if self._mode == LineMode.CENTER:
-            pos = self.position(readings)
-            if pos is None:
-                if self._last_side == 0:
-                    raise RuntimeError(
-                        "center mode: no element sees the line and "
-                        "it has never been seen — start with the "
-                        "line inside the window")
-                return 50.0 * self._last_side
-            err = 50.0 * (pos - self.CENTER_SETPOINT_MM) / self._half_span
-            return max(-50.0, min(50.0, err))
-        raise RuntimeError(
-            "no line-following mode selected — call "
-            "set_mode(LineMode.LEFT / RIGHT / CENTER) first")
-
-    def last_side(self):
-        """+1 if the line was last seen right of centre, -1 left,
-        0 if it has never been off-centre. The recovery hint for a
-        follower that lost the line entirely."""
-        return self._last_side
-
     def emitters(self, on):
         """Drive the CTRL pin (no-op when CTRL is tied high)."""
         if self._ctrl is not None:
@@ -640,7 +581,8 @@ class QTRChannel(QTRArray):
     into the steering centroid would yank the position toward every
     marker it passes. Steer on the array; DECIDE on this.
 
-    Example (bench: QTRX channel 1, far right, on GPIO 9)::
+    Example (GPIO 9, one of the two ADC1 pins the 8-channel front
+    window leaves free)::
 
         branch = QTRChannel(pin=9)
         branch.calibrate(duration_ms=3000)   # same sweep as the array
@@ -666,34 +608,48 @@ class QTRChannel(QTRArray):
 
 
 class QTRLineSensor(QTRArray):
-    """THE bench line sensor: one QTRX-HD-15A window of ten skip-
-    pattern channels, pre-wired geometry included — construct it,
-    pick a discipline, follow::
+    """THE bench line sensor: one QTRX-HD-15A window with its
+    geometry pre-wired — construct it, pick an element, follow::
 
-        qtr = QTRLineSensor()
-        qtr.set_mode(LineMode.LEFT)            # or "right", any time
-        error = qtr.read().edge_error()
+        qtr = QTRLineSensor()                  # ten channels, GPIO 1..10
+        r = qtr.read()
+        steer = KP * (50 - r[7].ambient())     # right edge under +16 mm
 
-    Wiring (detailed table in docs/hardware.md): QTRX channels
-    1, 3, 4, 5, 7, 9, 11, 12, 13, 15 left-to-right onto GPIO 1..10
-    in order — a 56 mm window at spacings 8/4/4/8/8/8/4/4/8 mm
-    (the pattern is a palindrome, so board orientation only changes
-    the channel LABELS, never the geometry). ``"left"`` mode holds
-    the line's LEFT edge under channel 4 (-16 mm); ``"right"``
-    holds the RIGHT edge under channel 12 (+16 mm) — both derived
-    from the positions table, not repeated by hand. Different
-    wiring: use :class:`QTRArray` directly with your own
-    pins/positions/setpoints.
+    Two layouts (detailed tables in docs/hardware.md), selected with
+    ``channels``:
+
+    * ``channels=10`` (default): QTRX channels 1, 3, 4, 5, 7, 9, 11,
+      12, 13, 15 left-to-right onto GPIO 1..10 in order — a 56 mm
+      window at spacings 8/4/4/8/8/8/4/4/8 mm (the pattern is a
+      palindrome, so board orientation only changes the channel
+      LABELS, never the geometry). Right edge under index 7
+      (+16 mm), left edge under index 2 (-16 mm).
+    * ``channels=8``: QTRX channels 1, 3, 5, 7, 9, 11, 13, 15 (every
+      other one, 8 mm pitch) onto GPIO 1..8 — the same 56 mm window
+      on eight pins, leaving GPIO 9 and 10 (the last two ADC1 pins on
+      the ESP32-S3) for a SECOND array. Right edge under index 5
+      (+12 mm), left edge under index 2 (-12 mm).
+
+    Both leave two mat-side elements beyond the followed edge for
+    the branch watch. Different wiring: use :class:`QTRArray`
+    directly with your own pins/positions.
     """
 
     PINS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     POSITIONS_MM = (-28.0, -20.0, -16.0, -12.0, -4.0,
                     4.0, 12.0, 16.0, 20.0, 28.0)
-    # Channel 4 is index 2 of the window, channel 12 is index 7.
-    LEFT_SETPOINT_MM = POSITIONS_MM[2]
-    RIGHT_SETPOINT_MM = POSITIONS_MM[7]
+    PINS_8 = (1, 2, 3, 4, 5, 6, 7, 8)
+    POSITIONS_MM_8 = (-28.0, -20.0, -12.0, -4.0,
+                      4.0, 12.0, 20.0, 28.0)
 
-    def __init__(self, dark_threshold=300):
-        QTRArray.__init__(self, pins=self.PINS,
-                          positions_mm=self.POSITIONS_MM,
+    def __init__(self, channels=10, dark_threshold=300):
+        if channels == 10:
+            pins, positions = self.PINS, self.POSITIONS_MM
+        elif channels == 8:
+            pins, positions = self.PINS_8, self.POSITIONS_MM_8
+        else:
+            raise ValueError(
+                "channels must be 8 (GPIO 1-8, leaving 9/10 for a "
+                "second array) or 10 (GPIO 1-10), got %r" % (channels,))
+        QTRArray.__init__(self, pins=pins, positions_mm=positions,
                           dark_threshold=dark_threshold)

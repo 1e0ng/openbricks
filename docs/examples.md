@@ -80,13 +80,31 @@ name the colour under every sensor.
    :language: python
 ```
 
-## Line following (QTR sensor bar, center mode)
+## Line following (QTR sensor bar)
 
-The QTRLineSensor's `LineMode.CENTER` mode steers on the weighted centroid
-of all ten elements, so `edge_error()` is proportional across the
-whole 56 mm window. The same control law ships pinned to
-`LineMode.LEFT` and `LineMode.RIGHT` in `examples/qtr_line_follow_left.py` /
-`_right.py` — see {doc}`/hardware` for what each mode holds.
+Three followers on the default ten-channel `QTRLineSensor` window,
+each a short control-law block over the element readings — the
+driver reports what every element sees, the program picks the
+discipline (see {doc}`/hardware` for the element tables and the
+eight-channel variant):
+
+- `examples/qtr_line_follow_right.py` holds the line's RIGHT edge
+  under element 7 (+16 mm, GPIO 8): `steer = KP * (50 -
+  r[7].ambient())`. Elements 8 and 9 sit on the mat beyond the edge;
+  either going dark is a branch marker.
+- `examples/qtr_line_follow_left.py` is the mirror: LEFT edge under
+  element 2 (−16 mm, GPIO 3), `steer = KP * (r[2].ambient() - 50)`,
+  elements 0 and 1 as the branch watch.
+- `examples/qtr_line_follow_center.py` (below) steers on
+  `reading.position()`, the dark-weighted centroid in mm, so the
+  error is proportional across the whole 56 mm window. When
+  `position()` is `None` the line has left the window and the robot
+  turns hard toward the side it was last seen on — the program keeps
+  that side itself. The two outermost elements on each side are the
+  branch watch.
+
+In all three the whole window going dark (`all_dark()`) is the
+intersection that ends the run.
 
 ```{eval-rst}
 .. literalinclude:: ../examples/qtr_line_follow_center.py

@@ -24,9 +24,8 @@ class-level member list.
 
 Example::
 
-    from openbricks.parameters import Stop, LineMode
+    from openbricks.parameters import Stop
     db.straight(300, then=Stop.BRAKE)
-    qtr.set_mode(LineMode.CENTER)
 """
 
 
@@ -103,19 +102,6 @@ class DriveMode(_Enum):
 
 
 _define(DriveMode, ("DUTY", 0), ("WHEEL", 1))
-
-
-class LineMode(_Enum):
-    """Which feature of the line a QTR array follows.
-
-    * ``LEFT`` — the line's left edge, under the left setpoint element.
-    * ``RIGHT`` — the line's right edge, under the right setpoint element.
-    * ``CENTER`` — the line's centre, the weighted centroid over every
-      element.
-    """
-
-
-_define(LineMode, ("LEFT", 0), ("RIGHT", 1), ("CENTER", 2))
 
 
 def check(enum_cls, value, param, allowed=None):

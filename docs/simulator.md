@@ -55,6 +55,7 @@ for. Fields not given keep the defaults.
   "wheel_radius": 0.0432,   "axle_length": 0.135,
   "body_length": 0.16,      "body_width": 0.12,
   "line_sensor_x": 0.06,
+  "line_sensor_2_x": -0.03,  "line_sensor_2_y": 0.0,
   "color_sensor_x": 0.06,   "color_sensor_y": 0.184,
   "pos_x": -0.547,          "pos_y": -0.15,        "yaw_deg": 90
 }
@@ -64,8 +65,16 @@ for. Fields not given keep the defaults.
   `DriveBase(wheel_diameter_mm=…, axle_track_mm=…)` in the script
   resizes it again at adoption, so the script's geometry always wins
   — set them here so a `preview` shows the same robot.
-- `line_sensor_x` places the reflectance-array site (`chassis_line`)
-  ahead of the axle. `color_sensor_x` / `_y` / `_z` place the centre
+- `line_sensor_x` places the first reflectance-array site
+  (`chassis_line`) ahead of the axle; `line_sensor_2_x` / `_y` place
+  the second (`chassis_line2`, default 30 mm behind the axle on the
+  centre line, the same height). Reflectance arrays bind these sites
+  in **construction order** within one run: the first `QTRArray` /
+  `QTRLineSensor` / `QTRChannel` the script constructs reads
+  `chassis_line`, the second reads `chassis_line2`, and a third raises
+  `RuntimeError` (two sites is the chassis's limit). The counter
+  resets when the shim is installed for a run, so every `sim run`
+  starts with both sites free. `color_sensor_x` / `_y` / `_z` place the centre
   colour camera (`chassis_cam_down`, the no-mux `TCS34725`) in the
   chassis frame (the floor is at `-(wheel_radius + 0.005)`);
   `color_sensor_yaw` / `_pitch` aim it (default straight down; a
@@ -86,7 +95,7 @@ for. Fields not given keep the defaults.
 | `DriveBase` | The firmware engine over an emulated `st_bus`; `use_gyro(True)` reads the chassis's true yaw. |
 | `ICM45686` / `BNO055` | Ground-truth chassis heading; the ICM's bias estimator reports calibrated at once. |
 | `TCS34725` | The firmware driver class over a synthesised raw read: the centre camera (no mux) or the left/right pair (mux channels 1 / 0) casts along its own axis — optionally a cone, with a range — and the first geom hit (a mat texel, a LEGO brick's material) gives the reflectance; `rgb()` / `ambient()` are the driver's channel-over-clear arithmetic, so white reads about (85, 85, 85) and a blue brick has the largest `b`, as on the robot. |
-| `QTRLineSensor` / `QTRArray` / `QTRChannel` | The firmware driver over a reflectance model: one element per array position, spread left-to-right from the `chassis_line` site, each averaging the floor over a 3 mm spot so an edge reads as a gradient (the basis of `edge_error`). `load_calibration("/qtr.cal")` and `calibrate()` need no file — the sim's reflectance is born normalised. |
+| `QTRLineSensor` / `QTRArray` / `QTRChannel` | The firmware driver over a reflectance model: one element per array position (`QTRLineSensor(channels=8)` gives the eight-channel front layout, exactly as on the hub), spread left-to-right from the site the array bound at construction — the first array a run constructs reads `chassis_line`, the second `chassis_line2`, a third raises `RuntimeError` — each element averaging the floor over a 3 mm spot so an edge reads as a gradient, which is what makes `50 - reading[i].ambient()` proportional. `load_calibration("/qtr_front.cal")` and `calibrate()` need no file — the sim's reflectance is born normalised. |
 | Distance sensors | A forward ray from the `chassis_dist` site. |
 
 Nothing above has a load: task motors don't grip, and a prop is only

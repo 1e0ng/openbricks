@@ -85,8 +85,11 @@ heading, brake:
 
 .. code-block:: python
 
-    while not at_the_marker():
-        db.drive(SPEED, KP * sensor.edge_error())
+    while True:
+        r = qtr.read()
+        if r.all_dark():                    # the intersection
+            break
+        db.drive(SPEED, KP * (50 - r[7].ambient()))   # right edge under +16 mm
     db.stop(then=Stop.BRAKE)   # gyro-held deceleration
     db.straight(200)           # holds the heading the follow reached
 
