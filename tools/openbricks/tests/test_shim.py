@@ -1315,6 +1315,30 @@ class ShimQTRTests(unittest.TestCase):
         qtr.load_calibration("/qtr_front.cal")   # the hub path: no file here
         return qtr
 
+    def test_line_sensor_refuses_before_install(self):
+        # The preset, like every shim class, needs a runtime to read
+        # from: constructing it with the shim down names the fix.
+        shim.uninstall()
+        try:
+            shim.ShimQTRLineSensor()
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("shim not installed" in str(e), e)
+
+    def test_site_binding_is_exactly_once_per_array(self):
+        # The firmware constructor chain can reach the binder twice
+        # for one array (the preset's __init__ and the patched base
+        # class); a second bind must keep the first site and must not
+        # consume the second one, or the next array has nowhere to go.
+        from openbricks.drivers.qtr import QTRArray
+        first = QTRArray(pins=(1,))
+        site = first.site_name
+        self.assertEqual(site, "chassis_line")
+        first._bind_line_site()
+        self.assertEqual(first.site_name, site)
+        second = QTRArray(pins=(2,))
+        self.assertEqual(second.site_name, "chassis_line2")
+
     def test_classes_resolve_to_the_shim(self):
         from openbricks.drivers import qtr as qtr_mod
         self.assertIs(qtr_mod.QTRLineSensor, shim.ShimQTRLineSensor)
