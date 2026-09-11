@@ -87,7 +87,9 @@ impl MeshRecord {
             return Err("mesh positions and normals disagree".into());
         }
         let positions: Vec<[f32; 3]> = pos
-            .chunks_exact(6)
+            .as_chunks::<6>()
+            .0
+            .iter()
             .map(|c| {
                 [
                     i16::from_le_bytes([c[0], c[1]]) as f32 / 100.0,
@@ -97,13 +99,23 @@ impl MeshRecord {
             })
             .collect();
         let normals: Vec<[f32; 3]> = nrm
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| [c[0] as i8 as f32 / 127.0, c[1] as i8 as f32 / 127.0, c[2] as i8 as f32 / 127.0])
             .collect();
         let indices: Vec<u32> = if self.idx32 {
-            idx.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+            idx.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect()
         } else {
-            idx.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).collect()
+            idx.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes([c[0], c[1]]) as u32)
+                .collect()
         };
         if !indices.len().is_multiple_of(3) || indices.iter().any(|&i| i as usize >= positions.len()) {
             return Err("mesh indices out of range".into());

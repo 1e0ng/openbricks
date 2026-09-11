@@ -117,7 +117,7 @@ pub fn sphere_mesh(radius: f32, at: [f32; 3], segments: u32, rings: u32) -> Mesh
 #[cfg(test)]
 pub fn signed_volume(m: &MeshData) -> f64 {
     let mut v = 0.0f64;
-    for t in m.indices.chunks_exact(3) {
+    for t in m.indices.as_chunks::<3>().0.iter() {
         let a = m.positions[t[0] as usize].map(|x| x as f64);
         let b = m.positions[t[1] as usize].map(|x| x as f64);
         let c = m.positions[t[2] as usize].map(|x| x as f64);
