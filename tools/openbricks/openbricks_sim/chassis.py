@@ -130,8 +130,15 @@ def camera_xyaxes(yaw_deg: float, pitch_deg: float) -> str:
     return " ".join(fmt(c) for c in x + y)
 
 
-def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
+def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis",
+                 inertial=None, extra_geoms=None) -> str:
     """Return an MJCF snippet describing the default chassis.
+
+    ``inertial`` (``{"mass_kg", "com_m", "fullinertia"}``) replaces the
+    body's box-guess inertial with a measured one — what an assembled
+    robot's brick-by-brick roll-up provides (:mod:`openbricks_sim.assembly`).
+    ``extra_geoms`` is a list of extra ``<geom …/>`` lines placed on the
+    chassis body (visual bricks, no contact, no mass).
 
     The snippet has **one** ``<worldbody>`` ``<body>`` at the top
     level (the chassis root) plus sibling ``<actuator>`` and
@@ -179,11 +186,11 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
         '          euler="0 0 {yaw:.4f}">\n'
         '      <freejoint name="{name}_free"/>\n'
         '      <!-- Inertial tag so MuJoCo doesn\'t derive mass from geoms alone. -->\n'
-        '      <inertial pos="0 0 0" mass="{bm:.3f}"\n'
-        '                diaginertia="0.002 0.002 0.002"/>\n'
+        '{inertial}'
         '      <geom name="{name}_body" type="box"\n'
         '            size="{bx:.4f} {by:.4f} {bz:.4f}"\n'
         '            rgba="0.10 0.50 0.90 1.0"/>\n'
+        '{extra}'
         '      <!-- Left drive wheel -->\n'
         '      <body name="{name}_wheel_l" pos="{wx:.4f}  {wy:.4f} {wz_offset:.4f}">\n'
         '        <joint name="{name}_hinge_l" type="hinge" axis="0 1 0"\n'
@@ -255,7 +262,8 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
     ).format(
         name=name,
         px=spec.pos_x, py=spec.pos_y, cz=chassis_z, yaw=spec.yaw_deg,
-        bm=spec.body_mass,
+        inertial=_inertial_xml(spec, inertial),
+        extra="".join(extra_geoms or []),
         bx=bx, by=by, bz=bz,
         wx=wheel_x, wy=wheel_y,
         wz_offset=wheel_z_local,
@@ -303,6 +311,36 @@ def chassis_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
     ).format(name=name)
 
     return body + actuators + sensors
+
+
+def _inertial_xml(spec, inertial):
+    """The chassis body's ``<inertial>``: the flat spec's box guess, or a
+    measured mass / centre / full tensor."""
+    if not inertial:
+        return ('      <inertial pos="0 0 0" mass="%.3f"\n'
+                '                diaginertia="0.002 0.002 0.002"/>\n' % spec.body_mass)
+    c = inertial["com_m"]
+    fi = inertial["fullinertia"]
+    return ('      <inertial pos="%.4f %.4f %.4f" mass="%.4f"\n'
+            '                fullinertia="%.6e %.6e %.6e %.6e %.6e %.6e"/>\n'
+            % (c[0], c[1], c[2], inertial["mass_kg"], fi[0], fi[1], fi[2], fi[3], fi[4], fi[5]))
+
+
+def brick_geoms_xml(bricks, name: str = "chassis"):
+    """Visual-only geoms for the bricks of an assembled chassis: one box
+    per brick, named ``<name>_brick:<path>`` so a viewer can put the
+    exact mesh in its place; no contact, no mass (``group="3"``)."""
+    out = []
+    for b in bricks:
+        out.append(
+            '      <geom name="%s_brick:%s" type="box" pos="%.4f %.4f %.4f"\n'
+            '            quat="%.6f %.6f %.6f %.6f" size="%.4f %.4f %.4f"\n'
+            '            contype="0" conaffinity="0" mass="0" group="3"\n'
+            '            rgba="0.36 0.48 0.61 1.0"/>\n'
+            % (name, b["path"], b["pos_m"][0], b["pos_m"][1], b["pos_m"][2],
+               b["quat"][0], b["quat"][1], b["quat"][2], b["quat"][3],
+               b["half_m"][0], b["half_m"][1], b["half_m"][2]))
+    return out
 
 
 def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
@@ -439,7 +477,8 @@ def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
         mujoco.mj_forward(model, data)
 
 
-def standalone_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
+def standalone_mjcf(spec: ChassisSpec = None, name: str = "chassis",
+                    inertial=None, extra_geoms=None) -> str:
     """Wrap :func:`chassis_mjcf` with a bare ``<mujoco>`` envelope and a
     ground plane so the chassis can be previewed in isolation without
     a world file.
@@ -447,7 +486,7 @@ def standalone_mjcf(spec: ChassisSpec = None, name: str = "chassis") -> str:
     Useful for unit tests + quick "does the chassis sit upright?"
     sanity checks.
     """
-    fragment = chassis_mjcf(spec, name=name)
+    fragment = chassis_mjcf(spec, name=name, inertial=inertial, extra_geoms=extra_geoms)
     return (
         '<mujoco model="openbricks_sim_chassis_preview">\n'
         '  <option timestep="0.001" iterations="20" solver="Newton"/>\n'

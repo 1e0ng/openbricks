@@ -7,6 +7,8 @@ mod app;
 mod assembly;
 mod bundle;
 mod geometry;
+mod sim;
+mod simulate;
 mod viewport;
 
 use std::path::PathBuf;
@@ -15,12 +17,14 @@ use std::path::PathBuf;
 struct Args {
     bricks: Vec<PathBuf>,
     file: Option<PathBuf>,
+    python: Option<String>,
 }
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         bricks: vec![],
         file: None,
+        python: None,
     };
     let mut i = 0;
     while i < argv.len() {
@@ -30,7 +34,11 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                 let p = argv.get(i).ok_or("--bricks needs a file")?;
                 args.bricks.push(PathBuf::from(p));
             }
-            "-h" | "--help" => return Err("usage: openbricks-sim [--bricks BUNDLE]... [robot.assembly.json]".into()),
+            "--python" => {
+                i += 1;
+                args.python = Some(argv.get(i).ok_or("--python needs an interpreter path")?.clone());
+            }
+            "-h" | "--help" => return Err("usage: openbricks-sim [--python PYTHON] [--bricks BUNDLE]... [robot.assembly.json]".into()),
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             s => {
                 if args.file.is_some() {
@@ -87,7 +95,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "openbricks-sim",
         options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(cc, bundle, doc)))),
+        Box::new(move |cc| Ok(Box::new(app::App::new(cc, bundle, doc, args.python)))),
     )
 }
 
@@ -100,12 +108,16 @@ mod tests {
         let a = parse_args(&[
             "--bricks".into(),
             "a.zlib".into(),
+            "--python".into(),
+            "/usr/bin/python3".into(),
             "--bricks".into(),
             "b.json".into(),
             "r.json".into(),
         ])
         .unwrap();
         assert_eq!(a.bricks.len(), 2);
+        assert_eq!(a.python.as_deref(), Some("/usr/bin/python3"));
+        assert!(parse_args(&["--python".into()]).is_err());
         assert_eq!(a.file.unwrap().to_string_lossy(), "r.json");
         assert!(parse_args(&["--bricks".into()]).is_err());
         assert!(parse_args(&["--nope".into()]).is_err());

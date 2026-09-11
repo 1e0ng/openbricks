@@ -13,6 +13,7 @@ use std::collections::HashMap;
 struct Vertex {
     pos: [f32; 3],
     nrm: [f32; 3],
+    uv: [f32; 2],
 }
 
 #[repr(C)]
@@ -35,6 +36,7 @@ struct Globals {
 struct InstanceData {
     model: [[f32; 4]; 4],
     color: [f32; 4],
+    flags: [u32; 4],
 }
 
 pub struct GpuMesh {
@@ -44,11 +46,17 @@ pub struct GpuMesh {
     pub bbox: (Vec3, Vec3),
 }
 
-/// One brick instance to draw: which mesh, where, what colour.
+/// One instance to draw: which mesh, where, what colour, and which
+/// texture (none = flat colour).
 pub struct DrawItem {
     pub mesh: String,
     pub model: Mat4,
     pub color: [f32; 4],
+    pub texture: Option<String>,
+}
+
+struct GpuTexture {
+    bind_group: wgpu::BindGroup,
 }
 
 /// A line segment in world space (grid, axes, markers).
@@ -171,6 +179,9 @@ pub struct Viewport {
     line_buf: wgpu::Buffer,
     line_capacity: usize,
     meshes: HashMap<String, GpuMesh>,
+    texture_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    textures: HashMap<String, GpuTexture>,
     color: Option<wgpu::TextureView>,
     depth: Option<wgpu::TextureView>,
     size: (u32, u32),
@@ -182,7 +193,7 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 impl Viewport {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bricks"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -213,9 +224,30 @@ impl Viewport {
                 count: None,
             }],
         });
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("texture"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("bricks"),
-            bind_group_layouts: &[Some(&globals_layout), Some(&instance_layout)],
+            bind_group_layouts: &[Some(&globals_layout), Some(&instance_layout), Some(&texture_layout)],
             ..Default::default()
         });
         let vertex_layout = wgpu::VertexBufferLayout {
@@ -231,6 +263,11 @@ impl Viewport {
                     format: wgpu::VertexFormat::Float32x3,
                     offset: 12,
                     shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 24,
+                    shader_location: 2,
                 },
             ],
         };
@@ -336,7 +373,16 @@ impl Viewport {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        Viewport {
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("texture"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        let mut vp = Viewport {
             pipeline,
             line_pipeline,
             globals,
@@ -352,8 +398,63 @@ impl Viewport {
             depth: None,
             size: (0, 0),
             tex_id: None,
+            texture_layout,
+            sampler,
+            textures: HashMap::new(),
             camera: Camera::default(),
-        }
+        };
+        vp.add_texture(device, queue, "white", 1, 1, &[255, 255, 255, 255]);
+        vp
+    }
+
+    /// Upload an RGBA8 image as a texture the draw items can name.
+    pub fn add_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, key: &str, width: u32, height: u32, rgba: &[u8]) {
+        let size = wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(key),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * size.width),
+                rows_per_image: Some(size.height),
+            },
+            size,
+        );
+        let view = texture.create_view(&Default::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(key),
+            layout: &self.texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+        self.textures.insert(key.to_string(), GpuTexture { bind_group });
     }
 
     fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -386,7 +487,12 @@ impl Viewport {
             .positions
             .iter()
             .zip(&data.normals)
-            .map(|(p, n)| Vertex { pos: *p, nrm: *n })
+            .enumerate()
+            .map(|(i, (p, n))| Vertex {
+                pos: *p,
+                nrm: *n,
+                uv: data.uvs.get(i).copied().unwrap_or([0.0, 0.0]),
+            })
             .collect();
         let mut lo = Vec3::splat(f32::INFINITY);
         let mut hi = Vec3::splat(f32::NEG_INFINITY);
@@ -480,6 +586,16 @@ impl Viewport {
             .map(|it| InstanceData {
                 model: it.model.to_cols_array_2d(),
                 color: it.color,
+                flags: [
+                    if it.texture.as_deref().map(|t| self.textures.contains_key(t)).unwrap_or(false) {
+                        1
+                    } else {
+                        0
+                    },
+                    0,
+                    0,
+                    0,
+                ],
             })
             .collect();
         if data.len() > self.instance_capacity {
@@ -551,7 +667,15 @@ impl Viewport {
             }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(1, &self.instance_bg, &[]);
+            let white = &self.textures["white"].bind_group;
             for (i, it) in items.iter().enumerate() {
+                let tex = it
+                    .texture
+                    .as_deref()
+                    .and_then(|t| self.textures.get(t))
+                    .map(|t| &t.bind_group)
+                    .unwrap_or(white);
+                pass.set_bind_group(2, tex, &[]);
                 let Some(mesh) = self.meshes.get(&it.mesh) else { continue };
                 if mesh.index_count == 0 {
                     continue;
@@ -584,13 +708,15 @@ impl Viewport {
 
 const SHADER: &str = r#"
 struct Globals { view_proj: mat4x4<f32>, light_dir: vec4<f32>, camera_pos: vec4<f32> };
-struct Inst { model: mat4x4<f32>, color: vec4<f32> };
+struct Inst { model: mat4x4<f32>, color: vec4<f32>, flags: vec4<u32> };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(1) @binding(0) var<storage, read> insts: array<Inst>;
+@group(2) @binding(0) var tex: texture_2d<f32>;
+@group(2) @binding(1) var samp: sampler;
 
-struct VOut { @builtin(position) pos: vec4<f32>, @location(0) nrm: vec3<f32>, @location(1) color: vec4<f32>, @location(2) wpos: vec3<f32> };
+struct VOut { @builtin(position) pos: vec4<f32>, @location(0) nrm: vec3<f32>, @location(1) color: vec4<f32>, @location(2) wpos: vec3<f32>, @location(3) uv: vec2<f32>, @location(4) @interpolate(flat) textured: u32 };
 
-@vertex fn vs_main(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @builtin(instance_index) ii: u32) -> VOut {
+@vertex fn vs_main(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>, @builtin(instance_index) ii: u32) -> VOut {
   let inst = insts[ii];
   let wp = inst.model * vec4<f32>(p, 1.0);
   var o: VOut;
@@ -598,6 +724,8 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) nrm: vec3<f32>, @l
   o.nrm = normalize((inst.model * vec4<f32>(n, 0.0)).xyz);
   o.color = inst.color;
   o.wpos = wp.xyz;
+  o.uv = uv;
+  o.textured = inst.flags.x;
   return o;
 }
 
@@ -609,7 +737,11 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) nrm: vec3<f32>, @l
   let diff = max(dot(n, l), 0.0);
   let sky = max(n.z, 0.0);
   let k = 0.32 + 0.48 * diff + 0.2 * sky;
-  return vec4<f32>(i.color.rgb * k, i.color.a);
+  var base = i.color;
+  if (i.textured != 0u) {
+    base = base * textureSample(tex, samp, i.uv);
+  }
+  return vec4<f32>(base.rgb * k, base.a);
 }
 
 struct LOut { @builtin(position) pos: vec4<f32>, @location(0) color: vec4<f32> };

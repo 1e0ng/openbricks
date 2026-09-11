@@ -4,6 +4,7 @@
 use crate::assembly::{self, Document, Geometry, Instance, Part, Props};
 use crate::bundle::{Bundle, MeshData};
 use crate::geometry;
+use crate::simulate::SimulateTab;
 use crate::viewport::{self, DrawItem, Line, Viewport};
 use eframe::egui;
 use glam::{DMat3, DVec3, Mat4, Quat, Vec3};
@@ -56,9 +57,10 @@ pub struct App {
     leaves: Vec<assembly::Leaf>,
     items: Vec<DrawItem>,
     item_tops: Vec<String>,
+    simulate: SimulateTab,
 }
 
-fn cat_color(category: &str, dark: bool) -> [f32; 4] {
+pub fn cat_color(category: &str, dark: bool) -> [f32; 4] {
     let hex = match (category, dark) {
         ("lego", false) => 0x5B7A9C,
         ("lego", true) => 0x6F90B4,
@@ -82,9 +84,9 @@ fn srgb(hex: u32) -> [f32; 4] {
 const ACCENT: [f32; 4] = [0.71, 0.29, 0.005, 1.0];
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, bundle: Bundle, doc: Option<(PathBuf, Document)>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, bundle: Bundle, doc: Option<(PathBuf, Document)>, python: Option<String>) -> Self {
         let state = cc.wgpu_render_state.as_ref().expect("the wgpu renderer is required");
-        let viewport = Viewport::new(&state.device);
+        let viewport = Viewport::new(&state.device, &state.queue);
         let (path, doc) = match doc {
             Some((p, d)) => (Some(p), d),
             None => (None, assembly::example()),
@@ -123,6 +125,7 @@ impl App {
             leaves: vec![],
             items: vec![],
             item_tops: vec![],
+            simulate: SimulateTab::new(python),
         };
         app.errors = assembly::validate(&app.doc, &app.bundle);
         app.recompute();
@@ -530,7 +533,12 @@ impl App {
                     1.0,
                 ];
             }
-            items.push(DrawItem { mesh: key, model, color });
+            items.push(DrawItem {
+                mesh: key,
+                model,
+                color,
+                texture: None,
+            });
             tops.push(leaf.path[0].clone());
         }
         self.items = items;
@@ -1482,11 +1490,96 @@ impl App {
         });
     }
 
-    fn simulate_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Simulate");
-        ui.label("Load a map, the chassis assembled in the workbench and your program; run, pause and stop, and watch the run here.");
-        ui.add_space(8.0);
-        ui.label("This tab arrives with the next release: pick the map, the chassis and the program here, then run, pause and stop.");
+    fn simulate_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if self.simulate.pump() || self.simulate.is_live() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        }
+        egui::Panel::top("sim-controls").show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let can_use = self.path.is_some() && !self.dirty;
+                if ui
+                    .add_enabled(can_use, egui::Button::new("Use the workbench's build"))
+                    .on_hover_text(if self.dirty {
+                        "save the assembly first"
+                    } else {
+                        "the assembly open in the Workbench tab"
+                    })
+                    .clicked()
+                    && let Some(p) = self.path.clone()
+                {
+                    self.simulate.set_chassis(p, self.doc.clone());
+                }
+                self.simulate.controls(ui);
+            });
+        });
+        egui::Panel::bottom("sim-log")
+            .default_size(160.0)
+            .resizable(true)
+            .show(ui, |ui| self.simulate.log_ui(ui));
+        egui::CentralPanel::default().show(ui, |ui| self.sim_view_ui(ui, frame));
+    }
+
+    fn sim_view_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let dark = ui.visuals().dark_mode;
+        let avail = ui.available_size();
+        let size = ((avail.x.max(1.0)) as u32, (avail.y.max(1.0)) as u32);
+        let Some(state) = frame.wgpu_render_state() else {
+            ui.label("wgpu is not available");
+            return;
+        };
+        let (items, lines) = self
+            .simulate
+            .draw_items(&mut self.viewport, &state.device, &state.queue, &self.bundle, dark);
+        if let Some((lo, hi)) = self.simulate.frame_target() {
+            self.viewport.camera.fit(lo, hi);
+            if self.simulate.follows() {
+                self.viewport.camera.distance = self.viewport.camera.distance.max(600.0);
+            }
+        }
+        let bg = if dark {
+            [0.0067, 0.0093, 0.0122, 1.0]
+        } else {
+            [0.83, 0.87, 0.89, 1.0]
+        };
+        let tex = {
+            let mut renderer = state.renderer.write();
+            self.viewport
+                .render(&state.device, &state.queue, &mut renderer, size, &items, &lines, bg)
+        };
+        let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
+        if response.hovered() {
+            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+            if scroll != 0.0 {
+                let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0);
+                self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(20.0, 50000.0);
+            }
+        }
+        let delta = response.drag_delta();
+        if response.dragged_by(egui::PointerButton::Primary) {
+            self.viewport.camera.yaw -= delta.x * 0.5;
+            self.viewport.camera.pitch = (self.viewport.camera.pitch + delta.y * 0.5).clamp(-89.0, 89.0);
+        } else if response.dragged_by(egui::PointerButton::Secondary) || response.dragged_by(egui::PointerButton::Middle) {
+            let cam = &mut self.viewport.camera;
+            let scale = cam.distance * 0.0015;
+            let (r, u) = (cam.right(), cam.up());
+            cam.target = cam.target - r * delta.x * scale + u * delta.y * scale;
+        }
+        if items.is_empty() {
+            ui.painter().text(
+                response.rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Choose a map, a chassis and a program, then Load or Run",
+                egui::FontId::proportional(14.0),
+                ui.visuals().weak_text_color(),
+            );
+        }
+        ui.painter().text(
+            response.rect.left_bottom() + egui::vec2(8.0, -8.0),
+            egui::Align2::LEFT_BOTTOM,
+            "orbit: drag · pan: right-drag · zoom: wheel",
+            egui::FontId::monospace(11.0),
+            ui.visuals().weak_text_color(),
+        );
     }
 }
 
@@ -1543,7 +1636,7 @@ impl eframe::App for App {
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         match self.tab {
             Tab::Simulate => {
-                egui::CentralPanel::default().show(ui, |ui| self.simulate_ui(ui));
+                self.simulate_ui(ui, frame);
             }
             Tab::Workbench => {
                 egui::Panel::left("library")
@@ -1574,5 +1667,11 @@ impl App {
             .and_then(|p| p.file_name())
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_else(|| "example".into())
+    }
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        self.simulate.shutdown();
     }
 }

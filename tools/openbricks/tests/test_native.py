@@ -153,11 +153,12 @@ class EnsureBinaryTests(unittest.TestCase):
 class LaunchTests(unittest.TestCase):
     def test_command_line(self):
         calls = []
-        rc = native.launch("/x/openbricks-sim", ["/a.zlib", "/b.json"], file="/r.json", run=lambda cmd: calls.append(cmd) or 0)
+        rc = native.launch("/x/openbricks-sim", ["/a.zlib", "/b.json"], file="/r.json", run=lambda cmd: calls.append(cmd) or 0, python="/py")
         self.assertEqual(rc, 0)
-        self.assertEqual(calls, [["/x/openbricks-sim", "--bricks", "/a.zlib", "--bricks", "/b.json", "/r.json"]])
+        self.assertEqual(calls, [["/x/openbricks-sim", "--python", "/py", "--bricks", "/a.zlib", "--bricks", "/b.json", "/r.json"]])
+        import sys
         native.launch("/x/openbricks-sim", [], run=lambda cmd: calls.append(cmd) or 3)
-        self.assertEqual(calls[-1], ["/x/openbricks-sim"])
+        self.assertEqual(calls[-1], ["/x/openbricks-sim", "--python", sys.executable])
 
 
 class SimCliTests(unittest.TestCase):

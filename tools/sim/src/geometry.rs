@@ -90,6 +90,40 @@ pub fn cylinder_mesh(radius: f32, length: f32, axis: &str, at: [f32; 3], segment
     m
 }
 
+/// A textured quad in the XY plane at z = 0: half sizes `hx`, `hy`,
+/// texture repeated `rep` times across the whole plane.
+pub fn plane_mesh(hx: f32, hy: f32, rep: [f32; 2]) -> MeshData {
+    let mut m = MeshData::default();
+    for (x, y, u, v) in [
+        (-hx, -hy, 0.0, rep[1]),
+        (hx, -hy, rep[0], rep[1]),
+        (hx, hy, rep[0], 0.0),
+        (-hx, hy, 0.0, 0.0),
+    ] {
+        m.positions.push([x, y, 0.0]);
+        m.normals.push([0.0, 0.0, 1.0]);
+        m.uvs.push([u, v]);
+    }
+    m.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    m
+}
+
+/// A capsule along z: a cylinder of `half_len` with hemispherical ends.
+pub fn capsule_mesh(radius: f32, half_len: f32, segments: u32) -> MeshData {
+    let mut m = cylinder_mesh(radius, 2.0 * half_len, "z", [0.0; 3], segments);
+    for (sign, at) in [(1.0f32, half_len), (-1.0, -half_len)] {
+        let s = sphere_mesh(radius, [0.0, 0.0, at], segments, segments / 2);
+        let base = m.positions.len() as u32;
+        for (i, p) in s.positions.iter().enumerate() {
+            let keep = (p[2] - at) * sign >= -1e-4;
+            m.positions.push(if keep { *p } else { [p[0], p[1], at] });
+            m.normals.push(s.normals[i]);
+        }
+        m.indices.extend(s.indices.iter().map(|i| i + base));
+    }
+    m
+}
+
 pub fn sphere_mesh(radius: f32, at: [f32; 3], segments: u32, rings: u32) -> MeshData {
     let mut m = MeshData::default();
     for r in 0..=rings {

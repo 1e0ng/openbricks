@@ -75,9 +75,21 @@ into the nearest hole, arrows nudge, `Delete` removes, `⌘Z` undoes.
 Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 
-**Simulate** loads a map, the chassis assembled in the workbench and
-your program, then runs, pauses and stops the run and shows it live.
-Everything is chosen inside the sim; it lands in the next release.
+**Simulate** runs your program on a map with the chassis you
+assembled. Pick the map (any built-in world), the chassis (a
+`robot.assembly.json`, or the build open in the Workbench tab once it
+is saved) and the program (`main.py`), then Run. Pause, Resume and
+Stop do what they say; the speed slider runs the physics slower or
+faster than wall time; "follow the robot" keeps the camera on the
+chassis; the program's prints and errors appear in the log panel
+below the view. Under the hood the sim starts the MuJoCo runtime as a
+child process — the same runtime, driver shim and C cores
+`openbricks sim run` uses — and draws the run from the poses it
+streams, with every brick of the chassis in its exact geometry. The
+chassis is built from the assembly: the wheel, caster and sensor
+roles place the physics skeleton, the brick-by-brick mass properties
+become the body's inertia, and each brick rides along as a visual
+geom.
 
 ## The Assembly Workbench
 

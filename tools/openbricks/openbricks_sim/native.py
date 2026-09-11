@@ -129,9 +129,11 @@ def _unpack(data, name, target):
                     shutil.copyfileobj(src, dst)
 
 
-def launch(binary, bundles, file=None, run=subprocess.call):
-    """Run the sim with the brick bundles and, optionally, an assembly file."""
-    cmd = [str(binary)]
+def launch(binary, bundles, file=None, run=subprocess.call, python=None):
+    """Run the sim with the brick bundles, the Python that carries the
+    runtime (so the Simulate tab can start ``openbricks_sim.server``),
+    and, optionally, an assembly file."""
+    cmd = [str(binary), "--python", str(python or sys.executable)]
     for b in bundles:
         cmd += ["--bricks", str(b)]
     if file:

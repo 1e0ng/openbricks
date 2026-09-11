@@ -3,6 +3,36 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.3.0 — the sim's Simulate tab: map, chassis, program, run / pause / stop, live view
+
+The sim now runs programs. The **Simulate** tab loads a map (any
+built-in world), the chassis assembled in the workbench
+(`robot.assembly.json`, or the build open in the Workbench tab once it
+is saved) and a `main.py`, then runs, pauses, resumes and stops it,
+paces the physics against wall time with a speed slider, follows the
+robot, and shows the program's prints and errors in a log panel.
+
+- **The chassis comes from the assembly.** `openbricks_sim.assembly`
+  turns a `robot.assembly.json` into the chassis the runtime drives:
+  the wheel, caster and sensor roles place the proven physics
+  skeleton (`chassis_mjcf` unchanged), the brick-by-brick roll-up —
+  mass, centre of mass and the full inertia tensor from the recorded
+  weights and exact meshes — replaces the box-guess `<inertial>`, and
+  every brick becomes a visual geom named `chassis_brick:<path>`.
+  `SimRobot(assembly=…)` takes a path or a parsed document.
+- **The run server.** `python -m openbricks_sim.server` speaks JSON
+  lines on stdin / stdout: `worlds`, `load`, `run`, `pause`, `resume`,
+  `stop`, `speed`, `quit`; it exports the scene once (bodies, geoms,
+  materials, texture files, bricks), streams body poses at up to 60
+  frames a second while a program runs, turns the program's prints
+  into `log` events, and reports `state` changes. The program runs in
+  a thread with the driver shim installed; pacing, pause and stop ride
+  on the runtime's tick.
+- **The sim** starts that server with the Python that launched it
+  (`openbricks sim` passes `--python`), draws the world's planes,
+  boxes, cylinders, spheres and capsules with the mat texture, and the
+  chassis's bricks in their exact LDraw geometry at the streamed pose.
+
 ## 4.2.0 — the sim: a native desktop app, and `openbricks sim` launches it
 
 Bare `openbricks sim` now launches **the sim**, a native desktop
