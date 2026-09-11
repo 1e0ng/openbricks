@@ -212,6 +212,8 @@ pub struct Viewport {
     depth: Option<wgpu::TextureView>,
     size: (u32, u32),
     tex_id: Option<eframe::egui::TextureId>,
+    /// Small renders by key (library thumbnails), kept alive for egui.
+    thumbs: HashMap<String, (wgpu::Texture, eframe::egui::TextureId)>,
     pub camera: Camera,
 }
 
@@ -425,6 +427,7 @@ impl Viewport {
             depth: None,
             size: (0, 0),
             tex_id: None,
+            thumbs: HashMap::new(),
             texture_layout,
             sampler,
             textures: HashMap::new(),
@@ -593,6 +596,19 @@ impl Viewport {
     pub fn read_pixels(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Option<(u32, u32, Vec<u8>)> {
         let texture = self.color_tex.as_ref()?;
         let (w, h) = self.size;
+        Self::read_texture(device, queue, texture, w, h)
+    }
+
+    /// A thumbnail's pixels, for tests.
+    #[cfg(test)]
+    pub fn read_thumb(&self, device: &wgpu::Device, queue: &wgpu::Queue, key: &str) -> Option<(u32, u32, Vec<u8>)> {
+        let (texture, _) = self.thumbs.get(key)?;
+        let size = texture.size();
+        Self::read_texture(device, queue, texture, size.width, size.height)
+    }
+
+    #[cfg(test)]
+    fn read_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture, w: u32, h: u32) -> Option<(u32, u32, Vec<u8>)> {
         let row = (4 * w).div_ceil(256) * 256;
         let buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
@@ -650,13 +666,98 @@ impl Viewport {
         size: (u32, u32),
         scene: &Scene<'_>,
     ) -> eframe::egui::TextureId {
-        let (items, lines, background) = (scene.items, scene.lines, scene.background);
         self.ensure_targets(device, renderer, size);
+        let (color, depth) = (self.color.clone().unwrap(), self.depth.clone().unwrap());
+        let camera = self.camera.clone();
+        self.render_to(device, queue, &color, &depth, size, &camera, scene);
+        self.tex_id.unwrap()
+    }
+
+    /// Render `items` alone into a small square texture the library can
+    /// show, framed from the usual angle; the texture stays alive under
+    /// `key` and the same key returns the same image.
+    #[allow(clippy::too_many_arguments)]
+    pub fn thumbnail(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        renderer: &mut egui_wgpu::Renderer,
+        key: &str,
+        items: &[DrawItem],
+        bbox: (Vec3, Vec3),
+        size: u32,
+        background: [f64; 4],
+    ) -> eframe::egui::TextureId {
+        if let Some((_, id)) = self.thumbs.get(key) {
+            return *id;
+        }
+        let desc = |format, usage| wgpu::TextureDescriptor {
+            label: Some("thumbnail"),
+            size: wgpu::Extent3d {
+                width: size.max(1),
+                height: size.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[],
+        };
+        let color = device.create_texture(&desc(
+            FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+        ));
+        let depth = device.create_texture(&desc(DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT));
+        let color_view = color.create_view(&Default::default());
+        let depth_view = depth.create_view(&Default::default());
+        let mut camera = Camera::default();
+        camera.fit(bbox.0, bbox.1);
+        camera.distance *= 0.8;
+        let scene = Scene {
+            items,
+            lines: &[],
+            overlay: &[],
+            background,
+        };
+        self.render_to(device, queue, &color_view, &depth_view, (size, size), &camera, &scene);
+        let id = renderer.register_native_texture(device, &color_view, wgpu::FilterMode::Linear);
+        self.thumbs.insert(key.to_string(), (color, id));
+        id
+    }
+
+    pub fn thumb(&self, key: &str) -> Option<eframe::egui::TextureId> {
+        self.thumbs.get(key).map(|t| t.1)
+    }
+
+    /// Drop the thumbnails whose key `keep` rejects (stale components).
+    pub fn retain_thumbs(&mut self, renderer: &mut egui_wgpu::Renderer, keep: impl Fn(&str) -> bool) {
+        let gone: Vec<String> = self.thumbs.keys().filter(|k| !keep(k)).cloned().collect();
+        for k in gone {
+            if let Some((_, id)) = self.thumbs.remove(&k) {
+                renderer.free_texture(&id);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_to(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        size: (u32, u32),
+        camera: &Camera,
+        scene: &Scene<'_>,
+    ) {
+        let (items, lines, background) = (scene.items, scene.lines, scene.background);
         let aspect = size.0 as f32 / size.1.max(1) as f32;
-        let eye = self.camera.eye();
-        let light = (self.camera.direction() + Vec3::Z * 0.8 + self.camera.right() * 0.3).normalize();
+        let eye = camera.eye();
+        let light = (camera.direction() + Vec3::Z * 0.8 + camera.right() * 0.3).normalize();
         let globals = Globals {
-            view_proj: self.camera.view_proj(aspect).to_cols_array_2d(),
+            view_proj: camera.view_proj(aspect).to_cols_array_2d(),
             light_dir: [light.x, light.y, light.z, 0.0],
             camera_pos: [eye.x, eye.y, eye.z, 1.0],
         };
@@ -712,8 +813,6 @@ impl Viewport {
         }
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport") });
         {
-            let color = self.color.as_ref().unwrap();
-            let depth = self.depth.as_ref().unwrap();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -725,7 +824,7 @@ impl Viewport {
                             r: background[0],
                             g: background[1],
                             b: background[2],
-                            a: 1.0,
+                            a: background[3],
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -768,8 +867,6 @@ impl Viewport {
         }
         if !scene.overlay.is_empty() {
             // handles: on top of everything, but still occluding each other
-            let color = self.color.as_ref().unwrap();
-            let depth = self.depth.as_ref().unwrap();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("overlay"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -807,7 +904,6 @@ impl Viewport {
             }
         }
         queue.submit(Some(encoder.finish()));
-        self.tex_id.unwrap()
     }
 
     /// The nearest item under a pixel, by oriented bounding box.
@@ -984,6 +1080,54 @@ mod tests {
 
     fn cam_cone_row(cam: &Camera, g: &Gizmo, w: f32, h: f32) -> u32 {
         cam.project(g.center + Vec3::Z * g.length * 0.9, w, h).unwrap().y.round() as u32
+    }
+
+    #[test]
+    fn thumbnails_frame_the_item_and_are_kept_by_key() {
+        let Some((device, queue)) = test_device() else { return };
+        let mut renderer = test_renderer(&device);
+        let mut vp = Viewport::new(&device, &queue);
+        vp.add_mesh(&device, "box", &geometry::box_mesh([40.0, 40.0, 40.0], [0.0; 3]));
+        let items = [DrawItem {
+            mesh: "box".into(),
+            model: Mat4::IDENTITY,
+            color: srgb(0x5B7A9C),
+            texture: None,
+        }];
+        let bbox = (Vec3::splat(-20.0), Vec3::splat(20.0));
+        let id = vp.thumbnail(&device, &queue, &mut renderer, "t:box", &items, bbox, 64, [0.0, 0.0, 0.0, 1.0]);
+        assert!(vp.thumb("t:box").is_some());
+        assert_eq!(
+            vp.thumbnail(&device, &queue, &mut renderer, "t:box", &[], bbox, 64, [0.0; 4]),
+            id,
+            "the same key: the same image"
+        );
+        let (w, h, px) = vp.read_thumb(&device, &queue, "t:box").unwrap();
+        assert_eq!((w, h), (64, 64));
+        let at = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2]]
+        };
+        assert_ne!(at(32, 32), [0, 0, 0], "the box fills the middle");
+        assert_eq!(at(1, 1), [0, 0, 0], "the corner is background");
+        assert!(vp.read_thumb(&device, &queue, "nope").is_none());
+        vp.retain_thumbs(&mut renderer, |k| k != "t:box");
+        assert!(vp.thumb("t:box").is_none());
+        // the main view still renders after thumbnails used the shared buffers
+        vp.render(
+            &device,
+            &queue,
+            &mut renderer,
+            (32, 24),
+            &Scene {
+                items: &items,
+                lines: &[],
+                overlay: &[],
+                background: [0.0; 4],
+            },
+        );
+        let (_, _, px) = vp.read_pixels(&device, &queue).unwrap();
+        assert_eq!(px.len(), 32 * 24 * 4);
     }
 
     #[test]

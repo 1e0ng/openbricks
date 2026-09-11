@@ -6,10 +6,12 @@
 mod app;
 mod assembly;
 mod bundle;
+mod editor;
 mod geometry;
 mod gizmo;
 mod sim;
 mod simulate;
+mod stl;
 mod viewport;
 
 use std::path::PathBuf;

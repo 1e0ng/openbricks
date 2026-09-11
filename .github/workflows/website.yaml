@@ -254,6 +254,13 @@ jobs:
       || (github.event_name == 'workflow_dispatch' && inputs.tag == '')
     needs: build-docs
     runs-on: ubuntu-latest
+    # One Pages deployment at a time: a release tag and the main push
+    # it sits on deploy the same docs seconds apart, and Pages refuses
+    # the second while the first is in progress (a red run on main
+    # after every release, with the docs deployed all the same).
+    concurrency:
+      group: github-pages-docs
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write

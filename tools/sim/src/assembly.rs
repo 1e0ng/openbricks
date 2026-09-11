@@ -151,6 +151,10 @@ pub struct Instance {
     pub pos: [f64; 3],
     #[serde(default)]
     pub rot: [f64; 3],
+    /// A locked instance stays where it is: the pointer, the keys and
+    /// the inspector cannot move, turn or remove it until it is unlocked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -211,7 +215,7 @@ pub fn euler_from(m: &DMat3) -> [f64; 3] {
     })
 }
 
-fn shift_term(m: f64, d: DVec3) -> DMat3 {
+pub fn shift_term(m: f64, d: DVec3) -> DMat3 {
     let dd = d.dot(d);
     DMat3::from_cols(
         DVec3::new(m * (dd - d.x * d.x), -m * d.y * d.x, -m * d.z * d.x),
@@ -670,6 +674,7 @@ pub fn group(doc: &mut Document, editing: &str, names: &[String], new_id: &str) 
             component: Some(new_id.clone()),
             pos: p0.to_array(),
             rot: first.rot,
+            locked: false,
         },
     );
     Ok(inst_name)
@@ -991,6 +996,7 @@ mod tests {
             component: None,
             pos,
             rot,
+            locked: false,
         }
     }
 
@@ -1141,6 +1147,7 @@ mod tests {
             component: Some("u".into()),
             pos: [0.0; 3],
             rot: [0.0; 3],
+            locked: false,
         });
         assert!(component_contains(&doc, "robot", "u", &mut vec![]));
         assert!(!component_contains(&doc, "u", "robot", &mut vec![]));
@@ -1182,6 +1189,7 @@ mod tests {
             nrm: String::new(),
             idx: String::new(),
             idx32: false,
+            scale: None,
         };
         let rec = |c: Connector| PartRecord {
             name: "r".into(),

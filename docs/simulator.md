@@ -66,7 +66,8 @@ Run `openbricks sim --help` for the full, always-current option list.
 
 `openbricks sim` opens a window with two tabs. **Workbench** is the
 editor described in the next section: the library on the left (your
-components, the LEGO Technic set, other bricks), the 3D view in the
+components, the LEGO Technic set, other bricks, each with a rendered
+thumbnail), the 3D view in the
 middle, the contents of the component you are editing and the
 inspector on the right. Drag in the view to orbit, right-drag to pan,
 scroll to zoom, `F` to fit; drag a brick to move it on the ground
@@ -76,7 +77,19 @@ steps, or three rings (**Rotate**, `E`) to turn it about one axis in
 15° steps — hold shift for free movement or rotation; several
 selected items move and turn together about the first one's origin.
 `R` turns the selection 90°, `S` snaps it into the nearest hole,
-arrows nudge, `Delete` removes, `⌘Z` undoes.
+arrows nudge, `Delete` removes, `⌘Z` undoes. `⌘C` copies the selection
+and `⌘V` pastes it: back into the same component two modules over,
+into another component as it was, or into another window (the
+clipboard carries every part and component definition it needs).
+`⌘L` locks the selection so nothing moves, turns or removes it until
+`⌘⇧L` unlocks it; locked bricks draw faded and show 🔒 in the
+contents list. **Import STL…** in the library brings in a part from a
+mesh file: choose the file's units, where its origin goes (as in the
+file, the bounding-box centre or the bottom centre), and a weighed
+mass or a density; the part gets its exact volume, centre of mass and
+inertia from the closed mesh (an open mesh gets a box's inertia and
+needs a mass), plus any 4.8 mm pin holes found on it, and lands in
+the library and the view.
 Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 
@@ -91,7 +104,9 @@ chassis; the program's prints and errors appear in the log panel
 below the view. Under the hood the sim starts the MuJoCo runtime as a
 child process — the same runtime, driver shim and C cores
 `openbricks sim run` uses — and draws the run from the poses it
-streams, with every brick of the chassis in its exact geometry. The
+streams, with every brick of the chassis in its exact geometry and
+the map's mesh props (the WRO senior mosaic frame) as MuJoCo has
+them. The
 chassis is built from the assembly: the wheel, caster and sensor
 roles place the physics skeleton, the brick-by-brick mass properties
 become the body's inertia, and each brick rides along as a visual

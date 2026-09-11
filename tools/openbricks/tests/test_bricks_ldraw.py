@@ -110,6 +110,14 @@ class ConverterTests(unittest.TestCase):
         self.assertTrue(np.allclose(np.linalg.norm(nrm, axis=1), 1.0, atol=0.02))
         rebuilt = pos[idx]
         self.assertAlmostEqual(ldraw.mass_properties(rebuilt)[0], 512, places=2)
+        self.assertEqual(mesh["scale"], 0.01)
+        # a coarser quantum for scenery: the step travels with the record
+        coarse = ldraw.pack_mesh(tris * 250.0, q=10.0)
+        self.assertEqual(coarse["scale"], 0.1)
+        pos, _, idx = ldraw.unpack_mesh(coarse)
+        self.assertTrue(np.allclose(np.abs(pos).max(axis=0), [2000.0, 500.0, 1000.0]))
+        self.assertAlmostEqual(ldraw.mass_properties(pos[idx])[0], 512 * 250.0 ** 3, delta=1e6)
+        self.assertRaises(ValueError, ldraw.pack_mesh, tris * 400.0)   # 3.2 m does not fit the fine quantum
 
     def test_merge_connectors_splits_a_long_pin_per_module(self):
         a = np.array([0.0, 0.0, 0.0])
@@ -239,9 +247,17 @@ class ConverterEdgeCaseTests(unittest.TestCase):
         self.assertEqual(ldraw.detect_bores(tris, min_votes=10_000), [])   # fewer parallel faces than votes needed
         self.assertEqual(ldraw.detect_bores(tris, min_votes=40), [])       # the bore's 32 faces are not enough
         self.assertEqual(len(ldraw.detect_bores(tris)), 1)
-        # a bore too short to be a hole
-        short = tris * np.array([1, 1, 0.2])
+        # a bore too short to be a hole; a thin liftarm's wall (2-5 mm) is its 4 mm hole
+        (_, a, b), = ldraw.detect_bores(tris)
+        full = float(np.linalg.norm(b - a))
+        short = tris * np.array([1, 1, 1.5 / full])
         self.assertEqual(ldraw.detect_bores(short), [])
+        thin = tris * np.array([1, 1, 2.5 / full])
+        (_, a, b), = ldraw.detect_bores(thin)
+        self.assertAlmostEqual(float(np.linalg.norm(b - a)), 4.0, places=6)
+        plate = tris * np.array([1, 1, 3.2 / full])       # a plate's hole is its whole 3.2 mm
+        (_, a, b), = ldraw.detect_bores(plate)
+        self.assertAlmostEqual(float(np.linalg.norm(b - a)), 3.2, places=6)
         # a few stray bore faces further along the same axis do not make a second hole
         p1, p2, p3 = tris[:, 0], tris[:, 1], tris[:, 2]
         fn = np.cross(p2 - p1, p3 - p1)
