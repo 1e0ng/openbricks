@@ -124,7 +124,8 @@ it always matches the installed version.
    :prog: openbricks
 ```
 
-`openbricks sim …` forwards to the simulator's own parser:
+`openbricks sim …` forwards to the simulator's own parser; bare
+`openbricks sim` launches the sim, the native desktop application:
 
 ```{eval-rst}
 .. argparse::

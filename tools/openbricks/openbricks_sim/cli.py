@@ -238,6 +238,20 @@ def _install_run_guard(robot, trace_path, max_sim_s):
     robot.runtime.add_tick(tick)
 
 
+def cmd_app(args):
+    """``openbricks sim`` / ``openbricks sim app``: launch the sim, the
+    native desktop application, with the shipped brick library."""
+    from openbricks_sim import bricks, native
+    bundles = [bricks.data_path(bricks.BUNDLE_NAME)] + list(args.bricks)
+    try:
+        binary = args.bin or native.ensure_binary(download=not args.no_download, progress=print)
+    except RuntimeError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        print("       the browser fallback is: openbricks sim workbench", file=sys.stderr)
+        return 1
+    return native.launch(binary, bundles, file=args.file)
+
+
 def cmd_workbench(args, serve=None):
     """``openbricks sim workbench``: build the
     Assembly Workbench page (shipped Technic bundle + any extra bundles
@@ -293,7 +307,29 @@ def _build_parser():
         help="Print the openbricks package version and exit.",
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
-    sub.required = True
+    sub.required = False        # bare ``openbricks sim`` launches the sim
+
+    p_app = sub.add_parser(
+        "app",
+        help="Launch the sim, the native desktop application (what bare "
+             "``openbricks sim`` does).",
+        description="Launches the sim: the Assembly Workbench as a native "
+                    "program with LEGO Technic bricks in exact LDraw "
+                    "geometry, your own STL parts, components, and the "
+                    "robot as the top component. The first run downloads "
+                    "the signed build for this platform into the cache "
+                    "(~/.cache/openbricks/sim); OPENBRICKS_SIM_BIN points "
+                    "at a build of your own.",
+    )
+    p_app.add_argument("file", nargs="?", default=None,
+                       help="A robot.assembly.json to open.")
+    p_app.add_argument("--bricks", action="append", default=[], metavar="FILE",
+                       help="An extra brick bundle from ``openbricks bricks "
+                            "convert`` to add to the library (repeatable).")
+    p_app.add_argument("--bin", default=None, metavar="PATH",
+                       help="Run this sim binary instead of the cached release build.")
+    p_app.add_argument("--no-download", action="store_true",
+                       help="Never download: fail if the build is not cached.")
 
     p_wb = sub.add_parser(
         "workbench",
@@ -391,6 +427,10 @@ def _build_parser():
 def main(argv=None):
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.command is None:
+        args = parser.parse_args(["app"] + list(argv if argv is not None else sys.argv[1:]))
+    if args.command == "app":
+        return cmd_app(args)
     if args.command == "workbench":
         return cmd_workbench(args)
     if args.command == "preview":
