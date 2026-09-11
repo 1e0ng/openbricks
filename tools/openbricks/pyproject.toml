@@ -158,6 +158,14 @@ openbricks_sim = [
     # frame). MuJoCo loads them via ``<mesh file="..."/>`` at
     # ``mj_makeData`` time, same lifecycle as ``mat.png``.
     "worlds/*/*.stl",
+    # The brick library (4.1.0): the curated LEGO Technic set converted
+    # from LDraw, the list it came from, the BrickLink weights used, and
+    # the Assembly Workbench page ``openbricks sim`` serves.
+    "bricks/technic_bundle.json.zlib",
+    "bricks/technic_parts.txt",
+    "bricks/weights.json",
+    "bricks/LDRAW-LICENSE.md",
+    "workbench/index.html",
 ]
 
 # The ``openbricks_sim._native`` CPython extension is declared in

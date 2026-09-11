@@ -238,6 +238,23 @@ def _install_run_guard(robot, trace_path, max_sim_s):
     robot.runtime.add_tick(tick)
 
 
+def cmd_workbench(args, serve=None):
+    """``openbricks sim workbench``: build the
+    Assembly Workbench page (shipped Technic bundle + any extra bundles
+    + an optional assembly file to open) and serve it locally."""
+    from openbricks_sim import workbench
+    extras = []
+    for path in args.bricks:
+        with open(path) as fh:
+            extras.append(json.load(fh))
+    doc = None
+    if args.file:
+        with open(args.file) as fh:
+            doc = json.load(fh)
+    page = workbench.render_page(extra_bundles=extras, doc=doc)
+    return (serve or workbench.serve)(page, port=args.port, open_browser=not args.no_browser)
+
+
 def _add_chassis_args(sub):
     """``--chassis`` / ``--x`` / ``--y`` / ``--yaw`` — the same on
     ``preview`` and ``run``. The pose flags default to None so a
@@ -277,6 +294,27 @@ def _build_parser():
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
+
+    p_wb = sub.add_parser(
+        "workbench",
+        help="Open the Assembly Workbench in your browser.",
+        description="Serves the Assembly Workbench on localhost and opens "
+                    "it: LEGO Technic bricks with exact LDraw geometry, "
+                    "STL imports, components, and the robot as the top "
+                    "component with mass, centre of mass and inertia "
+                    "computed at every level. Pass a robot.assembly.json "
+                    "to open it.",
+    )
+    p_wb.add_argument("file", nargs="?", default=None,
+                      help="A robot.assembly.json to open (otherwise the "
+                           "browser's last draft, else the example).")
+    p_wb.add_argument("--bricks", action="append", default=[], metavar="FILE",
+                      help="An extra brick bundle from ``openbricks bricks "
+                           "convert`` to add to the library (repeatable).")
+    p_wb.add_argument("--port", type=int, default=0,
+                      help="Port to serve on. Default: a free one.")
+    p_wb.add_argument("--no-browser", action="store_true",
+                      help="Print the URL instead of opening a browser.")
 
     p_preview = sub.add_parser(
         "preview",
@@ -353,11 +391,13 @@ def _build_parser():
 def main(argv=None):
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.command == "workbench":
+        return cmd_workbench(args)
     if args.command == "preview":
         return cmd_preview(args)
     if args.command == "run":
         return cmd_run(args)
-    parser.error("unknown command: %r" % args.command)
+    parser.error("unknown command: %r" % args.command)   # pragma: no cover - argparse rejects unknown commands
 
 
 if __name__ == "__main__":

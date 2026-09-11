@@ -1,0 +1,1839 @@
+<title>Openbricks Assembly Workbench</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+<script id="brick-bundle" type="text/plain">__BUNDLE__</script>
+<script id="initial-doc" type="application/json">__DOC__</script>
+<style>
+  :root {
+    color-scheme: light;
+    --ground: #F3F5F6;
+    --sheet: #FFFFFF;
+    --well: #EDF0F2;
+    --ink: #1E262B;
+    --ink-2: #5C6B75;
+    --ink-3: #93A1AA;
+    --rule: #D7DEE2;
+    --grid: #DCE3E7;
+    --grid-strong: #C3CDD3;
+    --accent: #D9910F;
+    --accent-ink: #7A4F00;
+    --accent-soft: #FBEFD6;
+    --bad: #C4442A;
+    --bad-soft: #F8E1DB;
+    --focus: #1F6FB2;
+    --sel: #FFF4DF;
+    --cat-lego: #5B7A9C;
+    --cat-electronics: #4A8A69;
+    --cat-servo: #46525C;
+    --cat-wheel: #2E3438;
+    --cat-other: #9A8562;
+    --edge: #FFFFFF;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground: #15191C; --sheet: #1C2226; --well: #171C20;
+      --ink: #E4EAEE; --ink-2: #A9B6BE; --ink-3: #6F7D86;
+      --rule: #2E383E; --grid: #242C31; --grid-strong: #344047;
+      --accent: #E8A93A; --accent-ink: #F5CF86; --accent-soft: #3A2D12;
+      --bad: #E4644A; --bad-soft: #3E211B; --focus: #6FB2EE; --sel: #2E2612;
+      --cat-lego: #6F90B4; --cat-electronics: #5FA382; --cat-servo: #7C8A96; --cat-wheel: #5A6369; --cat-other: #B49C74;
+      --edge: #0F1316;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground: #15191C; --sheet: #1C2226; --well: #171C20;
+    --ink: #E4EAEE; --ink-2: #A9B6BE; --ink-3: #6F7D86;
+    --rule: #2E383E; --grid: #242C31; --grid-strong: #344047;
+    --accent: #E8A93A; --accent-ink: #F5CF86; --accent-soft: #3A2D12;
+    --bad: #E4644A; --bad-soft: #3E211B; --focus: #6FB2EE; --sel: #2E2612;
+    --cat-lego: #6F90B4; --cat-electronics: #5FA382; --cat-servo: #7C8A96; --cat-wheel: #5A6369; --cat-other: #B49C74;
+    --edge: #0F1316;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 13.5px/1.45 var(--sans); }
+  button { font: 500 12px var(--sans); color: var(--ink); background: var(--sheet); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 9px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--ink-3); }
+  button.primary { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+  button.danger { color: var(--bad); }
+  button.tiny { padding: 1px 6px; font-size: 11px; }
+  button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  input, select, textarea { font: 500 12.5px var(--mono); color: var(--ink); background: var(--sheet); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 6px; }
+  input[type=text] { width: 100%; }
+  input.num { text-align: right; font-variant-numeric: tabular-nums; }
+  h2 { margin: 0; font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+  h2 small { font: 400 12px var(--sans); letter-spacing: 0; text-transform: none; color: var(--ink-3); margin-left: 8px; }
+  .chip { display: inline-block; font: 500 10px var(--mono); letter-spacing: .04em; padding: 1px 5px; border-radius: 2px; border: 1px solid var(--rule); color: var(--ink-2); white-space: nowrap; vertical-align: middle; }
+  .chip.placeholder { color: var(--bad); border-color: var(--bad); }
+  .chip.sum { color: var(--accent-ink); border-color: var(--accent); }
+  .note { font-size: 12px; color: var(--ink-2); margin: 6px 0 0; }
+  .note.bad { color: var(--bad); }
+  .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* title block */
+  header.block { display: grid; grid-template-columns: auto 1fr; border-bottom: 1px solid var(--rule); background: var(--sheet); }
+  header.block .name { padding: 12px 22px; border-right: 1px solid var(--rule); }
+  header.block h1 { margin: 0; font: 600 17px var(--mono); }
+  header.block .name p { margin: 4px 0 0; color: var(--ink-2); max-width: 62ch; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .fact { padding: 10px 16px; border-right: 1px solid var(--rule); min-width: 0; }
+  .fact:last-child { border-right: 0; }
+  .fact .k { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+  .fact .v { font: 600 20px var(--mono); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .fact .v small { font-size: 12px; color: var(--ink-2); font-weight: 400; margin-left: 3px; }
+  .fact .s { font-size: 12px; color: var(--ink-2); }
+  .fact.warn .v { color: var(--bad); }
+  .fact.ok .v { color: var(--accent-ink); }
+
+  /* workbench */
+  .bench { display: grid; grid-template-columns: 300px 1fr 340px; min-height: 680px; border-bottom: 1px solid var(--rule); }
+  @media (max-width: 1180px) { .bench { grid-template-columns: 250px 1fr; } .bench aside.insp { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--rule); } }
+  @media (max-width: 760px) { .bench { grid-template-columns: 1fr; } .bench aside.lib { border-right: 0; border-bottom: 1px solid var(--rule); } }
+  aside.lib { border-right: 1px solid var(--rule); padding: 12px 12px 18px; overflow: auto; max-height: 960px; }
+  aside.insp { border-left: 1px solid var(--rule); padding: 12px 14px 18px; overflow: auto; max-height: 960px; }
+  section.stage { display: grid; grid-template-rows: auto 520px 1fr; min-width: 0; }
+  .crumbs { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
+  .crumbs .crumb { font: 500 12.5px var(--mono); color: var(--ink-2); background: none; border: 0; padding: 2px 4px; cursor: pointer; }
+  .crumbs .crumb.cur { color: var(--ink); font-weight: 600; cursor: default; }
+  .crumbs .sep { color: var(--ink-3); }
+  .crumbs .sp { flex: 1; }
+  .crumbs label { font-size: 12px; color: var(--ink-2); display: inline-flex; gap: 5px; align-items: center; }
+  .viewwrap { position: relative; border-bottom: 1px solid var(--rule); }
+  .viewwrap.over::after { content: ""; position: absolute; inset: 0; border: 2px dashed var(--accent); pointer-events: none; }
+  canvas#view { width: 100%; height: 100%; display: block; background: var(--well); touch-action: none; }
+  .labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .labels div { position: absolute; transform: translate(10px, -22px); font: 11px var(--mono); color: var(--accent-ink); background: var(--sheet); opacity: .9; padding: 1px 5px; border-radius: 2px; white-space: nowrap; }
+  .no3d { position: absolute; inset: 0; display: grid; place-items: center; color: var(--bad); font: 500 13px var(--sans); text-align: center; padding: 20px; }
+  .hud { position: absolute; left: 10px; bottom: 8px; right: 10px; font: 11px var(--mono); color: var(--ink-3); pointer-events: none; display: flex; justify-content: space-between; gap: 12px; }
+  .empty-hint { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: var(--ink-3); font: 500 13px var(--sans); text-align: center; }
+  .contents { padding: 8px 8px 14px; overflow: auto; }
+  .contents .row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 12.5px; }
+  .contents .row:hover { background: var(--well); }
+  .contents .row.sel { background: var(--sel); }
+  .contents .row .nm { font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .contents .row .nm small { color: var(--ink-3); font-family: var(--sans); margin-left: 6px; }
+  .contents .row .mass { font: 12px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .contents .row .mass.sum { color: var(--accent-ink); }
+
+  /* library */
+  .lib h2 { padding: 4px 0 8px; }
+  .lib .search { width: 100%; margin-bottom: 6px; }
+  .item { display: grid; grid-template-columns: 76px 1fr; gap: 8px; padding: 6px 4px; border-top: 1px solid var(--rule); cursor: grab; align-items: center; }
+  .item:active { cursor: grabbing; }
+  .item canvas { width: 76px; height: 56px; display: block; background: var(--well); border-radius: 3px; }
+  .item .t { font: 500 12.5px var(--mono); overflow-wrap: anywhere; line-height: 1.3; }
+  .item .d { font-size: 11.5px; color: var(--ink-2); }
+  .item .d b { font-weight: 500; color: var(--ink); font-family: var(--mono); }
+  .item .acts { margin-top: 3px; gap: 4px; }
+  .item.cur { background: var(--sel); }
+  .form { border-top: 1px solid var(--rule); margin-top: 12px; padding-top: 10px; display: grid; gap: 6px; }
+  .form .g { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .form .g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .form label { font-size: 11.5px; color: var(--ink-2); display: grid; gap: 2px; }
+  .form .err { color: var(--bad); font-size: 12px; }
+  details summary { cursor: pointer; font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); padding: 10px 0 4px; }
+
+  /* inspector */
+  .insp h2 { padding: 8px 0 6px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; align-items: baseline; }
+  .kv .k { color: var(--ink-2); white-space: nowrap; }
+  .kv .v { font-family: var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .kv .v.sum { color: var(--accent-ink); }
+  .kv .v.sans { font-family: var(--sans); }
+  .pose { display: grid; grid-template-columns: auto 1fr auto auto; gap: 4px 6px; align-items: center; }
+  .pose .k { font: 12px var(--mono); color: var(--ink-2); }
+  .pose input { width: 84px; }
+  .mat { font: 11.5px var(--mono); font-variant-numeric: tabular-nums; color: var(--accent-ink); border-collapse: collapse; }
+  .mat td { padding: 1px 8px 1px 0; text-align: right; }
+  .roles { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 12px; }
+  .roles .k { font-family: var(--mono); color: var(--ink-2); }
+  .roles select { width: 100%; }
+  .name-edit { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+  .groupform { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 6px; }
+
+  /* report + file */
+  section.report, section.file { padding: 14px 18px 20px; }
+  table.bom { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.bom th { text-align: left; font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding: 6px 8px; border-bottom: 1px solid var(--rule); }
+  table.bom td { padding: 4px 8px; border-bottom: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+  table.bom td.n, table.bom th.n { text-align: right; font-family: var(--mono); }
+  table.bom td.item { font-family: var(--mono); }
+  table.bom tr.comp td { color: var(--accent-ink); }
+  table.bom tr.total td { font-weight: 600; border-top: 2px solid var(--ink-3); }
+  .scroll { overflow-x: auto; }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button.on { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+  textarea.code { width: 100%; min-height: 240px; resize: vertical; font: 12px/1.5 var(--mono); background: var(--well); border: 1px solid var(--rule); border-radius: 3px; padding: 10px; color: var(--ink); }
+  .file .two { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; }
+  @media (max-width: 900px) { .file .two { grid-template-columns: 1fr; } }
+  .file .head { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .file .head .st { font: 12px var(--mono); color: var(--ink-3); margin-left: auto; }
+  .file .head .st.bad { color: var(--bad); }
+  .hint { font-size: 12.5px; color: var(--ink-2); max-width: 78ch; margin: 8px 0 0; }
+  footer.credits { padding: 10px 18px 18px; font-size: 12px; color: var(--ink-3); max-width: 90ch; }
+  footer.credits a { color: var(--ink-2); }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--ground); font: 500 12.5px var(--sans); padding: 8px 14px; border-radius: 3px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 5; }
+  .toast.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+
+<header class="block">
+  <div class="name">
+    <h1 id="robot-title">Openbricks Assembly Workbench</h1>
+    <p>LEGO Technic parts with their exact LDraw geometry, holes and all. Drag them into the 3D view, and pins, axles and studs snap into holes as you place them. Group what you built into a new component; it joins the library. Mass, centre of mass and inertia are computed from the real shapes at every level.</p>
+  </div>
+  <div class="facts" id="facts"></div>
+</header>
+
+<div class="bench">
+  <aside class="lib" aria-label="Library">
+    <h2>Library <small>drag onto the canvas</small></h2>
+    <input type="text" class="search" id="search" placeholder="search bricks and components">
+    <h2 style="padding-top:8px">Components</h2>
+    <div id="comps-list"></div>
+    <div class="acts" style="margin-top:6px"><button type="button" id="new-comp">New empty component</button></div>
+    <h2 style="padding-top:14px">LEGO Technic <small id="ldraw-count"></small></h2>
+    <div id="ldraw-list"></div>
+    <h2 style="padding-top:14px">Other bricks <small>servos, boards, wheels, your own prints</small></h2>
+    <div id="parts-list"></div>
+    <details id="stl-details">
+      <summary>Import a part from an STL file</summary>
+      <div class="form" style="border-top:0;margin-top:0;padding-top:4px">
+        <label>STL file <input type="file" id="stl-file" accept=".stl,model/stl,application/sla"></label>
+        <label>name <input type="text" id="stl-name" placeholder="Servo bracket v3"></label>
+        <div class="g">
+          <label>units in the file <select id="stl-units"><option value="1">mm</option><option value="10">cm</option><option value="25.4">inch</option><option value="1000">m</option></select></label>
+          <label>origin <select id="stl-origin"><option value="file">as in the file</option><option value="centre">bounding-box centre</option><option value="bottom">bottom centre, z = 0</option></select></label>
+        </div>
+        <div class="g">
+          <label>category <select id="stl-cat"><option value="other">other</option><option value="lego">lego</option><option value="electronics">electronics</option><option value="servo">servo</option><option value="wheel">wheel</option></select></label>
+          <label>mass, g <input type="text" class="num" id="stl-mass" inputmode="decimal" placeholder="weighed, or blank"></label>
+        </div>
+        <label>density when no mass is given <select id="stl-dens"><option value="1.24">PLA 1.24 g/cm³</option><option value="1.27">PETG 1.27</option><option value="1.05">ABS 1.05</option><option value="1.10">nylon 1.10</option><option value="2.70">aluminium 2.70</option></select></label>
+        <p class="note" id="stl-info">Binary or ASCII STL. Volume, centre of mass and inertia come from the mesh; 4.8 mm bores become pin holes.</p>
+        <div class="err" id="stl-err"></div>
+        <div class="acts" style="margin-top:2px"><button type="button" class="primary" id="stl-save" disabled>Add to library</button></div>
+      </div>
+    </details>
+    <details id="part-details">
+      <summary id="part-form-title">Record a brick</summary>
+      <div class="form" id="part-form" style="border-top:0;margin-top:0;padding-top:4px">
+        <label>name <input type="text" id="pf-name" placeholder="Technic Liftarm Thick 1 x 9"></label>
+        <div class="g">
+          <label>category <select id="pf-cat"><option value="lego">lego</option><option value="electronics">electronics</option><option value="servo">servo</option><option value="wheel">wheel</option><option value="other">other</option></select></label>
+          <label>mass, g <input type="text" class="num" id="pf-mass" inputmode="decimal" placeholder="2.35"></label>
+        </div>
+        <div class="g">
+          <label>source <select id="pf-src"><option value="measured">measured</option><option value="datasheet">datasheet</option><option value="vendor">vendor</option><option value="placeholder">placeholder</option></select></label>
+          <label>shape <select id="pf-shape"><option value="box">box</option><option value="cylinder">cylinder</option><option value="sphere">sphere</option></select></label>
+        </div>
+        <div class="g3" id="pf-box"><label>x, mm <input type="text" class="num" id="pf-sx" inputmode="decimal"></label><label>y, mm <input type="text" class="num" id="pf-sy" inputmode="decimal"></label><label>z, mm <input type="text" class="num" id="pf-sz" inputmode="decimal"></label></div>
+        <div class="g3" id="pf-cyl" hidden><label>radius, mm <input type="text" class="num" id="pf-r" inputmode="decimal"></label><label>length, mm <input type="text" class="num" id="pf-len" inputmode="decimal"></label><label>axis <select id="pf-axis"><option>x</option><option>y</option><option>z</option></select></label></div>
+        <div class="g" id="pf-sph" hidden><label>radius, mm <input type="text" class="num" id="pf-sr" inputmode="decimal"></label></div>
+        <label>source note <input type="text" id="pf-note" placeholder="BrickLink weight, or kitchen scale 2026-09-11"></label>
+        <div class="err" id="pf-err"></div>
+        <div class="acts" style="margin-top:2px"><button type="button" class="primary" id="pf-save">Save brick</button><button type="button" id="pf-cancel" hidden>Cancel</button></div>
+      </div>
+    </details>
+  </aside>
+
+  <section class="stage" aria-label="Canvas">
+    <div class="crumbs" id="crumbs"></div>
+    <div class="viewwrap" id="viewwrap">
+      <canvas id="view" aria-label="3D view of the component being edited"></canvas>
+      <div class="labels" id="labels"></div>
+      <div class="empty-hint" id="empty-hint" hidden>This component is empty.<br>Drag bricks or components here from the library.</div>
+      <div class="hud"><span id="hud-l"></span><span id="hud-r"></span></div>
+    </div>
+    <div class="contents" id="contents"></div>
+  </section>
+
+  <aside class="insp" id="insp" aria-label="Inspector"></aside>
+</div>
+
+<section class="report">
+  <h2>Mass properties of the robot <small>every row below a component is rolled up into it</small></h2>
+  <div class="scroll"><table class="bom" id="bom"></table></div>
+</section>
+
+<section class="file">
+  <div class="two">
+    <div>
+      <div class="head">
+        <div class="tabs"><button type="button" class="on" data-tab="assembly">robot.assembly.json</button><button type="button" data-tab="derived">what the simulator receives</button></div>
+        <button type="button" class="primary" id="copy">Copy</button>
+        <span class="st" id="file-st"></span>
+      </div>
+      <textarea class="code" id="out" readonly spellcheck="false" aria-label="File contents"></textarea>
+      <p class="hint" id="file-hint"></p>
+    </div>
+    <div>
+      <div class="head"><h2>Load a file</h2><button type="button" id="apply">Apply</button><button type="button" id="reset-example">Reset to example</button><span class="st" id="import-st"></span></div>
+      <textarea class="code" id="in" spellcheck="false" aria-label="Paste a robot.assembly.json" placeholder='paste a robot.assembly.json'></textarea>
+      <p class="hint">Only recorded facts are stored: brick shapes and masses, where each instance sits, the roles the simulator needs. Everything computed is recomputed on load.</p>
+    </div>
+  </div>
+</section>
+<footer class="credits">LEGO Technic geometry from the <a href="https://www.ldraw.org" rel="noopener">LDraw parts library</a>, CC BY 2.0 / CC BY 4.0. Part weights from the BrickLink catalogue. LEGO® is a trademark of the LEGO Group, which does not sponsor or endorse this tool.</footer>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  // ================================================================
+  // maths
+  // ================================================================
+  const D2R = Math.PI / 180;
+  const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const vAdd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  const vSub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const vScale = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+  const vDot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const vCross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const vLen = a => Math.sqrt(vDot(a, a));
+  const vNorm = a => { const l = vLen(a) || 1; return vScale(a, 1 / l); };
+  const matVec = (M, v) => [vDot(M[0], v), vDot(M[1], v), vDot(M[2], v)];
+  const matT = M => [[M[0][0], M[1][0], M[2][0]], [M[0][1], M[1][1], M[2][1]], [M[0][2], M[1][2], M[2][2]]];
+  function matMul(A, B) {
+    const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] = A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j];
+    return C;
+  }
+  const matAdd = (A, B) => A.map((r, i) => r.map((v, j) => v + B[i][j]));
+  const matZero = () => [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  // rotation from [roll, pitch, yaw] degrees: R = Rz(yaw) · Ry(pitch) · Rx(roll)
+  function rotMat(rpy) {
+    const [r, p, y] = (rpy || [0, 0, 0]).map(a => a * D2R);
+    const cr = Math.cos(r), sr = Math.sin(r), cp = Math.cos(p), sp = Math.sin(p), cy = Math.cos(y), sy = Math.sin(y);
+    return [
+      [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+      [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+      [-sp, cp * sr, cp * cr],
+    ];
+  }
+  function eulerFrom(R) {
+    const sp = -R[2][0];
+    let roll, pitch, yaw;
+    if (Math.abs(sp) > 0.999999) { pitch = Math.asin(Math.max(-1, Math.min(1, sp))); roll = 0; yaw = Math.atan2(-R[0][1], R[1][1]); }
+    else { pitch = Math.asin(sp); roll = Math.atan2(R[2][1], R[2][2]); yaw = Math.atan2(R[1][0], R[0][0]); }
+    return [roll, pitch, yaw].map(a => Math.round(a / D2R * 100) / 100).map(a => Object.is(a, -0) ? 0 : a);
+  }
+  function shiftTerm(m, d) {
+    const dd = vDot(d, d);
+    return [
+      [m * (dd - d[0] * d[0]), -m * d[0] * d[1], -m * d[0] * d[2]],
+      [-m * d[1] * d[0], m * (dd - d[1] * d[1]), -m * d[1] * d[2]],
+      [-m * d[2] * d[0], -m * d[2] * d[1], m * (dd - d[2] * d[2])],
+    ];
+  }
+  const rotateInertia = (R, I) => matMul(matMul(R, I), matT(R));
+  const round3 = v => Math.round(v * 1000) / 1000;
+
+  // ================================================================
+  // shapes
+  // ================================================================
+  function shapeVolume(s) {
+    if (s.type === "box") return s.size[0] * s.size[1] * s.size[2];
+    if (s.type === "cylinder") return Math.PI * s.radius * s.radius * s.length;
+    return 4 / 3 * Math.PI * Math.pow(s.radius, 3);
+  }
+  function shapeInertia(s, m) {
+    if (s.type === "box") {
+      const [a, b, c] = s.size;
+      return [[m / 12 * (b * b + c * c), 0, 0], [0, m / 12 * (a * a + c * c), 0], [0, 0, m / 12 * (a * a + b * b)]];
+    }
+    if (s.type === "cylinder") {
+      const ax = m * s.radius * s.radius / 2, tr = m / 12 * (3 * s.radius * s.radius + s.length * s.length);
+      const d = { x: [ax, tr, tr], y: [tr, ax, tr], z: [tr, tr, ax] }[s.axis || "z"];
+      return [[d[0], 0, 0], [0, d[1], 0], [0, 0, d[2]]];
+    }
+    const k = 0.4 * m * s.radius * s.radius;
+    return [[k, 0, 0], [0, k, 0], [0, 0, k]];
+  }
+  function shapeHalf(s) {
+    if (s.type === "box") return [s.size[0] / 2, s.size[1] / 2, s.size[2] / 2];
+    if (s.type === "cylinder") return { x: [s.length / 2, s.radius, s.radius], y: [s.radius, s.length / 2, s.radius], z: [s.radius, s.radius, s.length / 2] }[s.axis || "z"];
+    return [s.radius, s.radius, s.radius];
+  }
+  function partShapeText(part) {
+    const ld = geomOf(part);
+    if (ld) return (part.ldraw ? "LDraw " + ld.ldraw + " exact mesh, " : "STL mesh, ") + ld.mesh.tris.toLocaleString("en-US") + " triangles, " + [0, 1, 2].map(i => fmt(ld.bbox[1][i] - ld.bbox[0][i], 1)).join(" × ") + " mm";
+    return (part.shapes || []).map(shapeText).join("; ");
+  }
+  function connectorSummary(part) {
+    const ld = geomOf(part); if (!ld || !ld.connectors || !ld.connectors.length) return "";
+    const n = {}; ld.connectors.forEach(c => { n[c.kind] = (n[c.kind] || 0) + 1; });
+    const label = { pin_hole: "pin hole", axle_hole: "axle hole", pin: "pin", axle: "axle", stud: "stud", stud_hole: "stud tube" };
+    return Object.keys(n).map(k => n[k] + " " + label[k] + (n[k] > 1 ? "s" : "")).join(", ");
+  }
+  function shapeText(s) {
+    if (s.type === "box") return "box " + s.size.map(n => fmt(n)).join(" × ") + " mm";
+    if (s.type === "cylinder") return "cylinder ⌀" + fmt(2 * s.radius) + " × " + fmt(s.length) + " mm along " + (s.axis || "z");
+    return "sphere ⌀" + fmt(2 * s.radius) + " mm";
+  }
+  function bboxOfCorners(corners) {
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    corners.forEach(c => { for (let i = 0; i < 3; i++) { if (c[i] < mn[i]) mn[i] = c[i]; if (c[i] > mx[i]) mx[i] = c[i]; } });
+    return { min: mn, max: mx };
+  }
+  function bboxCorners(b) {
+    const out = [];
+    for (let i = 0; i < 8; i++) out.push([i & 1 ? b.max[0] : b.min[0], i & 2 ? b.max[1] : b.min[1], i & 4 ? b.max[2] : b.min[2]]);
+    return out;
+  }
+  function bboxTransform(b, p, R) { return bboxOfCorners(bboxCorners(b).map(c => vAdd(p, matVec(R, c)))); }
+  function bboxUnion(a, b) {
+    if (!a) return b; if (!b) return a;
+    return { min: a.min.map((v, i) => Math.min(v, b.min[i])), max: a.max.map((v, i) => Math.max(v, b.max[i])) };
+  }
+
+  // ================================================================
+  // the document: recorded facts only
+  // ================================================================
+  function exampleDocument() {
+    return {
+      format: "openbricks-assembly/1",
+      units: { length: "mm", mass: "g", angle: "deg" },
+      parts: {
+        st3032: { name: "Feetech ST-3032 serial servo", category: "servo", mass_g: 20.6, source: "datasheet",
+          source_note: "docs/datasheets/feetech_sts3032.pdf: 23 × 12 × 27.5 mm, 20.6 ± 2 g, shaft 5.7 mm off-centre; mounted with the shaft along +Y",
+          shapes: [{ type: "box", size: [23, 27.5, 12], pos: [0, 0, 0] }, { type: "cylinder", radius: 2.5, length: 4.4, axis: "y", pos: [5.7, 15.95, 0] }],
+          frames: { shaft: { pos: [5.7, 13.75, 0], axis: [0, 1, 0] } } },
+        wheel_86: { name: "Drive wheel ⌀86.4 mm", category: "wheel", mass_g: 30, source: "placeholder",
+          source_note: "diameter from the program's DriveBase(wheel_diameter_mm=86.4); width and mass still to measure",
+          shapes: [{ type: "cylinder", radius: 43.2, length: 20, axis: "y", pos: [0, 0, 0] }] },
+        lego_64178: { name: "Technic Beam 11 x 5 with Open Center 5 x 3", category: "lego", mass_g: 7, source: "vendor", source_note: "BrickLink 64178: 7 g", ldraw: "64178" },
+        lego_64179: { name: "Technic Beam 7 x 5 with Open Center 5 x 3", category: "lego", mass_g: 5.3, source: "vendor", source_note: "BrickLink 64179: 5.3 g", ldraw: "64179" },
+        lego_32278: { name: "Technic Beam 15", category: "lego", mass_g: 4, source: "vendor", source_note: "BrickLink 32278: 4 g", ldraw: "32278" },
+        lego_32525: { name: "Technic Beam 11", category: "lego", mass_g: 2.8, source: "vendor", source_note: "BrickLink 32525: 2.8 g", ldraw: "32525" },
+        lego_32524: { name: "Technic Beam 7", category: "lego", mass_g: 1.74, source: "vendor", source_note: "BrickLink 32524: 1.74 g", ldraw: "32524" },
+        lego_32316: { name: "Technic Beam 5", category: "lego", mass_g: 1.25, source: "vendor", source_note: "BrickLink 32316: 1.25 g", ldraw: "32316" },
+        lego_2780: { name: "Technic Pin with Friction and Slots", category: "lego", mass_g: 0.2, source: "vendor", source_note: "BrickLink 2780: 0.2 g", ldraw: "2780" },
+        lego_4519: { name: "Technic Axle 3", category: "lego", mass_g: 0.43, source: "vendor", source_note: "BrickLink 4519: 0.43 g", ldraw: "4519" },
+        qtrx_hd15a: { name: "Pololu QTRX-HD-15A reflectance array", category: "electronics", mass_g: 3.5, source: "vendor",
+          source_note: "pololu.com/product/4415: 61.0 × 20.0 × 3.0 mm, 3.5 g, 4 mm pitch; sensors on the -Z face",
+          shapes: [{ type: "box", size: [20, 61, 3], pos: [0, 0, 0] }], frames: { look: { axis: [0, 0, -1] } } },
+        tcs34725: { name: "Adafruit TCS34725 colour sensor", category: "electronics", mass_g: 3.23, source: "vendor",
+          source_note: "adafruit.com/product/1334: 20.44 × 20.28 mm, 3.23 g; 1.6 mm PCB assumed; sensor on the +Z face",
+          shapes: [{ type: "box", size: [20.44, 20.28, 1.6], pos: [0, 0, 0] }], frames: { look: { axis: [0, 0, 1] } } },
+        tca9548a: { name: "Adafruit TCA9548A I2C multiplexer", category: "electronics", mass_g: 1.8, source: "vendor",
+          source_note: "adafruit.com/product/2717: 30.6 × 17.6 × 2.7 mm, 1.8 g", shapes: [{ type: "box", size: [30.6, 17.6, 2.7], pos: [0, 0, 0] }] },
+        esp32s3_board: { name: "ESP32-S3 controller board", category: "electronics", mass_g: 9, source: "placeholder",
+          source_note: "measure your board: the COREBOARD V1.4 outline is not in its schematic", shapes: [{ type: "box", size: [63, 25.5, 12], pos: [0, 0, 0] }] },
+        icm45686_board: { name: "ICM-45686 IMU breakout", category: "electronics", mass_g: 2, source: "placeholder",
+          source_note: "measure your breakout", shapes: [{ type: "box", size: [20, 20, 1.6], pos: [0, 0, 0] }] },
+        lipo_3s: { name: "3S LiPo pack", category: "other", mass_g: 180, source: "placeholder",
+          source_note: "packs vary: weigh yours and measure the outline", shapes: [{ type: "box", size: [105, 34, 24], pos: [0, 0, 0] }] },
+        caster_ball: { name: "Ball caster ⌀19 mm", category: "other", mass_g: 8, source: "placeholder",
+          source_note: "ball only; the housing is not modelled", shapes: [{ type: "sphere", radius: 9.5, pos: [0, 0, 0] }] },
+      },
+      components: {
+        drive_unit: {
+          note: "one servo with its wheel on the shaft; used mirrored for the other side",
+          children: [
+            { name: "servo", part: "st3032", pos: [0, 0, 0], rot: [0, 0, 0] },
+            { name: "wheel", part: "wheel_86", pos: [5.7, 23.75, 0], rot: [0, 0, 0] },
+          ],
+        },
+        sensor_bar: {
+          note: "the line array hung below the frame on two vertical liftarms",
+          children: [
+            { name: "board", part: "qtrx_hd15a", pos: [0, 0, 0], rot: [0, 0, 0] },
+            { name: "hanger_l", part: "lego_32316", pos: [-8, 20, 21.5], rot: [90, 0, 0] },
+            { name: "hanger_r", part: "lego_32316", pos: [-8, -20, 21.5], rot: [90, 0, 0] },
+          ],
+        },
+        robot: {
+          note: "the whole robot; the axle is the origin. Rails pinned to the frame with four friction pins.",
+          children: [
+            { name: "frame", part: "lego_64178", pos: [0, 0, 0], rot: [0, 0, 90] },
+            { name: "rail_l", part: "lego_32278", pos: [0, 16, 8], rot: [0, 0, 90] },
+            { name: "rail_r", part: "lego_32278", pos: [0, -16, 8], rot: [0, 0, 90] },
+            { name: "pin_fl", part: "lego_2780", pos: [24, 16, 4], rot: [0, 90, 0] },
+            { name: "pin_fr", part: "lego_2780", pos: [24, -16, 4], rot: [0, 90, 0] },
+            { name: "pin_rl", part: "lego_2780", pos: [-24, 16, 4], rot: [0, 90, 0] },
+            { name: "pin_rr", part: "lego_2780", pos: [-24, -16, 4], rot: [0, 90, 0] },
+            { name: "left", component: "drive_unit", pos: [-5.7, 43.75, 0], rot: [0, 0, 0] },
+            { name: "right", component: "drive_unit", pos: [5.7, -43.75, 0], rot: [0, 0, 180] },
+            { name: "controller", part: "esp32s3_board", pos: [-10, 0, 9.9], rot: [0, 0, 0] },
+            { name: "imu", part: "icm45686_board", pos: [30, 0, 4.7], rot: [0, 0, 0] },
+            { name: "mux", part: "tca9548a", pos: [-10, 0, 17.3], rot: [0, 0, 0] },
+            { name: "battery", part: "lipo_3s", pos: [-40, 0, 32], rot: [0, 0, 0] },
+            { name: "front_bar", component: "sensor_bar", pos: [70, 0, -38.5], rot: [0, 0, 0] },
+            { name: "rear_array", part: "qtrx_hd15a", pos: [-30, 0, -38.5], rot: [0, 0, 0] },
+            { name: "colour", part: "tcs34725", pos: [0, 45, 30], rot: [-90, 0, 0] },
+            { name: "caster", part: "caster_ball", pos: [-75, 0, -33.7], rot: [0, 0, 0] },
+          ],
+        },
+      },
+      robot: {
+        name: "et",
+        root: "robot",
+        roles: { wheel_left: "left/wheel", wheel_right: "right/wheel", caster: "caster", line_sensor: "front_bar/board", line_sensor_2: "rear_array", color_sensor: "colour", imu: "imu", distance_sensor: "" },
+        spawn: { pos_mm: [-547, -150], yaw_deg: 90 },
+        measured_mass_g: null,
+      },
+    };
+  }
+  const ROLES = [
+    ["wheel_left", "left drive wheel (a cylinder)"], ["wheel_right", "right drive wheel"], ["caster", "the free support"],
+    ["line_sensor", "first QTR array → chassis_line"], ["line_sensor_2", "second array → chassis_line2"],
+    ["color_sensor", "TCS34725 → chassis_cam_down"], ["distance_sensor", "range sensor → chassis_dist"], ["imu", "gyro → chassis_imu"],
+  ];
+
+  // ================================================================
+  // state
+  // ================================================================
+  // The LEGO Technic library: exact LDraw geometry, mass properties for a uniform solid, connection features.
+  let BUNDLE = { parts: {} };
+  try {
+    const b64 = document.getElementById("brick-bundle").textContent.trim();
+    if (b64 && typeof pako !== "undefined") {
+      const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      BUNDLE = JSON.parse(pako.inflate(bin, { to: "string" }));
+    }
+  } catch (err) { console.error("brick bundle failed to load", err); BUNDLE = { parts: {} }; }
+  const ldrawOf = part => (part && part.ldraw && BUNDLE.parts[part.ldraw]) || null;
+  const geomOf = part => part ? (part.ldraw ? ldrawOf(part) : (part.mesh ? part : null)) : null;   // same fields either way: mesh, bbox, com, inertia_per_g, volume_mm3, connectors
+  const geomKey = (partId, part) => part.ldraw ? "ld:" + part.ldraw : "part:" + partId;
+  function b64bytes(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+  let magnet = true;
+  let doc = null;
+  let editing = null;        // component id open on the canvas
+  let crumbs = [];           // component ids from the root to `editing`
+  let selection = [];        // ordered names of top-level instances in `editing`
+  let editingPart = null;    // brick id loaded into the form
+  const undoStack = [];
+  let memo = new Map();
+  let errors = [];
+  let rootFlat = [], rootProps = null, derived = null;
+  let canvasLeaves = [];
+
+  // ================================================================
+  // computation
+  // ================================================================
+  function computePart(part) {
+    const ld = geomOf(part);
+    if (ld) {
+      const m = part.mass_g;
+      return { mass: m, com: ld.com.slice(), I: ld.inertia_per_g.map(r => r.map(v => v * m)), bbox: { min: ld.bbox[0].slice(), max: ld.bbox[1].slice() }, count: 1 };
+    }
+    const shapes = part.shapes || [];
+    const vols = shapes.map(shapeVolume);
+    const vt = vols.reduce((a, b) => a + b, 0);
+    const masses = shapes.map((s, i) => vt > 0 ? part.mass_g * vols[i] / vt : part.mass_g / Math.max(1, shapes.length));
+    let m = 0, mc = [0, 0, 0], bbox = null;
+    shapes.forEach((s, i) => { m += masses[i]; mc = vAdd(mc, vScale(s.pos || [0, 0, 0], masses[i])); const h = shapeHalf(s); const p = s.pos || [0, 0, 0]; bbox = bboxUnion(bbox, { min: vSub(p, h), max: vAdd(p, h) }); });
+    const com = m > 0 ? vScale(mc, 1 / m) : [0, 0, 0];
+    let I = matZero();
+    shapes.forEach((s, i) => { I = matAdd(I, matAdd(shapeInertia(s, masses[i]), shiftTerm(masses[i], vSub(s.pos || [0, 0, 0], com)))); });
+    return { mass: part.mass_g, com, I, bbox: bbox || { min: [0, 0, 0], max: [0, 0, 0] }, count: 1 };
+  }
+  function computeComponent(id, stack) {
+    stack = stack || [];
+    if (memo.has(id)) return memo.get(id);
+    const comp = doc.components[id];
+    const empty = { mass: 0, com: [0, 0, 0], I: matZero(), bbox: null, count: 0 };
+    if (!comp) { errors.push("component '" + id + "' does not exist"); return empty; }
+    if (stack.includes(id)) { errors.push("component '" + id + "' contains itself"); return empty; }
+    let m = 0, mc = [0, 0, 0], count = 0, bbox = null;
+    const placed = [];
+    (comp.children || []).forEach(ch => {
+      let props;
+      if (ch.part) { const part = doc.parts[ch.part]; if (!part) { errors.push("'" + ch.name + "' refers to a brick '" + ch.part + "' that is not in the library"); return; } props = computePart(part); }
+      else props = computeComponent(ch.component, stack.concat(id));
+      const R = rotMat(ch.rot), p = ch.pos || [0, 0, 0];
+      const c = vAdd(p, matVec(R, props.com));
+      placed.push({ m: props.mass, c, I: rotateInertia(R, props.I) });
+      m += props.mass; mc = vAdd(mc, vScale(c, props.mass)); count += props.count;
+      if (props.bbox) bbox = bboxUnion(bbox, bboxTransform(props.bbox, p, R));
+    });
+    const com = m > 0 ? vScale(mc, 1 / m) : [0, 0, 0];
+    let I = matZero();
+    placed.forEach(q => { I = matAdd(I, matAdd(q.I, shiftTerm(q.m, vSub(q.c, com)))); });
+    const out = { mass: m, com, I, bbox, count };
+    memo.set(id, out);
+    return out;
+  }
+  function flatten(compId, world, path, out, stack) {
+    const comp = doc.components[compId];
+    if (!comp) return out;
+    (comp.children || []).forEach(ch => {
+      const R = matMul(world.R, rotMat(ch.rot)), p = vAdd(world.p, matVec(world.R, ch.pos || [0, 0, 0]));
+      const cpath = path.concat(ch.name);
+      if (ch.part) out.push({ kind: "part", path: cpath, name: ch.name, partId: ch.part, world: { p, R }, inst: ch, parentComp: compId, depth: path.length });
+      else {
+        out.push({ kind: "component", path: cpath, name: ch.name, compId: ch.component, world: { p, R }, inst: ch, parentComp: compId, depth: path.length });
+        if (!stack.includes(ch.component)) flatten(ch.component, { p, R }, cpath, out, stack.concat(ch.component));
+      }
+    });
+    return out;
+  }
+  function componentContains(id, target, stack) {
+    stack = stack || [];
+    if (id === target) return true;
+    const comp = doc.components[id];
+    if (!comp || stack.includes(id)) return false;
+    return (comp.children || []).some(ch => ch.component && componentContains(ch.component, target, stack.concat(id)));
+  }
+  function usageCount(compId) {
+    let n = 0;
+    Object.keys(doc.components).forEach(k => (doc.components[k].children || []).forEach(ch => { if (ch.component === compId) n++; }));
+    return n;
+  }
+  function recompute() {
+    memo = new Map(); errors = [];
+    rootProps = computeComponent(doc.robot.root, []);
+    rootFlat = flatten(doc.robot.root, { p: [0, 0, 0], R: I3 }, [], [], [doc.robot.root]);
+    derived = deriveForSim();
+    canvasLeaves = flatten(editing, { p: [0, 0, 0], R: I3 }, [], [], [editing]);
+  }
+  function childOf(compId, name) { return (doc.components[compId].children || []).find(c => c.name === name) || null; }
+  const selectedInstances = () => selection.map(n => childOf(editing, n)).filter(Boolean);
+  function partShapes(part) {
+    if (part.shapes && part.shapes.length) return part.shapes;
+    const ld = geomOf(part);
+    if (!ld) return [];
+    const size = [0, 1, 2].map(i => ld.bbox[1][i] - ld.bbox[0][i]), pos = [0, 1, 2].map(i => (ld.bbox[0][i] + ld.bbox[1][i]) / 2);
+    return [{ type: "box", size, pos }];
+  }
+  function firstShape(part, type) { return partShapes(part).find(s => s.type === type) || null; }
+  function shapeWorldCentre(node, s) { return vAdd(node.world.p, matVec(node.world.R, s.pos || [0, 0, 0])); }
+  function lookOf(node) {
+    const part = doc.parts[node.partId];
+    const axis = part && part.frames && part.frames.look ? part.frames.look.axis : [0, 0, 1];
+    return vNorm(matVec(node.world.R, axis));
+  }
+  function deriveForSim() {
+    const byPath = new Map(rootFlat.map(n => [n.path.join("/"), n]));
+    const role = r => { const p = doc.robot.roles[r]; return p ? (byPath.get(p) || null) : null; };
+    const missing = [], notes = [];
+    ROLES.forEach(([r]) => { if (doc.robot.roles[r] && !byPath.get(doc.robot.roles[r])) notes.push("role " + r + " points at '" + doc.robot.roles[r] + "', which no longer exists"); });
+    const wl = role("wheel_left"), wr = role("wheel_right");
+    let origin = [0, 0, 0], wheel = null, ground = rootProps.bbox ? rootProps.bbox.min[2] : 0;
+    if (wl && wr && wl.kind === "part" && wr.kind === "part") {
+      const cl = firstShape(doc.parts[wl.partId], "cylinder"), cr = firstShape(doc.parts[wr.partId], "cylinder");
+      if (cl && cr) {
+        const pl = shapeWorldCentre(wl, cl), pr = shapeWorldCentre(wr, cr);
+        origin = vScale(vAdd(pl, pr), 0.5);
+        wheel = { radius: cl.radius, width: cl.length, track: vLen(vSub(pl, pr)), mass: doc.parts[wl.partId].mass_g };
+        ground = Math.min(pl[2], pr[2]) - cl.radius;
+        if (Math.abs(pl[0] - pr[0]) > 0.5) notes.push("the wheel centres differ in X by " + fmt(Math.abs(pl[0] - pr[0])) + " mm; the simulator's axle is straight");
+      } else missing.push("wheel roles must point at bricks with a cylinder shape");
+    } else { missing.push("wheel_left"); missing.push("wheel_right"); }
+    const rel = v => vSub(v, origin);
+    const spec = {};
+    const excluded = new Set([doc.robot.roles.wheel_left, doc.robot.roles.wheel_right, doc.robot.roles.caster].filter(Boolean));
+    let bodyBox = null, bodyMass = 0;
+    rootFlat.filter(n => n.kind === "part" && !excluded.has(n.path.join("/"))).forEach(n => {
+      const part = doc.parts[n.partId]; if (!part) return;
+      const pp = computePart(part);
+      bodyBox = bboxUnion(bodyBox, bboxTransform(pp.bbox, n.world.p, n.world.R)); bodyMass += pp.mass;
+    });
+    if (bodyBox) {
+      spec.body_length = (bodyBox.max[0] - bodyBox.min[0]) / 1000; spec.body_width = (bodyBox.max[1] - bodyBox.min[1]) / 1000; spec.body_height = (bodyBox.max[2] - bodyBox.min[2]) / 1000; spec.body_mass = bodyMass / 1000;
+      const bc = rel(vScale(vAdd(bodyBox.min, bodyBox.max), 0.5));
+      if (vLen(bc) > 1) notes.push("the flat spec centres its body box on the axle; this build's box centre is " + bc.map(v => fmt(v)).join(", ") + " mm from it (the assembly loader will place every brick where it is)");
+    }
+    if (wheel) { spec.wheel_radius = wheel.radius / 1000; spec.wheel_width = wheel.width / 1000; spec.wheel_mass = wheel.mass / 1000; spec.axle_length = wheel.track / 1000; }
+    const ca = role("caster");
+    if (ca && ca.kind === "part") {
+      const sp = firstShape(doc.parts[ca.partId], "sphere");
+      if (sp) { spec.caster_radius = sp.radius / 1000; spec.caster_offset = -rel(shapeWorldCentre(ca, sp))[0] / 1000; spec.caster_mass = doc.parts[ca.partId].mass_g / 1000; }
+      else notes.push("the caster role should point at a brick with a sphere shape");
+    } else missing.push("caster");
+    const cs = role("color_sensor");
+    if (cs) {
+      const c = rel(cs.world.p);
+      spec.color_sensor_x = c[0] / 1000; spec.color_sensor_y = c[1] / 1000; spec.color_sensor_z = c[2] / 1000;
+      const look = lookOf(cs);
+      spec.color_sensor_yaw = Math.round(Math.atan2(look[1], look[0]) / D2R * 10) / 10;
+      spec.color_sensor_pitch = Math.round(Math.asin(Math.max(-1, Math.min(1, look[2]))) / D2R * 10) / 10;
+    } else missing.push("color_sensor");
+    const l1 = role("line_sensor");
+    if (l1) { const c = rel(l1.world.p); spec.line_sensor_x = c[0] / 1000; if (Math.abs(c[1]) > 0.5) notes.push("the first line array is " + fmt(c[1]) + " mm off the centre line; the flat spec keeps chassis_line on it"); }
+    else missing.push("line_sensor");
+    const l2 = role("line_sensor_2");
+    if (l2) { const c = rel(l2.world.p); spec.line_sensor_2_x = c[0] / 1000; spec.line_sensor_2_y = c[1] / 1000; }
+    spec.pos_x = (doc.robot.spawn.pos_mm[0] || 0) / 1000; spec.pos_y = (doc.robot.spawn.pos_mm[1] || 0) / 1000; spec.yaw_deg = doc.robot.spawn.yaw_deg || 0;
+    Object.keys(spec).forEach(k => { spec[k] = Math.round(spec[k] * 1e5) / 1e5; });
+    const massProps = {
+      mass_kg: rootProps.mass / 1000,
+      com_m: rel(rootProps.com).map(v => Math.round(v) / 1000),
+      inertia_kg_m2_about_com: rootProps.I.map(r => r.map(v => Number((v * 1e-9).toExponential(3)))),
+      ground_z_m: Math.round(ground - origin[2]) / 1000,
+    };
+    return { spec, massProps, missing, notes, origin, ground, wheel };
+  }
+
+  // ================================================================
+  // formatting
+  // ================================================================
+  function fmt(v, d) {
+    if (v === null || v === undefined || !isFinite(v)) return "—";
+    const k = Math.pow(10, d === undefined ? 2 : d);
+    const r = Math.round(v * k) / k;
+    return (Object.is(r, -0) ? 0 : r).toString();
+  }
+  const fmtV = v => v.map(x => fmt(x, 1)).join(", ");
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function hexToRgb(h) { h = h.replace("#", ""); if (h.length === 3) h = h.split("").map(c => c + c).join(""); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; }
+  function shade(hex, k) { const [r, g, b] = hexToRgb(hex); const f = x => Math.max(0, Math.min(255, Math.round(x * k))); return "rgb(" + f(r) + "," + f(g) + "," + f(b) + ")"; }
+  let toastTimer = null;
+  function toast(text) { const t = document.getElementById("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1600); }
+  function slug(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); }
+
+  // ================================================================
+  // 3D viewport (three.js): scene, gizmos, picking, drops, thumbnails
+  // ================================================================
+  const HAS3D = typeof THREE !== "undefined" && THREE.OrbitControls && THREE.TransformControls;
+  const canvas = document.getElementById("view");
+  const wrap = document.getElementById("viewwrap");
+  let snapMM = 8;
+  let gizmoMode = "translate";
+  const catToken = { lego: "--cat-lego", electronics: "--cat-electronics", servo: "--cat-servo", wheel: "--cat-wheel", other: "--cat-other" };
+  const colorOf = token => new THREE.Color(css(token));
+  const mat4 = (R, p) => new THREE.Matrix4().set(R[0][0], R[0][1], R[0][2], p[0], R[1][0], R[1][1], R[1][2], p[1], R[2][0], R[2][1], R[2][2], p[2], 0, 0, 0, 1);
+  function rotFromObject(o) { o.updateMatrix(); const e = o.matrix.elements; return [[e[0], e[4], e[8]], [e[1], e[5], e[9]], [e[2], e[6], e[10]]]; }
+  function editedProps() { return computeComponent(editing, []); }
+  function canvasGround() { return editing === doc.robot.root ? derived.ground : (editedProps().bbox ? editedProps().bbox.min[2] : 0); }
+
+  const geoCache = new Map();
+  function meshGeometry(key, ld) {
+    if (geoCache.has(key)) return geoCache.get(key);
+    if (!ld) return null;
+    const pos16 = new Int16Array(b64bytes(ld.mesh.pos).buffer);
+    const nrm8 = new Int8Array(b64bytes(ld.mesh.nrm).buffer);
+    const ib = b64bytes(ld.mesh.idx).buffer;
+    const idx = ld.mesh.idx32 ? new Uint32Array(ib) : new Uint16Array(ib);
+    const pos = new Float32Array(pos16.length), nrm = new Float32Array(nrm8.length);
+    for (let i = 0; i < pos16.length; i++) { pos[i] = pos16[i] / 100; nrm[i] = nrm8[i] / 127; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    geoCache.set(key, g);
+    return g;
+  }
+  // builds one Group per brick instance (userData.top = the top-level instance it belongs to)
+  function buildLeafMeshes(leaves, selected) {
+    const root = new THREE.Group();
+    leaves.filter(n => n.kind === "part").forEach(n => {
+      const part = n.partId.startsWith("__ld_") ? { category: "lego", ldraw: n.partId.slice(5), mass_g: 1 } : doc.parts[n.partId]; if (!part) return;
+      const g = new THREE.Group();
+      g.matrixAutoUpdate = false; g.matrix.copy(mat4(n.world.R, n.world.p));
+      g.userData = { top: n.path[0], path: n.path.join("/"), partId: n.partId };
+      const isSel = selected && selected(n);
+      const base = colorOf(catToken[part.category] || "--cat-other");
+      const ld = geomOf(part);
+      if (ld) {
+        const geo = meshGeometry(geomKey(n.partId, part), ld);
+        const m = new THREE.MeshStandardMaterial({ color: base, roughness: 0.55, metalness: 0.04, side: THREE.DoubleSide });
+        if (isSel) { m.emissive = colorOf("--accent"); m.emissiveIntensity = 0.45; }
+        const mesh = new THREE.Mesh(geo, m);
+        mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData = Object.assign({ shared: true }, g.userData);
+        g.add(mesh); root.add(g);
+        return;
+      }
+      (part.shapes || []).forEach(sh => {
+        let geo;
+        if (sh.type === "box") geo = new THREE.BoxGeometry(sh.size[0], sh.size[1], sh.size[2]);
+        else if (sh.type === "cylinder") { geo = new THREE.CylinderGeometry(sh.radius, sh.radius, sh.length, 32); if ((sh.axis || "z") === "x") geo.rotateZ(-Math.PI / 2); else if ((sh.axis || "z") === "z") geo.rotateX(Math.PI / 2); }
+        else geo = new THREE.SphereGeometry(sh.radius, 24, 16);
+        const m = new THREE.MeshStandardMaterial({ color: base, roughness: 0.62, metalness: 0.05 });
+        if (isSel) { m.emissive = colorOf("--accent"); m.emissiveIntensity = 0.45; }
+        const mesh = new THREE.Mesh(geo, m);
+        mesh.position.set(...(sh.pos || [0, 0, 0]));
+        mesh.castShadow = true; mesh.receiveShadow = true;
+        mesh.userData = g.userData;
+        g.add(mesh);
+      });
+      root.add(g);
+    });
+    return root;
+  }
+  function disposeGroup(g) { g.traverse(o => { if (o.geometry && !o.userData.shared) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
+
+  let renderer, scene, camera, controls, gizmo, proxy, sceneRoot = null, gridGroup = null, groundMesh, axesHelper, selBoxes = [], comMarks = [], raycaster, ray = { down: null, skip: false };
+  const labelsHost = document.getElementById("labels");
+  function init3D() {
+    if (!HAS3D) {
+      const d = document.createElement("div"); d.className = "no3d"; d.textContent = "The 3D library did not load, so the view is empty. Everything else on the page still works.";
+      wrap.appendChild(d); return;
+    }
+    try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+    catch (err) { const d = document.createElement("div"); d.className = "no3d"; d.textContent = "This browser could not start WebGL, so the 3D view is empty: " + err.message; wrap.appendChild(d); renderer = null; return; }
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(38, 1, 1, 5000);
+    camera.up.set(0, 0, 1);
+    controls = new THREE.OrbitControls(camera, canvas);
+    controls.enableDamping = true; controls.dampingFactor = 0.12; controls.screenSpacePanning = true;
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.85));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+    sun.position.set(180, -140, 260); sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    const sc = sun.shadow.camera; sc.left = -300; sc.right = 300; sc.top = 300; sc.bottom = -300; sc.near = 10; sc.far = 1200;
+    scene.add(sun);
+    groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.ShadowMaterial({ opacity: 0.18 }));
+    groundMesh.receiveShadow = true; scene.add(groundMesh);
+    axesHelper = new THREE.AxesHelper(24); scene.add(axesHelper);
+    raycaster = new THREE.Raycaster();
+    proxy = new THREE.Object3D(); scene.add(proxy);
+    gizmo = new THREE.TransformControls(camera, canvas);
+    gizmo.setSize(0.8);
+    gizmo.addEventListener("dragging-changed", e => { controls.enabled = !e.value; });
+    gizmo.addEventListener("mouseDown", () => { pushUndo(); });
+    gizmo.addEventListener("objectChange", onGizmoChange);
+    gizmo.addEventListener("mouseUp", () => { changed(); if (magnet) snapSelection(false); });
+    scene.add(gizmo);
+    canvas.addEventListener("pointerdown", e => { ray.down = [e.clientX, e.clientY]; ray.skip = !!gizmo.axis; });
+    canvas.addEventListener("pointerup", e => {
+      if (!ray.down) return; const d = Math.hypot(e.clientX - ray.down[0], e.clientY - ray.down[1]); ray.down = null;
+      if (ray.skip || d > 4 || e.button !== 0) return;
+      const hit = pick(e.clientX, e.clientY);
+      if (!hit) { if (!e.shiftKey) { selection = []; renderContents(); renderInspector(); refresh3D(); } return; }
+      const top = hit.top;
+      if (e.shiftKey) selection = selection.includes(top) ? selection.filter(n => n !== top) : selection.concat(top);
+      else selection = [top];
+      renderContents(); renderInspector(); refresh3D();
+    });
+    canvas.addEventListener("dblclick", e => { const hit = pick(e.clientX, e.clientY); if (!hit) return; const ch = childOf(editing, hit.top); if (ch && ch.component) openComponent(ch.component, true); });
+    new ResizeObserver(resize3D).observe(wrap);
+    resize3D();
+    (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); placeLabels(); })();
+  }
+  function resize3D() {
+    if (!renderer) return;
+    const r = wrap.getBoundingClientRect(); const W = Math.max(1, r.width), H = Math.max(1, r.height);
+    renderer.setSize(W, H, false); camera.aspect = W / H; camera.updateProjectionMatrix();
+  }
+  function ndc(clientX, clientY) { const r = canvas.getBoundingClientRect(); return new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1); }
+  function pick(clientX, clientY) {
+    if (!sceneRoot) return null;
+    raycaster.setFromCamera(ndc(clientX, clientY), camera);
+    const hits = raycaster.intersectObjects(sceneRoot.children, true);
+    return hits.length ? hits[0].object.userData : null;
+  }
+  function planePoint(clientX, clientY, z0) {
+    raycaster.setFromCamera(ndc(clientX, clientY), camera);
+    const out = new THREE.Vector3();
+    const ok = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -z0), out);
+    return ok ? [out.x, out.y, out.z] : null;
+  }
+  const snap = v => snapMM ? Math.round(v / snapMM) * snapMM : round3(v);
+  // the gizmo drives the proxy; the proxy's pose is written back to the selected instances
+  let gizmoStart = null;
+  function syncProxy() {
+    if (!gizmo) return;
+    const insts = selectedInstances();
+    if (!insts.length) { gizmo.detach(); gizmoStart = null; return; }
+    const a = insts[0];
+    proxy.position.set(...a.pos); proxy.setRotationFromMatrix(mat4(rotMat(a.rot), [0, 0, 0]));
+    gizmoStart = { pos: a.pos.slice(), R: rotMat(a.rot), others: insts.slice(1).map(i => ({ inst: i, pos: i.pos.slice(), R: rotMat(i.rot) })) };
+    gizmo.attach(proxy); gizmo.setMode(gizmoMode);
+    gizmo.setTranslationSnap(snapMM || null); gizmo.setRotationSnap(snapMM ? Math.PI / 2 : null);
+  }
+  function onGizmoChange() {
+    const insts = selectedInstances(); if (!insts.length || !gizmoStart) return;
+    const a = insts[0];
+    const p = [proxy.position.x, proxy.position.y, proxy.position.z].map(v => round3(snapMM ? Math.round(v / snapMM) * snapMM : v));
+    const R = rotFromObject(proxy);
+    const dp = vSub(p, gizmoStart.pos);
+    const dR = matMul(R, matT(gizmoStart.R));      // rotation applied since the drag started
+    a.pos = p; a.rot = eulerFrom(R);
+    gizmoStart.others.forEach(o => {
+      if (gizmoMode === "translate") o.inst.pos = vAdd(o.pos, dp).map(round3);
+      else { o.inst.rot = eulerFrom(matMul(dR, o.R)); o.inst.pos = vAdd(gizmoStart.pos, matVec(dR, vSub(o.pos, gizmoStart.pos))).map(round3); }
+    });
+    changed(true); rebuildScene(); renderPose(); renderContents();
+  }
+  function rebuildScene() {
+    if (!renderer) return;
+    if (sceneRoot) { scene.remove(sceneRoot); disposeGroup(sceneRoot); }
+    const selSet = new Set(selection);
+    sceneRoot = buildLeafMeshes(canvasLeaves, n => selSet.has(n.path[0]));
+    scene.add(sceneRoot);
+    selBoxes.forEach(b => scene.remove(b)); selBoxes = [];
+    sceneRoot.children.forEach(g => { if (selSet.has(g.userData.top)) { const b = new THREE.BoxHelper(g, colorOf("--accent")); scene.add(b); selBoxes.push(b); } });
+    // ground + grid
+    const gz = canvasGround();
+    groundMesh.position.z = gz - 0.05;
+    if (gridGroup) { scene.remove(gridGroup); disposeGroup(gridGroup); gridGroup = null; }
+    if (document.getElementById("show-ground").checked) {
+      const pr = editedProps(); const bb = pr.bbox || { min: [-40, -40, 0], max: [40, 40, 0] };
+      const x0 = Math.floor((bb.min[0] - 48) / 8) * 8, x1 = Math.ceil((bb.max[0] + 48) / 8) * 8, y0 = Math.floor((bb.min[1] - 48) / 8) * 8, y1 = Math.ceil((bb.max[1] + 48) / 8) * 8;
+      const fine = [], strong = [];
+      for (let x = x0; x <= x1; x += 8) (x % 40 === 0 ? strong : fine).push(x, y0, gz, x, y1, gz);
+      for (let y = y0; y <= y1; y += 8) (y % 40 === 0 ? strong : fine).push(x0, y, gz, x1, y, gz);
+      gridGroup = new THREE.Group();
+      [[fine, "--grid"], [strong, "--grid-strong"]].forEach(([arr, tok]) => { const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3)); gridGroup.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: colorOf(tok) }))); });
+      scene.add(gridGroup);
+    }
+    // centres of mass
+    comMarks.forEach(m => scene.remove(m.obj)); comMarks = []; labelsHost.innerHTML = "";
+    if (document.getElementById("show-com").checked) {
+      const pr = editedProps();
+      const marks = [];
+      if (pr.count) marks.push({ c: pr.com, label: (editing === doc.robot.root ? "robot" : editing) + " COM", r: 3.2 });
+      if (selection.length === 1) { const ch = childOf(editing, selection[0]); if (ch && ch.component) { const cp = computeComponent(ch.component, []); marks.push({ c: vAdd(ch.pos, matVec(rotMat(ch.rot), cp.com)), label: ch.name + " COM", r: 2.4 }); } }
+      marks.forEach(mk => {
+        const o = new THREE.Group();
+        o.add(new THREE.Mesh(new THREE.SphereGeometry(mk.r, 16, 12), new THREE.MeshBasicMaterial({ color: colorOf("--accent") })));
+        const L = mk.r * 4, arr = [-L, 0, 0, L, 0, 0, 0, -L, 0, 0, L, 0, 0, 0, -L, 0, 0, L];
+        const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3));
+        o.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: colorOf("--accent") })));
+        o.position.set(...mk.c); scene.add(o);
+        const lab = document.createElement("div"); lab.textContent = mk.label; labelsHost.appendChild(lab);
+        comMarks.push({ obj: o, el: lab, c: mk.c });
+      });
+    }
+    scene.background = colorOf("--well");
+    axesHelper.position.set(0, 0, 0);
+    document.getElementById("empty-hint").hidden = editedProps().count > 0;
+    document.getElementById("hud-l").textContent = "editing " + editing + (selection.length ? " · " + selection.length + " selected" : "") + " · 1 module = 8 mm · snap " + (snapMM ? snapMM + " mm" : "off");
+    document.getElementById("hud-r").textContent = "orbit: drag · pan: right-drag · zoom: wheel · W move · E rotate · R turn 90° · Del · ⌘Z undo · double-click a component to open it";
+  }
+  function placeLabels() {
+    if (!renderer) return;
+    const r = canvas.getBoundingClientRect();
+    comMarks.forEach(m => { const v = new THREE.Vector3(...m.c).project(camera); m.el.hidden = v.z > 1; m.el.style.left = ((v.x + 1) / 2 * r.width) + "px"; m.el.style.top = ((1 - v.y) / 2 * r.height) + "px"; });
+  }
+  function refresh3D() { rebuildScene(); syncProxy(); }
+
+  // connection features of an instance (or every leaf under a component instance), in the edited frame
+  const MATES = { pin: ["pin_hole"], axle: ["axle_hole", "pin_hole"], stud: ["stud_hole", "pin_hole"] };
+  function leafConnectors(leaf) {
+    const part = doc.parts[leaf.partId]; const ld = geomOf(part); if (!ld || !ld.connectors) return [];
+    return ld.connectors.map(c => ({ kind: c.kind, c: vAdd(leaf.world.p, matVec(leaf.world.R, c.centre)), u: vNorm(matVec(leaf.world.R, c.axis)), L: c.length, leaf }));
+  }
+  function connectorsOf(topNames) {
+    const set = new Set(topNames);
+    return canvasLeaves.filter(n => n.kind === "part" && set.has(n.path[0])).flatMap(leafConnectors);
+  }
+  function connectorsExcept(topNames) {
+    const set = new Set(topNames);
+    return canvasLeaves.filter(n => n.kind === "part" && !set.has(n.path[0])).flatMap(leafConnectors);
+  }
+  function matedPairs(mine, others, tolMm, tolDeg) {
+    const out = [];
+    mine.forEach(m => others.forEach(o => {
+      const male = MATES[m.kind] ? m : (MATES[o.kind] ? o : null), female = male === m ? o : m;
+      if (!male || !MATES[male.kind].includes(female.kind)) return;
+      const cosA = Math.abs(vDot(m.u, o.u)); if (cosA < Math.cos(tolDeg * D2R)) return;
+      const d = vSub(o.c, m.c); const along = vDot(d, o.u); const off = vLen(vSub(d, vScale(o.u, along)));
+      const slack = Math.max(0, (Math.max(m.L, o.L) - Math.min(m.L, o.L)) / 2);
+      const dist = Math.hypot(off, Math.max(0, Math.abs(along) - slack));
+      if (dist <= tolMm) out.push({ m, o, dist, angle: Math.acos(Math.min(1, cosA)) / D2R });
+    }));
+    return out.sort((a, b) => a.dist - b.dist);
+  }
+  function snapSelection(announce) {
+    if (selection.length !== 1) { if (announce) toast("Select one item to snap"); return false; }
+    const inst = childOf(editing, selection[0]); if (!inst) return false;
+    const mine = connectorsOf(selection), others = connectorsExcept(selection);
+    if (!mine.length || !others.length) { if (announce) toast("Nothing to snap to"); return false; }
+    const pairs = matedPairs(mine, others, 6, 30);
+    if (!pairs.length) { if (announce) toast("No hole within reach"); return false; }
+    const { m, o } = pairs[0];
+    // rotate the instance so its connector axis lies on the hole axis (nearest sign), then centre it in the hole
+    const s = vDot(m.u, o.u) >= 0 ? 1 : -1;
+    const ut = vScale(o.u, s);
+    const R0 = rotMat(inst.rot);
+    let dR = I3;
+    const cr = vCross(m.u, ut), sn = vLen(cr), cs = vDot(m.u, ut);
+    if (sn > 1e-6) {
+      const k = vScale(cr, 1 / sn), K = [[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]];
+      const KK = matMul(K, K);
+      dR = matAdd(matAdd(I3, K.map(r => r.map(v => v * sn))), KK.map(r => r.map(v => v * (1 - cs))));
+    }
+    const R1 = matMul(dR, R0);
+    const cLocal = matVec(matT(R0), vSub(m.c, inst.pos));                 // connector centre in the instance frame
+    const cNow = vAdd(inst.pos, matVec(R1, cLocal));
+    let t = vDot(vSub(cNow, o.c), ut);
+    const slack = Math.abs(o.L - m.L) / 2;          // an axle slides through a hole; a pin half sits centred in one
+    t = Math.abs(o.L - m.L) < 1 ? 0 : Math.max(-slack, Math.min(slack, t));
+    const target = vAdd(o.c, vScale(ut, t));
+    pushUndo();
+    inst.rot = eulerFrom(R1);
+    inst.pos = vSub(target, matVec(R1, cLocal)).map(v => Math.round(v * 100) / 100);
+    changed();
+    if (announce) toast("Snapped " + inst.name + " into " + o.leaf.path.join("/"));
+    return true;
+  }
+  function connectionsOf(topName) {
+    const mine = connectorsOf([topName]), others = connectorsExcept([topName]);
+    const seen = new Set();
+    return matedPairs(mine, others, 0.4, 3).filter(p => { const k = p.m.c.map(v => Math.round(v * 10)).join(",") + "|" + p.o.leaf.path.join("/"); if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+  function fitView(dir) {
+    if (!renderer) return;
+    const pr = editedProps(); const bb = pr.bbox || { min: [-40, -40, -20], max: [40, 40, 20] };
+    const c = vScale(vAdd(bb.min, bb.max), 0.5); const diag = Math.max(40, vLen(vSub(bb.max, bb.min)));
+    const dist = diag / (2 * Math.tan(camera.fov * D2R / 2)) * 1.25;
+    const d = vNorm(dir || [-0.62, -0.62, 0.48]);
+    controls.target.set(...c); camera.position.set(c[0] + d[0] * dist, c[1] + d[1] * dist, c[2] + d[2] * dist); camera.near = Math.max(0.5, dist / 200); camera.far = dist * 40; camera.updateProjectionMatrix(); controls.update();
+  }
+  // drops from the library land on the plane z = 0 of the frame being edited
+  wrap.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; wrap.classList.add("over"); });
+  wrap.addEventListener("dragleave", () => wrap.classList.remove("over"));
+  wrap.addEventListener("drop", e => {
+    e.preventDefault(); wrap.classList.remove("over");
+    let ref; try { ref = JSON.parse(e.dataTransfer.getData("text/plain")); } catch (err) { return; }
+    if (!ref || (!ref.part && !ref.component)) return;
+    const p = (renderer && planePoint(e.clientX, e.clientY, 0)) || [0, 0, 0];
+    addInstance(ref, [snap(p[0]), snap(p[1]), 0]);
+    if (magnet) snapSelection(false);
+  });
+  window.addEventListener("keydown", e => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSelection(); return; }
+    if (e.key === "Escape") { selection = []; renderContents(); renderInspector(); refresh3D(); return; }
+    if (e.key.toLowerCase() === "w") { setGizmoMode("translate"); return; }
+    if (e.key.toLowerCase() === "e") { setGizmoMode("rotate"); return; }
+    if (e.key.toLowerCase() === "f") { fitView(); return; }
+    if (e.key.toLowerCase() === "s") { snapSelection(true); return; }
+    if (!selection.length) return;
+    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeSelection(); return; }
+    if (e.key.toLowerCase() === "r") { e.preventDefault(); rotateSelection(2, 90); return; }
+    const step = e.shiftKey ? 1 : (snapMM || 1);
+    const nudge = { ArrowUp: [step, 0], ArrowDown: [-step, 0], ArrowLeft: [0, step], ArrowRight: [0, -step] }[e.key];
+    if (nudge) { e.preventDefault(); pushUndo(); selectedInstances().forEach(i => { i.pos[0] = round3(i.pos[0] + nudge[0]); i.pos[1] = round3(i.pos[1] + nudge[1]); }); changed(); }
+  });
+  function setGizmoMode(m) { gizmoMode = m; if (gizmo) gizmo.setMode(m); document.querySelectorAll("button[data-gizmo]").forEach(b => b.classList.toggle("on", b.getAttribute("data-gizmo") === m)); }
+
+  // thumbnails: rendered by the main renderer into an offscreen target (no second WebGL context), then copied into each card
+  let thumbRT = null, thumbCam = null, thumbBuf = null, thumbCanvas = null;
+  const thumbCache = new Map();
+  function thumbCached(key, cv, leavesFn, bbox) {
+    const k = key + "|" + css("--well");
+    if (thumbCache.has(k)) { cv.getContext("2d").drawImage(thumbCache.get(k), 0, 0); return; }
+    thumb(cv, leavesFn(), bbox);
+    const copy = document.createElement("canvas"); copy.width = cv.width; copy.height = cv.height; copy.getContext("2d").drawImage(cv, 0, 0);
+    thumbCache.set(k, copy);
+  }
+  const TW = 152, TH = 112;
+  function thumb(cv, leaves, bbox) {
+    const ctx = cv.getContext("2d"); ctx.clearRect(0, 0, cv.width, cv.height);
+    const placeholder = text => {
+      ctx.strokeStyle = css("--ink-3"); ctx.setLineDash([3, 3]); ctx.strokeRect(10, 8, cv.width - 20, cv.height - 16); ctx.setLineDash([]);
+      ctx.fillStyle = css("--ink-3"); ctx.font = "10px " + css("--mono"); ctx.textAlign = "center"; ctx.fillText(text, cv.width / 2, cv.height / 2 + 4);
+    };
+    if (!leaves.some(n => n.kind === "part")) { placeholder("empty"); return; }
+    if (!renderer) { placeholder("no 3D"); return; }
+    try {
+      if (!thumbRT) {
+        thumbRT = new THREE.WebGLRenderTarget(TW, TH, { depthBuffer: true });
+        thumbCam = new THREE.PerspectiveCamera(30, TW / TH, 1, 5000); thumbCam.up.set(0, 0, 1);
+        thumbBuf = new Uint8Array(TW * TH * 4);
+        thumbCanvas = document.createElement("canvas"); thumbCanvas.width = TW; thumbCanvas.height = TH;
+      }
+      const sc = new THREE.Scene();
+      sc.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.9));
+      const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(120, -100, 200); sc.add(sun);
+      const g = buildLeafMeshes(leaves, null); sc.add(g);
+      const c = vScale(vAdd(bbox.min, bbox.max), 0.5), diag = Math.max(10, vLen(vSub(bbox.max, bbox.min)));
+      const dist = diag / (2 * Math.tan(thumbCam.fov * D2R / 2)) * 1.15, d = vNorm([-0.62, -0.62, 0.48]);
+      thumbCam.position.set(c[0] + d[0] * dist, c[1] + d[1] * dist, c[2] + d[2] * dist); thumbCam.lookAt(c[0], c[1], c[2]); thumbCam.near = dist / 100; thumbCam.far = dist * 10; thumbCam.updateProjectionMatrix();
+      const prevTarget = renderer.getRenderTarget(), prevShadow = renderer.shadowMap.enabled;
+      renderer.shadowMap.enabled = false;
+      renderer.setRenderTarget(thumbRT); renderer.setClearColor(0x000000, 0); renderer.clear();
+      renderer.render(sc, thumbCam);
+      renderer.readRenderTargetPixels(thumbRT, 0, 0, TW, TH, thumbBuf);
+      renderer.setRenderTarget(prevTarget); renderer.shadowMap.enabled = prevShadow;
+      disposeGroup(g);
+      const img = thumbCanvas.getContext("2d").createImageData(TW, TH);
+      for (let y = 0; y < TH; y++) img.data.set(thumbBuf.subarray((TH - 1 - y) * TW * 4, (TH - y) * TW * 4), y * TW * 4);   // GL rows are bottom-up
+      thumbCanvas.getContext("2d").putImageData(img, 0, 0);
+      ctx.drawImage(thumbCanvas, 0, 0, cv.width, cv.height);
+    } catch (err) { placeholder("3D"); }
+  }
+
+  // ================================================================
+  // editing operations
+  // ================================================================
+  function pushUndo() { undoStack.push(JSON.stringify({ doc, editing, crumbs, selection })); if (undoStack.length > 60) undoStack.shift(); }
+  function undo() {
+    const s = undoStack.pop(); if (!s) { toast("Nothing to undo"); return; }
+    const o = JSON.parse(s); doc = o.doc; editing = o.editing; crumbs = o.crumbs; selection = o.selection;
+    if (!doc.components[editing]) { editing = doc.robot.root; crumbs = [editing]; selection = []; }
+    changed(true); renderAll(); toast("Undone");
+  }
+  function openComponent(id, push) {
+    if (!doc.components[id]) return;
+    if (push) crumbs = crumbs.concat(id); else crumbs = crumbs.slice(0, crumbs.indexOf(id) + 1);
+    editing = id; selection = [];
+    recompute(); renderAll(); fitView();
+  }
+  function ensureLdrawPart(num) {
+    const ld = BUNDLE.parts[num]; if (!ld) return null;
+    const id = "lego_" + num;
+    if (!doc.parts[id]) doc.parts[id] = { name: ld.name, category: "lego", mass_g: ld.mass_g, source: ld.source, source_note: ld.source_note, ldraw: num };
+    return id;
+  }
+  function addInstance(ref, pos) {
+    if (ref.ldraw) { const id = ensureLdrawPart(ref.ldraw); if (!id) return; ref = { part: id }; }
+    if (ref.component && componentContains(ref.component, editing)) { toast("That would put " + ref.component + " inside itself"); return; }
+    if (ref.part && !doc.parts[ref.part]) return;
+    pushUndo();
+    const comp = doc.components[editing];
+    const base = ref.part || ref.component;
+    const name = comp.children.some(c => c.name === base) ? uniqueName(comp.children, base) : base;
+    comp.children.push(Object.assign({ name, pos: pos || [0, 0, 0], rot: [0, 0, 0] }, ref));
+    selection = [name];
+    changed(); toast("Added " + name + " to " + editing);
+  }
+  function uniqueName(siblings, base) {
+    const stem = base.replace(/_\d+$/, "");
+    let i = 2, name = stem + "_" + i;
+    while (siblings.some(c => c.name === name)) { i++; name = stem + "_" + i; }
+    return name;
+  }
+  // role paths walk from the root; rewrite them when the tree under `editing` changes shape
+  function remapRoles(fn) {
+    Object.keys(doc.robot.roles).forEach(r => {
+      const p = doc.robot.roles[r]; if (!p) return;
+      const segs = p.split("/"), out = [];
+      let comp = doc.robot.root;
+      for (let k = 0; k < segs.length; k++) {
+        const seg = segs[k];
+        const here = comp === editing;
+        const res = here ? fn(seg) : null;   // null = unchanged, [] = dropped, [...names] = replaced
+        if (res === null) out.push(seg); else res.forEach(x => out.push(x));
+        const ch = comp ? childOf(comp, seg) : null;
+        comp = ch && ch.component ? ch.component : null;
+        if (!comp) { for (let j = k + 1; j < segs.length; j++) out.push(segs[j]); break; }
+      }
+      doc.robot.roles[r] = out.join("/");
+    });
+  }
+  function removeSelection() {
+    const insts = selectedInstances(); if (!insts.length) return;
+    pushUndo();
+    const names = new Set(insts.map(i => i.name));
+    // roles that pointed into the removed instances are cleared
+    Object.keys(doc.robot.roles).forEach(r => { const p = doc.robot.roles[r]; if (!p) return; const n = rootFlat.find(x => x.path.join("/") === p); if (n && n.path.some((seg, k) => { const c = compAtDepth(n.path, k); return c === editing && names.has(seg); })) doc.robot.roles[r] = ""; });
+    doc.components[editing].children = doc.components[editing].children.filter(c => !names.has(c.name));
+    selection = []; changed(); toast("Removed " + insts.length + (insts.length === 1 ? " item" : " items"));
+  }
+  function compAtDepth(path, k) {
+    let comp = doc.robot.root;
+    for (let i = 0; i < k; i++) { const ch = childOf(comp, path[i]); comp = ch && ch.component ? ch.component : null; if (!comp) return null; }
+    return comp;
+  }
+  function duplicateSelection() {
+    const insts = selectedInstances(); if (!insts.length) return;
+    pushUndo();
+    const siblings = doc.components[editing].children;
+    const made = [];
+    insts.forEach(inst => { const copy = JSON.parse(JSON.stringify(inst)); copy.name = uniqueName(siblings, inst.name); copy.pos[1] = round3(copy.pos[1] - (snapMM || 8) * 2); siblings.splice(siblings.indexOf(inst) + 1, 0, copy); made.push(copy.name); });
+    selection = made; changed(); toast("Duplicated");
+  }
+  function rotateSelection(axis, deg) {
+    const insts = selectedInstances(); if (!insts.length) return;
+    pushUndo();
+    insts.forEach(i => { i.rot[axis] = ((i.rot[axis] + deg + 180) % 360 + 360) % 360 - 180; });
+    changed();
+  }
+  function groupSelection(newId) {
+    const comp = doc.components[editing];
+    const chosen = selection.map(n => childOf(editing, n)).filter(Boolean);
+    if (!chosen.length) return;
+    newId = slug(newId);
+    if (!newId) { toast("Give the component a name"); return; }
+    if (doc.components[newId]) { toast("A component named " + newId + " already exists"); return; }
+    pushUndo();
+    const first = chosen[0], p0 = first.pos.slice(), R0 = rotMat(first.rot), R0t = matT(R0);
+    const children = chosen.map(ch => Object.assign({}, JSON.parse(JSON.stringify(ch)), { pos: matVec(R0t, vSub(ch.pos, p0)).map(round3), rot: eulerFrom(matMul(R0t, rotMat(ch.rot))) }));
+    const instName = comp.children.some(c => c.name === newId && !chosen.includes(c)) ? uniqueName(comp.children, newId) : newId;
+    const names = chosen.map(c => c.name);
+    remapRoles(seg => names.includes(seg) ? [instName, seg] : null);
+    doc.components[newId] = { note: "", children };
+    const idx = comp.children.indexOf(first);
+    comp.children = comp.children.filter(c => !chosen.includes(c));
+    comp.children.splice(Math.min(idx, comp.children.length), 0, { name: instName, component: newId, pos: p0, rot: first.rot.slice() });
+    selection = [instName];
+    changed(); toast(newId + " is now in the library");
+  }
+  function ungroupSelection() {
+    const inst = selectedInstances()[0]; if (!inst || !inst.component) return;
+    const comp = doc.components[editing], inner = doc.components[inst.component];
+    if (!inner) return;
+    pushUndo();
+    const R = rotMat(inst.rot);
+    const rename = {};
+    const siblings = comp.children.filter(c => c !== inst);
+    const made = inner.children.map(ch => {
+      const c = JSON.parse(JSON.stringify(ch));
+      c.pos = vAdd(inst.pos, matVec(R, ch.pos)).map(round3); c.rot = eulerFrom(matMul(R, rotMat(ch.rot)));
+      if (siblings.some(s => s.name === c.name) || made_names_has(c.name)) { const nn = uniqueName(siblings.concat(madeSoFar), c.name); rename[ch.name] = nn; c.name = nn; }
+      madeSoFar.push(c);
+      return c;
+    });
+    remapRoles(seg => seg === inst.name ? [] : null);
+    // children of the ungrouped instance now sit in `editing` under their (possibly new) names
+    Object.keys(doc.robot.roles).forEach(r => { const p = doc.robot.roles[r]; if (!p) return; });
+    const idx = comp.children.indexOf(inst);
+    comp.children.splice(idx, 1, ...made);
+    // a renamed child breaks any role that named it; repoint those
+    Object.keys(rename).forEach(old => { Object.keys(doc.robot.roles).forEach(r => { const segs = doc.robot.roles[r].split("/"); for (let k = 0; k < segs.length; k++) if (segs[k] === old && compAtDepth(segs, k) === editing) segs[k] = rename[old]; doc.robot.roles[r] = segs.join("/"); }); });
+    selection = made.map(c => c.name);
+    changed(); toast("Ungrouped " + inst.name + "; " + inst.component + " stays in the library");
+  }
+  let madeSoFar = [];
+  function made_names_has(n) { return madeSoFar.some(c => c.name === n); }
+  function renameInstance(inst, nv) {
+    const siblings = doc.components[editing].children;
+    if (!nv || siblings.some(c => c !== inst && c.name === nv) || nv.includes("/")) { toast("Names must be unique among siblings and contain no /"); return false; }
+    pushUndo();
+    const old = inst.name;
+    remapRoles(seg => seg === old ? [nv] : null);
+    inst.name = nv;
+    selection = selection.map(n => n === old ? nv : n);
+    changed(); return true;
+  }
+  function renameComponent(oldId, newId) {
+    newId = slug(newId);
+    if (!newId || newId === oldId) return false;
+    if (doc.components[newId]) { toast("A component named " + newId + " already exists"); return false; }
+    pushUndo();
+    doc.components[newId] = doc.components[oldId]; delete doc.components[oldId];
+    Object.keys(doc.components).forEach(k => (doc.components[k].children || []).forEach(ch => { if (ch.component === oldId) ch.component = newId; }));
+    if (doc.robot.root === oldId) doc.robot.root = newId;
+    if (editing === oldId) editing = newId;
+    crumbs = crumbs.map(c => c === oldId ? newId : c);
+    changed(); return true;
+  }
+
+  // ================================================================
+  // STL import: a file becomes a brick with exact mass properties and pin holes
+  // ================================================================
+  function parseSTL(buf) {
+    const dv = new DataView(buf);
+    if (buf.byteLength >= 84) {
+      const n = dv.getUint32(80, true);
+      if (84 + 50 * n === buf.byteLength) {
+        const out = new Float32Array(n * 9); let o = 84;
+        for (let i = 0; i < n; i++) { o += 12; for (let k = 0; k < 9; k++) { out[i * 9 + k] = dv.getFloat32(o, true); o += 4; } o += 2; }
+        return out;
+      }
+    }
+    const text = new TextDecoder().decode(new Uint8Array(buf));
+    if (/^\s*solid/i.test(text)) {
+      const re = /vertex\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)/g; const vals = []; let m;
+      while ((m = re.exec(text))) vals.push(+m[1], +m[2], +m[3]);
+      if (vals.length && vals.length % 9 === 0) return Float32Array.from(vals);
+    }
+    throw new Error("not a binary or ASCII STL file");
+  }
+  function meshProps(t) {
+    let vol = 0; const mc = [0, 0, 0], cov = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < t.length; i += 9) {
+      const a = [t[i], t[i + 1], t[i + 2]], b = [t[i + 3], t[i + 4], t[i + 5]], c = [t[i + 6], t[i + 7], t[i + 8]];
+      [a, b, c].forEach(v => { for (let k = 0; k < 3; k++) { if (v[k] < mn[k]) mn[k] = v[k]; if (v[k] > mx[k]) mx[k] = v[k]; } });
+      const det = vDot(a, vCross(b, c));
+      vol += det / 6;
+      const sm = vAdd(vAdd(a, b), c);
+      for (let k = 0; k < 3; k++) mc[k] += det * sm[k] / 24;
+      for (let i2 = 0; i2 < 3; i2++) for (let j = 0; j < 3; j++) cov[i2][j] += det * (sm[i2] * sm[j] + a[i2] * a[j] + b[i2] * b[j] + c[i2] * c[j]) / 120;
+    }
+    const com = Math.abs(vol) > 1e-9 ? vScale(mc, 1 / vol) : vScale(vAdd(mn, mx), 0.5);
+    const tr = cov[0][0] + cov[1][1] + cov[2][2];
+    const I0 = [[tr - cov[0][0], -cov[0][1], -cov[0][2]], [-cov[1][0], tr - cov[1][1], -cov[1][2]], [-cov[2][0], -cov[2][1], tr - cov[2][2]]];
+    const Icom = matAdd(I0, shiftTerm(-vol, com));
+    return { volume: vol, com, I: Icom, bbox: { min: mn, max: mx } };
+  }
+  function packMesh(t) {
+    const n = t.length / 9;
+    const fn = new Float32Array(n * 3); const keep = new Uint8Array(n);
+    for (let f = 0; f < n; f++) {
+      const i = f * 9; const a = [t[i], t[i + 1], t[i + 2]], b = [t[i + 3], t[i + 4], t[i + 5]], c = [t[i + 6], t[i + 7], t[i + 8]];
+      const nn = vCross(vSub(b, a), vSub(c, a)); const l = vLen(nn);
+      if (l > 1e-9) { keep[f] = 1; fn[f * 3] = nn[0] / l; fn[f * 3 + 1] = nn[1] / l; fn[f * 3 + 2] = nn[2] / l; }
+    }
+    const groups = new Map(); const ckey = new Array(n * 3);
+    for (let f = 0; f < n; f++) { if (!keep[f]) continue; for (let k = 0; k < 3; k++) { const i = f * 9 + k * 3; const key = Math.round(t[i] * 100) + "," + Math.round(t[i + 1] * 100) + "," + Math.round(t[i + 2] * 100); ckey[f * 3 + k] = key; let g = groups.get(key); if (!g) { g = []; groups.set(key, g); } g.push(f); } }
+    const COS = Math.cos(30 * D2R);
+    const uniq = new Map(); const pos = [], nrm = [], idx = [];
+    for (let f = 0; f < n; f++) {
+      if (!keep[f]) continue;
+      for (let k = 0; k < 3; k++) {
+        const key = ckey[f * 3 + k]; const g = groups.get(key);
+        let nx = 0, ny = 0, nz = 0;
+        for (const o of g) { const d = fn[f * 3] * fn[o * 3] + fn[f * 3 + 1] * fn[o * 3 + 1] + fn[f * 3 + 2] * fn[o * 3 + 2]; if (d > COS) { nx += fn[o * 3]; ny += fn[o * 3 + 1]; nz += fn[o * 3 + 2]; } }
+        const l = Math.hypot(nx, ny, nz) || 1; const q = [Math.round(nx / l * 127), Math.round(ny / l * 127), Math.round(nz / l * 127)];
+        const vk = key + "|" + q.join(",");
+        let vi = uniq.get(vk);
+        if (vi === undefined) { vi = pos.length / 3; uniq.set(vk, vi); const i = f * 9 + k * 3; pos.push(Math.round(t[i] * 100), Math.round(t[i + 1] * 100), Math.round(t[i + 2] * 100)); nrm.push(q[0], q[1], q[2]); }
+        idx.push(vi);
+      }
+    }
+    const nv = pos.length / 3;
+    const pos16 = Int16Array.from(pos.map(v => Math.max(-32767, Math.min(32767, v)))), nrm8 = Int8Array.from(nrm);
+    const ib = nv < 65536 ? Uint16Array.from(idx) : Uint32Array.from(idx);
+    return { verts: nv, tris: idx.length / 3, pos: bytesB64(new Uint8Array(pos16.buffer)), nrm: bytesB64(new Uint8Array(nrm8.buffer)), idx: bytesB64(new Uint8Array(ib.buffer)), idx32: nv >= 65536 };
+  }
+  function bytesB64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); return btoa(s); }
+  function detectBores(t, radius, minVotes) {
+    radius = radius || 2.4; minVotes = minVotes || 12;
+    const n = t.length / 9, apothem = radius * Math.cos(Math.PI / 16);
+    const faces = [];
+    for (let f = 0; f < n; f++) {
+      const i = f * 9; const a = [t[i], t[i + 1], t[i + 2]], b = [t[i + 3], t[i + 4], t[i + 5]], c = [t[i + 6], t[i + 7], t[i + 8]];
+      const nn = vCross(vSub(b, a), vSub(c, a)); const l = vLen(nn); if (l < 1e-9) continue;
+      faces.push({ n: vScale(nn, 1 / l), c: vScale(vAdd(vAdd(a, b), c), 1 / 3), lo: [Math.min(a[0], b[0], c[0]), Math.min(a[1], b[1], c[1]), Math.min(a[2], b[2], c[2])], hi: [Math.max(a[0], b[0], c[0]), Math.max(a[1], b[1], c[1]), Math.max(a[2], b[2], c[2])] });
+    }
+    const out = [];
+    for (let ax = 0; ax < 3; ax++) {
+      const oth = [0, 1, 2].filter(i => i !== ax);
+      const bins = new Map();
+      faces.forEach(f => {
+        if (Math.abs(f.n[ax]) >= 0.08) return;
+        const pc = vAdd(f.c, vScale(f.n, apothem));
+        const key = Math.round(pc[oth[0]] / 0.5) + "," + Math.round(pc[oth[1]] / 0.5);
+        let b = bins.get(key); if (!b) { b = []; bins.set(key, b); } b.push({ f, u: pc[oth[0]], v: pc[oth[1]], mid: (f.lo[ax] + f.hi[ax]) / 2 });
+      });
+      bins.forEach(list => {
+        if (list.length < minVotes) return;
+        list.sort((p, q) => p.mid - q.mid);
+        let start = 0;
+        for (let i = 1; i <= list.length; i++) {
+          if (i === list.length || list[i].mid - list[i - 1].mid > 7.5) {
+            const grp = list.slice(start, i); start = i;
+            if (grp.length < minVotes) continue;
+            const covered = new Set(grp.map(p => Math.floor((Math.atan2(p.f.n[oth[1]], p.f.n[oth[0]]) + Math.PI) / (2 * Math.PI) * 16) % 16)).size;
+            if (covered < 10) continue;
+            let lo = Infinity, hi = -Infinity, su = 0, sv = 0;
+            grp.forEach(p => { lo = Math.min(lo, p.f.lo[ax]); hi = Math.max(hi, p.f.hi[ax]); su += p.u; sv += p.v; });
+            if (hi - lo < 3) continue;
+            if (hi - lo >= 5 && hi - lo <= 8.5) { const mid = (lo + hi) / 2; lo = mid - 4; hi = mid + 4; }
+            const cu = su / grp.length, cv = sv / grp.length;
+            const a = [0, 0, 0], b = [0, 0, 0]; a[oth[0]] = cu; a[oth[1]] = cv; b[oth[0]] = cu; b[oth[1]] = cv; a[ax] = lo; b[ax] = hi;
+            const L = hi - lo, axis = [0, 0, 0]; axis[ax] = 1;
+            const segs = L > 8.5 ? Math.round(L / 8) : 1;
+            for (let s2 = 0; s2 < segs; s2++) { const c0 = lo + L * (s2 + 0.5) / segs; const cen = [0, 0, 0]; cen[oth[0]] = cu; cen[oth[1]] = cv; cen[ax] = c0; out.push({ kind: "pin_hole", centre: cen.map(v => Math.round(v * 1000) / 1000), axis, length: Math.round(L / segs * 1000) / 1000, r: radius }); }
+          }
+        }
+      });
+    }
+    return out;
+  }
+  function meshRecordFromTriangles(t) {
+    let pr = meshProps(t);
+    if (pr.volume < 0) {                      // inside-out file: flip every triangle
+      for (let i = 0; i < t.length; i += 9) { for (let k = 0; k < 3; k++) { const tmp = t[i + 3 + k]; t[i + 3 + k] = t[i + 6 + k]; t[i + 6 + k] = tmp; } }
+      pr = meshProps(t);
+    }
+    const closed = pr.volume > 1;
+    const size = vSub(pr.bbox.max, pr.bbox.min);
+    const boxI = [[(size[1] * size[1] + size[2] * size[2]) / 12, 0, 0], [0, (size[0] * size[0] + size[2] * size[2]) / 12, 0], [0, 0, (size[0] * size[0] + size[1] * size[1]) / 12]];
+    return {
+      mesh: packMesh(t),
+      bbox: [pr.bbox.min.map(v => Math.round(v * 1000) / 1000), pr.bbox.max.map(v => Math.round(v * 1000) / 1000)],
+      volume_mm3: Math.round(pr.volume * 100) / 100,
+      com: (closed ? pr.com : vScale(vAdd(pr.bbox.min, pr.bbox.max), 0.5)).map(v => Math.round(v * 1000) / 1000),
+      inertia_per_g: (closed ? pr.I.map(r => r.map(v => v / pr.volume)) : boxI).map(r => r.map(v => Math.round(v * 10000) / 10000)),
+      mass_model: closed ? "mesh" : "box",
+      connectors: detectBores(t),
+    };
+  }
+  let stlPending = null;
+  const sf = id => document.getElementById(id);
+  function stlPrepare() {
+    const err = sf("stl-err"), info = sf("stl-info"); err.textContent = "";
+    if (!stlPending) { sf("stl-save").disabled = true; return; }
+    const scale = parseFloat(sf("stl-units").value);
+    const t = Float32Array.from(stlPending.raw, v => v * scale);
+    const pr0 = meshProps(t);
+    const origin = sf("stl-origin").value;
+    let shift = [0, 0, 0];
+    if (origin === "centre") shift = vScale(vAdd(pr0.bbox.min, pr0.bbox.max), -0.5);
+    if (origin === "bottom") shift = [-(pr0.bbox.min[0] + pr0.bbox.max[0]) / 2, -(pr0.bbox.min[1] + pr0.bbox.max[1]) / 2, -pr0.bbox.min[2]];
+    for (let i = 0; i < t.length; i += 3) { t[i] += shift[0]; t[i + 1] += shift[1]; t[i + 2] += shift[2]; }
+    const rec = meshRecordFromTriangles(t);
+    const size = [0, 1, 2].map(i => rec.bbox[1][i] - rec.bbox[0][i]);
+    const massIn = parseFloat(String(sf("stl-mass").value).replace(",", "."));
+    const dens = parseFloat(sf("stl-dens").value);
+    const mass = isFinite(massIn) && massIn > 0 ? massIn : (rec.mass_model === "mesh" ? rec.volume_mm3 / 1000 * dens : NaN);
+    stlPending.rec = rec; stlPending.mass = mass; stlPending.measured = isFinite(massIn) && massIn > 0;
+    info.textContent = rec.mesh.tris.toLocaleString("en-US") + " triangles · " + size.map(v => fmt(v, 1)).join(" × ") + " mm · " +
+      (rec.mass_model === "mesh" ? "volume " + fmt(rec.volume_mm3 / 1000, 2) + " cm³ · " : "open mesh, box inertia · ") +
+      (isFinite(mass) ? "mass " + fmt(mass, 2) + " g" + (stlPending.measured ? "" : " at " + dens + " g/cm³") : "give a mass") +
+      (rec.connectors.length ? " · " + rec.connectors.length + " pin hole" + (rec.connectors.length > 1 ? "s" : "") + " found" : "");
+    sf("stl-save").disabled = !isFinite(mass);
+  }
+  sf("stl-file").addEventListener("change", e => {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const err = sf("stl-err"); err.textContent = "";
+    file.arrayBuffer().then(buf => {
+      let raw;
+      try { raw = parseSTL(buf); } catch (ex) { err.textContent = ex.message; stlPending = null; sf("stl-save").disabled = true; return; }
+      if (raw.length / 9 > 1500000) { err.textContent = "That is " + (raw.length / 9).toLocaleString("en-US") + " triangles; decimate it below 1.5 million first."; stlPending = null; sf("stl-save").disabled = true; return; }
+      stlPending = { raw, file: file.name };
+      if (!sf("stl-name").value.trim()) sf("stl-name").value = file.name.replace(/\.stl$/i, "");
+      stlPrepare();
+    }).catch(ex => { err.textContent = "Could not read the file: " + ex.message; });
+  });
+  ["stl-units", "stl-origin", "stl-mass", "stl-dens"].forEach(id => sf(id).addEventListener(id === "stl-mass" ? "input" : "change", stlPrepare));
+  sf("stl-save").addEventListener("click", () => {
+    if (!stlPending || !stlPending.rec || !isFinite(stlPending.mass)) return;
+    const name = sf("stl-name").value.trim() || stlPending.file;
+    let id = slug(name) || "part"; const stem = id; let k = 2; while (doc.parts[id]) id = stem + "_" + k++;
+    pushUndo();
+    doc.parts[id] = Object.assign({ name, category: sf("stl-cat").value, mass_g: Math.round(stlPending.mass * 1000) / 1000, source: stlPending.measured ? "measured" : "placeholder",
+      source_note: "imported from " + stlPending.file + (stlPending.measured ? "" : "; mass from the mesh volume at " + sf("stl-dens").value + " g/cm³: weigh it") }, stlPending.rec);
+    geoCache.delete("part:" + id);
+    stlPending = null; sf("stl-file").value = ""; sf("stl-name").value = ""; sf("stl-mass").value = ""; sf("stl-info").textContent = "Added."; sf("stl-save").disabled = true;
+    changed(); toast(name + " is in the library: drag it into the view");
+  });
+
+  // ================================================================
+  // library
+  // ================================================================
+  function renderLibrary() {
+    const q = document.getElementById("search").value.trim().toLowerCase();
+    const ch = document.getElementById("comps-list");
+    ch.innerHTML = "";
+    Object.keys(doc.components).sort().forEach(id => {
+      if (q && !id.includes(q)) return;
+      const pr = computeComponent(id, []);
+      const uses = usageCount(id);
+      const d = document.createElement("div");
+      d.className = "item" + (id === editing ? " cur" : "");
+      d.draggable = id !== doc.robot.root && !componentContains(id, editing);
+      d.title = d.draggable ? "drag onto the canvas; double-click to open" : "double-click to open";
+      d.innerHTML = '<canvas width="76" height="56"></canvas><div><div class="t">' + esc(id) + (id === doc.robot.root ? ' <span class="chip">robot</span>' : '') + '</div><div class="d"><b>' + fmt(pr.mass, 1) + ' g</b> Σ · ' + pr.count + ' bricks · used ×' + uses + '</div>' +
+        '<div class="acts"><button type="button" class="tiny" data-open="' + esc(id) + '">open</button>' +
+        (d.draggable ? '<button type="button" class="tiny" data-addc="' + esc(id) + '">+ add</button>' : '') +
+        (id !== doc.robot.root ? '<button type="button" class="tiny" data-copyc="' + esc(id) + '">copy</button>' : '') +
+        (uses === 0 && id !== doc.robot.root ? '<button type="button" class="tiny danger" data-delc="' + esc(id) + '">delete</button>' : '') + '</div></div>';
+      ch.appendChild(d);
+      thumb(d.querySelector("canvas"), flatten(id, { p: [0, 0, 0], R: I3 }, [], [], [id]), pr.bbox);
+      d.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", JSON.stringify({ component: id })); e.dataTransfer.effectAllowed = "copy"; });
+      d.addEventListener("dblclick", () => openComponent(id, id !== doc.robot.root && !crumbs.includes(id)));
+    });
+    ch.querySelectorAll("button[data-open]").forEach(b => b.addEventListener("click", () => { const id = b.getAttribute("data-open"); openComponent(id, id !== doc.robot.root && !crumbs.includes(id)); }));
+    ch.querySelectorAll("button[data-addc]").forEach(b => b.addEventListener("click", () => addInstance({ component: b.getAttribute("data-addc") }, [0, 0, 0])));
+    ch.querySelectorAll("button[data-copyc]").forEach(b => b.addEventListener("click", () => {
+      const id = b.getAttribute("data-copyc"); let k = 2, nid = id + "_copy"; while (doc.components[nid]) nid = id + "_copy" + (k++);
+      pushUndo(); doc.components[nid] = JSON.parse(JSON.stringify(doc.components[id])); changed(); toast("Copied as " + nid);
+    }));
+    ch.querySelectorAll("button[data-delc]").forEach(b => b.addEventListener("click", () => { pushUndo(); delete doc.components[b.getAttribute("data-delc")]; changed(); }));
+
+    // LEGO Technic from the LDraw bundle
+    const lh = document.getElementById("ldraw-list");
+    lh.innerHTML = "";
+    const nums = Object.keys(BUNDLE.parts).filter(n => !q || n.includes(q) || BUNDLE.parts[n].name.toLowerCase().includes(q));
+    document.getElementById("ldraw-count").textContent = Object.keys(BUNDLE.parts).length + " parts, exact LDraw geometry";
+    nums.sort((a, b) => BUNDLE.parts[a].name.localeCompare(BUNDLE.parts[b].name)).forEach(num => {
+      const ld = BUNDLE.parts[num];
+      const rec = doc.parts["lego_" + num];
+      const mass = rec ? rec.mass_g : ld.mass_g, src = rec ? rec.source : ld.source;
+      const d = document.createElement("div");
+      d.className = "item"; d.draggable = true; d.title = "drag into the 3D view";
+      const dens = ld.volume_mm3 > 0 ? mass / (ld.volume_mm3 / 1000) : 0;
+      d.innerHTML = '<canvas width="76" height="56"></canvas><div><div class="t">' + esc(ld.name) + ' <span class="chip">' + esc(num) + '</span></div><div class="d"><b>' + fmt(mass, 2) + ' g</b> · ' + fmt(dens, 2) + ' g/cm³ · ' + esc(connectorSummary({ ldraw: num }) || "no connectors") + ' <span class="chip ' + esc(src) + '">' + esc(src) + '</span></div>' +
+        '<div class="acts"><button type="button" class="tiny" data-addl="' + esc(num) + '">+ add</button></div></div>';
+      lh.appendChild(d);
+      thumbCached("ld:" + num, d.querySelector("canvas"), () => [{ kind: "part", path: [num], name: num, partId: "__ld_" + num, world: { p: [0, 0, 0], R: I3 } }], { min: ld.bbox[0], max: ld.bbox[1] });
+      d.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", JSON.stringify({ ldraw: num })); e.dataTransfer.effectAllowed = "copy"; });
+    });
+    lh.querySelectorAll("button[data-addl]").forEach(b => b.addEventListener("click", () => addInstance({ ldraw: b.getAttribute("data-addl") }, [0, 0, 0])));
+
+    const host = document.getElementById("parts-list");
+    host.innerHTML = "";
+    Object.keys(doc.parts).filter(id => !doc.parts[id].ldraw).sort((a, b) => doc.parts[a].name.localeCompare(doc.parts[b].name)).forEach(id => {
+      const p = doc.parts[id];
+      if (q && !(p.name.toLowerCase().includes(q) || id.includes(q) || (p.category || "").includes(q))) return;
+      const d = document.createElement("div");
+      d.className = "item"; d.draggable = true; d.title = "drag into the 3D view";
+      const dims = partShapeText(p);
+      d.innerHTML = '<canvas width="76" height="56"></canvas><div><div class="t">' + esc(p.name) + '</div><div class="d"><b>' + fmt(p.mass_g, 2) + ' g</b> · ' + esc(dims) + ' <span class="chip ' + esc(p.source) + '">' + esc(p.source) + '</span></div>' +
+        '<div class="acts"><button type="button" class="tiny" data-add="' + esc(id) + '">+ add</button><button type="button" class="tiny" data-edit="' + esc(id) + '">edit</button></div></div>';
+      host.appendChild(d);
+      const pp = computePart(p);
+      thumb(d.querySelector("canvas"), [{ kind: "part", path: [id], name: id, partId: id, world: { p: [0, 0, 0], R: I3 } }], pp.bbox);
+      d.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", JSON.stringify({ part: id })); e.dataTransfer.effectAllowed = "copy"; });
+    });
+    host.querySelectorAll("button[data-add]").forEach(b => b.addEventListener("click", () => addInstance({ part: b.getAttribute("data-add") }, [0, 0, 0])));
+    host.querySelectorAll("button[data-edit]").forEach(b => b.addEventListener("click", () => loadPartForm(b.getAttribute("data-edit"))));
+  }
+  document.getElementById("search").addEventListener("input", renderLibrary);
+  document.getElementById("new-comp").addEventListener("click", () => {
+    let i = 1, id = "component_" + i;
+    while (doc.components[id]) { i++; id = "component_" + i; }
+    pushUndo();
+    doc.components[id] = { note: "", children: [] };
+    changed(true); openComponent(id, true); toast(id + " opened on the canvas: drag bricks in, then rename it");
+  });
+  // the brick form
+  const pf = id => document.getElementById(id);
+  pf("pf-shape").addEventListener("change", () => { const t = pf("pf-shape").value; pf("pf-box").hidden = t !== "box"; pf("pf-cyl").hidden = t !== "cylinder"; pf("pf-sph").hidden = t !== "sphere"; });
+  function loadPartForm(id) {
+    const p = doc.parts[id]; if (!p) return;
+    editingPart = id;
+    pf("part-details").open = true;
+    pf("part-form-title").textContent = "Edit brick " + id;
+    pf("pf-name").value = p.name; pf("pf-cat").value = p.category || "other"; pf("pf-mass").value = fmt(p.mass_g, 3); pf("pf-src").value = p.source || "measured"; pf("pf-note").value = p.source_note || "";
+    const s = (p.shapes || [])[0] || { type: "box", size: [8, 8, 8] };
+    pf("pf-shape").value = s.type; pf("pf-shape").dispatchEvent(new Event("change"));
+    if (s.type === "box") { pf("pf-sx").value = s.size[0]; pf("pf-sy").value = s.size[1]; pf("pf-sz").value = s.size[2]; }
+    if (s.type === "cylinder") { pf("pf-r").value = s.radius; pf("pf-len").value = s.length; pf("pf-axis").value = s.axis || "z"; }
+    if (s.type === "sphere") pf("pf-sr").value = s.radius;
+    pf("pf-cancel").hidden = false; pf("pf-save").textContent = "Save changes"; pf("pf-err").textContent = (p.shapes || []).length > 1 ? "This brick has " + p.shapes.length + " shapes; the form edits the first, the others stay as recorded." : "";
+    pf("pf-name").focus();
+  }
+  function clearPartForm() {
+    editingPart = null;
+    pf("part-form-title").textContent = "Record a brick";
+    ["pf-name", "pf-mass", "pf-note", "pf-sx", "pf-sy", "pf-sz", "pf-r", "pf-len", "pf-sr"].forEach(i => { pf(i).value = ""; });
+    pf("pf-cancel").hidden = true; pf("pf-save").textContent = "Save brick"; pf("pf-err").textContent = "";
+  }
+  pf("pf-cancel").addEventListener("click", clearPartForm);
+  pf("pf-save").addEventListener("click", () => {
+    const name = pf("pf-name").value.trim();
+    const mass = parseFloat(pf("pf-mass").value.replace(",", "."));
+    const t = pf("pf-shape").value;
+    const n = id => parseFloat(pf(id).value.replace(",", "."));
+    let shape;
+    if (t === "box") shape = { type: "box", size: [n("pf-sx"), n("pf-sy"), n("pf-sz")], pos: [0, 0, 0] };
+    if (t === "cylinder") shape = { type: "cylinder", radius: n("pf-r"), length: n("pf-len"), axis: pf("pf-axis").value, pos: [0, 0, 0] };
+    if (t === "sphere") shape = { type: "sphere", radius: n("pf-sr"), pos: [0, 0, 0] };
+    const dims = t === "box" ? shape.size : t === "cylinder" ? [shape.radius, shape.length] : [shape.radius];
+    if (!name) { pf("pf-err").textContent = "Give the brick a name."; return; }
+    if (!(mass > 0)) { pf("pf-err").textContent = "Mass must be a positive number of grams."; return; }
+    if (dims.some(v => !(v > 0))) { pf("pf-err").textContent = "Every dimension must be a positive number of millimetres."; return; }
+    let id = editingPart;
+    if (!id) { id = slug(name) || "brick"; let k = 2; const stem = id; while (doc.parts[id]) { id = stem + "_" + k++; } }
+    pushUndo();
+    const prev = doc.parts[id] || {};
+    const shapes = (prev.shapes || []).slice();
+    if (shapes.length && shapes[0].type === shape.type) shapes[0] = Object.assign({}, shapes[0], shape, { pos: shapes[0].pos || [0, 0, 0] }); else if (shapes.length) shapes[0] = shape; else shapes.push(shape);
+    doc.parts[id] = Object.assign({}, prev, { name, category: pf("pf-cat").value, mass_g: mass, source: pf("pf-src").value, source_note: pf("pf-note").value.trim(), shapes });
+    toast(editingPart ? "Brick updated everywhere it is used" : "Brick recorded: " + id);
+    clearPartForm(); changed();
+  });
+
+  // ================================================================
+  // crumbs, contents, inspector
+  // ================================================================
+  function renderCrumbs() {
+    const h = document.getElementById("crumbs");
+    let s = "";
+    crumbs.forEach((id, i) => { s += (i ? '<span class="sep">›</span>' : '') + '<button type="button" class="crumb' + (i === crumbs.length - 1 ? " cur" : "") + '" data-crumb="' + esc(id) + '">' + esc(id === doc.robot.root ? (doc.robot.name || id) + " (robot)" : id) + '</button>'; });
+    s += '<span class="sp"></span>' +
+      '<button type="button" data-gizmo="translate"' + (gizmoMode === "translate" ? ' class="on"' : '') + ' title="W">Move</button><button type="button" data-gizmo="rotate"' + (gizmoMode === "rotate" ? ' class="on"' : '') + ' title="E">Rotate</button>' +
+      '<span class="sep">·</span><button type="button" data-view="iso">Iso</button><button type="button" data-view="top">Top</button><button type="button" data-view="side">Side</button><button type="button" data-view="front">Front</button><button type="button" data-view="fit" title="F">Fit</button>' +
+      '<label>snap <select id="snap"><option value="8"' + (snapMM === 8 ? " selected" : "") + '>8 mm</option><option value="4"' + (snapMM === 4 ? " selected" : "") + '>4 mm</option><option value="1"' + (snapMM === 1 ? " selected" : "") + '>1 mm</option><option value="0"' + (snapMM === 0 ? " selected" : "") + '>off</option></select></label>' +
+      '<label><input type="checkbox" id="show-com" checked> COM</label><label><input type="checkbox" id="show-ground" checked> ground</label>' +
+      '<label title="pins, axles and studs snap into holes when you let go"><input type="checkbox" id="magnet"' + (magnet ? " checked" : "") + '> snap to holes</label><button type="button" id="snap-now" title="S">Snap</button>';
+    h.innerHTML = s;
+    h.querySelectorAll("button[data-crumb]").forEach(b => b.addEventListener("click", () => { const id = b.getAttribute("data-crumb"); if (id !== editing) openComponent(id, false); }));
+    h.querySelectorAll("button[data-view]").forEach(b => b.addEventListener("click", () => {
+      const v = b.getAttribute("data-view");
+      fitView({ iso: [-0.62, -0.62, 0.48], top: [0, -0.001, 1], side: [0, -1, 0.0001], front: [1, 0, 0.0001], fit: null }[v]);
+    }));
+    h.querySelectorAll("button[data-gizmo]").forEach(b => b.addEventListener("click", () => setGizmoMode(b.getAttribute("data-gizmo"))));
+    document.getElementById("snap").addEventListener("change", e => { snapMM = parseInt(e.target.value, 10); refresh3D(); });
+    document.getElementById("show-com").addEventListener("change", refresh3D);
+    document.getElementById("show-ground").addEventListener("change", refresh3D);
+    document.getElementById("magnet").addEventListener("change", e => { magnet = e.target.checked; });
+    document.getElementById("snap-now").addEventListener("click", () => snapSelection(true));
+  }
+  function renderContents() {
+    const host = document.getElementById("contents");
+    host.innerHTML = "";
+    const comp = doc.components[editing];
+    if (!comp.children.length) return;
+    comp.children.forEach(ch => {
+      const d = document.createElement("div");
+      d.className = "row" + (selection.includes(ch.name) ? " sel" : "");
+      let sub, mass, isComp = !!ch.component, src = "";
+      if (ch.part) { const p = doc.parts[ch.part]; sub = p ? p.name : "missing brick " + ch.part; mass = p ? p.mass_g : NaN; src = p ? p.source : "placeholder"; }
+      else { sub = ch.component + (usageCount(ch.component) > 1 ? " · used ×" + usageCount(ch.component) : ""); mass = computeComponent(ch.component, []).mass; }
+      d.innerHTML = '<span class="nm">' + esc(ch.name) + '<small>' + esc(sub) + '</small></span>' + (src === "placeholder" ? '<span class="chip placeholder">measure</span>' : (isComp ? '<span class="chip sum">Σ</span>' : '<span></span>')) + '<span class="mass' + (isComp ? " sum" : "") + '">' + fmt(mass, 2) + ' g</span>';
+      d.addEventListener("click", e => { if (e.shiftKey) selection = selection.includes(ch.name) ? selection.filter(n => n !== ch.name) : selection.concat(ch.name); else selection = [ch.name]; renderContents(); renderInspector(); refresh3D(); });
+      d.addEventListener("dblclick", () => { if (ch.component) openComponent(ch.component, true); });
+      host.appendChild(d);
+    });
+  }
+  function renderInspector() {
+    const host = document.getElementById("insp");
+    const insts = selectedInstances();
+    let h = "";
+    if (!insts.length) {
+      if (editing === doc.robot.root) {
+        h += '<h2>Robot</h2><div class="name-edit"><input type="text" id="robot-name" value="' + esc(doc.robot.name || "") + '" aria-label="Robot name"><span class="chip">root · ' + esc(doc.robot.root) + '</span></div>';
+        h += computedBlock(rootProps, "assembly frame");
+        h += '<h2>Roles <small>what the simulator binds</small></h2><div class="roles">';
+        const options = rootFlat.filter(x => x.kind === "part").map(x => x.path.join("/"));
+        ROLES.forEach(([r, help]) => { h += '<span class="k" title="' + esc(help) + '">' + r + '</span><select data-role="' + r + '"><option value="">—</option>' + options.map(o => '<option value="' + esc(o) + '"' + (doc.robot.roles[r] === o ? " selected" : "") + '>' + esc(o) + '</option>').join("") + '</select>'; });
+        h += '</div>';
+        if (derived.missing.length) h += '<p class="note bad">not yet assigned: ' + esc(derived.missing.join(", ")) + '</p>';
+        derived.notes.forEach(t => { h += '<p class="note">' + esc(t) + '</p>'; });
+        h += '<h2>Spawn <small>on the mat</small></h2><div class="pose">' + poseRow("x", "sp-x", doc.robot.spawn.pos_mm[0], 10) + poseRow("y", "sp-y", doc.robot.spawn.pos_mm[1], 10) + poseRow("yaw", "sp-yaw", doc.robot.spawn.yaw_deg, 90) + '</div>';
+        h += '<h2>Check against the scale</h2><div class="pose">' + poseRow("weighed g", "measured", doc.robot.measured_mass_g, 10) + '</div>';
+        if (doc.robot.measured_mass_g) { const dlt = rootProps.mass - doc.robot.measured_mass_g; h += '<p class="note' + (Math.abs(dlt) / doc.robot.measured_mass_g > 0.05 ? " bad" : "") + '">computed ' + fmt(rootProps.mass, 1) + ' g vs weighed ' + fmt(doc.robot.measured_mass_g, 1) + ' g: ' + (dlt >= 0 ? "+" : "") + fmt(dlt, 1) + ' g (' + fmt(100 * dlt / doc.robot.measured_mass_g, 1) + ' %). Cables, screws and pins are usually the gap.</p>'; }
+      } else {
+        const comp = doc.components[editing], uses = usageCount(editing);
+        h += '<h2>Component</h2><div class="name-edit"><input type="text" id="comp-id" value="' + esc(editing) + '" aria-label="Component id"><span class="chip">used ×' + uses + '</span></div>';
+        h += '<p class="note">Its origin is the frame every instance is placed by. Drag bricks in, arrange them, then use it from the library.</p>';
+        h += '<label class="note" style="display:grid;gap:2px">note <input type="text" id="comp-note" value="' + esc(comp.note || "") + '"></label>';
+        h += computedBlock(editedProps(), editing + " frame");
+        h += '<div class="acts"><button type="button" id="back-root">Back to the robot</button></div>';
+      }
+      host.innerHTML = h; wireInspector(null); return;
+    }
+    if (insts.length > 1) {
+      let m = 0; insts.forEach(i => { m += i.part ? (doc.parts[i.part] ? doc.parts[i.part].mass_g : 0) : computeComponent(i.component, []).mass; });
+      h += '<h2>' + insts.length + ' selected</h2><div class="kv"><span class="k">together</span><span class="v sum">' + fmt(m, 2) + ' g</span><span class="k">items</span><span class="v">' + esc(insts.map(i => i.name).join(", ")) + '</span></div>';
+      h += groupForm(insts);
+      h += '<div class="acts"><button type="button" id="rot-yaw">Turn 90°</button><button type="button" id="dup">Duplicate</button><button type="button" class="danger" id="remove">Remove</button></div>';
+      host.innerHTML = h; wireInspector(insts); return;
+    }
+    const inst = insts[0];
+    const node = canvasLeaves.find(n => n.path.length === 1 && n.path[0] === inst.name);
+    h += '<h2>' + (inst.part ? "Brick" : "Component") + ' instance</h2>';
+    h += '<div class="name-edit"><input type="text" id="inst-name" value="' + esc(inst.name) + '" aria-label="Instance name"><span class="chip">' + esc(inst.part || inst.component) + '</span></div>';
+    if (usageCount(editing) > 1 && editing !== doc.robot.root) h += '<p class="note">' + esc(editing) + ' is used ×' + usageCount(editing) + ': a change here moves it in every use.</p>';
+    h += '<h2>Pose <small>in the ' + esc(editing) + ' frame</small></h2><div class="pose">' +
+      poseRow("x", "px", inst.pos[0], snapMM || 1) + poseRow("y", "py", inst.pos[1], snapMM || 1) + poseRow("z", "pz", inst.pos[2], snapMM || 1) +
+      poseRow("roll", "rr", inst.rot[0], 90) + poseRow("pitch", "rp", inst.rot[1], 90) + poseRow("yaw", "ry", inst.rot[2], 90) + '</div>';
+    if (inst.part) {
+      const part = doc.parts[inst.part];
+      if (part) {
+        const ld = geomOf(part);
+        h += '<h2>Recorded <small>the brick\'s own facts</small></h2><div class="kv">' +
+          '<span class="k">name</span><span class="v">' + esc(part.name) + '</span><span class="k">mass</span><span class="v">' + fmt(part.mass_g, 2) + ' g</span>' +
+          (ld ? '<span class="k">geometry</span><span class="v">' + esc(partShapeText(part)) + '</span><span class="k">volume</span><span class="v">' + fmt(ld.volume_mm3 / 1000, 2) + ' cm³ → ' + fmt(part.mass_g / (ld.volume_mm3 / 1000), 2) + ' g/cm³' + (Math.abs(part.mass_g / (ld.volume_mm3 / 1000) - 1.05) < 0.2 ? ' (ABS ✓)' : ' (check: ABS is ≈1.05)') + '</span><span class="k">features</span><span class="v">' + esc(connectorSummary(part)) + '</span>' : '') +
+          (part.shapes || []).map((s, i) => '<span class="k">shape ' + (i + 1) + '</span><span class="v">' + esc(shapeText(s)) + (s.pos && vLen(s.pos) ? ' at ' + fmtV(s.pos) : '') + '</span>').join("") +
+          '<span class="k">source</span><span class="v"><span class="chip ' + esc(part.source) + '">' + esc(part.source) + '</span></span>' +
+          (part.source_note ? '<span class="k">note</span><span class="v sans">' + esc(part.source_note) + '</span>' : '') + '</div>';
+        h += '<div class="acts"><button type="button" id="edit-part">Edit this brick</button></div>';
+        if (ld) {
+          const cons = connectionsOf(inst.name);
+          h += '<h2>Connections <small>mated features</small></h2>' + (cons.length ? '<div class="kv">' + cons.map(c => '<span class="k">' + esc(c.m.kind.replace("_", " ")) + '</span><span class="v">' + esc(c.o.kind.replace("_", " ")) + ' of ' + esc(c.o.leaf.path.join("/")) + '</span>').join("") + '</div>' : '<p class="note">none: drag it next to a hole and let go, or press S</p>');
+        }
+        if (node && part.frames && part.frames.look) { const l = lookOf(node); h += '<p class="note">looks along ' + fmtV(l) + ' (yaw ' + fmt(Math.atan2(l[1], l[0]) / D2R, 0) + '°, pitch ' + fmt(Math.asin(Math.max(-1, Math.min(1, l[2]))) / D2R, 0) + '°)</p>'; }
+        h += computedBlock(computePart(part), "brick frame");
+      } else h += '<p class="note bad">brick ' + esc(inst.part) + ' is missing from the library</p>';
+    } else {
+      h += computedBlock(computeComponent(inst.component, []), inst.component + " frame");
+      const comp = doc.components[inst.component];
+      if (comp && comp.note) h += '<p class="note">' + esc(comp.note) + '</p>';
+      h += '<div class="acts"><button type="button" id="open-def">Open ' + esc(inst.component) + '</button><button type="button" id="ungroup">Ungroup</button></div>';
+    }
+    h += groupForm(insts);
+    h += '<div class="acts"><button type="button" id="rot-yaw">Turn 90°</button><button type="button" id="rot-pitch">Pitch 90°</button><button type="button" id="rot-roll">Roll 90°</button><button type="button" id="dup">Duplicate</button><button type="button" class="danger" id="remove">Remove</button></div>';
+    host.innerHTML = h; wireInspector(insts);
+  }
+  function groupForm(insts) {
+    return '<h2>Make a component <small>from ' + (insts.length === 1 ? "this item" : "these " + insts.length + " items") + '</small></h2>' +
+      '<div class="groupform"><input type="text" id="group-name" placeholder="drive_unit" aria-label="New component name"><button type="button" class="primary" id="group">Group</button></div>' +
+      '<p class="note">The first selected item\'s frame becomes the new component\'s origin. The component joins the library; this canvas keeps one instance of it in place.</p>';
+  }
+  function poseRow(label, id, value, step) {
+    return '<span class="k">' + label + '</span><input type="text" class="num" id="' + id + '" inputmode="decimal" value="' + esc(value === null || value === undefined ? "" : fmt(value, 3)) + '" data-step="' + step + '"><button type="button" class="tiny" data-nudge="' + id + '" data-dir="-1">−' + step + '</button><button type="button" class="tiny" data-nudge="' + id + '" data-dir="1">+' + step + '</button>';
+  }
+  function computedBlock(pr, frame) {
+    return '<h2>Computed <small>Σ over everything inside, ' + esc(frame) + '</small></h2><div class="kv">' +
+      '<span class="k">mass</span><span class="v sum">' + fmt(pr.mass, 2) + ' g</span>' +
+      '<span class="k">centre of mass</span><span class="v sum">' + fmtV(pr.com) + ' mm</span>' +
+      (pr.bbox ? '<span class="k">extents</span><span class="v sum">' + fmtV(vSub(pr.bbox.max, pr.bbox.min)) + ' mm</span>' : '') +
+      '<span class="k">bricks</span><span class="v sum">' + pr.count + '</span>' +
+      '<span class="k">inertia about COM</span><span class="v"><table class="mat">' + pr.I.map(r => '<tr>' + r.map(v => '<td>' + inertiaText(v) + '</td>').join("") + '</tr>').join("") + '</table><span style="color:var(--ink-3);font-size:11px">g·mm²</span></span></div>';
+  }
+  function inertiaText(v) { if (Math.abs(v) < 0.5) return "0"; return Math.round(v).toLocaleString("en-US"); }
+  function renderPose() {
+    const inst = selectedInstances()[0]; if (!inst || selection.length !== 1) return;
+    [["px", inst.pos[0]], ["py", inst.pos[1]], ["pz", inst.pos[2]]].forEach(([id, v]) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = fmt(v, 3); });
+  }
+  function wireInspector(insts) {
+    const host = document.getElementById("insp");
+    const num = id => { const el = document.getElementById(id); if (!el) return NaN; return parseFloat(String(el.value).replace(",", ".")); };
+    host.querySelectorAll("button[data-nudge]").forEach(b => b.addEventListener("click", () => {
+      const inp = document.getElementById(b.getAttribute("data-nudge"));
+      inp.value = fmt((parseFloat(inp.value) || 0) + parseFloat(inp.getAttribute("data-step")) * parseInt(b.getAttribute("data-dir"), 10), 3);
+      inp.dispatchEvent(new Event("input"));
+    }));
+    if (!insts) {
+      const rn = document.getElementById("robot-name");
+      if (rn) {
+        rn.addEventListener("input", e => { doc.robot.name = e.target.value; changed(false); renderCrumbs(); document.getElementById("robot-title").textContent = (doc.robot.name ? doc.robot.name + " · " : "") + "Openbricks Assembly Workbench"; });
+        host.querySelectorAll("select[data-role]").forEach(s => s.addEventListener("change", () => { pushUndo(); doc.robot.roles[s.getAttribute("data-role")] = s.value; changed(); }));
+        ["sp-x", "sp-y", "sp-yaw", "measured"].forEach(id => document.getElementById(id).addEventListener("input", () => {
+          const v = num(id);
+          if (id === "sp-x" && isFinite(v)) doc.robot.spawn.pos_mm[0] = v;
+          if (id === "sp-y" && isFinite(v)) doc.robot.spawn.pos_mm[1] = v;
+          if (id === "sp-yaw" && isFinite(v)) doc.robot.spawn.yaw_deg = v;
+          if (id === "measured") { doc.robot.measured_mass_g = isFinite(v) ? v : null; }
+          changed(false); recompute(); renderFacts(); renderFile();
+        }));
+      } else {
+        document.getElementById("comp-id").addEventListener("change", e => { if (!renameComponent(editing, e.target.value)) e.target.value = editing; });
+        document.getElementById("comp-note").addEventListener("input", e => { doc.components[editing].note = e.target.value; changed(false); });
+        document.getElementById("back-root").addEventListener("click", () => openComponent(doc.robot.root, false));
+      }
+      return;
+    }
+    const g = document.getElementById("group");
+    g.addEventListener("click", () => groupSelection(document.getElementById("group-name").value));
+    document.getElementById("group-name").addEventListener("keydown", e => { if (e.key === "Enter") g.click(); });
+    document.getElementById("rot-yaw").addEventListener("click", () => rotateSelection(2, 90));
+    document.getElementById("dup").addEventListener("click", duplicateSelection);
+    document.getElementById("remove").addEventListener("click", removeSelection);
+    if (insts.length > 1) return;
+    const inst = insts[0];
+    document.getElementById("rot-pitch").addEventListener("click", () => rotateSelection(1, 90));
+    document.getElementById("rot-roll").addEventListener("click", () => rotateSelection(0, 90));
+    document.getElementById("inst-name").addEventListener("change", e => { if (!renameInstance(inst, e.target.value.trim())) e.target.value = inst.name; });
+    [["px", 0, "pos"], ["py", 1, "pos"], ["pz", 2, "pos"], ["rr", 0, "rot"], ["rp", 1, "rot"], ["ry", 2, "rot"]].forEach(([id, i, key]) => {
+      const el = document.getElementById(id);
+      el.addEventListener("focus", pushUndo);
+      el.addEventListener("input", () => {
+        const v = num(id); if (!isFinite(v)) return;
+        inst[key][i] = key === "rot" ? ((v + 180) % 360 + 360) % 360 - 180 : v;
+        changed(false); recompute(); refresh3D(); renderContents(); renderFacts(); renderReport(); renderFile();
+      });
+    });
+    const ep = document.getElementById("edit-part"); if (ep) ep.addEventListener("click", () => loadPartForm(inst.part));
+    const od = document.getElementById("open-def"); if (od) od.addEventListener("click", () => openComponent(inst.component, true));
+    const ug = document.getElementById("ungroup"); if (ug) ug.addEventListener("click", ungroupSelection);
+  }
+
+  // ================================================================
+  // report, file, facts
+  // ================================================================
+  function renderReport() {
+    const t = document.getElementById("bom");
+    let h = '<thead><tr><th>item</th><th>kind</th><th class="n">mass g</th><th class="n">share</th><th class="n">COM x</th><th class="n">COM y</th><th class="n">COM z</th><th>source</th></tr></thead><tbody>';
+    const total = rootProps.mass || 1;
+    const line = (depth, name, kind, mass, com, cls, src) => '<tr class="' + cls + '"><td class="item" style="padding-left:' + (8 + depth * 18) + 'px">' + esc(name) + '</td><td>' + esc(kind) + '</td><td class="n">' + fmt(mass, 2) + '</td><td class="n">' + fmt(100 * mass / total, 1) + ' %</td><td class="n">' + fmt(com[0], 1) + '</td><td class="n">' + fmt(com[1], 1) + '</td><td class="n">' + fmt(com[2], 1) + '</td><td>' + src + '</td></tr>';
+    h += line(0, doc.robot.name || doc.robot.root, "robot Σ", rootProps.mass, rootProps.com, "comp", "computed");
+    rootFlat.forEach(n => {
+      if (n.kind === "part") { const p = doc.parts[n.partId]; if (!p) return; const pr = computePart(p); h += line(n.depth + 1, n.name, p.name, p.mass_g, vAdd(n.world.p, matVec(n.world.R, pr.com)), "", '<span class="chip ' + esc(p.source) + '">' + esc(p.source) + '</span>'); }
+      else { const pr = computeComponent(n.compId, []); h += line(n.depth + 1, n.name, n.compId + " Σ", pr.mass, vAdd(n.world.p, matVec(n.world.R, pr.com)), "comp", "computed"); }
+    });
+    h += '<tr class="total"><td>total</td><td>' + rootProps.count + ' bricks</td><td class="n">' + fmt(rootProps.mass, 2) + '</td><td class="n">100 %</td><td class="n">' + fmt(rootProps.com[0], 1) + '</td><td class="n">' + fmt(rootProps.com[1], 1) + '</td><td class="n">' + fmt(rootProps.com[2], 1) + '</td><td>COM in the assembly frame, mm</td></tr></tbody>';
+    t.innerHTML = h;
+  }
+  let tab = "assembly";
+  document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => { tab = b.getAttribute("data-tab"); document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b)); renderFile(); }));
+  function renderFile() {
+    const out = document.getElementById("out"), hint = document.getElementById("file-hint");
+    if (tab === "assembly") {
+      out.value = JSON.stringify(doc, null, 2);
+      hint.textContent = "Save as robot.assembly.json. The simulator would build one MuJoCo body per rigid group: a geom per brick with its recorded mass, so inertia comes from the build; wheels become hinged child bodies at the wheel roles; sensor sites land on the roles.";
+    } else {
+      const o = { chassis_spec: derived.spec, mass_properties: derived.massProps };
+      if (derived.missing.length) o.roles_still_needed = derived.missing;
+      if (derived.notes.length) o.notes = derived.notes;
+      out.value = JSON.stringify(o, null, 2);
+      hint.textContent = "chassis_spec is what today's `openbricks sim run --chassis` accepts, derived from the roles: the axle midpoint is the origin, sensor positions are relative to it, the colour sensor's yaw and pitch come from how its brick is turned. mass_properties is what the assembly loader would use directly.";
+    }
+    document.getElementById("file-st").textContent = errors.length ? errors.join("; ") : (tab === "assembly" ? Object.keys(doc.parts).length + " bricks, " + Object.keys(doc.components).length + " components" : "");
+    document.getElementById("file-st").className = "st" + (errors.length ? " bad" : "");
+  }
+  document.getElementById("copy").addEventListener("click", async () => { const ta = document.getElementById("out"); try { await navigator.clipboard.writeText(ta.value); toast("Copied"); } catch (e) { ta.focus(); ta.select(); toast("Select and copy from the box"); } });
+  document.getElementById("apply").addEventListener("click", () => {
+    const st = document.getElementById("import-st");
+    let o;
+    try { o = JSON.parse(document.getElementById("in").value); } catch (e) { st.textContent = "Not valid JSON: " + e.message; st.className = "st bad"; return; }
+    const err = validateDoc(o);
+    if (err) { st.textContent = err; st.className = "st bad"; return; }
+    pushUndo();
+    doc = o; editing = doc.robot.root; crumbs = [editing]; selection = []; changed(); st.textContent = "loaded"; st.className = "st"; toast("File loaded");
+  });
+  document.getElementById("reset-example").addEventListener("click", () => { pushUndo(); doc = exampleDocument(); editing = doc.robot.root; crumbs = [editing]; selection = []; changed(); toast("Example loaded"); });
+  function validateDoc(o) {
+    if (!o || typeof o !== "object") return "Expected a JSON object.";
+    if (o.format !== "openbricks-assembly/1") return "format must be \"openbricks-assembly/1\".";
+    if (!o.parts || typeof o.parts !== "object") return "parts must be an object of bricks.";
+    if (!o.components || typeof o.components !== "object") return "components must be an object of assemblies.";
+    if (!o.robot || !o.components[o.robot.root]) return "robot.root must name a component.";
+    for (const id of Object.keys(o.parts)) {
+      const p = o.parts[id];
+      if (!(p.mass_g > 0)) return "brick " + id + " needs mass_g > 0.";
+      if (p.ldraw) { if (!BUNDLE.parts[p.ldraw]) return "brick " + id + " needs LDraw part " + p.ldraw + ", which this library does not carry."; continue; }
+      if (p.mesh) { if (!(p.mesh.pos && p.mesh.nrm && p.mesh.idx && Array.isArray(p.bbox) && Array.isArray(p.com) && Array.isArray(p.inertia_per_g))) return "brick " + id + ": the imported mesh record is incomplete."; continue; }
+      if (!Array.isArray(p.shapes) || !p.shapes.length) return "brick " + id + " needs at least one shape.";
+      for (const s of p.shapes) {
+        if (!["box", "cylinder", "sphere"].includes(s.type)) return "brick " + id + ": shape type must be box, cylinder or sphere.";
+        if (s.type === "box" && !(Array.isArray(s.size) && s.size.length === 3 && s.size.every(v => v > 0))) return "brick " + id + ": box size must be three positive numbers.";
+        if (s.type === "cylinder" && !(s.radius > 0 && s.length > 0)) return "brick " + id + ": cylinder needs radius and length.";
+        if (s.type === "sphere" && !(s.radius > 0)) return "brick " + id + ": sphere needs a radius.";
+      }
+    }
+    for (const id of Object.keys(o.components)) {
+      const c = o.components[id];
+      if (!Array.isArray(c.children)) return "component " + id + " needs a children array.";
+      const names = new Set();
+      for (const ch of c.children) {
+        if (!ch.name || names.has(ch.name) || ch.name.includes("/")) return "component " + id + ": every child needs a unique name without /.";
+        names.add(ch.name);
+        if (ch.part && !o.parts[ch.part]) return "component " + id + ": brick " + ch.part + " is not in the library.";
+        if (ch.component && !o.components[ch.component]) return "component " + id + ": component " + ch.component + " does not exist.";
+        if (!ch.part && !ch.component) return "component " + id + ": child " + ch.name + " needs part or component.";
+        if (!Array.isArray(ch.pos) || ch.pos.length !== 3) return "component " + id + ": child " + ch.name + " needs pos [x, y, z].";
+        ch.rot = Array.isArray(ch.rot) && ch.rot.length === 3 ? ch.rot : [0, 0, 0];
+      }
+    }
+    o.robot.roles = o.robot.roles || {}; ROLES.forEach(([r]) => { if (typeof o.robot.roles[r] !== "string") o.robot.roles[r] = ""; });
+    o.robot.spawn = o.robot.spawn || { pos_mm: [0, 0], yaw_deg: 0 };
+    if (o.robot.measured_mass_g === undefined) o.robot.measured_mass_g = null;
+    return "";
+  }
+  function renderFacts() {
+    const f = document.getElementById("facts");
+    const used = new Set(rootFlat.filter(n => n.kind === "part").map(n => n.partId));
+    const ph = Object.keys(doc.parts).filter(id => doc.parts[id].source === "placeholder" && used.has(id)).length;
+    const comH = rootProps.com[2] - derived.ground;
+    let h = '<div class="fact"><div class="k">computed mass</div><div class="v">' + fmt(rootProps.mass, 1) + '<small>g</small></div><div class="s">' + rootProps.count + ' bricks in ' + rootFlat.filter(n => n.kind === "component").length + ' sub-assemblies</div></div>';
+    h += '<div class="fact"><div class="k">centre of mass</div><div class="v">' + fmt(comH, 0) + '<small>mm up</small></div><div class="s">' + fmtV(rootProps.com) + ' mm in the assembly frame</div></div>';
+    if (derived.wheel) h += '<div class="fact"><div class="k">drive</div><div class="v">' + fmt(derived.wheel.track, 1) + '<small>mm track</small></div><div class="s">⌀' + fmt(2 * derived.wheel.radius, 1) + ' mm wheels, ground ' + fmt(derived.ground, 1) + ' mm</div></div>';
+    else h += '<div class="fact warn"><div class="k">drive</div><div class="v">—</div><div class="s">assign both wheel roles</div></div>';
+    if (doc.robot.measured_mass_g) { const d = rootProps.mass - doc.robot.measured_mass_g; h += '<div class="fact' + (Math.abs(d) / doc.robot.measured_mass_g > 0.05 ? " warn" : " ok") + '"><div class="k">vs the scale</div><div class="v">' + (d >= 0 ? "+" : "") + fmt(d, 1) + '<small>g</small></div><div class="s">weighed ' + fmt(doc.robot.measured_mass_g, 1) + ' g</div></div>'; }
+    else h += '<div class="fact"><div class="k">vs the scale</div><div class="v">—</div><div class="s">weigh the robot, enter it on the robot</div></div>';
+    h += '<div class="fact' + (ph ? " warn" : "") + '"><div class="k">still to measure</div><div class="v">' + ph + '<small>bricks</small></div><div class="s">' + (ph ? "placeholder masses in use" : "every brick in use is sourced") + '</div></div>';
+    f.innerHTML = h;
+  }
+
+  // ================================================================
+  // lifecycle
+  // ================================================================
+  function changed(quiet) {
+    try { localStorage.setItem("openbricks-assembly-draft", JSON.stringify(doc)); } catch (e) {}
+    if (quiet === false) return;      // caller re-renders what it needs
+    if (quiet === true) { recompute(); return; }
+    recompute(); renderAll();
+  }
+  function renderAll() {
+    madeSoFar = [];
+    if (!doc.components[editing]) { editing = doc.robot.root; crumbs = [editing]; selection = []; recompute(); }
+    selection = selection.filter(n => childOf(editing, n));
+    renderFacts(); renderCrumbs(); renderLibrary(); renderContents(); renderInspector(); renderReport(); renderFile(); refresh3D();
+    document.getElementById("robot-title").textContent = (doc.robot.name ? doc.robot.name + " · " : "") + "Openbricks Assembly Workbench";
+  }
+  let draft = null, initial = null;
+  try { draft = JSON.parse(localStorage.getItem("openbricks-assembly-draft") || "null"); } catch (e) { draft = null; }
+  try { initial = JSON.parse(document.getElementById("initial-doc").textContent || "null"); } catch (e) { initial = null; }
+  doc = (initial && !validateDoc(initial)) ? initial : ((draft && !validateDoc(draft)) ? draft : exampleDocument());
+  editing = doc.robot.root; crumbs = [editing];
+  recompute(); init3D(); renderAll(); fitView();
+  const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  if (mq && mq.addEventListener) mq.addEventListener("change", renderAll);
+  new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>

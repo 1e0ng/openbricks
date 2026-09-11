@@ -123,3 +123,12 @@ it always matches the installed version.
    :func: _build_parser
    :prog: openbricks
 ```
+
+`openbricks sim …` forwards to the simulator's own parser:
+
+```{eval-rst}
+.. argparse::
+   :module: openbricks_sim.cli
+   :func: _build_parser
+   :prog: openbricks sim
+```
