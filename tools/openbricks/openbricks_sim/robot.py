@@ -112,15 +112,35 @@ class SimRobot:
                  counts_per_rev: int = 1320,
                  kp: float = 0.3,
                  kp_sum: Optional[float] = None,
-                 kp_diff: Optional[float] = None):
-        spec = chassis_spec if chassis_spec is not None else ChassisSpec()
+                 kp_diff: Optional[float] = None,
+                 assembly=None):
+        # ``assembly``: a robot.assembly.json path or its parsed dict —
+        # the chassis is then derived from the build (roles → spec,
+        # rolled-up mass properties, one visual geom per brick).
+        inertial = extra_geoms = None
+        self.assembly_bricks = []
+        if assembly is not None:
+            from openbricks_sim import assembly as assembly_mod
+            from openbricks_sim.chassis import brick_geoms_xml
+            doc = assembly
+            if not isinstance(assembly, dict):
+                import json
+                with open(assembly) as fh:
+                    doc = json.load(fh)
+            spec, inertial, self.assembly_bricks, _notes = assembly_mod.derive(doc)
+            extra_geoms = brick_geoms_xml(self.assembly_bricks)
+            if chassis_spec is not None:
+                spec = chassis_spec
+        else:
+            spec = chassis_spec if chassis_spec is not None else ChassisSpec()
         path = _resolve_world(world)
         if path is None:
-            xml = standalone_mjcf(spec)
+            xml = standalone_mjcf(spec, inertial=inertial, extra_geoms=extra_geoms)
             model = mujoco.MjModel.from_xml_string(xml)
             data  = mujoco.MjData(model)
         else:
-            model, data, _ = load_world(path, chassis_spec=spec)
+            model, data, _ = load_world(path, chassis_spec=spec,
+                                        inertial=inertial, extra_geoms=extra_geoms)
 
         self.model        = model
         self.data         = data

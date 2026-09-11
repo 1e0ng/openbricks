@@ -152,7 +152,8 @@ def _inject(world_xml: str, body: str, actuators: str, sensors: str) -> str:
 
 def load_world(world_path: str,
                chassis_spec: ChassisSpec = None,
-               chassis_name: str = "chassis"):
+               chassis_name: str = "chassis",
+               inertial=None, extra_geoms=None):
     """Load a world MJCF from disk and splice in the default chassis.
 
     Returns a tuple ``(mujoco.MjModel, mujoco.MjData, merged_mjcf)``
@@ -171,7 +172,8 @@ def load_world(world_path: str,
     # separate build pass.
     world_xml = _expand_lego_props(world_xml, p.parent)
 
-    fragment = chassis_mjcf(chassis_spec, name=chassis_name)
+    fragment = chassis_mjcf(chassis_spec, name=chassis_name,
+                            inertial=inertial, extra_geoms=extra_geoms)
     body, actuators, sensors = _extract_fragment_sections(fragment)
     merged = _inject(world_xml, body, actuators, sensors)
 

@@ -75,6 +75,8 @@ pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
+    /// Texture coordinates, one per position, when the mesh is textured.
+    pub uvs: Vec<[f32; 2]>,
 }
 
 impl MeshRecord {
@@ -124,6 +126,7 @@ impl MeshRecord {
             positions,
             normals,
             indices,
+            uvs: Vec::new(),
         })
     }
 }
