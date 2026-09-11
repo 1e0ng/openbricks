@@ -3,6 +3,55 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.1.0 — the Assembly Workbench: LEGO Technic bricks with exact geometry, and the brick library
+
+`openbricks sim workbench` serves and opens the **Assembly Workbench**,
+a 3D editor for the robot as a tree of components. Bricks are recorded
+once with geometry, mass and provenance; components are bricks and
+components placed by a pose; the robot is the top component. Mass,
+centre of mass, inertia and extents are computed at every level, never
+typed in.
+
+- **LEGO Technic, exact.** `openbricks_sim.bricks` converts LDraw part
+  files (CC BY 2.0 / 4.0, ldraw.org) into brick records: the exact
+  triangle mesh, volume, centroid and inertia per gram from the closed
+  mesh, and the connection features — pins, axles, studs and stud
+  tubes from LDraw's connector primitives, pin holes found on the
+  finished mesh as 4.8 mm bores whose wall normals go all the way
+  round (LDraw authors build a hole a dozen ways). The wheel ships a
+  curated set of 129 popular Technic parts (`bricks/technic_parts.txt`)
+  with BrickLink catalogue weights for 125 of them; weight over exact
+  volume is shown as a density on every part, and ABS beams land at
+  1.05–1.08 g/cm³.
+- **`openbricks bricks fetch` / `convert`.** `fetch` downloads the
+  whole LDraw library (145 MB, about 600 MB unpacked) into
+  `~/.cache/openbricks/ldraw` or `$OPENBRICKS_LDRAW_DIR`; `convert
+  NUMBER …` turns any part numbers into a bundle file that `openbricks
+  sim workbench --bricks FILE` adds to the library.
+- **Pins snap into holes.** Release a part near a compatible feature
+  and it aligns: pin ↔ pin hole, axle ↔ axle hole or pin hole, stud ↔
+  stud tube or pin hole. A pin half centres in its 8 mm module; an
+  axle keeps its position along the hole. The inspector lists a
+  part's mated connections; `S` snaps on demand; the magnet can be
+  switched off.
+- **STL import.** Binary or ASCII STL, in mm / cm / inch / m, origin
+  as in the file or re-based; a weighed mass or a density (PLA, PETG,
+  ABS, nylon, aluminium presets). The mesh's volume, centre of mass
+  and inertia are computed on import, inside-out files are repaired,
+  and 4.8 mm bores become pin holes, so a printed bracket designed for
+  Technic pins connects like a brick.
+- **The page.** three.js viewport with orbit, move and rotate gizmos
+  snapping to the 8 mm module, thumbnails rendered from the real
+  meshes, grouping and ungrouping that keep every brick where it is,
+  undo, and `robot.assembly.json` in and out (recorded facts only;
+  everything computed is recomputed on load). Roles name the drive
+  wheels, caster, line arrays, colour sensor, range sensor and IMU;
+  the page derives today's flat `ChassisSpec` from them.
+- `openbricks sim workbench [FILE] [--bricks FILE] [--port N]
+  [--no-browser]`; `preview` and `run` are unchanged. The workbench
+  is a local web page today; a native editor is the next step, and
+  bare `openbricks sim` is reserved for it.
+
 ## 4.0.0 — the QTR driver drops its mode API; steering is the program's job, and a second array fits on GPIO 9/10
 
 Breaking. `LineMode`, `QTRArray.set_mode()` / `mode()` /

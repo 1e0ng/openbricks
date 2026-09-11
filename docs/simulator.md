@@ -22,6 +22,15 @@ like their hardware counterparts.
 ## Commands
 
 ```console
+$ openbricks sim workbench [robot.assembly.json] [--bricks more.json] [--port N] [--no-browser]
+```
+
+Opens the [Assembly Workbench](#the-assembly-workbench) in your
+browser: build the robot from LEGO Technic bricks with their exact
+geometry, import your own STL parts, and read the computed mass
+properties.
+
+```console
 $ openbricks sim preview [--world WORLD] [--x X] [--y Y] [--headless] [--duration S] [--seed N]
 ```
 
@@ -40,6 +49,78 @@ without it the sim runs headless (CI-friendly). `--seed` makes
 randomized worlds reproducible.
 
 Run `openbricks sim --help` for the full, always-current option list.
+
+## The Assembly Workbench
+
+`openbricks sim workbench` serves a single page on localhost and opens
+it. The page is a 3D editor for the robot as a tree of components:
+
+- **Bricks** are recorded once, with their geometry, mass and
+  provenance (`measured`, `datasheet`, `vendor` or `placeholder`).
+  The library that ships in the wheel holds a curated set of popular
+  LEGO Technic parts converted from the [LDraw parts
+  library](https://www.ldraw.org) (CC BY 2.0 / 4.0): beams in every
+  common length, bent and L beams, frames, Technic bricks and plates,
+  pins, axles, bushes, connectors, gears, a few rims and tyres, and
+  fairing panels, with BrickLink catalogue weights where known.
+  Servos, boards and wheels are recorded as boxes, cylinders and
+  spheres, and any part you have as a mesh comes in through
+  **Import a part from an STL file** (binary or ASCII; mm, cm, inch
+  or m; a weighed mass or a density such as PLA 1.24 g/cm³).
+- **Components** are lists of bricks and other components, each
+  placed by a position and a roll / pitch / yaw. Drag bricks from the
+  library into the view, move and rotate them with the gizmos, select
+  what you built and *Group* it: the new component joins the library
+  and can be dropped anywhere, as many times as you like. Double-click
+  an instance to edit its definition in place; every use follows.
+- **Connections.** Pins, axles and studs are real features of the
+  LDraw parts, and 4.8 mm bores are recognised as pin holes on every
+  mesh, imported STL files included. Let go of a part near a hole and
+  it snaps: the pin axis aligns to the hole, a pin half centres in its
+  module, an axle keeps its position along the hole. The inspector
+  lists what each part is mated to.
+- **Mass properties** are never typed in above the brick level.
+  Volume, centre of mass and the inertia tensor of every LDraw and STL
+  part come from its closed mesh, so a recorded weight becomes a full
+  inertia tensor; components and the robot roll their children up
+  with the parallel-axis theorem. Weight divided by exact volume is
+  shown as a density on every part, which catches a wrong weight or a
+  wrong part at a glance (ABS is about 1.05 g/cm³).
+- **Roles** name the parts the simulator binds: the two drive wheels,
+  the caster, the reflectance arrays, the colour sensor, the range
+  sensor and the IMU. From them the page derives the flat
+  `ChassisSpec` fields (`what the simulator receives`) with the axle
+  midpoint as the origin, so a build can be run today with
+  `openbricks sim run --chassis`.
+
+The file the page reads and writes, `robot.assembly.json`, stores
+recorded facts only: bricks, poses, roles, spawn pose. Everything
+computed is recomputed on load. Open one with `openbricks sim
+workbench robot.assembly.json`; the browser also keeps your last
+draft between visits.
+
+## The brick library
+
+```console
+$ openbricks bricks fetch [--dest DIR] [--force]
+$ openbricks bricks convert NUMBER [NUMBER ...] [--out FILE] [--weights FILE] [--ldraw DIR]
+$ openbricks sim workbench --bricks FILE
+```
+
+The wheel ships the curated Technic set; the whole LDraw library
+(every LEGO part ever catalogued, 145 MB to download, about 600 MB
+unpacked) is one command away. `bricks fetch` unpacks it into
+`~/.cache/openbricks/ldraw` (or `$OPENBRICKS_LDRAW_DIR`), and `bricks
+convert` turns any part numbers — the LEGO design ids printed on the
+parts, `3648` for the 24-tooth gear — into a bundle file that
+`openbricks sim workbench --bricks` adds to the library. Converted
+parts without a weight carry a volume estimate at 1.05 g/cm³ and are
+flagged until you weigh them; pass `--weights` with a JSON of
+`{"3648": {"g": 1.62}}` to record real ones.
+
+LEGO® and Technic are trademarks of the LEGO Group, which does not
+sponsor or endorse openbricks. The geometry is the LDraw community's
+work; the bundle carries its attribution.
 
 ## Describing your robot
 

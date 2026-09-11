@@ -299,6 +299,9 @@ jobs:
           # ``openbricks sim …`` forwards to openbricks_sim.cli; the
           # [sim] extra is installed above so this should work.
           openbricks sim --help
+          openbricks sim workbench --help
+          openbricks bricks --help
+          openbricks bricks convert --help
           openbricks sim preview --help
           # Headless preview of each shipped world.
           openbricks sim preview --headless --duration 0.2 --world empty
