@@ -110,6 +110,14 @@ class ConverterTests(unittest.TestCase):
         self.assertTrue(np.allclose(np.linalg.norm(nrm, axis=1), 1.0, atol=0.02))
         rebuilt = pos[idx]
         self.assertAlmostEqual(ldraw.mass_properties(rebuilt)[0], 512, places=2)
+        self.assertEqual(mesh["scale"], 0.01)
+        # a coarser quantum for scenery: the step travels with the record
+        coarse = ldraw.pack_mesh(tris * 250.0, q=10.0)
+        self.assertEqual(coarse["scale"], 0.1)
+        pos, _, idx = ldraw.unpack_mesh(coarse)
+        self.assertTrue(np.allclose(np.abs(pos).max(axis=0), [2000.0, 500.0, 1000.0]))
+        self.assertAlmostEqual(ldraw.mass_properties(pos[idx])[0], 512 * 250.0 ** 3, delta=1e6)
+        self.assertRaises(ValueError, ldraw.pack_mesh, tris * 400.0)   # 3.2 m does not fit the fine quantum
 
     def test_merge_connectors_splits_a_long_pin_per_module(self):
         a = np.array([0.0, 0.0, 0.0])

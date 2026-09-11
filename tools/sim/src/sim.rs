@@ -74,6 +74,9 @@ pub struct Scene {
     pub materials: HashMap<String, Material>,
     #[serde(default)]
     pub textures: HashMap<String, String>,
+    /// Mesh assets by name, packed like the bundle's bricks (in mm).
+    #[serde(default)]
+    pub meshes: HashMap<String, crate::bundle::MeshRecord>,
     #[serde(default)]
     pub bricks: Vec<Brick>,
     #[serde(default)]

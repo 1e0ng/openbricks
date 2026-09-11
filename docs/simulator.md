@@ -103,7 +103,9 @@ chassis; the program's prints and errors appear in the log panel
 below the view. Under the hood the sim starts the MuJoCo runtime as a
 child process — the same runtime, driver shim and C cores
 `openbricks sim run` uses — and draws the run from the poses it
-streams, with every brick of the chassis in its exact geometry. The
+streams, with every brick of the chassis in its exact geometry and
+the map's mesh props (the WRO senior mosaic frame) as MuJoCo has
+them. The
 chassis is built from the assembly: the wheel, caster and sensor
 roles place the physics skeleton, the brick-by-brick mass properties
 become the body's inertia, and each brick rides along as a visual

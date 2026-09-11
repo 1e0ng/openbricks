@@ -243,9 +243,12 @@ def mass_properties(tris):
 
 
 # ---------------------------------------------------------- mesh packing
-def pack_mesh(tris):
-    """int16 positions (0.01 mm), int8 normals smoothed across edges
-    below a 30° crease, and an index buffer — base64 strings."""
+def pack_mesh(tris, q=Q):
+    """int16 positions (``1/q`` mm steps: 0.01 mm for bricks, coarser
+    for scenery that must fit ±327 m at ``q=0.1``), int8 normals
+    smoothed across edges below a 30° crease, and an index buffer —
+    base64 strings. ``scale`` records the step so readers need not
+    know ``q``."""
     p1, p2, p3 = tris[:, 0], tris[:, 1], tris[:, 2]
     fn = np.cross(p2 - p1, p3 - p1)
     ln = np.linalg.norm(fn, axis=1)
@@ -254,7 +257,10 @@ def pack_mesh(tris):
     fn = fn / ln[:, None]
     n = len(tris)
     corners = tris.reshape(-1, 3)
-    qpos = np.round(corners * Q).astype(np.int64)
+    qpos = np.round(corners * q).astype(np.int64)
+    if len(qpos) and np.abs(qpos).max() > 32767:
+        raise ValueError("the mesh spans %.0f mm, more than int16 holds at %g mm steps; pack it with a coarser q"
+                         % (np.abs(corners).max(), 1.0 / q))
     keys = qpos[:, 0] * 4000037 * 4000037 + qpos[:, 1] * 4000037 + qpos[:, 2]
     order = np.argsort(keys, kind="stable")
     sorted_keys = keys[order]
@@ -273,7 +279,7 @@ def pack_mesh(tris):
     qn = np.clip(np.round(normals * 127), -127, 127).astype(np.int8)
     combo = np.concatenate([qpos, qn.astype(np.int64) + 128], axis=1)
     uniq, inv = np.unique(combo, axis=0, return_inverse=True)
-    pos16 = np.clip(uniq[:, :3], -32767, 32767).astype("<i2")
+    pos16 = uniq[:, :3].astype("<i2")
     nrm8 = (uniq[:, 3:] - 128).astype(np.int8)
     inv = inv.reshape(-1)
     idx32 = len(uniq) >= 65536
@@ -285,13 +291,14 @@ def pack_mesh(tris):
         "nrm": base64.b64encode(nrm8.tobytes()).decode(),
         "idx": base64.b64encode(idx.tobytes()).decode(),
         "idx32": bool(idx32),
+        "scale": 1.0 / q,
     }
 
 
 def unpack_mesh(mesh):
     """The inverse of ``pack_mesh``: positions (mm, float64, N×3),
     normals (N×3) and the triangle index array (M×3)."""
-    pos = np.frombuffer(base64.b64decode(mesh["pos"]), dtype="<i2").reshape(-1, 3) / Q
+    pos = np.frombuffer(base64.b64decode(mesh["pos"]), dtype="<i2").reshape(-1, 3) * mesh.get("scale", 1.0 / Q)
     nrm = np.frombuffer(base64.b64decode(mesh["nrm"]), dtype=np.int8).reshape(-1, 3) / 127.0
     idx = np.frombuffer(base64.b64decode(mesh["idx"]), dtype="<u4" if mesh.get("idx32") else "<u2").reshape(-1, 3)
     return pos, nrm, idx

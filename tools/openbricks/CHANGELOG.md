@@ -3,6 +3,16 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.7.0 — the Simulate view draws mesh scenery
+
+Maps with mesh props — the WRO senior mosaic frame — now show them in
+the Simulate view. The run server exports every mesh asset the geoms
+name as MuJoCo holds it (vertices centred and scaled as it draws
+them), packed like a bundle brick at 0.1 mm steps so metre-sized
+scenery fits; the sim decodes it once per scene. The packer's record
+now carries its position step (`scale`), and refuses a mesh that
+would not fit instead of clipping it.
+
 ## 4.6.0 — the sim imports STL parts
 
 **Import STL…** in the Workbench's library brings a part in from a

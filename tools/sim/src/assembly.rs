@@ -1189,6 +1189,7 @@ mod tests {
             nrm: String::new(),
             idx: String::new(),
             idx32: false,
+            scale: None,
         };
         let rec = |c: Connector| PartRecord {
             name: "r".into(),

@@ -57,6 +57,9 @@ pub struct MeshRecord {
     pub idx: String,
     #[serde(default)]
     pub idx32: bool,
+    /// Millimetres per position step; 0.01 (bricks) when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
@@ -88,15 +91,16 @@ impl MeshRecord {
         if pos.len() % 6 != 0 || nrm.len() % 3 != 0 || pos.len() / 6 != nrm.len() / 3 {
             return Err("mesh positions and normals disagree".into());
         }
+        let step = self.scale.unwrap_or(0.01) as f32;
         let positions: Vec<[f32; 3]> = pos
             .as_chunks::<6>()
             .0
             .iter()
             .map(|c| {
                 [
-                    i16::from_le_bytes([c[0], c[1]]) as f32 / 100.0,
-                    i16::from_le_bytes([c[2], c[3]]) as f32 / 100.0,
-                    i16::from_le_bytes([c[4], c[5]]) as f32 / 100.0,
+                    i16::from_le_bytes([c[0], c[1]]) as f32 * step,
+                    i16::from_le_bytes([c[2], c[3]]) as f32 * step,
+                    i16::from_le_bytes([c[4], c[5]]) as f32 * step,
                 ]
             })
             .collect();
@@ -186,7 +190,42 @@ mod tests {
             nrm: b64.encode(nrm),
             idx: b64.encode(idx),
             idx32,
+            scale: None,
         }
+    }
+
+    #[test]
+    fn the_position_step_travels_with_the_record() {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let pos = b64.encode(
+            [100i16, 0, 0, 0, 100, 0, 0, 0, 100]
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect::<Vec<u8>>(),
+        );
+        let nrm = b64.encode([0i8, 0, 127, 0, 0, 127, 0, 0, 127].iter().map(|v| *v as u8).collect::<Vec<u8>>());
+        let idx = b64.encode([0u16, 1, 2].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>());
+        let mut rec = MeshRecord {
+            verts: 3,
+            tris: 1,
+            pos,
+            nrm,
+            idx,
+            idx32: false,
+            scale: None,
+        };
+        assert_eq!(rec.decode().unwrap().positions[0], [1.0, 0.0, 0.0], "0.01 mm steps by default");
+        rec.scale = Some(0.1);
+        assert_eq!(rec.decode().unwrap().positions[1], [0.0, 10.0, 0.0], "coarser scenery steps");
+        assert!(
+            !serde_json::to_string(&MeshRecord {
+                scale: None,
+                ..rec.clone()
+            })
+            .unwrap()
+            .contains("scale")
+        );
     }
 
     #[test]

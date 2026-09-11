@@ -100,6 +100,22 @@ class SessionTests(unittest.TestCase):
             fh.write(body)
         return path
 
+    def test_scene_export_carries_mesh_assets(self):
+        from openbricks_sim.bricks.ldraw import unpack_mesh
+        out = io.StringIO()
+        s = self.session(out)
+        s.load(world="wro-2026-senior")
+        scene = next(e for e in _events(out.getvalue()) if e["ev"] == "scene")
+        frame = next(g for g in scene["geoms"] if g["type"] == "mesh")
+        self.assertEqual(frame["mesh"], "mosaic_frame")
+        rec = scene["meshes"]["mosaic_frame"]
+        self.assertEqual(rec["scale"], 0.1)
+        self.assertGreater(rec["tris"], 100)
+        pos, nrm, idx = unpack_mesh(rec)
+        self.assertEqual(idx.shape, (rec["tris"], 3))
+        size = pos.max(axis=0) - pos.min(axis=0)
+        self.assertTrue(100 < size.max() < 2000 and size.min() > 1, size)   # a real frame, in mm (not metres)
+
     def test_scene_export(self):
         out = io.StringIO()
         s = self.session(out)
@@ -121,6 +137,7 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(len(frame["bodies"][0]), 7)
         state = [e for e in ev if e["ev"] == "state"][-1]
         self.assertEqual(state["status"], "loaded")
+        self.assertEqual(scene["meshes"], {})
 
     def test_run_finishes_and_logs(self):
         out = io.StringIO()

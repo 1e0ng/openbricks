@@ -20,7 +20,7 @@ Events (one JSON object per line on stdout)::
 
     {"ev": "worlds", "worlds": [{"alias", "path", "dir"}, ...]}
     {"ev": "scene", "bodies": [...], "geoms": [...], "materials": {...},
-                    "textures": {...}, "bricks": [...], "timestep_ms": 1}
+                    "textures": {...}, "meshes": {...}, "bricks": [...], "timestep_ms": 1}
     {"ev": "frame", "t_ms": 1234, "bodies": [[x, y, z, qw, qx, qy, qz], ...]}
     {"ev": "log", "text": "..."}            # the program's prints
     {"ev": "state", "status": "idle|loaded|running|paused|finished|stopped|error", ...}
@@ -110,9 +110,22 @@ def _texture_files(world_path):
     return out
 
 
+def _packed_mesh(model, mid):
+    """A mesh asset as the compiled model holds it (vertices already
+    centred and scaled as MuJoCo renders them), in mm at 0.1 mm steps."""
+    import numpy as np
+    from openbricks_sim.bricks.ldraw import pack_mesh
+    va, vn = int(model.mesh_vertadr[mid]), int(model.mesh_vertnum[mid])
+    fa, fn = int(model.mesh_faceadr[mid]), int(model.mesh_facenum[mid])
+    verts = np.asarray(model.mesh_vert[va:va + vn], dtype=np.float64) * 1000.0
+    faces = np.asarray(model.mesh_face[fa:fa + fn], dtype=np.int64)
+    return pack_mesh(verts[faces], q=10.0)
+
+
 def export_scene(model, world_path=None, bricks=()):
     """Everything a viewer needs once: bodies, geoms with their local
-    pose and material, materials with texture names, texture files."""
+    pose and material, materials with texture names, texture files,
+    and the mesh assets the mesh geoms name."""
     import mujoco
     geom_types = {mujoco.mjtGeom.mjGEOM_PLANE: "plane", mujoco.mjtGeom.mjGEOM_SPHERE: "sphere",
                   mujoco.mjtGeom.mjGEOM_CAPSULE: "capsule", mujoco.mjtGeom.mjGEOM_ELLIPSOID: "ellipsoid",
@@ -133,13 +146,16 @@ def export_scene(model, world_path=None, bricks=()):
             "texrepeat": [float(v) for v in model.mat_texrepeat[i]],
         }
     geoms = []
+    meshes = {}
     for i in range(model.ngeom):
         gt = geom_types.get(int(model.geom_type[i]), "other")
         mat = int(model.geom_matid[i])
         mesh_file = None
         if gt == "mesh":
             mid = int(model.geom_dataid[i])
-            mesh_file = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_MESH, mid)
+            mesh_file = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_MESH, mid) or ("mesh%d" % mid)
+            if mesh_file not in meshes:
+                meshes[mesh_file] = _packed_mesh(model, mid)
         geoms.append({
             "name": mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i) or "",
             "type": gt,
@@ -153,7 +169,7 @@ def export_scene(model, world_path=None, bricks=()):
             "mesh": mesh_file,
         })
     return {"bodies": bodies, "geoms": geoms, "materials": materials, "textures": _texture_files(world_path),
-            "bricks": list(bricks), "timestep_ms": max(1, int(round(model.opt.timestep * 1000.0)))}
+            "meshes": meshes, "bricks": list(bricks), "timestep_ms": max(1, int(round(model.opt.timestep * 1000.0)))}
 
 
 def frame_of(model, data, t_ms):

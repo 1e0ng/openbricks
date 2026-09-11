@@ -221,6 +221,7 @@ pub fn pack(tris: &[Tri]) -> MeshRecord {
         nrm: b64.encode(nrm.iter().map(|v| *v as u8).collect::<Vec<u8>>()),
         idx: b64.encode(idx_bytes),
         idx32,
+        scale: Some(0.01),
     }
 }
 

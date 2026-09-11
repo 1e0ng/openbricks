@@ -344,70 +344,71 @@ impl SimulateTab {
                 continue; // MuJoCo's convention: groups 3+ are helper geometry
             }
             let key = format!("geom:{}:{gi}", self.scene_gen);
-            let (mesh, texture, mut color) = match g.kind.as_str() {
-                "plane" => {
-                    let (hx, hy) = if g.size[0] > 0.0 && g.size[1] > 0.0 {
-                        (g.size[0] as f32, g.size[1] as f32)
-                    } else {
-                        (5.0, 5.0)
-                    };
-                    let mat = g.material.as_ref().and_then(|m| scene.materials.get(m));
-                    let rep = mat.map(|m| [m.texrepeat[0] as f32, m.texrepeat[1] as f32]).unwrap_or([1.0, 1.0]);
-                    let tex = mat
-                        .and_then(|m| m.texture.clone())
-                        .filter(|t| self.textures_loaded.get(t).copied().unwrap_or(false))
-                        .map(|t| format!("tex:{t}"));
-                    (geometry::plane_mesh(hx * M_TO_MM, hy * M_TO_MM, rep), tex, [1.0, 1.0, 1.0, 1.0])
-                }
-                "box" => (
-                    geometry::box_mesh(
-                        [
-                            2.0 * g.size[0] as f32 * M_TO_MM,
-                            2.0 * g.size[1] as f32 * M_TO_MM,
-                            2.0 * g.size[2] as f32 * M_TO_MM,
-                        ],
-                        [0.0; 3],
-                    ),
-                    None,
-                    [1.0; 4],
-                ),
-                "sphere" => (geometry::sphere_mesh(g.size[0] as f32 * M_TO_MM, [0.0; 3], 24, 16), None, [1.0; 4]),
-                "cylinder" => (
-                    geometry::cylinder_mesh(g.size[0] as f32 * M_TO_MM, 2.0 * g.size[1] as f32 * M_TO_MM, "z", [0.0; 3], 32),
-                    None,
-                    [1.0; 4],
-                ),
-                "capsule" => (
-                    geometry::capsule_mesh(g.size[0] as f32 * M_TO_MM, g.size[1] as f32 * M_TO_MM, 24),
-                    None,
-                    [1.0; 4],
-                ),
-                "ellipsoid" => {
-                    let mut m = geometry::sphere_mesh(1.0, [0.0; 3], 24, 16);
-                    for p in m.positions.iter_mut() {
-                        p[0] *= g.size[0] as f32 * M_TO_MM;
-                        p[1] *= g.size[1] as f32 * M_TO_MM;
-                        p[2] *= g.size[2] as f32 * M_TO_MM;
-                    }
-                    (m, None, [1.0; 4])
-                }
-                _ => continue, // meshes from files: not drawn yet
+            let mat = g.material.as_ref().and_then(|m| scene.materials.get(m));
+            // a plane takes its material's texture; everything else a flat colour
+            let texture = if g.kind == "plane" {
+                mat.and_then(|m| m.texture.clone())
+                    .filter(|t| self.textures_loaded.get(t).copied().unwrap_or(false))
+                    .map(|t| format!("tex:{t}"))
+            } else {
+                None
             };
             if !viewport.has_mesh(&key) {
+                let size = |k: usize| g.size[k] as f32 * M_TO_MM;
+                let mesh = match g.kind.as_str() {
+                    "plane" => {
+                        let (hx, hy) = if g.size[0] > 0.0 && g.size[1] > 0.0 {
+                            (size(0), size(1))
+                        } else {
+                            (5.0 * M_TO_MM, 5.0 * M_TO_MM)
+                        };
+                        let rep = mat.map(|m| [m.texrepeat[0] as f32, m.texrepeat[1] as f32]).unwrap_or([1.0, 1.0]);
+                        geometry::plane_mesh(hx, hy, rep)
+                    }
+                    "box" => geometry::box_mesh([2.0 * size(0), 2.0 * size(1), 2.0 * size(2)], [0.0; 3]),
+                    "sphere" => geometry::sphere_mesh(size(0), [0.0; 3], 24, 16),
+                    "cylinder" => geometry::cylinder_mesh(size(0), 2.0 * size(1), "z", [0.0; 3], 32),
+                    "capsule" => geometry::capsule_mesh(size(0), size(1), 24),
+                    "ellipsoid" => {
+                        let mut m = geometry::sphere_mesh(1.0, [0.0; 3], 24, 16);
+                        for p in m.positions.iter_mut() {
+                            p[0] *= size(0);
+                            p[1] *= size(1);
+                            p[2] *= size(2);
+                        }
+                        m
+                    }
+                    "mesh" => {
+                        // the asset as the server packed it, in mm, already posed like MuJoCo draws it
+                        let decoded = g.mesh.as_ref().and_then(|name| scene.meshes.get(name)).map(|rec| rec.decode());
+                        match decoded {
+                            Some(Ok(m)) => m,
+                            Some(Err(e)) => {
+                                self.log
+                                    .push(("server".into(), format!("mesh {}: {e}", g.mesh.clone().unwrap_or_default())));
+                                continue;
+                            }
+                            None => continue,
+                        }
+                    }
+                    _ => continue,
+                };
                 viewport.add_mesh(device, &key, &mesh);
             }
-            let rgba = match g.material.as_ref().and_then(|m| scene.materials.get(m)) {
+            let rgba = match mat {
                 Some(m) if g.rgba == [0.5, 0.5, 0.5, 1.0] => m.rgba,
                 _ => g.rgba,
             };
-            if texture.is_none() {
-                color = [
+            let color = if texture.is_some() {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                [
                     srgb_to_linear(rgba[0] as f32),
                     srgb_to_linear(rgba[1] as f32),
                     srgb_to_linear(rgba[2] as f32),
                     rgba[3] as f32,
-                ];
-            }
+                ]
+            };
             let local = Mat4::from_rotation_translation(
                 Quat::from_xyzw(g.quat[1] as f32, g.quat[2] as f32, g.quat[3] as f32, g.quat[0] as f32).normalize(),
                 Vec3::new(g.pos[0] as f32, g.pos[1] as f32, g.pos[2] as f32) * M_TO_MM,
@@ -919,6 +920,26 @@ mod tests {
         t.send(serde_json::json!({"cmd": "stop"}));
         assert!(pump_until(&mut t, 60, |t| t.status == "stopped"), "{}", t.status);
         assert!(t.error.is_none(), "{:?}", t.error);
+        // a world with a mesh asset: the frame arrives packed and decodes
+        t.world = "wro-2026-senior".into();
+        t.reload();
+        assert!(
+            pump_until(&mut t, 180, |t| t.status == "loaded"
+                && t.scene.as_ref().map(|s| !s.meshes.is_empty()).unwrap_or(false)),
+            "{} / {} / {:?}",
+            t.status,
+            t.message,
+            t.log
+        );
+        let scene = t.scene.as_ref().unwrap();
+        let frame = scene.meshes.get("mosaic_frame").expect("the mosaic frame");
+        assert!(frame.decode().unwrap().indices.len() > 300);
+        assert!(
+            scene
+                .geoms
+                .iter()
+                .any(|g| g.kind == "mesh" && g.mesh.as_deref() == Some("mosaic_frame"))
+        );
         t.shutdown();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -956,12 +977,19 @@ mod tests {
             geom("k", "capsule", 1, 0, None, None),
             geom("e", "ellipsoid", 1, 0, None, None),
             geom("m", "mesh", 0, 0, Some("frame"), None),
+            geom("m2", "mesh", 0, 0, Some("unknown"), None),
+            geom("m3", "mesh", 0, 0, Some("broken"), None),
             geom("helper", "box", 0, 3, None, None),
             geom("chassis_brick:beam", "box", 1, 3, None, None),
         ]
         .join(",");
+        let frame = crate::stl::pack(&[[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [0.0, 100.0, 0.0]]]);
+        let meshes = format!(
+            r#""frame":{},"broken":{{"verts":1,"tris":1,"pos":"AAA=","nrm":"AAAA","idx":"AAAAAAAA"}}"#,
+            serde_json::to_string(&frame).unwrap()
+        );
         let scene_json = format!(
-            r#"{{"bodies":["world","chassis"],"geoms":[{geoms}],"materials":{{"mat":{{"rgba":[0.2,0.3,0.4,1],"texture":"tex","texrepeat":[2,2]}},"plain":{{"rgba":[0.9,0.1,0.1,1],"texture":null,"texrepeat":[1,1]}}}},"textures":{{"tex":"{}"}},"bricks":[{{"path":"beam","part":"lego_32278","ldraw":"32278","pos_m":[0.01,0,0.02],"quat":[1,0,0,0],"half_m":[0.06,0.004,0.004],"category":"lego"}},{{"path":"servo","part":"servo","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":"servo"}},{{"path":"ghost","part":"missing","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":""}},{{"path":"bare","part":"bare","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":""}}],"timestep_ms":1}}"#,
+            r#"{{"bodies":["world","chassis"],"geoms":[{geoms}],"materials":{{"mat":{{"rgba":[0.2,0.3,0.4,1],"texture":"tex","texrepeat":[2,2]}},"plain":{{"rgba":[0.9,0.1,0.1,1],"texture":null,"texrepeat":[1,1]}}}},"textures":{{"tex":"{}"}},"meshes":{{{meshes}}},"bricks":[{{"path":"beam","part":"lego_32278","ldraw":"32278","pos_m":[0.01,0,0.02],"quat":[1,0,0,0],"half_m":[0.06,0.004,0.004],"category":"lego"}},{{"path":"servo","part":"servo","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":"servo"}},{{"path":"ghost","part":"missing","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":""}},{{"path":"bare","part":"bare","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":""}}],"timestep_ms":1}}"#,
             png.to_string_lossy().replace('\\', "/")
         );
         let mut t = SimulateTab::new(None);
@@ -1011,8 +1039,13 @@ mod tests {
         );
         t.chassis_doc = Some(doc);
         let (items, lines) = t.draw_items(&mut vp, &device, &queue, &bundle, false);
-        // six geoms drawn; the file mesh, the helper and the brick stand-in skipped; two of four bricks drawable
-        assert_eq!(items.len(), 8, "{:?}", items.iter().map(|i| i.mesh.clone()).collect::<Vec<_>>());
+        // six primitives and the mesh asset drawn; the unknown and broken meshes, the helper and the brick stand-in skipped; two of four bricks drawable
+        assert_eq!(items.len(), 9, "{:?}", items.iter().map(|i| i.mesh.clone()).collect::<Vec<_>>());
+        assert!(
+            t.log.iter().any(|(s, x)| s == "server" && x.starts_with("mesh broken:")),
+            "{:?}",
+            t.log
+        );
         assert_eq!(lines.len(), 3);
         assert_eq!(
             items[0].texture.as_deref(),
@@ -1048,7 +1081,7 @@ mod tests {
             .textures
             .insert("tex".into(), dir.join("missing.png").to_string_lossy().to_string());
         let (again, _) = t.draw_items(&mut vp, &device, &queue, &bundle, true);
-        assert_eq!(again.len(), 8);
+        assert_eq!(again.len(), 9);
         assert!(again[0].texture.is_none(), "no texture when the file is unreadable");
         assert!(t.log.iter().any(|(s, x)| s == "server" && x.starts_with("texture ")), "{:?}", t.log);
         // the camera: the mat once, then the chassis while following
