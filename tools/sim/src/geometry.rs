@@ -148,6 +148,54 @@ pub fn sphere_mesh(radius: f32, at: [f32; 3], segments: u32, rings: u32) -> Mesh
 }
 
 /// A closed mesh's signed volume (mm³): positive when wound outward.
+/// A cone along +z: a base circle of `radius` at `at`, the apex `length` above it.
+pub fn cone_mesh(radius: f32, length: f32, at: [f32; 3], segments: u32) -> MeshData {
+    let mut m = MeshData::default();
+    let apex = [at[0], at[1], at[2] + length];
+    let k = (radius * radius + length * length).sqrt();
+    let (nr, nz) = (length / k, radius / k);
+    for i in 0..segments {
+        let a0 = i as f32 / segments as f32 * 2.0 * PI;
+        let a1 = (i + 1) as f32 / segments as f32 * 2.0 * PI;
+        let am = (a0 + a1) / 2.0;
+        let p0 = [at[0] + radius * a0.cos(), at[1] + radius * a0.sin(), at[2]];
+        let p1 = [at[0] + radius * a1.cos(), at[1] + radius * a1.sin(), at[2]];
+        let base = m.positions.len() as u32;
+        m.positions.extend_from_slice(&[p0, p1, apex]);
+        m.normals.extend_from_slice(&[
+            [nr * a0.cos(), nr * a0.sin(), nz],
+            [nr * a1.cos(), nr * a1.sin(), nz],
+            [nr * am.cos(), nr * am.sin(), nz],
+        ]);
+        m.indices.extend_from_slice(&[base, base + 1, base + 2]);
+        let base = m.positions.len() as u32;
+        m.positions.extend_from_slice(&[at, p1, p0]);
+        m.normals.extend_from_slice(&[[0.0, 0.0, -1.0]; 3]);
+        m.indices.extend_from_slice(&[base, base + 1, base + 2]);
+    }
+    m
+}
+
+/// A torus in the xy plane about the origin: `major` is the radius of
+/// the tube's centre line, `minor` the tube's own radius.
+pub fn torus_mesh(major: f32, minor: f32, segments: u32, sides: u32) -> MeshData {
+    let mut m = MeshData::default();
+    for i in 0..segments {
+        for j in 0..sides {
+            let base = m.positions.len() as u32;
+            for (di, dj) in [(0, 0), (1, 0), (1, 1), (0, 1)] {
+                let u = (i + di) as f32 / segments as f32 * 2.0 * PI;
+                let v = (j + dj) as f32 / sides as f32 * 2.0 * PI;
+                let (cu, su, cv, sv) = (u.cos(), u.sin(), v.cos(), v.sin());
+                m.positions.push([(major + minor * cv) * cu, (major + minor * cv) * su, minor * sv]);
+                m.normals.push([cv * cu, cv * su, sv]);
+            }
+            m.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+    m
+}
+
 #[cfg(test)]
 pub fn signed_volume(m: &MeshData) -> f64 {
     let mut v = 0.0f64;
@@ -170,6 +218,17 @@ mod tests {
         let m = box_mesh([40.0, 20.0, 10.0], [0.0; 3]);
         assert_eq!(m.indices.len(), 36);
         assert!((signed_volume(&m) - 8000.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn cone_and_torus_are_closed_and_outward() {
+        let c = cone_mesh(10.0, 30.0, [1.0, 2.0, 3.0], 64);
+        let want = PI as f64 * 100.0 * 30.0 / 3.0;
+        assert!((signed_volume(&c) / want - 1.0).abs() < 0.01, "{}", signed_volume(&c));
+        let t = torus_mesh(50.0, 5.0, 64, 16);
+        let want = 2.0 * (PI as f64).powi(2) * 50.0 * 25.0;
+        assert!((signed_volume(&t) / want - 1.0).abs() < 0.05, "{}", signed_volume(&t));
+        assert_eq!(t.positions.len(), t.normals.len());
     }
 
     #[test]

@@ -841,7 +841,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev libssl-dev
+          # mesa's lavapipe gives the offscreen render test a Vulkan device
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev libssl-dev mesa-vulkan-drivers libvulkan1
 
       - name: Format, lint, test
         if: runner.os == 'Linux'

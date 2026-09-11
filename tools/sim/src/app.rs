@@ -4,8 +4,9 @@
 use crate::assembly::{self, Document, Geometry, Instance, Part, Props};
 use crate::bundle::{Bundle, MeshData};
 use crate::geometry;
+use crate::gizmo::{self, Gizmo, Handle, Mode};
 use crate::simulate::SimulateTab;
-use crate::viewport::{self, DrawItem, Line, Viewport};
+use crate::viewport::{self, DrawItem, Line, Viewport, srgb};
 use eframe::egui;
 use glam::{DMat3, DVec3, Mat4, Quat, Vec3};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +29,14 @@ enum Drag {
         start: Vec3,
         starts: Vec<(String, [f64; 3])>,
     },
+    /// A handle drag: the axis position or ring angle it started at,
+    /// the pivot, and every selected instance's starting pose.
+    Handle {
+        handle: Handle,
+        start: f32,
+        pivot: Vec3,
+        starts: Vec<(String, [f64; 3], [f64; 3])>,
+    },
 }
 
 pub struct App {
@@ -44,6 +53,8 @@ pub struct App {
     group_name: String,
     snap_mm: f64,
     magnet: bool,
+    gizmo_mode: Mode,
+    hot: Option<Handle>,
     show_grid: bool,
     show_com: bool,
     status: String,
@@ -76,11 +87,6 @@ pub fn cat_color(category: &str, dark: bool) -> [f32; 4] {
     srgb(hex)
 }
 
-fn srgb(hex: u32) -> [f32; 4] {
-    let c = |v: u32| ((v & 0xff) as f32 / 255.0).powf(2.2);
-    [c(hex >> 16), c(hex >> 8), c(hex), 1.0]
-}
-
 const ACCENT: [f32; 4] = [0.71, 0.29, 0.005, 1.0];
 
 impl App {
@@ -106,6 +112,8 @@ impl App {
             group_name: String::new(),
             snap_mm: MODULE_MM,
             magnet: true,
+            gizmo_mode: Mode::Move,
+            hot: None,
             show_grid: true,
             show_com: true,
             status: String::new(),
@@ -507,6 +515,25 @@ impl App {
         }
     }
 
+    fn ensure_gizmo_meshes(&mut self, device: &eframe::egui_wgpu::wgpu::Device) {
+        if self.viewport.has_mesh(gizmo::MESH_SHAFT) {
+            return;
+        }
+        let shaft = geometry::cylinder_mesh(0.012, 0.8, "z", [0.0, 0.0, 0.4], 12);
+        let cone = geometry::cone_mesh(0.05, 0.2, [0.0, 0.0, 0.8], 16);
+        let ring = geometry::torus_mesh(gizmo::RING_FRACTION, 0.014, 64, 8);
+        self.viewport.add_mesh(device, gizmo::MESH_SHAFT, &shaft);
+        self.viewport.add_mesh(device, gizmo::MESH_CONE, &cone);
+        self.viewport.add_mesh(device, gizmo::MESH_RING, &ring);
+    }
+
+    /// The handles on the selection: at the first selected instance's origin.
+    fn gizmo(&self, h: f32) -> Option<Gizmo> {
+        let first = self.selected_instances().into_iter().next()?;
+        let c = Vec3::new(first.pos[0] as f32, first.pos[1] as f32, first.pos[2] as f32);
+        Some(Gizmo::new(c, self.gizmo_mode, &self.viewport.camera, h))
+    }
+
     fn build_items(&mut self, device: &eframe::egui_wgpu::wgpu::Device, dark: bool) {
         let sel: HashSet<String> = self.selection.iter().cloned().collect();
         let mut items = Vec::new();
@@ -630,12 +657,16 @@ impl App {
             ui.label("wgpu is not available");
             return;
         };
+        self.ensure_gizmo_meshes(&state.device);
         self.build_items(&state.device, dark);
         if self.fit_pending {
             self.fit_view();
             self.fit_pending = false;
         }
         let lines = self.scene_lines(dark);
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        let gizmo = self.gizmo(h);
+        let overlay: Vec<DrawItem> = gizmo.as_ref().map(|g| g.draw(self.hot)).unwrap_or_default();
         let bg = if dark {
             [0.0067, 0.0093, 0.0122, 1.0]
         } else {
@@ -643,12 +674,19 @@ impl App {
         };
         let tex = {
             let mut renderer = state.renderer.write();
-            self.viewport
-                .render(&state.device, &state.queue, &mut renderer, size, &self.items, &lines, bg)
+            let scene = viewport::Scene {
+                items: &self.items,
+                lines: &lines,
+                overlay: &overlay,
+                background: bg,
+            };
+            self.viewport.render(&state.device, &state.queue, &mut renderer, size, &scene)
         };
-        let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
+        let response = ui.add(egui::Image::new((tex, egui::vec2(w, h))).sense(egui::Sense::click_and_drag()));
         let rect = response.rect;
         let local = |p: egui::Pos2| (p.x - rect.min.x, p.y - rect.min.y);
+        let cam = self.viewport.camera.clone();
+        let handle_under = |x: f32, y: f32| gizmo.as_ref().and_then(|g| g.handle_at(&cam, x, y, w, h));
 
         // zoom
         if response.hovered() {
@@ -658,8 +696,27 @@ impl App {
                 self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(20.0, 20000.0);
             }
         }
-        // press: pick
-        if response.drag_started_by(egui::PointerButton::Primary) || response.clicked_by(egui::PointerButton::Primary) {
+        // press: a handle first, then a brick
+        let pressed = response.drag_started_by(egui::PointerButton::Primary) || response.clicked_by(egui::PointerButton::Primary);
+        let on_handle = if pressed {
+            response.interact_pointer_pos().map(local).and_then(|(x, y)| handle_under(x, y))
+        } else {
+            None
+        };
+        if let (Some(handle), Some(g), true) = (on_handle, gizmo.as_ref(), response.drag_started_by(egui::PointerButton::Primary)) {
+            let (x, y) = response.interact_pointer_pos().map(local).unwrap_or((0.0, 0.0));
+            let (o, d) = self.viewport.camera.ray(x, y, w, h);
+            if let Some(start) = g.param(handle, o, d) {
+                self.push_undo();
+                let starts = self.selected_instances().iter().map(|i| (i.name.clone(), i.pos, i.rot)).collect();
+                self.drag = Drag::Handle {
+                    handle,
+                    start,
+                    pivot: g.center,
+                    starts,
+                };
+            }
+        } else if pressed && on_handle.is_none() {
             let hit = response
                 .interact_pointer_pos()
                 .map(local)
@@ -731,9 +788,49 @@ impl App {
                 let (r, u) = (cam.right(), cam.up());
                 cam.target = cam.target - r * delta.x * scale + u * delta.y * scale;
             }
+            Drag::Handle {
+                handle,
+                start,
+                pivot,
+                starts,
+            } if response.dragged() => {
+                let (handle, start, pivot, starts) = (*handle, *start, *pivot, starts.clone());
+                if let Some((x, y)) = response.interact_pointer_pos().map(local) {
+                    let (o, d) = self.viewport.camera.ray(x, y, w, h);
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    let g = Gizmo {
+                        center: pivot,
+                        mode: self.gizmo_mode,
+                        length: 1.0,
+                    };
+                    if let Some(now) = g.param(handle, o, d) {
+                        match handle {
+                            Handle::Axis(i) => {
+                                let snap = if shift { 0.0 } else { self.snap_mm };
+                                for (name, p0, _) in &starts {
+                                    let np = gizmo::moved(*p0, i, (now - start) as f64, snap);
+                                    self.set_instance(name, |inst| inst.pos = np);
+                                }
+                            }
+                            Handle::Ring(i) => {
+                                let deg = gizmo::snap_angle(now - start, !shift && self.snap_mm > 0.0);
+                                let pivot = DVec3::new(pivot.x as f64, pivot.y as f64, pivot.z as f64);
+                                for (name, p0, r0) in &starts {
+                                    let (np, nr) = gizmo::rotated(*p0, *r0, pivot, i, deg);
+                                    self.set_instance(name, |inst| {
+                                        inst.pos = np;
+                                        inst.rot = nr;
+                                    });
+                                }
+                            }
+                        }
+                        self.recompute();
+                    }
+                }
+            }
             Drag::Move { z0, start, starts } if response.dragged() => {
                 if let Some((x, y)) = response.interact_pointer_pos().map(local) {
-                    let (o, d) = self.viewport.camera.ray(x, y, size.0 as f32, size.1 as f32);
+                    let (o, d) = self.viewport.camera.ray(x, y, w, h);
                     let shift = ui.input(|i| i.modifiers.shift);
                     let starts = starts.clone();
                     if shift {
@@ -770,10 +867,25 @@ impl App {
                     self.snap_selection(false);
                 }
             }
+            if matches!(self.drag, Drag::Handle { .. }) {
+                self.recompute();
+                if self.magnet {
+                    self.snap_selection(false);
+                }
+            }
             self.drag = Drag::None;
         }
+        // the handle under the pointer lights up (drawn next frame)
+        self.hot = match &self.drag {
+            Drag::Handle { handle, .. } => Some(*handle),
+            Drag::None => response.hover_pos().map(local).and_then(|(x, y)| handle_under(x, y)),
+            _ => None,
+        };
+        if self.hot.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
         // keyboard
-        let (del, rot, esc, undo, dup, fit, snap_now, arrows, shift) = ui.input(|i| {
+        let (del, rot, esc, undo, dup, fit, snap_now, arrows, shift, move_mode, rotate_mode) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
                 i.key_pressed(egui::Key::R),
@@ -789,11 +901,19 @@ impl App {
                     i.key_pressed(egui::Key::ArrowRight),
                 ],
                 i.modifiers.shift,
+                i.key_pressed(egui::Key::W),
+                i.key_pressed(egui::Key::E),
             )
         });
         if !ui.ctx().egui_wants_keyboard_input() {
             if undo {
                 self.undo();
+            }
+            if move_mode {
+                self.gizmo_mode = Mode::Move;
+            }
+            if rotate_mode {
+                self.gizmo_mode = Mode::Rotate;
             }
             if dup {
                 self.duplicate_selection();
@@ -828,7 +948,7 @@ impl App {
             }
         }
         let hud = format!(
-            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: right-drag · zoom: wheel · drag a brick to move it, shift lifts · R turns 90° · S snaps · Del · ⌘Z",
+            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: right-drag · zoom: wheel · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° · S snaps · Del · ⌘Z",
             self.editing,
             if self.selection.is_empty() {
                 String::new()
@@ -915,6 +1035,10 @@ impl App {
                     self.viewport.camera.pitch = pitch;
                 }
             }
+            ui.selectable_value(&mut self.gizmo_mode, Mode::Move, "Move")
+                .on_hover_text("W: arrows on the selection");
+            ui.selectable_value(&mut self.gizmo_mode, Mode::Rotate, "Rotate")
+                .on_hover_text("E: rings on the selection");
             ui.label("snap");
             egui::ComboBox::from_id_salt("snap")
                 .selected_text(if self.snap_mm > 0.0 {
@@ -1543,8 +1667,13 @@ impl App {
         };
         let tex = {
             let mut renderer = state.renderer.write();
-            self.viewport
-                .render(&state.device, &state.queue, &mut renderer, size, &items, &lines, bg)
+            let scene = viewport::Scene {
+                items: &items,
+                lines: &lines,
+                overlay: &[],
+                background: bg,
+            };
+            self.viewport.render(&state.device, &state.queue, &mut renderer, size, &scene)
         };
         let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
         if response.hovered() {

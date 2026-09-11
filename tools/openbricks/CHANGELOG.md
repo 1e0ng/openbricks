@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.4.0 — move and rotate handles in the sim's editor
+
+Selecting anything in the Workbench now shows handles at its origin:
+three world-axis arrows (**Move**, `W`) or three rings (**Rotate**,
+`E`). Drag an arrow to slide the selection along that axis in grid
+steps, drag a ring to turn it about that axis in 15° steps; shift
+frees either. Several selected instances move and turn together about
+the first one's origin. The handles keep one size on screen at any
+zoom, light up under the pointer, draw over the bricks they sit in,
+and let go into the nearest hole like a plain drag does. Dragging a
+brick itself still moves it on the ground plane.
+
+- `tools/sim`: the `gizmo` module (screen-space picking, axis and
+  ring drag maths, pose updates), cone and torus meshes,
+  `Camera::project`, an overlay render pass, and pixel read-back from
+  the offscreen target. The Rust tests now include an offscreen render
+  of bricks and handles checked pixel by pixel; the Linux CI leg
+  installs mesa's lavapipe so it runs without a GPU.
+
 ## 4.3.0 — the sim's Simulate tab: map, chassis, program, run / pause / stop, live view
 
 The sim now runs programs. The **Simulate** tab loads a map (any
