@@ -3,6 +3,26 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.6.0 — the sim imports STL parts
+
+**Import STL…** in the Workbench's library brings a part in from a
+binary or ASCII STL file, like the web workbench does: pick the file's
+units (mm, cm, inch, m), where its origin goes (as in the file, the
+bounding-box centre or the bottom centre), a category, and a weighed
+mass or a density (PLA, PETG, ABS, nylon, aluminium presets). The
+part records the same fields as a bundle brick — a packed mesh, the
+bounding box, and the volume, centre of mass and inertia from the
+closed mesh — plus the 4.8 mm pin holes found on it, so it snaps,
+rolls up and shows in the Simulate view like any other. Inside-out
+files are flipped; a mesh that is open or inconsistently wound gets a
+box's inertia, no volume and needs a mass.
+
+- `tools/sim/stl.rs`: the parser, mass properties by signed
+  tetrahedra, the closed-surface check, the bundle's mesh packing,
+  bore detection by face votes, and the import form's logic, with
+  tests for each; the editor's `import_part` gives the part a unique
+  id and a place in the view.
+
 ## 4.5.0 — copy, paste, lock and unlock in the sim's editor
 
 The Workbench gains copy and paste (`⌘C` / `⌘X` / `⌘V`, and a Copy

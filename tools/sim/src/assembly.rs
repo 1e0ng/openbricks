@@ -215,7 +215,7 @@ pub fn euler_from(m: &DMat3) -> [f64; 3] {
     })
 }
 
-fn shift_term(m: f64, d: DVec3) -> DMat3 {
+pub fn shift_term(m: f64, d: DVec3) -> DMat3 {
     let dd = d.dot(d);
     DMat3::from_cols(
         DVec3::new(m * (dd - d.x * d.x), -m * d.y * d.x, -m * d.z * d.x),

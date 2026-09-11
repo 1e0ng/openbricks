@@ -528,6 +528,27 @@ impl Editor {
         self.recompute();
     }
 
+    /// A part recorded from outside (an STL import) joins the library
+    /// under a unique id and is placed in the view.
+    pub fn import_part(&mut self, part: Part) -> String {
+        let stem = {
+            let s = assembly::slug(&part.name);
+            if s.is_empty() { "part".to_string() } else { s }
+        };
+        let mut id = stem.clone();
+        let mut k = 2;
+        while self.doc.parts.contains_key(&id) {
+            id = format!("{stem}_{k}");
+            k += 1;
+        }
+        self.push_undo();
+        let name = part.name.clone();
+        self.doc.parts.insert(id.clone(), part);
+        self.add_instance(Some(id.clone()), None, [0.0; 3]);
+        self.status = format!("{name} is in the library and in the view");
+        id
+    }
+
     // ------------------------------------------------------- clipboard
 
     /// The selection as clipboard text, with every definition it needs.
@@ -1210,6 +1231,33 @@ mod tests {
         assert!(cut.contains(&brick));
         assert_eq!(ed.children().len(), n - 1);
         assert!(ed.cut_selection().is_none());
+    }
+
+    #[test]
+    fn imported_parts_get_unique_ids_and_a_place_in_the_view() {
+        let mut ed = editor();
+        ed.magnet = false;
+        let part = |name: &str| Part {
+            name: name.into(),
+            category: "other".into(),
+            mass_g: 5.0,
+            source: "measured".into(),
+            source_note: String::new(),
+            ldraw: None,
+            shapes: vec![crate::assembly::Shape::Box {
+                size: [10.0, 10.0, 10.0],
+                pos: [0.0; 3],
+            }],
+            extra: Default::default(),
+        };
+        let n = ed.children().len();
+        assert_eq!(ed.import_part(part("Sensor Bracket")), "sensor_bracket");
+        assert_eq!(ed.import_part(part("Sensor Bracket")), "sensor_bracket_2");
+        assert_eq!(ed.import_part(part("???")), "part");
+        assert_eq!(ed.children().len(), n + 3);
+        assert_eq!(ed.selection, vec!["part".to_string()]);
+        assert_eq!(ed.status, "??? is in the library and in the view");
+        assert!(ed.doc.parts.contains_key("sensor_bracket_2"));
     }
 
     #[test]

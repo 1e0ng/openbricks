@@ -9,6 +9,7 @@ use crate::editor::Editor;
 use crate::geometry;
 use crate::gizmo::{self, Gizmo, Handle, Mode};
 use crate::simulate::SimulateTab;
+use crate::stl;
 use crate::viewport::{self, DrawItem, Line, Viewport, srgb};
 use eframe::egui;
 use glam::{DVec3, Mat4, Quat, Vec3};
@@ -53,6 +54,9 @@ pub struct App {
     items: Vec<DrawItem>,
     item_tops: Vec<String>,
     simulate: SimulateTab,
+    /// An STL file being imported: the form and what it works out to.
+    stl: Option<stl::Import>,
+    stl_prepared: Option<stl::Prepared>,
 }
 
 pub fn cat_color(category: &str, dark: bool) -> [f32; 4] {
@@ -97,6 +101,8 @@ impl App {
             items: vec![],
             item_tops: vec![],
             simulate: SimulateTab::new(python),
+            stl: None,
+            stl_prepared: None,
         }
     }
 
@@ -741,7 +747,13 @@ impl App {
                 });
             }
             ui.add_space(8.0);
-            ui.strong("Other bricks");
+            let mut import = false;
+            ui.horizontal(|ui| {
+                ui.strong("Other bricks");
+                if ui.small_button("Import STL…").on_hover_text("a part from a mesh file").clicked() {
+                    import = true;
+                }
+            });
             let ids: Vec<String> = self
                 .editor
                 .doc
@@ -775,7 +787,127 @@ impl App {
                 let push = id != self.editor.doc.robot.root && !self.editor.crumbs.contains(&id);
                 self.editor.open_component(&id, push);
             }
+            if import {
+                self.import_stl();
+            }
         });
+    }
+
+    fn import_stl(&mut self) {
+        let Some(p) = rfd::FileDialog::new().add_filter("STL", &["stl"]).pick_file() else {
+            return;
+        };
+        match stl::Import::from_path(&p) {
+            Ok(imp) => {
+                self.stl_prepared = Some(imp.prepare());
+                self.stl = Some(imp);
+            }
+            Err(e) => self.editor.status = format!("Could not import {}: {e}", p.display()),
+        }
+    }
+
+    /// The import form: name, category, units, origin, a weighed mass
+    /// or a density; what it works out to is shown as it changes.
+    fn stl_window(&mut self, ctx: &egui::Context) {
+        let Some(imp) = self.stl.as_mut() else { return };
+        let mut open = true;
+        let mut changed = false;
+        let mut add = false;
+        let mut cancel = false;
+        let prepared = &self.stl_prepared;
+        egui::Window::new("Import a part from an STL file")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!("{} · {} triangles in the file", imp.file, imp.raw.len()));
+                egui::Grid::new("stl-form").num_columns(2).show(ui, |ui| {
+                    ui.weak("name");
+                    ui.text_edit_singleline(&mut imp.name);
+                    ui.end_row();
+                    ui.weak("category");
+                    egui::ComboBox::from_id_salt("stl-cat")
+                        .selected_text(imp.category.clone())
+                        .show_ui(ui, |ui| {
+                            for c in stl::CATEGORIES {
+                                ui.selectable_value(&mut imp.category, c.to_string(), c);
+                            }
+                        });
+                    ui.end_row();
+                    ui.weak("units in the file");
+                    egui::ComboBox::from_id_salt("stl-units")
+                        .selected_text(imp.units.label())
+                        .show_ui(ui, |ui| {
+                            for u in stl::Units::ALL {
+                                changed |= ui.selectable_value(&mut imp.units, u, u.label()).changed();
+                            }
+                        });
+                    ui.end_row();
+                    ui.weak("origin");
+                    egui::ComboBox::from_id_salt("stl-origin")
+                        .selected_text(imp.origin.label())
+                        .show_ui(ui, |ui| {
+                            for o in stl::Origin::ALL {
+                                changed |= ui.selectable_value(&mut imp.origin, o, o.label()).changed();
+                            }
+                        });
+                    ui.end_row();
+                    ui.weak("weighed mass");
+                    ui.horizontal(|ui| {
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut imp.mass_g).speed(0.1).range(0.0..=100000.0).suffix(" g"))
+                            .changed();
+                        ui.weak("0 = from the volume and density");
+                    });
+                    ui.end_row();
+                    ui.weak("density");
+                    ui.horizontal(|ui| {
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut imp.density)
+                                    .speed(0.01)
+                                    .range(0.01..=30.0)
+                                    .suffix(" g/cm³"),
+                            )
+                            .changed();
+                        for (name, d) in stl::DENSITIES {
+                            if ui.small_button(name).clicked() {
+                                imp.density = d;
+                                changed = true;
+                            }
+                        }
+                    });
+                    ui.end_row();
+                });
+                if let Some(p) = prepared {
+                    ui.add_space(4.0);
+                    ui.label(&p.summary);
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let can_add = prepared.as_ref().map(|p| p.mass_g.is_some()).unwrap_or(false);
+                    if ui.add_enabled(can_add, egui::Button::new("Add to the library")).clicked() {
+                        add = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if changed {
+            self.stl_prepared = Some(imp.prepare());
+        }
+        if add
+            && let (Some(imp), Some(p)) = (self.stl.as_ref(), self.stl_prepared.as_ref())
+            && let Some(part) = imp.part(p)
+        {
+            self.editor.import_part(part);
+            cancel = true;
+        }
+        if cancel || !open {
+            self.stl = None;
+            self.stl_prepared = None;
+        }
     }
 
     fn tree_ui(&mut self, ui: &mut egui::Ui) {
@@ -1404,6 +1536,7 @@ impl eframe::App for App {
                 self.simulate_ui(ui, frame);
             }
             Tab::Workbench => {
+                self.stl_window(ui.ctx());
                 egui::Panel::left("library")
                     .default_size(300.0)
                     .resizable(true)

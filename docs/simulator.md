@@ -82,7 +82,13 @@ into another component as it was, or into another window (the
 clipboard carries every part and component definition it needs).
 `⌘L` locks the selection so nothing moves, turns or removes it until
 `⌘⇧L` unlocks it; locked bricks draw faded and show 🔒 in the
-contents list.
+contents list. **Import STL…** in the library brings in a part from a
+mesh file: choose the file's units, where its origin goes (as in the
+file, the bounding-box centre or the bottom centre), and a weighed
+mass or a density; the part gets its exact volume, centre of mass and
+inertia from the closed mesh (an open mesh gets a box's inertia and
+needs a mass), plus any 4.8 mm pin holes found on it, and lands in
+the library and the view.
 Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 
