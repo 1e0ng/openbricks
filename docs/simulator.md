@@ -101,8 +101,21 @@ pick the program (`main.py`), then Run. Pause, Resume and
 Stop do what they say; the speed slider runs the physics slower or
 faster than wall time; "follow the robot" keeps the camera on the
 chassis; the program's prints and errors appear in the log panel
-below the view. Under the hood the sim starts the MuJoCo runtime as a
-child process — the same runtime, driver shim and C cores
+below the view. The loaded chassis stands on the map at true scale:
+drag it to put it where a run should start (shift turns it), or type
+the pose in the **Route** panel. That panel plans a route as a
+sequence of runs: arm **+ Straight to…** or **+ Curve to…**, click
+the map where the segment ends, and the sim works out what drives
+it — for a straight line the turn to face the point and the distance,
+for a curve the arc tangent to the current heading through the point
+with its radius and angle — draws it on the map, and shows the drive
+base calls. Routes save and load as `*.route.json` (the map, the start
+pose and the points); **▶ Run route** writes the route as a hub-style
+program (`ST3032Motor` wheels and a `DriveBase` sized from the
+chassis; edit the motor lines for other wiring) and runs it, and
+"show the program" prints it. Under the hood the sim starts the
+MuJoCo runtime as a child process — the same runtime, driver shim and
+C cores
 `openbricks sim run` uses — and draws the run from the poses it
 streams, with every brick of the chassis in its exact geometry and
 the map's mesh props (the WRO senior mosaic frame) as MuJoCo has

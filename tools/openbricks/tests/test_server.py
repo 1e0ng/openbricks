@@ -100,6 +100,29 @@ class SessionTests(unittest.TestCase):
             fh.write(body)
         return path
 
+    def test_place_moves_the_chassis_and_is_refused_during_a_run(self):
+        out = io.StringIO()
+        s = self.session(out)
+        s.load(world="practice-line", assembly=_EXAMPLE)
+        scene = next(e for e in _events(out.getvalue()) if e["ev"] == "scene")
+        self.assertEqual(scene["chassis"]["wheel_diameter_mm"], 86.4)
+        self.assertEqual(scene["chassis"]["axle_track_mm"], 135.0)
+        self.assertEqual(scene["chassis"]["spawn"], {"x_mm": -547.0, "y_mm": -150.0, "yaw_deg": 90.0})
+        cid = scene["bodies"].index("chassis")
+        s.place(100.0, 200.0, -45.0)
+        frames = [e for e in _events(out.getvalue()) if e["ev"] == "frame"]
+        x, y = frames[-1]["bodies"][cid][:2]
+        self.assertAlmostEqual(x, 0.1, places=3)
+        self.assertAlmostEqual(y, 0.2, places=3)
+        self.assertAlmostEqual(s.robot.chassis_pose()[2], -45.0, places=6)
+        s.run(self.script("robot.run_for(5.0)\n"))
+        with self.assertRaises(RuntimeError):
+            s.place(0.0, 0.0)
+        s.stop()
+        empty = server.Session(server.Protocol(io.StringIO()))
+        with self.assertRaises(RuntimeError):
+            empty.place(0.0, 0.0)
+
     def test_scene_export_carries_mesh_assets(self):
         from openbricks_sim.bricks.ldraw import unpack_mesh
         out = io.StringIO()

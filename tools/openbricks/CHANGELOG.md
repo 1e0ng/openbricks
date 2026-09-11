@@ -3,6 +3,29 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.6.0 — routes on the map, and the chassis placed by hand
+
+The Simulate tab plans routes. A route is a start pose and a sequence
+of runs: arm **+ Straight to…** or **+ Curve to…**, click the map
+where the segment ends, and the sim works out what drives it — the
+turn to face the point and the distance for a straight line, the arc
+tangent to the current heading through the point (radius and angle)
+for a curve — draws it on the map and lists the drive base calls.
+Routes save and load as `*.route.json`; **▶ Run route** writes the
+route as a hub-style program (`ST3032Motor` wheels, a `DriveBase`
+sized from the loaded chassis) and runs it. The loaded chassis stands
+on the map at true scale and can be dragged to where a run starts
+(shift turns it) or placed by typing the pose; the run server gets a
+`place` command for it and exports the chassis geometry with the
+scene.
+
+- Tests: the planner's geometry (turn-then-drive, tangent arcs left
+  and right, points on the heading line, chained segments, the
+  program text, files); the tab's planning, placement, drawing and
+  running against the stand-in server; and, against the real MuJoCo
+  runtime, placing the robot and driving a planned two-segment route
+  to within 25 mm and 10° of where it was planned.
+
 ## 4.5.0 — the sim's editor: copy, paste, lock, STL import, thumbnails, mesh scenery, and a tested core
 
 One release for the sim's editor work of the last day.

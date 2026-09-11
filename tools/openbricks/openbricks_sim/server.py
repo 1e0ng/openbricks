@@ -12,6 +12,7 @@ Commands (one JSON object per line on stdin)::
     {"cmd": "worlds"}
     {"cmd": "load", "world": "practice-line", "assembly": "robot.assembly.json"}
     {"cmd": "run", "script": "main.py"}
+    {"cmd": "place", "x_mm": -547, "y_mm": -150, "yaw_deg": 90}
     {"cmd": "pause"}   {"cmd": "resume"}   {"cmd": "stop"}
     {"cmd": "speed", "factor": 2.0}
     {"cmd": "quit"}
@@ -20,7 +21,9 @@ Events (one JSON object per line on stdout)::
 
     {"ev": "worlds", "worlds": [{"alias", "path", "dir"}, ...]}
     {"ev": "scene", "bodies": [...], "geoms": [...], "materials": {...},
-                    "textures": {...}, "meshes": {...}, "bricks": [...], "timestep_ms": 1}
+                    "textures": {...}, "meshes": {...}, "bricks": [...],
+                    "chassis": {"wheel_diameter_mm", "axle_track_mm", "spawn": {"x_mm", "y_mm", "yaw_deg"}},
+                    "timestep_ms": 1}
     {"ev": "frame", "t_ms": 1234, "bodies": [[x, y, z, qw, qx, qy, qz], ...]}
     {"ev": "log", "text": "..."}            # the program's prints
     {"ev": "state", "status": "idle|loaded|running|paused|finished|stopped|error", ...}
@@ -122,10 +125,18 @@ def _packed_mesh(model, mid):
     return pack_mesh(verts[faces], q=10.0)
 
 
-def export_scene(model, world_path=None, bricks=()):
+def chassis_info(spec):
+    """The chassis geometry a route planner needs, in mm and degrees."""
+    return {"wheel_diameter_mm": round(float(spec.wheel_radius) * 2000.0, 3),
+            "axle_track_mm": round(float(spec.axle_length) * 1000.0, 3),
+            "spawn": {"x_mm": round(float(spec.pos_x) * 1000.0, 3), "y_mm": round(float(spec.pos_y) * 1000.0, 3),
+                      "yaw_deg": round(float(spec.yaw_deg), 3)}}
+
+
+def export_scene(model, world_path=None, bricks=(), chassis_spec=None):
     """Everything a viewer needs once: bodies, geoms with their local
     pose and material, materials with texture names, texture files,
-    and the mesh assets the mesh geoms name."""
+    the mesh assets the mesh geoms name, and the chassis geometry."""
     import mujoco
     geom_types = {mujoco.mjtGeom.mjGEOM_PLANE: "plane", mujoco.mjtGeom.mjGEOM_SPHERE: "sphere",
                   mujoco.mjtGeom.mjGEOM_CAPSULE: "capsule", mujoco.mjtGeom.mjGEOM_ELLIPSOID: "ellipsoid",
@@ -169,7 +180,9 @@ def export_scene(model, world_path=None, bricks=()):
             "mesh": mesh_file,
         })
     return {"bodies": bodies, "geoms": geoms, "materials": materials, "textures": _texture_files(world_path),
-            "meshes": meshes, "bricks": list(bricks), "timestep_ms": max(1, int(round(model.opt.timestep * 1000.0)))}
+            "meshes": meshes, "bricks": list(bricks),
+            "chassis": chassis_info(chassis_spec) if chassis_spec is not None else None,
+            "timestep_ms": max(1, int(round(model.opt.timestep * 1000.0)))}
 
 
 def frame_of(model, data, t_ms):
@@ -209,8 +222,19 @@ class Session:
         self.world_path = robot_mod._resolve_world(world)
         self.assembly = assembly
         self.status = "loaded"
-        scene = export_scene(self.robot.model, self.world_path, self.robot.assembly_bricks)
+        scene = export_scene(self.robot.model, self.world_path, self.robot.assembly_bricks, self.robot.chassis_spec)
         self.protocol.send(ev="scene", **scene)
+        self._send_frame()
+        self._send_state()
+
+    def place(self, x_mm, y_mm, yaw_deg=0.0):
+        """Put the chassis at a pose on the map (a route's start, or
+        where the user dragged it); refused while a program runs."""
+        if self.robot is None:
+            raise RuntimeError("load a world first")
+        if self.thread is not None and self.thread.is_alive():
+            raise RuntimeError("a program is running; stop it first")
+        self.robot.set_pose(float(x_mm), float(y_mm), float(yaw_deg))
         self._send_frame()
         self._send_state()
 
@@ -348,6 +372,8 @@ def serve(stdin=None, stdout=None, frame_hz=60.0):
                 session.load(world=cmd.get("world"), assembly=cmd.get("assembly"), chassis=cmd.get("chassis"))
             elif name == "run":
                 session.run(cmd["script"])
+            elif name == "place":
+                session.place(cmd["x_mm"], cmd["y_mm"], cmd.get("yaw_deg", 0.0))
             elif name == "pause":
                 session.pause()
             elif name == "resume":
