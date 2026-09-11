@@ -65,6 +65,14 @@ pub struct Brick {
     pub category: String,
 }
 
+/// The chassis geometry a route planner needs, as the server loaded it.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct ChassisInfo {
+    pub wheel_diameter_mm: f64,
+    pub axle_track_mm: f64,
+    pub spawn: crate::route::Pose2,
+}
+
 #[derive(Deserialize, Clone, Debug, Default)]
 #[allow(dead_code)] // the whole wire format is kept, used or not
 pub struct Scene {
@@ -79,6 +87,8 @@ pub struct Scene {
     pub meshes: HashMap<String, crate::bundle::MeshRecord>,
     #[serde(default)]
     pub bricks: Vec<Brick>,
+    #[serde(default)]
+    pub chassis: Option<ChassisInfo>,
     #[serde(default)]
     pub timestep_ms: u32,
 }
@@ -278,8 +288,12 @@ W = [{"alias": "practice-line", "path": "/w/practice_line/world.xml", "dir": "/w
      {"alias": "empty", "path": "/w/empty.xml", "dir": "/w"}]
 SCENE = {"ev": "scene", "bodies": ["world", "chassis"],
          "geoms": [{"name": "floor", "type": "plane", "body": 0, "size": [1.2, 0.9, 0.1], "pos": [0, 0, 0],
-                    "quat": [1, 0, 0, 0], "rgba": [1, 1, 1, 1], "material": None, "group": 0, "mesh": None}],
-         "materials": {}, "textures": {}, "bricks": [], "timestep_ms": 1}
+                    "quat": [1, 0, 0, 0], "rgba": [1, 1, 1, 1], "material": None, "group": 0, "mesh": None},
+                   {"name": "chassis_body", "type": "box", "body": 1, "size": [0.08, 0.06, 0.02], "pos": [0, 0, 0],
+                    "quat": [1, 0, 0, 0], "rgba": [0.3, 0.3, 0.8, 1], "material": None, "group": 0, "mesh": None}],
+         "materials": {}, "textures": {}, "bricks": [],
+         "chassis": {"wheel_diameter_mm": 86.4, "axle_track_mm": 135.0, "spawn": {"x_mm": -547.0, "y_mm": -150.0, "yaw_deg": 90.0}},
+         "timestep_ms": 1}
 status = "idle"
 for line in sys.stdin:
     c = json.loads(line)
@@ -290,7 +304,7 @@ for line in sys.stdin:
     if cmd == "load":
         status = "loaded"
         send(**SCENE)
-        send(ev="frame", t_ms=0, bodies=[[0, 0, 0, 1, 0, 0, 0], [0, 0, 0.05, 1, 0, 0, 0]])
+        send(ev="frame", t_ms=0, bodies=[[0, 0, 0, 1, 0, 0, 0], [-0.547, -0.15, 0.05, 0.7071068, 0, 0, 0.7071068]])
         send(ev="log", stream="server", text="loaded %s with %s" % (c.get("world"), c.get("assembly")))
     elif cmd == "run":
         status = "running"
@@ -305,6 +319,14 @@ for line in sys.stdin:
     elif cmd == "speed":
         send(ev="state", status=status, t_ms=0, speed=c["factor"], error=None)
         continue
+    elif cmd == "place":
+        if status == "running":
+            send(ev="error", text="a program is running; stop it first")
+            continue
+        import math
+        yaw = math.radians(float(c.get("yaw_deg") or 0.0))
+        send(ev="frame", t_ms=0, bodies=[[0, 0, 0, 1, 0, 0, 0], [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, 0.05, math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]])
+        send(ev="log", stream="server", text="placed at %s %s %s" % (c["x_mm"], c["y_mm"], c.get("yaw_deg")))
     elif cmd == "quit":
         send(ev="bye")
         break
@@ -390,6 +412,25 @@ mod tests {
         assert!(matches!(parse_event(r#"{"ev":"bye"}"#).unwrap(), Event::Bye));
         assert!(parse_event(r#"{"ev":"what"}"#).is_err());
         assert!(parse_event("not json").is_err());
+    }
+
+    #[test]
+    fn a_scene_carries_the_chassis_geometry_when_the_server_sends_it() {
+        let bare = r#"{"ev":"scene","bodies":["world"],"geoms":[],"timestep_ms":1}"#;
+        let Event::Scene(s) = parse_event(bare).unwrap() else { panic!() };
+        assert!(s.chassis.is_none());
+        let with = r#"{"ev":"scene","bodies":["world","chassis"],"geoms":[],"chassis":{"wheel_diameter_mm":86.4,"axle_track_mm":135.0,"spawn":{"x_mm":-547.0,"y_mm":-150.0,"yaw_deg":90.0}},"timestep_ms":1}"#;
+        let Event::Scene(s) = parse_event(with).unwrap() else { panic!() };
+        let c = s.chassis.unwrap();
+        assert_eq!((c.wheel_diameter_mm, c.axle_track_mm), (86.4, 135.0));
+        assert_eq!(
+            c.spawn,
+            crate::route::Pose2 {
+                x_mm: -547.0,
+                y_mm: -150.0,
+                yaw_deg: 90.0
+            }
+        );
     }
 
     #[test]
