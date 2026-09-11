@@ -831,11 +831,28 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: tools/sim
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+        if: runner.os == 'Linux'
+
+      - uses: actions/setup-python@v6
+        if: runner.os == 'Linux'
+        with:
+          python-version: "3.11"
+
+      - name: The runtime for the end-to-end test
+        # The sim's tests drive the real run server (MuJoCo) when
+        # OPENBRICKS_SIM_PYTHON names an interpreter that has it.
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install '../openbricks[sim]'
+          echo "OPENBRICKS_SIM_PYTHON=$(which python)" >> "$GITHUB_ENV"
 
       - name: Linux build dependencies (winit, wgpu, file dialogs)
         if: runner.os == 'Linux'
@@ -844,12 +861,21 @@ jobs:
           # mesa's lavapipe gives the offscreen render test a Vulkan device
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev libssl-dev mesa-vulkan-drivers libvulkan1
 
-      - name: Format, lint, test
+      - name: Format, lint, test under coverage
         if: runner.os == 'Linux'
         run: |
           cargo fmt --check
           cargo clippy --all-targets --release -- -D warnings
-          cargo test --release
+          cargo llvm-cov --release --lcov --output-path lcov.info
+
+      - name: Upload sim coverage to Codecov (sim-rs flag)
+        if: runner.os == 'Linux' && github.event_name == 'pull_request'
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: tools/sim/lcov.info
+          flags: sim-rs
+          fail_ci_if_error: false
 
       - name: Build
         run: cargo build --release

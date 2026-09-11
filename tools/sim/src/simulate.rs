@@ -17,6 +17,7 @@ const M_TO_MM: f32 = 1000.0;
 
 pub struct SimulateTab {
     python: Option<String>,
+    env: Vec<(String, String)>,
     process: Option<SimProcess>,
     connected: bool,
     worlds: Vec<WorldEntry>,
@@ -38,12 +39,23 @@ pub struct SimulateTab {
     follow: bool,
     pending_load: bool,
     scene_gen: u32,
+    /// The default map is loaded once, when the tab first shows.
+    auto_loaded: bool,
+    /// Every command sent, for tests.
+    #[cfg(test)]
+    pub sent: Vec<serde_json::Value>,
 }
 
 impl SimulateTab {
     pub fn new(python: Option<String>) -> Self {
+        Self::new_with_env(python, vec![])
+    }
+
+    /// `env` is added to the run server's environment.
+    pub fn new_with_env(python: Option<String>, env: Vec<(String, String)>) -> Self {
         SimulateTab {
             python,
+            env,
             process: None,
             connected: false,
             worlds: vec![],
@@ -65,6 +77,9 @@ impl SimulateTab {
             follow: false,
             pending_load: false,
             scene_gen: 0,
+            auto_loaded: false,
+            #[cfg(test)]
+            sent: vec![],
         }
     }
 
@@ -72,9 +87,39 @@ impl SimulateTab {
         self.follow
     }
 
+    /// A chassis chosen: the map is rebuilt with it.
     pub fn set_chassis(&mut self, path: PathBuf, doc: Document) {
         self.chassis = Some(path);
         self.chassis_doc = Some(doc);
+        self.reload();
+    }
+
+    /// Back to the default chassis.
+    pub fn clear_chassis(&mut self) {
+        self.chassis = None;
+        self.chassis_doc = None;
+        self.reload();
+    }
+
+    /// The tab is showing: load the default map once so the view is
+    /// never empty. Failures (no Python) are reported once.
+    pub fn ensure_loaded(&mut self) {
+        if self.auto_loaded {
+            return;
+        }
+        self.auto_loaded = true;
+        self.load();
+    }
+
+    /// A different map or chassis was chosen: show it. A run in
+    /// progress is stopped first; the load follows its `stopped` state.
+    pub fn reload(&mut self) {
+        if matches!(self.status.as_str(), "running" | "paused") {
+            self.pending_load = true;
+            self.send(serde_json::json!({"cmd": "stop"}));
+        } else {
+            self.load();
+        }
     }
 
     // --------------------------------------------------------- process
@@ -87,7 +132,7 @@ impl SimulateTab {
             self.message = "no Python interpreter: start the sim with `openbricks sim` (or pass --python)".into();
             return false;
         };
-        match SimProcess::spawn(&python) {
+        match SimProcess::spawn_with_env(&python, &self.env) {
             Ok(p) => {
                 self.process = Some(p);
                 self.status = "starting the run server".into();
@@ -102,6 +147,8 @@ impl SimulateTab {
     }
 
     fn send(&mut self, cmd: serde_json::Value) {
+        #[cfg(test)]
+        self.sent.push(cmd.clone());
         if let Some(p) = self.process.as_mut()
             && let Err(e) = p.send(&cmd)
         {
@@ -114,9 +161,16 @@ impl SimulateTab {
     /// Drain the server's events; returns true when something changed.
     pub fn pump(&mut self) -> bool {
         let mut changed = false;
-        let mut dead = false;
         while let Some(ev) = self.process.as_mut().and_then(|p| p.try_recv()) {
             changed = true;
+            self.apply(ev);
+        }
+        changed
+    }
+
+    /// One event from the run server applied to the tab.
+    pub fn apply(&mut self, ev: Event) {
+        {
             match ev {
                 Event::Hello { version } => {
                     self.connected = true;
@@ -169,26 +223,28 @@ impl SimulateTab {
                     self.t_ms = t_ms;
                     self.speed_sent = speed;
                     self.error = error;
+                    if self.pending_load && !matches!(self.status.as_str(), "running" | "paused") {
+                        self.pending_load = false;
+                        self.load();
+                    }
                 }
                 Event::Error(text) => {
                     self.message = text.clone();
                     self.log.push(("server".into(), text));
                 }
-                Event::Bye => {
-                    dead = true;
-                }
-                Event::Exited(why) => {
-                    self.message = why;
-                    dead = true;
-                }
+                Event::Bye => self.server_gone(None),
+                Event::Exited(why) => self.server_gone(Some(why)),
             }
         }
-        if dead {
-            self.process = None;
-            self.connected = false;
-            self.status = "run server stopped".into();
+    }
+
+    fn server_gone(&mut self, why: Option<String>) {
+        if let Some(w) = why {
+            self.message = w;
         }
-        changed
+        self.process = None;
+        self.connected = false;
+        self.status = "run server stopped".into();
     }
 
     pub fn is_live(&self) -> bool {
@@ -495,6 +551,7 @@ impl SimulateTab {
             } else {
                 self.worlds.iter().map(|w| w.alias.clone()).collect()
             };
+            let before = self.world.clone();
             egui::ComboBox::from_id_salt("world")
                 .selected_text(self.world.clone())
                 .show_ui(ui, |ui| {
@@ -502,6 +559,9 @@ impl SimulateTab {
                         ui.selectable_value(&mut self.world, a.clone(), a);
                     }
                 });
+            if self.world != before {
+                self.reload();
+            }
             ui.label("chassis");
             let chassis_label = self
                 .chassis
@@ -524,8 +584,7 @@ impl SimulateTab {
                 }
             }
             if self.chassis.is_some() && ui.small_button("×").on_hover_text("use the default chassis").clicked() {
-                self.chassis = None;
-                self.chassis_doc = None;
+                self.clear_chassis();
             }
             ui.label("program");
             let script_label = self
@@ -608,6 +667,397 @@ fn srgb_to_linear(c: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assembly::{self, Part, Shape};
+    use crate::sim::testing::fake_server;
+    use crate::viewport::testing::{test_device, test_renderer};
+    use std::time::{Duration, Instant};
+
+    const SCENE: &str = r#"{"bodies":["world","chassis"],"geoms":[{"name":"floor","type":"plane","body":0,"size":[1.2,0.9,0.1],"pos":[0,0,0],"quat":[1,0,0,0],"rgba":[1,1,1,1],"material":null,"group":0,"mesh":null}],"materials":{},"textures":{},"bricks":[],"timestep_ms":1}"#;
+
+    fn pump_until(tab: &mut SimulateTab, secs: u64, f: impl Fn(&SimulateTab) -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        while Instant::now() < deadline {
+            tab.pump();
+            if f(tab) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
+    }
+
+    fn state(status: &str) -> Event {
+        Event::State {
+            status: status.into(),
+            t_ms: 0,
+            speed: 1.0,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn events_drive_the_state_machine() {
+        let mut t = SimulateTab::new(None);
+        t.apply(Event::Hello { version: "9".into() });
+        assert!(t.connected && t.status == "run server 9 ready");
+        t.world = "nope".into();
+        t.apply(Event::Worlds(vec![
+            WorldEntry {
+                alias: "empty".into(),
+                ..Default::default()
+            },
+            WorldEntry {
+                alias: "practice-line".into(),
+                ..Default::default()
+            },
+        ]));
+        assert_eq!(t.world, "practice-line");
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE).unwrap())));
+        assert_eq!(t.poses.len(), 2);
+        assert_eq!(t.scene_gen, 1);
+        assert!(t.fit_pending);
+        t.apply(Event::Frame {
+            t_ms: 5,
+            poses: vec![Pose::default()],
+        });
+        assert_eq!(t.t_ms, 5);
+        assert_eq!(t.poses[1].quat, [1.0, 0.0, 0.0, 0.0], "a frame of the wrong size is ignored");
+        t.apply(Event::Frame {
+            t_ms: 6,
+            poses: vec![
+                Pose::default(),
+                Pose {
+                    pos: [1.0, 2.0, 3.0],
+                    quat: [1.0, 0.0, 0.0, 0.0],
+                },
+            ],
+        });
+        assert_eq!(t.poses[1].pos, [1.0, 2.0, 3.0]);
+        for i in 0..2001 {
+            t.apply(Event::Log {
+                stream: "stdout".into(),
+                text: i.to_string(),
+            });
+        }
+        assert_eq!(t.log.len(), 1501);
+        t.apply(Event::State {
+            status: "running".into(),
+            t_ms: 7,
+            speed: 2.0,
+            error: Some("x".into()),
+        });
+        assert_eq!(
+            (t.status.as_str(), t.t_ms, t.speed_sent, t.error.as_deref()),
+            ("running", 7, 2.0, Some("x"))
+        );
+        assert!(!t.is_live(), "no process: not live");
+        t.apply(Event::Error("bad".into()));
+        assert_eq!(t.message, "bad");
+        assert_eq!(t.log.last().unwrap().0, "server");
+        t.apply(Event::Exited("gone".into()));
+        assert!(!t.connected && t.status == "run server stopped" && t.message == "gone");
+        t.status = "loaded".into();
+        t.apply(Event::Bye);
+        assert_eq!(t.status, "run server stopped");
+    }
+
+    #[test]
+    fn a_map_chosen_mid_run_loads_once_the_run_has_stopped() {
+        let mut t = SimulateTab::new(None);
+        t.status = "running".into();
+        t.reload();
+        assert!(t.pending_load);
+        assert_eq!(t.sent.last().unwrap()["cmd"], "stop");
+        t.apply(state("stopped"));
+        assert!(!t.pending_load);
+        assert!(t.message.contains("no Python interpreter"), "{}", t.message);
+        // the tab showing loads the default map once
+        t.message.clear();
+        t.ensure_loaded();
+        assert!(t.message.contains("no Python interpreter"));
+        t.message.clear();
+        t.ensure_loaded();
+        assert!(t.message.is_empty());
+        // a run needs a program
+        t.run();
+        assert_eq!(t.message, "choose a program first");
+    }
+
+    #[test]
+    fn choosing_a_map_shows_it_and_the_controls_reach_the_server() {
+        let Some(fake) = fake_server("simulate") else {
+            return;
+        };
+        let (dir, mut t) = (fake.dir, SimulateTab::new_with_env(Some(fake.python), fake.env));
+        t.ensure_loaded();
+        assert!(
+            pump_until(&mut t, 30, |t| t.scene.is_some() && t.status == "loaded"),
+            "{} / {}",
+            t.status,
+            t.message
+        );
+        assert!(t.log.iter().any(|(_, x)| x == "loaded practice-line with None"), "{:?}", t.log);
+        assert_eq!(t.poses.len(), 2);
+        assert!(t.worlds.iter().any(|w| w.alias == "wro-2026-senior"));
+        // another map: loaded as soon as it is chosen
+        t.world = "wro-2026-senior".into();
+        t.reload();
+        assert!(
+            pump_until(&mut t, 30, |t| t.log.iter().any(|(_, x)| x == "loaded wro-2026-senior with None")),
+            "{:?}",
+            t.log
+        );
+        // a run: its print and its frame arrive
+        let script = dir.join("main.py");
+        std::fs::write(&script, "print('hi')\n").unwrap();
+        t.script = Some(script);
+        t.run();
+        assert!(pump_until(&mut t, 30, |t| t.status == "running"), "{}", t.status);
+        assert!(t.log.iter().any(|(s, x)| s == "stdout" && x.ends_with("main.py")), "{:?}", t.log);
+        assert!(t.t_ms == 10 && (t.poses[1].pos[0] - 0.01).abs() < 1e-9);
+        assert!(t.is_live());
+        // a map chosen mid-run: stopped first, then loaded
+        t.world = "practice-line".into();
+        t.reload();
+        assert!(t.pending_load);
+        assert!(
+            pump_until(&mut t, 30, |t| !t.pending_load
+                && t.status == "loaded"
+                && t.log.iter().any(|(_, x)| x == "loaded practice-line with None")),
+            "{} {:?}",
+            t.status,
+            t.log
+        );
+        // pause, resume, stop, speed, and an error the server reports
+        t.run();
+        assert!(pump_until(&mut t, 30, |t| t.status == "running"));
+        t.send(serde_json::json!({"cmd": "pause"}));
+        assert!(pump_until(&mut t, 30, |t| t.status == "paused"));
+        t.send(serde_json::json!({"cmd": "resume"}));
+        assert!(pump_until(&mut t, 30, |t| t.status == "running"));
+        t.send(serde_json::json!({"cmd": "stop"}));
+        assert!(pump_until(&mut t, 30, |t| t.status == "stopped"));
+        t.send(serde_json::json!({"cmd": "speed", "factor": 2.5}));
+        assert!(pump_until(&mut t, 30, |t| t.speed_sent == 2.5));
+        t.send(serde_json::json!({"cmd": "bogus"}));
+        assert!(pump_until(&mut t, 30, |t| t.message == "no such command bogus"), "{}", t.message);
+        // a chassis: the map is rebuilt with it, and without it again
+        let path = dir.join("robot.assembly.json");
+        std::fs::write(&path, assembly::EXAMPLE).unwrap();
+        t.set_chassis(path.clone(), assembly::example());
+        assert!(
+            pump_until(&mut t, 30, |t| t.log.iter().any(|(_, x)| x.ends_with("robot.assembly.json"))),
+            "{:?}",
+            t.log
+        );
+        t.clear_chassis();
+        assert!(pump_until(&mut t, 30, |t| t
+            .log
+            .iter()
+            .any(|(_, x)| x == "loaded practice-line with None")));
+        t.shutdown();
+        assert!(t.process.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The real runtime: `OPENBRICKS_SIM_PYTHON` names an interpreter
+    /// with `openbricks_sim` and MuJoCo installed (CI's Linux leg sets
+    /// it); unset, the test is skipped.
+    #[test]
+    fn the_real_run_server_end_to_end() {
+        let Some(python) = std::env::var("OPENBRICKS_SIM_PYTHON").ok().filter(|p| !p.is_empty()) else {
+            eprintln!("OPENBRICKS_SIM_PYTHON is unset: skipping the end-to-end test");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("ob-e2e-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let assembly = dir.join("robot.assembly.json");
+        std::fs::write(&assembly, assembly::EXAMPLE).unwrap();
+        let script = dir.join("main.py");
+        std::fs::write(&script, "print('hello from the program')\nrobot.run_for(0.3)\nprint('done')\n").unwrap();
+        let long = dir.join("long.py");
+        std::fs::write(&long, "robot.run_for(30.0)\n").unwrap();
+        let mut t = SimulateTab::new(Some(python));
+        t.world = "practice-line".into();
+        t.set_chassis(assembly, assembly::example());
+        assert!(
+            pump_until(&mut t, 180, |t| t.scene.is_some() && t.status == "loaded"),
+            "{} / {} / {:?}",
+            t.status,
+            t.message,
+            t.log
+        );
+        let scene = t.scene.as_ref().unwrap();
+        assert!(scene.body_id("chassis").is_some(), "{:?}", scene.bodies);
+        assert!(!scene.bricks.is_empty(), "the assembled chassis carries its bricks");
+        assert!(scene.geoms.iter().any(|g| g.kind == "plane"));
+        assert_eq!(t.poses.len(), scene.bodies.len());
+        t.script = Some(script);
+        t.run();
+        assert!(
+            pump_until(&mut t, 180, |t| t.status == "finished"),
+            "{} / {} / {:?}",
+            t.status,
+            t.message,
+            t.log
+        );
+        assert!(
+            t.log.iter().any(|(s, x)| s == "stdout" && x == "hello from the program"),
+            "{:?}",
+            t.log
+        );
+        assert!(t.log.iter().any(|(s, x)| s == "stdout" && x == "done"), "{:?}", t.log);
+        assert!(t.t_ms >= 300, "{}", t.t_ms);
+        // pause, resume and stop a long program
+        t.script = Some(long);
+        t.run();
+        assert!(pump_until(&mut t, 60, |t| t.status == "running"), "{} / {}", t.status, t.message);
+        t.send(serde_json::json!({"cmd": "pause"}));
+        assert!(pump_until(&mut t, 60, |t| t.status == "paused"), "{}", t.status);
+        t.send(serde_json::json!({"cmd": "resume"}));
+        assert!(pump_until(&mut t, 60, |t| t.status == "running"), "{}", t.status);
+        t.send(serde_json::json!({"cmd": "stop"}));
+        assert!(pump_until(&mut t, 60, |t| t.status == "stopped"), "{}", t.status);
+        assert!(t.error.is_none(), "{:?}", t.error);
+        t.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn draw_items_builds_meshes_for_every_geom_kind_and_the_chassis_bricks() {
+        let Some((device, queue)) = test_device() else { return };
+        let mut vp = Viewport::new(&device, &queue);
+        let bundle_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../openbricks/openbricks_sim/bricks/technic_bundle.json.zlib");
+        let bundle = crate::bundle::load_bundle(&bundle_path).expect("the shipped brick bundle");
+        let dir = std::env::temp_dir().join(format!("ob-draw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("mat.png");
+        image::save_buffer(
+            &png,
+            &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255],
+            2,
+            2,
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
+        let geom = |name: &str, kind: &str, body: usize, group: i64, mesh: Option<&str>, material: Option<&str>| {
+            format!(
+                r#"{{"name":"{name}","type":"{kind}","body":{body},"size":[0.1,0.05,0.02],"pos":[0.1,0,0],"quat":[1,0,0,0],"rgba":[0.5,0.5,0.5,1],"material":{},"group":{group},"mesh":{}}}"#,
+                material.map(|m| format!("\"{m}\"")).unwrap_or("null".into()),
+                mesh.map(|m| format!("\"{m}\"")).unwrap_or("null".into())
+            )
+        };
+        let geoms = [
+            geom("floor", "plane", 0, 0, None, Some("mat")),
+            geom("b", "box", 0, 0, None, Some("plain")),
+            geom("s", "sphere", 0, 0, None, None),
+            geom("c", "cylinder", 1, 0, None, None),
+            geom("k", "capsule", 1, 0, None, None),
+            geom("e", "ellipsoid", 1, 0, None, None),
+            geom("m", "mesh", 0, 0, Some("frame"), None),
+            geom("helper", "box", 0, 3, None, None),
+            geom("chassis_brick:beam", "box", 1, 3, None, None),
+        ]
+        .join(",");
+        let scene_json = format!(
+            r#"{{"bodies":["world","chassis"],"geoms":[{geoms}],"materials":{{"mat":{{"rgba":[0.2,0.3,0.4,1],"texture":"tex","texrepeat":[2,2]}},"plain":{{"rgba":[0.9,0.1,0.1,1],"texture":null,"texrepeat":[1,1]}}}},"textures":{{"tex":"{}"}},"bricks":[{{"path":"beam","part":"lego_32278","ldraw":"32278","pos_m":[0.01,0,0.02],"quat":[1,0,0,0],"half_m":[0.06,0.004,0.004],"category":"lego"}},{{"path":"servo","part":"servo","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":"servo"}},{{"path":"ghost","part":"missing","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":""}},{{"path":"bare","part":"bare","ldraw":null,"pos_m":[0,0,0],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":""}}],"timestep_ms":1}}"#,
+            png.to_string_lossy().replace('\\', "/")
+        );
+        let mut t = SimulateTab::new(None);
+        t.apply(Event::Scene(Box::new(serde_json::from_str(&scene_json).unwrap())));
+        let mut doc = assembly::example();
+        doc.parts.insert(
+            "lego_32278".into(),
+            Part {
+                name: "beam".into(),
+                category: "lego".into(),
+                mass_g: 1.0,
+                source: String::new(),
+                source_note: String::new(),
+                ldraw: Some("32278".into()),
+                shapes: vec![],
+                extra: Default::default(),
+            },
+        );
+        doc.parts.insert(
+            "servo".into(),
+            Part {
+                name: "servo".into(),
+                category: "servo".into(),
+                mass_g: 20.0,
+                source: String::new(),
+                source_note: String::new(),
+                ldraw: None,
+                shapes: vec![Shape::Box {
+                    size: [20.0, 20.0, 20.0],
+                    pos: [0.0; 3],
+                }],
+                extra: Default::default(),
+            },
+        );
+        doc.parts.insert(
+            "bare".into(),
+            Part {
+                name: "bare".into(),
+                category: String::new(),
+                mass_g: 1.0,
+                source: String::new(),
+                source_note: String::new(),
+                ldraw: None,
+                shapes: vec![],
+                extra: Default::default(),
+            },
+        );
+        t.chassis_doc = Some(doc);
+        let (items, lines) = t.draw_items(&mut vp, &device, &queue, &bundle, false);
+        // six geoms drawn; the file mesh, the helper and the brick stand-in skipped; two of four bricks drawable
+        assert_eq!(items.len(), 8, "{:?}", items.iter().map(|i| i.mesh.clone()).collect::<Vec<_>>());
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            items[0].texture.as_deref(),
+            Some("tex:tex"),
+            "the plane takes its material's texture"
+        );
+        assert_eq!(t.textures_loaded.get("tex"), Some(&true));
+        assert!(items[1].texture.is_none());
+        assert!(
+            items[1].color[0] > items[1].color[2],
+            "the default grey takes the material colour (red)"
+        );
+        assert!(vp.has_mesh("ld:32278") && vp.has_mesh("part:servo"));
+        assert!(!vp.has_mesh("part:bare") && !vp.has_mesh("part:missing"));
+        let mut renderer = test_renderer(&device);
+        vp.render(
+            &device,
+            &queue,
+            &mut renderer,
+            (64, 48),
+            &crate::viewport::Scene {
+                items: &items,
+                lines: &lines,
+                overlay: &[],
+                background: [0.0; 4],
+            },
+        );
+        // a second pass reuses every mesh; a texture that cannot be read is reported once
+        t.textures_loaded.clear();
+        t.scene
+            .as_mut()
+            .unwrap()
+            .textures
+            .insert("tex".into(), dir.join("missing.png").to_string_lossy().to_string());
+        let (again, _) = t.draw_items(&mut vp, &device, &queue, &bundle, true);
+        assert_eq!(again.len(), 8);
+        assert!(again[0].texture.is_none(), "no texture when the file is unreadable");
+        assert!(t.log.iter().any(|(s, x)| s == "server" && x.starts_with("texture ")), "{:?}", t.log);
+        // the camera: the mat once, then the chassis while following
+        assert!(t.frame_target().is_some());
+        assert!(t.frame_target().is_none());
+        t.follow = true;
+        assert!(t.frame_target().is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn frame_target_fits_the_mat_once() {

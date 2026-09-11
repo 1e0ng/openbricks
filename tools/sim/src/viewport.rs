@@ -875,17 +875,16 @@ struct LOut { @builtin(position) pos: vec4<f32>, @location(0) color: vec4<f32> }
 @fragment fn fs_line(i: LOut) -> @location(0) vec4<f32> { return i.color; }
 "#;
 
+/// Offscreen GPU access for tests in every module.
 #[cfg(test)]
-mod tests {
+pub mod testing {
     use super::*;
-    use crate::geometry;
-    use crate::gizmo::{self, Gizmo, Handle, Mode};
 
     /// A GPU device for offscreen tests: any adapter (CI's Linux leg
     /// installs mesa's lavapipe). Without one the test is skipped on a
     /// developer machine but fails on CI, so a missing driver cannot
     /// silently turn the test off there.
-    fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    pub fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
         let adapter = match adapter {
@@ -903,10 +902,23 @@ mod tests {
         Some((device, queue))
     }
 
+    /// An egui renderer for the offscreen colour format.
+    pub fn test_renderer(device: &wgpu::Device) -> egui_wgpu::Renderer {
+        egui_wgpu::Renderer::new(device, FORMAT, egui_wgpu::RendererOptions::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::*;
+    use super::*;
+    use crate::geometry;
+    use crate::gizmo::{self, Gizmo, Handle, Mode};
+
     #[test]
     fn renders_bricks_and_handles_offscreen() {
         let Some((device, queue)) = test_device() else { return };
-        let mut renderer = egui_wgpu::Renderer::new(&device, FORMAT, egui_wgpu::RendererOptions::default());
+        let mut renderer = test_renderer(&device);
         let mut vp = Viewport::new(&device, &queue);
         vp.camera = Camera {
             target: Vec3::ZERO,
