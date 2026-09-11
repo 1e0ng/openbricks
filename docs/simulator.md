@@ -70,8 +70,13 @@ components, the LEGO Technic set, other bricks), the 3D view in the
 middle, the contents of the component you are editing and the
 inspector on the right. Drag in the view to orbit, right-drag to pan,
 scroll to zoom, `F` to fit; drag a brick to move it on the ground
-plane in 8 mm steps (shift lifts it), `R` turns it 90°, `S` snaps it
-into the nearest hole, arrows nudge, `Delete` removes, `⌘Z` undoes.
+plane in 8 mm steps (shift lifts it). The selection carries handles:
+three arrows (**Move**, `W`) to slide it along one world axis in grid
+steps, or three rings (**Rotate**, `E`) to turn it about one axis in
+15° steps — hold shift for free movement or rotation; several
+selected items move and turn together about the first one's origin.
+`R` turns the selection 90°, `S` snaps it into the nearest hole,
+arrows nudge, `Delete` removes, `⌘Z` undoes.
 Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 

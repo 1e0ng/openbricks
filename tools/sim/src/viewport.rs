@@ -66,6 +66,22 @@ pub struct Line {
     pub color: [f32; 4],
 }
 
+/// Everything one frame draws: the scene, its lines, and overlay items
+/// (handles) drawn on top of it with a fresh depth buffer.
+#[derive(Default)]
+pub struct Scene<'a> {
+    pub items: &'a [DrawItem],
+    pub lines: &'a [Line],
+    pub overlay: &'a [DrawItem],
+    pub background: [f64; 4],
+}
+
+/// A `0xRRGGBB` colour as linear RGBA.
+pub fn srgb(hex: u32) -> [f32; 4] {
+    let c = |v: u32| ((v & 0xff) as f32 / 255.0).powf(2.2);
+    [c(hex >> 16), c(hex >> 8), c(hex), 1.0]
+}
+
 #[derive(Clone, Debug)]
 pub struct Camera {
     pub target: Vec3,
@@ -116,6 +132,15 @@ impl Camera {
         self.target = (min + max) * 0.5;
         let diag = (max - min).length().max(40.0);
         self.distance = diag / (2.0 * (self.fov_deg.to_radians() / 2.0).tan()) * 1.25;
+    }
+    /// The pixel of a `w × h` view a world point lands on; None behind the eye.
+    pub fn project(&self, p: Vec3, w: f32, h: f32) -> Option<glam::Vec2> {
+        let clip = self.view_proj(w / h) * p.extend(1.0);
+        if clip.w <= 1e-6 {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        Some(glam::Vec2::new((ndc.x + 1.0) * 0.5 * w, (1.0 - ndc.y) * 0.5 * h))
     }
     /// A world-space ray through a pixel of a `w × h` view.
     pub fn ray(&self, px: f32, py: f32, w: f32, h: f32) -> (Vec3, Vec3) {
@@ -183,6 +208,7 @@ pub struct Viewport {
     sampler: wgpu::Sampler,
     textures: HashMap<String, GpuTexture>,
     color: Option<wgpu::TextureView>,
+    color_tex: Option<wgpu::Texture>,
     depth: Option<wgpu::TextureView>,
     size: (u32, u32),
     tex_id: Option<eframe::egui::TextureId>,
@@ -395,6 +421,7 @@ impl Viewport {
             line_capacity,
             meshes: HashMap::new(),
             color: None,
+            color_tex: None,
             depth: None,
             size: (0, 0),
             tex_id: None,
@@ -545,7 +572,7 @@ impl Viewport {
         };
         let color = device.create_texture(&desc(
             FORMAT,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
         ));
         let depth = device.create_texture(&desc(DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT));
         let color_view = color.create_view(&Default::default());
@@ -555,22 +582,75 @@ impl Viewport {
             None => self.tex_id = Some(renderer.register_native_texture(device, &color_view, wgpu::FilterMode::Linear)),
         }
         self.color = Some(color_view);
+        self.color_tex = Some(color);
         self.depth = Some(depth_view);
         self.size = size;
     }
 
+    /// The last frame as tightly packed RGBA8 rows, top to bottom;
+    /// None before the first render.
+    #[cfg(test)]
+    pub fn read_pixels(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Option<(u32, u32, Vec<u8>)> {
+        let texture = self.color_tex.as_ref()?;
+        let (w, h) = self.size;
+        let row = (4 * w).div_ceil(256) * 256;
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback"),
+            size: (row * h) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(Some(encoder.finish()));
+        let slice = buf.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
+        rx.recv().ok()?.ok()?;
+        let data = slice.get_mapped_range();
+        let mut out = Vec::with_capacity((4 * w * h) as usize);
+        for y in 0..h {
+            let s = (y * row) as usize;
+            out.extend_from_slice(&data[s..s + (4 * w) as usize]);
+        }
+        drop(data);
+        buf.unmap();
+        Some((w, h, out))
+    }
+
     /// Draw the scene into the offscreen target; returns the egui texture to show.
-    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         renderer: &mut egui_wgpu::Renderer,
         size: (u32, u32),
-        items: &[DrawItem],
-        lines: &[Line],
-        background: [f64; 4],
+        scene: &Scene<'_>,
     ) -> eframe::egui::TextureId {
+        let (items, lines, background) = (scene.items, scene.lines, scene.background);
         self.ensure_targets(device, renderer, size);
         let aspect = size.0 as f32 / size.1.max(1) as f32;
         let eye = self.camera.eye();
@@ -583,6 +663,7 @@ impl Viewport {
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         let data: Vec<InstanceData> = items
             .iter()
+            .chain(scene.overlay.iter())
             .map(|it| InstanceData {
                 model: it.model.to_cols_array_2d(),
                 color: it.color,
@@ -685,6 +766,46 @@ impl Viewport {
                 pass.draw_indexed(0..mesh.index_count, 0, i as u32..i as u32 + 1);
             }
         }
+        if !scene.overlay.is_empty() {
+            // handles: on top of everything, but still occluding each other
+            let color = self.color.as_ref().unwrap();
+            let depth = self.depth.as_ref().unwrap();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overlay"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.globals_bg, &[]);
+            pass.set_bind_group(1, &self.instance_bg, &[]);
+            pass.set_bind_group(2, &self.textures["white"].bind_group, &[]);
+            for (k, it) in scene.overlay.iter().enumerate() {
+                let Some(mesh) = self.meshes.get(&it.mesh) else { continue };
+                if mesh.index_count == 0 {
+                    continue;
+                }
+                let i = (items.len() + k) as u32;
+                pass.set_vertex_buffer(0, mesh.vbuf.slice(..));
+                pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.index_count, 0, i..i + 1);
+            }
+        }
         queue.submit(Some(encoder.finish()));
         self.tex_id.unwrap()
     }
@@ -757,6 +878,101 @@ struct LOut { @builtin(position) pos: vec4<f32>, @location(0) color: vec4<f32> }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry;
+    use crate::gizmo::{self, Gizmo, Handle, Mode};
+
+    /// A GPU device for offscreen tests: any adapter (CI's Linux leg
+    /// installs mesa's lavapipe). Without one the test is skipped on a
+    /// developer machine but fails on CI, so a missing driver cannot
+    /// silently turn the test off there.
+    fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
+        let adapter = match adapter {
+            Ok(a) => a,
+            Err(e) => {
+                assert!(
+                    std::env::var_os("CI").is_none(),
+                    "CI must provide a GPU adapter for the render test: {e}"
+                );
+                eprintln!("no GPU adapter ({e}): skipping the offscreen render test");
+                return None;
+            }
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("a device");
+        Some((device, queue))
+    }
+
+    #[test]
+    fn renders_bricks_and_handles_offscreen() {
+        let Some((device, queue)) = test_device() else { return };
+        let mut renderer = egui_wgpu::Renderer::new(&device, FORMAT, egui_wgpu::RendererOptions::default());
+        let mut vp = Viewport::new(&device, &queue);
+        vp.camera = Camera {
+            target: Vec3::ZERO,
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 500.0,
+            fov_deg: 38.0,
+        };
+        let (w, h) = (320u32, 240u32);
+        vp.add_mesh(&device, "box", &geometry::box_mesh([100.0; 3], [0.0; 3]));
+        vp.add_mesh(
+            &device,
+            gizmo::MESH_SHAFT,
+            &geometry::cylinder_mesh(0.03, 0.8, "z", [0.0, 0.0, 0.4], 12),
+        );
+        vp.add_mesh(&device, gizmo::MESH_CONE, &geometry::cone_mesh(0.05, 0.2, [0.0, 0.0, 0.8], 16));
+        let items = [DrawItem {
+            mesh: "box".into(),
+            model: Mat4::IDENTITY,
+            color: srgb(0x5B7A9C),
+            texture: None,
+        }];
+        // the y arrow crosses the box's face; the z arrow is the lit one
+        let g = Gizmo::new(Vec3::ZERO, Mode::Move, &vp.camera, h as f32);
+        let overlay = g.draw(Some(Handle::Axis(2)));
+        let scene = Scene {
+            items: &items,
+            lines: &[],
+            overlay: &overlay,
+            background: [0.0, 0.0, 0.0, 1.0],
+        };
+        vp.render(&device, &queue, &mut renderer, (w, h), &scene);
+        let (rw, rh, px) = vp.read_pixels(&device, &queue).unwrap();
+        assert_eq!((rw, rh), (w, h));
+        if let Some(p) = std::env::var_os("OPENBRICKS_SIM_RENDER_PNG") {
+            image::save_buffer(p, &px, w, h, image::ColorType::Rgba8).unwrap();
+        }
+        let at = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2]]
+        };
+        let column = |x: u32, y0: u32, y1: u32| (y0..=y1).map(|y| at(x, y)).collect::<Vec<_>>();
+        assert_eq!(at(10, 10), [0, 0, 0], "the corner is background");
+        // the box: blue-grey, in front of everything but the handles
+        let b = at(160, 140);
+        assert!(b[2] > b[1] && b[2] > 40, "box pixel {b:?}");
+        // the y arrow points right across the box and is drawn over it (green beats blue)
+        assert!(
+            column(200, 116, 124).iter().any(|c| c[1] > c[2] && c[1] > c[0] && c[1] > 40),
+            "no green shaft over the box at x=200: {:?}",
+            column(200, 116, 124)
+        );
+        // the lit z arrow's cone, above the box: amber (red over green over blue)
+        let cone = cam_cone_row(&vp.camera, &g, w as f32, h as f32);
+        assert!(
+            column(160, cone - 3, cone + 3)
+                .iter()
+                .any(|c| c[0] > c[1] && c[1] > c[2] && c[0] > 120),
+            "no amber cone at y={cone}: {:?}",
+            column(160, cone - 3, cone + 3)
+        );
+    }
+
+    fn cam_cone_row(cam: &Camera, g: &Gizmo, w: f32, h: f32) -> u32 {
+        cam.project(g.center + Vec3::Z * g.length * 0.9, w, h).unwrap().y.round() as u32
+    }
 
     #[test]
     fn camera_ray_passes_through_the_target_at_the_centre_pixel() {
@@ -779,6 +995,24 @@ mod tests {
         let p = ray_plane_z(Vec3::new(0.0, 0.0, 10.0), Vec3::new(0.0, 0.0, -1.0), 0.0).unwrap();
         assert_eq!(p, Vec3::ZERO);
         assert!(ray_plane_z(Vec3::ZERO, Vec3::X, 5.0).is_none());
+    }
+
+    #[test]
+    fn project_is_the_inverse_of_ray() {
+        let cam = Camera {
+            target: Vec3::new(10.0, 20.0, 30.0),
+            ..Default::default()
+        };
+        let centre = cam.project(cam.target, 640.0, 480.0).unwrap();
+        assert!((centre - glam::Vec2::new(320.0, 240.0)).length() < 1e-2, "{centre:?}");
+        let p = Vec3::new(-25.0, 40.0, 12.0);
+        let px = cam.project(p, 640.0, 480.0).unwrap();
+        let (o, d) = cam.ray(px.x, px.y, 640.0, 480.0);
+        let along = (p - o).dot(d);
+        assert!((o + d * along - p).length() < 1e-2);
+        assert!(cam.project(cam.eye() + cam.direction() * 10.0, 640.0, 480.0).is_none());
+        assert_eq!(srgb(0xFFFFFF), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(srgb(0x000000), [0.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]
