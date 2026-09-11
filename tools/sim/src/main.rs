@@ -6,6 +6,7 @@
 mod app;
 mod assembly;
 mod bundle;
+mod editor;
 mod geometry;
 mod gizmo;
 mod sim;

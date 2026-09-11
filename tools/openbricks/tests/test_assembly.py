@@ -30,6 +30,17 @@ class DeriveTests(unittest.TestCase):
         cls.doc = _example()
         cls.spec, cls.inertial, cls.bricks, cls.notes = assembly.derive(cls.doc, cls.bundle)
 
+    def test_locked_instances_are_plain_instances(self):
+        # the sim's editor saves ``locked: true`` on instances it protects; the loader treats them like any other
+        doc = copy.deepcopy(self.doc)
+        root = doc["robot"]["root"]
+        for ch in doc["components"][root]["children"]:
+            ch["locked"] = True
+        spec, inertial, bricks_out, notes = assembly.derive(doc, self.bundle)
+        self.assertEqual(inertial["mass_kg"], self.inertial["mass_kg"])
+        self.assertEqual(len(bricks_out), len(self.bricks))
+        self.assertEqual(notes, [])
+
     def test_roles_become_the_flat_spec(self):
         s = self.spec
         self.assertAlmostEqual(s.wheel_radius, 0.0432, places=4)

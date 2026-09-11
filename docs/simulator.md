@@ -76,7 +76,13 @@ steps, or three rings (**Rotate**, `E`) to turn it about one axis in
 15° steps — hold shift for free movement or rotation; several
 selected items move and turn together about the first one's origin.
 `R` turns the selection 90°, `S` snaps it into the nearest hole,
-arrows nudge, `Delete` removes, `⌘Z` undoes.
+arrows nudge, `Delete` removes, `⌘Z` undoes. `⌘C` copies the selection
+and `⌘V` pastes it: back into the same component two modules over,
+into another component as it was, or into another window (the
+clipboard carries every part and component definition it needs).
+`⌘L` locks the selection so nothing moves, turns or removes it until
+`⌘⇧L` unlocks it; locked bricks draw faded and show 🔒 in the
+contents list.
 Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 

@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.5.0 — copy, paste, lock and unlock in the sim's editor
+
+The Workbench gains copy and paste (`⌘C` / `⌘X` / `⌘V`, and a Copy
+button): the selection goes to the system clipboard with every part
+and component definition it needs, so it pastes back two modules
+over, into another component as it was, or into another window. Lock
+(`⌘L`) and Unlock (`⌘⇧L`) protect a group of bricks and components
+from the pointer, the keys and the inspector; locked items draw faded
+and show 🔒 in the contents list, and `locked: true` is saved with the
+instance (older files and the Python loader read it as before).
+
+- Tests (closing the sim's test gaps, part 2): the editing state now
+  lives in `editor.rs`, apart from any widget, with tests covering
+  adding, selecting, removing (roles cleared), duplicating, rotating,
+  nudging, snapping, grouping, renaming, the undo depth, files, plane
+  and handle drags, locks, copy and paste. `app.rs` only draws it.
+
 ## 4.4.1 — the Simulate tab shows the map as soon as it is chosen
 
 Choosing a map in the Simulate tab now builds and shows it at once,
