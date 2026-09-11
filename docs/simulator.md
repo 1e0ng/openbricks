@@ -81,9 +81,10 @@ Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 
 **Simulate** runs your program on a map with the chassis you
-assembled. Pick the map (any built-in world), the chassis (a
-`robot.assembly.json`, or the build open in the Workbench tab once it
-is saved) and the program (`main.py`), then Run. Pause, Resume and
+assembled. Pick the map (any built-in world) and it appears in the
+view at once, as does the chassis (a `robot.assembly.json`, or the
+build open in the Workbench tab once it is saved) when you choose it;
+pick the program (`main.py`), then Run. Pause, Resume and
 Stop do what they say; the speed slider runs the physics slower or
 faster than wall time; "follow the robot" keeps the camera on the
 chassis; the program's prints and errors appear in the log panel

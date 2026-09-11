@@ -1615,6 +1615,7 @@ impl App {
     }
 
     fn simulate_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.simulate.ensure_loaded();
         if self.simulate.pump() || self.simulate.is_live() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
         }
@@ -1697,7 +1698,7 @@ impl App {
             ui.painter().text(
                 response.rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Choose a map, a chassis and a program, then Load or Run",
+                "The map appears here once the run server has built it",
                 egui::FontId::proportional(14.0),
                 ui.visuals().weak_text_color(),
             );

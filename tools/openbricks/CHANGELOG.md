@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.4.1 — the Simulate tab shows the map as soon as it is chosen
+
+Choosing a map in the Simulate tab now builds and shows it at once,
+as does choosing or clearing a chassis, and the default map appears
+when the tab opens; before, the view stayed empty until Load or Run.
+A change made while a program runs stops the program first and loads
+once it has stopped.
+
+- Tests: the Simulate tab's event handling is exercised event by
+  event, its controls against a stand-in run server, its scene
+  builder on a GPU (every geom kind, textures, the chassis bricks),
+  and the whole path against the real MuJoCo runtime — load, run,
+  prints, frames, pause, resume, stop — when `OPENBRICKS_SIM_PYTHON`
+  names an interpreter with the runtime, which CI's Linux leg does.
+  The sim's Rust line coverage now reaches codecov under the `sim-rs`
+  flag.
+
 ## 4.4.0 — move and rotate handles in the sim's editor
 
 Selecting anything in the Workbench now shows handles at its origin:

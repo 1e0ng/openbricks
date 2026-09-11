@@ -176,9 +176,12 @@ pub struct SimProcess {
 }
 
 impl SimProcess {
-    pub fn spawn(python: &str) -> Result<SimProcess, String> {
+    /// Spawn the run server; `env` adds environment variables (tests
+    /// point PYTHONPATH at a stand-in server).
+    pub fn spawn_with_env(python: &str, env: &[(String, String)]) -> Result<SimProcess, String> {
         let mut child = Command::new(python)
             .args(["-u", "-m", "openbricks_sim.server"])
+            .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -252,6 +255,85 @@ impl Drop for SimProcess {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// A stand-in run server for tests: a Python package on a private
+/// PYTHONPATH that speaks the protocol with canned answers.
+#[cfg(test)]
+pub mod testing {
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    const FAKE_SERVER: &str = r#"
+import sys, json
+def send(**kw):
+    print(json.dumps(kw), flush=True)
+send(ev="hello", version="fake")
+W = [{"alias": "practice-line", "path": "/w/practice_line/world.xml", "dir": "/w/practice_line"},
+     {"alias": "wro-2026-senior", "path": "/w/senior/world.xml", "dir": "/w/senior"},
+     {"alias": "empty", "path": "/w/empty.xml", "dir": "/w"}]
+SCENE = {"ev": "scene", "bodies": ["world", "chassis"],
+         "geoms": [{"name": "floor", "type": "plane", "body": 0, "size": [1.2, 0.9, 0.1], "pos": [0, 0, 0],
+                    "quat": [1, 0, 0, 0], "rgba": [1, 1, 1, 1], "material": None, "group": 0, "mesh": None}],
+         "materials": {}, "textures": {}, "bricks": [], "timestep_ms": 1}
+status = "idle"
+for line in sys.stdin:
+    c = json.loads(line)
+    cmd = c["cmd"]
+    if cmd == "worlds":
+        send(ev="worlds", worlds=W)
+        continue
+    if cmd == "load":
+        status = "loaded"
+        send(**SCENE)
+        send(ev="frame", t_ms=0, bodies=[[0, 0, 0, 1, 0, 0, 0], [0, 0, 0.05, 1, 0, 0, 0]])
+        send(ev="log", stream="server", text="loaded %s with %s" % (c.get("world"), c.get("assembly")))
+    elif cmd == "run":
+        status = "running"
+        send(ev="log", stream="stdout", text="hello from " + c["script"])
+        send(ev="frame", t_ms=10, bodies=[[0, 0, 0, 1, 0, 0, 0], [0.01, 0, 0.05, 1, 0, 0, 0]])
+    elif cmd == "pause":
+        status = "paused"
+    elif cmd == "resume":
+        status = "running"
+    elif cmd == "stop":
+        status = "stopped"
+    elif cmd == "speed":
+        send(ev="state", status=status, t_ms=0, speed=c["factor"], error=None)
+        continue
+    elif cmd == "quit":
+        send(ev="bye")
+        break
+    else:
+        send(ev="error", text="no such command " + cmd)
+        continue
+    send(ev="state", status=status, t_ms=10 if status == "running" else 0, speed=1.0, error=None)
+"#;
+
+    /// The interpreter to run it with, the environment that makes
+    /// `openbricks_sim.server` resolve to the stand-in, and the private
+    /// directory (remove it when done). None without a `python3`.
+    pub struct FakeServer {
+        pub python: String,
+        pub env: Vec<(String, String)>,
+        pub dir: PathBuf,
+    }
+
+    pub fn fake_server(tag: &str) -> Option<FakeServer> {
+        let python = ["python3", "python"]
+            .into_iter()
+            .find(|p| Command::new(p).arg("--version").output().is_ok())?;
+        let dir = std::env::temp_dir().join(format!("ob-fake-{}-{tag}", std::process::id()));
+        std::fs::create_dir_all(dir.join("openbricks_sim")).unwrap();
+        std::fs::write(dir.join("openbricks_sim/__init__.py"), "").unwrap();
+        std::fs::write(dir.join("openbricks_sim/server.py"), FAKE_SERVER).unwrap();
+        let env = vec![("PYTHONPATH".to_string(), dir.to_string_lossy().to_string())];
+        Some(FakeServer {
+            python: python.to_string(),
+            env,
+            dir,
+        })
     }
 }
 
