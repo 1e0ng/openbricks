@@ -134,3 +134,22 @@ class SimCliTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm, contextlib.redirect_stdout(io.StringIO()):
             sim_cli.main(["preview", "--help"])
         self.assertEqual(cm.exception.code, 0)
+
+
+class ServeInterruptTests(unittest.TestCase):
+    def test_ctrl_c_stops_the_server_cleanly(self):
+        class Fake:
+            server_address = ("127.0.0.1", 5)
+            closed = False
+
+            def serve_forever(self):
+                raise KeyboardInterrupt
+
+            def server_close(self):
+                self.closed = True
+        fake = Fake()
+        said = []
+        with mock.patch("openbricks_sim.workbench.make_server", return_value=fake):
+            self.assertEqual(workbench.serve("<title>t</title>", port=5, open_browser=False, say=said.append), 0)
+        self.assertIn("stopped", said)
+        self.assertTrue(fake.closed)

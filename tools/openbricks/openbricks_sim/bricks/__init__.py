@@ -91,7 +91,8 @@ def library_present(root):
     return (root / "parts").is_dir() and (root / "p").is_dir()
 
 
-def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=urllib.request.urlopen):
+def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=urllib.request.urlopen,
+                  progress_every=10 * 1024 * 1024):
     """Download ``complete.zip`` and unpack ``parts/`` and ``p/`` into
     ``dest`` (default :func:`ldraw_dir`). Returns the library root.
     Skips the download when the library is already there unless
@@ -106,7 +107,7 @@ def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=u
     say("downloading %s" % url)
     with opener(url) as resp, open(tmp_zip, "wb") as out:
         total = 0
-        next_mark = 10 * 1024 * 1024
+        next_mark = progress_every
         while True:
             chunk = resp.read(1024 * 1024)
             if not chunk:
@@ -114,8 +115,8 @@ def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=u
             out.write(chunk)
             total += len(chunk)
             if total >= next_mark:
-                say("  %d MB" % (total // (1024 * 1024)))
-                next_mark += 10 * 1024 * 1024
+                say("  %.1f MB" % (total / (1024 * 1024)))
+                next_mark += progress_every
     say("unpacking into %s" % root)
     staging = pathlib.Path(tempfile.mkdtemp(prefix="ldraw-", dir=str(root)))
     try:
@@ -123,8 +124,6 @@ def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=u
             members = [m for m in zf.namelist() if m.startswith("ldraw/") and not m.endswith("/")]
             for m in members:
                 rel = m[len("ldraw/"):]
-                if not rel:
-                    continue
                 target = staging / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(m) as src, open(target, "wb") as dst:
@@ -146,10 +145,8 @@ def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=u
             shutil.move(str(extra), str(final))
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-        try:
+        if tmp_zip.exists():
             tmp_zip.unlink()
-        except OSError:
-            pass
     n_parts = sum(1 for p in (root / "parts").iterdir() if p.suffix.lower() == ".dat")
     say("done: %d part files at %s" % (n_parts, root))
     return root

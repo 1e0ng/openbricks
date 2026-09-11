@@ -397,7 +397,7 @@ def main(argv=None):
         return cmd_preview(args)
     if args.command == "run":
         return cmd_run(args)
-    parser.error("unknown command: %r" % args.command)
+    parser.error("unknown command: %r" % args.command)   # pragma: no cover - argparse rejects unknown commands
 
 
 if __name__ == "__main__":

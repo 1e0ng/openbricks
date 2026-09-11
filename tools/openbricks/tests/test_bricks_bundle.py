@@ -180,3 +180,12 @@ class FetchLibraryTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             bricks.fetch_library(dest=dest, opener=opener)
         self.assertFalse(bricks.library_present(dest))
+
+
+class FetchProgressTests(unittest.TestCase):
+    def test_progress_lines_every_interval(self):
+        payload = _zip_bytes({"ldraw/parts/9999.dat": "0 Test\n", "ldraw/p/x.dat": "0 P\n", "ldraw/pad.bin": "x" * 3000})
+        said = []
+        with tempfile.TemporaryDirectory() as tmp:
+            bricks.fetch_library(dest=os.path.join(tmp, "lib"), opener=lambda url: _FakeResponse(payload), progress=said.append, progress_every=1024)
+        self.assertTrue(any(s.strip().endswith("MB") for s in said), said)

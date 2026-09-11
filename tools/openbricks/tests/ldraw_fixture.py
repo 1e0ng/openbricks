@@ -115,5 +115,42 @@ def write_mini_library(root):
     _write(os.path.join(parts, "7777.dat"), "Test Ring with Pin Hole", ring_lines(15, 6, -10, 10))
     _write(os.path.join(prims, "confric5.dat"), "Technic Friction Pin 1.0 Slotted with Split Base Collar (test stand-in)",
            cylinder_lines(6, -20, 0))
-    _write(os.path.join(parts, "6666.dat"), "Test Pin from a Primitive", ["1 16 0 0 0 1 0 0 0 1 0 0 0 1 confric5.dat"])
+    _write(os.path.join(parts, "6666.dat"), "Test Pin from a Primitive", [
+        "1 16 0 0 0 1 0 0 0 1 0 0 0 1 confric5.dat",
+        "1 16 0 0 0 -1 0 0 0 -1 0 0 0 1 confric5.dat",          # the other half, mirrored about the collar
+    ])
+    # a shelled box: the outer box, and the inner one turned inside out with INVERTNEXT
+    _write(os.path.join(parts, "5555.dat"), "Test Shelled Box", [
+        "1 16 0 0 0 1 0 0 0 1 0 0 0 1 9999.dat",
+        "0 BFC INVERTNEXT",
+        "1 16 0 0 0 0.5 0 0 0 0.5 0 0 0 0.5 9999.dat",
+    ])
+    # connector primitives that carry only edge lines or nothing at all, and studs
+    _write(os.path.join(prims, "axlehol2.dat"), "Technic Axle Hole Side Edges (test stand-in)",
+           ["2 24 6 -10 0 6 10 0", "2 24 -6 -10 0 -6 10 0"])
+    _write(os.path.join(prims, "axlehol0.dat"), "Technic Axle Hole Hint (test stand-in, no geometry)", ["0 // nothing"])
+    _write(os.path.join(prims, "stud.dat"), "Stud (test stand-in)", cylinder_lines(6, -4, 0))
+    _write(os.path.join(parts, "4444.dat"), "Test Brick with Edge-Only Axle Hole and Two Studs",
+           box_lines(20, 12, 20) + [
+               "1 16 0 0 0 1 0 0 0 1 0 0 0 1 axlehol2.dat",
+               "1 16 0 0 0 1 0 0 0 1 0 0 0 1 axlehol0.dat",
+               "1 16 10 -12 0 1 0 0 0 1 0 0 0 1 stud.dat",
+               "1 16 -10 -12 0 1 0 0 0 1 0 0 0 1 stud.dat",
+               "1 16 0 0 0 1 0 0 0 1 0 0 0 1 nothing-here.dat",   # a missing reference is skipped
+           ])
+    # a part that references itself: the depth guard must end the walk
+    _write(os.path.join(parts, "3333.dat"), "Test Self Reference", box_lines(5, 5, 5) + ["1 16 0 0 0 1 0 0 0 1 0 0 0 1 3333.dat"])
+    # malformed lines of every kind next to two valid triangles
+    _write(os.path.join(parts, "2222.dat"), "Test Garbage Tolerance", [
+        "1 16 x 0 0 1 0 0 0 1 0 0 0 1 9999.dat",
+        "4 16 0 0 0 1 0 0 1 1 0 oops 1 0",
+        "2 24 0 0 0 1 x 0",
+        "5 24 0 0 0 1 0 0 0 1 0 1 1 0",
+        "3 16 0 0 0 10 0 0 0 10 0",
+        "3 16 0 0 0 0 10 0 0 0 10",
+    ])
+    # lines only: no faces, so no brick
+    _write(os.path.join(parts, "1111.dat"), "Test Lines Only", ["2 24 0 0 0 10 0 0"])
+    with open(os.path.join(parts, "readme.txt"), "w") as fh:
+        fh.write("not a part\n")
     return root

@@ -66,7 +66,7 @@ def _fetch(args):
 def _convert(args):
     from openbricks_sim import bricks
     try:
-        from openbricks_sim.bricks import ldraw
+        import openbricks_sim.bricks.ldraw as ldraw
     except ImportError:
         print("error: ``openbricks bricks convert`` needs numpy: pip install openbricks[sim]", file=sys.stderr)
         return 1

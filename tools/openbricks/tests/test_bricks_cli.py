@@ -94,3 +94,21 @@ class ConvertTests(unittest.TestCase):
     def test_nothing_converted_is_a_failure(self):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(["bricks", "convert", "0000", "--ldraw", self.root]), 1)
+
+
+class BricksErrorPathTests(unittest.TestCase):
+    def test_unknown_action_is_rejected(self):
+        import types
+        from openbricks_dev import bricks
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(bricks.run(types.SimpleNamespace(bricks_command="nope")), 2)
+        self.assertIn("unknown bricks action", err.getvalue())
+
+    def test_convert_without_numpy_points_at_the_extra(self):
+        import sys
+        err = io.StringIO()
+        with mock.patch.dict(sys.modules, {"openbricks_sim.bricks.ldraw": None}), redirect_stderr(err):
+            rc = cli.main(["bricks", "convert", "9999"])
+        self.assertEqual(rc, 1)
+        self.assertIn("pip install openbricks[sim]", err.getvalue())
