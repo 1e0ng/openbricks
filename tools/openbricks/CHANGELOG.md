@@ -3,6 +3,13 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.8.0 — thumbnails in the sim's library
+
+Every row of the Workbench's library — your components, the LEGO
+Technic set, other bricks — shows a rendered thumbnail of the exact
+geometry, drawn a few per frame so the window opens without a pause;
+a component's picture follows its edits.
+
 ## 4.7.0 — the Simulate view draws mesh scenery
 
 Maps with mesh props — the WRO senior mosaic frame — now show them in

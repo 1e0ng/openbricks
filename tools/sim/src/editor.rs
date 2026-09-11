@@ -45,6 +45,8 @@ pub struct Editor {
     pub errors: Vec<String>,
     /// Set when the view should frame the edited component again.
     pub fit_pending: bool,
+    /// Counts recomputes: anything derived from the document (thumbnails) keys on it.
+    pub edits: u64,
     pub memo: HashMap<String, Props>,
     pub root_props: Props,
     pub leaves: Vec<Leaf>,
@@ -71,6 +73,7 @@ impl Editor {
             status: String::new(),
             errors: vec![],
             fit_pending: true,
+            edits: 0,
             memo: HashMap::new(),
             root_props: Props {
                 mass: 0.0,
@@ -89,6 +92,7 @@ impl Editor {
     // ------------------------------------------------------------ model
 
     pub fn recompute(&mut self) {
+        self.edits += 1;
         self.memo.clear();
         let mut errs = vec![];
         let root = self.doc.robot.root.clone();

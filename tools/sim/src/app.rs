@@ -12,6 +12,7 @@ use crate::simulate::SimulateTab;
 use crate::stl;
 use crate::viewport::{self, DrawItem, Line, Viewport, srgb};
 use eframe::egui;
+use eframe::egui_wgpu::RenderState;
 use glam::{DVec3, Mat4, Quat, Vec3};
 use std::collections::HashSet;
 
@@ -76,6 +77,11 @@ pub fn cat_color(category: &str, dark: bool) -> [f32; 4] {
 }
 
 const ACCENT: [f32; 4] = [0.71, 0.29, 0.005, 1.0];
+/// Library thumbnails: rendered pixels, shown at half size; how many
+/// are rendered per frame so the first frames stay quick.
+const THUMB_PX: u32 = 88;
+const THUMB_SIZE: egui::Vec2 = egui::vec2(44.0, 33.0);
+const THUMBS_PER_FRAME: usize = 4;
 const RED: egui::Color32 = egui::Color32::from_rgb(196, 68, 42);
 
 impl App {
@@ -137,6 +143,154 @@ impl App {
         }
     }
 
+    /// The viewport mesh of a part, built on first use; None without geometry.
+    fn ensure_part_mesh(&mut self, device: &eframe::egui_wgpu::wgpu::Device, part_id: &str, part: &Part) -> Option<String> {
+        let key = Self::mesh_key(part_id, part);
+        if !self.viewport.has_mesh(&key) {
+            let m = self.mesh_for(part)?;
+            self.viewport.add_mesh(device, &key, &m);
+        }
+        Some(key)
+    }
+
+    // ------------------------------------------------------- thumbnails
+
+    fn thumb_background(dark: bool) -> [f64; 4] {
+        if dark {
+            [0.0067, 0.0093, 0.0122, 0.0]
+        } else {
+            [0.83, 0.87, 0.89, 0.0]
+        }
+    }
+
+    /// A Technic part from the bundle, rendered alone.
+    fn part_thumb(&mut self, state: Option<&RenderState>, budget: &mut usize, num: &str, dark: bool) -> Option<egui::TextureId> {
+        let key = format!("thumb:ld:{num}:{dark}");
+        if let Some(id) = self.viewport.thumb(&key) {
+            return Some(id);
+        }
+        let state = state?;
+        if *budget == 0 {
+            return None;
+        }
+        let rec = self.editor.bundle.parts.get(num)?;
+        let bbox = (Vec3::from(rec.bbox[0].map(|v| v as f32)), Vec3::from(rec.bbox[1].map(|v| v as f32)));
+        let part = Part {
+            name: rec.name.clone(),
+            category: "lego".into(),
+            mass_g: rec.mass_g,
+            source: String::new(),
+            source_note: String::new(),
+            ldraw: Some(num.to_string()),
+            shapes: vec![],
+            extra: Default::default(),
+        };
+        let mesh = self.ensure_part_mesh(&state.device, num, &part)?;
+        let items = [DrawItem {
+            mesh,
+            model: Mat4::IDENTITY,
+            color: cat_color("lego", dark),
+            texture: None,
+        }];
+        *budget -= 1;
+        let mut renderer = state.renderer.write();
+        Some(self.viewport.thumbnail(
+            &state.device,
+            &state.queue,
+            &mut renderer,
+            &key,
+            &items,
+            bbox,
+            THUMB_PX,
+            Self::thumb_background(dark),
+        ))
+    }
+
+    /// A brick recorded in the document (shapes or an imported mesh).
+    fn other_thumb(&mut self, state: Option<&RenderState>, budget: &mut usize, id: &str, dark: bool) -> Option<egui::TextureId> {
+        let key = format!("thumb:part:{id}:{}:{dark}", self.editor.edits);
+        if let Some(id) = self.viewport.thumb(&key) {
+            return Some(id);
+        }
+        let state = state?;
+        if *budget == 0 {
+            return None;
+        }
+        let part = self.editor.doc.parts.get(id)?.clone();
+        let pr = assembly::part_props(&part, &self.editor.bundle);
+        let bb = pr.bbox?;
+        let mesh = self.ensure_part_mesh(&state.device, id, &part)?;
+        let items = [DrawItem {
+            mesh,
+            model: Mat4::IDENTITY,
+            color: cat_color(&part.category, dark),
+            texture: None,
+        }];
+        *budget -= 1;
+        let mut renderer = state.renderer.write();
+        Some(self.viewport.thumbnail(
+            &state.device,
+            &state.queue,
+            &mut renderer,
+            &key,
+            &items,
+            (bb.min.as_vec3(), bb.max.as_vec3()),
+            THUMB_PX,
+            Self::thumb_background(dark),
+        ))
+    }
+
+    /// A component as it is now: every brick under it, in its frame.
+    fn component_thumb(&mut self, state: Option<&RenderState>, budget: &mut usize, id: &str, dark: bool) -> Option<egui::TextureId> {
+        let key = format!("thumb:comp:{id}:{}:{dark}", self.editor.edits);
+        if let Some(id) = self.viewport.thumb(&key) {
+            return Some(id);
+        }
+        let state = state?;
+        if *budget == 0 {
+            return None;
+        }
+        let bb = self.editor.memo.get(id)?.bbox.clone()?;
+        let mut items = Vec::new();
+        for leaf in assembly::flatten(&self.editor.doc, id) {
+            let Some(part) = self.editor.doc.parts.get(&leaf.part_id).cloned() else {
+                continue;
+            };
+            let Some(mesh) = self.ensure_part_mesh(&state.device, &leaf.part_id, &part) else {
+                continue;
+            };
+            let q = Quat::from_mat3(&leaf.rot.as_mat3());
+            items.push(DrawItem {
+                mesh,
+                model: Mat4::from_rotation_translation(q, leaf.pos.as_vec3()),
+                color: cat_color(&part.category, dark),
+                texture: None,
+            });
+        }
+        *budget -= 1;
+        let mut renderer = state.renderer.write();
+        Some(self.viewport.thumbnail(
+            &state.device,
+            &state.queue,
+            &mut renderer,
+            &key,
+            &items,
+            (bb.min.as_vec3(), bb.max.as_vec3()),
+            THUMB_PX,
+            Self::thumb_background(dark),
+        ))
+    }
+
+    /// Thumbnails of components and document bricks are keyed on the
+    /// edit count; the stale ones go when the document changes.
+    fn prune_thumbs(&mut self, state: Option<&RenderState>) {
+        let Some(state) = state else { return };
+        let stamp = format!(":{}:", self.editor.edits);
+        let mut renderer = state.renderer.write();
+        self.viewport
+            .retain_thumbs(&mut renderer, |k| k.starts_with("thumb:ld:") || k.contains(&stamp));
+    }
+
     fn ensure_gizmo_meshes(&mut self, device: &eframe::egui_wgpu::wgpu::Device) {
         if self.viewport.has_mesh(gizmo::MESH_SHAFT) {
             return;
@@ -165,13 +319,9 @@ impl App {
             let Some(part) = self.editor.doc.parts.get(&leaf.part_id).cloned() else {
                 continue;
             };
-            let key = Self::mesh_key(&leaf.part_id, &part);
-            if !self.viewport.has_mesh(&key) {
-                match self.mesh_for(&part) {
-                    Some(m) => self.viewport.add_mesh(device, &key, &m),
-                    None => continue,
-                }
-            }
+            let Some(key) = self.ensure_part_mesh(device, &leaf.part_id, &part) else {
+                continue;
+            };
             let selected = sel.contains(&leaf.path[0]);
             let q = Quat::from_mat3(&leaf.rot.as_mat3());
             let model = Mat4::from_rotation_translation(q, leaf.pos.as_vec3());
@@ -691,10 +841,14 @@ impl App {
         self.editor.save_to(&path);
     }
 
-    fn library_ui(&mut self, ui: &mut egui::Ui) {
+    fn library_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         ui.heading("Library");
         ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("search bricks and components"));
         let q = self.search.trim().to_lowercase();
+        let dark = ui.visuals().dark_mode;
+        let state = frame.wgpu_render_state();
+        self.prune_thumbs(state);
+        let mut budget = THUMBS_PER_FRAME;
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(6.0);
             ui.strong("Components");
@@ -710,7 +864,9 @@ impl App {
                 let uses = assembly::usage_count(&self.editor.doc, &id);
                 let is_root = id == self.editor.doc.robot.root;
                 let can_add = !is_root && !assembly::component_contains(&self.editor.doc, &id, &self.editor.editing, &mut vec![]);
+                let thumb = self.component_thumb(state, &mut budget, &id, dark);
                 ui.horizontal(|ui| {
+                    thumb_slot(ui, thumb);
                     ui.monospace(&id);
                     ui.weak(format!("{} g Σ · used ×{uses}", assembly::fmt(mass)));
                     if ui.small_button("open").clicked() {
@@ -726,10 +882,10 @@ impl App {
                 "LEGO Technic  ({} parts, exact LDraw geometry)",
                 self.editor.bundle.parts.len()
             ));
-            let mut nums: Vec<&String> = self.editor.bundle.parts.keys().collect();
-            nums.sort_by_key(|n| self.editor.bundle.parts[*n].name.to_lowercase());
+            let mut nums: Vec<String> = self.editor.bundle.parts.keys().cloned().collect();
+            nums.sort_by_key(|n| self.editor.bundle.parts[n].name.to_lowercase());
             for num in nums {
-                let rec = &self.editor.bundle.parts[num];
+                let rec = &self.editor.bundle.parts[&num];
                 if !(q.is_empty() || num.contains(&q) || rec.name.to_lowercase().contains(&q)) {
                     continue;
                 }
@@ -738,12 +894,15 @@ impl App {
                 } else {
                     0.0
                 };
+                let (name, mass) = (rec.name.clone(), rec.mass_g);
+                let thumb = self.part_thumb(state, &mut budget, &num, dark);
                 ui.horizontal(|ui| {
+                    thumb_slot(ui, thumb);
                     if ui.small_button("+").on_hover_text("add to the view").clicked() {
                         to_ldraw = Some(num.clone());
                     }
-                    ui.label(&rec.name);
-                    ui.weak(format!("{num} · {} g · {:.2} g/cm³", assembly::fmt(rec.mass_g), dens));
+                    ui.label(&name);
+                    ui.weak(format!("{num} · {} g · {:.2} g/cm³", assembly::fmt(mass), dens));
                 });
             }
             ui.add_space(8.0);
@@ -763,11 +922,13 @@ impl App {
                 .map(|(k, _)| k.clone())
                 .collect();
             for id in ids {
-                let p = &self.editor.doc.parts[&id];
+                let p = self.editor.doc.parts[&id].clone();
                 if !(q.is_empty() || p.name.to_lowercase().contains(&q) || id.contains(&q)) {
                     continue;
                 }
+                let thumb = self.other_thumb(state, &mut budget, &id, dark);
                 ui.horizontal(|ui| {
+                    thumb_slot(ui, thumb);
                     if ui.small_button("+").clicked() {
                         to_add = Some((Some(id.clone()), None));
                     }
@@ -1480,6 +1641,18 @@ impl App {
     }
 }
 
+/// A thumbnail, or the space one takes while it is not rendered yet.
+fn thumb_slot(ui: &mut egui::Ui, thumb: Option<egui::TextureId>) {
+    match thumb {
+        Some(id) => {
+            ui.image((id, THUMB_SIZE));
+        }
+        None => {
+            ui.add_space(THUMB_SIZE.x + ui.spacing().item_spacing.x);
+        }
+    }
+}
+
 fn vec_text(v: DVec3) -> String {
     format!("{}, {}, {}", assembly::fmt(v.x), assembly::fmt(v.y), assembly::fmt(v.z))
 }
@@ -1540,7 +1713,7 @@ impl eframe::App for App {
                 egui::Panel::left("library")
                     .default_size(300.0)
                     .resizable(true)
-                    .show(ui, |ui| self.library_ui(ui));
+                    .show(ui, |ui| self.library_ui(ui, frame));
                 egui::Panel::right("inspector").default_size(360.0).resizable(true).show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         self.tree_ui(ui);

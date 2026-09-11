@@ -66,7 +66,8 @@ Run `openbricks sim --help` for the full, always-current option list.
 
 `openbricks sim` opens a window with two tabs. **Workbench** is the
 editor described in the next section: the library on the left (your
-components, the LEGO Technic set, other bricks), the 3D view in the
+components, the LEGO Technic set, other bricks, each with a rendered
+thumbnail), the 3D view in the
 middle, the contents of the component you are editing and the
 inspector on the right. Drag in the view to orbit, right-drag to pan,
 scroll to zoom, `F` to fit; drag a brick to move it on the ground
