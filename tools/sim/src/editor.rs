@@ -835,8 +835,9 @@ pub fn wrap_deg(a: f64) -> f64 {
     ((a + 180.0).rem_euclid(360.0)) - 180.0
 }
 
+/// Shared by the tests of every module that needs real bricks.
 #[cfg(test)]
-mod tests {
+pub mod testing {
     use super::*;
     use crate::bundle;
 
@@ -845,6 +846,12 @@ mod tests {
         let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../openbricks/openbricks_sim/bricks/technic_bundle.json.zlib");
         bundle::load_bundle(&p).expect("the shipped brick bundle")
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::real_bundle;
+    use super::*;
 
     fn editor() -> Editor {
         Editor::new(real_bundle(), None)

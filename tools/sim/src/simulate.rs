@@ -87,6 +87,21 @@ impl SimulateTab {
         self.follow
     }
 
+    #[cfg(test)]
+    pub fn status(&self) -> &str {
+        &self.status
+    }
+
+    #[cfg(test)]
+    pub fn scene_loaded(&self) -> bool {
+        self.scene.is_some()
+    }
+
+    #[cfg(test)]
+    pub fn set_script(&mut self, path: PathBuf) {
+        self.script = Some(path);
+    }
+
     /// A chassis chosen: the map is rebuilt with it.
     pub fn set_chassis(&mut self, path: PathBuf, doc: Document) {
         self.chassis = Some(path);

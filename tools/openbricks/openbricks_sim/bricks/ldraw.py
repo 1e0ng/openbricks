@@ -314,13 +314,15 @@ def to_ours(pts_ldu):
 
 
 # ------------------------------------------------------------ pin holes
-def detect_bores(tris, radius=2.4, min_votes=12, min_len=3.0):
+def detect_bores(tris, radius=2.4, min_votes=12, min_len=2.0):
     """Round bores of the pin radius on a finished mesh. Every wall face
     of a 16-gon bore has its centroid one apothem from the axis along
     its inward normal, so faces vote for axis positions; a real bore
     collects votes from normals all the way round. Technic holes run
-    along one of the part's axes. Returns ``(kind, a, b)`` segments in
-    the mesh's own frame."""
+    along one of the part's axes. A wall shorter than a module is a
+    chamfered ring: 5-8.5 mm means a thick beam's 8 mm hole, under 3 mm
+    a thin liftarm's 4 mm one; a plate's 3.2 mm wall is its whole hole.
+    Returns ``(kind, a, b)`` segments in the mesh's own frame."""
     if len(tris) == 0:
         return []
     p1, p2, p3 = tris[:, 0], tris[:, 1], tris[:, 2]
@@ -374,6 +376,9 @@ def detect_bores(tris, radius=2.4, min_votes=12, min_len=3.0):
                 if 5.0 <= hi - lo <= 8.5:         # chamfered rings sit inside the module
                     mid = (lo + hi) / 2
                     lo, hi = mid - 4.0, mid + 4.0
+                elif hi - lo < 3.0:               # a thin liftarm's wall between chamfers: a 4 mm hole
+                    mid = (lo + hi) / 2
+                    lo, hi = mid - 2.0, mid + 2.0
                 a = np.zeros(3)
                 b = np.zeros(3)
                 a[oth] = centre_uv

@@ -3,59 +3,51 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
-## 4.8.0 — thumbnails in the sim's library
+## 4.5.0 — the sim's editor: copy, paste, lock, STL import, thumbnails, mesh scenery, and a tested core
 
-Every row of the Workbench's library — your components, the LEGO
-Technic set, other bricks — shows a rendered thumbnail of the exact
-geometry, drawn a few per frame so the window opens without a pause;
-a component's picture follows its edits.
+One release for the sim's editor work of the last day.
 
-## 4.7.0 — the Simulate view draws mesh scenery
-
-Maps with mesh props — the WRO senior mosaic frame — now show them in
-the Simulate view. The run server exports every mesh asset the geoms
-name as MuJoCo holds it (vertices centred and scaled as it draws
-them), packed like a bundle brick at 0.1 mm steps so metre-sized
-scenery fits; the sim decodes it once per scene. The packer's record
-now carries its position step (`scale`), and refuses a mesh that
-would not fit instead of clipping it.
-
-## 4.6.0 — the sim imports STL parts
-
-**Import STL…** in the Workbench's library brings a part in from a
-binary or ASCII STL file, like the web workbench does: pick the file's
-units (mm, cm, inch, m), where its origin goes (as in the file, the
-bounding-box centre or the bottom centre), a category, and a weighed
-mass or a density (PLA, PETG, ABS, nylon, aluminium presets). The
-part records the same fields as a bundle brick — a packed mesh, the
-bounding box, and the volume, centre of mass and inertia from the
-closed mesh — plus the 4.8 mm pin holes found on it, so it snaps,
-rolls up and shows in the Simulate view like any other. Inside-out
-files are flipped; a mesh that is open or inconsistently wound gets a
-box's inertia, no volume and needs a mass.
-
-- `tools/sim/stl.rs`: the parser, mass properties by signed
-  tetrahedra, the closed-surface check, the bundle's mesh packing,
-  bore detection by face votes, and the import form's logic, with
-  tests for each; the editor's `import_part` gives the part a unique
-  id and a place in the view.
-
-## 4.5.0 — copy, paste, lock and unlock in the sim's editor
-
-The Workbench gains copy and paste (`⌘C` / `⌘X` / `⌘V`, and a Copy
-button): the selection goes to the system clipboard with every part
-and component definition it needs, so it pastes back two modules
-over, into another component as it was, or into another window. Lock
-(`⌘L`) and Unlock (`⌘⇧L`) protect a group of bricks and components
-from the pointer, the keys and the inspector; locked items draw faded
-and show 🔒 in the contents list, and `locked: true` is saved with the
-instance (older files and the Python loader read it as before).
-
-- Tests (closing the sim's test gaps, part 2): the editing state now
-  lives in `editor.rs`, apart from any widget, with tests covering
-  adding, selecting, removing (roles cleared), duplicating, rotating,
-  nudging, snapping, grouping, renaming, the undo depth, files, plane
-  and handle drags, locks, copy and paste. `app.rs` only draws it.
+- **Copy, paste, lock and unlock.** `⌘C` / `⌘X` / `⌘V` (and a Copy
+  button): the selection goes to the system clipboard with every part
+  and component definition it needs, so it pastes back two modules
+  over, into another component as it was, or into another window.
+  Lock (`⌘L`) and Unlock (`⌘⇧L`) protect a group of bricks and
+  components from the pointer, the keys and the inspector; locked
+  items draw faded and show 🔒 in the contents list, and `locked:
+  true` is saved with the instance (older files and the Python loader
+  read it as before).
+- **Import STL…** in the library brings a part in from a binary or
+  ASCII STL file, as the web workbench does: the file's units, where
+  its origin goes, a category, a weighed mass or a density. The part
+  records the same fields as a bundle brick — a packed mesh, the
+  bounding box, and the volume, centre of mass and inertia from the
+  closed mesh — plus the 4.8 mm pin holes found on it, so it snaps,
+  rolls up and shows in the Simulate view like any other. Inside-out
+  files are flipped; a mesh that is open or inconsistently wound gets
+  a box's inertia, no volume and needs a mass.
+- **Thumbnails.** Every library row — components, the LEGO Technic
+  set, other bricks — shows a rendered thumbnail of the exact
+  geometry, drawn a few per frame; a component's picture follows its
+  edits. The library and inspector panels keep a bounded width with
+  long rows truncated or wrapped.
+- **Mesh scenery in the Simulate view.** Maps with mesh props (the
+  WRO senior mosaic frame) show them: the run server exports every
+  mesh asset as MuJoCo holds it, packed like a bundle brick at 0.1 mm
+  steps so metre-sized scenery fits; the packer's record carries its
+  position step (`scale`) and refuses a mesh that would not fit
+  instead of clipping it.
+- **Thin liftarms get their pin holes.** The bore detector accepts
+  the 2.4 mm wall a thin liftarm's chamfers leave and records it as
+  the part's 4 mm hole (a plate's 3.2 mm wall stays as measured);
+  seven bricks in the shipped bundle gain their holes and snap.
+- **Tests (closing the sim's test gaps, part 2).** The editing state
+  now lives in `editor.rs`, apart from any widget, with tests for
+  every operation; `app.rs` only draws it — and is driven headless
+  by `egui_kittest` through the toolbar, the library, the inspector,
+  the keys and clipboard events, pointer drags in the 3D view (orbit,
+  pan, zoom, pick, move, lift, arrow and ring handles, double-click),
+  the Simulate tab against the stand-in server, and the STL dialog.
+  Rust tests: 75.
 
 ## 4.4.1 — the Simulate tab shows the map as soon as it is chosen
 

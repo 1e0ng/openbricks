@@ -12,11 +12,31 @@ use crate::simulate::SimulateTab;
 use crate::stl;
 use crate::viewport::{self, DrawItem, Line, Viewport, srgb};
 use eframe::egui;
-use eframe::egui_wgpu::RenderState;
+use eframe::egui_wgpu::{self, RenderState, wgpu};
 use glam::{DVec3, Mat4, Quat, Vec3};
 use std::collections::HashSet;
+use std::sync::Arc;
 
-#[derive(PartialEq, Clone, Copy)]
+/// The GPU handles the app draws with: eframe's render state, or a
+/// test device.
+#[derive(Clone)]
+pub struct Gpu {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
+}
+
+impl From<&RenderState> for Gpu {
+    fn from(s: &RenderState) -> Self {
+        Gpu {
+            device: s.device.clone(),
+            queue: s.queue.clone(),
+            renderer: s.renderer.clone(),
+        }
+    }
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum Tab {
     Workbench,
     Simulate,
@@ -52,6 +72,8 @@ pub struct App {
     show_com: bool,
     viewport: Viewport,
     drag: Drag,
+    /// Where the 3D view was drawn last frame, in screen points.
+    view_rect: egui::Rect,
     items: Vec<DrawItem>,
     item_tops: Vec<String>,
     simulate: SimulateTab,
@@ -91,8 +113,17 @@ impl App {
         doc: Option<(std::path::PathBuf, assembly::Document)>,
         python: Option<String>,
     ) -> Self {
-        let state = cc.wgpu_render_state.as_ref().expect("the wgpu renderer is required");
-        let viewport = Viewport::new(&state.device, &state.queue);
+        let gpu = Gpu::from(cc.wgpu_render_state.as_ref().expect("the wgpu renderer is required"));
+        Self::with_gpu(&gpu, bundle, doc, python)
+    }
+
+    pub fn with_gpu(
+        gpu: &Gpu,
+        bundle: crate::bundle::Bundle,
+        doc: Option<(std::path::PathBuf, assembly::Document)>,
+        python: Option<String>,
+    ) -> Self {
+        let viewport = Viewport::new(&gpu.device, &gpu.queue);
         App {
             editor: Editor::new(bundle, doc),
             tab: Tab::Workbench,
@@ -104,6 +135,7 @@ impl App {
             show_com: true,
             viewport,
             drag: Drag::None,
+            view_rect: egui::Rect::ZERO,
             items: vec![],
             item_tops: vec![],
             simulate: SimulateTab::new(python),
@@ -164,12 +196,12 @@ impl App {
     }
 
     /// A Technic part from the bundle, rendered alone.
-    fn part_thumb(&mut self, state: Option<&RenderState>, budget: &mut usize, num: &str, dark: bool) -> Option<egui::TextureId> {
+    fn part_thumb(&mut self, gpu: Option<&Gpu>, budget: &mut usize, num: &str, dark: bool) -> Option<egui::TextureId> {
         let key = format!("thumb:ld:{num}:{dark}");
         if let Some(id) = self.viewport.thumb(&key) {
             return Some(id);
         }
-        let state = state?;
+        let gpu = gpu?;
         if *budget == 0 {
             return None;
         }
@@ -185,7 +217,7 @@ impl App {
             shapes: vec![],
             extra: Default::default(),
         };
-        let mesh = self.ensure_part_mesh(&state.device, num, &part)?;
+        let mesh = self.ensure_part_mesh(&gpu.device, num, &part)?;
         let items = [DrawItem {
             mesh,
             model: Mat4::IDENTITY,
@@ -193,10 +225,10 @@ impl App {
             texture: None,
         }];
         *budget -= 1;
-        let mut renderer = state.renderer.write();
+        let mut renderer = gpu.renderer.write();
         Some(self.viewport.thumbnail(
-            &state.device,
-            &state.queue,
+            &gpu.device,
+            &gpu.queue,
             &mut renderer,
             &key,
             &items,
@@ -207,19 +239,19 @@ impl App {
     }
 
     /// A brick recorded in the document (shapes or an imported mesh).
-    fn other_thumb(&mut self, state: Option<&RenderState>, budget: &mut usize, id: &str, dark: bool) -> Option<egui::TextureId> {
+    fn other_thumb(&mut self, gpu: Option<&Gpu>, budget: &mut usize, id: &str, dark: bool) -> Option<egui::TextureId> {
         let key = format!("thumb:part:{id}:{}:{dark}", self.editor.edits);
         if let Some(id) = self.viewport.thumb(&key) {
             return Some(id);
         }
-        let state = state?;
+        let gpu = gpu?;
         if *budget == 0 {
             return None;
         }
         let part = self.editor.doc.parts.get(id)?.clone();
         let pr = assembly::part_props(&part, &self.editor.bundle);
         let bb = pr.bbox?;
-        let mesh = self.ensure_part_mesh(&state.device, id, &part)?;
+        let mesh = self.ensure_part_mesh(&gpu.device, id, &part)?;
         let items = [DrawItem {
             mesh,
             model: Mat4::IDENTITY,
@@ -227,10 +259,10 @@ impl App {
             texture: None,
         }];
         *budget -= 1;
-        let mut renderer = state.renderer.write();
+        let mut renderer = gpu.renderer.write();
         Some(self.viewport.thumbnail(
-            &state.device,
-            &state.queue,
+            &gpu.device,
+            &gpu.queue,
             &mut renderer,
             &key,
             &items,
@@ -241,12 +273,12 @@ impl App {
     }
 
     /// A component as it is now: every brick under it, in its frame.
-    fn component_thumb(&mut self, state: Option<&RenderState>, budget: &mut usize, id: &str, dark: bool) -> Option<egui::TextureId> {
+    fn component_thumb(&mut self, gpu: Option<&Gpu>, budget: &mut usize, id: &str, dark: bool) -> Option<egui::TextureId> {
         let key = format!("thumb:comp:{id}:{}:{dark}", self.editor.edits);
         if let Some(id) = self.viewport.thumb(&key) {
             return Some(id);
         }
-        let state = state?;
+        let gpu = gpu?;
         if *budget == 0 {
             return None;
         }
@@ -256,7 +288,7 @@ impl App {
             let Some(part) = self.editor.doc.parts.get(&leaf.part_id).cloned() else {
                 continue;
             };
-            let Some(mesh) = self.ensure_part_mesh(&state.device, &leaf.part_id, &part) else {
+            let Some(mesh) = self.ensure_part_mesh(&gpu.device, &leaf.part_id, &part) else {
                 continue;
             };
             let q = Quat::from_mat3(&leaf.rot.as_mat3());
@@ -268,10 +300,10 @@ impl App {
             });
         }
         *budget -= 1;
-        let mut renderer = state.renderer.write();
+        let mut renderer = gpu.renderer.write();
         Some(self.viewport.thumbnail(
-            &state.device,
-            &state.queue,
+            &gpu.device,
+            &gpu.queue,
             &mut renderer,
             &key,
             &items,
@@ -283,10 +315,10 @@ impl App {
 
     /// Thumbnails of components and document bricks are keyed on the
     /// edit count; the stale ones go when the document changes.
-    fn prune_thumbs(&mut self, state: Option<&RenderState>) {
-        let Some(state) = state else { return };
+    fn prune_thumbs(&mut self, gpu: Option<&Gpu>) {
+        let Some(gpu) = gpu else { return };
         let stamp = format!(":{}:", self.editor.edits);
-        let mut renderer = state.renderer.write();
+        let mut renderer = gpu.renderer.write();
         self.viewport
             .retain_thumbs(&mut renderer, |k| k.starts_with("thumb:ld:") || k.contains(&stamp));
     }
@@ -424,16 +456,16 @@ impl App {
         }
     }
 
-    fn viewport_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn viewport_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
         let dark = ui.visuals().dark_mode;
         let avail = ui.available_size();
         let size = ((avail.x.max(1.0)) as u32, (avail.y.max(1.0)) as u32);
-        let Some(state) = frame.wgpu_render_state() else {
+        let Some(gpu) = gpu else {
             ui.label("wgpu is not available");
             return;
         };
-        self.ensure_gizmo_meshes(&state.device);
-        self.build_items(&state.device, dark);
+        self.ensure_gizmo_meshes(&gpu.device);
+        self.build_items(&gpu.device, dark);
         if self.editor.fit_pending {
             self.fit_view();
             self.editor.fit_pending = false;
@@ -448,17 +480,18 @@ impl App {
             [0.83, 0.87, 0.89, 1.0]
         };
         let tex = {
-            let mut renderer = state.renderer.write();
+            let mut renderer = gpu.renderer.write();
             let scene = viewport::Scene {
                 items: &self.items,
                 lines: &lines,
                 overlay: &overlay,
                 background: bg,
             };
-            self.viewport.render(&state.device, &state.queue, &mut renderer, size, &scene)
+            self.viewport.render(&gpu.device, &gpu.queue, &mut renderer, size, &scene)
         };
         let response = ui.add(egui::Image::new((tex, egui::vec2(w, h))).sense(egui::Sense::click_and_drag()));
         let rect = response.rect;
+        self.view_rect = rect;
         let local = |p: egui::Pos2| (p.x - rect.min.x, p.y - rect.min.y);
         let cam = self.viewport.camera.clone();
         let handle_under = |x: f32, y: f32| gizmo.as_ref().and_then(|g| g.handle_at(&cam, x, y, w, h));
@@ -472,16 +505,18 @@ impl App {
                 self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(20.0, 20000.0);
             }
         }
-        // press: a handle first, then a brick
+        // press: a handle first, then a brick — both judged where the button went down,
+        // since a drag is only recognised once the pointer has moved a few points
         let pressed = response.drag_started_by(egui::PointerButton::Primary) || response.clicked_by(egui::PointerButton::Primary);
         let pointer = response.interact_pointer_pos().map(local);
+        let origin = ui.input(|i| i.pointer.press_origin()).map(local).or(pointer);
         let on_handle = if pressed {
-            pointer.and_then(|(x, y)| handle_under(x, y))
+            origin.and_then(|(x, y)| handle_under(x, y))
         } else {
             None
         };
         if let (Some(handle), Some(g), true) = (on_handle, gizmo.as_ref(), response.drag_started_by(egui::PointerButton::Primary)) {
-            let (x, y) = pointer.unwrap_or((0.0, 0.0));
+            let (x, y) = origin.unwrap_or((0.0, 0.0));
             let (o, d) = cam.ray(x, y, w, h);
             if let Some(start) = g.param(handle, o, d) {
                 let starts = self.editor.begin_handle();
@@ -495,15 +530,18 @@ impl App {
                 }
             }
         } else if pressed && on_handle.is_none() {
-            let hit = pointer
+            let hit = origin
                 .and_then(|(x, y)| self.viewport.pick(&self.items, x, y))
                 .map(|i| self.item_tops[i].clone());
             match hit {
                 Some(top) => {
-                    self.editor.select(&top, shift);
+                    // a click selects (shift toggles); a drag only makes sure what it drags is selected
+                    if response.clicked_by(egui::PointerButton::Primary) || !self.editor.selection.contains(&top) {
+                        self.editor.select(&top, shift);
+                    }
                     if response.drag_started_by(egui::PointerButton::Primary) {
                         let z0 = self.editor.selected_instances().first().map(|i| i.pos[2] as f32).unwrap_or(0.0);
-                        let (x, y) = pointer.unwrap_or((0.0, 0.0));
+                        let (x, y) = origin.unwrap_or((0.0, 0.0));
                         let (o, d) = cam.ray(x, y, w, h);
                         if let Some(start) = viewport::ray_plane_z(o, d, z0) {
                             let starts = self.editor.begin_move();
@@ -526,7 +564,8 @@ impl App {
         if response.drag_started_by(egui::PointerButton::Secondary) || response.drag_started_by(egui::PointerButton::Middle) {
             self.drag = Drag::Pan;
         }
-        if response.double_clicked() {
+        // a double-click opens a component (a third quick click still counts as one)
+        if response.double_clicked() || response.triple_clicked() {
             let hit = pointer
                 .and_then(|(x, y)| self.viewport.pick(&self.items, x, y))
                 .map(|i| self.item_tops[i].clone());
@@ -841,13 +880,12 @@ impl App {
         self.editor.save_to(&path);
     }
 
-    fn library_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn library_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
         ui.heading("Library");
         ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("search bricks and components"));
         let q = self.search.trim().to_lowercase();
         let dark = ui.visuals().dark_mode;
-        let state = frame.wgpu_render_state();
-        self.prune_thumbs(state);
+        self.prune_thumbs(gpu);
         let mut budget = THUMBS_PER_FRAME;
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(6.0);
@@ -864,11 +902,11 @@ impl App {
                 let uses = assembly::usage_count(&self.editor.doc, &id);
                 let is_root = id == self.editor.doc.robot.root;
                 let can_add = !is_root && !assembly::component_contains(&self.editor.doc, &id, &self.editor.editing, &mut vec![]);
-                let thumb = self.component_thumb(state, &mut budget, &id, dark);
+                let thumb = self.component_thumb(gpu, &mut budget, &id, dark);
                 ui.horizontal(|ui| {
                     thumb_slot(ui, thumb);
-                    ui.monospace(&id);
-                    ui.weak(format!("{} g Σ · used ×{uses}", assembly::fmt(mass)));
+                    ui.add(egui::Label::new(egui::RichText::new(&id).monospace()).truncate());
+                    ui.add(egui::Label::new(egui::RichText::new(format!("{} g Σ · used ×{uses}", assembly::fmt(mass))).weak()).truncate());
                     if ui.small_button("open").clicked() {
                         to_open = Some(id.clone());
                     }
@@ -895,14 +933,17 @@ impl App {
                     0.0
                 };
                 let (name, mass) = (rec.name.clone(), rec.mass_g);
-                let thumb = self.part_thumb(state, &mut budget, &num, dark);
+                let thumb = self.part_thumb(gpu, &mut budget, &num, dark);
                 ui.horizontal(|ui| {
                     thumb_slot(ui, thumb);
                     if ui.small_button("+").on_hover_text("add to the view").clicked() {
                         to_ldraw = Some(num.clone());
                     }
-                    ui.label(&name);
-                    ui.weak(format!("{num} · {} g · {:.2} g/cm³", assembly::fmt(mass), dens));
+                    ui.add(egui::Label::new(&name).truncate());
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(format!("{num} · {} g · {:.2} g/cm³", assembly::fmt(mass), dens)).weak())
+                            .truncate(),
+                    );
                 });
             }
             ui.add_space(8.0);
@@ -926,14 +967,16 @@ impl App {
                 if !(q.is_empty() || p.name.to_lowercase().contains(&q) || id.contains(&q)) {
                     continue;
                 }
-                let thumb = self.other_thumb(state, &mut budget, &id, dark);
+                let thumb = self.other_thumb(gpu, &mut budget, &id, dark);
                 ui.horizontal(|ui| {
                     thumb_slot(ui, thumb);
                     if ui.small_button("+").clicked() {
                         to_add = Some((Some(id.clone()), None));
                     }
-                    ui.label(&p.name);
-                    ui.weak(format!("{} g · {}", assembly::fmt(p.mass_g), p.source));
+                    ui.add(egui::Label::new(&p.name).truncate());
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(format!("{} g · {}", assembly::fmt(p.mass_g), p.source)).weak()).truncate(),
+                    );
                 });
             }
             if let Some(num) = to_ldraw
@@ -1376,12 +1419,15 @@ impl App {
                     match assembly::geometry_of(&part, &self.editor.bundle) {
                         Geometry::Record(rec) => {
                             ui.weak("geometry");
-                            ui.label(format!(
-                                "LDraw {} exact mesh, {} triangles, {} mm",
-                                rec.ldraw,
-                                rec.mesh.tris,
-                                bbox_text(&rec.bbox)
-                            ));
+                            ui.add(
+                                egui::Label::new(format!(
+                                    "LDraw {} exact mesh, {} triangles, {} mm",
+                                    rec.ldraw,
+                                    rec.mesh.tris,
+                                    bbox_text(&rec.bbox)
+                                ))
+                                .wrap(),
+                            );
                             ui.end_row();
                             ui.weak("volume");
                             let dens = part.mass_g / (rec.volume_mm3 / 1000.0);
@@ -1430,15 +1476,18 @@ impl App {
                         }
                     }
                     ui.weak("source");
-                    ui.label(format!(
-                        "{}{}",
-                        part.source,
-                        if part.source_note.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" — {}", part.source_note)
-                        }
-                    ));
+                    ui.add(
+                        egui::Label::new(format!(
+                            "{}{}",
+                            part.source,
+                            if part.source_note.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" — {}", part.source_note)
+                            }
+                        ))
+                        .wrap(),
+                    );
                     ui.end_row();
                 });
                 let cons = assembly::connections_of(&self.editor.doc, &self.editor.bundle, &self.editor.editing, &inst.name);
@@ -1533,7 +1582,7 @@ impl App {
         });
     }
 
-    fn simulate_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn simulate_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
         self.simulate.ensure_loaded();
         if self.simulate.pump() || self.simulate.is_live() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
@@ -1560,20 +1609,20 @@ impl App {
             .default_size(160.0)
             .resizable(true)
             .show(ui, |ui| self.simulate.log_ui(ui));
-        egui::CentralPanel::default().show(ui, |ui| self.sim_view_ui(ui, frame));
+        egui::CentralPanel::default().show(ui, |ui| self.sim_view_ui(ui, gpu));
     }
 
-    fn sim_view_ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn sim_view_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
         let dark = ui.visuals().dark_mode;
         let avail = ui.available_size();
         let size = ((avail.x.max(1.0)) as u32, (avail.y.max(1.0)) as u32);
-        let Some(state) = frame.wgpu_render_state() else {
+        let Some(gpu) = gpu else {
             ui.label("wgpu is not available");
             return;
         };
         let (items, lines) = self
             .simulate
-            .draw_items(&mut self.viewport, &state.device, &state.queue, &self.editor.bundle, dark);
+            .draw_items(&mut self.viewport, &gpu.device, &gpu.queue, &self.editor.bundle, dark);
         if let Some((lo, hi)) = self.simulate.frame_target() {
             self.viewport.camera.fit(lo, hi);
             if self.simulate.follows() {
@@ -1586,16 +1635,17 @@ impl App {
             [0.83, 0.87, 0.89, 1.0]
         };
         let tex = {
-            let mut renderer = state.renderer.write();
+            let mut renderer = gpu.renderer.write();
             let scene = viewport::Scene {
                 items: &items,
                 lines: &lines,
                 overlay: &[],
                 background: bg,
             };
-            self.viewport.render(&state.device, &state.queue, &mut renderer, size, &scene)
+            self.viewport.render(&gpu.device, &gpu.queue, &mut renderer, size, &scene)
         };
         let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
+        self.view_rect = response.rect;
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0.0 {
@@ -1700,34 +1750,48 @@ fn connector_summary(cs: &[crate::bundle::Connector]) -> String {
         .join(", ")
 }
 
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+impl App {
+    /// One frame of the whole window, drawn with `gpu` (None shows a
+    /// notice where the 3D views would be).
+    pub fn frame_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         match self.tab {
             Tab::Simulate => {
-                self.simulate_ui(ui, frame);
+                self.simulate_ui(ui, gpu);
             }
             Tab::Workbench => {
                 self.stl_window(ui.ctx());
                 egui::Panel::left("library")
-                    .default_size(300.0)
+                    .default_size(320.0)
+                    .size_range(220.0..=520.0)
                     .resizable(true)
-                    .show(ui, |ui| self.library_ui(ui, frame));
-                egui::Panel::right("inspector").default_size(360.0).resizable(true).show(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        self.tree_ui(ui);
-                        ui.separator();
-                        self.inspector_ui(ui);
+                    .show(ui, |ui| self.library_ui(ui, gpu));
+                egui::Panel::right("inspector")
+                    .default_size(380.0)
+                    .size_range(320.0..=560.0)
+                    .resizable(true)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            self.tree_ui(ui);
+                            ui.separator();
+                            self.inspector_ui(ui);
+                        });
                     });
-                });
-                egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui, frame));
+                egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui, gpu));
             }
         }
         if self.editor.dirty {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::Title(format!("Openbricks Sim — {}*", self.title_name())));
         }
+    }
+}
+
+impl eframe::App for App {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let gpu = frame.wgpu_render_state().map(Gpu::from);
+        self.frame_ui(ui, gpu.as_ref());
     }
 }
 
@@ -1740,6 +1804,12 @@ impl Drop for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::testing::real_bundle;
+    use crate::sim::testing::fake_server;
+    use crate::viewport::testing::{test_device, test_renderer};
+    use egui::{Event, Key, Modifiers, PointerButton, Pos2};
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT, Queryable};
 
     #[test]
     fn colours_and_labels() {
@@ -1761,5 +1831,649 @@ mod tests {
             connector_summary(&[c("pin_hole"), c("pin_hole"), c("axle_hole"), c("stud_hole"), c("pin")]),
             "2 pin holes, 1 axle hole, 1 stud tube, 1 pin"
         );
+    }
+
+    /// The whole app in a headless window, drawn with the test GPU.
+    fn gpu() -> Option<Gpu> {
+        let (device, queue) = test_device()?;
+        let renderer = test_renderer(&device);
+        Some(Gpu {
+            device,
+            queue,
+            renderer: Arc::new(egui::mutex::RwLock::new(renderer)),
+        })
+    }
+
+    fn harness(gpu: &Gpu, python: Option<String>) -> Harness<'_, App> {
+        let app = App::with_gpu(gpu, real_bundle(), None, python);
+        Harness::builder()
+            .with_size(egui::vec2(1800.0, 2400.0))
+            .with_step_dt(1.0 / 60.0)
+            .build_ui_state(|ui, app: &mut App| app.frame_ui(ui, Some(gpu)), app)
+    }
+
+    fn steps(h: &mut Harness<'_, App>, n: usize) {
+        for _ in 0..n {
+            h.step();
+        }
+    }
+
+    /// The screen point a world position lands on in the 3D view.
+    fn on_screen(app: &App, world: Vec3) -> Pos2 {
+        let r = app.view_rect;
+        let p = app
+            .viewport
+            .camera
+            .project(world, r.width(), r.height())
+            .expect("in front of the camera");
+        Pos2::new(r.min.x + p.x, r.min.y + p.y)
+    }
+
+    /// The pointer arrives, then the button goes down, each in its own
+    /// frame as they do from a real mouse.
+    fn press(h: &mut Harness<'_, App>, pos: Pos2, button: PointerButton, modifiers: Modifiers) {
+        h.input_mut().events.push(Event::PointerMoved(pos));
+        h.step();
+        h.input_mut().modifiers = modifiers;
+        h.input_mut().events.push(Event::PointerButton {
+            pos,
+            button,
+            pressed: true,
+            modifiers,
+        });
+        h.step();
+    }
+
+    fn drag_to(h: &mut Harness<'_, App>, pos: Pos2, modifiers: Modifiers) {
+        h.input_mut().modifiers = modifiers;
+        h.input_mut().events.push(Event::PointerMoved(pos));
+        h.step();
+    }
+
+    fn release(h: &mut Harness<'_, App>, pos: Pos2, button: PointerButton) {
+        h.input_mut().modifiers = Modifiers::NONE;
+        h.input_mut().events.push(Event::PointerButton {
+            pos,
+            button,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        });
+        h.step();
+        h.step();
+    }
+
+    #[test]
+    fn toolbar_buttons_and_mode_keys_drive_the_view() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        assert!(h.state().view_rect.width() > 300.0, "{:?}", h.state().view_rect);
+        assert!(!h.state().items.is_empty(), "the example robot is drawn");
+        h.get_by_label("Rotate").click();
+        h.step();
+        assert_eq!(h.state().gizmo_mode, Mode::Rotate);
+        h.get_by_label("Move").click();
+        h.step();
+        assert_eq!(h.state().gizmo_mode, Mode::Move);
+        h.key_press(Key::E);
+        h.step();
+        assert_eq!(h.state().gizmo_mode, Mode::Rotate);
+        h.key_press(Key::W);
+        h.step();
+        assert_eq!(h.state().gizmo_mode, Mode::Move);
+        for (name, yaw, pitch) in [
+            ("Top", -90.0, 89.0),
+            ("Side", -90.0, 0.0),
+            ("Front", 180.0, 0.0),
+            ("Iso", -128.0, 28.0),
+        ] {
+            h.get_by_label(name).click();
+            h.step();
+            assert_eq!(
+                (h.state().viewport.camera.yaw, h.state().viewport.camera.pitch),
+                (yaw, pitch),
+                "{name}"
+            );
+        }
+        h.state_mut().viewport.camera.distance = 5000.0;
+        h.get_by_label("Fit").click();
+        h.step();
+        assert!(h.state().viewport.camera.distance < 2000.0);
+        h.state_mut().viewport.camera.distance = 5000.0;
+        h.key_press(Key::F);
+        h.step();
+        assert!(h.state().viewport.camera.distance < 2000.0);
+        h.get_by_label("ground").click();
+        h.get_by_label("COM").click();
+        h.get_by_label("snap to holes").click();
+        h.step();
+        assert!(!h.state().show_grid && !h.state().show_com && !h.state().editor.magnet);
+        h.get_by_label("Snap").click();
+        h.step();
+        assert_eq!(h.state().editor.status, "Select one item to snap");
+        h.get_by_label("Example").click();
+        h.step();
+        assert!(h.state().editor.dirty);
+        assert_eq!(h.state().title_name(), "example");
+        h.get_by_label("Simulate").click();
+        h.step();
+        assert_eq!(h.state().tab, Tab::Simulate);
+        h.get_by_label("Workbench").click();
+        h.step();
+        assert_eq!(h.state().tab, Tab::Workbench);
+    }
+
+    #[test]
+    fn the_library_adds_bricks_and_components_and_shows_thumbnails() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        let n = h.state().editor.children().len();
+        h.get_all_by_label("+ add").next().unwrap().click();
+        h.step();
+        assert_eq!(h.state().editor.children().len(), n + 1);
+        assert!(h.state().editor.selected_instances()[0].component.is_some(), "a component instance");
+        h.get_all_by_label("+").next().unwrap().click();
+        h.step();
+        assert_eq!(h.state().editor.children().len(), n + 2);
+        assert!(h.state().editor.selected_instances()[0].part.is_some(), "a brick instance");
+        // thumbnails arrive a few per frame
+        steps(&mut h, 60);
+        let dark = h.ctx.theme() == egui::Theme::Dark;
+        assert!(
+            h.state().viewport.thumb(&format!("thumb:ld:32278:{dark}")).is_some(),
+            "a Technic beam's thumbnail"
+        );
+        let edits = h.state().editor.edits;
+        let root = h.state().editor.doc.robot.root.clone();
+        assert!(
+            h.state().viewport.thumb(&format!("thumb:comp:{root}:{edits}:{dark}")).is_some(),
+            "the robot's thumbnail"
+        );
+        // an edit stamps new component thumbnails and prunes the old
+        h.state_mut().editor.nudge_selection([8.0, 0.0, 0.0]);
+        steps(&mut h, 3);
+        assert!(
+            h.state().viewport.thumb(&format!("thumb:comp:{root}:{edits}:{dark}")).is_none(),
+            "stale thumbnail dropped"
+        );
+        // the search narrows the list
+        h.state_mut().search = "zzzz-nothing".into();
+        h.step();
+        assert!(h.query_by_label("+ add").is_none());
+        h.state_mut().search.clear();
+        h.step();
+    }
+
+    #[test]
+    fn the_inspector_edits_the_selection_and_makes_components() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        let brick = h.state().editor.children().iter().find(|c| c.part.is_some()).unwrap().name.clone();
+        h.state_mut().editor.selection = vec![brick.clone()];
+        steps(&mut h, 3);
+        let rot0 = h.state().editor.selected_instances()[0].rot;
+        for label in ["Turn 90°", "Pitch 90°", "Roll 90°"] {
+            h.get_by_label(label).click();
+            steps(&mut h, 2);
+        }
+        let rot = h.state().editor.selected_instances()[0].rot;
+        assert_ne!(rot, rot0);
+        h.get_by_label("Copy").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.status, "Copied 1");
+        h.get_by_label("Lock").click();
+        steps(&mut h, 3);
+        assert!(h.state().editor.is_locked(&brick));
+        assert!(h.query_by_label("Lock").is_none() && h.query_by_label("Unlock").is_some());
+        h.get_by_label("Unlock").click();
+        steps(&mut h, 3);
+        assert!(!h.state().editor.is_locked(&brick));
+        let n = h.state().editor.children().len();
+        h.get_by_label("Duplicate").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.children().len(), n + 1);
+        h.get_by_label("Remove").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.children().len(), n);
+        // two selected: grouped into a new component, then opened, ungrouped and left
+        let names: Vec<String> = h.state().editor.children().iter().take(2).map(|c| c.name.clone()).collect();
+        h.state_mut().editor.selection = names.clone();
+        h.state_mut().group_name = "Sensor Mast".into();
+        steps(&mut h, 3);
+        assert!(h.query_by_label("2 selected").is_some());
+        h.get_by_label("Group").click();
+        steps(&mut h, 3);
+        assert!(h.state().editor.doc.components.contains_key("sensor_mast"));
+        assert!(h.state().group_name.is_empty());
+        h.get_by_label("Open sensor_mast").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.editing, "sensor_mast");
+        h.get_by_label("Back to the robot").click();
+        steps(&mut h, 3);
+        assert!(h.state().editor.is_root());
+        let inst = h
+            .state()
+            .editor
+            .children()
+            .iter()
+            .find(|c| c.component.as_deref() == Some("sensor_mast"))
+            .unwrap()
+            .name
+            .clone();
+        h.state_mut().editor.selection = vec![inst];
+        steps(&mut h, 3);
+        h.get_by_label("Ungroup").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.selection, names);
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
+        assert!(
+            h.query_by_label("Robot").is_some(),
+            "no selection at the root: the robot's own page"
+        );
+    }
+
+    #[test]
+    fn keys_and_clipboard_events_edit_the_selection() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        h.state_mut().editor.magnet = false;
+        let brick = h.state().editor.children().iter().find(|c| c.part.is_some()).unwrap().name.clone();
+        h.state_mut().editor.selection = vec![brick.clone()];
+        h.step();
+        let start = h.state().editor.selected_instances()[0].clone();
+        h.key_press(Key::R);
+        h.step();
+        assert_eq!(
+            h.state().editor.selected_instances()[0].rot[2],
+            crate::editor::wrap_deg(start.rot[2] + 90.0)
+        );
+        h.key_press(Key::ArrowUp);
+        h.key_press(Key::ArrowRight);
+        h.step();
+        let p = h.state().editor.selected_instances()[0].pos;
+        assert_eq!((p[0], p[1]), (start.pos[0] + 8.0, start.pos[1] - 8.0));
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.step();
+        assert_eq!(h.state().editor.selected_instances()[0].pos, start.pos);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+        h.step();
+        assert!(h.state().editor.is_locked(&brick));
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::L);
+        h.step();
+        assert!(!h.state().editor.is_locked(&brick));
+        let n = h.state().editor.children().len();
+        h.key_press_modifiers(Modifiers::COMMAND, Key::D);
+        h.step();
+        assert_eq!(h.state().editor.children().len(), n + 1);
+        h.key_press(Key::Delete);
+        h.step();
+        assert_eq!(h.state().editor.children().len(), n);
+        // copy puts our text on the clipboard; paste brings it back
+        h.state_mut().editor.selection = vec![brick.clone()];
+        h.input_mut().events.push(Event::Copy);
+        h.step();
+        assert_eq!(h.state().editor.status, "Copied 1");
+        let text = h.state().editor.copy_selection().unwrap();
+        h.input_mut().events.push(Event::Paste(text));
+        h.step();
+        assert_eq!(h.state().editor.children().len(), n + 1);
+        assert!(h.state().editor.status.starts_with("Pasted 1"));
+        h.input_mut().events.push(Event::Paste("just some text".into()));
+        h.step();
+        assert_eq!(h.state().editor.status, "The clipboard holds no bricks");
+        h.input_mut().events.push(Event::Cut);
+        h.step();
+        assert_eq!(h.state().editor.children().len(), n);
+        h.key_press(Key::S);
+        h.step();
+        assert_eq!(h.state().editor.status, "Select one item to snap");
+        h.key_press(Key::Escape);
+        h.step();
+        assert!(h.state().editor.selection.is_empty());
+        h.input_mut().events.push(Event::Copy);
+        h.step();
+        assert_eq!(h.state().editor.status, "Nothing selected to copy");
+        h.input_mut().events.push(Event::Cut);
+        h.step();
+        assert_eq!(h.state().editor.status, "Nothing selected to cut");
+    }
+
+    #[test]
+    fn the_pointer_orbits_pans_zooms_picks_moves_and_pulls_handles() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        h.state_mut().editor.magnet = false;
+        let rect = h.state().view_rect;
+        let corner = Pos2::new(rect.min.x + 12.0, rect.min.y + 12.0);
+        // orbit: a drag on empty space turns the camera
+        let yaw0 = h.state().viewport.camera.yaw;
+        press(&mut h, corner, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, corner + egui::vec2(10.0, 0.0), Modifiers::NONE);
+        drag_to(&mut h, corner + egui::vec2(60.0, 0.0), Modifiers::NONE);
+        release(&mut h, corner + egui::vec2(60.0, 0.0), PointerButton::Primary);
+        assert_ne!(h.state().viewport.camera.yaw, yaw0);
+        assert!(h.state().editor.selection.is_empty());
+        // pan: the right button moves the target
+        let target0 = h.state().viewport.camera.target;
+        press(&mut h, corner, PointerButton::Secondary, Modifiers::NONE);
+        drag_to(&mut h, corner + egui::vec2(10.0, 10.0), Modifiers::NONE);
+        drag_to(&mut h, corner + egui::vec2(50.0, 40.0), Modifiers::NONE);
+        release(&mut h, corner + egui::vec2(50.0, 40.0), PointerButton::Secondary);
+        assert_ne!(h.state().viewport.camera.target, target0);
+        // zoom: the wheel changes the distance
+        let d0 = h.state().viewport.camera.distance;
+        h.input_mut().events.push(Event::PointerMoved(rect.center()));
+        h.input_mut().events.push(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -40.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        steps(&mut h, 2);
+        assert!(
+            h.state().viewport.camera.distance > d0,
+            "{} vs {d0}",
+            h.state().viewport.camera.distance
+        );
+        h.get_by_label("Fit").click();
+        steps(&mut h, 2);
+        // a drag from a brick selects the one in front and moves it on the ground plane in 8 mm steps
+        let before: std::collections::HashMap<String, [f64; 3]> =
+            h.state().editor.children().iter().map(|c| (c.name.clone(), c.pos)).collect();
+        let leaf = h.state().editor.leaves.iter().find(|l| l.path.len() == 1).unwrap().clone();
+        let at = on_screen(h.state(), leaf.pos.as_vec3());
+        assert!(rect.contains(at), "{at:?} in {rect:?}");
+        press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, at + egui::vec2(8.0, 0.0), Modifiers::NONE);
+        assert_eq!(h.state().editor.selection.len(), 1, "the brick under the pointer");
+        let top = h.state().editor.selection[0].clone();
+        let start = before[&top];
+        drag_to(&mut h, at + egui::vec2(90.0, 0.0), Modifiers::NONE);
+        release(&mut h, at + egui::vec2(90.0, 0.0), PointerButton::Primary);
+        assert_eq!(h.state().editor.selection, vec![top.clone()]);
+        let moved = h.state().editor.children().iter().find(|c| c.name == top).unwrap().pos;
+        assert_ne!(moved, start);
+        assert!((moved[0] / 8.0).fract() == 0.0 && (moved[1] / 8.0).fract() == 0.0, "{moved:?}");
+        // shift lifts: pressed on the brick's body, away from its origin where the handles meet
+        let body = {
+            let leaf = h.state().editor.leaves.iter().find(|l| l.path == [top.clone()]).unwrap().clone();
+            let part = h.state().editor.doc.parts[&leaf.part_id].clone();
+            let pr = assembly::part_props(&part, &h.state().editor.bundle);
+            let bb = pr.bbox.unwrap();
+            let size = bb.size();
+            let axis = if size.x >= size.y && size.x >= size.z {
+                0
+            } else if size.y >= size.z {
+                1
+            } else {
+                2
+            };
+            let mut local = (bb.min + bb.max) * 0.5;
+            local[axis] = bb.min[axis] + size[axis] * 0.85;
+            (leaf.pos + leaf.rot * local).as_vec3()
+        };
+        let at = on_screen(h.state(), body);
+        let before: std::collections::HashMap<String, [f64; 3]> =
+            h.state().editor.children().iter().map(|c| (c.name.clone(), c.pos)).collect();
+        press(&mut h, at, PointerButton::Primary, Modifiers::SHIFT);
+        drag_to(&mut h, at + egui::vec2(0.0, -8.0), Modifiers::SHIFT);
+        // whichever brick is nearest along that ray is the one lifted
+        let top = h.state().editor.selection[0].clone();
+        drag_to(&mut h, at + egui::vec2(0.0, -60.0), Modifiers::SHIFT);
+        release(&mut h, at + egui::vec2(0.0, -60.0), PointerButton::Primary);
+        let moved = before[&top];
+        let lifted = h.state().editor.children().iter().find(|c| c.name == top).unwrap().pos;
+        assert!(lifted[2] > moved[2], "{lifted:?} above {moved:?}");
+        // the z arrow: a handle drag along the axis
+        let centre = Vec3::new(lifted[0] as f32, lifted[1] as f32, lifted[2] as f32);
+        let g = Gizmo::new(centre, Mode::Move, &h.state().viewport.camera, rect.height());
+        let tip = on_screen(h.state(), centre + Vec3::Z * g.length * 0.5);
+        press(&mut h, tip, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, tip + egui::vec2(0.0, -10.0), Modifiers::NONE);
+        assert!(matches!(h.state().drag, Drag::Handle { .. }), "the arrow was grabbed");
+        assert_eq!(h.state().hot, Some(Handle::Axis(2)));
+        drag_to(&mut h, tip + egui::vec2(0.0, -80.0), Modifiers::NONE);
+        release(&mut h, tip + egui::vec2(0.0, -80.0), PointerButton::Primary);
+        let pulled = h.state().editor.children().iter().find(|c| c.name == top).unwrap().pos;
+        assert!(pulled[2] > lifted[2] + 4.0, "{pulled:?} above {lifted:?}");
+        assert!(matches!(h.state().drag, Drag::None));
+        // a ring turns it: seen from the top, the z ring is a circle and the others are lines
+        h.state_mut().gizmo_mode = Mode::Rotate;
+        h.get_by_label("Top").click();
+        h.get_by_label("Fit").click();
+        steps(&mut h, 2);
+        h.state_mut().viewport.camera.distance *= 1.6; // room for the ring around a brick near the edge
+        steps(&mut h, 2);
+        let centre = Vec3::new(pulled[0] as f32, pulled[1] as f32, pulled[2] as f32);
+        let g = Gizmo::new(centre, Mode::Rotate, &h.state().viewport.camera, rect.height());
+        // 45° along the z ring: a point no other ring passes through
+        let on_ring = on_screen(h.state(), centre + (Vec3::X + Vec3::Y) * (0.5f32.sqrt() * g.ring_radius()));
+        assert!(rect.contains(on_ring), "{on_ring:?} in {rect:?}");
+        let rot0 = h.state().editor.children().iter().find(|c| c.name == top).unwrap().rot;
+        press(&mut h, on_ring, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, on_ring + egui::vec2(0.0, 10.0), Modifiers::NONE);
+        assert!(
+            matches!(
+                h.state().drag,
+                Drag::Handle {
+                    handle: Handle::Ring(2),
+                    ..
+                }
+            ),
+            "{:?}",
+            h.state().hot
+        );
+        drag_to(&mut h, on_ring + egui::vec2(0.0, 70.0), Modifiers::NONE);
+        release(&mut h, on_ring + egui::vec2(0.0, 70.0), PointerButton::Primary);
+        let rot = h.state().editor.children().iter().find(|c| c.name == top).unwrap().rot;
+        assert_ne!(rot, rot0);
+        // a double-click on a component instance opens it: find a brick of one that is in front
+        h.get_by_label("Iso").click();
+        h.get_by_label("Fit").click();
+        steps(&mut h, 2);
+        let rect = h.state().view_rect;
+        let mut target = None;
+        for leaf in h.state().editor.leaves.iter().filter(|l| l.path.len() > 1) {
+            let at = on_screen(h.state(), leaf.pos.as_vec3());
+            if !rect.contains(at) {
+                continue;
+            }
+            let app = h.state();
+            if let Some(i) = app.viewport.pick(&app.items, at.x - rect.min.x, at.y - rect.min.y)
+                && let Some(cid) = app.editor.component_of(&app.item_tops[i])
+            {
+                target = Some((at, cid));
+                break;
+            }
+        }
+        let (at, cid) = target.expect("a component instance in view");
+        steps(&mut h, 40); // well clear of the toolbar clicks, which egui would chain into the count
+        for _ in 0..2 {
+            press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
+            release(&mut h, at, PointerButton::Primary);
+        }
+        h.step();
+        assert_eq!(h.state().editor.editing, cid);
+    }
+
+    #[test]
+    fn the_simulate_tab_runs_a_program_on_the_stand_in_server() {
+        let Some(gpu) = gpu() else { return };
+        let Some(fake) = fake_server("app") else { return };
+        let mut h = harness(&gpu, None);
+        h.state_mut().simulate = SimulateTab::new_with_env(Some(fake.python.clone()), fake.env.clone());
+        h.get_by_label("Simulate").click();
+        h.step();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !h.state().simulate.scene_loaded() && std::time::Instant::now() < deadline {
+            h.step();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(h.state().simulate.scene_loaded(), "{}", h.state().simulate.status());
+        assert!(h.state().view_rect.width() > 300.0);
+        let script = fake.dir.join("main.py");
+        std::fs::write(&script, "print('hi')\n").unwrap();
+        h.state_mut().simulate.set_script(script);
+        h.step();
+        h.get_by_label("▶ Run").click();
+        let wait = |h: &mut Harness<'_, App>, status: &str| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while h.state().simulate.status() != status && std::time::Instant::now() < deadline {
+                h.step();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert_eq!(h.state().simulate.status(), status);
+        };
+        wait(&mut h, "running");
+        h.get_by_label("⏸ Pause").click();
+        wait(&mut h, "paused");
+        h.get_by_label("▶ Resume").click();
+        wait(&mut h, "running");
+        h.get_by_label("⏹ Stop").click();
+        wait(&mut h, "stopped");
+        assert!(
+            h.state()
+                .simulate
+                .log
+                .iter()
+                .any(|(s, t)| s == "stdout" && t.starts_with("hello from"))
+        );
+        h.get_by_label("clear").click();
+        h.step();
+        assert!(h.state().simulate.log.is_empty());
+        // the sim view orbits and pans like the workbench's
+        let rect = h.state().view_rect;
+        let yaw0 = h.state().viewport.camera.yaw;
+        let at = rect.center();
+        press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, at + egui::vec2(10.0, 0.0), Modifiers::NONE);
+        drag_to(&mut h, at + egui::vec2(50.0, 0.0), Modifiers::NONE);
+        release(&mut h, at + egui::vec2(50.0, 0.0), PointerButton::Primary);
+        assert_ne!(h.state().viewport.camera.yaw, yaw0);
+        let target0 = h.state().viewport.camera.target;
+        press(&mut h, at, PointerButton::Secondary, Modifiers::NONE);
+        drag_to(&mut h, at + egui::vec2(10.0, 10.0), Modifiers::NONE);
+        drag_to(&mut h, at + egui::vec2(40.0, 40.0), Modifiers::NONE);
+        release(&mut h, at + egui::vec2(40.0, 40.0), PointerButton::Secondary);
+        assert_ne!(h.state().viewport.camera.target, target0);
+        // following keeps the camera on the chassis whatever the pan
+        h.get_by_label("follow the robot").click();
+        steps(&mut h, 2);
+        assert!(h.state().simulate.follows());
+        let on_robot = h.state().viewport.camera.target;
+        press(&mut h, at, PointerButton::Secondary, Modifiers::NONE);
+        drag_to(&mut h, at + egui::vec2(10.0, 10.0), Modifiers::NONE);
+        drag_to(&mut h, at + egui::vec2(40.0, 40.0), Modifiers::NONE);
+        release(&mut h, at + egui::vec2(40.0, 40.0), PointerButton::Secondary);
+        assert_eq!(h.state().viewport.camera.target, on_robot);
+        // the workbench's build is offered once saved
+        assert!(h.get_by_label("Use the workbench's build").accesskit_node().is_disabled());
+        let path = fake.dir.join("robot.assembly.json");
+        h.state_mut().editor.save_to(&path);
+        h.step();
+        h.get_by_label("Use the workbench's build").click();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !h.state().simulate.log.iter().any(|(_, t)| t.ends_with("robot.assembly.json")) && std::time::Instant::now() < deadline {
+            h.step();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            h.state().simulate.log.iter().any(|(_, t)| t.ends_with("robot.assembly.json")),
+            "{:?}",
+            h.state().simulate.log
+        );
+        h.state_mut().simulate.shutdown();
+        let _ = std::fs::remove_dir_all(&fake.dir);
+    }
+
+    #[test]
+    fn without_python_the_simulate_tab_says_so() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        h.get_by_label("Simulate").click();
+        steps(&mut h, 2);
+        assert!(h.query_by_label("The map appears here once the run server has built it").is_some() || !h.state().simulate.scene_loaded());
+        assert!(h.state().simulate.status().contains("no run server") || !h.state().simulate.is_live());
+    }
+
+    #[test]
+    fn the_stl_window_adds_a_part_or_cancels() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        let tris: Vec<stl::Tri> = {
+            let m = geometry::box_mesh([20.0, 10.0, 5.0], [0.0; 3]);
+            m.indices
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|t| [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]])
+                .collect()
+        };
+        let imp = stl::Import::new("bracket.stl", tris.clone()).unwrap();
+        h.state_mut().stl_prepared = Some(imp.prepare());
+        h.state_mut().stl = Some(imp);
+        steps(&mut h, 3);
+        assert!(h.query_by_label("Add to the library").is_some());
+        h.get_by_label("PETG").click();
+        h.step();
+        assert_eq!(h.state().stl.as_ref().unwrap().density, 1.27);
+        assert!(h.state().stl_prepared.as_ref().unwrap().summary.contains("1.27"));
+        let n = h.state().editor.children().len();
+        h.get_by_label("Add to the library").click();
+        h.step();
+        assert!(h.state().stl.is_none());
+        assert_eq!(h.state().editor.children().len(), n + 1);
+        assert!(h.state().editor.doc.parts.contains_key("bracket"));
+        assert!(h.state().editor.status.ends_with("is in the library and in the view"));
+        steps(&mut h, 2);
+        assert!(h.state().items.len() > n, "the imported part is drawn");
+        let imp = stl::Import::new("other.stl", tris).unwrap();
+        h.state_mut().stl_prepared = Some(imp.prepare());
+        h.state_mut().stl = Some(imp);
+        h.step();
+        h.get_by_label("Cancel").click();
+        h.step();
+        assert!(h.state().stl.is_none());
+        assert_eq!(h.state().editor.children().len(), n + 1);
+    }
+
+    #[test]
+    fn the_inspector_shows_a_component_page_and_a_brick_page() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        let cid = h
+            .state()
+            .editor
+            .doc
+            .components
+            .keys()
+            .find(|k| **k != h.state().editor.doc.robot.root)
+            .unwrap()
+            .clone();
+        h.state_mut().editor.open_component(&cid, true);
+        h.step();
+        assert!(h.query_by_label(&format!("Component {cid}")).is_some());
+        h.get_by_label("Back to the robot").click();
+        h.step();
+        assert!(h.state().editor.is_root());
+        // a brick instance's page lists its recorded facts and connections
+        let brick = h.state().editor.children().iter().find(|c| c.part.is_some()).unwrap().name.clone();
+        h.state_mut().editor.selection = vec![brick];
+        h.step();
+        assert!(h.query_by_label("Brick instance").is_some());
+        assert!(h.query_by_label("Recorded  (the brick's own facts)").is_some());
+        // a locked brick's page says so and its pose fields are disabled
+        h.state_mut().editor.lock_selection(true);
+        h.step();
+        assert!(h.query_by_label("Brick instance  🔒 locked").is_some());
+        assert!(h.query_by_label("Unlock").is_some());
     }
 }

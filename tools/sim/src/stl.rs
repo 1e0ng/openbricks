@@ -229,7 +229,10 @@ pub fn pack(tris: &[Tri]) -> MeshRecord {
 /// 16-gon bore has its centroid one apothem from the axis along its
 /// inward normal, so faces vote for axis positions; a real bore
 /// collects votes from normals all the way round. Bores run along one
-/// of the part's axes and are cut into 8 mm modules.
+/// of the part's axes and are cut into 8 mm modules; a wall shorter
+/// than a module is a chamfered ring (5-8.5 mm: a thick beam's 8 mm
+/// hole, under 3 mm: a thin liftarm's 4 mm one; a plate's 3.2 mm wall
+/// is its whole hole).
 pub fn detect_bores(tris: &[Tri], radius: f64, min_votes: usize) -> Vec<Connector> {
     struct Face {
         n: DVec3,
@@ -302,7 +305,7 @@ pub fn detect_bores(tris: &[Tri], radius: f64, min_votes: usize) -> Vec<Connecto
                     su += p.1;
                     sv += p.2;
                 }
-                if hi - lo < 3.0 {
+                if hi - lo < 2.0 {
                     continue;
                 }
                 if (5.0..=8.5).contains(&(hi - lo)) {
@@ -310,6 +313,11 @@ pub fn detect_bores(tris: &[Tri], radius: f64, min_votes: usize) -> Vec<Connecto
                     let mid = (lo + hi) / 2.0;
                     lo = mid - 4.0;
                     hi = mid + 4.0;
+                } else if hi - lo < 3.0 {
+                    // a thin liftarm's wall between chamfers: a 4 mm hole
+                    let mid = (lo + hi) / 2.0;
+                    lo = mid - 2.0;
+                    hi = mid + 2.0;
                 }
                 let (cu, cv) = (su / grp.len() as f64, sv / grp.len() as f64);
                 let len = hi - lo;
@@ -762,7 +770,13 @@ mod tests {
             detect_bores(&bore(2.4, 2, 0.0, 8.0, 7, [0.0; 3]), 2.4, 12).is_empty(),
             "half a bore is a fillet"
         );
-        assert!(detect_bores(&bore(2.4, 2, 0.0, 2.0, 16, [0.0; 3]), 2.4, 12).is_empty(), "too short");
+        assert!(detect_bores(&bore(2.4, 2, 0.0, 1.5, 16, [0.0; 3]), 2.4, 12).is_empty(), "too short");
+        let thin = detect_bores(&bore(2.4, 2, 10.0, 12.5, 16, [0.0; 3]), 2.4, 12);
+        assert_eq!(thin.len(), 1, "a thin liftarm's wall");
+        assert_eq!((thin[0].length, thin[0].centre[2]), (4.0, 11.25));
+        let plate = detect_bores(&bore(2.4, 2, 0.0, 3.2, 16, [0.0; 3]), 2.4, 12);
+        assert_eq!(plate.len(), 1);
+        assert!((plate[0].length - 3.2).abs() < 1e-6, "a plate's hole is its whole wall");
         assert!(
             detect_bores(&bore(6.0, 2, 0.0, 8.0, 16, [0.0; 3]), 2.4, 12).is_empty(),
             "the wrong radius votes nowhere"
