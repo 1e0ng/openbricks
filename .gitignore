@@ -49,3 +49,6 @@ docs/_build/
 # ignore cannot be undone by a later negation, hence the /* form.
 tools/openbricks/openbricks_dev/_docs/*
 !tools/openbricks/openbricks_dev/_docs/offline-docs.zip
+
+# Rust build output (tools/sim)
+tools/sim/target/

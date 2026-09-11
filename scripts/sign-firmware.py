@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Sign every firmware ``.bin`` in a directory with the project key.
+"""Sign every firmware ``.bin`` and sim archive in a directory with the project key.
 
 CI usage (the release job)::
 
@@ -55,7 +55,13 @@ def main(out_dir):
               % out_dir, file=sys.stderr)
         return 1
 
-    for name in bins:
+    # The sim (the native desktop app) ships on the same release as one
+    # archive per platform; ``openbricks sim`` refuses an archive whose
+    # signature does not verify, so they are signed with the same key.
+    sims = sorted(
+        f for f in os.listdir(out_dir)
+        if f.startswith("openbricks-sim-") and f.endswith((".tar.gz", ".zip")))
+    for name in bins + sims:
         path = os.path.join(out_dir, name)
         with open(path, "rb") as f:
             data = f.read()

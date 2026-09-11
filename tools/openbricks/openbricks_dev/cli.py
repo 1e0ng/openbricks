@@ -367,8 +367,9 @@ def _build_parser():
     # ``openbricks --help``.
     sub.add_parser(
         "sim",
-        help="Run a sim subcommand (workbench, preview, run; "
-             "requires ``pip install openbricks[sim]``).",
+        help="Launch the sim (the native app), or run a sim subcommand "
+             "(app, workbench, preview, run; requires ``pip install "
+             "openbricks[sim]``).",
         description="Forwards all remaining arguments to the "
                     "MuJoCo-backed simulator's CLI. Use ``openbricks "
                     "sim --help`` to see the sim's own subcommand list.",

@@ -3,6 +3,37 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.2.0 — the sim: a native desktop app, and `openbricks sim` launches it
+
+Bare `openbricks sim` now launches **the sim**, a native desktop
+application written in Rust (`tools/sim`): the Assembly Workbench with
+LEGO Technic bricks in exact LDraw geometry, your own STL parts,
+components, and the robot as the top component, in a wgpu-rendered
+3D view. It reads and writes the same `robot.assembly.json` and the
+same brick bundle as the browser workbench, which stays available as
+`openbricks sim workbench`.
+
+- **Distribution.** CI builds the sim for macOS (Apple silicon and
+  Intel), Linux and Windows on every `v*` tag and attaches one
+  archive per platform to the firmware release, signed with the
+  project key like the images. The first `openbricks sim` downloads
+  the build matching the installed version into
+  `~/.cache/openbricks/sim` and refuses an archive whose signature
+  does not verify; `--bin PATH` or `OPENBRICKS_SIM_BIN` run a build of
+  your own; `--no-download` fails instead of fetching.
+- **Workbench tab.** Library (components, the LEGO Technic set, other
+  bricks) with search; a 3D view with orbit, pan, zoom and fit; drag
+  bricks on the ground plane in 8 mm steps, shift to lift; rotate in
+  90° steps; pins, axles and studs snap into holes on release or with
+  `S`; contents list and inspector with pose, the brick's recorded
+  facts, density check, mated connections and the computed mass
+  properties at every level; grouping and ungrouping that keep every
+  brick where it is; roles, spawn pose and the weighed-mass check on
+  the robot; undo; open and save.
+- **Simulate tab** is a placeholder in this release; the map, chassis,
+  program, run/pause/stop and live view arrive next.
+- `openbricks sim app` is the explicit form of the bare command.
+
 ## 4.1.0 — the Assembly Workbench: LEGO Technic bricks with exact geometry, and the brick library
 
 `openbricks sim workbench` serves and opens the **Assembly Workbench**,

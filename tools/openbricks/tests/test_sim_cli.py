@@ -80,10 +80,12 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(args.yaw, -90.0)
         self.assertEqual(cli._chassis_spec(args).yaw_deg, -90.0)
 
-    def test_missing_subcommand_exits(self):
-        with self.assertRaises(SystemExit):
-            with patch("sys.stderr", new_callable=io.StringIO):
-                self.parser.parse_args([])
+    def test_bare_invocation_is_the_sim(self):
+        # Since 4.2.0 bare ``openbricks sim`` launches the sim (the
+        # native app): the parser accepts no subcommand and ``main``
+        # re-parses as ``app`` (tests/test_native.py).
+        self.assertIsNone(self.parser.parse_args([]).command)
+        self.assertEqual(self.parser.parse_args(["app"]).command, "app")
 
     def test_version_flag_prints_and_exits(self):
         # ``openbricks-sim --version`` exits 0 and writes the version

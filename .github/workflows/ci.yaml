@@ -299,6 +299,7 @@ jobs:
           # ``openbricks sim …`` forwards to openbricks_sim.cli; the
           # [sim] extra is installed above so this should work.
           openbricks sim --help
+          openbricks sim app --help
           openbricks sim workbench --help
           openbricks bricks --help
           openbricks bricks convert --help
@@ -618,7 +619,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [test, firmware]
+    needs: [test, firmware, sim-rs]
     # ``needs`` on a job that SKIPS would skip this one too, and on
     # a main push the test jobs now skip by design — so gate on the
     # results explicitly instead. Skipped is acceptable; failed never
@@ -626,6 +627,7 @@ jobs:
     if: >
       always()
       && needs.firmware.result == 'success'
+      && needs.sim-rs.result == 'success'
       && needs.test.result != 'failure'
       && needs.test.result != 'cancelled'
       && github.event_name == 'push'
@@ -649,13 +651,22 @@ jobs:
           path: release-out/
           merge-multiple: true
 
+      # The sim (native app) archives, one per platform, built by the
+      # ``sim-rs`` matrix with the same version string.
+      - name: Download sim artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: openbricks-sim-*-${{ needs.firmware.outputs.version }}
+          path: release-out/
+          merge-multiple: true
+
       # Every published image gets an Ed25519 signature the CLI can
       # check against its baked-in public key — that's what makes
       # ``openbricks flash`` label a download "(official)". The
       # private key exists only as this repository secret; the script
       # hard-fails on a missing key or a public-half mismatch, so a
       # release can never quietly ship unsigned.
-      - name: Sign firmware images
+      - name: Sign firmware images and sim archives
         env:
           FIRMWARE_SIGNING_KEY: ${{ secrets.FIRMWARE_SIGNING_KEY }}
         run: |
@@ -712,6 +723,8 @@ jobs:
             - `openbricks-esp32s3-firmware-latest.bin` — ESP32-S3 (Xtensa LX7, native USB)
 
             Flash with `openbricks flash` or `esptool.py` — see `docs/build.md`.
+
+            The sim (native app) archives `openbricks-sim-latest-<platform>.tar.gz` / `.zip` are the head-of-main build; `openbricks sim` downloads the build matching its own version.
           files: release-out/*
           # action-gh-release is idempotent: re-running replaces the
           # release's assets in place.
@@ -789,6 +802,87 @@ jobs:
           # ``pattern: openbricks-wheels-*`` glob.
           name: openbricks-wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  sim-rs:
+    # The sim: the native desktop application (tools/sim, Rust). Format,
+    # lint and unit tests on Linux for every PR; a release build on all
+    # four platforms so a ``v*`` tag ships one signed archive each,
+    # which ``openbricks sim`` downloads on first run.
+    needs: [openbricks-host]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            tag: linux-x86_64
+          - os: macos-latest
+            tag: macos-arm64
+          - os: macos-15-intel
+            tag: macos-x86_64
+          - os: windows-latest
+            tag: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tools/sim
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/sim
+
+      - name: Linux build dependencies (winit, wgpu, file dialogs)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev libssl-dev
+
+      - name: Format, lint, test
+        if: runner.os == 'Linux'
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --release -- -D warnings
+          cargo test --release
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package
+        id: pkg
+        shell: bash
+        run: |
+          # Same version string as the firmware job (``v4.2.0`` on a
+          # tag, ``latest`` on main) names the artifact; the archive
+          # itself carries the bare version ``openbricks sim`` asks for.
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            REL="${GITHUB_REF#refs/tags/}"
+          else
+            REL="latest"
+          fi
+          REL="${REL//\//-}"
+          VER="${REL#v}"
+          NAME="openbricks-sim-${VER}-${{ matrix.tag }}"
+          mkdir -p ../../release-out
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            7z a "../../release-out/${NAME}.zip" ./target/release/openbricks-sim.exe
+          else
+            tar -C target/release -czf "../../release-out/${NAME}.tar.gz" openbricks-sim
+          fi
+          echo "release=${REL}" >> "$GITHUB_OUTPUT"
+          ls -la ../../release-out/
+
+      - name: Upload sim artifact
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: actions/upload-artifact@v7
+        with:
+          name: openbricks-sim-${{ matrix.tag }}-${{ steps.pkg.outputs.release }}
+          path: release-out/*
           if-no-files-found: error
 
   publish-openbricks:

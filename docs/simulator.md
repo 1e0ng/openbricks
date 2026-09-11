@@ -22,13 +22,25 @@ like their hardware counterparts.
 ## Commands
 
 ```console
+$ openbricks sim [robot.assembly.json] [--bricks more.json] [--bin PATH] [--no-download]
+```
+
+Launches [the sim](#the-sim), the native desktop application: the
+Assembly Workbench with LEGO Technic bricks in exact geometry, your own
+STL parts, and the robot as the top component. The first run downloads
+the signed build for your platform (about 15 MB) from the release that
+matches the installed version into `~/.cache/openbricks/sim`; it is
+checked against the same project key that signs firmware images before
+it runs. `OPENBRICKS_SIM_BIN` points at a build of your own
+(`cargo build --release` in `tools/sim`). `openbricks sim app` is the
+explicit form.
+
+```console
 $ openbricks sim workbench [robot.assembly.json] [--bricks more.json] [--port N] [--no-browser]
 ```
 
-Opens the [Assembly Workbench](#the-assembly-workbench) in your
-browser: build the robot from LEGO Technic bricks with their exact
-geometry, import your own STL parts, and read the computed mass
-properties.
+The same workbench as a page in your browser, for a machine without
+the native build.
 
 ```console
 $ openbricks sim preview [--world WORLD] [--x X] [--y Y] [--headless] [--duration S] [--seed N]
@@ -50,10 +62,28 @@ randomized worlds reproducible.
 
 Run `openbricks sim --help` for the full, always-current option list.
 
+## The sim
+
+`openbricks sim` opens a window with two tabs. **Workbench** is the
+editor described in the next section: the library on the left (your
+components, the LEGO Technic set, other bricks), the 3D view in the
+middle, the contents of the component you are editing and the
+inspector on the right. Drag in the view to orbit, right-drag to pan,
+scroll to zoom, `F` to fit; drag a brick to move it on the ground
+plane in 8 mm steps (shift lifts it), `R` turns it 90°, `S` snaps it
+into the nearest hole, arrows nudge, `Delete` removes, `⌘Z` undoes.
+Double-click a component to edit its definition in place; every use
+follows. Open and save `robot.assembly.json` from the toolbar.
+
+**Simulate** loads a map, the chassis assembled in the workbench and
+your program, then runs, pauses and stops the run and shows it live.
+Everything is chosen inside the sim; it lands in the next release.
+
 ## The Assembly Workbench
 
-`openbricks sim workbench` serves a single page on localhost and opens
-it. The page is a 3D editor for the robot as a tree of components:
+The sim and `openbricks sim workbench` (the same editor as a page in
+the browser) read and write one file. The editor is a 3D view of the
+robot as a tree of components:
 
 - **Bricks** are recorded once, with their geometry, mass and
   provenance (`measured`, `datasheet`, `vendor` or `placeholder`).
@@ -93,11 +123,12 @@ it. The page is a 3D editor for the robot as a tree of components:
   midpoint as the origin, so a build can be run today with
   `openbricks sim run --chassis`.
 
-The file the page reads and writes, `robot.assembly.json`, stores
+The file the editor reads and writes, `robot.assembly.json`, stores
 recorded facts only: bricks, poses, roles, spawn pose. Everything
 computed is recomputed on load. Open one with `openbricks sim
-workbench robot.assembly.json`; the browser also keeps your last
-draft between visits.
+robot.assembly.json` (or `openbricks sim workbench
+robot.assembly.json` in the browser, which also keeps your last draft
+between visits).
 
 ## The brick library
 
@@ -113,7 +144,8 @@ unpacked) is one command away. `bricks fetch` unpacks it into
 `~/.cache/openbricks/ldraw` (or `$OPENBRICKS_LDRAW_DIR`), and `bricks
 convert` turns any part numbers — the LEGO design ids printed on the
 parts, `3648` for the 24-tooth gear — into a bundle file that
-`openbricks sim workbench --bricks` adds to the library. Converted
+`openbricks sim --bricks` (and `openbricks sim workbench --bricks`)
+adds to the library. Converted
 parts without a weight carry a volume estimate at 1.05 g/cm³ and are
 flagged until you weigh them; pass `--weights` with a JSON of
 `{"3648": {"g": 1.62}}` to record real ones.

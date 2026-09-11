@@ -1,0 +1,656 @@
+{
+ "format": "openbricks-assembly/1",
+ "units": {
+  "length": "mm",
+  "mass": "g",
+  "angle": "deg"
+ },
+ "parts": {
+  "st3032": {
+   "name": "Feetech ST-3032 serial servo",
+   "category": "servo",
+   "mass_g": 20.6,
+   "source": "datasheet",
+   "source_note": "docs/datasheets/feetech_sts3032.pdf: 23 × 12 × 27.5 mm, 20.6 ± 2 g, shaft 5.7 mm off-centre; mounted with the shaft along +Y",
+   "shapes": [
+    {
+     "type": "box",
+     "size": [
+      23,
+      27.5,
+      12
+     ],
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "type": "cylinder",
+     "radius": 2.5,
+     "length": 4.4,
+     "axis": "y",
+     "pos": [
+      5.7,
+      15.95,
+      0
+     ]
+    }
+   ],
+   "frames": {
+    "shaft": {
+     "pos": [
+      5.7,
+      13.75,
+      0
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  "wheel_86": {
+   "name": "Drive wheel ⌀86.4 mm",
+   "category": "wheel",
+   "mass_g": 30,
+   "source": "placeholder",
+   "source_note": "diameter from the program's DriveBase(wheel_diameter_mm=86.4); width and mass still to measure",
+   "shapes": [
+    {
+     "type": "cylinder",
+     "radius": 43.2,
+     "length": 20,
+     "axis": "y",
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  "lego_64178": {
+   "name": "Technic Beam 11 x 5 with Open Center 5 x 3",
+   "category": "lego",
+   "mass_g": 7,
+   "source": "vendor",
+   "source_note": "BrickLink 64178: 7 g",
+   "ldraw": "64178"
+  },
+  "lego_64179": {
+   "name": "Technic Beam 7 x 5 with Open Center 5 x 3",
+   "category": "lego",
+   "mass_g": 5.3,
+   "source": "vendor",
+   "source_note": "BrickLink 64179: 5.3 g",
+   "ldraw": "64179"
+  },
+  "lego_32278": {
+   "name": "Technic Beam 15",
+   "category": "lego",
+   "mass_g": 4,
+   "source": "vendor",
+   "source_note": "BrickLink 32278: 4 g",
+   "ldraw": "32278"
+  },
+  "lego_32525": {
+   "name": "Technic Beam 11",
+   "category": "lego",
+   "mass_g": 2.8,
+   "source": "vendor",
+   "source_note": "BrickLink 32525: 2.8 g",
+   "ldraw": "32525"
+  },
+  "lego_32524": {
+   "name": "Technic Beam 7",
+   "category": "lego",
+   "mass_g": 1.74,
+   "source": "vendor",
+   "source_note": "BrickLink 32524: 1.74 g",
+   "ldraw": "32524"
+  },
+  "lego_32316": {
+   "name": "Technic Beam 5",
+   "category": "lego",
+   "mass_g": 1.25,
+   "source": "vendor",
+   "source_note": "BrickLink 32316: 1.25 g",
+   "ldraw": "32316"
+  },
+  "lego_2780": {
+   "name": "Technic Pin with Friction and Slots",
+   "category": "lego",
+   "mass_g": 0.2,
+   "source": "vendor",
+   "source_note": "BrickLink 2780: 0.2 g",
+   "ldraw": "2780"
+  },
+  "lego_4519": {
+   "name": "Technic Axle 3",
+   "category": "lego",
+   "mass_g": 0.43,
+   "source": "vendor",
+   "source_note": "BrickLink 4519: 0.43 g",
+   "ldraw": "4519"
+  },
+  "qtrx_hd15a": {
+   "name": "Pololu QTRX-HD-15A reflectance array",
+   "category": "electronics",
+   "mass_g": 3.5,
+   "source": "vendor",
+   "source_note": "pololu.com/product/4415: 61.0 × 20.0 × 3.0 mm, 3.5 g, 4 mm pitch; sensors on the -Z face",
+   "shapes": [
+    {
+     "type": "box",
+     "size": [
+      20,
+      61,
+      3
+     ],
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    }
+   ],
+   "frames": {
+    "look": {
+     "axis": [
+      0,
+      0,
+      -1
+     ]
+    }
+   }
+  },
+  "tcs34725": {
+   "name": "Adafruit TCS34725 colour sensor",
+   "category": "electronics",
+   "mass_g": 3.23,
+   "source": "vendor",
+   "source_note": "adafruit.com/product/1334: 20.44 × 20.28 mm, 3.23 g; 1.6 mm PCB assumed; sensor on the +Z face",
+   "shapes": [
+    {
+     "type": "box",
+     "size": [
+      20.44,
+      20.28,
+      1.6
+     ],
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    }
+   ],
+   "frames": {
+    "look": {
+     "axis": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  "tca9548a": {
+   "name": "Adafruit TCA9548A I2C multiplexer",
+   "category": "electronics",
+   "mass_g": 1.8,
+   "source": "vendor",
+   "source_note": "adafruit.com/product/2717: 30.6 × 17.6 × 2.7 mm, 1.8 g",
+   "shapes": [
+    {
+     "type": "box",
+     "size": [
+      30.6,
+      17.6,
+      2.7
+     ],
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  "esp32s3_board": {
+   "name": "ESP32-S3 controller board",
+   "category": "electronics",
+   "mass_g": 9,
+   "source": "placeholder",
+   "source_note": "measure your board: the COREBOARD V1.4 outline is not in its schematic",
+   "shapes": [
+    {
+     "type": "box",
+     "size": [
+      63,
+      25.5,
+      12
+     ],
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  "icm45686_board": {
+   "name": "ICM-45686 IMU breakout",
+   "category": "electronics",
+   "mass_g": 2,
+   "source": "placeholder",
+   "source_note": "measure your breakout",
+   "shapes": [
+    {
+     "type": "box",
+     "size": [
+      20,
+      20,
+      1.6
+     ],
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  "lipo_3s": {
+   "name": "3S LiPo pack",
+   "category": "other",
+   "mass_g": 180,
+   "source": "placeholder",
+   "source_note": "packs vary: weigh yours and measure the outline",
+   "shapes": [
+    {
+     "type": "box",
+     "size": [
+      105,
+      34,
+      24
+     ],
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  "caster_ball": {
+   "name": "Ball caster ⌀19 mm",
+   "category": "other",
+   "mass_g": 8,
+   "source": "placeholder",
+   "source_note": "ball only; the housing is not modelled",
+   "shapes": [
+    {
+     "type": "sphere",
+     "radius": 9.5,
+     "pos": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  }
+ },
+ "components": {
+  "drive_unit": {
+   "note": "one servo with its wheel on the shaft; used mirrored for the other side",
+   "children": [
+    {
+     "name": "servo",
+     "part": "st3032",
+     "pos": [
+      0,
+      0,
+      0
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "wheel",
+     "part": "wheel_86",
+     "pos": [
+      5.7,
+      23.75,
+      0
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  "sensor_bar": {
+   "note": "the line array hung below the frame on two vertical liftarms",
+   "children": [
+    {
+     "name": "board",
+     "part": "qtrx_hd15a",
+     "pos": [
+      0,
+      0,
+      0
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hanger_l",
+     "part": "lego_32316",
+     "pos": [
+      -8,
+      20,
+      21.5
+     ],
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "hanger_r",
+     "part": "lego_32316",
+     "pos": [
+      -8,
+      -20,
+      21.5
+     ],
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  "robot": {
+   "note": "the whole robot; the axle is the origin. Rails pinned to the frame with four friction pins.",
+   "children": [
+    {
+     "name": "frame",
+     "part": "lego_64178",
+     "pos": [
+      0,
+      0,
+      0
+     ],
+     "rot": [
+      0,
+      0,
+      90
+     ]
+    },
+    {
+     "name": "rail_l",
+     "part": "lego_32278",
+     "pos": [
+      0,
+      16,
+      8
+     ],
+     "rot": [
+      0,
+      0,
+      90
+     ]
+    },
+    {
+     "name": "rail_r",
+     "part": "lego_32278",
+     "pos": [
+      0,
+      -16,
+      8
+     ],
+     "rot": [
+      0,
+      0,
+      90
+     ]
+    },
+    {
+     "name": "pin_fl",
+     "part": "lego_2780",
+     "pos": [
+      24,
+      16,
+      4
+     ],
+     "rot": [
+      0,
+      90,
+      0
+     ]
+    },
+    {
+     "name": "pin_fr",
+     "part": "lego_2780",
+     "pos": [
+      24,
+      -16,
+      4
+     ],
+     "rot": [
+      0,
+      90,
+      0
+     ]
+    },
+    {
+     "name": "pin_rl",
+     "part": "lego_2780",
+     "pos": [
+      -24,
+      16,
+      4
+     ],
+     "rot": [
+      0,
+      90,
+      0
+     ]
+    },
+    {
+     "name": "pin_rr",
+     "part": "lego_2780",
+     "pos": [
+      -24,
+      -16,
+      4
+     ],
+     "rot": [
+      0,
+      90,
+      0
+     ]
+    },
+    {
+     "name": "left",
+     "component": "drive_unit",
+     "pos": [
+      -5.7,
+      43.75,
+      0
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "right",
+     "component": "drive_unit",
+     "pos": [
+      5.7,
+      -43.75,
+      0
+     ],
+     "rot": [
+      0,
+      0,
+      180
+     ]
+    },
+    {
+     "name": "controller",
+     "part": "esp32s3_board",
+     "pos": [
+      -10,
+      0,
+      9.9
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "imu",
+     "part": "icm45686_board",
+     "pos": [
+      30,
+      0,
+      4.7
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "mux",
+     "part": "tca9548a",
+     "pos": [
+      -10,
+      0,
+      17.3
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "battery",
+     "part": "lipo_3s",
+     "pos": [
+      -40,
+      0,
+      32
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "front_bar",
+     "component": "sensor_bar",
+     "pos": [
+      70,
+      0,
+      -38.5
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "rear_array",
+     "part": "qtrx_hd15a",
+     "pos": [
+      -30,
+      0,
+      -38.5
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "colour",
+     "part": "tcs34725",
+     "pos": [
+      0,
+      45,
+      30
+     ],
+     "rot": [
+      -90,
+      0,
+      0
+     ]
+    },
+    {
+     "name": "caster",
+     "part": "caster_ball",
+     "pos": [
+      -75,
+      0,
+      -33.7
+     ],
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  }
+ },
+ "robot": {
+  "name": "et",
+  "root": "robot",
+  "roles": {
+   "wheel_left": "left/wheel",
+   "wheel_right": "right/wheel",
+   "caster": "caster",
+   "line_sensor": "front_bar/board",
+   "line_sensor_2": "rear_array",
+   "color_sensor": "colour",
+   "imu": "imu",
+   "distance_sensor": ""
+  },
+  "spawn": {
+   "pos_mm": [
+    -547,
+    -150
+   ],
+   "yaw_deg": 90
+  },
+  "measured_mass_g": null
+ }
+}
