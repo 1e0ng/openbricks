@@ -1122,6 +1122,11 @@ pub mod testing {
                 return None;
             }
         };
+        let info = adapter.get_info();
+        eprintln!(
+            "GPU adapter: {} ({:?}, {:?}) driver {} {}",
+            info.name, info.backend, info.device_type, info.driver, info.driver_info
+        );
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("a device");
         Some((device, queue))
     }
@@ -1236,6 +1241,68 @@ mod tests {
             let lin = ((s as f64 / 255.0 + 0.055) / 1.055).powf(2.4) * 0.3;
             ((1.055 * lin.powf(1.0 / 2.4) - 0.055) * 255.0).round() as u8
         };
+        // the report: how the ghost-only pixels come out at three alphas (a driver's blend
+        // going wrong shows up here, with the adapter named above)
+        let ghost_only: Vec<(u32, u32)> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let (bare, solid) = (pick(&bare_px, x, y), pick(&solid_px, x, y));
+                sum(bare) == 0 && solid[2] > solid[1] && solid[2] > solid[0] && solid[2] > 40
+            })
+            .collect();
+        let bbox = |pts: &[(u32, u32)]| {
+            pts.iter().fold((u32::MAX, u32::MAX, 0u32, 0u32), |b, &(x, y)| {
+                (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y))
+            })
+        };
+        eprintln!("ghost-only pixels: {} in bbox {:?}", ghost_only.len(), bbox(&ghost_only));
+        for alpha in [0.0f32, 0.3, 1.0] {
+            let g = [DrawItem {
+                color: [ghost[0].color[0], ghost[0].color[1], ghost[0].color[2], alpha],
+                ..ghost[0].clone()
+            }];
+            let sc = Scene {
+                items: &items,
+                lines: &[],
+                ghost: &g,
+                overlay: &overlay,
+                background: [0.0, 0.0, 0.0, 1.0],
+            };
+            vp.render(&device, &queue, &mut renderer, (w, h), &sc);
+            let (_, _, gpx) = vp.read_pixels(&device, &queue).unwrap();
+            let want = |s: u8| -> u8 {
+                let lin = ((s as f64 / 255.0 + 0.055) / 1.055).powf(2.4) * alpha as f64;
+                ((1.055 * lin.powf(1.0 / 2.4) - 0.055).max(0.0) * 255.0).round() as u8
+            };
+            let (mut black, mut as_expected, mut as_solid, mut other) = (0, 0, 0, 0);
+            let mut samples = Vec::new();
+            for &(x, y) in &ghost_only {
+                let (gp, solid) = (pick(&gpx, x, y), pick(&solid_px, x, y));
+                let exp = solid.map(want);
+                let near = |a: [u8; 3], b: [u8; 3]| (0..3).all(|c| (a[c] as i32 - b[c] as i32).abs() <= 3);
+                if sum(gp) == 0 {
+                    black += 1;
+                } else if near(gp, exp) {
+                    as_expected += 1;
+                } else if near(gp, solid) {
+                    as_solid += 1;
+                } else {
+                    other += 1;
+                    if samples.len() < 4 {
+                        samples.push(((x, y), gp, exp, solid));
+                    }
+                }
+            }
+            let lit: Vec<(u32, u32)> = (0..h)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .filter(|&(x, y)| sum(pick(&gpx, x, y)) != sum(pick(&bare_px, x, y)))
+                .collect();
+            eprintln!(
+                "alpha {alpha}: black {black}, as expected {as_expected}, as solid {as_solid}, other {other} {samples:?}; the ghost changed {} pixels in bbox {:?}",
+                lit.len(),
+                bbox(&lit)
+            );
+        }
         let (mut compared, mut exact) = (0, 0);
         let mut off = Vec::new();
         for y in 0..h {
