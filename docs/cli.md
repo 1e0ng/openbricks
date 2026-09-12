@@ -88,6 +88,41 @@ fresh hub out of the box. Heights, mats and lighting differ — run
 `examples/qtr_calibrate.py` once for a calibration measured on your
 own rig.
 
+## Fast uploads
+
+An upload is one BLE session and, since 4.10.0, one round trip of
+work on the hub. The CLI connects (discovering only the hub's UART
+service), interrupts whatever the hub runs and enters the raw REPL in
+a single write, and pastes **one** program that prints the firmware
+version, writes the file, syncs the clock, prints the size
+confirmation and drops straight back into the button's idle loop; the
+host reads the confirmation and the idle banner off the stream and
+hangs up. Earlier versions spent four such execs — a version probe,
+the file, a confirmation, the idle-loop restart — each with its own
+handshake, plus a fixed settle wait, on every upload.
+
+The CLI remembers each hub's firmware version (in
+`~/.cache/openbricks/hubs.json`, or `$OPENBRICKS_CACHE_DIR`), so a hub
+it has met before is not probed again. The staged program still
+prints its version first and refuses to write compiled code on
+firmware that cannot run it, so a hub re-flashed to something older
+is caught in-session: the CLI says so and stages source instead.
+
+On the hub side, firmware 4.10.0 asks for a 512-byte BLE packet size
+(the stack's default of 256 capped every write at 253 bytes) and
+advertises every 40 ms instead of 100 ms, so discovery and the
+connection start sooner.
+
+Every upload ends with a line saying where its time went:
+
+```
+staged in 1.42 s (scan 0.31, connect 0.58, subscribe 0.05, raw repl 0.09, paste 0.21, confirm 0.12, close 0.06)
+```
+
+`scan` and `connect` are the operating system's Bluetooth stack
+(scanning for the advertisement, then connecting and discovering the
+service); the rest is the hub. `--debug` adds the packet-level trace.
+
 ## One upload at a time
 
 `openbricks run` and `openbricks upload` push a program through the

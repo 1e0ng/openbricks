@@ -183,6 +183,12 @@ def _build_parser():
         "--scan-timeout", type=float, default=5.0,
         help="BLE scan timeout. Default: 5.0 s.",
     )
+    p_upload.add_argument(
+        "--debug", action="store_true",
+        help="Print every BLE notify packet and the connect timing "
+             "breakdown to stderr (the per-phase line is printed "
+             "regardless).",
+    )
 
     # ---- stop ----
     p_stop = sub.add_parser(

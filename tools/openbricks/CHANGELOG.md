@@ -3,6 +3,41 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.10.0 — `openbricks upload` in one round trip
+
+An upload used to spend four raw-paste execs on the hub — a firmware
+version probe, the file, a size confirmation, and the idle-loop
+restart — each with its own handshake round trips, plus a fixed
+0.3 s settle wait before entering the raw REPL. It is now ONE staged
+program: it prints the firmware version, writes the file, syncs the
+clock, prints the confirmation and drops back into the launcher's
+idle loop; the host reads the confirmation and the idle banner off
+the stream and hangs up. The raw REPL is entered with a single write
+(the interrupts and the Ctrl-A together; the hub handles the
+interrupt at the stdin layer, so nothing waited for). `run` shares
+the same shape: its file write now rides in the runner's exec.
+
+The CLI remembers each hub's firmware version (`~/.cache/openbricks/
+hubs.json`, or `$OPENBRICKS_CACHE_DIR`), so a hub it has met before
+is not probed; the staged program refuses to write compiled code on
+older firmware, so a re-flashed hub is caught in-session and gets
+source, announced. Connecting discovers only the hub's UART service.
+Every upload ends with a line saying where its time went, and
+`upload --debug` adds the packet trace.
+
+Firmware: the hub asks for a 512-byte ATT MTU (the stack's default
+preference of 256 capped every host write at 253 bytes) and
+advertises every 40 ms instead of 100, so discovery and the
+connection start sooner.
+
+- Tests: the hub cache; the one-exec upload against the scripted hub
+  (probe only for an unknown hub, the remembered hub skipping it, a
+  re-flashed hub refused in-session and re-staged as source, a hub
+  error before the idle loop restoring it the old way, the custom
+  path unguarded); the run session's single exec; the raw-REPL entry
+  as one write; the NUS service filter; the firmware's MTU and
+  advertising interval.
+
 ## 4.9.0 — routes drawn on the map: tools, popups, selection, copy, lock
 
 Routes are now drawn on the map. Click a tool — **→ Straight**,

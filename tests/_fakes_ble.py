@@ -103,6 +103,9 @@ class _FakeBLE:
     _char_values          = {}    # handle → bytes
 
     _mtu = None
+    # Set to an exception instance to make ``config(mtu=...)`` raise —
+    # a stack that refuses the preferred MTU must not stop the bridge.
+    _mtu_error = None
     _irq_handler = None
 
     # Advertising state.
@@ -146,6 +149,8 @@ class _FakeBLE:
             if "gap_name" in kwargs:
                 _FakeBLE._gap_name = kwargs["gap_name"]
             if "mtu" in kwargs:
+                if _FakeBLE._mtu_error is not None:
+                    raise _FakeBLE._mtu_error
                 _FakeBLE._mtu = int(kwargs["mtu"])
             return None
         if args:
@@ -218,6 +223,8 @@ class _FakeBLE:
         cls._INSTANCE = None
         cls._active = False
         cls._gap_name = None
+        cls._mtu = None
+        cls._mtu_error = None
         cls._next_handle = 1
         cls._service_registrations = []
         cls._registered_handles = []

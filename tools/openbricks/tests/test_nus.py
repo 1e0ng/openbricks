@@ -67,8 +67,9 @@ class _FakeBleakModule:
             return _FakeBleakModule.device
 
     class BleakClient:
-        def __new__(cls, device):
+        def __new__(cls, device, services=None):
             _FakeBleakModule.client = _FakeBleakClient(device)
+            _FakeBleakModule.client.services_filter = services
             return _FakeBleakModule.client
 
 
@@ -116,6 +117,9 @@ class WriteChunkingTests(_BleakInjection):
     def test_large_write_is_split_by_mtu(self):
         link = asyncio.run(NUSLink.connect("RobotA"))
         client = _FakeBleakModule.client
+        # connect discovers only the NUS service: every other service,
+        # characteristic and descriptor would be a round trip wasted
+        self.assertEqual(client.services_filter, [_nus.UART_SERVICE_UUID])
         client.writes = []
         asyncio.run(link.write(b"x" * 1000))
         # mtu_size 256 on the fake -> 253-byte payloads.
@@ -185,7 +189,7 @@ class ConnectTests(_BleakInjection):
     def test_connect_failure_raises(self):
         class _Failing(_FakeBleakModule):
             class BleakClient:
-                def __new__(cls, device):
+                def __new__(cls, device, services=None):
                     c = _FakeBleakClient(device)
                     c.fail_connect = OSError("radio off")
                     _FakeBleakModule.client = c
@@ -201,7 +205,7 @@ class ConnectTests(_BleakInjection):
     def test_subscribe_failure_disconnects_and_raises(self):
         class _Failing(_FakeBleakModule):
             class BleakClient:
-                def __new__(cls, device):
+                def __new__(cls, device, services=None):
                     c = _FakeBleakClient(device)
                     c.fail_start_notify = OSError("no such char")
                     _FakeBleakModule.client = c
@@ -220,7 +224,7 @@ class ConnectTests(_BleakInjection):
         # Cleanup disconnect ALSO failing must not mask the NUSError.
         class _Failing(_FakeBleakModule):
             class BleakClient:
-                def __new__(cls, device):
+                def __new__(cls, device, services=None):
                     c = _FakeBleakClient(device)
                     c.fail_start_notify = OSError("no such char")
 

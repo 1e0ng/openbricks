@@ -278,6 +278,11 @@ class RunFlowTests(unittest.TestCase):
         self.tmp.write("print('hello from hub')\n")
         self.tmp.close()
         self.addCleanup(os.unlink, self.tmp.name)
+        # a private hub cache: every test starts with an unknown hub
+        self.cache = tempfile.mkdtemp()
+        env = patch.dict(os.environ, {"OPENBRICKS_CACHE_DIR": self.cache})
+        env.start()
+        self.addCleanup(env.stop)
 
     @staticmethod
     def _stage_round(n=1):
@@ -308,15 +313,17 @@ class RunFlowTests(unittest.TestCase):
         ]
 
     def _standard_responses(self, stdout_msg, stderr_msg=b"", stage_rounds=1,
-                            fw_version=b"fwv=1.92.0\r\n"):
+                            fw_version=b"fwv=1.92.0\r\n", probe=True):
+        """The hub side of one run: the raw-REPL banner, the firmware
+        probe (an unknown hub), then the ONE staged program — its
+        paste ack, its version line, the program's stdout and
+        stderr."""
         return [
-            b"",                          # drain after Ctrl-C interrupt
             _BANNER,                      # raw-REPL banner
-        ] + self._probe_round(fw_version) \
-          + self._stage_round(stage_rounds) + [
-            _R_SUPPORTED + _WINDOW_8K,    # runner paste ack + window
+        ] + (self._probe_round(fw_version) if probe else []) + [
+            _R_SUPPORTED + _WINDOW_8K,    # the staged program's paste ack + window
             _CTRL_D,                      # end-of-paste ack
-            stdout_msg + _CTRL_D,         # stdout + EOT
+            fw_version + stdout_msg + _CTRL_D,   # version line, stdout + EOT
             stderr_msg + _CTRL_D,         # stderr + EOT
         ]
 
@@ -349,6 +356,57 @@ class RunFlowTests(unittest.TestCase):
         self.assertNotIn(b"os.remove", joined)
         self.assertIn("predates precompiled", err.getvalue())
         self.assertIn("1.91.1", err.getvalue())
+
+    def test_a_re_flashed_hub_is_caught_in_session_and_gets_source(self):
+        # The cache says 1.92.0; the hub now runs 1.91.1: the staged
+        # program's guard refuses the .mpy, the host consumes the
+        # refusal, announces, and runs the source instead.
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        fake = _ScriptedLink([
+            _BANNER,
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,          # the .mpy program
+            b"fwv=1.91.1\r\n" + _CTRL_D,                  # its stdout ends at once
+            b"AssertionError: fwneedsrc\r\n" + _CTRL_D, b">",
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,          # the source program
+            b"fwv=1.91.1\r\nhello from hub\r\n" + _CTRL_D,
+            _CTRL_D,
+        ])
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        err = io.StringIO()
+        with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO) as out, \
+             patch("sys.stderr", err):
+            rc = run_mod.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"\x05A\x01"), 2)
+        self.assertIn(b"'/program.mpy'", joined)
+        self.assertIn(b"'/program.py'", joined)
+        self.assertIn("predates precompiled", err.getvalue())
+        self.assertIn("hello from hub", out.getvalue())
+        self.assertNotIn("fwv=", out.getvalue())
+        self.assertEqual(_hubcache.firmware_version("RobotA"), (1, 91, 1))
+
+    def test_a_remembered_hub_is_not_probed(self):
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        fake = _ScriptedLink(self._standard_responses(b"hi\r\n", probe=False))
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO) as out:
+            rc = run_mod.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"\x05A\x01"), 1, "one exec: no probe")
+        self.assertIn(b"fwneedsrc", joined)
+        self.assertIn("hi", out.getvalue())
 
     def test_happy_path_streams_stdout(self):
         fake = _ScriptedLink(self._standard_responses(
@@ -417,7 +475,6 @@ class RunFlowTests(unittest.TestCase):
 class RawPasteErrorTests(unittest.TestCase):
     def test_hub_without_raw_paste_support_errors(self):
         responses = [
-            b"",
             _BANNER,
             b"R\x00",  # raw-paste NOT supported
         ]
@@ -485,7 +542,6 @@ class InlineCommandTests(unittest.TestCase):
 
     def test_command_bytes_reach_the_bootstrap(self):
         responses = [
-            b"",
             _BANNER,
             # probe round: firmware version
             _R_SUPPORTED + _WINDOW_8K,
@@ -493,16 +549,10 @@ class InlineCommandTests(unittest.TestCase):
             b"fwv=1.92.0\r\n" + _CTRL_D,
             _CTRL_D,
             b">",
-            # one staging round (inline code is < _STAGE_CHUNK_BYTES)
+            # the ONE staged program: its version line, then the run
             _R_SUPPORTED + _WINDOW_8K,
             _CTRL_D,
-            _CTRL_D,
-            _CTRL_D,
-            b">",
-            # runner round
-            _R_SUPPORTED + _WINDOW_8K,
-            _CTRL_D,
-            b"hello\r\n" + _CTRL_D,
+            b"fwv=1.92.0\r\nhello\r\n" + _CTRL_D,
             _CTRL_D,
         ]
         fake = _ScriptedLink(responses)
@@ -861,10 +911,14 @@ class HostInterruptForwardingTests(unittest.TestCase):
         async def _stub_pick(blink, l, *slot_pair):
             return run_mod._TARGET_PATH, False, None
 
+        async def _stub_version(blink, name):
+            return (4, 10, 0)
+
         patches = [
             ("_enter_raw_repl", _raw_repl),
             ("_pick_staging", _stub_pick),
             ("_stage_file", _stub_stage),
+            ("_read_version_line", _stub_version),
             ("_raw_paste_upload", _stub_upload),
             ("_stream_output", _stream),
             ("_restore_idle_loop", _restore),
