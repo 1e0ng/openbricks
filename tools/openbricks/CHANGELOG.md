@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.8.1 — a freshly loaded map draws at once
+
+Choosing a map showed nothing until the first run or the first drag of
+the chassis: the run server's load frame was taken from a MuJoCo state
+that had never had a forward pass, so every body — the mat included —
+came as a row of zeros, and the viewer turned the zero quaternion into
+NaN and drew nothing. `SimRobot` now runs `mj_forward` at the end of
+its constructor (the load frame is real), and the viewer treats a zero
+or non-finite quaternion as upright and a non-finite position as the
+origin, so no frame can blank the view again.
+
+- Tests: the server's load frame has an upright world body and a
+  chassis on its wheels; a zero-quaternion frame stands bodies upright
+  in the tab; and, on the real runtime, every shipped world loads,
+  draws every geom, and lights more than a third of the plan view.
+
 ## 4.8.0 — the Simulate tab is a plan view
 
 The Simulate tab shows the map as a fixed top-down plan, north up,

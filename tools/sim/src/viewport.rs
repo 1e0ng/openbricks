@@ -1581,6 +1581,54 @@ mod tests {
     }
 
     #[test]
+    fn the_plan_camera_renders_what_lies_below_it() {
+        let Some((device, queue)) = test_device() else { return };
+        let mut renderer = test_renderer(&device);
+        let mut vp = Viewport::new(&device, &queue);
+        vp.camera = Camera::top_down();
+        vp.camera
+            .fit_plan(Vec3::new(-300.0, -200.0, 0.0), Vec3::new(300.0, 200.0, 20.0), 320.0 / 240.0);
+        let (w, h) = (320u32, 240u32);
+        vp.add_mesh(&device, "slab", &geometry::box_mesh([600.0, 400.0, 2.0], [0.0; 3]));
+        vp.add_mesh(&device, "box", &geometry::box_mesh([40.0; 3], [0.0; 3]));
+        let items = [
+            DrawItem {
+                mesh: "slab".into(),
+                model: Mat4::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+                color: srgb(0xD8D8D8),
+                texture: None,
+            },
+            DrawItem {
+                mesh: "box".into(),
+                model: Mat4::from_translation(Vec3::new(100.0, 50.0, 22.0)),
+                color: srgb(0xC02020),
+                texture: None,
+            },
+        ];
+        let scene = Scene {
+            items: &items,
+            lines: &[],
+            ghost: &[],
+            overlay: &[],
+            background: [0.0, 0.0, 0.0, 1.0],
+        };
+        vp.render(&device, &queue, &mut renderer, (w, h), &scene);
+        let (_, _, px) = vp.read_pixels(&device, &queue).unwrap();
+        let at = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2]]
+        };
+        // the mat fills the middle of the view, lit from above; the box sits north-east of centre
+        let c = at(160, 120);
+        assert!(c[0] > 100 && c[1] > 100 && c[2] > 100, "the mat at the centre: {c:?}");
+        let b = vp.camera.project(Vec3::new(100.0, 50.0, 42.0), w as f32, h as f32).unwrap();
+        assert!(b.x > 160.0 && b.y < 120.0, "{b:?}");
+        let bp = at(b.x as u32, b.y as u32);
+        assert!(bp[0] > bp[1] * 2 && bp[0] > 60, "the box is red on top: {bp:?}");
+        assert_eq!(at(2, 2), [0, 0, 0], "outside the mat is background");
+    }
+
+    #[test]
     fn the_top_down_camera_is_a_plan_with_north_up_and_no_perspective() {
         let mut cam = Camera::top_down();
         cam.target = Vec3::new(100.0, -50.0, 0.0);

@@ -100,10 +100,20 @@ impl Scene {
 }
 
 /// One body pose from a frame: position (m) and quaternion (w, x, y, z).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pose {
     pub pos: [f64; 3],
     pub quat: [f64; 4],
+}
+
+impl Default for Pose {
+    /// At the origin, upright: a usable pose, not a zero quaternion.
+    fn default() -> Self {
+        Pose {
+            pos: [0.0; 3],
+            quat: [1.0, 0.0, 0.0, 0.0],
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
