@@ -99,7 +99,7 @@ view at once, as does the chassis (a `robot.assembly.json`, or the
 build open in the Workbench tab once it is saved) when you choose it;
 pick the program (`main.py`), then Run. The view is a plan: the map
 seen straight from above, north up, with no perspective — drag to
-pan, scroll to zoom, **Fit** or `F` to frame the whole map again
+pan, scroll to zoom, **Fit** or `F` to frame the whole map again, edge to edge
 (the Workbench keeps its own 3D camera). Pause, Resume and Stop do
 what they say; the speed slider runs the physics slower or faster
 than wall time; "follow the robot" keeps the view on the chassis;
@@ -109,22 +109,31 @@ server is doing. The loaded chassis stands on the map at true scale:
 drag it to put it where a run should start — a 70 % transparent copy
 follows the pointer with its axle centre under it, and letting go
 places the robot there (shift turns it) — or type the pose in the
-**Route** panel. That panel plans a route as a list of actions:
-**straight** (mm), **turn** (degrees, positive right), **curve**
-(radius and degrees), **stop** (coast, brake or hold, with an
-optional wait) and **custom** (a line of code, such as
-`line_follow()`). Add one with the **+** buttons and type its
-parameters, or arm **→ point** / **⌒ point** and click the map: the
-sim works out what reaches the point — the turn to face it and the
-distance for a straight line, the arc tangent to the current heading
-through it for a curve. Every move has a handle on the map: drag it
-to set the distance, the heading or the arc, with the transparent
-chassis showing where the robot ends up. Straights and curves have an
-end state — coast, brake, hold, or **continue** for a run that flows
-into the next action without slowing (`then=Stop.NONE`). Rows drag
-by their **≡** grip to reorder (or ↑ ↓), **×** removes one. Custom
-actions call whatever the **Definitions** box defines: type
-`def line_follow(): …` there and the custom row's picker lists it.
+**Route** panel. That panel plans a route as actions placed on the
+map. Click a tool — **→ Straight**, **⌒ Curve**, **↻ Turn**,
+**■ Stop** or **ƒ Custom** — then click the map: a straight or a
+curve takes its start and its end (the start snaps to where the
+previous action ends, or to the chassis, so paths chain), a turn takes
+where it turns and a point to face, a stop or a custom call takes one
+point. A popup then asks for the parameters: the speed (the drive
+base's default, shown in mm/s for your wheels), **continuous** for a
+move that flows into the next one without slowing (`then=Stop.NONE`)
+or otherwise the end state (coast, brake, hold), a curve's radius and
+side (it starts as a quarter circle), a turn's heading and rate, a
+stop's wait, a custom action's call (the picker lists what the
+**Definitions** box defines, such as `def line_follow(): …`) and
+whether it moves the robot, in which case one more click says where it
+ends. Where an action does not start where the previous one ends, a
+dashed line shows the drive the program inserts to get there. Every
+action is an object on the map: click its path to select it and edit
+its parameters in the panel, drag its handles (a straight's ends, a
+curve's ends and its midpoint to bend it, a turn's heading arrow) or
+the path itself to move it, ⌘C / ⌘V to copy and paste it (the copy
+lands a little to the side), ⌘L / ⌘⇧L to lock and unlock it (a locked
+action shows 🔒 and cannot be moved, edited or deleted), Delete to
+remove it, ⌘Z to undo, Esc to cancel a placement. The numbers on the
+map are the order the program runs them in; rows drag by their **≡**
+grip (or ↑ ↓) to reorder.
 Routes save and load as `*.route.json` (the map, the start pose, the
 actions and the definitions); **▶ Run route** writes the route as a
 hub-style program (`ST3032Motor` wheels and a `DriveBase` sized from

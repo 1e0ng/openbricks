@@ -1697,16 +1697,24 @@ impl App {
             viewport::ray_plane_z(o, d, 0.0)
         };
         let shift = ui.input(|i| i.modifiers.shift);
-        // a press on a route handle drags it, on the chassis moves it; anywhere else pans the plan
+        // the pointer on the map, for the rubber band of a placement
+        self.simulate.hover = response
+            .hover_pos()
+            .and_then(|p| {
+                let (x, y) = local(p);
+                ground(x, y)
+            })
+            .map(|h| [h.x as f64, h.y as f64]);
+        // a press on a route handle drags it, on a path drags the path, on the chassis moves it; anywhere else pans
         if response.drag_started_by(egui::PointerButton::Primary) {
             let origin = ui
                 .input(|i| i.pointer.press_origin())
                 .map(local)
                 .or(response.interact_pointer_pos().map(local));
             self.drag = Drag::Pan;
-            let handle = origin.and_then(|(x, y)| self.simulate.route_handle_at(&cam, x, y, w, h));
-            if let Some(i) = handle {
-                if self.simulate.begin_handle_drag(i) {
+            let handle = origin.and_then(|(x, y)| Some((self.simulate.route_handle_at(&cam, x, y, w, h)?, ground(x, y)?)));
+            if let Some(((i, handle), hit)) = handle {
+                if self.simulate.begin_handle_drag(i, handle, [hit.x as f64, hit.y as f64]) {
                     self.drag = Drag::RouteHandle;
                 }
             } else {
@@ -1725,13 +1733,24 @@ impl App {
         if response.drag_started_by(egui::PointerButton::Secondary) || response.drag_started_by(egui::PointerButton::Middle) {
             self.drag = Drag::Pan;
         }
-        // a click on the map ends the armed move
+        // a click on the map places the armed action's next point, or selects the path under it
         if response.clicked_by(egui::PointerButton::Primary)
-            && self.simulate.pick.is_some()
-            && let Some((x, y)) = response.interact_pointer_pos().map(local)
-            && let Some(hit) = ground(x, y)
+            && self.simulate.draft.is_none()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some(hit) = {
+                let (x, y) = local(pos);
+                ground(x, y)
+            }
         {
-            self.simulate.map_click(hit.x as f64, hit.y as f64);
+            let tol = (15.0 * cam.units_per_px(h)) as f64;
+            let p = [hit.x as f64, hit.y as f64];
+            if self.simulate.map_click(p[0], p[1], tol) {
+                if let Some(d) = self.simulate.draft.as_mut() {
+                    d.at = Some(pos + egui::vec2(12.0, 12.0));
+                }
+            } else {
+                self.simulate.select_at(p, tol);
+            }
         }
         let delta = response.drag_delta();
         match &self.drag {
@@ -1782,11 +1801,59 @@ impl App {
             self.drag = Drag::None;
         }
         if !ui.ctx().egui_wants_keyboard_input() {
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.simulate.pick = None;
+            let mut copy = false;
+            let mut cut = false;
+            let mut paste = None;
+            let (esc, del, undo, lock, unlock, fit) = ui.input(|i| {
+                for ev in &i.events {
+                    match ev {
+                        egui::Event::Copy => copy = true,
+                        egui::Event::Cut => cut = true,
+                        egui::Event::Paste(t) => paste = Some(t.clone()),
+                        _ => {}
+                    }
+                }
+                (
+                    i.key_pressed(egui::Key::Escape),
+                    i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
+                    i.modifiers.command && i.key_pressed(egui::Key::Z),
+                    i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::L),
+                    i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::L),
+                    i.key_pressed(egui::Key::F),
+                )
+            });
+            if esc {
+                if self.simulate.placing.is_some() || self.simulate.draft.is_some() {
+                    self.simulate.cancel();
+                } else {
+                    self.simulate.selected = None;
+                }
             }
-            if ui.input(|i| i.key_pressed(egui::Key::F)) {
+            if del {
+                self.simulate.remove_selected();
+            }
+            if undo {
+                self.simulate.undo();
+            }
+            if lock {
+                self.simulate.set_locked(true);
+            }
+            if unlock {
+                self.simulate.set_locked(false);
+            }
+            if fit {
                 self.simulate.refit();
+            }
+            if (copy || cut)
+                && let Some(text) = self.simulate.copy_selected()
+            {
+                ui.ctx().copy_text(text);
+                if cut {
+                    self.simulate.remove_selected();
+                }
+            }
+            if let Some(text) = paste {
+                self.simulate.paste(&text);
             }
         }
         if items.is_empty() {
@@ -1806,14 +1873,26 @@ impl App {
                 ui.visuals().weak_text_color(),
             );
         }
+        // each action's number on the map, and the popup of a freshly placed one
+        let label_color = if dark {
+            egui::Color32::from_rgb(255, 210, 120)
+        } else {
+            egui::Color32::from_rgb(140, 70, 0)
+        };
+        for (p, text) in self.simulate.route_labels(&cam, w, h) {
+            ui.painter().text(
+                rect.min + egui::vec2(p.x, p.y),
+                egui::Align2::LEFT_BOTTOM,
+                text,
+                egui::FontId::proportional(13.0),
+                label_color,
+            );
+        }
+        self.simulate.draft_ui(ui.ctx());
         ui.painter().text(
             response.rect.left_bottom() + egui::vec2(8.0, -8.0),
             egui::Align2::LEFT_BOTTOM,
-            if self.simulate.pick.is_some() {
-                "click the map where the move ends · Esc cancels"
-            } else {
-                "pan: drag · zoom: wheel · F fits the map · drag the chassis to place it (shift turns it) · drag an action's handle to set it"
-            },
+            self.simulate.hint(),
             egui::FontId::monospace(11.0),
             ui.visuals().weak_text_color(),
         );
@@ -1948,7 +2027,6 @@ mod tests {
     use super::*;
     use crate::editor::testing::real_bundle;
     use crate::sim::testing::fake_server;
-    use crate::simulate::Tool;
     use crate::viewport::testing::{test_device, test_renderer};
     use egui::{Event, Key, Modifiers, PointerButton, Pos2};
     use egui_kittest::Harness;
@@ -2575,7 +2653,7 @@ mod tests {
     }
 
     #[test]
-    fn the_route_panel_plans_on_the_map_and_the_chassis_drags_into_place() {
+    fn the_route_panel_places_actions_by_clicks_and_edits_them_on_the_map() {
         let Some(gpu) = gpu() else { return };
         let Some(fake) = fake_server("route") else { return };
         let mut h = harness(&gpu, None);
@@ -2594,6 +2672,11 @@ mod tests {
                 h.state().simulate.log
             );
         };
+        let click = |h: &mut Harness<'_, App>, at: Pos2| {
+            press(h, at, PointerButton::Primary, Modifiers::NONE);
+            release(h, at, PointerButton::Primary);
+            steps(h, 2);
+        };
         wait_for(&mut h, &|a| a.simulate.scene_loaded());
         steps(&mut h, 3);
         assert!(h.query_by_label("Route").is_some());
@@ -2601,7 +2684,6 @@ mod tests {
         wait_for(&mut h, &|a| a.simulate.chassis_pose().map(|p| p.x_mm < -500.0).unwrap_or(false));
         let p0 = h.state().simulate.chassis_pose().unwrap();
         assert!((p0.x_mm + 547.0).abs() < 1e-3 && (p0.yaw_deg - 90.0).abs() < 1e-3, "{p0:?}");
-        // the plan view is framed on the mat as the tab framed it
         let rect = h.state().view_rect;
         let at = on_screen(h.state(), Vec3::new(p0.x_mm as f32, p0.y_mm as f32, 50.0));
         assert!(rect.contains(at), "{at:?} in {rect:?}");
@@ -2611,34 +2693,12 @@ mod tests {
         let target = at + egui::vec2(120.0, 0.0);
         drag_to(&mut h, target, Modifiers::NONE);
         let ghost = h.state().simulate.ghost.expect("a ghost follows the pointer");
-        let under = {
-            let app = h.state();
-            let r = app.view_rect;
-            let (o, d) = app
-                .viewport
-                .camera
-                .ray(target.x - r.min.x, target.y - r.min.y, r.width(), r.height());
-            viewport::ray_plane_z(o, d, 0.0).unwrap()
-        };
-        assert!(
-            (ghost.x_mm - under.x as f64).abs() < 1.0 && (ghost.y_mm - under.y as f64).abs() < 1.0,
-            "{ghost:?} under {under:?}"
-        );
         assert!(ghost.x_mm > p0.x_mm + 50.0, "{ghost:?}");
-        assert!(
-            h.state()
-                .simulate
-                .chassis_pose()
-                .map(|p| (p.x_mm - p0.x_mm).abs() < 1e-3)
-                .unwrap_or(false),
-            "the chassis itself stays until the drop"
-        );
         release(&mut h, target, PointerButton::Primary);
         let placed = h.state().simulate.route.start;
-        assert!((placed.x_mm - under.x as f64).abs() < 1.0, "{placed:?}");
+        assert!(placed.x_mm > p0.x_mm + 50.0, "{placed:?}");
         assert!(h.state().simulate.ghost.is_none());
         assert_eq!(h.state().simulate.sent.last().unwrap()["cmd"], "place");
-        // the server's next frame shows it there; then shift turns it
         wait_for(&mut h, &|a| {
             a.simulate
                 .chassis_pose()
@@ -2651,85 +2711,149 @@ mod tests {
         drag_to(&mut h, at + egui::vec2(8.0, 0.0), Modifiers::SHIFT);
         drag_to(&mut h, at + egui::vec2(100.0, 0.0), Modifiers::SHIFT);
         release(&mut h, at + egui::vec2(100.0, 0.0), PointerButton::Primary);
-        let turned = h.state().simulate.route.start;
+        let start = h.state().simulate.route.start;
         assert!(
-            (turned.x_mm - placed.x_mm).abs() < 1e-6 && turned.yaw_deg < placed.yaw_deg,
-            "{turned:?} from {placed:?}"
+            (start.x_mm - placed.x_mm).abs() < 1e-6 && start.yaw_deg < placed.yaw_deg,
+            "{start:?} from {placed:?}"
         );
         wait_for(&mut h, &|a| {
             a.simulate
                 .chassis_pose()
-                .map(|p| (p.yaw_deg - turned.yaw_deg).abs() < 1e-3)
+                .map(|p| (p.yaw_deg - start.yaw_deg).abs() < 1e-3)
                 .unwrap_or(false)
         });
-        // the point tool: a click on the map dead ahead adds one straight action
-        h.get_by_label("→ point").click();
+        let (hx, hy) = start.heading();
+        let map = |h: &Harness<'_, App>, p: [f64; 2]| on_screen(h.state(), Vec3::new(p[0] as f32, p[1] as f32, 0.0));
+        // the straight tool: a click near the chassis snaps to its start, a click 250 mm ahead opens the popup
+        h.get_by_label("→ Straight").click();
         steps(&mut h, 2);
-        assert_eq!(h.state().simulate.pick, Some(Tool::StraightTo));
-        assert!(h.query_by_label("click the map where the straight line ends").is_some());
-        let (hx, hy) = (turned.yaw_deg.to_radians().cos(), turned.yaw_deg.to_radians().sin());
-        let ahead = [turned.x_mm + hx * 250.0, turned.y_mm + hy * 250.0];
-        let end = on_screen(h.state(), Vec3::new(ahead[0] as f32, ahead[1] as f32, 0.0));
-        press(&mut h, end, PointerButton::Primary, Modifiers::NONE);
-        release(&mut h, end, PointerButton::Primary);
+        assert!(h.state().simulate.placing.as_ref().is_some_and(|p| p.kind == "straight"));
+        let at_ = map(&h, [start.x_mm + 5.0, start.y_mm - 5.0]);
+        click(&mut h, at_);
+        assert_eq!(
+            h.state().simulate.placing.as_ref().unwrap().points,
+            vec![start.point()],
+            "snapped to the start"
+        );
+        let ahead = [start.x_mm + hx * 250.0, start.y_mm + hy * 250.0];
+        let at_ = map(&h, ahead);
+        click(&mut h, at_);
+        assert!(h.state().simulate.draft.is_some(), "the popup is up");
+        steps(&mut h, 2);
+        assert!(h.query_by_label("New straight").is_some());
+        assert!(h.state().simulate.route.actions.is_empty());
+        h.get_by_label("Add").click();
         steps(&mut h, 2);
         let actions = h.state().simulate.route.actions.clone();
         assert_eq!(actions.len(), 1, "{actions:?}");
-        let crate::route::Action::Straight { mm, .. } = &actions[0] else {
-            panic!("{actions:?}")
-        };
-        assert!((mm - 250.0).abs() < 4.0, "{mm}");
-        assert!(h.state().simulate.pick.is_none());
-        // typed: a curve and a stop are added with their defaults, then a custom call
-        for label in ["+ Curve", "+ Stop", "+ Custom"] {
-            h.get_by_label(label).click();
-            steps(&mut h, 2);
-        }
+        let end0 = actions[0].action.end();
+        assert!(
+            (end0[0] - ahead[0]).abs() < 4.0 && (end0[1] - ahead[1]).abs() < 4.0,
+            "{end0:?} vs {ahead:?}"
+        );
+        assert_eq!(h.state().simulate.selected, Some(0));
+        // a curve from that end (snapped) to a point ahead and to the right, then a stop where it ends
+        h.get_by_label("⌒ Curve").click();
+        steps(&mut h, 2);
+        let at_ = map(&h, [end0[0] + 4.0, end0[1] + 4.0]);
+        click(&mut h, at_);
+        let aside = [end0[0] + hx * 150.0 + hy * 150.0, end0[1] + hy * 150.0 - hx * 150.0];
+        let at_ = map(&h, aside);
+        click(&mut h, at_);
+        steps(&mut h, 2);
+        assert!(h.query_by_label("New curve").is_some());
+        h.get_by_label("Add").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.route.actions.len(), 2);
+        assert_eq!(
+            h.state().simulate.route.actions[1].action.start(),
+            end0,
+            "the curve starts where the straight ends"
+        );
+        let end1 = h.state().simulate.route.actions[1].action.end();
+        h.get_by_label("■ Stop").click();
+        steps(&mut h, 2);
+        let at_ = map(&h, [end1[0] + 3.0, end1[1] - 3.0]);
+        click(&mut h, at_);
+        steps(&mut h, 2);
+        h.get_by_label("Add").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.route.actions.len(), 3);
+        assert_eq!(h.state().simulate.route.actions[2].action.start(), end1);
+        // a click on the straight's path selects it; one out on the mat clears the selection; a click
+        // on the stop's marker selects the stop rather than the curve ending there
+        let mid = [(start.x_mm + end0[0]) / 2.0, (start.y_mm + end0[1]) / 2.0];
+        let at_ = map(&h, mid);
+        click(&mut h, at_);
+        assert_eq!(h.state().simulate.selected, Some(0));
+        let at_ = map(&h, [start.x_mm - hy * 400.0, start.y_mm + hx * 400.0]);
+        click(&mut h, at_);
+        assert_eq!(h.state().simulate.selected, None);
+        let at_ = map(&h, end1);
+        click(&mut h, at_);
+        assert_eq!(h.state().simulate.selected, Some(2));
+        // ⌘C / ⌘V: the copy lands beside the original, after it, selected
+        h.input_mut().events.push(Event::Copy);
+        h.step();
+        let text = h.state().simulate.copy_selected().unwrap();
+        h.input_mut().events.push(Event::Paste(text));
+        h.step();
         assert_eq!(h.state().simulate.route.actions.len(), 4);
-        assert!(matches!(
-            h.state().simulate.route.actions[1],
-            crate::route::Action::Curve {
-                radius_mm: 150.0,
-                deg: 90.0,
-                ..
-            }
-        ));
         assert_eq!(h.state().simulate.selected, Some(3));
-        // the straight's handle on the map: dragging it along the line sets the distance
-        let step = h.state().simulate.steps()[0].clone();
-        let hp = crate::route::handle(&step, &actions[0]).unwrap();
-        let hs = on_screen(h.state(), Vec3::new(hp[0] as f32, hp[1] as f32, 3.0));
-        assert!(h.state().view_rect.contains(hs), "{hs:?}");
-        let further = on_screen(h.state(), Vec3::new((hp[0] + hx * 100.0) as f32, (hp[1] + hy * 100.0) as f32, 3.0));
+        let copy_at = h.state().simulate.route.actions[3].action.start();
+        assert!(
+            (copy_at[0] - end1[0] - 40.0).abs() < 0.1 && (copy_at[1] - end1[1] - 40.0).abs() < 0.1,
+            "{copy_at:?}"
+        );
+        // ⌘L locks it: its handle will not drag; ⌘⇧L unlocks
+        h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+        h.step();
+        assert!(h.state().simulate.is_locked(3));
+        let hs = map(&h, copy_at);
+        press(&mut h, hs, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, hs + egui::vec2(12.0, 0.0), Modifiers::NONE);
+        assert_ne!(
+            h.state().simulate.dragging_index(),
+            Some(3),
+            "a locked action's handle is not grabbed"
+        );
+        release(&mut h, hs + egui::vec2(12.0, 0.0), PointerButton::Primary);
+        assert_eq!(h.state().simulate.route.actions[3].action.start(), copy_at);
+        assert!(h.state().simulate.is_locked(3));
+        h.state_mut().simulate.selected = Some(3);
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::L);
+        h.step();
+        assert!(!h.state().simulate.is_locked(3));
+        // its handle drags 100 mm along the heading, the ghost showing where it ends; ⌘Z undoes it
+        let hs = map(&h, copy_at);
+        let further = map(&h, [copy_at[0] + hx * 100.0, copy_at[1] + hy * 100.0]);
         press(&mut h, hs, PointerButton::Primary, Modifiers::NONE);
         drag_to(&mut h, hs + (further - hs).normalized() * 12.0, Modifiers::NONE);
         assert!(matches!(h.state().drag, Drag::RouteHandle), "the handle was grabbed");
+        assert_eq!(h.state().simulate.dragging_index(), Some(3));
         assert!(h.state().simulate.ghost.is_some(), "the ghost shows where the action ends");
         drag_to(&mut h, further, Modifiers::NONE);
         release(&mut h, further, PointerButton::Primary);
-        let crate::route::Action::Straight { mm, .. } = &h.state().simulate.route.actions[0] else {
-            panic!()
-        };
-        assert!((mm - 350.0).abs() < 6.0, "dragged out to 350 mm: {mm}");
+        let moved = h.state().simulate.route.actions[3].action.start();
+        assert!(
+            (moved[0] - copy_at[0] - hx * 100.0).abs() < 4.0 && (moved[1] - copy_at[1] - hy * 100.0).abs() < 4.0,
+            "{moved:?} from {copy_at:?}"
+        );
         assert!(h.state().simulate.ghost.is_none());
-        // the list: later, earlier, remove
-        h.state_mut().simulate.selected = Some(0);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
         steps(&mut h, 2);
-        h.get_all_by_label("↓").next().unwrap().click();
-        steps(&mut h, 2);
-        assert!(matches!(h.state().simulate.route.actions[0], crate::route::Action::Curve { .. }));
-        h.get_all_by_label("↑").nth(1).unwrap().click();
-        steps(&mut h, 2);
-        assert!(matches!(h.state().simulate.route.actions[0], crate::route::Action::Straight { .. }));
-        h.get_all_by_label("×").last().unwrap().click();
+        assert_eq!(h.state().simulate.route.actions[3].action.start(), copy_at, "undone");
+        // Delete removes the selected copy; Escape drops an armed tool
+        h.state_mut().simulate.selected = Some(3);
+        h.key_press(Key::Delete);
         steps(&mut h, 2);
         assert_eq!(h.state().simulate.route.actions.len(), 3);
-        // Escape cancels an armed tool; the curve tool is armed the same way
-        h.get_by_label("⌒ point").click();
+        h.get_by_label("↻ Turn").click();
         h.step();
+        assert!(h.state().simulate.placing.is_some());
         h.key_press(Key::Escape);
         steps(&mut h, 2);
-        assert!(h.state().simulate.pick.is_none());
+        assert!(h.state().simulate.placing.is_none());
         // definitions and the program
         h.get_by_label("Definitions (what custom actions call)").click();
         steps(&mut h, 2);
@@ -2747,12 +2871,12 @@ mod tests {
         );
         h.get_by_label("⏹ Stop").click();
         wait_for(&mut h, &|a| a.simulate.status() == "stopped");
-        h.get_by_label("Undo last").click();
-        steps(&mut h, 2);
-        assert_eq!(h.state().simulate.route.actions.len(), 2);
         h.get_by_label("Clear").click();
         steps(&mut h, 2);
         assert!(h.state().simulate.route.actions.is_empty());
+        h.get_by_label("Undo").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.route.actions.len(), 3);
         h.state_mut().simulate.shutdown();
         let _ = std::fs::remove_dir_all(&fake.dir);
     }

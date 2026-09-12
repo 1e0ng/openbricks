@@ -3,6 +3,40 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.9.0 — routes drawn on the map: tools, popups, selection, copy, lock
+
+Routes are now drawn on the map. Click a tool — **→ Straight**,
+**⌒ Curve**, **↻ Turn**, **■ Stop**, **ƒ Custom** — then click the
+map: a straight or a curve takes its start and end (the start snaps to
+where the previous action ends, or to the chassis), a turn takes where
+it turns and a point to face, a stop or a custom call one point. A
+popup asks for the parameters: speed (the drive base's default 350
+wheel-°/s, shown in mm/s for your wheels), **continuous** or the end
+state, a curve's radius and side (a quarter circle to start with), a
+turn's heading and rate, a stop's wait, a custom call and whether it
+moves the robot (one more click for where it ends). Each action is an
+object on the map, numbered in the order the program runs them: click
+its path to select it and edit it in the panel, drag its handles or
+the path itself, ⌘C / ⌘V copy and paste it beside the original,
+⌘L / ⌘⇧L lock and unlock it (🔒 on the map; a locked action cannot be
+moved, edited or deleted), Delete removes it, ⌘Z undoes, Esc cancels a
+placement. Where an action does not start where the previous one ends,
+a dashed line shows the drive the program inserts to get there, and the
+program sets `db.settings(straight_speed=…)` / `turn_rate` when an
+action's speed differs. Route files are `openbricks-route/3` (actions
+with their map geometry, speeds and locks); the earlier formats still
+load and convert. The plan view now fits the map edge to edge on its
+tighter axis instead of keeping a margin all round.
+
+- Tests: the arc geometry (side, headings, midpoint bends), handles,
+  the plan's connecting drives and sign conventions, speeds and
+  definitions in the program, snapping and hit-testing, v1/v2/v3
+  files; the tab's tools, popups, selection, clipboard, locks, undo and
+  handle drags; the panel driven headless through a straight, a curve
+  and a stop placed by clicks and popups, selection on the map, ⌘C/⌘V,
+  ⌘L/⌘⇧L, a handle drag, ⌘Z, Delete and Esc; on the real runtime a
+  five-action placed route driven to within 25 mm / 10°.
+
 ## 4.8.1 — a freshly loaded map draws at once
 
 Choosing a map showed nothing until the first run or the first drag of
