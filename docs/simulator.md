@@ -115,7 +115,10 @@ map. Click a tool — **→ Straight**, **⌒ Curve**, **↻ Turn**,
 curve takes its start and its end (the start snaps to where the
 previous action ends, or to the chassis, so paths chain), a turn takes
 where it turns and a point to face, a stop or a custom call takes one
-point. A popup then asks for the parameters: the speed (the drive
+point. Every click leaves a marker; after the first click the line (or
+the arc, or the turn's arrow) follows the pointer with its length,
+radius and angle, or heading written beside it, and once placed each
+action keeps that label next to its path. A popup then asks for the parameters: the speed (the drive
 base's default, shown in mm/s for your wheels), **continuous** for a
 move that flows into the next one without slowing (`then=Stop.NONE`)
 or otherwise the end state (coast, brake, hold), a curve's radius and
@@ -134,6 +137,15 @@ action shows 🔒 and cannot be moved, edited or deleted), Delete to
 remove it, ⌘Z to undo, Esc to cancel a placement. The numbers on the
 map are the order the program runs them in; rows drag by their **≡**
 grip (or ↑ ↓) to reorder.
+**Markers** are named points you add to a map — a corner of the mat, a
+mission object, a line junction: click **◉ Marker**, click the map,
+name it in the popup. They show as flags with their names, drag to
+move, rename or remove in the panel, and route clicks snap to them,
+so a path can start or end exactly on a marker. They are kept with
+the map on your machine (under `~/.local/share/openbricks/markers/`,
+or `$OPENBRICKS_DATA_DIR`), not in the route file, and come back
+whenever that map loads.
+
 Routes save and load as `*.route.json` (the map, the start pose, the
 actions and the definitions); **▶ Run route** writes the route as a
 hub-style program (`ST3032Motor` wheels and a `DriveBase` sized from

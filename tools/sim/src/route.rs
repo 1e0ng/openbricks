@@ -453,6 +453,41 @@ impl Action {
         }
     }
 
+    /// The key parameters, short enough to sit beside the path on the map.
+    pub fn brief(&self) -> String {
+        match self {
+            Action::Straight { .. } => format!("{} mm", fmt(self.length_mm())),
+            Action::Curve { radius_mm, .. } => format!(
+                "r {} mm · {}°",
+                fmt(*radius_mm),
+                fmt(self.arc().map(|a| a.sweep_deg).unwrap_or(0.0))
+            ),
+            Action::Turn { heading_deg, .. } => format!("face {}°", fmt(*heading_deg)),
+            Action::Stop { wait_ms, .. } => {
+                if *wait_ms > 0.0 {
+                    format!("stop, {} ms", fmt(*wait_ms))
+                } else {
+                    "stop".into()
+                }
+            }
+            Action::Custom { code, end, .. } => {
+                let call = code.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("custom").to_string();
+                if end.is_some() {
+                    format!("{call}, {} mm", fmt(self.length_mm()))
+                } else {
+                    call
+                }
+            }
+        }
+    }
+
+    /// Where a label about the action sits: the middle of its path, or
+    /// the point itself.
+    pub fn label_point(&self) -> Point {
+        let pts = self.path();
+        pts[pts.len() / 2]
+    }
+
     pub fn translate(&mut self, dx: f64, dy: f64) {
         let mv = |p: &mut Point| {
             p[0] = round1(p[0] + dx);
@@ -1069,6 +1104,32 @@ mod tests {
             }
         );
         assert_eq!(Action::placed("stop", &[[1.0, 2.0]]).text(), "stop (coast)");
+        // the short labels beside the paths, and where they sit
+        assert_eq!(s.brief(), "300 mm");
+        assert_eq!(s.label_point(), [300.0, 0.0]);
+        assert_eq!(c.brief(), "r 100 mm · 90°");
+        assert_eq!(t.brief(), "face 90°");
+        assert_eq!(t.label_point(), [10.0, 10.0]);
+        assert_eq!(Action::placed("stop", &[[1.0, 2.0]]).brief(), "stop");
+        assert_eq!(
+            Action::Stop {
+                at: [0.0, 0.0],
+                then: End::Hold,
+                wait_ms: 500.0
+            }
+            .brief(),
+            "stop, 500 ms"
+        );
+        assert_eq!(Action::placed("custom", &[[1.0, 2.0]]).brief(), "custom");
+        assert_eq!(
+            Action::Custom {
+                at: [0.0, 0.0],
+                end: Some([0.0, 120.0]),
+                code: "\nline_follow()\n".into()
+            }
+            .brief(),
+            "line_follow(), 120 mm"
+        );
         assert_eq!(Action::placed("custom", &[[1.0, 2.0]]).text(), "custom (type the call)");
         for (kind, _, _) in KINDS {
             assert_eq!(Action::placed(kind, &[[0.0, 0.0], [100.0, 0.0]]).kind(), kind);
