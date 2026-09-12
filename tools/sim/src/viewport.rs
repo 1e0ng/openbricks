@@ -82,6 +82,9 @@ struct GhostTargets {
 pub struct Scene<'a> {
     pub items: &'a [DrawItem],
     pub lines: &'a [Line],
+    /// Lines drawn over everything, in order (later ones win): a map's
+    /// markers, then the route on top of them.
+    pub top_lines: &'a [Line],
     pub ghost: &'a [DrawItem],
     pub overlay: &'a [DrawItem],
     pub background: [f64; 4],
@@ -251,6 +254,8 @@ pub struct Viewport {
     composite_pipeline: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
     line_pipeline: wgpu::RenderPipeline,
+    /// Lines that ignore depth: the map's annotations, over the scene.
+    line_top_pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,
     instance_layout: wgpu::BindGroupLayout,
@@ -502,6 +507,50 @@ impl Viewport {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 depth_write_enabled: Some(false),
+                ..depth_state.clone()
+            }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        // the same lines, drawn last and never hidden by the scene
+        let line_top_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lines on top"),
+            layout: Some(&line_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_line"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<LineVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_line"),
+                targets: &[Some(FORMAT.into())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
                 ..depth_state
             }),
             multisample: Default::default(),
@@ -546,6 +595,7 @@ impl Viewport {
             composite_pipeline,
             composite_layout,
             line_pipeline,
+            line_top_pipeline,
             globals,
             globals_bg,
             instance_layout,
@@ -884,6 +934,7 @@ impl Viewport {
         let scene = Scene {
             items,
             lines: &[],
+            top_lines: &[],
             ghost: &[],
             overlay: &[],
             background,
@@ -958,8 +1009,8 @@ impl Viewport {
         if !data.is_empty() {
             queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&data));
         }
-        let mut lv: Vec<LineVertex> = Vec::with_capacity(lines.len() * 2);
-        for l in lines {
+        let mut lv: Vec<LineVertex> = Vec::with_capacity((lines.len() + scene.top_lines.len()) * 2);
+        for l in lines.iter().chain(scene.top_lines.iter()) {
             lv.push(LineVertex {
                 pos: l.a.to_array(),
                 color: l.color,
@@ -969,6 +1020,7 @@ impl Viewport {
                 color: l.color,
             });
         }
+        let n_under = (lines.len() * 2) as u32;
         if lv.len() > self.line_capacity {
             self.line_capacity = lv.len().next_power_of_two();
             self.line_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1010,10 +1062,10 @@ impl Viewport {
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.globals_bg, &[]);
-            if !lv.is_empty() {
+            if n_under > 0 {
                 pass.set_pipeline(&self.line_pipeline);
                 pass.set_vertex_buffer(0, self.line_buf.slice(..));
-                pass.draw(0..lv.len() as u32, 0..1);
+                pass.draw(0..n_under, 0..1);
             }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(1, &self.instance_bg, &[]);
@@ -1095,6 +1147,34 @@ impl Viewport {
                 pass.set_bind_group(0, &gt.bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
+        }
+        if (lv.len() as u32) > n_under {
+            // the map's annotations: over the scene and the ghost, in their own order
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("lines on top"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.line_top_pipeline);
+            pass.set_bind_group(0, &self.globals_bg, &[]);
+            pass.set_vertex_buffer(0, self.line_buf.slice(..));
+            pass.draw(n_under..lv.len() as u32, 0..1);
         }
         if !scene.overlay.is_empty() {
             // handles: on top of everything, but still occluding each other
@@ -1312,6 +1392,7 @@ mod tests {
         let scene = Scene {
             items: &items,
             lines: &[],
+            top_lines: &[],
             ghost: &ghost,
             overlay: &overlay,
             background: [0.0, 0.0, 0.0, 1.0],
@@ -1338,6 +1419,7 @@ mod tests {
         let bare_scene = Scene {
             items: &items,
             lines: &[],
+            top_lines: &[],
             ghost: &[],
             overlay: &overlay,
             background: [0.0, 0.0, 0.0, 1.0],
@@ -1355,6 +1437,7 @@ mod tests {
         let solid_scene = Scene {
             items: &solid_items,
             lines: &[],
+            top_lines: &[],
             ghost: &[],
             overlay: &overlay,
             background: [0.0, 0.0, 0.0, 1.0],
@@ -1393,6 +1476,7 @@ mod tests {
             let sc = Scene {
                 items: &items,
                 lines: &[],
+                top_lines: &[],
                 ghost: &g,
                 overlay: &overlay,
                 background: [0.0, 0.0, 0.0, 1.0],
@@ -1523,6 +1607,7 @@ mod tests {
             &Scene {
                 items: &items,
                 lines: &[],
+                top_lines: &[],
                 ghost: &[],
                 overlay: &[],
                 background: [0.0; 4],
@@ -1609,6 +1694,7 @@ mod tests {
         let scene = Scene {
             items: &items,
             lines: &[],
+            top_lines: &[],
             ghost: &[],
             overlay: &[],
             background: [0.0, 0.0, 0.0, 1.0],
@@ -1627,6 +1713,50 @@ mod tests {
         let bp = at(b.x as u32, b.y as u32);
         assert!(bp[0] > bp[1] * 2 && bp[0] > 60, "the box is red on top: {bp:?}");
         assert_eq!(at(2, 2), [0, 0, 0], "outside the mat is background");
+        // lines: one under the box (hidden, it is below the box's top and never wins the
+        // depth test), one on top (drawn last, ignoring depth): only the second shows
+        let under = [Line {
+            a: Vec3::new(60.0, 50.0, 0.0),
+            b: Vec3::new(140.0, 50.0, 0.0),
+            color: [0.0, 1.0, 0.0, 1.0],
+        }];
+        let over = [Line {
+            a: Vec3::new(60.0, 50.0, 0.0),
+            b: Vec3::new(140.0, 50.0, 0.0),
+            color: [0.0, 1.0, 0.0, 1.0],
+        }];
+        let scene = Scene {
+            items: &items,
+            lines: &under,
+            top_lines: &[],
+            ghost: &[],
+            overlay: &[],
+            background: [0.0, 0.0, 0.0, 1.0],
+        };
+        vp.render(&device, &queue, &mut renderer, (w, h), &scene);
+        let (_, _, px) = vp.read_pixels(&device, &queue).unwrap();
+        let at = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2]]
+        };
+        let c = at(b.x as u32, b.y as u32);
+        assert!(c[0] > c[1] * 2, "the box's top hides the line under it: {c:?}");
+        let scene = Scene {
+            items: &items,
+            lines: &[],
+            top_lines: &over,
+            ghost: &[],
+            overlay: &[],
+            background: [0.0, 0.0, 0.0, 1.0],
+        };
+        vp.render(&device, &queue, &mut renderer, (w, h), &scene);
+        let (_, _, px) = vp.read_pixels(&device, &queue).unwrap();
+        let at = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2]]
+        };
+        let c = at(b.x as u32, b.y as u32);
+        assert!(c[1] > c[0] * 2 && c[1] > 150, "the line on top shows over the box: {c:?}");
     }
 
     #[test]

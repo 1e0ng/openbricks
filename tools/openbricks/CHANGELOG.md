@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.12.0 — paths on top of the map, in a colour of your own
+
+Route paths were drawn under the map: the renderer drew lines first,
+without writing depth, and the mat painted over them. The map's
+annotations now go through their own pass over everything — the map
+at the bottom, the markers above it, the route on top — so a path is
+never hidden by the mat, a wall, a prop or the chassis.
+
+Each action has a colour: the kind's default (blue straights, green
+curves, orange turns, stops and calls) or one of your own, picked in
+the popup or the panel, kept in the route file, and put back to the
+default with one click.
+
+- Tests: a pixel check that a top-layer line shows over a nearer box
+  while an ordinary line stays hidden; markers ordered before the
+  route; a chosen colour reaching the lines, the defaults per kind and
+  theme, the colour written to the file only when chosen; the panel's
+  "default" button.
+
 ## 4.11.0 — placing a path shows what it does, and markers on the map
 
 While a tool is armed, every click on the map leaves a marker (a
