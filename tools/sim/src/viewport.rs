@@ -48,6 +48,7 @@ pub struct GpuMesh {
 
 /// One instance to draw: which mesh, where, what colour, and which
 /// texture (none = flat colour).
+#[derive(Clone, Debug)]
 pub struct DrawItem {
     pub mesh: String,
     pub model: Mat4,
@@ -66,12 +67,22 @@ pub struct Line {
     pub color: [f32; 4],
 }
 
-/// Everything one frame draws: the scene, its lines, and overlay items
-/// (handles) drawn on top of it with a fresh depth buffer.
+/// Where the ghosts render before they are blended over the frame.
+struct GhostTargets {
+    color: wgpu::TextureView,
+    depth: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+}
+
+/// Everything one frame draws: the scene, its lines, translucent ghost
+/// items blended over it (a chassis where a drag would put it), and
+/// overlay items (handles) drawn on top of everything with a fresh
+/// depth buffer.
 #[derive(Default)]
 pub struct Scene<'a> {
     pub items: &'a [DrawItem],
     pub lines: &'a [Line],
+    pub ghost: &'a [DrawItem],
     pub overlay: &'a [DrawItem],
     pub background: [f64; 4],
 }
@@ -194,6 +205,9 @@ pub fn ray_obb(origin: Vec3, dir: Vec3, model: &Mat4, bbox: (Vec3, Vec3)) -> Opt
 
 pub struct Viewport {
     pipeline: wgpu::RenderPipeline,
+    /// Lays the ghost image over the frame where the ghost is nearer than the scene.
+    composite_pipeline: wgpu::RenderPipeline,
+    composite_layout: wgpu::BindGroupLayout,
     line_pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,
@@ -210,6 +224,10 @@ pub struct Viewport {
     color: Option<wgpu::TextureView>,
     color_tex: Option<wgpu::Texture>,
     depth: Option<wgpu::TextureView>,
+    /// The ghosts' own colour and depth, composited over the frame.
+    ghost_color: Option<wgpu::TextureView>,
+    ghost_depth: Option<wgpu::TextureView>,
+    composite_bg: Option<wgpu::BindGroup>,
     size: (u32, u32),
     tex_id: Option<eframe::egui::TextureId>,
     /// Small renders by key (library thumbnails), kept alive for egui.
@@ -312,7 +330,7 @@ impl Viewport {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[vertex_layout],
+                buffers: std::slice::from_ref(&vertex_layout),
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -326,6 +344,77 @@ impl Viewport {
                 ..Default::default()
             },
             depth_stencil: Some(depth_state.clone()),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        // the ghost composite: a screen triangle that blends the ghost image in wherever the
+        // ghost is nearer than the scene (the ghost's own depth buffer resolved its faces)
+        let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ghost composite"),
+            source: wgpu::ShaderSource::Wgsl(COMPOSITE_SHADER.into()),
+        });
+        let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ghost composite"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let composite_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("ghost composite"),
+            bind_group_layouts: &[Some(&composite_layout)],
+            ..Default::default()
+        });
+        let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ghost composite"),
+            layout: Some(&composite_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &composite_shader,
+                entry_point: Some("vs_composite"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &composite_shader,
+                entry_point: Some("fs_composite"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
             multisample: Default::default(),
             multiview_mask: None,
             cache: None,
@@ -412,6 +501,8 @@ impl Viewport {
         });
         let mut vp = Viewport {
             pipeline,
+            composite_pipeline,
+            composite_layout,
             line_pipeline,
             globals,
             globals_bg,
@@ -425,6 +516,9 @@ impl Viewport {
             color: None,
             color_tex: None,
             depth: None,
+            ghost_color: None,
+            ghost_depth: None,
+            composite_bg: None,
             size: (0, 0),
             tex_id: None,
             thumbs: HashMap::new(),
@@ -577,16 +671,41 @@ impl Viewport {
             FORMAT,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
         ));
-        let depth = device.create_texture(&desc(DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT));
+        let bindable = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+        let depth = device.create_texture(&desc(DEPTH, bindable));
+        let ghost_color = device.create_texture(&desc(FORMAT, bindable));
+        let ghost_depth = device.create_texture(&desc(DEPTH, bindable));
         let color_view = color.create_view(&Default::default());
         let depth_view = depth.create_view(&Default::default());
+        let ghost_color_view = ghost_color.create_view(&Default::default());
+        let ghost_depth_view = ghost_depth.create_view(&Default::default());
         match self.tex_id {
             Some(id) => renderer.update_egui_texture_from_wgpu_texture(device, &color_view, wgpu::FilterMode::Linear, id),
             None => self.tex_id = Some(renderer.register_native_texture(device, &color_view, wgpu::FilterMode::Linear)),
         }
+        self.composite_bg = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ghost composite"),
+            layout: &self.composite_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&ghost_color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&ghost_depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&depth_view),
+                },
+            ],
+        }));
         self.color = Some(color_view);
         self.color_tex = Some(color);
         self.depth = Some(depth_view);
+        self.ghost_color = Some(ghost_color_view);
+        self.ghost_depth = Some(ghost_depth_view);
         self.size = size;
     }
 
@@ -668,8 +787,13 @@ impl Viewport {
     ) -> eframe::egui::TextureId {
         self.ensure_targets(device, renderer, size);
         let (color, depth) = (self.color.clone().unwrap(), self.depth.clone().unwrap());
+        let ghost = GhostTargets {
+            color: self.ghost_color.clone().unwrap(),
+            depth: self.ghost_depth.clone().unwrap(),
+            bind_group: self.composite_bg.clone().unwrap(),
+        };
         let camera = self.camera.clone();
-        self.render_to(device, queue, &color, &depth, size, &camera, scene);
+        self.render_to(device, queue, &color, &depth, size, &camera, scene, Some(&ghost));
         self.tex_id.unwrap()
     }
 
@@ -718,10 +842,11 @@ impl Viewport {
         let scene = Scene {
             items,
             lines: &[],
+            ghost: &[],
             overlay: &[],
             background,
         };
-        self.render_to(device, queue, &color_view, &depth_view, (size, size), &camera, &scene);
+        self.render_to(device, queue, &color_view, &depth_view, (size, size), &camera, &scene, None);
         let id = renderer.register_native_texture(device, &color_view, wgpu::FilterMode::Linear);
         self.thumbs.insert(key.to_string(), (color, id));
         id
@@ -742,6 +867,7 @@ impl Viewport {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn render_to(
         &mut self,
         device: &wgpu::Device,
@@ -751,6 +877,7 @@ impl Viewport {
         size: (u32, u32),
         camera: &Camera,
         scene: &Scene<'_>,
+        ghost: Option<&GhostTargets>,
     ) {
         let (items, lines, background) = (scene.items, scene.lines, scene.background);
         let aspect = size.0 as f32 / size.1.max(1) as f32;
@@ -765,6 +892,7 @@ impl Viewport {
         let data: Vec<InstanceData> = items
             .iter()
             .chain(scene.overlay.iter())
+            .chain(scene.ghost.iter())
             .map(|it| InstanceData {
                 model: it.model.to_cols_array_2d(),
                 color: it.color,
@@ -863,6 +991,67 @@ impl Viewport {
                 pass.set_vertex_buffer(0, mesh.vbuf.slice(..));
                 pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, i as u32..i as u32 + 1);
+            }
+        }
+        if let (false, Some(gt)) = (scene.ghost.is_empty(), ghost) {
+            // the ghosts, opaque, into their own colour and depth (so a ghost's nearest
+            // surface wins over its back faces) ...
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("ghost"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &gt.color,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &gt.depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.globals_bg, &[]);
+                pass.set_bind_group(1, &self.instance_bg, &[]);
+                pass.set_bind_group(2, &self.textures["white"].bind_group, &[]);
+                for (k, it) in scene.ghost.iter().enumerate() {
+                    let Some(mesh) = self.meshes.get(&it.mesh) else { continue };
+                    if mesh.index_count == 0 {
+                        continue;
+                    }
+                    let i = (items.len() + scene.overlay.len() + k) as u32;
+                    pass.set_vertex_buffer(0, mesh.vbuf.slice(..));
+                    pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, i..i + 1);
+                }
+            }
+            // ... then blended over the frame by their alpha, where the scene is not nearer
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("ghost composite"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: color,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.composite_pipeline);
+                pass.set_bind_group(0, &gt.bind_group, &[]);
+                pass.draw(0..3, 0..1);
             }
         }
         if !scene.overlay.is_empty() {
@@ -971,6 +1160,31 @@ struct LOut { @builtin(position) pos: vec4<f32>, @location(0) color: vec4<f32> }
 @fragment fn fs_line(i: LOut) -> @location(0) vec4<f32> { return i.color; }
 "#;
 
+/// The ghost composite: one triangle over the screen; each pixel takes
+/// the ghost image's colour and alpha where the ghost drew and is not
+/// behind the scene.
+const COMPOSITE_SHADER: &str = r#"
+@group(0) @binding(0) var ghost_color: texture_2d<f32>;
+@group(0) @binding(1) var ghost_depth: texture_depth_2d;
+@group(0) @binding(2) var scene_depth: texture_depth_2d;
+
+struct COut { @builtin(position) pos: vec4<f32> };
+@vertex fn vs_composite(@builtin(vertex_index) vi: u32) -> COut {
+  var o: COut;
+  let x = f32(i32(vi & 1u) * 4 - 1);
+  let y = f32(i32(vi >> 1u) * 4 - 1);
+  o.pos = vec4<f32>(x, y, 0.0, 1.0);
+  return o;
+}
+@fragment fn fs_composite(i: COut) -> @location(0) vec4<f32> {
+  let xy = vec2<i32>(i.pos.xy);
+  let g = textureLoad(ghost_color, xy, 0);
+  if (g.a <= 0.0) { discard; }
+  if (textureLoad(ghost_depth, xy, 0) > textureLoad(scene_depth, xy, 0)) { discard; }
+  return g;
+}
+"#;
+
 /// Offscreen GPU access for tests in every module.
 #[cfg(test)]
 pub mod testing {
@@ -994,6 +1208,11 @@ pub mod testing {
                 return None;
             }
         };
+        let info = adapter.get_info();
+        eprintln!(
+            "GPU adapter: {} ({:?}, {:?}) driver {} {}",
+            info.name, info.backend, info.device_type, info.driver, info.driver_info
+        );
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("a device");
         Some((device, queue))
     }
@@ -1040,9 +1259,17 @@ mod tests {
         // the y arrow crosses the box's face; the z arrow is the lit one
         let g = Gizmo::new(Vec3::ZERO, Mode::Move, &vp.camera, h as f32);
         let overlay = g.draw(Some(Handle::Axis(2)));
+        // a ghost box beside it, 70 % transparent: seen, but faint
+        let ghost = [DrawItem {
+            mesh: "box".into(),
+            model: Mat4::from_translation(Vec3::new(0.0, 120.0, 0.0)),
+            color: [srgb(0x5B7A9C)[0], srgb(0x5B7A9C)[1], srgb(0x5B7A9C)[2], 0.3],
+            texture: None,
+        }];
         let scene = Scene {
             items: &items,
             lines: &[],
+            ghost: &ghost,
             overlay: &overlay,
             background: [0.0, 0.0, 0.0, 1.0],
         };
@@ -1061,6 +1288,137 @@ mod tests {
         // the box: blue-grey, in front of everything but the handles
         let b = at(160, 140);
         assert!(b[2] > b[1] && b[2] > 40, "box pixel {b:?}");
+        // the ghost: the same colour blended at 30 % over the background. Every pixel that
+        // only the ghost box covers (black without it, the box's hue with it drawn solid) is
+        // lit in the ghost render, and fainter than the solid box there.
+        let sum = |c: [u8; 3]| c[0] as u32 + c[1] as u32 + c[2] as u32;
+        let bare_scene = Scene {
+            items: &items,
+            lines: &[],
+            ghost: &[],
+            overlay: &overlay,
+            background: [0.0, 0.0, 0.0, 1.0],
+        };
+        vp.render(&device, &queue, &mut renderer, (w, h), &bare_scene);
+        let (_, _, bare_px) = vp.read_pixels(&device, &queue).unwrap();
+        let solid_items: Vec<DrawItem> = items
+            .iter()
+            .cloned()
+            .chain(ghost.iter().map(|g| DrawItem {
+                color: [g.color[0], g.color[1], g.color[2], 1.0],
+                ..g.clone()
+            }))
+            .collect();
+        let solid_scene = Scene {
+            items: &solid_items,
+            lines: &[],
+            ghost: &[],
+            overlay: &overlay,
+            background: [0.0, 0.0, 0.0, 1.0],
+        };
+        vp.render(&device, &queue, &mut renderer, (w, h), &solid_scene);
+        let (_, _, solid_px) = vp.read_pixels(&device, &queue).unwrap();
+        let pick = |buf: &[u8], x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [buf[i], buf[i + 1], buf[i + 2]]
+        };
+        // 30 % of the solid pixel, blended in linear light and stored as sRGB
+        let expected = |s: u8| -> u8 {
+            let lin = ((s as f64 / 255.0 + 0.055) / 1.055).powf(2.4) * 0.3;
+            ((1.055 * lin.powf(1.0 / 2.4) - 0.055) * 255.0).round() as u8
+        };
+        // the report: how the ghost-only pixels come out at three alphas (a driver's blend
+        // going wrong shows up here, with the adapter named above)
+        let ghost_only: Vec<(u32, u32)> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let (bare, solid) = (pick(&bare_px, x, y), pick(&solid_px, x, y));
+                sum(bare) == 0 && solid[2] > solid[1] && solid[2] > solid[0] && solid[2] > 40
+            })
+            .collect();
+        let bbox = |pts: &[(u32, u32)]| {
+            pts.iter().fold((u32::MAX, u32::MAX, 0u32, 0u32), |b, &(x, y)| {
+                (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y))
+            })
+        };
+        eprintln!("ghost-only pixels: {} in bbox {:?}", ghost_only.len(), bbox(&ghost_only));
+        for alpha in [0.0f32, 0.3, 1.0] {
+            let g = [DrawItem {
+                color: [ghost[0].color[0], ghost[0].color[1], ghost[0].color[2], alpha],
+                ..ghost[0].clone()
+            }];
+            let sc = Scene {
+                items: &items,
+                lines: &[],
+                ghost: &g,
+                overlay: &overlay,
+                background: [0.0, 0.0, 0.0, 1.0],
+            };
+            vp.render(&device, &queue, &mut renderer, (w, h), &sc);
+            let (_, _, gpx) = vp.read_pixels(&device, &queue).unwrap();
+            let want = |s: u8| -> u8 {
+                let lin = ((s as f64 / 255.0 + 0.055) / 1.055).powf(2.4) * alpha as f64;
+                ((1.055 * lin.powf(1.0 / 2.4) - 0.055).max(0.0) * 255.0).round() as u8
+            };
+            let (mut black, mut as_expected, mut as_solid, mut other) = (0, 0, 0, 0);
+            let mut samples = Vec::new();
+            for &(x, y) in &ghost_only {
+                let (gp, solid) = (pick(&gpx, x, y), pick(&solid_px, x, y));
+                let exp = solid.map(want);
+                let near = |a: [u8; 3], b: [u8; 3]| (0..3).all(|c| (a[c] as i32 - b[c] as i32).abs() <= 3);
+                if sum(gp) == 0 {
+                    black += 1;
+                } else if near(gp, exp) {
+                    as_expected += 1;
+                } else if near(gp, solid) {
+                    as_solid += 1;
+                } else {
+                    other += 1;
+                    if samples.len() < 4 {
+                        samples.push(((x, y), gp, exp, solid));
+                    }
+                }
+            }
+            let lit: Vec<(u32, u32)> = (0..h)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .filter(|&(x, y)| sum(pick(&gpx, x, y)) != sum(pick(&bare_px, x, y)))
+                .collect();
+            eprintln!(
+                "alpha {alpha}: black {black}, as expected {as_expected}, as solid {as_solid}, other {other} {samples:?}; the ghost changed {} pixels in bbox {:?}",
+                lit.len(),
+                bbox(&lit)
+            );
+        }
+        let (mut compared, mut exact) = (0, 0);
+        let mut off = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let (bare, solid) = (pick(&bare_px, x, y), pick(&solid_px, x, y));
+                if sum(bare) != 0 || !(solid[2] > solid[1] && solid[2] > solid[0] && solid[2] > 40) {
+                    continue;
+                }
+                let gp = at(x, y);
+                assert!(sum(gp) > 0, "the ghost is visible at ({x}, {y})");
+                assert!(
+                    sum(gp) * 10 < sum(solid) * 9,
+                    "fainter than the solid box at ({x}, {y}): {gp:?} vs {solid:?}"
+                );
+                let want = solid.map(expected);
+                if (0..3).all(|c| (gp[c] as i32 - want[c] as i32).abs() <= 3) {
+                    exact += 1;
+                } else if off.len() < 8 {
+                    off.push(((x, y), gp, want));
+                }
+                compared += 1;
+            }
+        }
+        assert!(compared > 200, "{compared} ghost-only pixels compared");
+        // the box's edges, where two faces share a depth, may blend twice; everywhere else it is the 30 % blend
+        assert!(
+            exact * 20 >= compared * 19,
+            "{exact} of {compared} pixels are the 30 % blend; off: {off:?}"
+        );
+        vp.render(&device, &queue, &mut renderer, (w, h), &scene);
         // the y arrow points right across the box and is drawn over it (green beats blue)
         assert!(
             column(200, 116, 124).iter().any(|c| c[1] > c[2] && c[1] > c[0] && c[1] > 40),
@@ -1122,6 +1480,7 @@ mod tests {
             &Scene {
                 items: &items,
                 lines: &[],
+                ghost: &[],
                 overlay: &[],
                 background: [0.0; 4],
             },

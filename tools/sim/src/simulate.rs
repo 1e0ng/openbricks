@@ -5,7 +5,7 @@
 use crate::assembly::Document;
 use crate::bundle::Bundle;
 use crate::geometry;
-use crate::route::{self, Kind, Pose2, Route, Segment};
+use crate::route::{self, Action, End, KINDS, Pose2, Route};
 use crate::sim::{ChassisInfo, Event, Pose, Scene, SimProcess, WorldEntry};
 use crate::viewport::{DrawItem, Line, Viewport};
 use eframe::egui;
@@ -15,6 +15,36 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 const M_TO_MM: f32 = 1000.0;
+/// How close (screen points) a route handle is grabbed from.
+const HANDLE_PX: f32 = 10.0;
+/// The ghost chassis: 70 % transparent.
+const GHOST_ALPHA: f32 = 0.3;
+
+/// The map tools: the next click reaches that point in a straight line
+/// (a turn, then the distance) or on the tangent arc.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Tool {
+    StraightTo,
+    CurveTo,
+}
+
+impl Tool {
+    pub fn label(self) -> &'static str {
+        match self {
+            Tool::StraightTo => "straight line",
+            Tool::CurveTo => "curve",
+        }
+    }
+}
+
+/// What one frame of the Simulate view draws.
+#[derive(Default)]
+pub struct SimDraw {
+    pub items: Vec<DrawItem>,
+    pub lines: Vec<Line>,
+    /// The chassis where a drag would put it, to blend translucently.
+    pub ghost: Vec<DrawItem>,
+}
 
 pub struct SimulateTab {
     python: Option<String>,
@@ -45,15 +75,23 @@ pub struct SimulateTab {
     /// The route being planned on this map.
     pub route: Route,
     route_path: Option<PathBuf>,
-    /// Armed: the next click on the map ends a segment of this kind.
-    pub pick: Option<Kind>,
+    /// Armed: the next click on the map reaches that point with this tool.
+    pub pick: Option<Tool>,
     /// Where the chassis was put (dragged or typed); applied after every load.
     placed: Option<Pose2>,
-    /// The chassis pose while it is being dragged, drawn ahead of the server.
-    preview: Option<Pose2>,
+    /// A translucent chassis where a drag would put it: under the
+    /// pointer, or at a dragged action's end.
+    pub ghost: Option<Pose2>,
+    /// The action whose handle is being dragged.
+    dragging: Option<usize>,
+    /// The action lit on the map and in the list.
+    pub selected: Option<usize>,
     show_program: bool,
+    show_definitions: bool,
     /// Indices in the last `draw_items` result that draw the chassis.
     pub chassis_items: Vec<usize>,
+    /// The chassis's items in its own frame: mesh, placement, colour.
+    chassis_locals: Vec<(String, Mat4, [f32; 4])>,
     /// Every command sent, for tests.
     #[cfg(test)]
     pub sent: Vec<serde_json::Value>,
@@ -95,9 +133,13 @@ impl SimulateTab {
             route_path: None,
             pick: None,
             placed: None,
-            preview: None,
+            ghost: None,
+            dragging: None,
+            selected: None,
             show_program: false,
+            show_definitions: false,
             chassis_items: vec![],
+            chassis_locals: vec![],
             #[cfg(test)]
             sent: vec![],
         }
@@ -347,11 +389,8 @@ impl SimulateTab {
         matches!(self.status.as_str(), "running" | "paused")
     }
 
-    /// The chassis as it stands: the drag preview, else the last frame.
+    /// The chassis as the last frame has it.
     pub fn chassis_pose(&self) -> Option<Pose2> {
-        if let Some(p) = self.preview {
-            return Some(p);
-        }
         let scene = self.scene.as_ref()?;
         let p = self.poses.get(scene.body_id("chassis")?)?;
         let [w, x, y, z] = p.quat;
@@ -382,56 +421,148 @@ impl SimulateTab {
         }
     }
 
-    /// A drag of the chassis on the map: the preview follows the
-    /// pointer; letting go places it.
+    /// A drag of the chassis on the map: a ghost follows the pointer
+    /// with its axle centre under it; letting go places it.
     pub fn begin_chassis_drag(&mut self) -> Option<Pose2> {
         if self.busy() {
             self.message = "stop the program before moving the chassis".into();
             return None;
         }
         let p = self.chassis_pose()?;
-        self.preview = Some(p);
+        self.ghost = Some(p);
         Some(p)
     }
 
     pub fn drag_chassis(&mut self, pose: Pose2) {
-        if self.preview.is_some() {
-            self.preview = Some(pose);
+        if self.ghost.is_some() && self.dragging.is_none() {
+            self.ghost = Some(pose);
         }
     }
 
     pub fn end_chassis_drag(&mut self) {
-        if let Some(p) = self.preview.take() {
+        if self.dragging.is_none()
+            && let Some(p) = self.ghost.take()
+        {
             self.place_chassis(p);
         }
     }
 
-    /// A click on the map at `(x_mm, y_mm)`: ends the armed segment.
-    /// Returns whether the click was used.
+    /// The route worked out from its start.
+    pub fn steps(&self) -> Vec<route::Step> {
+        route::plan(&self.route)
+    }
+
+    fn end_pose(&self) -> Pose2 {
+        self.steps().last().map(|s| s.end).unwrap_or(self.route.start)
+    }
+
+    /// A click on the map at `(x_mm, y_mm)` with a tool armed: the
+    /// actions that reach the point join the route. Returns whether the
+    /// click was used.
     pub fn map_click(&mut self, x_mm: f64, y_mm: f64) -> bool {
-        let Some(kind) = self.pick.take() else { return false };
-        self.route.segments.push(Segment {
-            kind,
-            to: [(x_mm * 10.0).round() / 10.0, (y_mm * 10.0).round() / 10.0],
-        });
-        self.message.clear();
+        let Some(tool) = self.pick.take() else { return false };
+        let to = [(x_mm * 10.0).round() / 10.0, (y_mm * 10.0).round() / 10.0];
+        let from = self.end_pose();
+        let (actions, note) = match tool {
+            Tool::StraightTo => (route::straight_to(from, to), None),
+            Tool::CurveTo => route::curve_to(from, to),
+        };
+        self.message = note.unwrap_or_default();
+        if actions.is_empty() {
+            return true;
+        }
+        self.route.actions.extend(actions);
+        self.selected = Some(self.route.actions.len() - 1);
         true
     }
 
+    /// Append an action of a kind with its default parameters.
+    pub fn add_action(&mut self, kind: &str) {
+        self.route.actions.push(Action::default_of(kind));
+        self.selected = Some(self.route.actions.len() - 1);
+    }
+
+    pub fn remove_action(&mut self, i: usize) {
+        if i < self.route.actions.len() {
+            self.route.actions.remove(i);
+            self.selected = None;
+        }
+    }
+
+    /// Move the action at `from` so it sits at `to` (an insertion index
+    /// in the list as it was).
+    pub fn move_action(&mut self, from: usize, to: usize) {
+        let n = self.route.actions.len();
+        if from >= n || to > n {
+            return;
+        }
+        let a = self.route.actions.remove(from);
+        let at = if to > from { to - 1 } else { to };
+        self.route.actions.insert(at, a);
+        self.selected = Some(at);
+    }
+
     pub fn undo_segment(&mut self) {
-        self.route.segments.pop();
+        self.route.actions.pop();
+        self.selected = None;
     }
 
     pub fn clear_route(&mut self) {
-        self.route.segments.clear();
+        self.route.actions.clear();
         self.pick = None;
+        self.selected = None;
+    }
+
+    /// The action whose handle is under a screen point.
+    pub fn route_handle_at(&self, cam: &crate::viewport::Camera, px: f32, py: f32, w: f32, h: f32) -> Option<usize> {
+        self.scene.as_ref()?;
+        let mut best: Option<(f32, usize)> = None;
+        for (i, (step, action)) in self.steps().iter().zip(&self.route.actions).enumerate() {
+            let Some(hp) = route::handle(step, action) else { continue };
+            let Some(sp) = cam.project(Vec3::new(hp[0] as f32, hp[1] as f32, 3.0), w, h) else {
+                continue;
+            };
+            let d = (sp - glam::Vec2::new(px, py)).length();
+            if d <= HANDLE_PX && best.map(|b| d < b.0).unwrap_or(true) {
+                best = Some((d, i));
+            }
+        }
+        best.map(|b| b.1)
+    }
+
+    /// Start dragging an action's handle: the ghost shows where the
+    /// robot ends up after it.
+    pub fn begin_handle_drag(&mut self, i: usize) -> bool {
+        if i >= self.route.actions.len() {
+            return false;
+        }
+        self.dragging = Some(i);
+        self.selected = Some(i);
+        self.ghost = self.steps().get(i).map(|s| s.end);
+        true
+    }
+
+    /// The dragged handle at a map point: the action takes the
+    /// parameters that reach it, and the ghost moves to its new end.
+    pub fn drag_handle(&mut self, x_mm: f64, y_mm: f64) {
+        let Some(i) = self.dragging else { return };
+        let steps = self.steps();
+        let Some(step) = steps.get(i) else { return };
+        let action = route::dragged(&self.route.actions[i], step.start, [x_mm, y_mm]);
+        self.route.actions[i] = action;
+        self.ghost = self.steps().get(i).map(|s| s.end);
+    }
+
+    pub fn end_handle_drag(&mut self) {
+        self.dragging = None;
+        self.ghost = None;
     }
 
     /// The route's program for the loaded chassis.
     pub fn route_program(&self) -> Result<String, String> {
         let c = self.chassis().ok_or("load a map with a chassis first")?;
-        if self.route.segments.is_empty() {
-            return Err("plan a segment first".into());
+        if self.route.actions.is_empty() {
+            return Err("add an action first".into());
         }
         Ok(route::program(&self.route, c.wheel_diameter_mm, c.axle_track_mm))
     }
@@ -470,6 +601,7 @@ impl SimulateTab {
         match Route::load(&path) {
             Ok(r) => {
                 self.pick = None;
+                self.selected = None;
                 self.placed = Some(r.start);
                 let other_map = !r.world.is_empty() && r.world != self.world;
                 self.route = r;
@@ -486,39 +618,85 @@ impl SimulateTab {
         }
     }
 
-    /// The route drawn on the map: the start's heading, each segment's
-    /// path, and a mark at every end point.
+    /// The route drawn on the map: the start's heading, each action's
+    /// path, a handle at every end, and the lit one bigger.
     pub fn route_lines(&self, dark: bool) -> Vec<Line> {
         let mut out = Vec::new();
         if self.scene.is_none() {
             return out;
         }
         let z = 3.0;
-        let (straight, curve, mark) = if dark {
-            ([0.35, 0.65, 1.0, 1.0], [0.4, 0.9, 0.5, 1.0], [1.0, 0.75, 0.25, 1.0])
+        let (straight, curve, mark, lit) = if dark {
+            (
+                [0.35, 0.65, 1.0, 1.0],
+                [0.4, 0.9, 0.5, 1.0],
+                [1.0, 0.75, 0.25, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+            )
         } else {
-            ([0.1, 0.35, 0.8, 1.0], [0.1, 0.55, 0.25, 1.0], [0.85, 0.45, 0.0, 1.0])
+            (
+                [0.1, 0.35, 0.8, 1.0],
+                [0.1, 0.55, 0.25, 1.0],
+                [0.85, 0.45, 0.0, 1.0],
+                [0.9, 0.1, 0.1, 1.0],
+            )
         };
-        let planned = route::plan(&self.route);
-        for (seg, p) in self.route.segments.iter().zip(&planned) {
-            let color = match seg.kind {
-                Kind::Straight => straight,
-                Kind::Curve => curve,
+        let steps = self.steps();
+        for (i, (step, action)) in steps.iter().zip(&self.route.actions).enumerate() {
+            let on = self.selected == Some(i);
+            let color = match action {
+                Action::Straight { .. } => straight,
+                Action::Curve { .. } => curve,
+                _ => mark,
             };
-            for w in p.points.windows(2) {
+            let color = if on { lit } else { color };
+            for w in step.points.windows(2) {
                 out.push(Line {
                     a: Vec3::new(w[0][0] as f32, w[0][1] as f32, z),
                     b: Vec3::new(w[1][0] as f32, w[1][1] as f32, z),
                     color,
                 });
             }
-            let (x, y) = (seg.to[0] as f32, seg.to[1] as f32);
-            for (dx, dy) in [(12.0, 0.0), (0.0, 12.0)] {
+            if let Action::Turn { .. } = action {
+                // the new heading, from the spot
+                let (hx, hy) = (
+                    step.end.yaw_deg.to_radians().cos() as f32,
+                    step.end.yaw_deg.to_radians().sin() as f32,
+                );
+                let o = Vec3::new(step.end.x_mm as f32, step.end.y_mm as f32, z);
                 out.push(Line {
-                    a: Vec3::new(x - dx, y - dy, z),
-                    b: Vec3::new(x + dx, y + dy, z),
-                    color: mark,
+                    a: o,
+                    b: o + Vec3::new(hx, hy, 0.0) * route::TURN_HANDLE_MM as f32,
+                    color,
                 });
+            }
+            if let Some(hp) = route::handle(step, action) {
+                let (x, y) = (hp[0] as f32, hp[1] as f32);
+                let r = if on { 14.0 } else { 9.0 };
+                let corners = [(-r, -r), (r, -r), (r, r), (-r, r)];
+                for k in 0..4 {
+                    let (ax, ay) = corners[k];
+                    let (bx, by) = corners[(k + 1) % 4];
+                    out.push(Line {
+                        a: Vec3::new(x + ax, y + ay, z),
+                        b: Vec3::new(x + bx, y + by, z),
+                        color: if on { lit } else { mark },
+                    });
+                }
+            } else {
+                // a stop or a call: a small diamond where it happens
+                let (x, y) = (step.end.x_mm as f32, step.end.y_mm as f32);
+                let d = 8.0;
+                let pts = [(0.0, -d), (d, 0.0), (0.0, d), (-d, 0.0)];
+                for k in 0..4 {
+                    let (ax, ay) = pts[k];
+                    let (bx, by) = pts[(k + 1) % 4];
+                    out.push(Line {
+                        a: Vec3::new(x + ax, y + ay, z + 0.5),
+                        b: Vec3::new(x + bx, y + by, z + 0.5),
+                        color: if on { lit } else { mark },
+                    });
+                }
             }
         }
         // the start: an arrow along the heading
@@ -534,8 +712,8 @@ impl SimulateTab {
         out
     }
 
-    /// The route panel: the start, the segments with what they drive,
-    /// and what to do with the route.
+    /// The route panel: the start, the tools, the actions with their
+    /// parameters to type or drag, and what to do with the route.
     pub fn route_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Route");
@@ -576,71 +754,154 @@ impl SimulateTab {
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.selectable_label(self.pick == Some(Kind::Straight), "+ Straight to…").clicked() {
-                self.pick = if self.pick == Some(Kind::Straight) {
-                    None
-                } else {
-                    Some(Kind::Straight)
-                };
-            }
-            if ui.selectable_label(self.pick == Some(Kind::Curve), "+ Curve to…").clicked() {
-                self.pick = if self.pick == Some(Kind::Curve) { None } else { Some(Kind::Curve) };
+            ui.weak("to a point on the map:");
+            for (tool, label) in [(Tool::StraightTo, "→ point"), (Tool::CurveTo, "⌒ point")] {
+                if ui
+                    .selectable_label(self.pick == Some(tool), label)
+                    .on_hover_text(match tool {
+                        Tool::StraightTo => "a turn to face the point, then the distance",
+                        Tool::CurveTo => "the arc tangent to the heading through the point",
+                    })
+                    .clicked()
+                {
+                    self.pick = if self.pick == Some(tool) { None } else { Some(tool) };
+                }
             }
         });
-        if let Some(k) = self.pick {
+        if let Some(t) = self.pick {
             ui.colored_label(
                 egui::Color32::from_rgb(217, 145, 15),
-                format!("click the map where the {} segment ends", k.label()),
+                format!("click the map where the {} ends", t.label()),
             );
         }
-        let planned = route::plan(&self.route);
-        let mut remove = None;
-        let mut edited = false;
-        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            for (i, (seg, p)) in self.route.segments.iter_mut().zip(&planned).enumerate() {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.strong(format!("{}.", i + 1));
-                    for k in [Kind::Straight, Kind::Curve] {
-                        if ui.selectable_label(seg.kind == k, k.label()).clicked() && seg.kind != k {
-                            seg.kind = k;
-                            edited = true;
-                        }
-                    }
-                    ui.weak("to");
-                    edited |= ui.add(egui::DragValue::new(&mut seg.to[0]).speed(1.0).suffix(" mm")).changed();
-                    edited |= ui.add(egui::DragValue::new(&mut seg.to[1]).speed(1.0).suffix(" mm")).changed();
-                    if ui.small_button("×").on_hover_text("remove this segment").clicked() {
-                        remove = Some(i);
-                    }
-                });
-                for leg in &p.legs {
-                    ui.weak(format!("   {}", leg.text()));
-                }
-                if let Some(n) = &p.note {
-                    ui.colored_label(egui::Color32::from_rgb(196, 68, 42), format!("   {n}"));
+        ui.horizontal_wrapped(|ui| {
+            ui.weak("add:");
+            for kind in KINDS {
+                let label = format!("+ {}{}", &kind[..1].to_uppercase(), &kind[1..]);
+                if ui.button(label).clicked() {
+                    self.add_action(kind);
                 }
             }
         });
-        if let Some(i) = remove {
-            self.route.segments.remove(i);
+        let steps = self.steps();
+        let functions = self.route.functions();
+        let mut remove = None;
+        let mut nudge: Option<(usize, i32)> = None;
+        let mut from_to: Option<(usize, usize)> = None;
+        let mut select = None;
+        let selected = self.selected;
+        egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+            let frame = egui::Frame::default().inner_margin(2.0);
+            let (_, _dropped) = ui.dnd_drop_zone::<usize, ()>(frame, |ui| {
+                for (i, action) in self.route.actions.iter_mut().enumerate() {
+                    let step = &steps[i];
+                    let on = selected == Some(i);
+                    let row = ui.horizontal(|ui| {
+                        ui.dnd_drag_source(egui::Id::new(("route-action", i)), i, |ui| {
+                            ui.label("≡").on_hover_text("drag to reorder");
+                        });
+                        if ui.selectable_label(on, format!("{}.", i + 1)).clicked() {
+                            select = Some(i);
+                        }
+                        ui.strong(action.kind());
+                        match action {
+                            Action::Straight { mm, then } => {
+                                ui.add(egui::DragValue::new(mm).speed(1.0).suffix(" mm"));
+                                end_combo(ui, ("then", i), then, &End::MOVES);
+                            }
+                            Action::Turn { deg } => {
+                                ui.add(egui::DragValue::new(deg).speed(1.0).suffix("°"));
+                                ui.weak(if *deg >= 0.0 { "right" } else { "left" });
+                            }
+                            Action::Curve { radius_mm, deg, then } => {
+                                ui.weak("r");
+                                ui.add(egui::DragValue::new(radius_mm).speed(1.0).suffix(" mm"));
+                                ui.add(egui::DragValue::new(deg).speed(1.0).suffix("°"));
+                                end_combo(ui, ("then", i), then, &End::MOVES);
+                            }
+                            Action::Stop { then, wait_ms } => {
+                                end_combo(ui, ("then", i), then, &End::STOPS);
+                                ui.weak("wait");
+                                ui.add(egui::DragValue::new(wait_ms).speed(10.0).range(0.0..=600000.0).suffix(" ms"));
+                            }
+                            Action::Custom { code } => {
+                                if !functions.is_empty() {
+                                    egui::ComboBox::from_id_salt(("call", i)).selected_text("call…").show_ui(ui, |ui| {
+                                        for f in &functions {
+                                            if ui.selectable_label(false, f).clicked() {
+                                                *code = format!("{f}()");
+                                            }
+                                        }
+                                    });
+                                }
+                                ui.add(egui::TextEdit::singleline(code).hint_text("line_follow()").desired_width(180.0));
+                            }
+                        }
+                        if ui.small_button("↑").on_hover_text("earlier").clicked() {
+                            nudge = Some((i, -1));
+                        }
+                        if ui.small_button("↓").on_hover_text("later").clicked() {
+                            nudge = Some((i, 1));
+                        }
+                        if ui.small_button("×").on_hover_text("remove this action").clicked() {
+                            remove = Some(i);
+                        }
+                    });
+                    // a dragged row: a line where it would land, and the drop
+                    if let (Some(pointer), Some(hovered)) =
+                        (ui.input(|i| i.pointer.interact_pos()), row.response.dnd_hover_payload::<usize>())
+                    {
+                        let rect = row.response.rect;
+                        let insert = if *hovered == i || pointer.y < rect.center().y { i } else { i + 1 };
+                        let y = if insert <= i { rect.top() } else { rect.bottom() };
+                        ui.painter()
+                            .hline(rect.x_range(), y, egui::Stroke::new(2.0, egui::Color32::from_rgb(217, 145, 15)));
+                        if let Some(dragged) = row.response.dnd_release_payload::<usize>() {
+                            from_to = Some((*dragged, insert));
+                        }
+                    }
+                    let end = step.end;
+                    let where_to = if matches!(action, Action::Straight { .. } | Action::Curve { .. } | Action::Turn { .. }) {
+                        format!(" → ({}, {}) {}°", end.x_mm.round(), end.y_mm.round(), end.yaw_deg.round())
+                    } else {
+                        String::new()
+                    };
+                    ui.weak(format!("     {}{}", action.text(), where_to));
+                }
+            });
+        });
+        if let Some(i) = select {
+            self.selected = Some(i);
         }
-        if !self.route.segments.is_empty() {
-            let end = planned.last().map(|p| p.end).unwrap_or(self.route.start);
+        if let Some((from, to)) = from_to {
+            self.move_action(from, to);
+        } else if let Some((i, d)) = nudge {
+            let to = if d < 0 {
+                i.saturating_sub(1)
+            } else {
+                (i + 2).min(self.route.actions.len())
+            };
+            if (d < 0 && i > 0) || (d > 0 && i + 1 < self.route.actions.len()) {
+                self.move_action(i, to);
+            }
+        } else if let Some(i) = remove {
+            self.remove_action(i);
+        }
+        if !self.route.actions.is_empty() {
+            let end = self.end_pose();
             ui.weak(format!(
                 "{} mm in all · ends at ({}, {}) heading {}°",
-                route::length_mm(&planned).round(),
+                route::length_mm(&self.route).round(),
                 end.x_mm.round(),
                 end.y_mm.round(),
                 end.yaw_deg.round()
             ));
         }
-        let _ = edited;
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !busy && !self.route.segments.is_empty() && self.chassis().is_some(),
+                    !busy && !self.route.actions.is_empty() && self.chassis().is_some(),
                     egui::Button::new("▶ Run route"),
                 )
                 .on_hover_text("writes the route's program and runs it")
@@ -649,18 +910,25 @@ impl SimulateTab {
                 self.run_route();
             }
             if ui
-                .add_enabled(!self.route.segments.is_empty(), egui::Button::new("Undo last"))
+                .add_enabled(!self.route.actions.is_empty(), egui::Button::new("Undo last"))
                 .clicked()
             {
                 self.undo_segment();
             }
-            if ui
-                .add_enabled(!self.route.segments.is_empty(), egui::Button::new("Clear"))
-                .clicked()
-            {
+            if ui.add_enabled(!self.route.actions.is_empty(), egui::Button::new("Clear")).clicked() {
                 self.clear_route();
             }
         });
+        ui.checkbox(&mut self.show_definitions, "Definitions (what custom actions call)");
+        if self.show_definitions {
+            ui.add(
+                egui::TextEdit::multiline(&mut self.route.prelude)
+                    .code_editor()
+                    .desired_rows(6)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("def line_follow():\n    ...\n\ndef run_until_all_black():\n    ..."),
+            );
+        }
         ui.checkbox(&mut self.show_program, "show the program");
         if self.show_program {
             match self.route_program() {
@@ -691,24 +959,19 @@ impl SimulateTab {
         queue: &wgpu::Queue,
         bundle: &Bundle,
         dark: bool,
-    ) -> (Vec<DrawItem>, Vec<Line>) {
+    ) -> SimDraw {
         let Some(scene) = self.scene.as_ref() else {
-            return (vec![], vec![]);
+            return SimDraw::default();
         };
         let mut items = Vec::new();
         let mut chassis_items = Vec::new();
+        let mut chassis_locals: Vec<(String, Mat4, [f32; 4])> = Vec::new();
         let chassis_id = scene.body_id("chassis");
-        let preview = self.preview;
         let body_pose = |id: usize| -> Mat4 {
             let p = self.poses.get(id).copied().unwrap_or(Pose {
                 pos: [0.0; 3],
                 quat: [1.0, 0.0, 0.0, 0.0],
             });
-            if let (Some(pv), true) = (preview, Some(id) == chassis_id) {
-                // dragged: where the pointer has it, at the height it stands
-                let q = Quat::from_rotation_z(pv.yaw_deg.to_radians() as f32);
-                return Mat4::from_rotation_translation(q, Vec3::new(pv.x_mm as f32, pv.y_mm as f32, p.pos[2] as f32 * M_TO_MM));
-            }
             let q = Quat::from_xyzw(p.quat[1] as f32, p.quat[2] as f32, p.quat[3] as f32, p.quat[0] as f32).normalize();
             Mat4::from_rotation_translation(q, Vec3::new(p.pos[0] as f32, p.pos[1] as f32, p.pos[2] as f32) * M_TO_MM)
         };
@@ -810,6 +1073,7 @@ impl SimulateTab {
             );
             if Some(g.body) == chassis_id {
                 chassis_items.push(items.len());
+                chassis_locals.push((key.clone(), local, color));
             }
             items.push(DrawItem {
                 mesh: key,
@@ -879,16 +1143,37 @@ impl SimulateTab {
                     None => Vec3::ZERO,
                 };
                 let pos = Vec3::new(b.pos_m[0] as f32, b.pos_m[1] as f32, b.pos_m[2] as f32) * M_TO_MM - q * centre;
+                let local = Mat4::from_rotation_translation(q, pos);
+                let color = crate::app::cat_color(&category, dark);
                 chassis_items.push(items.len());
+                chassis_locals.push((key.clone(), local, color));
                 items.push(DrawItem {
                     mesh: key,
-                    model: body * Mat4::from_rotation_translation(q, pos),
-                    color: crate::app::cat_color(&category, dark),
+                    model: body * local,
+                    color,
+                    texture: None,
+                });
+            }
+        }
+        // the ghost: the chassis, 70 % transparent, where a drag would put it
+        let mut ghost = Vec::new();
+        if let (Some(g), Some(cid)) = (self.ghost, chassis_id) {
+            let z = self.poses.get(cid).map(|p| p.pos[2] as f32 * M_TO_MM).unwrap_or(0.0);
+            let body = Mat4::from_rotation_translation(
+                Quat::from_rotation_z(g.yaw_deg.to_radians() as f32),
+                Vec3::new(g.x_mm as f32, g.y_mm as f32, z),
+            );
+            for (mesh, local, color) in &chassis_locals {
+                ghost.push(DrawItem {
+                    mesh: mesh.clone(),
+                    model: body * *local,
+                    color: [color[0], color[1], color[2], GHOST_ALPHA],
                     texture: None,
                 });
             }
         }
         self.chassis_items = chassis_items;
+        self.chassis_locals = chassis_locals;
         let lines = vec![
             Line {
                 a: Vec3::ZERO,
@@ -906,7 +1191,7 @@ impl SimulateTab {
                 color: [0.1, 0.35, 0.65, 1.0],
             },
         ];
-        (items, lines)
+        SimDraw { items, lines, ghost }
     }
 
     /// Where the camera should look: the mat's extent on first load, the
@@ -1061,6 +1346,18 @@ impl SimulateTab {
     }
 }
 
+/// A small combo for a move's or a stop's end state.
+fn end_combo(ui: &mut egui::Ui, salt: (&str, usize), then: &mut End, choices: &[End]) {
+    egui::ComboBox::from_id_salt(salt)
+        .selected_text(then.label())
+        .width(84.0)
+        .show_ui(ui, |ui| {
+            for e in choices {
+                ui.selectable_value(then, *e, e.label());
+            }
+        });
+}
+
 fn srgb_to_linear(c: f32) -> f32 {
     c.clamp(0.0, 1.0).powf(2.2)
 }
@@ -1195,32 +1492,91 @@ mod tests {
             }
         );
         assert_eq!(t.route.world, "practice-line");
-        assert_eq!(t.route_program().unwrap_err(), "plan a segment first");
+        assert_eq!(t.route_program().unwrap_err(), "add an action first");
         assert!(t.route_lines(true).len() >= 3, "the start's arrow");
-        t.pick = Some(Kind::Straight);
+        // the point tools: a click dead ahead is one straight, a click off to the side an arc
+        t.pick = Some(Tool::StraightTo);
         assert!(t.map_click(-547.04, 100.02));
         assert!(t.pick.is_none(), "one point per arming");
-        t.pick = Some(Kind::Curve);
+        assert_eq!(t.selected, Some(0));
+        t.pick = Some(Tool::CurveTo);
         assert!(t.map_click(-447.0, 200.0));
-        assert_eq!(t.route.segments.len(), 2);
-        assert_eq!(t.route.segments[0].to, [-547.0, 100.0], "rounded to 0.1 mm");
+        assert_eq!(
+            t.route.actions,
+            vec![
+                Action::Straight {
+                    mm: 250.0,
+                    then: End::Coast
+                },
+                Action::Curve {
+                    radius_mm: 100.0,
+                    deg: 90.0,
+                    then: End::Coast
+                }
+            ],
+            "rounded to 0.1 mm"
+        );
+        // a curve tool click straight ahead is still a line, and says so
+        t.pick = Some(Tool::CurveTo);
+        assert!(t.map_click(-300.0, 200.0));
+        assert_eq!(t.message, "straight ahead: a line, not an arc");
+        assert_eq!(t.route.actions.len(), 3);
+        // a click where the robot already is adds nothing
+        t.pick = Some(Tool::StraightTo);
+        assert!(t.map_click(-300.0, 200.0));
+        assert_eq!(t.route.actions.len(), 3);
+        // typed actions with their defaults; a stop; a custom call
+        t.add_action("turn");
+        t.add_action("stop");
+        t.add_action("custom");
+        assert_eq!(t.selected, Some(5));
+        assert_eq!(t.route.actions[3], Action::Turn { deg: 90.0 });
+        if let Action::Custom { code } = &mut t.route.actions[5] {
+            *code = "line_follow()".into();
+        }
+        t.route.prelude = "def line_follow():\n    pass\n".into();
         let text = t.route_program().unwrap();
         assert!(text.contains("db.straight(250)") && text.contains("db.curve(100, 90)"), "{text}");
+        assert!(
+            text.contains("db.turn(90)") && text.contains("db.stop()") && text.contains("line_follow()"),
+            "{text}"
+        );
         assert!(text.contains("wheel_diameter_mm=86.4, axle_track_mm=135"), "{text}");
-        assert!(t.route_lines(false).len() > 20, "a line, an arc and the marks");
+        assert!(
+            text.find("def line_follow").unwrap() > text.find("DriveBase(").unwrap(),
+            "definitions after the setup"
+        );
+        assert!(
+            t.route_lines(false).len() > 30,
+            "lines, arcs, handles, the turn's heading and the marks"
+        );
         // running writes the program and asks the server to run it
         t.run_route();
         let last = t.sent.last().unwrap().clone();
         assert_eq!(last["cmd"], "run");
         let script = last["script"].as_str().unwrap().to_string();
         assert!(std::fs::read_to_string(&script).unwrap().contains("db.curve(100, 90)"));
+        // the list: move, nudge past the ends, remove, undo, clear
+        t.move_action(5, 0);
+        assert!(matches!(t.route.actions[0], Action::Custom { .. }) && t.selected == Some(0));
+        t.move_action(0, 6);
+        assert!(matches!(t.route.actions[5], Action::Custom { .. }) && t.selected == Some(5));
+        t.move_action(9, 0);
+        t.move_action(0, 9);
+        assert_eq!(t.route.actions.len(), 6, "out of range: nothing happens");
+        t.remove_action(3);
+        assert_eq!(t.route.actions.len(), 5);
+        assert!(!matches!(t.route.actions[3], Action::Turn { .. }));
+        t.remove_action(42);
+        assert_eq!(t.route.actions.len(), 5);
         t.undo_segment();
-        assert_eq!(t.route.segments.len(), 1);
-        t.pick = Some(Kind::Curve);
+        assert_eq!(t.route.actions.len(), 4);
+        t.pick = Some(Tool::CurveTo);
+        t.selected = Some(1);
         t.clear_route();
-        assert!(t.route.segments.is_empty() && t.pick.is_none());
+        assert!(t.route.actions.is_empty() && t.pick.is_none() && t.selected.is_none());
         t.run_route();
-        assert_eq!(t.message, "plan a segment first");
+        assert_eq!(t.message, "add an action first");
         // the chassis as the frames report it
         t.apply(frame_with_chassis(0.1, 0.2, -45.0));
         let p = t.chassis_pose().unwrap();
@@ -1250,16 +1606,19 @@ mod tests {
         assert_eq!(t.route.start, placed, "a reload keeps the user's placement");
         assert_eq!(t.sent.len(), n + 1);
         assert_eq!(t.sent.last().unwrap()["cmd"], "place");
-        // a drag: the preview moves ahead of the server, letting go places it
+        // a drag: a ghost follows the pointer while the chassis stays; letting go places it
         let p0 = t.begin_chassis_drag().unwrap();
+        assert_eq!(t.ghost, Some(p0));
         t.drag_chassis(Pose2 {
             x_mm: p0.x_mm + 50.0,
             y_mm: p0.y_mm,
             yaw_deg: p0.yaw_deg,
         });
-        assert_eq!(t.chassis_pose().unwrap().x_mm, p0.x_mm + 50.0, "the preview is what is shown");
+        assert_eq!(t.ghost.unwrap().x_mm, p0.x_mm + 50.0, "the ghost is where the pointer is");
+        assert_eq!(t.chassis_pose().unwrap().x_mm, p0.x_mm, "the chassis waits for the drop");
         t.end_chassis_drag();
         assert_eq!(t.route.start.x_mm, p0.x_mm + 50.0);
+        assert!(t.ghost.is_none());
         assert_eq!(t.sent.last().unwrap()["cmd"], "place");
         assert!(t.chassis_pose().is_some());
         // not while a program runs
@@ -1268,10 +1627,72 @@ mod tests {
         assert!(t.message.contains("stop the program"), "{}", t.message);
         assert!(t.begin_chassis_drag().is_none());
         t.apply(state("stopped"));
+        // an action's handle dragged on the map: the straight follows along its line, the ghost shows its end
+        let start = t.route.start;
+        t.add_action("straight");
+        t.add_action("stop");
+        assert!(!t.begin_handle_drag(7), "no such action");
+        assert!(t.begin_handle_drag(0));
+        assert_eq!(t.selected, Some(0));
+        let (hx, hy) = start.heading();
+        assert_eq!(
+            t.ghost
+                .map(|g| (g.x_mm - start.x_mm - hx * 200.0).abs() < 1e-6 && (g.y_mm - start.y_mm - hy * 200.0).abs() < 1e-6),
+            Some(true),
+            "{:?}",
+            t.ghost
+        );
+        t.drag_chassis(Pose2 {
+            x_mm: 999.0,
+            y_mm: 999.0,
+            yaw_deg: 0.0,
+        });
+        assert_ne!(t.ghost.unwrap().x_mm, 999.0, "a handle drag is not a chassis drag");
+        t.drag_handle(start.x_mm + hx * 320.0 + hy * 40.0, start.y_mm + hy * 320.0 - hx * 40.0);
+        assert_eq!(
+            t.route.actions[0],
+            Action::Straight {
+                mm: 320.0,
+                then: End::Coast
+            },
+            "the distance along the line, the side offset ignored"
+        );
+        assert!((t.ghost.unwrap().x_mm - start.x_mm - hx * 320.0).abs() < 1e-6);
+        t.end_chassis_drag();
+        assert!(t.ghost.is_some(), "the chassis drop does not end a handle drag");
+        t.end_handle_drag();
+        assert!(t.ghost.is_none());
+        t.drag_handle(0.0, 0.0);
+        assert!(
+            matches!(t.route.actions[0], Action::Straight { mm: 320.0, .. }),
+            "nothing dragged: nothing changes"
+        );
+        // the handles on screen: a camera over the map finds the straight's end and misses the stop
+        let cam = crate::viewport::Camera {
+            target: Vec3::new(start.x_mm as f32, start.y_mm as f32, 0.0),
+            pitch: 89.0,
+            distance: 1500.0,
+            ..Default::default()
+        };
+        let steps = t.steps();
+        let end = route::handle(&steps[0], &t.route.actions[0]).unwrap();
+        let sp = cam.project(Vec3::new(end[0] as f32, end[1] as f32, 3.0), 800.0, 600.0).unwrap();
+        assert_eq!(t.route_handle_at(&cam, sp.x, sp.y, 800.0, 600.0), Some(0));
+        assert_eq!(
+            t.route_handle_at(&cam, sp.x + 4.0, sp.y - 3.0, 800.0, 600.0),
+            Some(0),
+            "within the grab distance"
+        );
+        assert_eq!(t.route_handle_at(&cam, sp.x + 40.0, sp.y, 800.0, 600.0), None);
+        let sp0 = cam
+            .project(Vec3::new(start.x_mm as f32, start.y_mm as f32, 3.0), 800.0, 600.0)
+            .unwrap();
+        assert_eq!(t.route_handle_at(&cam, sp0.x, sp0.y, 800.0, 600.0), None, "the start is no handle");
+        t.clear_route();
         // save and load, with a route for another map
         let dir = std::env::temp_dir().join(format!("ob-tab-route-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        t.pick = Some(Kind::Straight);
+        t.pick = Some(Tool::StraightTo);
         t.map_click(0.0, 0.0);
         t.save_route(dir.join("a.route.json"));
         assert!(t.message.starts_with("saved the route"), "{}", t.message);
@@ -1279,7 +1700,7 @@ mod tests {
         other.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
         other.world = "wro-2026-senior".into();
         other.load_route(dir.join("a.route.json"));
-        assert_eq!(other.route.segments.len(), 1);
+        assert_eq!(other.route.actions.len(), 2, "a turn and a straight");
         assert_eq!(other.world, "practice-line", "the route's map is chosen");
         assert!(
             other.pending_load || other.message.contains("no Python interpreter"),
@@ -1403,7 +1824,7 @@ mod tests {
             t.log
         );
         // a route runs as a program the server receives
-        t.pick = Some(Kind::Straight);
+        t.pick = Some(Tool::StraightTo);
         t.map_click(250.0, 120.0);
         t.run_route();
         assert!(pump_until(&mut t, 30, |t| t.status == "running"), "{} {}", t.status, t.message);
@@ -1523,13 +1944,30 @@ mod tests {
             "{:?}",
             t.chassis_pose()
         );
-        t.pick = Some(Kind::Straight);
+        t.pick = Some(Tool::StraightTo);
         t.map_click(-400.0, 100.0);
-        t.pick = Some(Kind::Curve);
+        t.pick = Some(Tool::CurveTo);
         t.map_click(-300.0, 200.0);
+        // a continuous straight into a held stop, and a custom call, ride along
+        t.add_action("straight");
+        t.route.actions[2] = Action::Straight {
+            mm: 100.0,
+            then: End::Continue,
+        };
+        t.add_action("stop");
+        t.route.actions[3] = Action::Stop {
+            then: End::Hold,
+            wait_ms: 200.0,
+        };
+        t.add_action("custom");
+        t.route.actions[4] = Action::Custom { code: "say_hi()".into() };
+        t.route.prelude = "def say_hi():
+    print('hi from the route')
+"
+        .into();
         let planned = route::plan(&t.route);
         let end = planned.last().unwrap().end;
-        assert!((end.x_mm + 300.0).abs() < 1e-6 && (end.yaw_deg).abs() < 1e-6, "{end:?}");
+        assert!((end.x_mm + 200.0).abs() < 1e-6 && (end.yaw_deg).abs() < 1e-6, "{end:?}");
         t.run_route();
         assert!(
             pump_until(&mut t, 180, |t| matches!(t.status.as_str(), "finished" | "error")),
@@ -1539,6 +1977,7 @@ mod tests {
             t.log
         );
         assert_eq!(t.status, "finished", "{:?} / {:?}", t.error, t.log);
+        assert!(t.log.iter().any(|(_, x)| x.contains("hi from the route")), "{:?}", t.log);
         let p = t.chassis_pose().unwrap();
         assert!(
             (p.x_mm - end.x_mm).abs() < 25.0 && (p.y_mm - end.y_mm).abs() < 25.0 && route::wrap_deg(p.yaw_deg - end.yaw_deg).abs() < 10.0,
@@ -1642,7 +2081,9 @@ mod tests {
             },
         );
         t.chassis_doc = Some(doc);
-        let (items, lines) = t.draw_items(&mut vp, &device, &queue, &bundle, false);
+        let draw = t.draw_items(&mut vp, &device, &queue, &bundle, false);
+        let (items, lines) = (draw.items, draw.lines);
+        assert!(draw.ghost.is_empty(), "no drag: no ghost");
         // six primitives and the mesh asset drawn; the unknown and broken meshes, the helper and the brick stand-in skipped; two of four bricks drawable
         assert_eq!(items.len(), 9, "{:?}", items.iter().map(|i| i.mesh.clone()).collect::<Vec<_>>());
         assert!(
@@ -1667,20 +2108,27 @@ mod tests {
         // the chassis body's geoms (cylinder, capsule, ellipsoid) and its two drawable bricks
         assert_eq!(t.chassis_items.len(), 5, "{:?}", t.chassis_items);
         assert!(t.chassis_items.iter().all(|i| *i < items.len()));
-        // while dragged, the chassis is drawn at the preview pose
-        t.preview = Some(Pose2 {
+        // while dragged, a translucent copy of the chassis stands at the ghost pose; the chassis itself stays
+        t.ghost = Some(Pose2 {
             x_mm: 123.0,
             y_mm: -45.0,
             yaw_deg: 0.0,
         });
-        let (moved, _) = t.draw_items(&mut vp, &device, &queue, &bundle, false);
-        let brick = moved[*t.chassis_items.last().unwrap()].model.w_axis;
-        let before = items[*t.chassis_items.last().unwrap()].model.w_axis;
+        let dragged = t.draw_items(&mut vp, &device, &queue, &bundle, false);
+        assert_eq!(dragged.ghost.len(), t.chassis_items.len(), "every chassis item has a ghost");
+        let last = *t.chassis_items.last().unwrap();
+        let brick = items[last].model.w_axis;
+        let ghost = dragged.ghost.last().unwrap();
+        assert_eq!(ghost.mesh, items[last].mesh);
+        // the chassis body sits at the origin in this frame, so the ghost's brick is the same brick moved to (123, -45)
         assert!(
-            (brick.x - before.x - 123.0).abs() < 1e-3 && (brick.y - before.y + 45.0).abs() < 1e-3,
-            "{brick:?} vs {before:?}"
+            (ghost.model.w_axis.x - brick.x - 123.0).abs() < 1e-3 && (ghost.model.w_axis.y - brick.y + 45.0).abs() < 1e-3,
+            "{:?} vs {brick:?}",
+            ghost.model.w_axis
         );
-        t.preview = None;
+        assert!((ghost.color[3] - GHOST_ALPHA).abs() < 1e-6 && ghost.color[..3] == items[last].color[..3]);
+        assert_eq!(dragged.items[last].model.w_axis, brick, "the chassis does not move with the ghost");
+        t.ghost = None;
         let mut renderer = test_renderer(&device);
         vp.render(
             &device,
@@ -1690,6 +2138,7 @@ mod tests {
             &crate::viewport::Scene {
                 items: &items,
                 lines: &lines,
+                ghost: &dragged.ghost,
                 overlay: &[],
                 background: [0.0; 4],
             },
@@ -1701,7 +2150,7 @@ mod tests {
             .unwrap()
             .textures
             .insert("tex".into(), dir.join("missing.png").to_string_lossy().to_string());
-        let (again, _) = t.draw_items(&mut vp, &device, &queue, &bundle, true);
+        let again = t.draw_items(&mut vp, &device, &queue, &bundle, true).items;
         assert_eq!(again.len(), 9);
         assert!(again[0].texture.is_none(), "no texture when the file is unreadable");
         assert!(t.log.iter().any(|(s, x)| s == "server" && x.starts_with("texture ")), "{:?}", t.log);

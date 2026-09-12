@@ -102,17 +102,29 @@ Stop do what they say; the speed slider runs the physics slower or
 faster than wall time; "follow the robot" keeps the camera on the
 chassis; the program's prints and errors appear in the log panel
 below the view. The loaded chassis stands on the map at true scale:
-drag it to put it where a run should start (shift turns it), or type
-the pose in the **Route** panel. That panel plans a route as a
-sequence of runs: arm **+ Straight to…** or **+ Curve to…**, click
-the map where the segment ends, and the sim works out what drives
-it — for a straight line the turn to face the point and the distance,
-for a curve the arc tangent to the current heading through the point
-with its radius and angle — draws it on the map, and shows the drive
-base calls. Routes save and load as `*.route.json` (the map, the start
-pose and the points); **▶ Run route** writes the route as a hub-style
-program (`ST3032Motor` wheels and a `DriveBase` sized from the
-chassis; edit the motor lines for other wiring) and runs it, and
+drag it to put it where a run should start — a 70 % transparent copy
+follows the pointer with its axle centre under it, and letting go
+places the robot there (shift turns it) — or type the pose in the
+**Route** panel. That panel plans a route as a list of actions:
+**straight** (mm), **turn** (degrees, positive right), **curve**
+(radius and degrees), **stop** (coast, brake or hold, with an
+optional wait) and **custom** (a line of code, such as
+`line_follow()`). Add one with the **+** buttons and type its
+parameters, or arm **→ point** / **⌒ point** and click the map: the
+sim works out what reaches the point — the turn to face it and the
+distance for a straight line, the arc tangent to the current heading
+through it for a curve. Every move has a handle on the map: drag it
+to set the distance, the heading or the arc, with the transparent
+chassis showing where the robot ends up. Straights and curves have an
+end state — coast, brake, hold, or **continue** for a run that flows
+into the next action without slowing (`then=Stop.NONE`). Rows drag
+by their **≡** grip to reorder (or ↑ ↓), **×** removes one. Custom
+actions call whatever the **Definitions** box defines: type
+`def line_follow(): …` there and the custom row's picker lists it.
+Routes save and load as `*.route.json` (the map, the start pose, the
+actions and the definitions); **▶ Run route** writes the route as a
+hub-style program (`ST3032Motor` wheels and a `DriveBase` sized from
+the chassis; edit the motor lines for other wiring) and runs it, and
 "show the program" prints it. Under the hood the sim starts the
 MuJoCo runtime as a child process — the same runtime, driver shim and
 C cores
