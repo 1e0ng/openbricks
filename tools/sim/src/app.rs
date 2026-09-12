@@ -505,6 +505,7 @@ impl App {
             let scene = viewport::Scene {
                 items: &self.items,
                 lines: &lines,
+                top_lines: &[],
                 ghost: &[],
                 overlay: &overlay,
                 background: bg,
@@ -1660,8 +1661,9 @@ impl App {
         let draw = self
             .simulate
             .draw_items(&mut self.viewport, &gpu.device, &gpu.queue, &self.editor.bundle, dark);
-        let (items, mut lines, ghost) = (draw.items, draw.lines, draw.ghost);
-        lines.extend(self.simulate.route_lines(dark));
+        let (items, lines, ghost) = (draw.items, draw.lines, draw.ghost);
+        // markers and the route: over the map, whatever is drawn on it
+        let top = self.simulate.route_lines(dark);
         if let Some((lo, hi)) = self.simulate.frame_target() {
             self.viewport.camera.fit_plan(lo, hi, size.0 as f32 / size.1.max(1) as f32);
         }
@@ -1675,6 +1677,7 @@ impl App {
             let scene = viewport::Scene {
                 items: &items,
                 lines: &lines,
+                top_lines: &top,
                 ghost: &ghost,
                 overlay: &[],
                 background: bg,
@@ -3009,6 +3012,13 @@ mod tests {
         steps(&mut h, 2);
         assert!(h.state().simulate.markers.markers.is_empty());
         let _ = std::fs::remove_dir_all(&mdir);
+        // a path's colour: chosen, then back to the kind's default with one click
+        h.state_mut().simulate.selected = Some(0);
+        h.state_mut().simulate.route.actions[0].color = Some([255, 0, 0]);
+        steps(&mut h, 2);
+        h.get_by_label("default").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.route.actions[0].color, None);
         // definitions and the program
         h.get_by_label("Definitions (what custom actions call)").click();
         steps(&mut h, 2);

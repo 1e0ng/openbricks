@@ -118,7 +118,13 @@ where it turns and a point to face, a stop or a custom call takes one
 point. Every click leaves a marker; after the first click the line (or
 the arc, or the turn's arrow) follows the pointer with its length,
 radius and angle, or heading written beside it, and once placed each
-action keeps that label next to its path. A popup then asks for the parameters: the speed (the drive
+action keeps that label next to its path, and an arrowhead at the end
+of every path shows the way the robot faces there (a turn's arrow
+shows its own). Paths are drawn over
+everything on the map (markers sit between the map and the paths), in
+the kind's colour — blue straights, green curves, orange turns, stops
+and calls — or a colour of your own, picked in the popup or the panel
+("default" goes back to the kind's). A popup then asks for the parameters: the speed (the drive
 base's default, shown in mm/s for your wheels), **continuous** for a
 move that flows into the next one without slowing (`then=Stop.NONE`)
 or otherwise the end state (coast, brake, hold), a curve's radius and

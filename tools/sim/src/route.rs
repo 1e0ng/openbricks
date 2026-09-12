@@ -160,18 +160,25 @@ pub enum Action {
     },
 }
 
-/// An action on the map, and whether it is locked against editing.
+/// An action on the map, whether it is locked against editing, and the
+/// colour its path is drawn in when not the kind's default.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     #[serde(flatten)]
     pub action: Action,
     #[serde(default, skip_serializing_if = "is_false")]
     pub locked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
 }
 
 impl From<Action> for Item {
     fn from(action: Action) -> Self {
-        Item { action, locked: false }
+        Item {
+            action,
+            locked: false,
+            color: None,
+        }
     }
 }
 
@@ -1420,9 +1427,11 @@ mod tests {
             ..Default::default()
         };
         route.actions[1].locked = true;
+        route.actions[0].color = Some([200, 30, 30]);
         let p = dir.join("a.route.json");
         route.save(&p).unwrap();
         let text = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(text.matches("\"color\"").count(), 1, "only a chosen colour is written");
         assert!(
             text.contains("\"format\": \"openbricks-route/3\"") && text.contains("\"kind\": \"curve\""),
             "{text}"

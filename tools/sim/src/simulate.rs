@@ -57,6 +57,25 @@ pub struct Draft {
     pub moves: bool,
     /// Where the popup opens (screen), when known.
     pub at: Option<egui::Pos2>,
+    /// The path's colour, when not the kind's default.
+    pub color: Option<[u8; 3]>,
+}
+
+/// The arrowhead at the end of a path: its length along the heading and
+/// half its width, in mm on the map.
+pub const HEAD_MM: f64 = 14.0;
+pub const HEAD_HALF_MM: f64 = 8.0;
+
+/// The kind's default path colour, as drawn (sRGB bytes).
+pub fn default_color(kind: &str, dark: bool) -> [u8; 3] {
+    match (kind, dark) {
+        ("straight", true) => [89, 166, 255],
+        ("straight", false) => [26, 89, 204],
+        ("curve", true) => [102, 230, 128],
+        ("curve", false) => [26, 140, 64],
+        (_, true) => [255, 191, 64],
+        (_, false) => [217, 115, 0],
+    }
 }
 
 /// How many undo steps are kept.
@@ -699,6 +718,7 @@ impl SimulateTab {
                 action: Action::placed(placing.kind, &placing.points),
                 moves: false,
                 at: None,
+                color: None,
             });
         } else {
             self.placing = Some(placing);
@@ -711,7 +731,9 @@ impl SimulateTab {
     pub fn commit_draft(&mut self) {
         let Some(draft) = self.draft.take() else { return };
         self.record();
-        self.route.actions.push(draft.action.into());
+        let mut item: route::Item = draft.action.into();
+        item.color = draft.color;
+        self.route.actions.push(item);
         let i = self.route.actions.len() - 1;
         self.selected = Some(i);
         if draft.moves {
@@ -1084,24 +1106,12 @@ impl SimulateTab {
             return out;
         }
         let z = 3.0;
-        let (straight, curve, mark, lit, link_c, locked_c) = if dark {
-            (
-                [0.35, 0.65, 1.0, 1.0],
-                [0.4, 0.9, 0.5, 1.0],
-                [1.0, 0.75, 0.25, 1.0],
-                [1.0, 1.0, 1.0, 1.0],
-                [0.6, 0.6, 0.65, 1.0],
-                [0.55, 0.55, 0.6, 1.0],
-            )
+        let rgb = |c: [u8; 3]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0];
+        let mark = rgb(default_color("stop", dark));
+        let (lit, link_c, locked_c) = if dark {
+            ([1.0, 1.0, 1.0, 1.0], [0.6, 0.6, 0.65, 1.0], [0.55, 0.55, 0.6, 1.0])
         } else {
-            (
-                [0.1, 0.35, 0.8, 1.0],
-                [0.1, 0.55, 0.25, 1.0],
-                [0.85, 0.45, 0.0, 1.0],
-                [0.9, 0.1, 0.1, 1.0],
-                [0.45, 0.45, 0.5, 1.0],
-                [0.5, 0.5, 0.55, 1.0],
-            )
+            ([0.9, 0.1, 0.1, 1.0], [0.45, 0.45, 0.5, 1.0], [0.5, 0.5, 0.55, 1.0])
         };
         let seg = |out: &mut Vec<Line>, a: Point, b: Point, color: [f32; 4], z: f32| {
             out.push(Line {
@@ -1149,14 +1159,37 @@ impl SimulateTab {
                 );
             }
         };
+        // an arrowhead: the robot's heading at a point, as a closed triangle with its tip there
+        let head = |out: &mut Vec<Line>, tip: Point, heading_deg: f64, color: [f32; 4]| {
+            let (c, s) = (heading_deg.to_radians().cos(), heading_deg.to_radians().sin());
+            let back = [tip[0] - c * HEAD_MM, tip[1] - s * HEAD_MM];
+            let l = [back[0] - s * HEAD_HALF_MM, back[1] + c * HEAD_HALF_MM];
+            let r = [back[0] + s * HEAD_HALF_MM, back[1] - c * HEAD_HALF_MM];
+            seg(out, tip, l, color, z + 0.5);
+            seg(out, tip, r, color, z + 0.5);
+            seg(out, l, r, color, z + 0.5);
+        };
         let arrow = |out: &mut Vec<Line>, from: Point, heading_deg: f64, len: f64, color: [f32; 4]| {
             let (c, s) = (heading_deg.to_radians().cos(), heading_deg.to_radians().sin());
             let tip = [from[0] + c * len, from[1] + s * len];
-            let back = [from[0] + c * (len - 14.0), from[1] + s * (len - 14.0)];
             seg(out, from, tip, color, z);
-            seg(out, tip, [back[0] - s * 8.0, back[1] + c * 8.0], color, z);
-            seg(out, tip, [back[0] + s * 8.0, back[1] - c * 8.0], color, z);
+            head(out, tip, heading_deg, color);
         };
+        // the map's markers first: a flag on a pole, the selected one lit with a handle; the
+        // route is drawn after them and so lies over them
+        let marker_c = if dark { [0.85, 0.6, 1.0, 1.0] } else { [0.5, 0.2, 0.75, 1.0] };
+        for (i, m) in self.markers.markers.iter().enumerate() {
+            let on = self.selected_marker == Some(i);
+            let c = if on { lit } else { marker_c };
+            let p = m.at;
+            seg(&mut out, p, [p[0], p[1] + 30.0], c, z + 0.5);
+            seg(&mut out, [p[0], p[1] + 30.0], [p[0] + 18.0, p[1] + 24.0], c, z + 0.5);
+            seg(&mut out, [p[0] + 18.0, p[1] + 24.0], [p[0], p[1] + 18.0], c, z + 0.5);
+            diamond(&mut out, p, 5.0, c);
+            if on {
+                square(&mut out, p, 9.0, lit);
+            }
+        }
         let steps = self.steps();
         for (i, (step, item)) in steps.iter().zip(&self.route.actions).enumerate() {
             let on = self.selected == Some(i);
@@ -1166,17 +1199,17 @@ impl SimulateTab {
             } else if item.locked {
                 locked_c
             } else {
-                match a {
-                    Action::Straight { .. } => straight,
-                    Action::Curve { .. } => curve,
-                    _ => mark,
-                }
+                rgb(item.color.unwrap_or_else(|| default_color(a.kind(), dark)))
             };
             if step.link.len() == 2 {
                 dashed(&mut out, step.link[0], step.link[1], link_c);
             }
             for w in step.points.windows(2) {
                 seg(&mut out, w[0], w[1], color, z);
+            }
+            // where a path ends, the way the robot faces there
+            if step.points.len() >= 2 {
+                head(&mut out, step.end.point(), step.end.yaw_deg, color);
             }
             match a {
                 Action::Turn { at, heading_deg, .. } => arrow(&mut out, *at, *heading_deg, route::TURN_HANDLE_MM, color),
@@ -1226,11 +1259,14 @@ impl SimulateTab {
                     }
                 } else if let Some(first) = p.points.first() {
                     let preview = Action::placed(p.kind, &[*first, hover]);
-                    for w in preview.path().windows(2) {
+                    let path = preview.path();
+                    for w in path.windows(2) {
                         seg(&mut out, w[0], w[1], mark, z);
                     }
                     if let Action::Turn { at, heading_deg, .. } = &preview {
                         arrow(&mut out, *at, *heading_deg, route::TURN_HANDLE_MM, mark);
+                    } else if path.len() >= 2 {
+                        head(&mut out, preview.end(), preview.end_heading(0.0), mark);
                     }
                     circle(&mut out, hover, 6.0, mark);
                 } else {
@@ -1241,20 +1277,6 @@ impl SimulateTab {
         // the last click, wherever it landed
         if let Some(pt) = self.click_marker() {
             circle(&mut out, pt, 16.0, mark);
-        }
-        // the map's markers: a flag on a pole, the selected one lit with a handle
-        let marker_c = if dark { [0.85, 0.6, 1.0, 1.0] } else { [0.5, 0.2, 0.75, 1.0] };
-        for (i, m) in self.markers.markers.iter().enumerate() {
-            let on = self.selected_marker == Some(i);
-            let c = if on { lit } else { marker_c };
-            let p = m.at;
-            seg(&mut out, p, [p[0], p[1] + 30.0], c, z + 0.5);
-            seg(&mut out, [p[0], p[1] + 30.0], [p[0] + 18.0, p[1] + 24.0], c, z + 0.5);
-            seg(&mut out, [p[0] + 18.0, p[1] + 24.0], [p[0], p[1] + 18.0], c, z + 0.5);
-            diamond(&mut out, p, 5.0, c);
-            if on {
-                square(&mut out, p, 9.0, lit);
-            }
         }
         // the start: an arrow along the heading
         arrow(&mut out, self.route.start.point(), self.route.start.yaw_deg, 60.0, mark);
@@ -1314,11 +1336,13 @@ impl SimulateTab {
             window = window.anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0));
         }
         let mut done: Option<bool> = None;
+        let dark = ctx.global_style().visuals.dark_mode;
         window.show(ctx, |ui| {
             action_fields(ui, &mut draft.action, &functions, wheel, "draft");
             if let Action::Custom { .. } = draft.action {
                 ui.checkbox(&mut draft.moves, "moves the robot (click where it ends next)");
             }
+            color_field(ui, &mut draft.color, default_color(draft.action.kind(), dark));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.button("Add").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -1518,12 +1542,19 @@ impl SimulateTab {
             ));
             let before = self.route.actions[i].action.clone();
             let mut edited = before.clone();
+            let mut color = self.route.actions[i].color;
+            let dark = ui.visuals().dark_mode;
             ui.add_enabled_ui(!locked, |ui| {
                 action_fields(ui, &mut edited, &functions, wheel, "inspect");
+                color_field(ui, &mut color, default_color(edited.kind(), dark));
             });
             if edited != before {
                 self.record();
                 self.route.actions[i].action = edited;
+            }
+            if color != self.route.actions[i].color {
+                self.record();
+                self.route.actions[i].color = color;
             }
             ui.horizontal(|ui| {
                 let mut lock = locked;
@@ -2115,6 +2146,24 @@ fn speed_field(ui: &mut egui::Ui, label: &str, speed: &mut f64, wheel_mm: f64) {
     });
 }
 
+/// The path's colour: a picker, and a way back to the kind's default.
+fn color_field(ui: &mut egui::Ui, color: &mut Option<[u8; 3]>, default: [u8; 3]) {
+    ui.horizontal(|ui| {
+        ui.weak("colour");
+        let mut rgb = color.unwrap_or(default);
+        if egui::color_picker::color_edit_button_srgb(ui, &mut rgb).changed() {
+            *color = Some(rgb);
+        }
+        if color.is_some() {
+            if ui.small_button("default").on_hover_text("the kind's own colour").clicked() {
+                *color = None;
+            }
+        } else {
+            ui.weak("default");
+        }
+    });
+}
+
 /// A move's end: continuous, or one of the stop kinds.
 fn end_fields(ui: &mut egui::Ui, then: &mut End, scope: &str) {
     let mut continuous = *then == End::Continue;
@@ -2596,7 +2645,77 @@ mod tests {
         assert_eq!(t.selected_marker, Some(0));
         assert!(Markers::file(&mdir, "practice-line").exists(), "saved with the map");
         assert!(t.hint().starts_with("marker junction:"), "{}", t.hint());
-        assert!(t.route_lines(false).len() > 20, "the flag is drawn");
+        let lines = t.route_lines(false);
+        assert!(lines.len() > 20, "the flag is drawn");
+        let lit = [0.9, 0.1, 0.1, 1.0];
+        assert_eq!(
+            lines[0].color, lit,
+            "the selected marker's flag comes first, so the route is drawn over it"
+        );
+        assert!(lines.iter().skip(4).any(|l| l.color != lit), "and the route follows");
+        t.selected_marker = None;
+        assert_eq!(t.route_lines(false)[0].color, [0.5, 0.2, 0.75, 1.0], "an unselected flag is purple");
+        t.selected_marker = Some(0);
+        // a path in a colour of the user's, and back to the kind's default
+        t.route.actions.push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]]).into());
+        assert!(
+            t.route_lines(false)
+                .iter()
+                .any(|l| l.color == [26.0 / 255.0, 89.0 / 255.0, 204.0 / 255.0, 1.0]),
+            "the default blue"
+        );
+        t.route.actions.last_mut().unwrap().color = Some([255, 0, 128]);
+        assert!(
+            t.route_lines(false).iter().any(|l| l.color == [1.0, 0.0, 128.0 / 255.0, 1.0]),
+            "the chosen colour"
+        );
+        // the end of a path carries an arrowhead the way the robot faces there: for a straight
+        // along +x ending at (100, 0), the wings reach back to (86, ±8) in the path's colour
+        let rgb_of = |c: [u8; 3]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0];
+        let pink = rgb_of([255, 0, 128]);
+        let near = |v: Vec3, p: [f64; 2]| (v.x as f64 - p[0]).abs() < 1e-3 && (v.y as f64 - p[1]).abs() < 1e-3;
+        let wing = |lines: &[Line], tip: [f64; 2], back: [f64; 2], c: [f32; 4]| {
+            lines
+                .iter()
+                .any(|l| l.color == c && ((near(l.a, tip) && near(l.b, back)) || (near(l.a, back) && near(l.b, tip))))
+        };
+        let lines = t.route_lines(false);
+        assert!(wing(&lines, [100.0, 0.0], [86.0, 8.0], pink), "left wing");
+        assert!(wing(&lines, [100.0, 0.0], [86.0, -8.0], pink), "right wing");
+        assert!(wing(&lines, [86.0, 8.0], [86.0, -8.0], pink), "and the base closes the head");
+        // a curve's head follows the arc's end tangent: a quarter circle from (100, 0) to
+        // (200, 100) bending left ends heading +y, so the wings reach back to (∓8, 86)
+        t.route
+            .actions
+            .push(Action::placed("curve", &[[100.0, 0.0], [200.0, 100.0]]).into());
+        let lines = t.route_lines(false);
+        let green = [26.0 / 255.0, 140.0 / 255.0, 64.0 / 255.0, 1.0];
+        let end_heading = t.steps().last().unwrap().end.yaw_deg;
+        let (c, s) = (end_heading.to_radians().cos(), end_heading.to_radians().sin());
+        let back = [200.0 - c * 14.0, 100.0 - s * 14.0];
+        assert!(
+            wing(&lines, [200.0, 100.0], [back[0] - s * 8.0, back[1] + c * 8.0], green),
+            "the curve's head points along its end heading {end_heading}"
+        );
+        // a turn shows its heading with the arrow it already has (a shaft and the same closed
+        // head) plus the square on its point: no second head
+        let was_selected = t.selected.take();
+        let before = t.route_lines(false);
+        t.route
+            .actions
+            .push(Action::placed("turn", &[[200.0, 100.0], [200.0, 200.0]]).into());
+        let after = t.route_lines(false);
+        let extra: Vec<_> = after.iter().filter(|l| !before.contains(l)).collect();
+        assert_eq!(extra.len(), 8, "shaft + 3 head segments + 4 square sides: {extra:?}");
+        assert!(
+            wing(&after, [200.0, 160.0], [192.0, 146.0], rgb_of([217, 115, 0])),
+            "the turn's head at its arrow tip"
+        );
+        t.route.actions.truncate(t.route.actions.len() - 3);
+        t.selected = was_selected;
+        assert_eq!(default_color("curve", true), [102, 230, 128]);
+        assert_eq!(default_color("turn", false), default_color("custom", false));
+        t.route.actions.pop();
         assert!(t.route_labels(&cam, 800.0, 600.0).iter().any(|l| l.1 == "junction"));
         // a route click near it snaps to it
         t.arm("straight");
@@ -2929,7 +3048,8 @@ mod tests {
                 (w, h),
                 &crate::viewport::Scene {
                     items: &draw.items,
-                    lines: &lines,
+                    lines: &[],
+                    top_lines: &lines,
                     ghost: &[],
                     overlay: &[],
                     background: [0.0, 0.0, 0.0, 1.0],
@@ -3270,7 +3390,8 @@ mod tests {
             (64, 48),
             &crate::viewport::Scene {
                 items: &items,
-                lines: &lines,
+                lines: &[],
+                top_lines: &lines,
                 ghost: &dragged.ghost,
                 overlay: &[],
                 background: [0.0; 4],
