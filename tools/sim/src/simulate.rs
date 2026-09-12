@@ -5,6 +5,7 @@
 use crate::assembly::Document;
 use crate::bundle::Bundle;
 use crate::geometry;
+use crate::markers::{Marker, Markers};
 use crate::route::{self, Action, End, Handle, KINDS, Point, Pose2, Route};
 use crate::sim::{ChassisInfo, Event, Pose, Scene, SimProcess, WorldEntry};
 use crate::viewport::{DrawItem, Line, Viewport};
@@ -37,6 +38,7 @@ impl Placing {
         }
         let ask = KINDS.iter().find(|k| k.0 == self.kind).map(|k| k.2).unwrap_or("");
         let step = match (self.kind, self.points.len()) {
+            ("marker", _) => "click where it goes; a name follows",
             ("straight" | "curve", 0) => "click where it starts",
             ("straight" | "curve", _) => "click where it ends",
             ("turn", 0) => "click where it turns",
@@ -59,6 +61,8 @@ pub struct Draft {
 
 /// How many undo steps are kept.
 const HISTORY: usize = 60;
+/// How long a click's marker stays on the map.
+const CLICK_MARKER_FOR: std::time::Duration = std::time::Duration::from_millis(600);
 
 /// What one frame of the Simulate view draws.
 #[derive(Default)]
@@ -104,6 +108,17 @@ pub struct SimulateTab {
     pub draft: Option<Draft>,
     /// The pointer on the map, for the rubber band while placing.
     pub hover: Option<Point>,
+    /// The last click on the map and when it landed: a marker shows there briefly.
+    last_click: Option<(Point, std::time::Instant)>,
+    /// The map's markers: named points kept per map on this machine.
+    pub markers: Markers,
+    /// Where they are kept; tests point this at a scratch directory.
+    pub markers_dir: std::path::PathBuf,
+    pub selected_marker: Option<usize>,
+    /// A freshly placed marker awaiting its name: where, the name so far,
+    /// and where its popup opens.
+    pub marker_draft: Option<(Point, String, Option<egui::Pos2>)>,
+    marker_dragging: Option<usize>,
     /// Where the chassis was put (dragged or typed); applied after every load.
     placed: Option<Pose2>,
     /// A translucent chassis where a drag would put it: under the
@@ -163,6 +178,12 @@ impl SimulateTab {
             placing: None,
             draft: None,
             hover: None,
+            last_click: None,
+            markers: Markers::empty(""),
+            markers_dir: crate::markers::data_dir(),
+            selected_marker: None,
+            marker_draft: None,
+            marker_dragging: None,
             placed: None,
             ghost: None,
             dragging: None,
@@ -309,6 +330,17 @@ impl SimulateTab {
                         s.bodies.len()
                     ];
                     self.route.world = self.world.clone();
+                    if self.markers.world != self.world {
+                        // the markers kept for this map on this machine come back with it
+                        self.markers = match Markers::load(&self.markers_dir, &self.world) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                self.message = e;
+                                Markers::empty(&self.world)
+                            }
+                        };
+                        self.selected_marker = None;
+                    }
                     match (self.placed, s.chassis.as_ref()) {
                         (Some(p), _) => {
                             // the server put the robot at the assembly's spawn; the user's place wins
@@ -524,17 +556,117 @@ impl SimulateTab {
         });
     }
 
+    /// A click landed on the map at `p`: a marker shows there for a moment.
+    pub fn note_click(&mut self, p: Point) {
+        self.last_click = Some((p, std::time::Instant::now()));
+    }
+
+    /// Where the click marker is, if the last click is recent enough.
+    pub fn click_marker(&self) -> Option<Point> {
+        self.click_marker_at(std::time::Instant::now())
+    }
+
+    pub fn click_marker_at(&self, now: std::time::Instant) -> Option<Point> {
+        let (p, at) = self.last_click?;
+        (now.duration_since(at) < CLICK_MARKER_FOR).then_some(p)
+    }
+
     /// Drop the tool and any popup.
     pub fn cancel(&mut self) {
         self.placing = None;
         self.draft = None;
+        self.marker_draft = None;
     }
 
-    /// Where a click snaps: the chassis's start and every action's end.
+    /// Where a click snaps: the chassis's start, every action's end, and
+    /// the map's markers.
     fn snap_targets(&self) -> Vec<Point> {
         let mut v = vec![self.route.start.point()];
         v.extend(self.route.actions.iter().map(|i| i.action.end()));
+        v.extend(self.markers.points());
         v
+    }
+
+    // ---------------------------------------------------------- markers
+
+    fn save_markers(&mut self) {
+        if let Err(e) = self.markers.save(&self.markers_dir) {
+            self.message = e;
+        }
+    }
+
+    /// The named marker in the popup joins the map's markers, selected,
+    /// and the map's file is updated.
+    pub fn commit_marker_draft(&mut self) {
+        let Some((at, name, _)) = self.marker_draft.take() else { return };
+        let name = if name.trim().is_empty() {
+            self.markers.next_name()
+        } else {
+            name.trim().to_string()
+        };
+        self.markers.markers.push(Marker { name, at });
+        self.selected_marker = Some(self.markers.markers.len() - 1);
+        self.selected = None;
+        self.save_markers();
+    }
+
+    pub fn rename_marker(&mut self, i: usize, name: &str) {
+        if let Some(m) = self.markers.markers.get_mut(i)
+            && m.name != name
+        {
+            m.name = name.to_string();
+            self.save_markers();
+        }
+    }
+
+    pub fn remove_selected_marker(&mut self) {
+        if let Some(i) = self.selected_marker.take()
+            && i < self.markers.markers.len()
+        {
+            self.markers.markers.remove(i);
+            self.save_markers();
+        }
+    }
+
+    /// The marker under a screen point, within the handle distance.
+    pub fn marker_at(&self, cam: &crate::viewport::Camera, px: f32, py: f32, w: f32, h: f32) -> Option<usize> {
+        self.scene.as_ref()?;
+        let at = glam::Vec2::new(px, py);
+        self.markers
+            .markers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| {
+                let sp = cam.project(Vec3::new(m.at[0] as f32, m.at[1] as f32, 3.0), w, h)?;
+                let d = (sp - at).length();
+                (d <= HANDLE_PX).then_some((d, i))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, i)| i)
+    }
+
+    pub fn begin_marker_drag(&mut self, i: usize) -> bool {
+        if i >= self.markers.markers.len() {
+            return false;
+        }
+        self.marker_dragging = Some(i);
+        self.selected_marker = Some(i);
+        self.selected = None;
+        true
+    }
+
+    pub fn drag_marker(&mut self, x_mm: f64, y_mm: f64) {
+        if let Some(i) = self.marker_dragging
+            && let Some(m) = self.markers.markers.get_mut(i)
+        {
+            m.at = [(x_mm * 10.0).round() / 10.0, (y_mm * 10.0).round() / 10.0];
+        }
+    }
+
+    pub fn end_marker_drag(&mut self) {
+        if self.marker_dragging.take().is_some() {
+            self.save_markers();
+        }
     }
 
     /// A click on the map while a tool is armed: the point joins the
@@ -544,6 +676,10 @@ impl SimulateTab {
     pub fn map_click(&mut self, x_mm: f64, y_mm: f64, tol_mm: f64) -> bool {
         let Some(mut placing) = self.placing.take() else { return false };
         let p = [(x_mm * 10.0).round() / 10.0, (y_mm * 10.0).round() / 10.0];
+        if placing.kind == "marker" {
+            self.marker_draft = Some((p, self.markers.next_name(), None));
+            return true;
+        }
         if let Some(i) = placing.for_end {
             if i < self.route.actions.len() {
                 self.record();
@@ -591,7 +727,7 @@ impl SimulateTab {
     /// `tol_mm`; nothing there clears the selection. Returns whether one
     /// was hit.
     pub fn select_at(&mut self, p: Point, tol_mm: f64) -> bool {
-        let hit = self
+        let action = self
             .route
             .actions
             .iter()
@@ -604,15 +740,31 @@ impl SimulateTab {
                         .map(|(_, h)| ((h[0] - p[0]).powi(2) + (h[1] - p[1]).powi(2)).sqrt())
                         .fold(f64::INFINITY, f64::min),
                 );
-                // a marker (stop, turn, call) wins over a path that ends on it: distances
+                // a mark (stop, turn, call) wins over a path that ends on it: distances
                 // within a tenth of a millimetre count as the same
                 (d, (d * 10.0).round() as i64, item.action.path().len() > 1, i)
             })
             .filter(|(d, _, _, _)| *d <= tol_mm)
             .min_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)))
-            .map(|(_, _, _, i)| i);
-        self.selected = hit;
-        hit.is_some()
+            .map(|(d, _, _, i)| (d, i));
+        let marker = self.markers.nearest(p, tol_mm);
+        match (marker, action) {
+            (Some((mi, dm)), a) if a.is_none_or(|(da, _)| dm <= da) => {
+                self.selected_marker = Some(mi);
+                self.selected = None;
+                true
+            }
+            (_, Some((_, ai))) => {
+                self.selected = Some(ai);
+                self.selected_marker = None;
+                true
+            }
+            _ => {
+                self.selected = None;
+                self.selected_marker = None;
+                false
+            }
+        }
     }
 
     pub fn remove_action(&mut self, i: usize) {
@@ -859,6 +1011,12 @@ impl SimulateTab {
         if self.draft.is_some() {
             return "set the action's parameters in the popup".into();
         }
+        if self.marker_draft.is_some() {
+            return "name the marker in the popup".into();
+        }
+        if let Some(m) = self.selected_marker.and_then(|i| self.markers.markers.get(i)) {
+            return format!("marker {}: drag it · Delete removes it · rename it in the panel", m.name);
+        }
         match self.selected {
             Some(i) if self.is_locked(i) => format!("action {} is locked · ⌘⇧L unlocks", i + 1),
             Some(i) => format!(
@@ -870,25 +1028,50 @@ impl SimulateTab {
         }
     }
 
-    /// The map's labels: each action's number at its start (with a lock
-    /// when it is locked), in view pixels.
+    /// The map's labels, in view pixels: each action's number at its
+    /// start (with a lock when it is locked), its key parameters beside
+    /// its path, and — while a placement is in progress — the parameters
+    /// of what the next click would make, beside the rubber band.
     pub fn route_labels(&self, cam: &crate::viewport::Camera, w: f32, h: f32) -> Vec<(glam::Vec2, String)> {
         if self.scene.is_none() {
             return vec![];
         }
-        self.route
-            .actions
-            .iter()
-            .enumerate()
-            .filter_map(|(i, item)| {
-                let s = item.action.start();
-                let sp = cam.project(Vec3::new(s[0] as f32, s[1] as f32, 3.0), w, h)?;
-                Some((
+        let on_screen = |p: Point| cam.project(Vec3::new(p[0] as f32, p[1] as f32, 3.0), w, h);
+        let mut out = Vec::new();
+        for (i, item) in self.route.actions.iter().enumerate() {
+            if let Some(sp) = on_screen(item.action.start()) {
+                out.push((
                     sp + glam::Vec2::new(8.0, -8.0),
                     format!("{}{}", i + 1, if item.locked { " 🔒" } else { "" }),
-                ))
-            })
-            .collect()
+                ));
+            }
+            if let Some(mp) = on_screen(item.action.label_point()) {
+                out.push((mp + glam::Vec2::new(8.0, 16.0), item.action.brief()));
+            }
+        }
+        for m in &self.markers.markers {
+            if let Some(sp) = on_screen([m.at[0], m.at[1] + 30.0]) {
+                out.push((sp + glam::Vec2::new(6.0, -2.0), m.name.clone()));
+            }
+        }
+        if let (Some(p), Some(hover)) = (&self.placing, self.hover) {
+            if let Some(i) = p.for_end {
+                if let Some(item) = self.route.actions.get(i) {
+                    let s = item.action.start();
+                    let mid = [(s[0] + hover[0]) / 2.0, (s[1] + hover[1]) / 2.0];
+                    let d = ((hover[0] - s[0]).powi(2) + (hover[1] - s[1]).powi(2)).sqrt();
+                    if let Some(mp) = on_screen(mid) {
+                        out.push((mp + glam::Vec2::new(8.0, 16.0), format!("moves {} mm", d.round())));
+                    }
+                }
+            } else if let Some(first) = p.points.first() {
+                let preview = Action::placed(p.kind, &[*first, hover]);
+                if let Some(mp) = on_screen(preview.label_point()) {
+                    out.push((mp + glam::Vec2::new(8.0, 16.0), preview.brief()));
+                }
+            }
+        }
+        out
     }
 
     /// The route drawn on the map: the start's heading, the drives that
@@ -1012,22 +1195,65 @@ impl SimulateTab {
                 square(&mut out, a.end(), 4.0, color);
             }
         }
-        // a placement in progress: what the next click would make
-        if let (Some(p), Some(hover)) = (&self.placing, self.hover) {
-            if let Some(i) = p.for_end {
-                if let Some(item) = self.route.actions.get(i) {
-                    dashed(&mut out, item.action.start(), hover, mark);
+        let circle = |out: &mut Vec<Line>, p: Point, r: f64, color: [f32; 4]| {
+            for k in 0..8 {
+                let (a0, a1) = (k as f64 * std::f64::consts::FRAC_PI_4, (k + 1) as f64 * std::f64::consts::FRAC_PI_4);
+                seg(
+                    out,
+                    [p[0] + r * a0.cos(), p[1] + r * a0.sin()],
+                    [p[0] + r * a1.cos(), p[1] + r * a1.sin()],
+                    color,
+                    z + 0.5,
+                );
+            }
+        };
+        let crosshair = |out: &mut Vec<Line>, p: Point, r: f64, color: [f32; 4]| {
+            seg(out, [p[0] - r, p[1]], [p[0] + r, p[1]], color, z + 0.5);
+            seg(out, [p[0], p[1] - r], [p[0], p[1] + r], color, z + 0.5);
+        };
+        // a placement in progress: a marker on every point clicked so far, and what the next
+        // click would make, following the pointer
+        if let Some(p) = &self.placing {
+            for pt in &p.points {
+                crosshair(&mut out, *pt, 14.0, mark);
+                circle(&mut out, *pt, 8.0, mark);
+            }
+            if let Some(hover) = self.hover {
+                if let Some(i) = p.for_end {
+                    if let Some(item) = self.route.actions.get(i) {
+                        dashed(&mut out, item.action.start(), hover, mark);
+                        circle(&mut out, hover, 6.0, mark);
+                    }
+                } else if let Some(first) = p.points.first() {
+                    let preview = Action::placed(p.kind, &[*first, hover]);
+                    for w in preview.path().windows(2) {
+                        seg(&mut out, w[0], w[1], mark, z);
+                    }
+                    if let Action::Turn { at, heading_deg, .. } = &preview {
+                        arrow(&mut out, *at, *heading_deg, route::TURN_HANDLE_MM, mark);
+                    }
+                    circle(&mut out, hover, 6.0, mark);
+                } else {
+                    square(&mut out, hover, 6.0, mark);
                 }
-            } else if let Some(first) = p.points.first() {
-                let preview = Action::placed(p.kind, &[*first, hover]);
-                for w in preview.path().windows(2) {
-                    seg(&mut out, w[0], w[1], mark, z);
-                }
-                if let Action::Turn { at, heading_deg, .. } = &preview {
-                    arrow(&mut out, *at, *heading_deg, route::TURN_HANDLE_MM, mark);
-                }
-            } else {
-                square(&mut out, hover, 6.0, mark);
+            }
+        }
+        // the last click, wherever it landed
+        if let Some(pt) = self.click_marker() {
+            circle(&mut out, pt, 16.0, mark);
+        }
+        // the map's markers: a flag on a pole, the selected one lit with a handle
+        let marker_c = if dark { [0.85, 0.6, 1.0, 1.0] } else { [0.5, 0.2, 0.75, 1.0] };
+        for (i, m) in self.markers.markers.iter().enumerate() {
+            let on = self.selected_marker == Some(i);
+            let c = if on { lit } else { marker_c };
+            let p = m.at;
+            seg(&mut out, p, [p[0], p[1] + 30.0], c, z + 0.5);
+            seg(&mut out, [p[0], p[1] + 30.0], [p[0] + 18.0, p[1] + 24.0], c, z + 0.5);
+            seg(&mut out, [p[0] + 18.0, p[1] + 24.0], [p[0], p[1] + 18.0], c, z + 0.5);
+            diamond(&mut out, p, 5.0, c);
+            if on {
+                square(&mut out, p, 9.0, lit);
             }
         }
         // the start: an arrow along the heading
@@ -1035,9 +1261,48 @@ impl SimulateTab {
         out
     }
 
+    /// The popup for a freshly placed marker: its name, then Add (Enter)
+    /// or Cancel.
+    pub fn marker_draft_ui(&mut self, ctx: &egui::Context) {
+        let Some((at, mut name, pos)) = self.marker_draft.take() else {
+            return;
+        };
+        let mut window = egui::Window::new("New marker").collapsible(false).resizable(false);
+        window = match pos {
+            Some(p) => window.default_pos(p),
+            None => window.anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)),
+        };
+        let mut done: Option<bool> = None;
+        window.show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.weak("name");
+                ui.add(egui::TextEdit::singleline(&mut name).desired_width(140.0)).request_focus();
+            });
+            ui.weak(format!("at ({}, {}) mm · kept with this map", at[0].round(), at[1].round()));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Add").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    done = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    done = Some(false);
+                }
+            });
+        });
+        match done {
+            Some(true) => {
+                self.marker_draft = Some((at, name, pos));
+                self.commit_marker_draft();
+            }
+            Some(false) => {}
+            None => self.marker_draft = Some((at, name, pos)),
+        }
+    }
+
     /// The popup for a freshly placed action: its parameters, then Add
     /// (Enter) or Cancel.
     pub fn draft_ui(&mut self, ctx: &egui::Context) {
+        self.marker_draft_ui(ctx);
         let Some(mut draft) = self.draft.take() else { return };
         let functions = self.route.functions();
         let wheel = self.chassis().map(|c| c.wheel_diameter_mm).unwrap_or(0.0);
@@ -1312,6 +1577,57 @@ impl SimulateTab {
                 self.clear_route();
             }
         });
+        ui.add_space(6.0);
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.strong("Markers").on_hover_text(format!(
+                "named points kept with this map on this machine:\n{}",
+                Markers::file(&self.markers_dir, &self.world).display()
+            ));
+            let armed = self.placing.as_ref().is_some_and(|p| p.kind == "marker");
+            if ui
+                .add_enabled(has_map, egui::Button::selectable(armed, "◉ Marker"))
+                .on_hover_text("click the map where it goes; a name follows")
+                .clicked()
+            {
+                if armed {
+                    self.cancel();
+                } else {
+                    self.arm("marker");
+                }
+            }
+            ui.weak("route clicks snap to them");
+        });
+        let mut rename: Option<(usize, String)> = None;
+        let mut remove_marker = None;
+        let mut select_marker = None;
+        for (i, m) in self.markers.markers.iter().enumerate() {
+            let on = self.selected_marker == Some(i);
+            ui.horizontal(|ui| {
+                if ui.selectable_label(on, "◉").clicked() {
+                    select_marker = Some(i);
+                }
+                let mut name = m.name.clone();
+                if ui.add(egui::TextEdit::singleline(&mut name).desired_width(120.0)).changed() {
+                    rename = Some((i, name));
+                }
+                ui.weak(format!("({}, {}) mm", m.at[0].round(), m.at[1].round()));
+                if ui.small_button("×").on_hover_text("remove").clicked() {
+                    remove_marker = Some(i);
+                }
+            });
+        }
+        if let Some(i) = select_marker {
+            self.selected_marker = Some(i);
+            self.selected = None;
+        }
+        if let Some((i, name)) = rename {
+            self.rename_marker(i, &name);
+        }
+        if let Some(i) = remove_marker {
+            self.selected_marker = Some(i);
+            self.remove_selected_marker();
+        }
         ui.checkbox(&mut self.show_definitions, "Definitions (what custom actions call)");
         if self.show_definitions {
             ui.add(
@@ -2019,11 +2335,30 @@ mod tests {
             "{}",
             t.hint()
         );
+        let bare = t.route_lines(false).len();
+        t.hover = Some([-300.0, 0.0]);
+        assert!(t.route_lines(false).len() > bare, "the pointer is marked before the first click");
         assert!(t.map_click(-540.0, -146.0, 20.0));
         assert_eq!(t.placing.as_ref().unwrap().points, vec![[-547.0, -150.0]], "snapped to the start");
         assert!(t.hint().contains("click where it ends"));
+        t.hover = None;
+        let marked = t.route_lines(false).len();
+        assert!(marked >= bare + 10, "the clicked start is marked (crosshair + circle)");
         t.hover = Some([-547.0, 0.0]);
-        assert!(t.route_lines(false).len() > 3, "the rubber band");
+        assert!(t.route_lines(false).len() > marked + 8, "the rubber band and the pointer's circle");
+        let cam = crate::viewport::Camera {
+            target: Vec3::new(-400.0, 100.0, 0.0),
+            distance: 1500.0,
+            ..crate::viewport::Camera::top_down()
+        };
+        let live: Vec<String> = t.route_labels(&cam, 800.0, 600.0).into_iter().map(|l| l.1).collect();
+        assert_eq!(live, vec!["150 mm".to_string()], "the length follows the pointer");
+        // every click on the map leaves a marker for a moment
+        t.note_click([-547.0, 0.0]);
+        let now = std::time::Instant::now();
+        assert_eq!(t.click_marker_at(now), Some([-547.0, 0.0]));
+        assert_eq!(t.click_marker_at(now + CLICK_MARKER_FOR), None);
+        assert!(t.route_lines(false).len() > marked + 16, "the click's ring");
         assert!(t.map_click(-547.04, 100.02, 20.0));
         assert!(t.placing.is_none());
         assert_eq!(t.hint(), "set the action's parameters in the popup");
@@ -2101,15 +2436,15 @@ mod tests {
         assert_eq!(last["cmd"], "run");
         let script = last["script"].as_str().unwrap().to_string();
         assert!(std::fs::read_to_string(&script).unwrap().contains("db.curve(100, 90)"));
-        // labels: one per action, the number at its start
-        let cam = crate::viewport::Camera {
-            target: Vec3::new(-400.0, 100.0, 0.0),
-            distance: 1500.0,
-            ..crate::viewport::Camera::top_down()
-        };
-        let labels = t.route_labels(&cam, 800.0, 600.0);
-        assert_eq!(labels.len(), 5);
-        assert_eq!(labels[0].1, "1");
+        // labels: each action's number at its start and its key parameters beside its path
+        let labels: Vec<String> = t.route_labels(&cam, 800.0, 600.0).into_iter().map(|l| l.1).collect();
+        assert_eq!(labels.len(), 10);
+        assert_eq!(labels[0], "1");
+        assert_eq!(labels[1], "250 mm");
+        assert_eq!(labels[3], "r 100 mm · 90°");
+        assert_eq!(labels[5], "stop");
+        assert_eq!(labels[7], "face 90°");
+        assert_eq!(labels[9], "line_follow(), 200 mm");
         // selection on the map: the straight by its path, nothing out on the mat
         assert!(t.select_at([-547.0, 0.0], 10.0));
         assert_eq!(t.selected, Some(0));
@@ -2131,7 +2466,7 @@ mod tests {
         // a locked action: shown as such, no drag, no delete; unlocked it goes
         t.set_locked(true);
         assert!(t.is_locked(1) && t.hint().contains("locked"));
-        assert_eq!(t.route_labels(&cam, 800.0, 600.0)[1].1, "2 🔒");
+        assert_eq!(t.route_labels(&cam, 800.0, 600.0)[2].1, "2 🔒");
         assert!(!t.begin_handle_drag(1, Handle::End, [0.0, 0.0]));
         t.remove_selected();
         assert_eq!(t.route.actions.len(), 6);
@@ -2241,6 +2576,107 @@ mod tests {
         assert!(t.message.contains("stop the program"), "{}", t.message);
         assert!(t.begin_chassis_drag().is_none());
         t.apply(state("stopped"));
+        // markers: placed by a click, named in a popup, kept with the map, snapped to, dragged
+        let mdir = std::env::temp_dir().join(format!("ob-tab-markers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&mdir);
+        t.markers_dir = mdir.clone();
+        t.arm("marker");
+        assert!(t.hint().starts_with("marker: click where it goes"), "{}", t.hint());
+        assert!(t.map_click(100.0, 100.0, 20.0));
+        assert!(t.placing.is_none() && t.draft.is_none());
+        assert_eq!(
+            t.marker_draft.as_ref().map(|d| (d.0, d.1.clone())),
+            Some(([100.0, 100.0], "M1".into()))
+        );
+        assert_eq!(t.hint(), "name the marker in the popup");
+        t.marker_draft.as_mut().unwrap().1 = "  junction ".into();
+        t.commit_marker_draft();
+        assert_eq!(t.markers.markers.len(), 1);
+        assert_eq!(t.markers.markers[0].name, "junction");
+        assert_eq!(t.selected_marker, Some(0));
+        assert!(Markers::file(&mdir, "practice-line").exists(), "saved with the map");
+        assert!(t.hint().starts_with("marker junction:"), "{}", t.hint());
+        assert!(t.route_lines(false).len() > 20, "the flag is drawn");
+        assert!(t.route_labels(&cam, 800.0, 600.0).iter().any(|l| l.1 == "junction"));
+        // a route click near it snaps to it
+        t.arm("straight");
+        assert!(t.map_click(104.0, 97.0, 20.0));
+        assert_eq!(t.placing.as_ref().unwrap().points, vec![[100.0, 100.0]]);
+        t.cancel();
+        // selection: the marker wins over an action at the same spot and clears the action
+        // selection; an action away from any marker is selected and clears the marker's
+        t.route.actions.push(Action::placed("stop", &[[100.0, 100.0]]).into());
+        t.route.actions.push(Action::placed("stop", &[[-300.0, 200.0]]).into());
+        t.selected = Some(0);
+        assert!(t.select_at([101.0, 100.0], 10.0));
+        assert_eq!((t.selected_marker, t.selected), (Some(0), None));
+        assert!(t.select_at([-300.0, 200.0], 10.0));
+        assert_eq!((t.selected_marker, t.selected), (None, Some(1)));
+        assert!(!t.select_at([-800.0, -800.0], 10.0));
+        assert_eq!((t.selected_marker, t.selected), (None, None));
+        t.route.actions.clear();
+        // drag, rename, remove — each kept in the file
+        assert!(t.begin_marker_drag(0));
+        t.drag_marker(150.0, 120.04);
+        t.end_marker_drag();
+        assert_eq!(t.markers.markers[0].at, [150.0, 120.0]);
+        assert!(!t.begin_marker_drag(7));
+        t.rename_marker(0, "gate");
+        t.rename_marker(0, "gate");
+        t.rename_marker(9, "nobody");
+        // the popups themselves, driven without a window: the marker's name on Enter
+        t.marker_draft = Some(([5.0, 6.0], "".into(), None));
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run_ui(input, |ctx| t.draft_ui(ctx));
+        assert_eq!(t.markers.markers.len(), 2);
+        assert_eq!(
+            t.markers.markers[1],
+            Marker {
+                name: "M1".into(),
+                at: [5.0, 6.0]
+            },
+            "an empty name takes the next free one"
+        );
+        t.selected_marker = Some(1);
+        t.remove_selected_marker();
+        // a place that cannot be written names the failure and keeps the marker in memory
+        let blocked = mdir.join("blocker");
+        std::fs::write(&blocked, "x").unwrap();
+        t.markers_dir = blocked.clone();
+        t.marker_draft = Some(([7.0, 8.0], "x".into(), None));
+        t.commit_marker_draft();
+        assert_eq!(t.markers.markers.len(), 2);
+        assert!(t.message.contains("could not"), "{}", t.message);
+        t.selected_marker = Some(1);
+        t.remove_selected_marker();
+        t.markers_dir = mdir.clone();
+        t.message.clear();
+        let mut other = SimulateTab::new(None);
+        other.markers_dir = mdir.clone();
+        other.world = "practice-line".into();
+        other.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        assert_eq!(
+            other.markers.markers,
+            vec![Marker {
+                name: "gate".into(),
+                at: [150.0, 120.0]
+            }],
+            "back with the map"
+        );
+        t.selected_marker = Some(0);
+        t.remove_selected_marker();
+        assert!(t.markers.markers.is_empty() && t.selected_marker.is_none());
+        assert!(Markers::load(&mdir, "practice-line").unwrap().markers.is_empty());
+        t.remove_selected_marker();
+        let _ = std::fs::remove_dir_all(&mdir);
         // save and load, with a route for another map
         let dir = std::env::temp_dir().join(format!("ob-tab-route-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

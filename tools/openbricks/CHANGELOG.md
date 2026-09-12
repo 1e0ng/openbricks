@@ -3,6 +3,35 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.11.0 — placing a path shows what it does, and markers on the map
+
+While a tool is armed, every click on the map leaves a marker (a
+ring where it landed, a crosshair on each point of the action being
+placed), and after the first click the line — or the arc, or the
+turn's heading arrow — follows the pointer with its length (or radius
+and angle, or heading) written beside it. Once placed, each action
+keeps that label next to its path, on a backing so it reads over the
+mat, alongside its number.
+
+**Markers.** Named points on a map — a corner of the mat, a mission
+object, a line junction — placed with **◉ Marker** (click the map,
+name it in the popup), shown as flags with their names, dragged to
+move, renamed or removed in the panel. Route clicks snap to them, so
+a path can start or end exactly on one. They are kept with the map on
+this machine (`~/.local/share/openbricks/markers/<map>.json`, or
+`$OPENBRICKS_DATA_DIR`), not in the route file, and come back
+whenever that map loads.
+
+- Tests: markers stored per map and reloaded, odd map names, foreign
+  and broken files refused loudly; the tab placing, naming, snapping
+  to, selecting (a marker wins a tie with an action), dragging,
+  renaming and removing a marker with the file following; the panel
+  driven headless through the tool, the popup, a snapped route click
+  and Delete. And: the click markers and the rubber band in the tab, the live label
+  and the placed labels for every kind, the click ring's timeout; the
+  panel driven headless through a pointer move after the first click
+  (the length follows) and the placed line carrying its length.
+
 ## 4.10.0 — `openbricks upload` in one round trip
 
 An upload used to spend four raw-paste execs on the hub — a firmware

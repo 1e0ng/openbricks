@@ -68,6 +68,8 @@ enum Drag {
     },
     /// An action's handle dragged on the map.
     RouteHandle,
+    /// A map marker dragged to a new spot.
+    Marker,
 }
 
 pub struct App {
@@ -1712,8 +1714,13 @@ impl App {
                 .map(local)
                 .or(response.interact_pointer_pos().map(local));
             self.drag = Drag::Pan;
+            let marker = origin.and_then(|(x, y)| self.simulate.marker_at(&cam, x, y, w, h));
             let handle = origin.and_then(|(x, y)| Some((self.simulate.route_handle_at(&cam, x, y, w, h)?, ground(x, y)?)));
-            if let Some(((i, handle), hit)) = handle {
+            if let Some(i) = marker {
+                if self.simulate.begin_marker_drag(i) {
+                    self.drag = Drag::Marker;
+                }
+            } else if let Some(((i, handle), hit)) = handle {
                 if self.simulate.begin_handle_drag(i, handle, [hit.x as f64, hit.y as f64]) {
                     self.drag = Drag::RouteHandle;
                 }
@@ -1744,9 +1751,13 @@ impl App {
         {
             let tol = (15.0 * cam.units_per_px(h)) as f64;
             let p = [hit.x as f64, hit.y as f64];
+            self.simulate.note_click(p);
             if self.simulate.map_click(p[0], p[1], tol) {
                 if let Some(d) = self.simulate.draft.as_mut() {
                     d.at = Some(pos + egui::vec2(12.0, 12.0));
+                }
+                if let Some(m) = self.simulate.marker_draft.as_mut() {
+                    m.2 = Some(pos + egui::vec2(12.0, 12.0));
                 }
             } else {
                 self.simulate.select_at(p, tol);
@@ -1790,12 +1801,20 @@ impl App {
                     self.simulate.drag_handle(hit.x as f64, hit.y as f64);
                 }
             }
+            Drag::Marker if response.dragged() => {
+                if let Some((x, y)) = response.interact_pointer_pos().map(local)
+                    && let Some(hit) = ground(x, y)
+                {
+                    self.simulate.drag_marker(hit.x as f64, hit.y as f64);
+                }
+            }
             _ => {}
         }
         if response.drag_stopped() {
             match self.drag {
                 Drag::Chassis { .. } => self.simulate.end_chassis_drag(),
                 Drag::RouteHandle => self.simulate.end_handle_drag(),
+                Drag::Marker => self.simulate.end_marker_drag(),
                 _ => {}
             }
             self.drag = Drag::None;
@@ -1823,14 +1842,19 @@ impl App {
                 )
             });
             if esc {
-                if self.simulate.placing.is_some() || self.simulate.draft.is_some() {
+                if self.simulate.placing.is_some() || self.simulate.draft.is_some() || self.simulate.marker_draft.is_some() {
                     self.simulate.cancel();
                 } else {
                     self.simulate.selected = None;
+                    self.simulate.selected_marker = None;
                 }
             }
             if del {
-                self.simulate.remove_selected();
+                if self.simulate.selected_marker.is_some() {
+                    self.simulate.remove_selected_marker();
+                } else {
+                    self.simulate.remove_selected();
+                }
             }
             if undo {
                 self.simulate.undo();
@@ -1873,20 +1897,29 @@ impl App {
                 ui.visuals().weak_text_color(),
             );
         }
-        // each action's number on the map, and the popup of a freshly placed one
-        let label_color = if dark {
-            egui::Color32::from_rgb(255, 210, 120)
+        // each action's number and parameters on the map (on a backing so they read over the
+        // mat), and the popup of a freshly placed one
+        let (label_color, label_bg) = if dark {
+            (
+                egui::Color32::from_rgb(255, 210, 120),
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 150),
+            )
         } else {
-            egui::Color32::from_rgb(140, 70, 0)
+            (
+                egui::Color32::from_rgb(140, 70, 0),
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+            )
         };
         for (p, text) in self.simulate.route_labels(&cam, w, h) {
-            ui.painter().text(
-                rect.min + egui::vec2(p.x, p.y),
-                egui::Align2::LEFT_BOTTOM,
-                text,
-                egui::FontId::proportional(13.0),
-                label_color,
-            );
+            let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(13.0), label_color);
+            let anchor = rect.min + egui::vec2(p.x, p.y);
+            let r = egui::Rect::from_min_size(anchor - egui::vec2(0.0, galley.size().y), galley.size()).expand(2.0);
+            ui.painter().rect_filled(r, 3.0, label_bg);
+            ui.painter().galley(r.min + egui::vec2(2.0, 2.0), galley, label_color);
+        }
+        if self.simulate.click_marker().is_some() || self.simulate.placing.is_some() {
+            // the click's ring fades out and the rubber band follows the pointer
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
         }
         self.simulate.draft_ui(ui.ctx());
         ui.painter().text(
@@ -2658,6 +2691,9 @@ mod tests {
         let Some(fake) = fake_server("route") else { return };
         let mut h = harness(&gpu, None);
         h.state_mut().simulate = SimulateTab::new_with_env(Some(fake.python.clone()), fake.env.clone());
+        let mdir = std::env::temp_dir().join(format!("ob-harness-markers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&mdir);
+        h.state_mut().simulate.markers_dir = mdir.clone();
         h.get_by_label("Simulate").click();
         let wait_for = |h: &mut Harness<'_, App>, f: &dyn Fn(&App) -> bool| {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -2736,9 +2772,35 @@ mod tests {
             "snapped to the start"
         );
         let ahead = [start.x_mm + hx * 250.0, start.y_mm + hy * 250.0];
+        // moving the pointer stretches the line from the start to the pointer, its length beside it
+        let midway = map(&h, [start.x_mm + hx * 120.0, start.y_mm + hy * 120.0]);
+        h.input_mut().events.push(Event::PointerMoved(midway));
+        steps(&mut h, 2);
+        let hover = h.state().simulate.hover.expect("the pointer is on the map");
+        assert!(
+            (hover[0] - start.x_mm - hx * 120.0).abs() < 4.0 && (hover[1] - start.y_mm - hy * 120.0).abs() < 4.0,
+            "{hover:?}"
+        );
+        let labels: Vec<String> = {
+            let app = h.state();
+            let r = app.view_rect;
+            app.simulate
+                .route_labels(&app.viewport.camera, r.width(), r.height())
+                .into_iter()
+                .map(|l| l.1)
+                .collect()
+        };
+        assert!(
+            labels.iter().any(|l| l
+                .strip_suffix(" mm")
+                .and_then(|v| v.parse::<f64>().ok())
+                .is_some_and(|v| (v - 120.0).abs() < 5.0)),
+            "{labels:?}"
+        );
         let at_ = map(&h, ahead);
         click(&mut h, at_);
         assert!(h.state().simulate.draft.is_some(), "the popup is up");
+        assert!(h.state().simulate.click_marker().is_some(), "the click is marked");
         steps(&mut h, 2);
         assert!(h.query_by_label("New straight").is_some());
         assert!(h.state().simulate.route.actions.is_empty());
@@ -2752,6 +2814,17 @@ mod tests {
             "{end0:?} vs {ahead:?}"
         );
         assert_eq!(h.state().simulate.selected, Some(0));
+        let labels: Vec<String> = {
+            let app = h.state();
+            let r = app.view_rect;
+            app.simulate
+                .route_labels(&app.viewport.camera, r.width(), r.height())
+                .into_iter()
+                .map(|l| l.1)
+                .collect()
+        };
+        assert_eq!(labels[0], "1");
+        assert!(labels[1].ends_with(" mm"), "the placed line carries its length: {labels:?}");
         // a curve from that end (snapped) to a point ahead and to the right, then a stop where it ends
         h.get_by_label("⌒ Curve").click();
         steps(&mut h, 2);
@@ -2854,6 +2927,88 @@ mod tests {
         h.key_press(Key::Escape);
         steps(&mut h, 2);
         assert!(h.state().simulate.placing.is_none());
+        // a marker: the tool, a click on the mat, a name in the popup; it is kept with the map,
+        // route clicks snap to it, and Delete removes it
+        h.get_by_label("◉ Marker").click();
+        steps(&mut h, 2);
+        let spot = [start.x_mm - hy * 300.0, start.y_mm + hx * 300.0];
+        let at_ = map(&h, spot);
+        click(&mut h, at_);
+        assert!(h.state().simulate.marker_draft.is_some(), "the name popup is up");
+        steps(&mut h, 2);
+        assert!(h.query_by_label("New marker").is_some());
+        h.get_by_label("Add").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.markers.markers.len(), 1);
+        let placed_at = h.state().simulate.markers.markers[0].at;
+        assert!(
+            (placed_at[0] - spot[0]).abs() < 4.0 && (placed_at[1] - spot[1]).abs() < 4.0,
+            "{placed_at:?}"
+        );
+        assert_eq!(h.state().simulate.markers.markers[0].name, "M1");
+        assert_eq!(h.state().simulate.selected_marker, Some(0));
+        assert!(crate::markers::Markers::file(&mdir, "practice-line").exists());
+        // dragging the flag moves the marker, and the file follows
+        let hs = map(&h, placed_at);
+        let there = map(&h, [placed_at[0] + hx * 80.0, placed_at[1] + hy * 80.0]);
+        press(&mut h, hs, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, hs + (there - hs).normalized() * 12.0, Modifiers::NONE);
+        assert!(matches!(h.state().drag, Drag::Marker), "the marker was grabbed");
+        drag_to(&mut h, there, Modifiers::NONE);
+        release(&mut h, there, PointerButton::Primary);
+        let moved = h.state().simulate.markers.markers[0].at;
+        assert!(
+            (moved[0] - placed_at[0] - hx * 80.0).abs() < 4.0 && (moved[1] - placed_at[1] - hy * 80.0).abs() < 4.0,
+            "{moved:?}"
+        );
+        assert_eq!(crate::markers::Markers::load(&mdir, "practice-line").unwrap().markers[0].at, moved);
+        let placed_at = moved;
+        // a second marker's popup, cancelled; a third, dropped with Escape
+        h.get_by_label("◉ Marker").click();
+        steps(&mut h, 2);
+        let at_ = map(&h, [placed_at[0] + hx * 200.0, placed_at[1] + hy * 200.0]);
+        click(&mut h, at_);
+        steps(&mut h, 2);
+        h.get_by_label("Cancel").click();
+        steps(&mut h, 2);
+        assert!(h.state().simulate.marker_draft.is_none());
+        assert_eq!(h.state().simulate.markers.markers.len(), 1);
+        h.get_by_label("◉ Marker").click();
+        steps(&mut h, 2);
+        click(&mut h, at_);
+        assert!(h.state().simulate.marker_draft.is_some());
+        h.key_press(Key::Escape);
+        steps(&mut h, 2);
+        assert!(h.state().simulate.marker_draft.is_none());
+        assert_eq!(h.state().simulate.markers.markers.len(), 1);
+        h.get_by_label("■ Stop").click();
+        steps(&mut h, 2);
+        let at_ = map(&h, [placed_at[0] + 6.0, placed_at[1] - 6.0]);
+        click(&mut h, at_);
+        assert_eq!(
+            h.state().simulate.draft.as_ref().map(|d| d.action.start()),
+            Some(placed_at),
+            "a route click near the marker snaps to it"
+        );
+        h.key_press(Key::Escape);
+        steps(&mut h, 2);
+        assert!(h.state().simulate.draft.is_none());
+        // an action's popup can be cancelled too
+        h.get_by_label("■ Stop").click();
+        steps(&mut h, 2);
+        let at_ = map(&h, [placed_at[0] - hx * 150.0, placed_at[1] - hy * 150.0]);
+        click(&mut h, at_);
+        steps(&mut h, 2);
+        assert!(h.query_by_label("New stop").is_some());
+        h.get_by_label("Cancel").click();
+        steps(&mut h, 2);
+        assert!(h.state().simulate.draft.is_none());
+        assert_eq!(h.state().simulate.route.actions.len(), 3);
+        h.state_mut().simulate.selected_marker = Some(0);
+        h.key_press(Key::Delete);
+        steps(&mut h, 2);
+        assert!(h.state().simulate.markers.markers.is_empty());
+        let _ = std::fs::remove_dir_all(&mdir);
         // definitions and the program
         h.get_by_label("Definitions (what custom actions call)").click();
         steps(&mut h, 2);

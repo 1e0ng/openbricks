@@ -9,6 +9,7 @@ mod bundle;
 mod editor;
 mod geometry;
 mod gizmo;
+mod markers;
 mod route;
 mod sim;
 mod simulate;
