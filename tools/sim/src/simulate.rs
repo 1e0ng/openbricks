@@ -292,7 +292,9 @@ impl SimulateTab {
                 Event::Frame { t_ms, poses } => {
                     self.t_ms = t_ms;
                     if poses.len() == self.poses.len() {
-                        self.poses = poses;
+                        // a body the physics has not placed yet (all zeros, or worse) stands at
+                        // the origin upright rather than vanishing into NaN
+                        self.poses = poses.into_iter().map(sane_pose).collect();
                     }
                 }
                 Event::Log { stream, text } => {
@@ -1367,6 +1369,21 @@ impl SimulateTab {
     }
 }
 
+/// A pose the renderer can use: a zero or non-finite quaternion becomes
+/// identity, a non-finite position the origin.
+fn sane_pose(p: Pose) -> Pose {
+    let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
+    let len2: f64 = p.quat.iter().map(|x| x * x).sum();
+    Pose {
+        pos: if finite(&p.pos) { p.pos } else { [0.0; 3] },
+        quat: if finite(&p.quat) && len2 > 1e-12 {
+            p.quat
+        } else {
+            [1.0, 0.0, 0.0, 0.0]
+        },
+    }
+}
+
 /// A small combo for a move's or a stop's end state.
 fn end_combo(ui: &mut egui::Ui, salt: (&str, usize), then: &mut End, choices: &[End]) {
     egui::ComboBox::from_id_salt(salt)
@@ -1735,6 +1752,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The run server's first frame after a load reports every body as
+    /// zeros until the physics has run a forward pass; such a frame
+    /// must not blank the view.
+    #[test]
+    fn a_frame_of_zero_quaternions_stands_every_body_upright_at_the_origin() {
+        let mut t = SimulateTab::new(None);
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        t.apply(Event::Frame {
+            t_ms: 0,
+            poses: vec![
+                Pose {
+                    pos: [0.0; 3],
+                    quat: [0.0; 4],
+                },
+                Pose {
+                    pos: [f64::NAN, 0.0, 0.0],
+                    quat: [f64::NAN, 0.0, 0.0, 0.0],
+                },
+            ],
+        });
+        assert_eq!(t.poses[0].quat, [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(t.poses[1], Pose::default());
+        let p = t.chassis_pose().unwrap();
+        assert!(p.x_mm == 0.0 && p.yaw_deg == 0.0, "{p:?}");
+        // a real pose passes through untouched
+        let real = Pose {
+            pos: [0.1, 0.2, 0.05],
+            quat: [std::f64::consts::FRAC_1_SQRT_2, 0.0, 0.0, std::f64::consts::FRAC_1_SQRT_2],
+        };
+        assert_eq!(sane_pose(real), real);
+    }
+
     #[test]
     fn a_map_chosen_mid_run_loads_once_the_run_has_stopped() {
         let mut t = SimulateTab::new(None);
@@ -1859,6 +1908,101 @@ mod tests {
         t.shutdown();
         assert!(t.process.is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every world the run server ships loads into the tab and draws:
+    /// the scene parses, the mat is found, every geom becomes an item,
+    /// and the view frames the mat. Needs the real runtime like the
+    /// end-to-end test.
+    #[test]
+    fn every_shipped_world_loads_and_draws() {
+        let Some(python) = std::env::var("OPENBRICKS_SIM_PYTHON").ok().filter(|p| !p.is_empty()) else {
+            eprintln!("OPENBRICKS_SIM_PYTHON is unset: skipping the shipped-worlds test");
+            return;
+        };
+        let Some((device, queue)) = test_device() else { return };
+        let mut vp = Viewport::new(&device, &queue);
+        let bundle_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../openbricks/openbricks_sim/bricks/technic_bundle.json.zlib");
+        let bundle = crate::bundle::load_bundle(&bundle_path).expect("the shipped brick bundle");
+        let mut t = SimulateTab::new(Some(python));
+        t.world = "empty".into();
+        t.ensure_loaded();
+        assert!(
+            pump_until(&mut t, 120, |t| !t.worlds.is_empty() && t.scene.is_some() && t.status == "loaded"),
+            "{} / {} / {:?}",
+            t.status,
+            t.message,
+            t.log
+        );
+        let aliases: Vec<String> = t.worlds.iter().map(|w| w.alias.clone()).filter(|a| a != "empty").collect();
+        assert!(aliases.len() >= 6, "{aliases:?}");
+        let mut renderer = test_renderer(&device);
+        let (w, h) = (400u32, 300u32);
+        let mut dark = Vec::new();
+        for alias in aliases {
+            let generation = t.scene_gen;
+            t.world = alias.clone();
+            t.reload();
+            assert!(
+                pump_until(&mut t, 180, |t| t.status == "loaded"
+                    && t.scene_gen > generation
+                    && t.route.world == alias),
+                "{alias}: {} / {} / {:?}",
+                t.status,
+                t.message,
+                t.log
+            );
+            let scene = t.scene.as_ref().unwrap();
+            let n = scene.geoms.len();
+            assert!(scene.geoms.iter().any(|g| g.kind == "plane"), "{alias}: a mat");
+            let started = Instant::now();
+            let draw = t.draw_items(&mut vp, &device, &queue, &bundle, false);
+            eprintln!("{alias}: {n} geoms drawn as {} items in {:?}", draw.items.len(), started.elapsed());
+            assert_eq!(draw.items.len(), n, "{alias}: every geom is drawn");
+            let (lo, hi) = t.frame_target().expect("the view frames the mat");
+            let complaints: Vec<&String> = t
+                .log
+                .iter()
+                .filter(|(s, x)| s == "server" && (x.starts_with("texture ") || x.starts_with("mesh broken")))
+                .map(|(_, x)| x)
+                .collect();
+            assert!(complaints.is_empty(), "{alias}: {complaints:?}");
+            // seen from above as the Simulate tab shows it: the mat covers the middle of the view
+            vp.camera = crate::viewport::Camera::top_down();
+            vp.camera.fit_plan(lo, hi, w as f32 / h as f32);
+            let lines = t.route_lines(false);
+            vp.render(
+                &device,
+                &queue,
+                &mut renderer,
+                (w, h),
+                &crate::viewport::Scene {
+                    items: &draw.items,
+                    lines: &lines,
+                    ghost: &[],
+                    overlay: &[],
+                    background: [0.0, 0.0, 0.0, 1.0],
+                },
+            );
+            let (_, _, px) = vp.read_pixels(&device, &queue).unwrap();
+            let lit = (0..h)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let i = ((y * w + x) * 4) as usize;
+                    px[i] as u32 + px[i + 1] as u32 + px[i + 2] as u32 > 30
+                })
+                .count();
+            eprintln!("{alias}: {lit} of {} pixels lit from above", w * h);
+            if let Some(dir) = std::env::var_os("OPENBRICKS_SIM_RENDER_DIR") {
+                let path = std::path::Path::new(&dir).join(format!("{alias}.png"));
+                image::save_buffer(&path, &px, w, h, image::ColorType::Rgba8).unwrap();
+            }
+            dark.push((alias.clone(), lit));
+        }
+        t.shutdown();
+        let failed: Vec<&(String, usize)> = dark.iter().filter(|(_, lit)| *lit <= (w * h / 3) as usize).collect();
+        assert!(failed.is_empty(), "the mat should fill the view from above: {failed:?}");
     }
 
     /// The real runtime: `OPENBRICKS_SIM_PYTHON` names an interpreter

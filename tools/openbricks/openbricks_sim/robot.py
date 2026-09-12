@@ -183,6 +183,12 @@ class SimRobot:
         # Raycasts from the chassis_dist site along body +X.
         self.distance_sensor = SimDistanceSensor(self.runtime)
 
+        # One forward pass so the derived state (xpos / xquat / site
+        # frames) reflects the spawn before anyone reads it: the run
+        # server's load frame is taken straight from here, and a fresh
+        # MjData reports every body as zeros until this runs.
+        mujoco.mj_forward(self.model, self.data)
+
     # ------------------------------------------------------------------
     # Time advancement helpers — thin wrappers over runtime.step() with
     # the kinds of conditions user scripts most often want.

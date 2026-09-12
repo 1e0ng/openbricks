@@ -158,6 +158,13 @@ class SessionTests(unittest.TestCase):
         frame = next(e for e in ev if e["ev"] == "frame")
         self.assertEqual(len(frame["bodies"]), len(scene["bodies"]))
         self.assertEqual(len(frame["bodies"][0]), 7)
+        # the load frame is a real pose set (a forward pass has run): the world body is
+        # upright at the origin and the chassis stands on its wheels at the spawn, not a
+        # row of zeros the viewer cannot draw
+        self.assertEqual(frame["bodies"][0][3:], [1.0, 0.0, 0.0, 0.0])
+        chassis = frame["bodies"][scene["bodies"].index("chassis")]
+        self.assertGreater(chassis[2], 0.0)
+        self.assertAlmostEqual(sum(q * q for q in chassis[3:]), 1.0, places=4)
         state = [e for e in ev if e["ev"] == "state"][-1]
         self.assertEqual(state["status"], "loaded")
         self.assertEqual(scene["meshes"], {})
