@@ -124,7 +124,10 @@ async def _await_confirmation(blink, link):
         if remaining <= 0:
             raise UploadError(run_mod._format_timeout(
                 link, blink._step, blink._buf))
-        await blink._fill(timeout=min(remaining, 5.0))
+        try:
+            await blink._fill(timeout=min(remaining, 5.0))
+        except run_mod.RunError as e:
+            raise UploadError(str(e))
 
 
 def _phases_line(total, phases):

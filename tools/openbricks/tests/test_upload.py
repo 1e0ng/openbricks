@@ -355,24 +355,104 @@ class UploadFlowTests(unittest.TestCase):
 
 class UploadRestoreFailureTests(UploadFlowTests):
     def test_raising_idle_restore_is_swallowed(self):
-        # _restore_idle_loop (the fallback when the staged program never
-        # reached the idle loop) failing must not mask the real error,
-        # and a successful upload never calls it at all.
-        fake = _ScriptedLink(self._standard_responses(
-            b"uploaded 59 bytes to '/program.mpy'\r\n",
-            fw_version=b"fwv=1.92.0\r\n"))
+        # _restore_idle_loop is the fallback when the staged program
+        # never reached the idle loop; it failing must not mask the
+        # real error. A successful upload never calls it at all.
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        fake = _ScriptedLink([
+            _BANNER,
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            b"fwv=1.92.0\r\n" + _CTRL_D,
+            b"OSError: [Errno 28] ENOSPC\r\n" + _CTRL_D + b">",
+        ])
+        restores = []
 
         async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         async def _bad_restore(link):
+            restores.append(1)
             raise RuntimeError("hub hung up first")
 
         with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
              patch.object(ul.run_mod, "_restore_idle_loop", _bad_restore), \
-             patch("sys.stdout", new_callable=io.StringIO):
-            rc = ul.run(_args(script=self.tmp.name))
-        self.assertEqual(rc, 0)
+             patch("sys.stdout", new_callable=io.StringIO), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(ul.UploadError) as ctx:
+                asyncio.run(ul._upload_async("RobotA", self.tmp.name, None, 5.0))
+        self.assertIn("ENOSPC", str(ctx.exception))
+        self.assertEqual(restores, [1])
+        self.assertTrue(fake.closed)
+
+    def test_a_silent_hub_after_the_paste_is_a_timeout_error(self):
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        fake = _ScriptedLink([
+            _BANNER,
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            b"fwv=1.92.0\r\n",
+            # then nothing: every read is empty
+        ])
+        fake.stats = lambda: {"connected": True, "notify_count": 3, "byte_count": 30,
+                              "last_byte_ago": 1.0, "uptime": 2.0}
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(ul.UploadError) as ctx:
+                asyncio.run(ul._upload_async("RobotA", self.tmp.name, None, 5.0))
+        self.assertIn("waiting for the upload confirmation", str(ctx.exception))
+
+    def test_a_hub_that_never_stops_talking_hits_the_deadline(self):
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+
+        class _Chatty(_ScriptedLink):
+            async def read(self, timeout=None):
+                if timeout == 0:
+                    return b""
+                if self._responses:
+                    return self._responses.pop(0)
+                return b"still printing\r\n"
+
+        fake = _Chatty([_BANNER, _R_SUPPORTED + _WINDOW_8K, _CTRL_D, b"fwv=1.92.0\r\n"])
+        fake.stats = lambda: {"connected": True, "notify_count": 3, "byte_count": 30,
+                              "last_byte_ago": 0.0, "uptime": 2.0}
+        clock = [1000.0]
+
+        def _monotonic():
+            clock[0] += 3.0      # every look at the clock is 3 s later
+            return clock[0]
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch.object(ul.time, "monotonic", _monotonic), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(ul.UploadError):
+                asyncio.run(ul._upload_async("RobotA", self.tmp.name, None, 5.0))
+
+    def test_a_program_that_does_not_report_its_version_is_an_error(self):
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        fake = _ScriptedLink([
+            _BANNER,
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            b"something else entirely\r\n",
+        ])
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(ul.run_mod.RunError) as ctx:
+                asyncio.run(ul._upload_async("RobotA", self.tmp.name, None, 5.0))
+        self.assertIn("did not report the firmware version", str(ctx.exception))
 
 
 class UploadInterruptTests(unittest.TestCase):

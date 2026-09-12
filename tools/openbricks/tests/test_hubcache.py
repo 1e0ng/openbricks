@@ -59,6 +59,14 @@ class HubCacheTests(unittest.TestCase):
             self.assertIsNone(hc.firmware_version("RobotA"))
             hc.forget("RobotA")
 
+    def test_forget_on_a_read_only_file_is_silent(self):
+        hc.remember_firmware("RobotA", "4.9.1")
+        path = os.path.join(self.dir, "hubs.json")
+        os.chmod(path, 0o444)
+        self.addCleanup(os.chmod, path, 0o644)
+        hc.forget("RobotA")     # cannot write: no exception
+        self.assertEqual(hc.firmware_version("RobotA"), (4, 9, 1))
+
     def test_default_dir_follows_xdg(self):
         with patch.dict(os.environ, {"XDG_CACHE_HOME": "/tmp/xdg"}, clear=False):
             os.environ.pop(hc.CACHE_ENV, None)

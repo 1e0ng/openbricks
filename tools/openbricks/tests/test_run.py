@@ -357,6 +357,57 @@ class RunFlowTests(unittest.TestCase):
         self.assertIn("predates precompiled", err.getvalue())
         self.assertIn("1.91.1", err.getvalue())
 
+    def test_a_re_flashed_hub_is_caught_in_session_and_gets_source(self):
+        # The cache says 1.92.0; the hub now runs 1.91.1: the staged
+        # program's guard refuses the .mpy, the host consumes the
+        # refusal, announces, and runs the source instead.
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        fake = _ScriptedLink([
+            _BANNER,
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,          # the .mpy program
+            b"fwv=1.91.1\r\n" + _CTRL_D,                  # its stdout ends at once
+            b"AssertionError: fwneedsrc\r\n" + _CTRL_D, b">",
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,          # the source program
+            b"fwv=1.91.1\r\nhello from hub\r\n" + _CTRL_D,
+            _CTRL_D,
+        ])
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        err = io.StringIO()
+        with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO) as out, \
+             patch("sys.stderr", err):
+            rc = run_mod.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"\x05A\x01"), 2)
+        self.assertIn(b"'/program.mpy'", joined)
+        self.assertIn(b"'/program.py'", joined)
+        self.assertIn("predates precompiled", err.getvalue())
+        self.assertIn("hello from hub", out.getvalue())
+        self.assertNotIn("fwv=", out.getvalue())
+        self.assertEqual(_hubcache.firmware_version("RobotA"), (1, 91, 1))
+
+    def test_a_remembered_hub_is_not_probed(self):
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        fake = _ScriptedLink(self._standard_responses(b"hi\r\n", probe=False))
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO) as out:
+            rc = run_mod.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"\x05A\x01"), 1, "one exec: no probe")
+        self.assertIn(b"fwneedsrc", joined)
+        self.assertIn("hi", out.getvalue())
+
     def test_happy_path_streams_stdout(self):
         fake = _ScriptedLink(self._standard_responses(
             b"hello from hub\r\n"))

@@ -76,6 +76,19 @@ class StartStopTests(unittest.TestCase):
         # the stack's default of 256 capped host writes at 253 bytes.
         self.assertEqual(_FakeBLE._mtu, 512)
 
+    def test_a_refused_mtu_is_logged_and_the_bridge_still_starts(self):
+        # The MTU is a preference; a stack that will not take it must
+        # cost nothing but a log line (the link then runs at the
+        # stack's default, slower but whole).
+        _activate_ble()
+        _FakeBLE._mtu_error = OSError("mtu: EINVAL")
+        ble_repl.start()
+        self.assertTrue(ble_repl.is_running())
+        self.assertIsNone(_FakeBLE._mtu)
+        self.assertTrue(any(e[1] == "mtu_config_err" for e in ble_repl._LOG),
+                        ble_repl._LOG[-5:])
+        self.assertEqual(_FakeBLE._adv_interval_us, 40_000, "still advertising")
+
     def test_start_calls_gatts_set_buffer_with_append_mode(self):
         # Append mode is critical: without it, back-to-back writes
         # from the central overwrite each other in the GATTS layer
