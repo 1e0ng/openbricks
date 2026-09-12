@@ -534,6 +534,19 @@ impl SimulateTab {
     }
 
     /// The route worked out from its start.
+    /// The heading the robot arrives at `p` with: the last action's end
+    /// heading when `p` is that end (the route start's before any action),
+    /// else the way the plan's drive there faces.
+    pub fn heading_at(&self, p: Point) -> f64 {
+        let last = self.steps().last().map(|s| s.end).unwrap_or(self.route.start);
+        let (dx, dy) = (p[0] - last.x_mm, p[1] - last.y_mm);
+        if (dx * dx + dy * dy).sqrt() < 0.5 {
+            last.yaw_deg
+        } else {
+            dy.atan2(dx).to_degrees()
+        }
+    }
+
     pub fn steps(&self) -> Vec<route::Step> {
         route::plan(&self.route)
     }
@@ -715,7 +728,7 @@ impl SimulateTab {
         placing.points.push(p);
         if placing.points.len() >= route::clicks_needed(placing.kind) {
             self.draft = Some(Draft {
-                action: Action::placed(placing.kind, &placing.points),
+                action: Action::placed(placing.kind, &placing.points, self.heading_at(placing.points[0])),
                 moves: false,
                 at: None,
                 color: None,
@@ -1087,7 +1100,7 @@ impl SimulateTab {
                     }
                 }
             } else if let Some(first) = p.points.first() {
-                let preview = Action::placed(p.kind, &[*first, hover]);
+                let preview = Action::placed(p.kind, &[*first, hover], self.heading_at(*first));
                 if let Some(mp) = on_screen(preview.label_point()) {
                     out.push((mp + glam::Vec2::new(8.0, 16.0), preview.brief()));
                 }
@@ -1258,7 +1271,7 @@ impl SimulateTab {
                         circle(&mut out, hover, 6.0, mark);
                     }
                 } else if let Some(first) = p.points.first() {
-                    let preview = Action::placed(p.kind, &[*first, hover]);
+                    let preview = Action::placed(p.kind, &[*first, hover], self.heading_at(*first));
                     let path = preview.path();
                     for w in path.windows(2) {
                         seg(&mut out, w[0], w[1], mark, z);
@@ -2180,34 +2193,33 @@ fn end_fields(ui: &mut egui::Ui, then: &mut End, scope: &str) {
 
 /// The editable parameters of an action: the popup's and the inspector's.
 fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], wheel_mm: f64, scope: &str) {
-    let sweep = action.arc().map(|a| a.sweep_deg);
     match action {
         Action::Straight { speed, then, .. } => {
             speed_field(ui, "speed", speed, wheel_mm);
             end_fields(ui, then, scope);
         }
         Action::Curve {
-            start,
-            end,
+            heading_deg,
             radius_mm,
+            angle_deg,
             right,
             speed,
             then,
+            ..
         } => {
-            let chord = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
             ui.horizontal(|ui| {
                 ui.weak("radius");
-                ui.add(
-                    egui::DragValue::new(radius_mm)
-                        .speed(1.0)
-                        .range((chord / 2.0).max(1.0)..=100000.0)
-                        .suffix(" mm"),
-                );
+                ui.add(egui::DragValue::new(radius_mm).speed(1.0).range(1.0..=100000.0).suffix(" mm"));
+                ui.weak("angle");
+                ui.add(egui::DragValue::new(angle_deg).speed(1.0).range(0.5..=359.0).suffix("°"));
                 ui.selectable_value(right, true, "right");
                 ui.selectable_value(right, false, "left");
-                if let Some(deg) = sweep {
-                    ui.weak(format!("{}°", deg.round()));
-                }
+            });
+            ui.horizontal(|ui| {
+                ui.weak("entering at");
+                ui.add(egui::DragValue::new(heading_deg).speed(1.0).suffix("°"));
+                let ends = route::wrap_deg(*heading_deg + if *right { -*angle_deg } else { *angle_deg });
+                ui.weak(format!("→ ends facing {}°", ends.round()));
             });
             speed_field(ui, "speed", speed, wheel_mm);
             end_fields(ui, then, scope);
@@ -2424,22 +2436,35 @@ mod tests {
         t.commit_draft();
         assert_eq!(t.route.actions.len(), 1);
         assert_eq!(t.selected, Some(0));
-        // a curve from the straight's end (snapped) out to the side: a quarter circle by default
+        // a curve from the straight's end (snapped) through a point out to the side: the arc
+        // tangent to the straight's heading there, a right quarter circle of r 100
         t.arm("curve");
         assert!(t.map_click(-544.0, 104.0, 20.0) && t.map_click(-447.0, 200.0, 20.0));
         let d = t.draft.clone().unwrap();
+        let end = d.action.end();
         let Action::Curve {
             start,
-            end,
+            heading_deg,
             radius_mm,
+            angle_deg,
             right,
             ..
         } = d.action
         else {
             panic!("{d:?}")
         };
-        assert_eq!((start, end, right), ([-547.0, 100.0], [-447.0, 200.0], true));
-        assert!((radius_mm - 100.0).abs() < 0.1, "{radius_mm}");
+        assert_eq!(
+            (start, heading_deg, right),
+            ([-547.0, 100.0], 90.0, true),
+            "entered the straight's way"
+        );
+        assert!(
+            (radius_mm - 100.0).abs() < 0.1 && (angle_deg - 90.0).abs() < 0.1,
+            "{radius_mm} {angle_deg}"
+        );
+        assert!((end[0] + 447.0).abs() < 0.1 && (end[1] - 200.0).abs() < 0.1, "{end:?}");
+        assert_eq!(t.heading_at([-547.0, 100.0]), 90.0, "at the last end: its heading");
+        assert_eq!(t.heading_at([-447.0, 200.0]), 45.0, "elsewhere: the way the drive there faces");
         t.commit_draft();
         // a stop somewhere else (the plan drives there), a turn by two clicks, a custom call that moves
         t.arm("stop");
@@ -2657,7 +2682,9 @@ mod tests {
         assert_eq!(t.route_lines(false)[0].color, [0.5, 0.2, 0.75, 1.0], "an unselected flag is purple");
         t.selected_marker = Some(0);
         // a path in a colour of the user's, and back to the kind's default
-        t.route.actions.push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]]).into());
+        t.route
+            .actions
+            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0).into());
         assert!(
             t.route_lines(false)
                 .iter()
@@ -2687,7 +2714,7 @@ mod tests {
         // (200, 100) bending left ends heading +y, so the wings reach back to (∓8, 86)
         t.route
             .actions
-            .push(Action::placed("curve", &[[100.0, 0.0], [200.0, 100.0]]).into());
+            .push(Action::placed("curve", &[[100.0, 0.0], [200.0, 100.0]], 0.0).into());
         let lines = t.route_lines(false);
         let green = [26.0 / 255.0, 140.0 / 255.0, 64.0 / 255.0, 1.0];
         let end_heading = t.steps().last().unwrap().end.yaw_deg;
@@ -2703,7 +2730,7 @@ mod tests {
         let before = t.route_lines(false);
         t.route
             .actions
-            .push(Action::placed("turn", &[[200.0, 100.0], [200.0, 200.0]]).into());
+            .push(Action::placed("turn", &[[200.0, 100.0], [200.0, 200.0]], 0.0).into());
         let after = t.route_lines(false);
         let extra: Vec<_> = after.iter().filter(|l| !before.contains(l)).collect();
         assert_eq!(extra.len(), 8, "shaft + 3 head segments + 4 square sides: {extra:?}");
@@ -2724,8 +2751,8 @@ mod tests {
         t.cancel();
         // selection: the marker wins over an action at the same spot and clears the action
         // selection; an action away from any marker is selected and clears the marker's
-        t.route.actions.push(Action::placed("stop", &[[100.0, 100.0]]).into());
-        t.route.actions.push(Action::placed("stop", &[[-300.0, 200.0]]).into());
+        t.route.actions.push(Action::placed("stop", &[[100.0, 100.0]], 0.0).into());
+        t.route.actions.push(Action::placed("stop", &[[-300.0, 200.0]], 0.0).into());
         t.selected = Some(0);
         assert!(t.select_at([101.0, 100.0], 10.0));
         assert_eq!((t.selected_marker, t.selected), (Some(0), None));
@@ -2799,7 +2826,9 @@ mod tests {
         // save and load, with a route for another map
         let dir = std::env::temp_dir().join(format!("ob-tab-route-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        t.route.actions.push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]]).into());
+        t.route
+            .actions
+            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0).into());
         t.save_route(dir.join("a.route.json"));
         assert!(t.message.starts_with("saved the route"), "{}", t.message);
         let mut other = SimulateTab::new(None);
@@ -2964,7 +2993,7 @@ mod tests {
         // a route runs as a program the server receives
         t.route
             .actions
-            .push(Action::placed("straight", &[[250.0, -80.0], [250.0, 120.0]]).into());
+            .push(Action::placed("straight", &[[250.0, -80.0], [250.0, 120.0]], 0.0).into());
         t.run_route();
         assert!(pump_until(&mut t, 30, |t| t.status == "running"), "{} {}", t.status, t.message);
         assert!(
@@ -3183,12 +3212,13 @@ mod tests {
         // stop, and a custom call: placed on the map, chained end to start
         t.route
             .actions
-            .push(Action::placed("straight", &[[-400.0, -150.0], [-400.0, 100.0]]).into());
+            .push(Action::placed("straight", &[[-400.0, -150.0], [-400.0, 100.0]], 0.0).into());
         t.route.actions.push(
             Action::Curve {
                 start: [-400.0, 100.0],
-                end: [-300.0, 200.0],
+                heading_deg: 90.0,
                 radius_mm: 100.0,
+                angle_deg: 90.0,
                 right: true,
                 speed: 350.0,
                 then: End::Continue,
@@ -3197,7 +3227,7 @@ mod tests {
         );
         t.route
             .actions
-            .push(Action::placed("straight", &[[-300.0, 200.0], [-200.0, 200.0]]).into());
+            .push(Action::placed("straight", &[[-300.0, 200.0], [-200.0, 200.0]], 0.0).into());
         t.route.actions.push(
             Action::Stop {
                 at: [-200.0, 200.0],
