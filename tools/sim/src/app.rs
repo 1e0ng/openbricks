@@ -1756,6 +1756,9 @@ impl App {
                 if let Some(d) = self.simulate.draft.as_mut() {
                     d.at = Some(pos + egui::vec2(12.0, 12.0));
                 }
+                if let Some(m) = self.simulate.marker_draft.as_mut() {
+                    m.2 = Some(pos + egui::vec2(12.0, 12.0));
+                }
             } else {
                 self.simulate.select_at(p, tol);
             }
@@ -2945,6 +2948,39 @@ mod tests {
         assert_eq!(h.state().simulate.markers.markers[0].name, "M1");
         assert_eq!(h.state().simulate.selected_marker, Some(0));
         assert!(crate::markers::Markers::file(&mdir, "practice-line").exists());
+        // dragging the flag moves the marker, and the file follows
+        let hs = map(&h, placed_at);
+        let there = map(&h, [placed_at[0] + hx * 80.0, placed_at[1] + hy * 80.0]);
+        press(&mut h, hs, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, hs + (there - hs).normalized() * 12.0, Modifiers::NONE);
+        assert!(matches!(h.state().drag, Drag::Marker), "the marker was grabbed");
+        drag_to(&mut h, there, Modifiers::NONE);
+        release(&mut h, there, PointerButton::Primary);
+        let moved = h.state().simulate.markers.markers[0].at;
+        assert!(
+            (moved[0] - placed_at[0] - hx * 80.0).abs() < 4.0 && (moved[1] - placed_at[1] - hy * 80.0).abs() < 4.0,
+            "{moved:?}"
+        );
+        assert_eq!(crate::markers::Markers::load(&mdir, "practice-line").unwrap().markers[0].at, moved);
+        let placed_at = moved;
+        // a second marker's popup, cancelled; a third, dropped with Escape
+        h.get_by_label("◉ Marker").click();
+        steps(&mut h, 2);
+        let at_ = map(&h, [placed_at[0] + hx * 200.0, placed_at[1] + hy * 200.0]);
+        click(&mut h, at_);
+        steps(&mut h, 2);
+        h.get_by_label("Cancel").click();
+        steps(&mut h, 2);
+        assert!(h.state().simulate.marker_draft.is_none());
+        assert_eq!(h.state().simulate.markers.markers.len(), 1);
+        h.get_by_label("◉ Marker").click();
+        steps(&mut h, 2);
+        click(&mut h, at_);
+        assert!(h.state().simulate.marker_draft.is_some());
+        h.key_press(Key::Escape);
+        steps(&mut h, 2);
+        assert!(h.state().simulate.marker_draft.is_none());
+        assert_eq!(h.state().simulate.markers.markers.len(), 1);
         h.get_by_label("■ Stop").click();
         steps(&mut h, 2);
         let at_ = map(&h, [placed_at[0] + 6.0, placed_at[1] - 6.0]);
@@ -2957,6 +2993,17 @@ mod tests {
         h.key_press(Key::Escape);
         steps(&mut h, 2);
         assert!(h.state().simulate.draft.is_none());
+        // an action's popup can be cancelled too
+        h.get_by_label("■ Stop").click();
+        steps(&mut h, 2);
+        let at_ = map(&h, [placed_at[0] - hx * 150.0, placed_at[1] - hy * 150.0]);
+        click(&mut h, at_);
+        steps(&mut h, 2);
+        assert!(h.query_by_label("New stop").is_some());
+        h.get_by_label("Cancel").click();
+        steps(&mut h, 2);
+        assert!(h.state().simulate.draft.is_none());
+        assert_eq!(h.state().simulate.route.actions.len(), 3);
         h.state_mut().simulate.selected_marker = Some(0);
         h.key_press(Key::Delete);
         steps(&mut h, 2);

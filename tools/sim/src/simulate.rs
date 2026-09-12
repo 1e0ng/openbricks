@@ -2622,6 +2622,43 @@ mod tests {
         assert_eq!(t.markers.markers[0].at, [150.0, 120.0]);
         assert!(!t.begin_marker_drag(7));
         t.rename_marker(0, "gate");
+        t.rename_marker(0, "gate");
+        t.rename_marker(9, "nobody");
+        // the popups themselves, driven without a window: the marker's name on Enter
+        t.marker_draft = Some(([5.0, 6.0], "".into(), None));
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run_ui(input, |ctx| t.draft_ui(ctx));
+        assert_eq!(t.markers.markers.len(), 2);
+        assert_eq!(
+            t.markers.markers[1],
+            Marker {
+                name: "M1".into(),
+                at: [5.0, 6.0]
+            },
+            "an empty name takes the next free one"
+        );
+        t.selected_marker = Some(1);
+        t.remove_selected_marker();
+        // a place that cannot be written names the failure and keeps the marker in memory
+        let blocked = mdir.join("blocker");
+        std::fs::write(&blocked, "x").unwrap();
+        t.markers_dir = blocked.clone();
+        t.marker_draft = Some(([7.0, 8.0], "x".into(), None));
+        t.commit_marker_draft();
+        assert_eq!(t.markers.markers.len(), 2);
+        assert!(t.message.contains("could not"), "{}", t.message);
+        t.selected_marker = Some(1);
+        t.remove_selected_marker();
+        t.markers_dir = mdir.clone();
+        t.message.clear();
         let mut other = SimulateTab::new(None);
         other.markers_dir = mdir.clone();
         other.world = "practice-line".into();
@@ -2634,6 +2671,7 @@ mod tests {
             }],
             "back with the map"
         );
+        t.selected_marker = Some(0);
         t.remove_selected_marker();
         assert!(t.markers.markers.is_empty() && t.selected_marker.is_none());
         assert!(Markers::load(&mdir, "practice-line").unwrap().markers.is_empty());

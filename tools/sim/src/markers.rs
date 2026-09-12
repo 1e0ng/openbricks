@@ -34,13 +34,25 @@ pub struct Markers {
 
 /// Where this machine keeps its markers (and other per-user data).
 pub fn data_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("OPENBRICKS_DATA_DIR") {
+    data_dir_from(
+        std::env::var_os("OPENBRICKS_DATA_DIR"),
+        std::env::var_os("XDG_DATA_HOME"),
+        std::env::var_os("HOME"),
+    )
+}
+
+/// The data dir from the environment's three candidates: an explicit
+/// `OPENBRICKS_DATA_DIR`, else `XDG_DATA_HOME/openbricks`, else
+/// `~/.local/share/openbricks` (the working directory when there is no
+/// home at all).
+pub fn data_dir_from(explicit: Option<std::ffi::OsString>, xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(d) = explicit.filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
     }
-    if let Some(x) = std::env::var_os("XDG_DATA_HOME").filter(|x| !x.is_empty()) {
+    if let Some(x) = xdg.filter(|x| !x.is_empty()) {
         return PathBuf::from(x).join("openbricks");
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let home = home.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
     home.join(".local").join("share").join("openbricks")
 }
 
@@ -165,13 +177,33 @@ mod tests {
         assert!(Markers::load(&dir, "broken").unwrap_err().contains("broken.json"));
         std::fs::write(Markers::file(&dir, "foreign"), r#"{"format":"something-else"}"#).unwrap();
         assert!(Markers::load(&dir, "foreign").unwrap_err().contains("not a markers file"));
+        std::fs::write(Markers::file(&dir, "shape"), r#"{"format":"openbricks-markers/1","markers":5}"#).unwrap();
+        assert!(Markers::load(&dir, "shape").unwrap_err().contains("shape.json"));
+        std::fs::create_dir_all(Markers::file(&dir, "adir")).unwrap();
+        assert!(
+            Markers::load(&dir, "adir").unwrap_err().contains("could not read"),
+            "a directory in the file's place"
+        );
+        // saving where no directory can be made fails loudly
+        let blocked = dir.join("blocker");
+        std::fs::write(&blocked, "x").unwrap();
+        let e = Markers::empty("practice-line").save(&blocked).unwrap_err();
+        assert!(e.contains("could not create") || e.contains("could not write"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn the_data_dir_follows_the_environment() {
-        // the exact path depends on the environment; the shape does not
-        let d = data_dir();
-        assert!(d.to_string_lossy().contains("openbricks") || std::env::var_os("OPENBRICKS_DATA_DIR").is_some());
+        let os = |s: &str| Some(std::ffi::OsString::from(s));
+        assert_eq!(data_dir_from(os("/x/ob"), os("/y"), os("/h")), PathBuf::from("/x/ob"));
+        assert_eq!(
+            data_dir_from(os(""), os("/y"), os("/h")),
+            PathBuf::from("/y/openbricks"),
+            "an empty override does not count"
+        );
+        assert_eq!(data_dir_from(None, os(""), os("/h")), PathBuf::from("/h/.local/share/openbricks"));
+        assert_eq!(data_dir_from(None, None, None), PathBuf::from("./.local/share/openbricks"));
+        // the real one has the same shape
+        assert!(data_dir().to_string_lossy().contains("openbricks") || std::env::var_os("OPENBRICKS_DATA_DIR").is_some());
     }
 }
