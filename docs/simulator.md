@@ -97,11 +97,15 @@ follows. Open and save `robot.assembly.json` from the toolbar.
 assembled. Pick the map (any built-in world) and it appears in the
 view at once, as does the chassis (a `robot.assembly.json`, or the
 build open in the Workbench tab once it is saved) when you choose it;
-pick the program (`main.py`), then Run. Pause, Resume and
-Stop do what they say; the speed slider runs the physics slower or
-faster than wall time; "follow the robot" keeps the camera on the
-chassis; the program's prints and errors appear in the log panel
-below the view. The loaded chassis stands on the map at true scale:
+pick the program (`main.py`), then Run. The view is a plan: the map
+seen straight from above, north up, with no perspective — drag to
+pan, scroll to zoom, **Fit** or `F` to frame the whole map again
+(the Workbench keeps its own 3D camera). Pause, Resume and Stop do
+what they say; the speed slider runs the physics slower or faster
+than wall time; "follow the robot" keeps the view on the chassis;
+the program's prints and errors appear in the log panel below the
+view, and while the map is not there yet the view says what the run
+server is doing. The loaded chassis stands on the map at true scale:
 drag it to put it where a run should start — a 70 % transparent copy
 follows the pointer with its axle centre under it, and letting go
 places the robot there (shift turns it) — or type the pose in the

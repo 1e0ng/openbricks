@@ -11,7 +11,7 @@ use crate::gizmo::{self, Gizmo, Handle, Mode};
 use crate::route::Pose2;
 use crate::simulate::SimulateTab;
 use crate::stl;
-use crate::viewport::{self, DrawItem, Line, Viewport, srgb};
+use crate::viewport::{self, Camera, DrawItem, Line, Viewport, srgb};
 use eframe::egui;
 use eframe::egui_wgpu::{self, RenderState, wgpu};
 use glam::{DVec3, Mat4, Quat, Vec3};
@@ -80,6 +80,10 @@ pub struct App {
     show_grid: bool,
     show_com: bool,
     viewport: Viewport,
+    /// The camera of the tab not shown: the Workbench orbits in 3D, the
+    /// Simulate tab is a fixed top-down plan; switching tabs swaps them.
+    other_camera: Camera,
+    camera_tab: Tab,
     drag: Drag,
     /// Where the 3D view was drawn last frame, in screen points.
     view_rect: egui::Rect,
@@ -143,6 +147,8 @@ impl App {
             show_grid: true,
             show_com: true,
             viewport,
+            other_camera: Camera::top_down(),
+            camera_tab: Tab::Workbench,
             drag: Drag::None,
             view_rect: egui::Rect::ZERO,
             items: vec![],
@@ -457,6 +463,10 @@ impl App {
     }
 
     fn fit_view(&mut self) {
+        if self.tab == Tab::Simulate {
+            self.simulate.refit();
+            return;
+        }
         let pr = self.editor.edited_props();
         if let Some(b) = pr.bbox {
             self.viewport.camera.fit(b.min.as_vec3(), b.max.as_vec3());
@@ -833,8 +843,16 @@ impl App {
                 }
             }
             ui.separator();
-            if ui.button("Fit").on_hover_text("F").clicked() {
+            if ui
+                .button("Fit")
+                .on_hover_text(if self.tab == Tab::Simulate { "F: the whole map" } else { "F" })
+                .clicked()
+            {
                 self.fit_view();
+            }
+            if self.tab == Tab::Simulate {
+                ui.weak("plan view: drag to pan, wheel to zoom");
+                return;
             }
             for (name, yaw, pitch) in [
                 ("Iso", -128.0f32, 28.0f32),
@@ -1643,10 +1661,7 @@ impl App {
         let (items, mut lines, ghost) = (draw.items, draw.lines, draw.ghost);
         lines.extend(self.simulate.route_lines(dark));
         if let Some((lo, hi)) = self.simulate.frame_target() {
-            self.viewport.camera.fit(lo, hi);
-            if self.simulate.follows() {
-                self.viewport.camera.distance = self.viewport.camera.distance.max(600.0);
-            }
+            self.viewport.camera.fit_plan(lo, hi, size.0 as f32 / size.1.max(1) as f32);
         }
         let bg = if dark {
             [0.0067, 0.0093, 0.0122, 1.0]
@@ -1682,13 +1697,13 @@ impl App {
             viewport::ray_plane_z(o, d, 0.0)
         };
         let shift = ui.input(|i| i.modifiers.shift);
-        // a press on a route handle drags it, on the chassis moves it; anywhere else orbits
+        // a press on a route handle drags it, on the chassis moves it; anywhere else pans the plan
         if response.drag_started_by(egui::PointerButton::Primary) {
             let origin = ui
                 .input(|i| i.pointer.press_origin())
                 .map(local)
                 .or(response.interact_pointer_pos().map(local));
-            self.drag = Drag::Orbit;
+            self.drag = Drag::Pan;
             let handle = origin.and_then(|(x, y)| self.simulate.route_handle_at(&cam, x, y, w, h));
             if let Some(i) = handle {
                 if self.simulate.begin_handle_drag(i) {
@@ -1720,13 +1735,10 @@ impl App {
         }
         let delta = response.drag_delta();
         match &self.drag {
-            Drag::Orbit if response.dragged() => {
-                self.viewport.camera.yaw -= delta.x * 0.5;
-                self.viewport.camera.pitch = (self.viewport.camera.pitch + delta.y * 0.5).clamp(-89.0, 89.0);
-            }
             Drag::Pan if response.dragged() => {
+                // the map sticks to the pointer
                 let c = &mut self.viewport.camera;
-                let scale = c.distance * 0.0015;
+                let scale = c.units_per_px(h);
                 let (r, u) = (c.right(), c.up());
                 c.target = c.target - r * delta.x * scale + u * delta.y * scale;
             }
@@ -1769,8 +1781,13 @@ impl App {
             }
             self.drag = Drag::None;
         }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input() {
-            self.simulate.pick = None;
+        if !ui.ctx().egui_wants_keyboard_input() {
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.simulate.pick = None;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::F)) {
+                self.simulate.refit();
+            }
         }
         if items.is_empty() {
             ui.painter().text(
@@ -1780,6 +1797,14 @@ impl App {
                 egui::FontId::proportional(14.0),
                 ui.visuals().weak_text_color(),
             );
+            // what is holding it up: the status, and the last message when there is one
+            ui.painter().text(
+                response.rect.center() + egui::vec2(0.0, 22.0),
+                egui::Align2::CENTER_CENTER,
+                self.simulate.status_line(),
+                egui::FontId::proportional(12.0),
+                ui.visuals().weak_text_color(),
+            );
         }
         ui.painter().text(
             response.rect.left_bottom() + egui::vec2(8.0, -8.0),
@@ -1787,7 +1812,7 @@ impl App {
             if self.simulate.pick.is_some() {
                 "click the map where the move ends · Esc cancels"
             } else {
-                "orbit: drag · pan: right-drag · zoom: wheel · drag the chassis to place it (shift turns it)"
+                "pan: drag · zoom: wheel · F fits the map · drag the chassis to place it (shift turns it) · drag an action's handle to set it"
             },
             egui::FontId::monospace(11.0),
             ui.visuals().weak_text_color(),
@@ -1867,6 +1892,10 @@ impl App {
     /// One frame of the whole window, drawn with `gpu` (None shows a
     /// notice where the 3D views would be).
     pub fn frame_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
+        if self.tab != self.camera_tab {
+            std::mem::swap(&mut self.viewport.camera, &mut self.other_camera);
+            self.camera_tab = self.tab;
+        }
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         match self.tab {
@@ -2069,12 +2098,24 @@ mod tests {
         h.step();
         assert!(h.state().editor.dirty);
         assert_eq!(h.state().title_name(), "example");
+        // the Simulate tab is a fixed plan: no view angles or editing controls, its own top-down camera
         h.get_by_label("Simulate").click();
-        h.step();
+        steps(&mut h, 2);
         assert_eq!(h.state().tab, Tab::Simulate);
-        h.get_by_label("Workbench").click();
+        assert!(h.query_by_label("Iso").is_none() && h.query_by_label("Move").is_none() && h.query_by_label("ground").is_none());
+        let cam = h.state().viewport.camera.clone();
+        assert!(cam.ortho && cam.pitch == 90.0 && cam.yaw == -90.0, "{cam:?}");
+        assert!(!h.state().simulate.fit_is_pending());
+        h.get_by_label("Fit").click();
         h.step();
+        assert!(h.state().simulate.fit_is_pending(), "Fit frames the map once it is there");
+        // and back: the workbench's camera is as it was left
+        h.get_by_label("Workbench").click();
+        steps(&mut h, 2);
         assert_eq!(h.state().tab, Tab::Workbench);
+        let cam = h.state().viewport.camera.clone();
+        assert!(!cam.ortho && (cam.yaw, cam.pitch) == (-128.0, 28.0), "{cam:?}");
+        assert!(h.query_by_label("Iso").is_some());
     }
 
     #[test]
@@ -2461,23 +2502,48 @@ mod tests {
         h.get_by_label("clear").click();
         h.step();
         assert!(h.state().simulate.log.is_empty());
-        // the sim view orbits and pans like the workbench's
+        // the sim view is a plan: a drag pans it with the map stuck to the pointer, and never tilts it
         let rect = h.state().view_rect;
-        let yaw0 = h.state().viewport.camera.yaw;
+        let cam0 = h.state().viewport.camera.clone();
+        assert!(cam0.ortho && cam0.pitch == 90.0, "{cam0:?}");
         // away from the chassis, which the run parked near the mat's centre
         let at = rect.center() + egui::vec2(300.0, 0.0);
+        let under0 = {
+            let (o, d) = cam0.ray(at.x - rect.min.x, at.y - rect.min.y, rect.width(), rect.height());
+            viewport::ray_plane_z(o, d, 0.0).unwrap()
+        };
         press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
         drag_to(&mut h, at + egui::vec2(10.0, 0.0), Modifiers::NONE);
-        assert!(matches!(h.state().drag, Drag::Orbit), "empty map: orbit");
+        assert!(matches!(h.state().drag, Drag::Pan), "empty map: pan");
         drag_to(&mut h, at + egui::vec2(50.0, 0.0), Modifiers::NONE);
         release(&mut h, at + egui::vec2(50.0, 0.0), PointerButton::Primary);
-        assert_ne!(h.state().viewport.camera.yaw, yaw0);
+        let cam = h.state().viewport.camera.clone();
+        assert_eq!((cam.yaw, cam.pitch, cam.ortho), (cam0.yaw, cam0.pitch, true));
+        let under = {
+            let p = at + egui::vec2(50.0, 0.0);
+            let (o, d) = cam.ray(p.x - rect.min.x, p.y - rect.min.y, rect.width(), rect.height());
+            viewport::ray_plane_z(o, d, 0.0).unwrap()
+        };
+        assert!(
+            (under - under0).length() < 1.0,
+            "the map point under the pointer came along: {under:?} vs {under0:?}"
+        );
+        assert!(cam.target.x < cam0.target.x - 10.0, "{:?} vs {:?}", cam.target, cam0.target);
         let target0 = h.state().viewport.camera.target;
         press(&mut h, at, PointerButton::Secondary, Modifiers::NONE);
         drag_to(&mut h, at + egui::vec2(10.0, 10.0), Modifiers::NONE);
         drag_to(&mut h, at + egui::vec2(40.0, 40.0), Modifiers::NONE);
         release(&mut h, at + egui::vec2(40.0, 40.0), PointerButton::Secondary);
         assert_ne!(h.state().viewport.camera.target, target0);
+        // F frames the whole map again
+        h.key_press(Key::F);
+        steps(&mut h, 2);
+        let fitted = h.state().viewport.camera.clone();
+        assert!(
+            (fitted.target.x).abs() < 1.0 && (fitted.target.y).abs() < 1.0,
+            "{:?}",
+            fitted.target
+        );
         // following keeps the camera on the chassis whatever the pan
         h.get_by_label("follow the robot").click();
         steps(&mut h, 2);
@@ -2535,9 +2601,7 @@ mod tests {
         wait_for(&mut h, &|a| a.simulate.chassis_pose().map(|p| p.x_mm < -500.0).unwrap_or(false));
         let p0 = h.state().simulate.chassis_pose().unwrap();
         assert!((p0.x_mm + 547.0).abs() < 1e-3 && (p0.yaw_deg - 90.0).abs() < 1e-3, "{p0:?}");
-        // seen from the top, framed on the mat as the tab framed it (the toolbar's Fit frames the workbench)
-        h.get_by_label("Top").click();
-        steps(&mut h, 3);
+        // the plan view is framed on the mat as the tab framed it
         let rect = h.state().view_rect;
         let at = on_screen(h.state(), Vec3::new(p0.x_mm as f32, p0.y_mm as f32, 50.0));
         assert!(rect.contains(at), "{at:?} in {rect:?}");

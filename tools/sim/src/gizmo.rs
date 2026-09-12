@@ -244,6 +244,7 @@ mod tests {
             pitch: 0.0,
             distance: 500.0,
             fov_deg: 38.0,
+            ortho: false,
         }
     }
 

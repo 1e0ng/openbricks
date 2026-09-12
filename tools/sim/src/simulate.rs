@@ -145,6 +145,7 @@ impl SimulateTab {
         }
     }
 
+    #[cfg(test)]
     pub fn follows(&self) -> bool {
         self.follow
     }
@@ -1192,6 +1193,26 @@ impl SimulateTab {
             },
         ];
         SimDraw { items, lines, ghost }
+    }
+
+    /// Frame the whole map again at the next frame.
+    pub fn refit(&mut self) {
+        self.fit_pending = true;
+    }
+
+    #[cfg(test)]
+    pub fn fit_is_pending(&self) -> bool {
+        self.fit_pending
+    }
+
+    /// One line on what the view is waiting for: the status, and the
+    /// last message when there is one.
+    pub fn status_line(&self) -> String {
+        if self.message.is_empty() {
+            self.status.clone()
+        } else {
+            format!("{} — {}", self.status, self.message)
+        }
     }
 
     /// Where the camera should look: the mat's extent on first load, the

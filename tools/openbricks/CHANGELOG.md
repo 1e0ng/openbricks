@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.8.0 — the Simulate tab is a plan view
+
+The Simulate tab shows the map as a fixed top-down plan, north up,
+without perspective: drag to pan (the map sticks to the pointer),
+wheel to zoom, **Fit** or `F` to frame the whole map again. It has
+its own camera, so the Workbench keeps whatever 3D angle you left it
+at and the map is always framed when you come back. The view-angle
+buttons, the move/rotate handles and the snap controls belong to the
+Workbench and no longer show on the Simulate tab. When a map is chosen
+and nothing has appeared yet, the view says what it is waiting for
+(the run server's status and its last message) instead of staying
+blank.
+
+- Renderer: an orthographic camera mode (`Camera::top_down`,
+  `fit_plan`), and screen axes that stay defined looking straight down.
+- Tests: the plan camera's projection, rays and fits; the tab switch
+  keeping both cameras and hiding the 3D controls; a pan that keeps the
+  map point under the pointer; `F` re-framing the map.
+
 ## 4.7.0 — routes as action lists, typed or dragged, with continuous moves and custom calls
 
 A route in the Simulate tab is now a list of actions — **straight**,

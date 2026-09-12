@@ -100,6 +100,10 @@ pub struct Camera {
     pub pitch: f32,
     pub distance: f32,
     pub fov_deg: f32,
+    /// Orthographic: a plan view with no perspective, showing what a
+    /// perspective camera of the same field of view would see at the
+    /// target's distance (so zoom and fit behave the same).
+    pub ortho: bool,
 }
 
 impl Default for Camera {
@@ -110,11 +114,21 @@ impl Default for Camera {
             pitch: 28.0,
             distance: 400.0,
             fov_deg: 38.0,
+            ortho: false,
         }
     }
 }
 
 impl Camera {
+    /// Straight down on the map, north (+y) up, without perspective.
+    pub fn top_down() -> Self {
+        Camera {
+            yaw: -90.0,
+            pitch: 90.0,
+            ortho: true,
+            ..Default::default()
+        }
+    }
     pub fn direction(&self) -> Vec3 {
         let (y, p) = (self.yaw.to_radians(), self.pitch.to_radians());
         Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), p.sin())
@@ -123,26 +137,53 @@ impl Camera {
         self.target + self.direction() * self.distance
     }
     pub fn view(&self) -> Mat4 {
-        glam::camera::rh::view::look_at_mat4(self.eye(), self.target, Vec3::Z)
+        // looking straight down (or up), "up" on screen is the map's +y
+        let up = if self.direction().z.abs() > 0.9999 { Vec3::Y } else { Vec3::Z };
+        glam::camera::rh::view::look_at_mat4(self.eye(), self.target, up)
+    }
+    /// Half the height of the view at the target, in world units.
+    pub fn half_height(&self) -> f32 {
+        self.distance * (self.fov_deg.to_radians() / 2.0).tan()
     }
     pub fn proj(&self, aspect: f32) -> Mat4 {
+        let far = self.distance * 40.0 + 1000.0;
+        if self.ortho {
+            let hh = self.half_height();
+            let hw = hh * aspect.max(0.01);
+            return glam::camera::rh::proj::directx::orthographic(-hw, hw, -hh, hh, 0.5, far);
+        }
         let near = (self.distance / 200.0).max(0.5);
-        glam::camera::rh::proj::directx::perspective(self.fov_deg.to_radians(), aspect.max(0.01), near, self.distance * 40.0 + 1000.0)
+        glam::camera::rh::proj::directx::perspective(self.fov_deg.to_radians(), aspect.max(0.01), near, far)
+    }
+    /// World units per pixel at the target of a view `h` pixels tall.
+    pub fn units_per_px(&self, h: f32) -> f32 {
+        2.0 * self.half_height() / h.max(1.0)
     }
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
         self.proj(aspect) * self.view()
     }
+    /// The screen's right, in the world (as `view` has it).
     pub fn right(&self) -> Vec3 {
-        Vec3::Z.cross(self.direction()).normalize_or_zero()
+        let forward = -self.direction();
+        let up = if forward.z.abs() > 0.9999 { Vec3::Y } else { Vec3::Z };
+        forward.cross(up).normalize_or_zero()
     }
+    /// The screen's up, in the world.
     pub fn up(&self) -> Vec3 {
-        self.direction().cross(self.right()).normalize_or_zero()
+        self.right().cross(-self.direction()).normalize_or_zero()
     }
     /// Frame a bounding box: look at its centre from the current angles.
     pub fn fit(&mut self, min: Vec3, max: Vec3) {
         self.target = (min + max) * 0.5;
         let diag = (max - min).length().max(40.0);
         self.distance = diag / (2.0 * (self.fov_deg.to_radians() / 2.0).tan()) * 1.25;
+    }
+    /// Frame a box's footprint in a top-down view `aspect` wide for its
+    /// height: the whole extent fits with a small margin.
+    pub fn fit_plan(&mut self, min: Vec3, max: Vec3, aspect: f32) {
+        self.target = (min + max) * 0.5;
+        let hh = ((max.y - min.y) / 2.0).max((max.x - min.x) / 2.0 / aspect.max(0.01)).max(20.0) * 1.06;
+        self.distance = hh / (self.fov_deg.to_radians() / 2.0).tan();
     }
     /// The pixel of a `w × h` view a world point lands on; None behind the eye.
     pub fn project(&self, p: Vec3, w: f32, h: f32) -> Option<glam::Vec2> {
@@ -1241,6 +1282,7 @@ mod tests {
             pitch: 0.0,
             distance: 500.0,
             fov_deg: 38.0,
+            ortho: false,
         };
         let (w, h) = (320u32, 240u32);
         vp.add_mesh(&device, "box", &geometry::box_mesh([100.0; 3], [0.0; 3]));
@@ -1536,5 +1578,61 @@ mod tests {
         cam.fit(Vec3::new(-50.0, -50.0, 0.0), Vec3::new(50.0, 50.0, 20.0));
         assert_eq!(cam.target, Vec3::new(0.0, 0.0, 10.0));
         assert!(cam.distance > 100.0);
+    }
+
+    #[test]
+    fn the_top_down_camera_is_a_plan_with_north_up_and_no_perspective() {
+        let mut cam = Camera::top_down();
+        cam.target = Vec3::new(100.0, -50.0, 0.0);
+        cam.distance = 1000.0;
+        let (w, h) = (800.0, 600.0);
+        // +x is to the right, +y is up, at a scale that does not change with height
+        let c = cam.project(cam.target, w, h).unwrap();
+        assert!((c - glam::Vec2::new(400.0, 300.0)).length() < 1e-2, "{c:?}");
+        let east = cam.project(cam.target + Vec3::X * 100.0, w, h).unwrap();
+        let north = cam.project(cam.target + Vec3::Y * 100.0, w, h).unwrap();
+        let px = 100.0 / cam.units_per_px(h);
+        assert!((east - c - glam::Vec2::new(px, 0.0)).length() < 1e-2, "{east:?} vs {c:?}");
+        assert!((north - c - glam::Vec2::new(0.0, -px)).length() < 1e-2, "{north:?} vs {c:?}");
+        let raised = cam.project(cam.target + Vec3::X * 100.0 + Vec3::Z * 300.0, w, h).unwrap();
+        assert!(
+            (raised - east).length() < 1e-2,
+            "no perspective: height does not move a point, {raised:?} vs {east:?}"
+        );
+        // rays fall straight down, and project inverts them
+        let (o, d) = cam.ray(100.0, 500.0, w, h);
+        assert!((d - Vec3::NEG_Z).length() < 1e-4, "{d:?}");
+        let hit = ray_plane_z(o, d, 0.0).unwrap();
+        let back = cam.project(hit, w, h).unwrap();
+        assert!((back - glam::Vec2::new(100.0, 500.0)).length() < 1e-2, "{back:?}");
+        // fit frames the mat like the perspective camera would
+        cam.fit(Vec3::new(-1200.0, -900.0, 0.0), Vec3::new(1200.0, 900.0, 200.0));
+        assert_eq!(cam.target, Vec3::new(0.0, 0.0, 100.0));
+        let corner = cam.project(Vec3::new(1200.0, 900.0, 0.0), w, h).unwrap();
+        assert!(corner.x > 400.0 && corner.x < w && corner.y > 0.0 && corner.y < 300.0, "{corner:?}");
+        // fit_plan fills the view with the footprint: a wide mat in a wide view is bounded by its width
+        cam.fit_plan(Vec3::new(-1200.0, -900.0, 0.0), Vec3::new(1200.0, 900.0, 200.0), w / h);
+        let corner = cam.project(Vec3::new(1200.0, 900.0, 0.0), w, h).unwrap();
+        assert!((corner.x - w / 1.06 / 2.0 - w / 2.0).abs() < 1.0, "{corner:?}");
+        assert!(corner.y > 0.0 && corner.y < 300.0, "{corner:?}");
+        let corner = cam.project(Vec3::new(-1200.0, -900.0, 0.0), w, h).unwrap();
+        assert!(corner.x > 0.0 && corner.y < h, "{corner:?}");
+        // a tall footprint in the same view is bounded by its height
+        cam.fit_plan(Vec3::new(-100.0, -900.0, 0.0), Vec3::new(100.0, 900.0, 0.0), w / h);
+        let top = cam.project(Vec3::new(0.0, 900.0, 0.0), w, h).unwrap();
+        assert!((top.y - (h / 2.0 - h / 1.06 / 2.0)).abs() < 1.0, "{top:?}");
+        // the screen axes match the view: right is +x, up is +y
+        assert!((cam.right() - Vec3::X).length() < 1e-5 && (cam.up() - Vec3::Y).length() < 1e-5);
+        let iso = Camera::default();
+        assert!(
+            iso.right().z.abs() < 1e-6 && iso.up().z > 0.0,
+            "an angled camera's right is level and its up leans skyward"
+        );
+        // the same zoom rule as the perspective camera: half the view height at the target
+        let persp = Camera {
+            ortho: false,
+            ..cam.clone()
+        };
+        assert!((persp.half_height() - cam.half_height()).abs() < 1e-3);
     }
 }
