@@ -8,18 +8,18 @@ Firmware versions are tracked separately on the `v*` tag namespace.
 A curve was placed as the circle through two clicked points at a
 chosen radius, so its entry heading and its ending direction fell out
 of the geometry, and the planner quietly turned the robot to the arc's
-start first. A curve is now what `db.curve(radius, angle)` drives: it
-enters along the robot's heading at its start, sweeps the angle you
-choose (the ending direction) on the radius you choose, to the right
-or the left, and its end follows. Placing one still takes two clicks
-— the second is a point the arc passes through, and the arc tangent to
-the heading through it proposes the radius and the angle, which the
-popup lets you round or retype. The popup and the panel show the
-heading it enters at and the heading it ends facing. The end handle
-refits the arc through the pointer, the midpoint handle scales the
-radius keeping the angle, the start handle carries the arc along.
-Route files are `openbricks-route/4`; third-format files load, each
-curve keeping its shape (its start heading, radius and sweep).
+start first. A curve now takes three clicks — where it starts, where
+it ends, and a point to face there — and nothing is typed: it enters
+the way the robot arrives at its start (kept in step with the previous
+action as you edit; a locked curve keeps its own) and reaches the end
+pose exactly, as one arc when the end pose lies on the circle tangent
+to the start, else as two arcs meeting tangentially (a biarc), which
+the program drives as continuous `db.curve` calls. The arc follows
+the pointer while you place it, and after the second click its end
+swings to face the pointer. Handles: the end, the arrow at the end for
+the heading, and the start, which carries the end along. Route files
+are `openbricks-route/4`; third-format files load, each curve keeping
+its shape.
 
 Route paths and markers are drawn three pixels wide at any zoom. The
 GPU's hardware lines are one pixel, which read as barely visible on a
@@ -28,13 +28,17 @@ quad in the vertex shader.
 
 - Tests: the arc from a pose (ends, headings, a three-quarter turn, no
   radius, no angle); the tangent arc through a point (ahead, behind,
-  dead ahead, on the spot); placement by clicks from the previous
-  action's heading; the handles (end refit, midpoint radius, start
-  carry, translation); the plan and program unchanged for the same
-  geometry; fourth-format round trip and third-format conversion
-  (shape kept, colours and locks kept, a malformed curve refused);
-  the arrowhead following a curve's end tangent; the widened line's
-  pixel rows at 3 px and at 9 px.
+  dead ahead, on the spot); the biarc (an S of two semicircles, a U of
+  two quarters, the single arc and the straight run when the poses
+  allow, a sweep of end poses all reached facing the way asked);
+  placement by three clicks from the previous action's heading; the
+  handles (face, end, start carry, translation); the entry heading
+  following an edited predecessor unless locked; the plan and program
+  unchanged for the same geometry, two pieces flowing with
+  `then=Stop.NONE`; fourth-format round trip and third-format
+  conversion (shape kept, colours and locks kept, a malformed curve
+  refused); the arrowhead following a curve's end tangent; the
+  widened line's pixel rows at 3 px and at 9 px.
 
 ## 4.12.0 — paths on top of the map, in a colour of your own
 

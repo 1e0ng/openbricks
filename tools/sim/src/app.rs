@@ -2837,6 +2837,15 @@ mod tests {
         let at_ = map(&h, aside);
         click(&mut h, at_);
         steps(&mut h, 2);
+        assert!(
+            h.query_by_label("New curve").is_none(),
+            "a curve takes a third click: which way to face"
+        );
+        // facing right of the straight's way there: the arc tangent to the straight, one quarter circle
+        let face = [aside[0] + hy * 100.0, aside[1] - hx * 100.0];
+        let at_ = map(&h, face);
+        click(&mut h, at_);
+        steps(&mut h, 2);
         assert!(h.query_by_label("New curve").is_some());
         h.get_by_label("Add").click();
         steps(&mut h, 2);

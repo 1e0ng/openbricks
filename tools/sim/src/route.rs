@@ -101,10 +101,6 @@ impl End {
     }
 }
 
-fn quarter() -> f64 {
-    90.0
-}
-
 fn straight_dps() -> f64 {
     DEFAULT_STRAIGHT_DPS
 }
@@ -128,18 +124,18 @@ pub enum Action {
         #[serde(default)]
         then: End,
     },
-    /// The arc from `start`, entered facing `heading_deg`, of `radius_mm`,
-    /// sweeping `angle_deg` to the right or the left — `DriveBase.curve`'s
-    /// own terms; where it ends, and the heading there, follow.
+    /// A smooth drive from `start`, entered facing `heading_deg` (the way
+    /// the robot arrives there; the tab keeps it in step with the previous
+    /// action), to `end` facing `end_heading_deg`: one arc when the end
+    /// pose lies on the circle tangent to the start pose, else two arcs
+    /// meeting tangentially — see [`biarc`].
     Curve {
         start: Point,
         #[serde(default)]
         heading_deg: f64,
-        radius_mm: f64,
-        #[serde(default = "quarter")]
-        angle_deg: f64,
+        end: Point,
         #[serde(default)]
-        right: bool,
+        end_heading_deg: f64,
         #[serde(default = "straight_dps")]
         speed: f64,
         #[serde(default)]
@@ -195,7 +191,11 @@ impl From<Action> for Item {
 /// The kinds, their tool labels, and what each asks the user to click.
 pub const KINDS: [(&str, &str, &str); 5] = [
     ("straight", "→ Straight", "click where it starts, then where it ends"),
-    ("curve", "⌒ Curve", "click where it starts, then where it ends"),
+    (
+        "curve",
+        "⌒ Curve",
+        "click where it starts, where it ends, then a point to face there",
+    ),
     ("turn", "↻ Turn", "click where it turns, then a point to face"),
     ("stop", "■ Stop", "click where it stops"),
     ("custom", "ƒ Custom", "click where it runs"),
@@ -204,7 +204,8 @@ pub const KINDS: [(&str, &str, &str); 5] = [
 /// How many map clicks place a kind.
 pub fn clicks_needed(kind: &str) -> usize {
     match kind {
-        "straight" | "curve" | "turn" => 2,
+        "straight" | "turn" => 2,
+        "curve" => 3,
         _ => 1,
     }
 }
@@ -214,10 +215,8 @@ pub fn clicks_needed(kind: &str) -> usize {
 pub enum Handle {
     Start,
     End,
-    /// A curve's midpoint: dragging it bends the arc.
-    Mid,
     At,
-    /// A turn's heading, `TURN_HANDLE_MM` along it.
+    /// A turn's heading, or the heading a curve ends facing, `TURN_HANDLE_MM` along it.
     Face,
     /// The whole action.
     Body,
@@ -314,11 +313,126 @@ fn arc_points(arc: &Arc, start: Point, right: bool) -> Vec<Point> {
         .collect()
 }
 
+/// One piece of a curve: an arc, or a straight run where the poses line
+/// up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Piece {
+    Arc { from: Point, arc: Arc, right: bool },
+    Line { from: Point, to: Point },
+}
+
+impl Piece {
+    pub fn end(&self) -> Point {
+        match self {
+            Piece::Arc { arc, .. } => arc.end,
+            Piece::Line { to, .. } => *to,
+        }
+    }
+
+    /// The heading at its end, given the one at its start.
+    pub fn end_heading(&self, start_heading: f64) -> f64 {
+        match self {
+            Piece::Arc { arc, .. } => arc.end_heading,
+            Piece::Line { .. } => start_heading,
+        }
+    }
+
+    pub fn length_mm(&self) -> f64 {
+        match self {
+            Piece::Arc { arc, .. } => arc.radius_mm * arc.sweep_deg.to_radians(),
+            Piece::Line { from, to } => dist(*from, *to),
+        }
+    }
+
+    /// Its path, start to end.
+    pub fn points(&self) -> Vec<Point> {
+        match self {
+            Piece::Arc { from, arc, right } => {
+                let mut pts = arc_points(arc, *from, *right);
+                pts[0] = *from;
+                if let Some(last) = pts.last_mut() {
+                    *last = arc.end;
+                }
+                pts
+            }
+            Piece::Line { from, to } => vec![*from, *to],
+        }
+    }
+}
+
+/// The arc from a pose that a tangent fit found, ending exactly at `to`,
+/// or the straight run there when the fit found none (or the arc is too
+/// small to be one).
+fn arc_or_line(from: Point, heading_deg: f64, to: Point, fit: Option<(f64, f64, bool)>) -> Piece {
+    match fit.and_then(|(r, a, right)| arc_from(from, heading_deg, r, a, right).map(|arc| (arc, right))) {
+        Some((mut arc, right)) => {
+            arc.end = to;
+            Piece::Arc { from, arc, right }
+        }
+        None => Piece::Line { from, to },
+    }
+}
+
+/// The pieces a curve drives from one pose to another: the single arc
+/// when the end pose lies on the circle tangent to the start pose (the
+/// straight run when they line up), else two arcs meeting tangentially
+/// — the biarc with equal tangent lengths from both ends, which is the
+/// single arc again whenever one exists — a piece flattening to a
+/// straight run where its ends line up. Nothing when the poses share a
+/// point.
+pub fn biarc(start: Point, heading_deg: f64, end: Point, end_heading_deg: f64) -> Vec<Piece> {
+    let v = [end[0] - start[0], end[1] - start[1]];
+    let vv = v[0] * v[0] + v[1] * v[1];
+    if vv.sqrt() < EPS_MM {
+        return vec![];
+    }
+    let from = Pose2::at(start, heading_deg);
+    let (h1, h2) = (from.heading(), Pose2::at(end, end_heading_deg).heading());
+    let turn = wrap_deg(end_heading_deg - heading_deg);
+    // one arc, or one line
+    let fit = tangent_arc(from, end);
+    match fit {
+        Some((_, a, right)) => {
+            if wrap_deg(if right { -a } else { a } - turn).abs() < 0.5 {
+                return vec![arc_or_line(start, heading_deg, end, fit)];
+            }
+        }
+        None => {
+            if turn.abs() < 0.5 && v[0] * h1.0 + v[1] * h1.1 > 0.0 {
+                return vec![Piece::Line { from: start, to: end }];
+            }
+        }
+    }
+    // the joint: equal tangent lengths d from both ends — the chord's midpoint when the headings
+    // are parallel, where that equation has no root
+    let dot = h1.0 * h2.0 + h1.1 * h2.1;
+    let joint = if 1.0 - dot < 1e-9 {
+        [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0]
+    } else {
+        let vt = v[0] * (h1.0 + h2.0) + v[1] * (h1.1 + h2.1);
+        let d = (-vt + (vt * vt + 2.0 * (1.0 - dot) * vv).sqrt()) / (2.0 * (1.0 - dot));
+        [
+            (start[0] + d * h1.0 + end[0] - d * h2.0) / 2.0,
+            (start[1] + d * h1.1 + end[1] - d * h2.1) / 2.0,
+        ]
+    };
+    let first = arc_or_line(start, heading_deg, joint, tangent_arc(from, joint));
+    let (mid, mid_heading) = (first.end(), first.end_heading(heading_deg));
+    // the second arc, fitted backwards from the end pose: the same radius and angle, the other side
+    let back = tangent_arc(Pose2::at(end, end_heading_deg + 180.0), mid).map(|(r, a, side)| (r, a, !side));
+    let mut second = arc_or_line(mid, mid_heading, end, back);
+    if let Piece::Arc { arc, .. } = &mut second {
+        arc.end_heading = wrap_deg(end_heading_deg);
+    }
+    vec![first, second]
+}
+
 impl Action {
-    /// A kind placed by its clicks, with default parameters: a curve is
-    /// the arc tangent to `heading_deg` — the way the robot arrives at the
-    /// first click — through the second click, or a right quarter circle
-    /// when no arc passes there; a turn faces the second click.
+    /// A kind placed by its clicks, with default parameters: a curve runs
+    /// from the first click to the second and faces the third there —
+    /// before that click, the way the arc tangent to `heading_deg` (how
+    /// the robot arrives at the first click) through the second faces;
+    /// a turn faces the second click.
     pub fn placed(kind: &str, points: &[Point], heading_deg: f64) -> Action {
         let p = |i: usize| points.get(i).copied().unwrap_or([0.0, 0.0]);
         match kind {
@@ -329,15 +443,17 @@ impl Action {
                 then: End::Coast,
             },
             "curve" => {
-                let chord = dist(p(0), p(1));
-                let quarter = (if chord < EPS_MM { 100.0 } else { round1(chord / 2f64.sqrt()) }, 90.0, true);
-                let (radius_mm, angle_deg, right) = tangent_arc(Pose2::at(p(0), heading_deg), p(1)).unwrap_or(quarter);
+                let (start, end) = (p(0), p(1));
+                let facing = points.get(2).filter(|f| dist(**f, end) >= EPS_MM).map(|f| heading_to(end, *f));
+                let end_heading_deg = facing.unwrap_or_else(|| match tangent_arc(Pose2::at(start, heading_deg), end) {
+                    Some((_, a, right)) => heading_deg + if right { -a } else { a },
+                    None => heading_deg,
+                });
                 Action::Curve {
-                    start: p(0),
+                    start,
                     heading_deg: round1(wrap_deg(heading_deg)),
-                    radius_mm,
-                    angle_deg,
-                    right,
+                    end,
+                    end_heading_deg: round1(wrap_deg(end_heading_deg)),
                     speed: DEFAULT_STRAIGHT_DPS,
                     then: End::Coast,
                 }
@@ -381,24 +497,23 @@ impl Action {
     /// Where it leaves the robot.
     pub fn end(&self) -> Point {
         match self {
-            Action::Straight { end, .. } => *end,
-            Action::Curve { start, .. } => self.arc().map(|a| a.end).unwrap_or(*start),
+            Action::Straight { end, .. } | Action::Curve { end, .. } => *end,
             Action::Turn { at, .. } | Action::Stop { at, .. } => *at,
             Action::Custom { at, end, .. } => end.unwrap_or(*at),
         }
     }
 
-    pub fn arc(&self) -> Option<Arc> {
+    /// The pieces a curve drives; nothing for the other kinds.
+    pub fn pieces(&self) -> Vec<Piece> {
         match self {
             Action::Curve {
                 start,
                 heading_deg,
-                radius_mm,
-                angle_deg,
-                right,
+                end,
+                end_heading_deg,
                 ..
-            } => arc_from(*start, *heading_deg, *radius_mm, *angle_deg, *right),
-            _ => None,
+            } => biarc(*start, *heading_deg, *end, *end_heading_deg),
+            _ => vec![],
         }
     }
 
@@ -415,7 +530,7 @@ impl Action {
     /// The heading it leaves the robot with, given the one it started with.
     pub fn end_heading(&self, start_heading: f64) -> f64 {
         match self {
-            Action::Curve { heading_deg, .. } => self.arc().map(|a| a.end_heading).unwrap_or(wrap_deg(*heading_deg)),
+            Action::Curve { end_heading_deg, .. } => wrap_deg(*end_heading_deg),
             Action::Turn { heading_deg, .. } => wrap_deg(*heading_deg),
             _ => self.start_heading().unwrap_or(start_heading),
         }
@@ -425,17 +540,13 @@ impl Action {
     pub fn path(&self) -> Vec<Point> {
         match self {
             Action::Straight { start, end, .. } => vec![*start, *end],
-            Action::Curve { start, right, .. } => match self.arc() {
-                Some(arc) => {
-                    let mut pts = arc_points(&arc, *start, *right);
-                    pts[0] = *start;
-                    if let Some(last) = pts.last_mut() {
-                        *last = arc.end;
-                    }
-                    pts
+            Action::Curve { start, .. } => {
+                let mut pts = vec![*start];
+                for piece in self.pieces() {
+                    pts.extend(piece.points().into_iter().skip(1));
                 }
-                None => vec![*start],
-            },
+                pts
+            }
             Action::Custom { at, end: Some(e), .. } => vec![*at, *e],
             other => vec![other.start()],
         }
@@ -445,7 +556,7 @@ impl Action {
     pub fn length_mm(&self) -> f64 {
         match self {
             Action::Straight { start, end, .. } => dist(*start, *end),
-            Action::Curve { .. } => self.arc().map(|a| a.radius_mm * a.sweep_deg.to_radians()).unwrap_or(0.0),
+            Action::Curve { .. } => self.pieces().iter().map(Piece::length_mm).sum(),
             Action::Custom { at, end: Some(e), .. } => dist(*at, *e),
             _ => 0.0,
         }
@@ -457,21 +568,15 @@ impl Action {
             Action::Straight { speed, then, .. } => {
                 format!("straight {} mm at {}°/s{}", fmt(self.length_mm()), fmt(*speed), then.suffix())
             }
-            Action::Curve {
-                radius_mm,
-                angle_deg,
-                right,
-                speed,
-                then,
-                ..
-            } => format!(
-                "curve {} {}° on r {} mm at {}°/s{}",
-                if *right { "right" } else { "left" },
-                fmt(angle_deg.abs()),
-                fmt(*radius_mm),
-                fmt(*speed),
-                then.suffix()
-            ),
+            Action::Curve { speed, then, .. } => {
+                let pieces = self.pieces();
+                let what = if pieces.is_empty() {
+                    "curve (nowhere to go)".to_string()
+                } else {
+                    pieces.iter().map(piece_text).collect::<Vec<_>>().join(", then ")
+                };
+                format!("{what} at {}°/s{}", fmt(*speed), then.suffix())
+            }
             Action::Turn { heading_deg, speed, .. } => format!("turn to face {}° at {}°/s", fmt(*heading_deg), fmt(*speed)),
             Action::Stop { then, wait_ms, .. } => {
                 if *wait_ms > 0.0 {
@@ -500,7 +605,21 @@ impl Action {
     pub fn brief(&self) -> String {
         match self {
             Action::Straight { .. } => format!("{} mm", fmt(self.length_mm())),
-            Action::Curve { radius_mm, angle_deg, .. } => format!("r {} mm · {}°", fmt(*radius_mm), fmt(angle_deg.abs())),
+            Action::Curve { .. } => {
+                let pieces = self.pieces();
+                match pieces.as_slice() {
+                    [] => "curve".into(),
+                    [Piece::Arc { arc, .. }] => format!("r {} mm · {}°", fmt(arc.radius_mm), fmt(arc.sweep_deg)),
+                    many => many
+                        .iter()
+                        .map(|p| match p {
+                            Piece::Arc { arc, .. } => format!("r {}", fmt(arc.radius_mm)),
+                            Piece::Line { from, to } => format!("{} mm", fmt(dist(*from, *to))),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                }
+            }
             Action::Turn { heading_deg, .. } => format!("face {}°", fmt(*heading_deg)),
             Action::Stop { wait_ms, .. } => {
                 if *wait_ms > 0.0 {
@@ -533,12 +652,10 @@ impl Action {
             p[1] = round1(p[1] + dy);
         };
         match self {
-            Action::Straight { start, end, .. } => {
+            Action::Straight { start, end, .. } | Action::Curve { start, end, .. } => {
                 mv(start);
                 mv(end);
             }
-            // the arc keeps its shape: its end follows its start
-            Action::Curve { start, .. } => mv(start),
             Action::Turn { at, .. } | Action::Stop { at, .. } => mv(at),
             Action::Custom { at, end, .. } => {
                 mv(at);
@@ -553,13 +670,18 @@ impl Action {
     pub fn handles(&self) -> Vec<(Handle, Point)> {
         match self {
             Action::Straight { start, end, .. } => vec![(Handle::Start, *start), (Handle::End, *end)],
-            Action::Curve { start, .. } => {
-                let mut v = vec![(Handle::Start, *start), (Handle::End, self.end())];
-                let pts = self.path();
-                if pts.len() > 2 {
-                    v.push((Handle::Mid, pts[pts.len() / 2]));
-                }
-                v
+            Action::Curve {
+                start,
+                end,
+                end_heading_deg,
+                ..
+            } => {
+                let r = end_heading_deg.to_radians();
+                vec![
+                    (Handle::Start, *start),
+                    (Handle::End, *end),
+                    (Handle::Face, [end[0] + r.cos() * TURN_HANDLE_MM, end[1] + r.sin() * TURN_HANDLE_MM]),
+                ]
             }
             Action::Turn { at, heading_deg, .. } => {
                 let r = heading_deg.to_radians();
@@ -579,58 +701,22 @@ impl Action {
         }
     }
 
-    /// Move a handle to `to`: an end point moves; a curve's start carries
-    /// the arc along, its end handle refits the arc through the point
-    /// (same start, same entry heading), its midpoint handle scales the
-    /// radius keeping the angle; a turn's face handle sets the heading.
+    /// Move a handle to `to`: an end point moves (a curve's start carries
+    /// its end along), a face handle sets a turn's heading or the heading
+    /// a curve ends facing.
     pub fn drag(&mut self, handle: Handle, to: Point) {
         let to = [round1(to[0]), round1(to[1])];
         match (self, handle) {
-            (Action::Straight { start, .. }, Handle::Start) | (Action::Curve { start, .. }, Handle::Start) => *start = to,
-            (Action::Straight { end, .. }, Handle::End) => *end = to,
-            (
-                Action::Curve {
-                    start,
-                    heading_deg,
-                    radius_mm,
-                    angle_deg,
-                    right,
-                    ..
-                },
-                Handle::End,
-            ) => {
-                if let Some((r, a, side)) = tangent_arc(Pose2::at(*start, *heading_deg), to) {
-                    *radius_mm = r;
-                    *angle_deg = a;
-                    *right = side;
-                }
+            (Action::Straight { start, .. }, Handle::Start) => *start = to,
+            (Action::Curve { start, end, .. }, Handle::Start) => {
+                let (dx, dy) = (to[0] - start[0], to[1] - start[1]);
+                *start = to;
+                *end = [round1(end[0] + dx), round1(end[1] + dy)];
             }
-            (
-                Action::Curve {
-                    start,
-                    heading_deg,
-                    radius_mm,
-                    angle_deg,
-                    right,
-                    ..
-                },
-                Handle::Mid,
-            ) => {
-                // as the radius grows the arc's midpoint moves out along a ray from the start: the
-                // radius that brings it nearest the point, never behind the start
-                let (c, s) = (heading_deg.to_radians().cos(), heading_deg.to_radians().sin());
-                let n = if *right { [s, -c] } else { [-s, c] };
-                let half = angle_deg.abs().to_radians() / 2.0;
-                let v = [
-                    n[0] * (1.0 - half.cos()) + c * half.sin(),
-                    n[1] * (1.0 - half.cos()) + s * half.sin(),
-                ];
-                let vv = v[0] * v[0] + v[1] * v[1];
-                if vv > 1e-12 {
-                    let r = ((to[0] - start[0]) * v[0] + (to[1] - start[1]) * v[1]) / vv;
-                    if r >= 1.0 {
-                        *radius_mm = round1(r);
-                    }
+            (Action::Straight { end, .. }, Handle::End) | (Action::Curve { end, .. }, Handle::End) => *end = to,
+            (Action::Curve { end, end_heading_deg, .. }, Handle::Face) => {
+                if dist(*end, to) >= EPS_MM {
+                    *end_heading_deg = round1(heading_to(*end, to));
                 }
             }
             (Action::Turn { at, .. }, Handle::At) | (Action::Stop { at, .. }, Handle::At) | (Action::Custom { at, .. }, Handle::At) => {
@@ -650,21 +736,38 @@ impl Action {
     fn code(&self, from: Pose2) -> Vec<String> {
         match self {
             Action::Straight { then, .. } => vec![format!("db.straight({}{})", num(self.length_mm()), then.arg())],
-            Action::Curve {
-                radius_mm,
-                angle_deg,
-                right,
-                then,
-                ..
-            } => match self.arc() {
-                Some(_) => vec![format!(
-                    "db.curve({}, {}{})",
-                    num(*radius_mm),
-                    num(if *right { angle_deg.abs() } else { -angle_deg.abs() }),
-                    then.arg()
-                )],
-                None => vec![],
-            },
+            Action::Curve { end_heading_deg, then, .. } => {
+                let pieces = self.pieces();
+                if pieces.is_empty() {
+                    // nowhere to drive: only a heading to take up
+                    let rel = wrap_deg(end_heading_deg - from.yaw_deg);
+                    return if rel.abs() < 0.05 {
+                        vec![]
+                    } else {
+                        vec![format!("db.turn({})", num(-rel))]
+                    };
+                }
+                let mut heading = from.yaw_deg;
+                let mut out = Vec::new();
+                for (i, p) in pieces.iter().enumerate() {
+                    // the pieces flow into one another; the action's own end comes last
+                    let arg = if i + 1 == pieces.len() { then.arg() } else { End::Continue.arg() };
+                    out.push(match p {
+                        Piece::Arc { arc, right, .. } => format!(
+                            "db.curve({}, {}{arg})",
+                            num(arc.radius_mm),
+                            num(if *right { arc.sweep_deg } else { -arc.sweep_deg })
+                        ),
+                        Piece::Line { from, to } => {
+                            let (c, s) = (heading.to_radians().cos(), heading.to_radians().sin());
+                            // backward when the run lies behind the heading
+                            format!("db.straight({}{arg})", num((to[0] - from[0]) * c + (to[1] - from[1]) * s))
+                        }
+                    });
+                    heading = p.end_heading(heading);
+                }
+                out
+            }
             Action::Turn { heading_deg, .. } => {
                 let rel = wrap_deg(heading_deg - from.yaw_deg);
                 if rel.abs() < 0.05 {
@@ -732,6 +835,19 @@ pub struct Step {
     pub points: Vec<Point>,
 }
 
+/// One piece of a curve in words.
+fn piece_text(p: &Piece) -> String {
+    match p {
+        Piece::Arc { arc, right, .. } => format!(
+            "curve {} {}° on r {} mm",
+            if *right { "right" } else { "left" },
+            fmt(arc.sweep_deg),
+            fmt(arc.radius_mm)
+        ),
+        Piece::Line { from, to } => format!("straight {} mm", fmt(dist(*from, *to))),
+    }
+}
+
 fn fmt(v: f64) -> String {
     let r = (v * 10.0).round() / 10.0;
     if r == r.trunc() { format!("{}", r as i64) } else { format!("{r}") }
@@ -760,7 +876,7 @@ pub fn wrap_deg(a: f64) -> f64 {
 /// The robot brought from `from` to `to`, facing `heading` when one is
 /// asked for: the link it drives (empty when it is already there), the
 /// program lines, and the pose it arrives in.
-fn approach(from: Pose2, to: Point, heading: Option<f64>) -> (Vec<Point>, Vec<String>, Pose2) {
+pub fn approach(from: Pose2, to: Point, heading: Option<f64>) -> (Vec<Point>, Vec<String>, Pose2) {
     let mut code = Vec::new();
     let mut pose = from;
     let mut link = Vec::new();
@@ -873,7 +989,9 @@ pub fn program(route: &Route, wheel_diameter_mm: f64, axle_track_mm: f64) -> Str
         num(route.start.yaw_deg)
     );
     let stops = route.actions.iter().any(|i| match &i.action {
-        Action::Straight { then, .. } | Action::Curve { then, .. } | Action::Stop { then, .. } => *then != End::Coast,
+        // a curve of two pieces flows from one into the other with then=Stop.NONE
+        Action::Curve { then, .. } => *then != End::Coast || i.action.pieces().len() > 1,
+        Action::Straight { then, .. } | Action::Stop { then, .. } => *then != End::Coast,
         _ => false,
     });
     let waits = route
@@ -988,7 +1106,7 @@ impl Route {
 }
 
 /// The third format placed a curve by its two ends, a radius and a side;
-/// the arc keeps its shape here: its start heading, radius and sweep.
+/// the arc keeps its shape here: its ends and the headings at them.
 fn from_v3(mut v: serde_json::Value) -> Result<Route, String> {
     if let Some(actions) = v.get_mut("actions").and_then(|a| a.as_array_mut()) {
         for a in actions.iter_mut().filter_map(|a| a.as_object_mut()) {
@@ -1004,14 +1122,14 @@ fn from_v3(mut v: serde_json::Value) -> Result<Route, String> {
             };
             let radius = a.get("radius_mm").and_then(|r| r.as_f64()).unwrap_or(0.0);
             let right = a.get("right").and_then(|r| r.as_bool()).unwrap_or(false);
-            let (heading, radius, angle) = match arc_of(start, end, radius, right) {
-                Some(arc) => (arc.start_heading, arc.radius_mm, arc.sweep_deg),
-                None => (0.0, radius, 0.0),
+            let (heading, end_heading) = match arc_of(start, end, radius, right) {
+                Some(arc) => (arc.start_heading, arc.end_heading),
+                None => (0.0, 0.0),
             };
-            a.remove("end");
+            a.remove("radius_mm");
+            a.remove("right");
             a.insert("heading_deg".into(), serde_json::json!(round1(heading)));
-            a.insert("radius_mm".into(), serde_json::json!(round1(radius)));
-            a.insert("angle_deg".into(), serde_json::json!(round1(angle)));
+            a.insert("end_heading_deg".into(), serde_json::json!(round1(end_heading)));
         }
     }
     v["format"] = serde_json::json!(FORMAT);
@@ -1041,12 +1159,11 @@ fn from_v1(v: serde_json::Value) -> Result<Route, String> {
     let mut pose = old.start;
     for seg in old.segments {
         let action = match (seg.kind.as_str(), tangent_arc(pose, seg.to)) {
-            ("curve", Some((radius_mm, angle_deg, right))) => Action::Curve {
+            ("curve", Some((_, angle_deg, right))) => Action::Curve {
                 start: pose.point(),
                 heading_deg: round1(pose.yaw_deg),
-                radius_mm,
-                angle_deg,
-                right,
+                end: seg.to,
+                end_heading_deg: round1(wrap_deg(pose.yaw_deg + if right { -angle_deg } else { angle_deg })),
                 speed: DEFAULT_STRAIGHT_DPS,
                 then: End::Coast,
             },
@@ -1125,16 +1242,19 @@ fn from_v2(v: serde_json::Value) -> Result<Route, String> {
                 heading_deg: round1(wrap_deg(pose.yaw_deg - deg)),
                 speed: DEFAULT_TURN_DPS,
             },
-            Old::Curve { radius_mm, deg, then } if radius_mm.abs() >= EPS_MM && deg.abs() >= 1e-6 => Action::Curve {
-                start: pose.point(),
-                heading_deg: round1(pose.yaw_deg),
-                radius_mm: radius_mm.abs(),
-                angle_deg: deg.abs(),
+            Old::Curve { radius_mm, deg, then } if radius_mm.abs() >= EPS_MM && deg.abs() >= 1e-6 => {
                 // a positive angle was a forward right turn; driving backward it bent the other way
-                right: (deg > 0.0) == (radius_mm > 0.0),
-                speed: DEFAULT_STRAIGHT_DPS,
-                then,
-            },
+                let right = (deg > 0.0) == (radius_mm > 0.0);
+                let arc = arc_from(pose.point(), pose.yaw_deg, radius_mm.abs(), deg.abs(), right).expect("a radius and an angle");
+                Action::Curve {
+                    start: pose.point(),
+                    heading_deg: round1(pose.yaw_deg),
+                    end: arc.end,
+                    end_heading_deg: round1(arc.end_heading),
+                    speed: DEFAULT_STRAIGHT_DPS,
+                    then,
+                }
+            }
             Old::Curve { deg, .. } => Action::Turn {
                 at: pose.point(),
                 heading_deg: round1(wrap_deg(pose.yaw_deg - deg)),
@@ -1182,43 +1302,54 @@ mod tests {
         assert_eq!(s.start_heading(), Some(0.0));
         assert!(near(s.length_mm(), 300.0));
         assert_eq!(s.text(), "straight 300 mm at 350°/s");
-        // a curve from (0, 0) arriving facing +y through (100, 100): the tangent arc is a right
-        // quarter circle of r 100, so it ends there facing +x
+        // a curve from (0, 0) arriving facing +y, to (100, 100): before the third click it faces
+        // the way the tangent arc does there (+x) — a right quarter circle of r 100
         let c = Action::placed("curve", &[[0.0, 0.0], [100.0, 100.0]], 90.0);
         let Action::Curve {
             heading_deg,
-            radius_mm,
-            angle_deg,
-            right,
+            end,
+            end_heading_deg,
             ..
         } = &c
         else {
             panic!()
         };
-        assert!(
-            *right && near(*radius_mm, 100.0) && near(*angle_deg, 90.0) && near(*heading_deg, 90.0),
-            "{c:?}"
-        );
-        assert!(near(c.arc().unwrap().sweep_deg, 90.0));
+        assert_eq!((heading_deg, end, end_heading_deg), (&90.0, &[100.0, 100.0], &0.0), "{c:?}");
+        let pieces = c.pieces();
+        let [Piece::Arc { arc, right, .. }] = pieces[..] else {
+            panic!("{pieces:?}")
+        };
+        assert!(right && near(arc.radius_mm, 100.0) && near(arc.sweep_deg, 90.0), "{arc:?}");
         assert_eq!((c.start(), c.end()), ([0.0, 0.0], [100.0, 100.0]));
         assert_eq!((c.start_heading(), c.end_heading(0.0)), (Some(90.0), 0.0));
         assert_eq!(c.text(), "curve right 90° on r 100 mm at 350°/s");
-        // no arc passes through a point dead ahead: a right quarter circle of r = chord / √2
+        // the third click says which way to face at the end: facing +y there takes two arcs
+        let two = Action::placed("curve", &[[0.0, 0.0], [100.0, 100.0], [100.0, 200.0]], 90.0);
+        assert_eq!(two.end_heading(0.0), 90.0);
+        assert_eq!(two.pieces().len(), 2, "{:?}", two.pieces());
+        assert!(
+            two.text().starts_with("curve ") && two.text().contains(", then curve "),
+            "{}",
+            two.text()
+        );
+        assert!(two.brief().starts_with("r ") && two.brief().contains(" · r "), "{}", two.brief());
+        // a third click on the end itself decides nothing
+        assert_eq!(Action::placed("curve", &[[0.0, 0.0], [100.0, 100.0], [100.0, 100.0]], 90.0), c);
+        // a point dead ahead, facing the same way: a straight run
         let d = Action::placed("curve", &[[0.0, 0.0], [100.0, 0.0]], 0.0);
-        let Action::Curve {
-            radius_mm,
-            angle_deg,
-            right,
-            ..
-        } = &d
-        else {
-            panic!()
-        };
-        assert!(*right && (radius_mm - 70.7).abs() < 0.05 && near(*angle_deg, 90.0), "{d:?}");
-        let Action::Curve { radius_mm, .. } = Action::placed("curve", &[[5.0, 5.0], [5.0, 5.0]], 0.0) else {
-            panic!()
-        };
-        assert_eq!(radius_mm, 100.0, "two clicks on the spot: r 100");
+        assert_eq!(
+            d.pieces(),
+            vec![Piece::Line {
+                from: [0.0, 0.0],
+                to: [100.0, 0.0]
+            }]
+        );
+        assert_eq!(d.text(), "straight 100 mm at 350°/s");
+        assert_eq!(d.brief(), "100 mm");
+        let none = Action::placed("curve", &[[5.0, 5.0], [5.0, 5.0]], 0.0);
+        assert!(none.pieces().is_empty() && none.path() == vec![[5.0, 5.0]] && none.length_mm() == 0.0);
+        assert_eq!(none.brief(), "curve");
+        assert_eq!(none.text(), "curve (nowhere to go) at 350°/s");
         let t = Action::placed("turn", &[[10.0, 10.0], [10.0, 60.0]], 0.0);
         assert_eq!(
             t,
@@ -1293,9 +1424,8 @@ mod tests {
         let c = Action::Curve {
             start: [0.0, 0.0],
             heading_deg: 0.0,
-            radius_mm: 100.0,
-            angle_deg: 90.0,
-            right: false,
+            end: [100.0, 100.0],
+            end_heading_deg: 90.0,
             speed: 350.0,
             then: End::Coast,
         };
@@ -1320,17 +1450,76 @@ mod tests {
         assert!(near(big.end_heading, 0.0), "{big:?}");
         assert!(arc_from([0.0, 0.0], 0.0, 0.0, 90.0, true).is_none(), "no radius");
         assert!(arc_from([0.0, 0.0], 0.0, 100.0, 0.0, true).is_none(), "no angle");
-        let flat = Action::Curve {
+        let none = Action::Curve {
             start: [1.0, 2.0],
             heading_deg: 0.0,
-            radius_mm: 100.0,
-            angle_deg: 0.0,
-            right: true,
+            end: [1.0, 2.0],
+            end_heading_deg: 45.0,
             speed: 350.0,
             then: End::Coast,
         };
-        assert_eq!((flat.end(), flat.path(), flat.length_mm()), ([1.0, 2.0], vec![[1.0, 2.0]], 0.0));
-        assert_eq!(flat.end_heading(45.0), 0.0, "no arc: it still faces its entry heading");
+        assert_eq!((none.end(), none.path(), none.length_mm()), ([1.0, 2.0], vec![[1.0, 2.0]], 0.0));
+        assert_eq!(none.end_heading(0.0), 45.0, "nowhere to go, but a heading to take up");
+        // two arcs meeting tangentially wherever one arc cannot reach the end pose
+        let check = |start: Point, h: f64, end: Point, eh: f64| {
+            let pieces = biarc(start, h, end, eh);
+            assert!(!pieces.is_empty(), "{start:?} {h} -> {end:?} {eh}");
+            let (mut p, mut heading) = (start, h);
+            for piece in &pieces {
+                assert!(dist(piece.points()[0], p) < 0.3, "the pieces chain: {pieces:?}");
+                p = piece.end();
+                heading = piece.end_heading(heading);
+            }
+            assert!(dist(p, end) < 0.3, "ends at the end: {pieces:?}");
+            assert!(
+                wrap_deg(heading - eh).abs() < 0.3,
+                "faces the way asked: {heading} vs {eh}, {pieces:?}"
+            );
+            pieces
+        };
+        // an S: sideways, facing the same way — two semicircles of r 25
+        let s = check([0.0, 0.0], 0.0, [0.0, 100.0], 0.0);
+        let [Piece::Arc { arc: a1, right: r1, .. }, Piece::Arc { arc: a2, right: r2, .. }] = s[..] else {
+            panic!("{s:?}")
+        };
+        assert!(!r1 && r2 && near(a1.radius_mm, 25.0) && near(a2.radius_mm, 25.0), "{s:?}");
+        assert!(near(a1.sweep_deg, 180.0) && near(a2.sweep_deg, 180.0), "{s:?}");
+        // a U: back the way it came, 100 mm over — the semicircle of r 50 is a single arc
+        let u = check([0.0, 0.0], 0.0, [0.0, 100.0], 180.0);
+        let [Piece::Arc { arc: a1, right, .. }] = u[..] else {
+            panic!("{u:?}")
+        };
+        assert!(!right && near(a1.radius_mm, 50.0) && near(a1.sweep_deg, 180.0), "{u:?}");
+        // facing elsewhere at the same point takes two arcs
+        assert_eq!(check([0.0, 0.0], 0.0, [0.0, 100.0], 270.0).len(), 2);
+        // ahead and to the side, facing the same way: two quarter circles of r 50
+        let z = check([0.0, 0.0], 0.0, [100.0, 100.0], 0.0);
+        assert!(
+            matches!(z[..], [Piece::Arc { .. }, Piece::Arc { .. }]) && near(z[0].length_mm(), z[1].length_mm()),
+            "{z:?}"
+        );
+        // the single arc when the poses allow it, and the straight run when they line up
+        assert_eq!(check([0.0, 0.0], 0.0, [100.0, 100.0], 90.0).len(), 1);
+        assert_eq!(
+            check([0.0, 0.0], 0.0, [100.0, 0.0], 0.0),
+            vec![Piece::Line {
+                from: [0.0, 0.0],
+                to: [100.0, 0.0]
+            }]
+        );
+        // ends and headings all round, every one reached facing the way asked
+        let ends = [
+            ([200.0, 50.0], 30.0),
+            ([-50.0, 120.0], 200.0),
+            ([80.0, -140.0], -90.0),
+            ([30.0, 30.0], 180.0),
+        ];
+        for (i, (end, eh)) in ends.into_iter().enumerate() {
+            for h in [0.0, 20.0 * (i + 1) as f64, -135.0] {
+                check([10.0, -5.0], h, end, eh);
+            }
+        }
+        assert!(biarc([1.0, 1.0], 0.0, [1.0, 1.0], 90.0).is_empty(), "nowhere to go");
         // the tangent arc through a point: radius, angle, side
         assert_eq!(tangent_arc(Pose2::at([0.0, 0.0], 0.0), [100.0, 100.0]), Some((100.0, 90.0, false)));
         assert_eq!(tangent_arc(Pose2::at([0.0, 0.0], 0.0), [100.0, -100.0]), Some((100.0, 90.0, true)));
@@ -1359,57 +1548,38 @@ mod tests {
         assert_eq!(s.end(), [200.0, 50.0]);
         s.drag(Handle::Start, [10.0, 10.0]);
         assert_eq!(s.start(), [10.0, 10.0]);
-        s.drag(Handle::Mid, [0.0, 0.0]);
-        assert_eq!(s.start(), [10.0, 10.0], "a straight has no midpoint handle");
-        // a curve: a right quarter circle of r 100 from (0, 0) facing +x ends at (100, -100); its
-        // midpoint handle sits on the arc
+        s.drag(Handle::Face, [0.0, 0.0]);
+        assert_eq!(s.start(), [10.0, 10.0], "a straight has no face handle");
+        // a curve's handles: its start (which carries its end along), its end, and the heading it
+        // ends facing, TURN_HANDLE_MM along
         let mut c = Action::Curve {
             start: [0.0, 0.0],
             heading_deg: 0.0,
-            radius_mm: 100.0,
-            angle_deg: 90.0,
-            right: true,
+            end: [100.0, -100.0],
+            end_heading_deg: -90.0,
             speed: 350.0,
             then: End::Coast,
         };
+        assert_eq!(c.pieces().len(), 1, "a right quarter circle: {:?}", c.pieces());
         let h = c.handles();
-        assert_eq!(h.len(), 3);
-        assert_eq!(h[1], (Handle::End, [100.0, -100.0]));
-        assert!((h[2].1[0] - 70.7).abs() < 0.1 && (h[2].1[1] + 29.3).abs() < 0.1, "{h:?}");
-        // the midpoint handle scales the radius, keeping the angle and the side
-        c.drag(Handle::Mid, [141.4, -58.6]);
-        let Action::Curve {
-            radius_mm,
-            angle_deg,
-            right,
-            ..
-        } = &c
-        else {
-            panic!()
-        };
-        assert!((radius_mm - 200.0).abs() < 0.2 && *angle_deg == 90.0 && *right, "{c:?}");
-        c.drag(Handle::Mid, [-50.0, 50.0]);
-        let Action::Curve { radius_mm, .. } = &c else { panic!() };
-        assert!((radius_mm - 200.0).abs() < 0.2, "a point behind the start is refused: {c:?}");
-        // the end handle refits the arc through the point, from the same start and heading
+        assert_eq!(&h[..2], &[(Handle::Start, [0.0, 0.0]), (Handle::End, [100.0, -100.0])]);
+        assert!(
+            h[2].0 == Handle::Face && near(h[2].1[0], 100.0) && near(h[2].1[1], -100.0 - TURN_HANDLE_MM),
+            "{h:?}"
+        );
+        c.drag(Handle::Face, [200.0, -100.0]);
+        assert_eq!(c.end_heading(0.0), 0.0, "the face handle sets the heading it ends facing");
+        assert_eq!(c.pieces().len(), 2, "which now takes two arcs: {:?}", c.pieces());
+        c.drag(Handle::Face, [100.0, -100.0]);
+        assert_eq!(c.end_heading(0.0), 0.0, "a face handle on the spot changes nothing");
         c.drag(Handle::End, [100.0, 100.0]);
-        let Action::Curve {
-            radius_mm,
-            angle_deg,
-            right,
-            ..
-        } = &c
-        else {
-            panic!()
-        };
-        assert!(near(*radius_mm, 100.0) && near(*angle_deg, 90.0) && !*right, "{c:?}");
-        assert!(near(c.end_heading(0.0), 90.0));
-        c.drag(Handle::End, [300.0, 0.0]);
-        let Action::Curve { radius_mm, .. } = &c else { panic!() };
-        assert!(near(*radius_mm, 100.0), "a point dead ahead is no arc: left alone, {c:?}");
-        // the start handle carries the whole arc along, and so does a translation
+        assert_eq!(c.end(), [100.0, 100.0]);
         c.drag(Handle::Start, [10.0, 10.0]);
-        assert_eq!(c.end(), [110.0, 110.0]);
+        assert_eq!(
+            (c.start(), c.end()),
+            ([10.0, 10.0], [110.0, 110.0]),
+            "the start carries the end along"
+        );
         c.translate(-10.0, -10.0);
         assert_eq!((c.start(), c.end()), ([0.0, 0.0], [100.0, 100.0]));
         // a turn: the face handle sets the heading, the at handle moves it
@@ -1437,6 +1607,48 @@ mod tests {
     }
 
     #[test]
+    fn a_two_arc_curve_flows_from_one_piece_into_the_other() {
+        let curve = |end: Point, end_heading_deg: f64| Action::Curve {
+            start: [0.0, 0.0],
+            heading_deg: 0.0,
+            end,
+            end_heading_deg,
+            speed: 350.0,
+            then: End::Coast,
+        };
+        let route = Route {
+            start: Pose2::at([0.0, 0.0], 0.0),
+            actions: vec![curve([0.0, 100.0], 0.0).into()],
+            ..Default::default()
+        };
+        let text = program(&route, 86.4, 135.0);
+        assert!(
+            text.contains("from openbricks.parameters import Stop\n"),
+            "the first piece needs Stop.NONE: {text}"
+        );
+        assert!(
+            text.contains(
+                "# 1: curve left 180° on r 25 mm, then curve right 180° on r 25 mm at 350°/s\ndb.curve(25, -180, then=Stop.NONE)\ndb.curve(25, 180)\n"
+            ),
+            "{text}"
+        );
+        assert!(pose_near(plan(&route)[0].end, 0.0, 100.0, 0.0));
+        assert!(near(length_mm(&route), 50.0 * std::f64::consts::PI));
+        // a curve going nowhere but turning is a turn; one dead ahead is a straight (the plan
+        // turns back to its entry heading first: the file says it enters facing +x)
+        let spin = Route {
+            actions: vec![curve([0.0, 0.0], 90.0).into(), curve([100.0, 0.0], 0.0).into()],
+            ..Default::default()
+        };
+        let text = program(&spin, 86.4, 135.0);
+        assert!(text.contains("# 1: curve (nowhere to go) at 350°/s\ndb.turn(-90)\n"), "{text}");
+        assert!(
+            text.contains("\n# 2: straight 100 mm at 350°/s\n# to its start\ndb.turn(90)\ndb.straight(100)\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn the_plan_drives_to_each_action_and_keeps_the_sign_conventions() {
         let route = Route {
             start: Pose2::at([0.0, 0.0], 0.0),
@@ -1447,9 +1659,8 @@ mod tests {
                 Action::Curve {
                     start: [300.0, 0.0],
                     heading_deg: 90.0,
-                    radius_mm: 100.0,
-                    angle_deg: 90.0,
-                    right: true,
+                    end: [400.0, 100.0],
+                    end_heading_deg: 0.0,
                     speed: 350.0,
                     then: End::Continue,
                 }
@@ -1604,9 +1815,8 @@ mod tests {
                 Action::Curve {
                     start: [0.0, 0.0],
                     heading_deg: 0.0,
-                    radius_mm: 100.0,
-                    angle_deg: 90.0,
-                    right: false,
+                    end: [100.0, 100.0],
+                    end_heading_deg: 90.0,
                     speed: 300.0,
                     then: End::Continue,
                 }
@@ -1626,8 +1836,8 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("\"angle_deg\": 90.0") && !text.contains("\"end\""),
-            "an arc, not two ends: {text}"
+            text.contains("\"end_heading_deg\": 90.0") && !text.contains("\"radius_mm\""),
+            "two poses, no radius: {text}"
         );
         assert!(text.contains("\"locked\": true"), "{text}");
         assert_eq!(text.matches("\"locked\"").count(), 1, "unlocked actions do not mention it");
@@ -1645,19 +1855,18 @@ mod tests {
         let Action::Curve {
             start,
             heading_deg,
-            radius_mm,
-            angle_deg,
-            right,
+            end,
+            end_heading_deg,
             ..
         } = &third.actions[0].action
         else {
             panic!("{:?}", third.actions[0])
         };
         assert_eq!(
-            (start, heading_deg, radius_mm, angle_deg, right),
-            (&[0.0, 0.0], &0.0, &100.0, &90.0, &false)
+            (start, heading_deg, end, end_heading_deg),
+            (&[0.0, 0.0], &0.0, &[100.0, 100.0], &90.0)
         );
-        assert_eq!(third.actions[0].action.end(), [100.0, 100.0]);
+        assert_eq!(third.actions[0].action.pieces().len(), 1, "the same single arc");
         assert_eq!(third.actions[0].color, Some([1, 2, 3]));
         assert!(third.actions[1].locked);
         assert_eq!(third.actions[2].action.end(), [5.0, 5.0], "a curve with no arc keeps its start");
@@ -1679,19 +1888,17 @@ mod tests {
         let Action::Curve {
             start,
             heading_deg,
-            radius_mm,
-            angle_deg,
-            right,
+            end,
+            end_heading_deg,
             ..
         } = &old.actions[1].action
         else {
             panic!("{:?}", old.actions[1])
         };
         assert_eq!(
-            (start, heading_deg, radius_mm, angle_deg, right),
-            (&[0.0, 250.0], &90.0, &100.0, &90.0, &true)
+            (start, heading_deg, end, end_heading_deg),
+            (&[0.0, 250.0], &90.0, &[100.0, 350.0], &0.0)
         );
-        assert_eq!(old.actions[1].action.end(), [100.0, 350.0]);
         assert_eq!(
             old.actions[2].action,
             Action::Turn {
@@ -1727,10 +1934,13 @@ mod tests {
         let older = Route::load(&v1).unwrap();
         assert_eq!(older.actions.len(), 3);
         assert_eq!(older.actions[0].action.end(), [0.0, 250.0]);
-        let Action::Curve { radius_mm, right, .. } = &older.actions[1].action else {
+        let Action::Curve { end, end_heading_deg, .. } = &older.actions[1].action else {
             panic!()
         };
-        assert!(near(*radius_mm, 100.0) && *right);
+        assert_eq!((end, end_heading_deg), (&[100.0, 350.0], &0.0));
+        let pieces = older.actions[1].action.pieces();
+        assert!(matches!(pieces[..], [Piece::Arc { right: true, .. }]), "{pieces:?}");
+        assert!(near(pieces[0].length_mm(), 100.0 * std::f64::consts::FRAC_PI_2));
         assert!(
             matches!(older.actions[2].action, Action::Straight { .. }),
             "a point dead ahead is a line"
