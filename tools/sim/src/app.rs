@@ -60,13 +60,14 @@ enum Drag {
         pivot: Vec3,
         starts: Vec<(String, [f64; 3], [f64; 3])>,
     },
-    /// The chassis dragged on the map: where the press hit the ground,
-    /// the pointer's x there, and the pose it started from.
+    /// The chassis dragged on the map: the pointer's x at the press and
+    /// the pose it started from (the ghost's axle centre follows the pointer).
     Chassis {
-        start: Vec3,
         px0: f32,
         pose0: Pose2,
     },
+    /// An action's handle dragged on the map.
+    RouteHandle,
 }
 
 pub struct App {
@@ -492,6 +493,7 @@ impl App {
             let scene = viewport::Scene {
                 items: &self.items,
                 lines: &lines,
+                ghost: &[],
                 overlay: &overlay,
                 background: bg,
             };
@@ -1635,9 +1637,10 @@ impl App {
             ui.label("wgpu is not available");
             return;
         };
-        let (items, mut lines) = self
+        let draw = self
             .simulate
             .draw_items(&mut self.viewport, &gpu.device, &gpu.queue, &self.editor.bundle, dark);
+        let (items, mut lines, ghost) = (draw.items, draw.lines, draw.ghost);
         lines.extend(self.simulate.route_lines(dark));
         if let Some((lo, hi)) = self.simulate.frame_target() {
             self.viewport.camera.fit(lo, hi);
@@ -1655,6 +1658,7 @@ impl App {
             let scene = viewport::Scene {
                 items: &items,
                 lines: &lines,
+                ghost: &ghost,
                 overlay: &[],
                 background: bg,
             };
@@ -1678,29 +1682,35 @@ impl App {
             viewport::ray_plane_z(o, d, 0.0)
         };
         let shift = ui.input(|i| i.modifiers.shift);
-        // a press on the chassis starts moving it; anywhere else orbits
+        // a press on a route handle drags it, on the chassis moves it; anywhere else orbits
         if response.drag_started_by(egui::PointerButton::Primary) {
             let origin = ui
                 .input(|i| i.pointer.press_origin())
                 .map(local)
                 .or(response.interact_pointer_pos().map(local));
-            let on_chassis = origin
-                .and_then(|(x, y)| self.viewport.pick(&items, x, y))
-                .map(|i| self.simulate.chassis_items.contains(&i))
-                .unwrap_or(false);
             self.drag = Drag::Orbit;
-            if on_chassis
-                && let Some((x, y)) = origin
-                && let Some(hit) = ground(x, y)
-                && let Some(pose0) = self.simulate.begin_chassis_drag()
-            {
-                self.drag = Drag::Chassis { start: hit, px0: x, pose0 };
+            let handle = origin.and_then(|(x, y)| self.simulate.route_handle_at(&cam, x, y, w, h));
+            if let Some(i) = handle {
+                if self.simulate.begin_handle_drag(i) {
+                    self.drag = Drag::RouteHandle;
+                }
+            } else {
+                let on_chassis = origin
+                    .and_then(|(x, y)| self.viewport.pick(&items, x, y))
+                    .map(|i| self.simulate.chassis_items.contains(&i))
+                    .unwrap_or(false);
+                if on_chassis
+                    && let Some((x, _)) = origin
+                    && let Some(pose0) = self.simulate.begin_chassis_drag()
+                {
+                    self.drag = Drag::Chassis { px0: x, pose0 };
+                }
             }
         }
         if response.drag_started_by(egui::PointerButton::Secondary) || response.drag_started_by(egui::PointerButton::Middle) {
             self.drag = Drag::Pan;
         }
-        // a click on the map ends the armed segment
+        // a click on the map ends the armed move
         if response.clicked_by(egui::PointerButton::Primary)
             && self.simulate.pick.is_some()
             && let Some((x, y)) = response.interact_pointer_pos().map(local)
@@ -1720,8 +1730,8 @@ impl App {
                 let (r, u) = (c.right(), c.up());
                 c.target = c.target - r * delta.x * scale + u * delta.y * scale;
             }
-            Drag::Chassis { start, px0, pose0 } if response.dragged() => {
-                let (start, px0, pose0) = (*start, *px0, *pose0);
+            Drag::Chassis { px0, pose0 } if response.dragged() => {
+                let (px0, pose0) = (*px0, *pose0);
                 if let Some((x, y)) = response.interact_pointer_pos().map(local) {
                     let pose = if shift {
                         // shift turns it: a screen-width drag is a full turn
@@ -1730,9 +1740,10 @@ impl App {
                             ..pose0
                         }
                     } else if let Some(hit) = ground(x, y) {
+                        // the ghost's axle centre sits under the pointer
                         Pose2 {
-                            x_mm: pose0.x_mm + (hit.x - start.x) as f64,
-                            y_mm: pose0.y_mm + (hit.y - start.y) as f64,
+                            x_mm: hit.x as f64,
+                            y_mm: hit.y as f64,
                             yaw_deg: pose0.yaw_deg,
                         }
                     } else {
@@ -1741,11 +1752,20 @@ impl App {
                     self.simulate.drag_chassis(pose);
                 }
             }
+            Drag::RouteHandle if response.dragged() => {
+                if let Some((x, y)) = response.interact_pointer_pos().map(local)
+                    && let Some(hit) = ground(x, y)
+                {
+                    self.simulate.drag_handle(hit.x as f64, hit.y as f64);
+                }
+            }
             _ => {}
         }
         if response.drag_stopped() {
-            if matches!(self.drag, Drag::Chassis { .. }) {
-                self.simulate.end_chassis_drag();
+            match self.drag {
+                Drag::Chassis { .. } => self.simulate.end_chassis_drag(),
+                Drag::RouteHandle => self.simulate.end_handle_drag(),
+                _ => {}
             }
             self.drag = Drag::None;
         }
@@ -1765,7 +1785,7 @@ impl App {
             response.rect.left_bottom() + egui::vec2(8.0, -8.0),
             egui::Align2::LEFT_BOTTOM,
             if self.simulate.pick.is_some() {
-                "click the map where the segment ends · Esc cancels"
+                "click the map where the move ends · Esc cancels"
             } else {
                 "orbit: drag · pan: right-drag · zoom: wheel · drag the chassis to place it (shift turns it)"
             },
@@ -1899,6 +1919,7 @@ mod tests {
     use super::*;
     use crate::editor::testing::real_bundle;
     use crate::sim::testing::fake_server;
+    use crate::simulate::Tool;
     use crate::viewport::testing::{test_device, test_renderer};
     use egui::{Event, Key, Modifiers, PointerButton, Pos2};
     use egui_kittest::Harness;
@@ -2494,21 +2515,25 @@ mod tests {
         let mut h = harness(&gpu, None);
         h.state_mut().simulate = SimulateTab::new_with_env(Some(fake.python.clone()), fake.env.clone());
         h.get_by_label("Simulate").click();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while !h.state().simulate.scene_loaded() && std::time::Instant::now() < deadline {
-            h.step();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(h.state().simulate.scene_loaded(), "{}", h.state().simulate.status());
+        let wait_for = |h: &mut Harness<'_, App>, f: &dyn Fn(&App) -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while !f(h.state()) && std::time::Instant::now() < deadline {
+                h.step();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(
+                f(h.state()),
+                "waited in vain: {} / {:?}",
+                h.state().simulate.status(),
+                h.state().simulate.log
+            );
+        };
+        wait_for(&mut h, &|a| a.simulate.scene_loaded());
         steps(&mut h, 3);
         assert!(h.query_by_label("Route").is_some());
-        // the chassis stands at its spawn; a drag on it places it, and the server hears
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while h.state().simulate.chassis_pose().map(|p| p.x_mm > -500.0).unwrap_or(true) && std::time::Instant::now() < deadline {
-            h.step();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let p0 = h.state().simulate.chassis_pose().expect("the chassis's pose from the frames");
+        // the chassis stands at its spawn; a drag on it puts its axle centre under the pointer, and the server hears
+        wait_for(&mut h, &|a| a.simulate.chassis_pose().map(|p| p.x_mm < -500.0).unwrap_or(false));
+        let p0 = h.state().simulate.chassis_pose().unwrap();
         assert!((p0.x_mm + 547.0).abs() < 1e-3 && (p0.yaw_deg - 90.0).abs() < 1e-3, "{p0:?}");
         // seen from the top, framed on the mat as the tab framed it (the toolbar's Fit frames the workbench)
         h.get_by_label("Top").click();
@@ -2519,26 +2544,43 @@ mod tests {
         press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
         drag_to(&mut h, at + egui::vec2(8.0, 0.0), Modifiers::NONE);
         assert!(matches!(h.state().drag, Drag::Chassis { .. }), "the chassis was grabbed");
-        drag_to(&mut h, at + egui::vec2(120.0, 0.0), Modifiers::NONE);
-        let preview = h.state().simulate.chassis_pose().unwrap();
-        assert!(preview.x_mm > p0.x_mm + 50.0, "the preview follows the pointer: {preview:?}");
-        release(&mut h, at + egui::vec2(120.0, 0.0), PointerButton::Primary);
+        let target = at + egui::vec2(120.0, 0.0);
+        drag_to(&mut h, target, Modifiers::NONE);
+        let ghost = h.state().simulate.ghost.expect("a ghost follows the pointer");
+        let under = {
+            let app = h.state();
+            let r = app.view_rect;
+            let (o, d) = app
+                .viewport
+                .camera
+                .ray(target.x - r.min.x, target.y - r.min.y, r.width(), r.height());
+            viewport::ray_plane_z(o, d, 0.0).unwrap()
+        };
+        assert!(
+            (ghost.x_mm - under.x as f64).abs() < 1.0 && (ghost.y_mm - under.y as f64).abs() < 1.0,
+            "{ghost:?} under {under:?}"
+        );
+        assert!(ghost.x_mm > p0.x_mm + 50.0, "{ghost:?}");
+        assert!(
+            h.state()
+                .simulate
+                .chassis_pose()
+                .map(|p| (p.x_mm - p0.x_mm).abs() < 1e-3)
+                .unwrap_or(false),
+            "the chassis itself stays until the drop"
+        );
+        release(&mut h, target, PointerButton::Primary);
         let placed = h.state().simulate.route.start;
-        assert!(placed.x_mm > p0.x_mm + 50.0, "{placed:?}");
+        assert!((placed.x_mm - under.x as f64).abs() < 1.0, "{placed:?}");
+        assert!(h.state().simulate.ghost.is_none());
         assert_eq!(h.state().simulate.sent.last().unwrap()["cmd"], "place");
         // the server's next frame shows it there; then shift turns it
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while h
-            .state()
-            .simulate
-            .chassis_pose()
-            .map(|p| (p.x_mm - placed.x_mm).abs() > 1e-3)
-            .unwrap_or(true)
-            && std::time::Instant::now() < deadline
-        {
-            h.step();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        wait_for(&mut h, &|a| {
+            a.simulate
+                .chassis_pose()
+                .map(|p| (p.x_mm - placed.x_mm).abs() < 1e-3)
+                .unwrap_or(false)
+        });
         steps(&mut h, 2);
         let at = on_screen(h.state(), Vec3::new(placed.x_mm as f32, placed.y_mm as f32, 50.0));
         press(&mut h, at, PointerButton::Primary, Modifiers::SHIFT);
@@ -2550,59 +2592,103 @@ mod tests {
             (turned.x_mm - placed.x_mm).abs() < 1e-6 && turned.yaw_deg < placed.yaw_deg,
             "{turned:?} from {placed:?}"
         );
-        // arm a straight segment and click the map where it ends
-        h.get_by_label("+ Straight to…").click();
+        wait_for(&mut h, &|a| {
+            a.simulate
+                .chassis_pose()
+                .map(|p| (p.yaw_deg - turned.yaw_deg).abs() < 1e-3)
+                .unwrap_or(false)
+        });
+        // the point tool: a click on the map dead ahead adds one straight action
+        h.get_by_label("→ point").click();
         steps(&mut h, 2);
-        assert_eq!(h.state().simulate.pick, Some(crate::route::Kind::Straight));
-        assert!(h.query_by_label("click the map where the straight segment ends").is_some());
-        let end = on_screen(h.state(), Vec3::new((turned.x_mm + 250.0) as f32, turned.y_mm as f32, 0.0));
+        assert_eq!(h.state().simulate.pick, Some(Tool::StraightTo));
+        assert!(h.query_by_label("click the map where the straight line ends").is_some());
+        let (hx, hy) = (turned.yaw_deg.to_radians().cos(), turned.yaw_deg.to_radians().sin());
+        let ahead = [turned.x_mm + hx * 250.0, turned.y_mm + hy * 250.0];
+        let end = on_screen(h.state(), Vec3::new(ahead[0] as f32, ahead[1] as f32, 0.0));
         press(&mut h, end, PointerButton::Primary, Modifiers::NONE);
         release(&mut h, end, PointerButton::Primary);
         steps(&mut h, 2);
-        assert_eq!(
-            h.state().simulate.route.segments.len(),
-            1,
-            "{:?}",
-            h.state().simulate.route.segments
-        );
+        let actions = h.state().simulate.route.actions.clone();
+        assert_eq!(actions.len(), 1, "{actions:?}");
+        let crate::route::Action::Straight { mm, .. } = &actions[0] else {
+            panic!("{actions:?}")
+        };
+        assert!((mm - 250.0).abs() < 4.0, "{mm}");
         assert!(h.state().simulate.pick.is_none());
-        let to = h.state().simulate.route.segments[0].to;
-        assert!(
-            (to[0] - turned.x_mm - 250.0).abs() < 3.0 && (to[1] - turned.y_mm).abs() < 3.0,
-            "{to:?}"
-        );
-        assert!(h.query_by_label("straight").is_some());
-        // Escape cancels an armed pick; a curve is armed the same way
-        h.get_by_label("+ Curve to…").click();
+        // typed: a curve and a stop are added with their defaults, then a custom call
+        for label in ["+ Curve", "+ Stop", "+ Custom"] {
+            h.get_by_label(label).click();
+            steps(&mut h, 2);
+        }
+        assert_eq!(h.state().simulate.route.actions.len(), 4);
+        assert!(matches!(
+            h.state().simulate.route.actions[1],
+            crate::route::Action::Curve {
+                radius_mm: 150.0,
+                deg: 90.0,
+                ..
+            }
+        ));
+        assert_eq!(h.state().simulate.selected, Some(3));
+        // the straight's handle on the map: dragging it along the line sets the distance
+        let step = h.state().simulate.steps()[0].clone();
+        let hp = crate::route::handle(&step, &actions[0]).unwrap();
+        let hs = on_screen(h.state(), Vec3::new(hp[0] as f32, hp[1] as f32, 3.0));
+        assert!(h.state().view_rect.contains(hs), "{hs:?}");
+        let further = on_screen(h.state(), Vec3::new((hp[0] + hx * 100.0) as f32, (hp[1] + hy * 100.0) as f32, 3.0));
+        press(&mut h, hs, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, hs + (further - hs).normalized() * 12.0, Modifiers::NONE);
+        assert!(matches!(h.state().drag, Drag::RouteHandle), "the handle was grabbed");
+        assert!(h.state().simulate.ghost.is_some(), "the ghost shows where the action ends");
+        drag_to(&mut h, further, Modifiers::NONE);
+        release(&mut h, further, PointerButton::Primary);
+        let crate::route::Action::Straight { mm, .. } = &h.state().simulate.route.actions[0] else {
+            panic!()
+        };
+        assert!((mm - 350.0).abs() < 6.0, "dragged out to 350 mm: {mm}");
+        assert!(h.state().simulate.ghost.is_none());
+        // the list: later, earlier, remove
+        h.state_mut().simulate.selected = Some(0);
+        steps(&mut h, 2);
+        h.get_all_by_label("↓").next().unwrap().click();
+        steps(&mut h, 2);
+        assert!(matches!(h.state().simulate.route.actions[0], crate::route::Action::Curve { .. }));
+        h.get_all_by_label("↑").nth(1).unwrap().click();
+        steps(&mut h, 2);
+        assert!(matches!(h.state().simulate.route.actions[0], crate::route::Action::Straight { .. }));
+        h.get_all_by_label("×").last().unwrap().click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.route.actions.len(), 3);
+        // Escape cancels an armed tool; the curve tool is armed the same way
+        h.get_by_label("⌒ point").click();
         h.step();
         h.key_press(Key::Escape);
         steps(&mut h, 2);
         assert!(h.state().simulate.pick.is_none());
-        // the program and the run
+        // definitions and the program
+        h.get_by_label("Definitions (what custom actions call)").click();
+        steps(&mut h, 2);
+        h.state_mut().simulate.route.prelude = "def line_follow():\n    pass\n".into();
         h.get_by_label("show the program").click();
         steps(&mut h, 2);
-        assert!(h.query_by_label("show the program").is_some());
+        assert!(h.state().simulate.route_program().unwrap().contains("def line_follow():"));
+        // the run
         h.get_by_label("▶ Run route").click();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while h.state().simulate.status() != "running" && std::time::Instant::now() < deadline {
-            h.step();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert_eq!(h.state().simulate.status(), "running");
+        wait_for(&mut h, &|a| a.simulate.status() == "running");
         assert!(
             h.state().simulate.log.iter().any(|(_, t)| t.contains("openbricks-route-")),
             "{:?}",
             h.state().simulate.log
         );
         h.get_by_label("⏹ Stop").click();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while h.state().simulate.status() != "stopped" && std::time::Instant::now() < deadline {
-            h.step();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        wait_for(&mut h, &|a| a.simulate.status() == "stopped");
         h.get_by_label("Undo last").click();
         steps(&mut h, 2);
-        assert!(h.state().simulate.route.segments.is_empty());
+        assert_eq!(h.state().simulate.route.actions.len(), 2);
+        h.get_by_label("Clear").click();
+        steps(&mut h, 2);
+        assert!(h.state().simulate.route.actions.is_empty());
         h.state_mut().simulate.shutdown();
         let _ = std::fs::remove_dir_all(&fake.dir);
     }

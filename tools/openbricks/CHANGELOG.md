@@ -3,6 +3,45 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.7.0 — routes as action lists, typed or dragged, with continuous moves and custom calls
+
+A route in the Simulate tab is now a list of actions — **straight**,
+**turn**, **curve**, **stop** and **custom** — instead of a chain of
+points. Add one with the **+** buttons and type its parameters
+(distance, degrees, radius, the wait after a stop, the line of code a
+custom action runs), or arm **→ point** / **⌒ point** and click the
+map to have the sim work the actions out from where the previous one
+ends. Every move has a handle on the map: dragging it sets the
+straight's distance along its line, the turn's heading, or the
+curve's tangent arc through the point, and a 70 % transparent copy of
+the chassis shows where the robot ends up. Straights and curves carry
+an end state — coast, brake, hold, or **continue** (`then=Stop.NONE`)
+for a move that flows into the next one without slowing; stops choose
+coast, brake or hold and an optional wait. Custom actions call
+whatever the **Definitions** box defines (`def line_follow(): …`,
+`def run_until_all_black(): …`); the row's picker lists those names
+and the definitions ride into the generated program after the drive
+base is set up. Rows reorder by their **≡** grip or ↑ ↓, **×**
+removes one, and each row shows in words what it does and where it
+ends. Dragging the chassis itself now moves a transparent copy with
+its axle centre under the pointer; the robot jumps there when you let
+go. Route files are `openbricks-route/2` (actions and definitions);
+the 4.6.0 point files still load and are converted.
+
+- Renderer: a translucent pass (alpha-blended, depth-tested behind
+  its own depth pre-pass so a ghost never shows its back faces through
+  its front) for the ghost chassis.
+- Tests: every action's kinematics against the drive base's sign
+  conventions, the point tools, handle drags, the program text (imports
+  only as needed, definitions after the setup, custom lines verbatim),
+  file conversion; the tab's list edits, ghost, handle hit-testing and
+  running against the stand-in server; the ghost blend pixel-checked
+  against the same box drawn solid; the panel driven headless (tools,
+  add buttons, a handle dragged on the map, reordering, definitions,
+  a run); and, on the real MuJoCo runtime, a five-action route with a
+  continuous straight, a held stop and a custom call driven to within
+  25 mm and 10° of the plan.
+
 ## 4.6.0 — routes on the map, and the chassis placed by hand
 
 The Simulate tab plans routes. A route is a start pose and a sequence

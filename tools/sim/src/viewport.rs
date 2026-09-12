@@ -48,6 +48,7 @@ pub struct GpuMesh {
 
 /// One instance to draw: which mesh, where, what colour, and which
 /// texture (none = flat colour).
+#[derive(Clone, Debug)]
 pub struct DrawItem {
     pub mesh: String,
     pub model: Mat4,
@@ -66,12 +67,15 @@ pub struct Line {
     pub color: [f32; 4],
 }
 
-/// Everything one frame draws: the scene, its lines, and overlay items
-/// (handles) drawn on top of it with a fresh depth buffer.
+/// Everything one frame draws: the scene, its lines, translucent ghost
+/// items blended over it (a chassis where a drag would put it), and
+/// overlay items (handles) drawn on top of everything with a fresh
+/// depth buffer.
 #[derive(Default)]
 pub struct Scene<'a> {
     pub items: &'a [DrawItem],
     pub lines: &'a [Line],
+    pub ghost: &'a [DrawItem],
     pub overlay: &'a [DrawItem],
     pub background: [f64; 4],
 }
@@ -194,6 +198,8 @@ pub fn ray_obb(origin: Vec3, dir: Vec3, model: &Mat4, bbox: (Vec3, Vec3)) -> Opt
 
 pub struct Viewport {
     pipeline: wgpu::RenderPipeline,
+    ghost_depth_pipeline: wgpu::RenderPipeline,
+    ghost_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,
@@ -312,7 +318,7 @@ impl Viewport {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[vertex_layout],
+                buffers: std::slice::from_ref(&vertex_layout),
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -326,6 +332,69 @@ impl Viewport {
                 ..Default::default()
             },
             depth_stencil: Some(depth_state.clone()),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        // ghosts: first their depth alone (so only the nearest surface of a ghost shows, not
+        // its back faces through it), then the same shading blended by the item's alpha
+        // wherever the depth matches
+        let ghost_depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ghost depth"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: std::slice::from_ref(&vertex_layout),
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::empty(),
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_state.clone()),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let ghost_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ghost"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[vertex_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                ..depth_state.clone()
+            }),
             multisample: Default::default(),
             multiview_mask: None,
             cache: None,
@@ -412,6 +481,8 @@ impl Viewport {
         });
         let mut vp = Viewport {
             pipeline,
+            ghost_depth_pipeline,
+            ghost_pipeline,
             line_pipeline,
             globals,
             globals_bg,
@@ -718,6 +789,7 @@ impl Viewport {
         let scene = Scene {
             items,
             lines: &[],
+            ghost: &[],
             overlay: &[],
             background,
         };
@@ -765,6 +837,7 @@ impl Viewport {
         let data: Vec<InstanceData> = items
             .iter()
             .chain(scene.overlay.iter())
+            .chain(scene.ghost.iter())
             .map(|it| InstanceData {
                 model: it.model.to_cols_array_2d(),
                 color: it.color,
@@ -863,6 +936,22 @@ impl Viewport {
                 pass.set_vertex_buffer(0, mesh.vbuf.slice(..));
                 pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, i as u32..i as u32 + 1);
+            }
+            if !scene.ghost.is_empty() {
+                pass.set_bind_group(2, white, &[]);
+                for pipeline in [&self.ghost_depth_pipeline, &self.ghost_pipeline] {
+                    pass.set_pipeline(pipeline);
+                    for (k, it) in scene.ghost.iter().enumerate() {
+                        let Some(mesh) = self.meshes.get(&it.mesh) else { continue };
+                        if mesh.index_count == 0 {
+                            continue;
+                        }
+                        let i = (items.len() + scene.overlay.len() + k) as u32;
+                        pass.set_vertex_buffer(0, mesh.vbuf.slice(..));
+                        pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..mesh.index_count, 0, i..i + 1);
+                    }
+                }
             }
         }
         if !scene.overlay.is_empty() {
@@ -1040,9 +1129,17 @@ mod tests {
         // the y arrow crosses the box's face; the z arrow is the lit one
         let g = Gizmo::new(Vec3::ZERO, Mode::Move, &vp.camera, h as f32);
         let overlay = g.draw(Some(Handle::Axis(2)));
+        // a ghost box beside it, 70 % transparent: seen, but faint
+        let ghost = [DrawItem {
+            mesh: "box".into(),
+            model: Mat4::from_translation(Vec3::new(0.0, 120.0, 0.0)),
+            color: [srgb(0x5B7A9C)[0], srgb(0x5B7A9C)[1], srgb(0x5B7A9C)[2], 0.3],
+            texture: None,
+        }];
         let scene = Scene {
             items: &items,
             lines: &[],
+            ghost: &ghost,
             overlay: &overlay,
             background: [0.0, 0.0, 0.0, 1.0],
         };
@@ -1061,6 +1158,58 @@ mod tests {
         // the box: blue-grey, in front of everything but the handles
         let b = at(160, 140);
         assert!(b[2] > b[1] && b[2] > 40, "box pixel {b:?}");
+        // the ghost: the same colour blended at 30 % over the background. Every pixel that
+        // only the ghost box covers (black without it, the box's hue with it drawn solid) is
+        // lit in the ghost render, and fainter than the solid box there.
+        let sum = |c: [u8; 3]| c[0] as u32 + c[1] as u32 + c[2] as u32;
+        let bare_scene = Scene {
+            items: &items,
+            lines: &[],
+            ghost: &[],
+            overlay: &overlay,
+            background: [0.0, 0.0, 0.0, 1.0],
+        };
+        vp.render(&device, &queue, &mut renderer, (w, h), &bare_scene);
+        let (_, _, bare_px) = vp.read_pixels(&device, &queue).unwrap();
+        let solid_items: Vec<DrawItem> = items
+            .iter()
+            .cloned()
+            .chain(ghost.iter().map(|g| DrawItem {
+                color: [g.color[0], g.color[1], g.color[2], 1.0],
+                ..g.clone()
+            }))
+            .collect();
+        let solid_scene = Scene {
+            items: &solid_items,
+            lines: &[],
+            ghost: &[],
+            overlay: &overlay,
+            background: [0.0, 0.0, 0.0, 1.0],
+        };
+        vp.render(&device, &queue, &mut renderer, (w, h), &solid_scene);
+        let (_, _, solid_px) = vp.read_pixels(&device, &queue).unwrap();
+        let pick = |buf: &[u8], x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [buf[i], buf[i + 1], buf[i + 2]]
+        };
+        let mut compared = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let (bare, solid) = (pick(&bare_px, x, y), pick(&solid_px, x, y));
+                if sum(bare) != 0 || !(solid[2] > solid[1] && solid[2] > solid[0] && solid[2] > 40) {
+                    continue;
+                }
+                let gp = at(x, y);
+                assert!(sum(gp) > 0, "the ghost is visible at ({x}, {y})");
+                assert!(
+                    sum(gp) * 4 < sum(solid) * 3,
+                    "fainter than the solid box at ({x}, {y}): {gp:?} vs {solid:?}"
+                );
+                compared += 1;
+            }
+        }
+        assert!(compared > 200, "{compared} ghost-only pixels compared");
+        vp.render(&device, &queue, &mut renderer, (w, h), &scene);
         // the y arrow points right across the box and is drawn over it (green beats blue)
         assert!(
             column(200, 116, 124).iter().any(|c| c[1] > c[2] && c[1] > c[0] && c[1] > 40),
@@ -1122,6 +1271,7 @@ mod tests {
             &Scene {
                 items: &items,
                 lines: &[],
+                ghost: &[],
                 overlay: &[],
                 background: [0.0; 4],
             },
