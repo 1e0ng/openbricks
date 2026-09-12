@@ -1143,7 +1143,8 @@ impl SimulateTab {
         let mut select = None;
         let mut toggle_lock = None;
         let selected = self.selected;
-        egui::ScrollArea::vertical().max_height(300.0).id_salt("actions").show(ui, |ui| {
+        let list_id = ui.id().with("actions");
+        egui::ScrollArea::vertical().max_height(300.0).id_salt(list_id).show(ui, |ui| {
             let frame = egui::Frame::default().inner_margin(2.0);
             let (_, _dropped) = ui.dnd_drop_zone::<usize, ()>(frame, |ui| {
                 for (i, item) in self.route.actions.iter().enumerate() {
@@ -1774,8 +1775,9 @@ fn sane_pose(p: Pose) -> Pose {
 }
 
 /// A small combo for a move's or a stop's end state.
-fn end_combo(ui: &mut egui::Ui, salt: (&str, &str), then: &mut End, choices: &[End]) {
-    egui::ComboBox::from_id_salt(salt)
+fn end_combo(ui: &mut egui::Ui, scope: (&str, &str), then: &mut End, choices: &[End]) {
+    let id = ui.id().with(scope);
+    egui::ComboBox::from_id_salt(id)
         .selected_text(then.label())
         .width(84.0)
         .show_ui(ui, |ui| {
@@ -1798,7 +1800,7 @@ fn speed_field(ui: &mut egui::Ui, label: &str, speed: &mut f64, wheel_mm: f64) {
 }
 
 /// A move's end: continuous, or one of the stop kinds.
-fn end_fields(ui: &mut egui::Ui, then: &mut End, salt: &str) {
+fn end_fields(ui: &mut egui::Ui, then: &mut End, scope: &str) {
     let mut continuous = *then == End::Continue;
     if ui.checkbox(&mut continuous, "continuous (no stop at the end)").changed() {
         *then = if continuous { End::Continue } else { End::Coast };
@@ -1806,18 +1808,18 @@ fn end_fields(ui: &mut egui::Ui, then: &mut End, salt: &str) {
     if !continuous {
         ui.horizontal(|ui| {
             ui.weak("then");
-            end_combo(ui, (salt, "then"), then, &End::STOPS);
+            end_combo(ui, (scope, "then"), then, &End::STOPS);
         });
     }
 }
 
 /// The editable parameters of an action: the popup's and the inspector's.
-fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], wheel_mm: f64, salt: &str) {
+fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], wheel_mm: f64, scope: &str) {
     let sweep = action.arc().map(|a| a.sweep_deg);
     match action {
         Action::Straight { speed, then, .. } => {
             speed_field(ui, "speed", speed, wheel_mm);
-            end_fields(ui, then, salt);
+            end_fields(ui, then, scope);
         }
         Action::Curve {
             start,
@@ -1843,7 +1845,7 @@ fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], w
                 }
             });
             speed_field(ui, "speed", speed, wheel_mm);
-            end_fields(ui, then, salt);
+            end_fields(ui, then, scope);
         }
         Action::Turn { heading_deg, speed, .. } => {
             ui.horizontal(|ui| {
@@ -1856,7 +1858,7 @@ fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], w
         Action::Stop { then, wait_ms, .. } => {
             ui.horizontal(|ui| {
                 ui.weak("then");
-                end_combo(ui, (salt, "then"), then, &End::STOPS);
+                end_combo(ui, (scope, "then"), then, &End::STOPS);
                 ui.weak("wait");
                 ui.add(egui::DragValue::new(wait_ms).speed(10.0).range(0.0..=600000.0).suffix(" ms"));
             });
@@ -1864,7 +1866,7 @@ fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], w
         Action::Custom { code, .. } => {
             ui.horizontal(|ui| {
                 if !functions.is_empty() {
-                    egui::ComboBox::from_id_salt((salt, "call"))
+                    egui::ComboBox::from_id_salt(ui.id().with((scope, "call")))
                         .selected_text("call…")
                         .show_ui(ui, |ui| {
                             for f in functions {
