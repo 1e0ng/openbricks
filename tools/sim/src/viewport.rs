@@ -179,10 +179,11 @@ impl Camera {
         self.distance = diag / (2.0 * (self.fov_deg.to_radians() / 2.0).tan()) * 1.25;
     }
     /// Frame a box's footprint in a top-down view `aspect` wide for its
-    /// height: the whole extent fits with a small margin.
+    /// height: the whole extent fits, touching the view's edges on the
+    /// tighter axis.
     pub fn fit_plan(&mut self, min: Vec3, max: Vec3, aspect: f32) {
         self.target = (min + max) * 0.5;
-        let hh = ((max.y - min.y) / 2.0).max((max.x - min.x) / 2.0 / aspect.max(0.01)).max(20.0) * 1.06;
+        let hh = ((max.y - min.y) / 2.0).max((max.x - min.x) / 2.0 / aspect.max(0.01)).max(20.0);
         self.distance = hh / (self.fov_deg.to_radians() / 2.0).tan();
     }
     /// The pixel of a `w × h` view a world point lands on; None behind the eye.
@@ -1658,17 +1659,24 @@ mod tests {
         assert_eq!(cam.target, Vec3::new(0.0, 0.0, 100.0));
         let corner = cam.project(Vec3::new(1200.0, 900.0, 0.0), w, h).unwrap();
         assert!(corner.x > 400.0 && corner.x < w && corner.y > 0.0 && corner.y < 300.0, "{corner:?}");
-        // fit_plan fills the view with the footprint: a wide mat in a wide view is bounded by its width
+        // fit_plan fills the view with the footprint, no margin: a wide mat in a wide view touches
+        // the left and right edges and leaves room above and below
         cam.fit_plan(Vec3::new(-1200.0, -900.0, 0.0), Vec3::new(1200.0, 900.0, 200.0), w / h);
         let corner = cam.project(Vec3::new(1200.0, 900.0, 0.0), w, h).unwrap();
-        assert!((corner.x - w / 1.06 / 2.0 - w / 2.0).abs() < 1.0, "{corner:?}");
-        assert!(corner.y > 0.0 && corner.y < 300.0, "{corner:?}");
+        assert!((corner.x - w).abs() < 0.5, "touches the right edge: {corner:?}");
+        assert!(corner.y >= -0.5 && corner.y < 300.0, "{corner:?}");
         let corner = cam.project(Vec3::new(-1200.0, -900.0, 0.0), w, h).unwrap();
-        assert!(corner.x > 0.0 && corner.y < h, "{corner:?}");
-        // a tall footprint in the same view is bounded by its height
+        assert!(corner.x.abs() < 0.5 && corner.y <= h + 0.5, "touches the left edge: {corner:?}");
+        // a mat wider than the view's shape leaves room above and below
+        cam.fit_plan(Vec3::new(-1200.0, -600.0, 0.0), Vec3::new(1200.0, 600.0, 0.0), w / h);
+        let corner = cam.project(Vec3::new(1200.0, 600.0, 0.0), w, h).unwrap();
+        assert!((corner.x - w).abs() < 0.5 && (corner.y - 100.0).abs() < 0.5, "{corner:?}");
+        // a tall footprint in the same view touches the top and bottom instead
         cam.fit_plan(Vec3::new(-100.0, -900.0, 0.0), Vec3::new(100.0, 900.0, 0.0), w / h);
         let top = cam.project(Vec3::new(0.0, 900.0, 0.0), w, h).unwrap();
-        assert!((top.y - (h / 2.0 - h / 1.06 / 2.0)).abs() < 1.0, "{top:?}");
+        assert!(top.y.abs() < 0.5, "touches the top edge: {top:?}");
+        let bottom = cam.project(Vec3::new(0.0, -900.0, 0.0), w, h).unwrap();
+        assert!((bottom.y - h).abs() < 0.5, "touches the bottom edge: {bottom:?}");
         // the screen axes match the view: right is +x, up is +y
         assert!((cam.right() - Vec3::X).length() < 1e-5 && (cam.up() - Vec3::Y).length() < 1e-5);
         let iso = Camera::default();

@@ -5,7 +5,7 @@
 use crate::assembly::Document;
 use crate::bundle::Bundle;
 use crate::geometry;
-use crate::route::{self, Action, End, KINDS, Pose2, Route};
+use crate::route::{self, Action, End, Handle, KINDS, Point, Pose2, Route};
 use crate::sim::{ChassisInfo, Event, Pose, Scene, SimProcess, WorldEntry};
 use crate::viewport::{DrawItem, Line, Viewport};
 use eframe::egui;
@@ -20,22 +20,45 @@ const HANDLE_PX: f32 = 10.0;
 /// The ghost chassis: 70 % transparent.
 const GHOST_ALPHA: f32 = 0.3;
 
-/// The map tools: the next click reaches that point in a straight line
-/// (a turn, then the distance) or on the tangent arc.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Tool {
-    StraightTo,
-    CurveTo,
+/// A tool armed on the map: the kind being placed and the clicks so
+/// far; `for_end` names a custom call whose end point is the next click.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Placing {
+    pub kind: &'static str,
+    pub points: Vec<Point>,
+    pub for_end: Option<usize>,
 }
 
-impl Tool {
-    pub fn label(self) -> &'static str {
-        match self {
-            Tool::StraightTo => "straight line",
-            Tool::CurveTo => "curve",
+impl Placing {
+    /// What the next click does.
+    pub fn hint(&self) -> String {
+        if self.for_end.is_some() {
+            return "click where the call leaves the robot · Esc keeps it in place".into();
         }
+        let ask = KINDS.iter().find(|k| k.0 == self.kind).map(|k| k.2).unwrap_or("");
+        let step = match (self.kind, self.points.len()) {
+            ("straight" | "curve", 0) => "click where it starts",
+            ("straight" | "curve", _) => "click where it ends",
+            ("turn", 0) => "click where it turns",
+            ("turn", _) => "click a point to face",
+            _ => ask,
+        };
+        format!("{}: {step} · Esc cancels", self.kind)
     }
 }
+
+/// A freshly placed action awaiting its parameters in a popup.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Draft {
+    pub action: Action,
+    /// A custom call that moves the robot: its end is asked for next.
+    pub moves: bool,
+    /// Where the popup opens (screen), when known.
+    pub at: Option<egui::Pos2>,
+}
+
+/// How many undo steps are kept.
+const HISTORY: usize = 60;
 
 /// What one frame of the Simulate view draws.
 #[derive(Default)]
@@ -75,17 +98,23 @@ pub struct SimulateTab {
     /// The route being planned on this map.
     pub route: Route,
     route_path: Option<PathBuf>,
-    /// Armed: the next click on the map reaches that point with this tool.
-    pub pick: Option<Tool>,
+    /// An armed tool: the kind being placed and the map clicks so far.
+    pub placing: Option<Placing>,
+    /// A popup awaiting the parameters of a freshly placed action.
+    pub draft: Option<Draft>,
+    /// The pointer on the map, for the rubber band while placing.
+    pub hover: Option<Point>,
     /// Where the chassis was put (dragged or typed); applied after every load.
     placed: Option<Pose2>,
     /// A translucent chassis where a drag would put it: under the
     /// pointer, or at a dragged action's end.
     pub ghost: Option<Pose2>,
-    /// The action whose handle is being dragged.
-    dragging: Option<usize>,
+    /// The action, handle and last map point of a drag in progress.
+    dragging: Option<(usize, Handle, Point)>,
     /// The action lit on the map and in the list.
     pub selected: Option<usize>,
+    /// Route snapshots for undo, oldest first.
+    history: Vec<Route>,
     show_program: bool,
     show_definitions: bool,
     /// Indices in the last `draw_items` result that draw the chassis.
@@ -131,11 +160,14 @@ impl SimulateTab {
             auto_loaded: false,
             route: Route::default(),
             route_path: None,
-            pick: None,
+            placing: None,
+            draft: None,
+            hover: None,
             placed: None,
             ghost: None,
             dragging: None,
             selected: None,
+            history: vec![],
             show_program: false,
             show_definitions: false,
             chassis_items: vec![],
@@ -455,40 +487,150 @@ impl SimulateTab {
         route::plan(&self.route)
     }
 
-    fn end_pose(&self) -> Pose2 {
-        self.steps().last().map(|s| s.end).unwrap_or(self.route.start)
+    /// Keep the route as it is, for undo.
+    fn record(&mut self) {
+        if self.history.last() != Some(&self.route) {
+            self.history.push(self.route.clone());
+            if self.history.len() > HISTORY {
+                self.history.remove(0);
+            }
+        }
     }
 
-    /// A click on the map at `(x_mm, y_mm)` with a tool armed: the
-    /// actions that reach the point join the route. Returns whether the
-    /// click was used.
-    pub fn map_click(&mut self, x_mm: f64, y_mm: f64) -> bool {
-        let Some(tool) = self.pick.take() else { return false };
-        let to = [(x_mm * 10.0).round() / 10.0, (y_mm * 10.0).round() / 10.0];
-        let from = self.end_pose();
-        let (actions, note) = match tool {
-            Tool::StraightTo => (route::straight_to(from, to), None),
-            Tool::CurveTo => route::curve_to(from, to),
+    /// Back to the route before the last change.
+    pub fn undo(&mut self) -> bool {
+        let Some(r) = self.history.pop() else {
+            self.message = "nothing to undo".into();
+            return false;
         };
-        self.message = note.unwrap_or_default();
-        if actions.is_empty() {
-            return true;
+        self.route = r;
+        self.placing = None;
+        self.draft = None;
+        self.dragging = None;
+        self.ghost = None;
+        if self.selected.is_some_and(|i| i >= self.route.actions.len()) {
+            self.selected = None;
         }
-        self.route.actions.extend(actions);
-        self.selected = Some(self.route.actions.len() - 1);
         true
     }
 
-    /// Append an action of a kind with its default parameters.
-    pub fn add_action(&mut self, kind: &str) {
-        self.route.actions.push(Action::default_of(kind));
-        self.selected = Some(self.route.actions.len() - 1);
+    /// Arm a tool: the next map clicks place an action of this kind.
+    pub fn arm(&mut self, kind: &'static str) {
+        self.draft = None;
+        self.placing = Some(Placing {
+            kind,
+            points: vec![],
+            for_end: None,
+        });
+    }
+
+    /// Drop the tool and any popup.
+    pub fn cancel(&mut self) {
+        self.placing = None;
+        self.draft = None;
+    }
+
+    /// Where a click snaps: the chassis's start and every action's end.
+    fn snap_targets(&self) -> Vec<Point> {
+        let mut v = vec![self.route.start.point()];
+        v.extend(self.route.actions.iter().map(|i| i.action.end()));
+        v
+    }
+
+    /// A click on the map while a tool is armed: the point joins the
+    /// placement (a first click snaps to where the previous action ends,
+    /// within `tol_mm`), and once the kind has all its points its popup
+    /// opens. Returns whether the click was used.
+    pub fn map_click(&mut self, x_mm: f64, y_mm: f64, tol_mm: f64) -> bool {
+        let Some(mut placing) = self.placing.take() else { return false };
+        let p = [(x_mm * 10.0).round() / 10.0, (y_mm * 10.0).round() / 10.0];
+        if let Some(i) = placing.for_end {
+            if i < self.route.actions.len() {
+                self.record();
+                self.route.actions[i].action.drag(Handle::End, p);
+                self.selected = Some(i);
+            }
+            return true;
+        }
+        let p = if placing.points.is_empty() {
+            route::snap(p, &self.snap_targets(), tol_mm)
+        } else {
+            p
+        };
+        placing.points.push(p);
+        if placing.points.len() >= route::clicks_needed(placing.kind) {
+            self.draft = Some(Draft {
+                action: Action::placed(placing.kind, &placing.points),
+                moves: false,
+                at: None,
+            });
+        } else {
+            self.placing = Some(placing);
+        }
+        true
+    }
+
+    /// The popup's action joins the route, selected; a custom call that
+    /// moves the robot then asks for its end point.
+    pub fn commit_draft(&mut self) {
+        let Some(draft) = self.draft.take() else { return };
+        self.record();
+        self.route.actions.push(draft.action.into());
+        let i = self.route.actions.len() - 1;
+        self.selected = Some(i);
+        if draft.moves {
+            self.placing = Some(Placing {
+                kind: "custom",
+                points: vec![],
+                for_end: Some(i),
+            });
+        }
+    }
+
+    /// Select the action whose path is nearest a map point, within
+    /// `tol_mm`; nothing there clears the selection. Returns whether one
+    /// was hit.
+    pub fn select_at(&mut self, p: Point, tol_mm: f64) -> bool {
+        let hit = self
+            .route
+            .actions
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let d = route::distance_to_path(p, &item.action.path()).min(
+                    item.action
+                        .handles()
+                        .iter()
+                        .map(|(_, h)| ((h[0] - p[0]).powi(2) + (h[1] - p[1]).powi(2)).sqrt())
+                        .fold(f64::INFINITY, f64::min),
+                );
+                // a marker (stop, turn, call) wins over a path that ends on it: distances
+                // within a tenth of a millimetre count as the same
+                (d, (d * 10.0).round() as i64, item.action.path().len() > 1, i)
+            })
+            .filter(|(d, _, _, _)| *d <= tol_mm)
+            .min_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)))
+            .map(|(_, _, _, i)| i);
+        self.selected = hit;
+        hit.is_some()
     }
 
     pub fn remove_action(&mut self, i: usize) {
         if i < self.route.actions.len() {
+            if self.route.actions[i].locked {
+                self.message = format!("action {} is locked: unlock it first", i + 1);
+                return;
+            }
+            self.record();
             self.route.actions.remove(i);
             self.selected = None;
+        }
+    }
+
+    /// Remove the selected action (a locked one stays).
+    pub fn remove_selected(&mut self) {
+        if let Some(i) = self.selected {
+            self.remove_action(i);
         }
     }
 
@@ -499,66 +641,152 @@ impl SimulateTab {
         if from >= n || to > n {
             return;
         }
+        self.record();
         let a = self.route.actions.remove(from);
         let at = if to > from { to - 1 } else { to };
         self.route.actions.insert(at, a);
         self.selected = Some(at);
     }
 
-    pub fn undo_segment(&mut self) {
-        self.route.actions.pop();
-        self.selected = None;
+    /// Lock or unlock the selected action against edits on the map.
+    pub fn set_locked(&mut self, locked: bool) {
+        if let Some(i) = self.selected
+            && let Some(item) = self.route.actions.get_mut(i)
+            && item.locked != locked
+        {
+            self.record();
+            self.route.actions[i].locked = locked;
+        }
+    }
+
+    pub fn is_locked(&self, i: usize) -> bool {
+        self.route.actions.get(i).is_some_and(|a| a.locked)
+    }
+
+    /// The selected action as clipboard text.
+    pub fn copy_selected(&self) -> Option<String> {
+        let item = self.route.actions.get(self.selected?)?;
+        let v = serde_json::json!({"format": route::CLIP_FORMAT, "actions": [item]});
+        serde_json::to_string(&v).ok()
+    }
+
+    /// Actions from clipboard text join the route after the selection
+    /// (or at the end), a little to the side and unlocked; the last one
+    /// is selected. Returns how many were pasted.
+    pub fn paste(&mut self, text: &str) -> usize {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
+            return 0;
+        };
+        if v.get("format").and_then(|f| f.as_str()) != Some(route::CLIP_FORMAT) {
+            return 0;
+        }
+        let Ok(items) = serde_json::from_value::<Vec<route::Item>>(v.get("actions").cloned().unwrap_or_default()) else {
+            return 0;
+        };
+        if items.is_empty() {
+            return 0;
+        }
+        self.record();
+        let mut at = self
+            .selected
+            .map(|i| i + 1)
+            .unwrap_or(self.route.actions.len())
+            .min(self.route.actions.len());
+        let n = items.len();
+        for mut item in items {
+            item.action.translate(route::PASTE_OFFSET_MM, route::PASTE_OFFSET_MM);
+            item.locked = false;
+            self.route.actions.insert(at, item);
+            at += 1;
+        }
+        self.selected = Some(at - 1);
+        n
     }
 
     pub fn clear_route(&mut self) {
+        self.record();
         self.route.actions.clear();
-        self.pick = None;
+        self.placing = None;
+        self.draft = None;
         self.selected = None;
     }
 
-    /// The action whose handle is under a screen point.
-    pub fn route_handle_at(&self, cam: &crate::viewport::Camera, px: f32, py: f32, w: f32, h: f32) -> Option<usize> {
+    /// The handle under a screen point: the selected action's handles
+    /// first, then any unlocked action's path (dragged as a whole).
+    pub fn route_handle_at(&self, cam: &crate::viewport::Camera, px: f32, py: f32, w: f32, h: f32) -> Option<(usize, Handle)> {
         self.scene.as_ref()?;
-        let mut best: Option<(f32, usize)> = None;
-        for (i, (step, action)) in self.steps().iter().zip(&self.route.actions).enumerate() {
-            let Some(hp) = route::handle(step, action) else { continue };
-            let Some(sp) = cam.project(Vec3::new(hp[0] as f32, hp[1] as f32, 3.0), w, h) else {
-                continue;
-            };
-            let d = (sp - glam::Vec2::new(px, py)).length();
-            if d <= HANDLE_PX && best.map(|b| d < b.0).unwrap_or(true) {
-                best = Some((d, i));
+        let at = glam::Vec2::new(px, py);
+        let on_screen = |p: Point| cam.project(Vec3::new(p[0] as f32, p[1] as f32, 3.0), w, h);
+        if let Some(i) = self.selected
+            && let Some(item) = self.route.actions.get(i)
+            && !item.locked
+        {
+            let mut best: Option<(f32, Handle)> = None;
+            for (handle, hp) in item.action.handles() {
+                let Some(sp) = on_screen(hp) else { continue };
+                let d = (sp - at).length();
+                if d <= HANDLE_PX && best.map(|b| d < b.0).unwrap_or(true) {
+                    best = Some((d, handle));
+                }
+            }
+            if let Some((_, handle)) = best {
+                return Some((i, handle));
             }
         }
-        best.map(|b| b.1)
+        let (o, d) = cam.ray(px, py, w, h);
+        let hit = crate::viewport::ray_plane_z(o, d, 0.0)?;
+        let p = [hit.x as f64, hit.y as f64];
+        let tol = (HANDLE_PX * cam.units_per_px(h)) as f64;
+        self.route
+            .actions
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| !item.locked)
+            .map(|(i, item)| {
+                let d = route::distance_to_path(p, &item.action.path());
+                (d, (d * 10.0).round() as i64, item.action.path().len() > 1, i)
+            })
+            .filter(|(d, _, _, _)| *d <= tol)
+            .min_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)))
+            .map(|(_, _, _, i)| (i, Handle::Body))
     }
 
-    /// Start dragging an action's handle: the ghost shows where the
-    /// robot ends up after it.
-    pub fn begin_handle_drag(&mut self, i: usize) -> bool {
-        if i >= self.route.actions.len() {
+    /// Start dragging an action's handle from a map point: the ghost
+    /// shows where the robot ends up after it. Locked actions refuse.
+    pub fn begin_handle_drag(&mut self, i: usize, handle: Handle, at: Point) -> bool {
+        if i >= self.route.actions.len() || self.route.actions[i].locked {
             return false;
         }
-        self.dragging = Some(i);
+        self.record();
+        self.dragging = Some((i, handle, at));
         self.selected = Some(i);
         self.ghost = self.steps().get(i).map(|s| s.end);
         true
     }
 
-    /// The dragged handle at a map point: the action takes the
-    /// parameters that reach it, and the ghost moves to its new end.
+    /// The dragged handle at a map point: an end moves, a curve bends, a
+    /// turn aims, a body shifts whole; the ghost moves to the new end.
     pub fn drag_handle(&mut self, x_mm: f64, y_mm: f64) {
-        let Some(i) = self.dragging else { return };
-        let steps = self.steps();
-        let Some(step) = steps.get(i) else { return };
-        let action = route::dragged(&self.route.actions[i], step.start, [x_mm, y_mm]);
-        self.route.actions[i] = action;
+        let Some((i, handle, last)) = self.dragging else { return };
+        let Some(item) = self.route.actions.get_mut(i) else { return };
+        let p = [x_mm, y_mm];
+        if handle == Handle::Body {
+            item.action.translate(p[0] - last[0], p[1] - last[1]);
+            self.dragging = Some((i, handle, p));
+        } else {
+            item.action.drag(handle, p);
+        }
         self.ghost = self.steps().get(i).map(|s| s.end);
     }
 
     pub fn end_handle_drag(&mut self) {
         self.dragging = None;
         self.ghost = None;
+    }
+
+    #[cfg(test)]
+    pub fn dragging_index(&self) -> Option<usize> {
+        self.dragging.map(|d| d.0)
     }
 
     /// The route's program for the loaded chassis.
@@ -603,8 +831,10 @@ impl SimulateTab {
     pub fn load_route(&mut self, path: PathBuf) {
         match Route::load(&path) {
             Ok(r) => {
-                self.pick = None;
+                self.placing = None;
+                self.draft = None;
                 self.selected = None;
+                self.history.clear();
                 self.placed = Some(r.start);
                 let other_map = !r.world.is_empty() && r.world != self.world;
                 self.route = r;
@@ -621,20 +851,64 @@ impl SimulateTab {
         }
     }
 
-    /// The route drawn on the map: the start's heading, each action's
-    /// path, a handle at every end, and the lit one bigger.
+    /// What the view says under the pointer.
+    pub fn hint(&self) -> String {
+        if let Some(p) = &self.placing {
+            return p.hint();
+        }
+        if self.draft.is_some() {
+            return "set the action's parameters in the popup".into();
+        }
+        match self.selected {
+            Some(i) if self.is_locked(i) => format!("action {} is locked · ⌘⇧L unlocks", i + 1),
+            Some(i) => format!(
+                "action {}: drag its handles or the path · ⌘C copies · ⌘L locks · Delete removes · ⌘Z undoes",
+                i + 1
+            ),
+            None => "pan: drag · zoom: wheel · F fits the map · click a path to select it · drag the chassis to place it (shift turns it)"
+                .into(),
+        }
+    }
+
+    /// The map's labels: each action's number at its start (with a lock
+    /// when it is locked), in view pixels.
+    pub fn route_labels(&self, cam: &crate::viewport::Camera, w: f32, h: f32) -> Vec<(glam::Vec2, String)> {
+        if self.scene.is_none() {
+            return vec![];
+        }
+        self.route
+            .actions
+            .iter()
+            .enumerate()
+            .filter_map(|(i, item)| {
+                let s = item.action.start();
+                let sp = cam.project(Vec3::new(s[0] as f32, s[1] as f32, 3.0), w, h)?;
+                Some((
+                    sp + glam::Vec2::new(8.0, -8.0),
+                    format!("{}{}", i + 1, if item.locked { " 🔒" } else { "" }),
+                ))
+            })
+            .collect()
+    }
+
+    /// The route drawn on the map: the start's heading, the drives that
+    /// join actions (dashed), each action's path, marks at stops and
+    /// calls, the selected one lit with its handles, and the rubber band
+    /// of a placement in progress.
     pub fn route_lines(&self, dark: bool) -> Vec<Line> {
         let mut out = Vec::new();
         if self.scene.is_none() {
             return out;
         }
         let z = 3.0;
-        let (straight, curve, mark, lit) = if dark {
+        let (straight, curve, mark, lit, link_c, locked_c) = if dark {
             (
                 [0.35, 0.65, 1.0, 1.0],
                 [0.4, 0.9, 0.5, 1.0],
                 [1.0, 0.75, 0.25, 1.0],
                 [1.0, 1.0, 1.0, 1.0],
+                [0.6, 0.6, 0.65, 1.0],
+                [0.55, 0.55, 0.6, 1.0],
             )
         } else {
             (
@@ -642,81 +916,166 @@ impl SimulateTab {
                 [0.1, 0.55, 0.25, 1.0],
                 [0.85, 0.45, 0.0, 1.0],
                 [0.9, 0.1, 0.1, 1.0],
+                [0.45, 0.45, 0.5, 1.0],
+                [0.5, 0.5, 0.55, 1.0],
             )
         };
-        let steps = self.steps();
-        for (i, (step, action)) in steps.iter().zip(&self.route.actions).enumerate() {
-            let on = self.selected == Some(i);
-            let color = match action {
-                Action::Straight { .. } => straight,
-                Action::Curve { .. } => curve,
-                _ => mark,
-            };
-            let color = if on { lit } else { color };
-            for w in step.points.windows(2) {
-                out.push(Line {
-                    a: Vec3::new(w[0][0] as f32, w[0][1] as f32, z),
-                    b: Vec3::new(w[1][0] as f32, w[1][1] as f32, z),
+        let seg = |out: &mut Vec<Line>, a: Point, b: Point, color: [f32; 4], z: f32| {
+            out.push(Line {
+                a: Vec3::new(a[0] as f32, a[1] as f32, z),
+                b: Vec3::new(b[0] as f32, b[1] as f32, z),
+                color,
+            });
+        };
+        let dashed = |out: &mut Vec<Line>, a: Point, b: Point, color: [f32; 4]| {
+            let d = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+            let n = ((d / 20.0).ceil() as usize).max(1);
+            for k in (0..n).step_by(2) {
+                let t0 = k as f64 / n as f64;
+                let t1 = ((k + 1) as f64 / n as f64).min(1.0);
+                seg(
+                    out,
+                    [a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0],
+                    [a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1],
                     color,
-                });
-            }
-            if let Action::Turn { .. } = action {
-                // the new heading, from the spot
-                let (hx, hy) = (
-                    step.end.yaw_deg.to_radians().cos() as f32,
-                    step.end.yaw_deg.to_radians().sin() as f32,
+                    z,
                 );
-                let o = Vec3::new(step.end.x_mm as f32, step.end.y_mm as f32, z);
-                out.push(Line {
-                    a: o,
-                    b: o + Vec3::new(hx, hy, 0.0) * route::TURN_HANDLE_MM as f32,
-                    color,
-                });
             }
-            if let Some(hp) = route::handle(step, action) {
-                let (x, y) = (hp[0] as f32, hp[1] as f32);
-                let r = if on { 14.0 } else { 9.0 };
-                let corners = [(-r, -r), (r, -r), (r, r), (-r, r)];
-                for k in 0..4 {
-                    let (ax, ay) = corners[k];
-                    let (bx, by) = corners[(k + 1) % 4];
-                    out.push(Line {
-                        a: Vec3::new(x + ax, y + ay, z),
-                        b: Vec3::new(x + bx, y + by, z),
-                        color: if on { lit } else { mark },
-                    });
+        };
+        let square = |out: &mut Vec<Line>, p: Point, r: f64, color: [f32; 4]| {
+            let c = [(-r, -r), (r, -r), (r, r), (-r, r)];
+            for k in 0..4 {
+                seg(
+                    out,
+                    [p[0] + c[k].0, p[1] + c[k].1],
+                    [p[0] + c[(k + 1) % 4].0, p[1] + c[(k + 1) % 4].1],
+                    color,
+                    z + 0.5,
+                );
+            }
+        };
+        let diamond = |out: &mut Vec<Line>, p: Point, d: f64, color: [f32; 4]| {
+            let c = [(0.0, -d), (d, 0.0), (0.0, d), (-d, 0.0)];
+            for k in 0..4 {
+                seg(
+                    out,
+                    [p[0] + c[k].0, p[1] + c[k].1],
+                    [p[0] + c[(k + 1) % 4].0, p[1] + c[(k + 1) % 4].1],
+                    color,
+                    z + 0.5,
+                );
+            }
+        };
+        let arrow = |out: &mut Vec<Line>, from: Point, heading_deg: f64, len: f64, color: [f32; 4]| {
+            let (c, s) = (heading_deg.to_radians().cos(), heading_deg.to_radians().sin());
+            let tip = [from[0] + c * len, from[1] + s * len];
+            let back = [from[0] + c * (len - 14.0), from[1] + s * (len - 14.0)];
+            seg(out, from, tip, color, z);
+            seg(out, tip, [back[0] - s * 8.0, back[1] + c * 8.0], color, z);
+            seg(out, tip, [back[0] + s * 8.0, back[1] - c * 8.0], color, z);
+        };
+        let steps = self.steps();
+        for (i, (step, item)) in steps.iter().zip(&self.route.actions).enumerate() {
+            let on = self.selected == Some(i);
+            let a = &item.action;
+            let color = if on {
+                lit
+            } else if item.locked {
+                locked_c
+            } else {
+                match a {
+                    Action::Straight { .. } => straight,
+                    Action::Curve { .. } => curve,
+                    _ => mark,
+                }
+            };
+            if step.link.len() == 2 {
+                dashed(&mut out, step.link[0], step.link[1], link_c);
+            }
+            for w in step.points.windows(2) {
+                seg(&mut out, w[0], w[1], color, z);
+            }
+            match a {
+                Action::Turn { at, heading_deg, .. } => arrow(&mut out, *at, *heading_deg, route::TURN_HANDLE_MM, color),
+                Action::Stop { at, .. } => diamond(&mut out, *at, 8.0, color),
+                Action::Custom { at, .. } => {
+                    square(&mut out, *at, 6.0, color);
+                    diamond(&mut out, *at, 9.0, color);
+                }
+                _ => {}
+            }
+            if on {
+                for (_, hp) in a.handles() {
+                    square(&mut out, hp, 9.0, lit);
+                }
+            } else if !item.locked {
+                square(&mut out, a.end(), 4.0, color);
+            }
+        }
+        // a placement in progress: what the next click would make
+        if let (Some(p), Some(hover)) = (&self.placing, self.hover) {
+            if let Some(i) = p.for_end {
+                if let Some(item) = self.route.actions.get(i) {
+                    dashed(&mut out, item.action.start(), hover, mark);
+                }
+            } else if let Some(first) = p.points.first() {
+                let preview = Action::placed(p.kind, &[*first, hover]);
+                for w in preview.path().windows(2) {
+                    seg(&mut out, w[0], w[1], mark, z);
+                }
+                if let Action::Turn { at, heading_deg, .. } = &preview {
+                    arrow(&mut out, *at, *heading_deg, route::TURN_HANDLE_MM, mark);
                 }
             } else {
-                // a stop or a call: a small diamond where it happens
-                let (x, y) = (step.end.x_mm as f32, step.end.y_mm as f32);
-                let d = 8.0;
-                let pts = [(0.0, -d), (d, 0.0), (0.0, d), (-d, 0.0)];
-                for k in 0..4 {
-                    let (ax, ay) = pts[k];
-                    let (bx, by) = pts[(k + 1) % 4];
-                    out.push(Line {
-                        a: Vec3::new(x + ax, y + ay, z + 0.5),
-                        b: Vec3::new(x + bx, y + by, z + 0.5),
-                        color: if on { lit } else { mark },
-                    });
-                }
+                square(&mut out, hover, 6.0, mark);
             }
         }
         // the start: an arrow along the heading
-        let s = self.route.start;
-        let (c, sn) = (s.yaw_deg.to_radians().cos() as f32, s.yaw_deg.to_radians().sin() as f32);
-        let o = Vec3::new(s.x_mm as f32, s.y_mm as f32, z);
-        let tip = o + Vec3::new(c, sn, 0.0) * 60.0;
-        let side = Vec3::new(-sn, c, 0.0) * 14.0;
-        let back = o + Vec3::new(c, sn, 0.0) * 40.0;
-        for (a, b) in [(o, tip), (tip, back + side), (tip, back - side)] {
-            out.push(Line { a, b, color: mark });
-        }
+        arrow(&mut out, self.route.start.point(), self.route.start.yaw_deg, 60.0, mark);
         out
     }
 
-    /// The route panel: the start, the tools, the actions with their
-    /// parameters to type or drag, and what to do with the route.
+    /// The popup for a freshly placed action: its parameters, then Add
+    /// (Enter) or Cancel.
+    pub fn draft_ui(&mut self, ctx: &egui::Context) {
+        let Some(mut draft) = self.draft.take() else { return };
+        let functions = self.route.functions();
+        let wheel = self.chassis().map(|c| c.wheel_diameter_mm).unwrap_or(0.0);
+        let title = format!("New {}", draft.action.kind());
+        let mut window = egui::Window::new(title).collapsible(false).resizable(false);
+        if let Some(at) = draft.at {
+            window = window.default_pos(at);
+        } else {
+            window = window.anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0));
+        }
+        let mut done: Option<bool> = None;
+        window.show(ctx, |ui| {
+            action_fields(ui, &mut draft.action, &functions, wheel, "draft");
+            if let Action::Custom { .. } = draft.action {
+                ui.checkbox(&mut draft.moves, "moves the robot (click where it ends next)");
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Add").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    done = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    done = Some(false);
+                }
+            });
+        });
+        match done {
+            Some(true) => {
+                self.draft = Some(draft);
+                self.commit_draft();
+            }
+            Some(false) => {}
+            None => self.draft = Some(draft),
+        }
+    }
+
+    /// The route panel: the tools, the start, the actions with their
+    /// parameters, and what to do with the route.
     pub fn route_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Route");
@@ -738,6 +1097,7 @@ impl SimulateTab {
             ui.weak(p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default());
         }
         let busy = self.busy();
+        let has_map = self.scene.is_some();
         ui.add_space(4.0);
         ui.strong("Start  (drag the chassis on the map, shift turns it)");
         let mut start = self.route.start;
@@ -756,89 +1116,57 @@ impl SimulateTab {
             self.place_chassis(start);
         }
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.weak("to a point on the map:");
-            for (tool, label) in [(Tool::StraightTo, "→ point"), (Tool::CurveTo, "⌒ point")] {
+        ui.strong("Add an action, then click the map");
+        ui.horizontal_wrapped(|ui| {
+            for (kind, label, ask) in KINDS {
+                let armed = self.placing.as_ref().is_some_and(|p| p.kind == kind && p.for_end.is_none());
                 if ui
-                    .selectable_label(self.pick == Some(tool), label)
-                    .on_hover_text(match tool {
-                        Tool::StraightTo => "a turn to face the point, then the distance",
-                        Tool::CurveTo => "the arc tangent to the heading through the point",
-                    })
+                    .add_enabled(has_map, egui::Button::selectable(armed, label))
+                    .on_hover_text(ask)
                     .clicked()
                 {
-                    self.pick = if self.pick == Some(tool) { None } else { Some(tool) };
+                    if armed {
+                        self.cancel();
+                    } else {
+                        self.arm(kind);
+                    }
                 }
             }
         });
-        if let Some(t) = self.pick {
-            ui.colored_label(
-                egui::Color32::from_rgb(217, 145, 15),
-                format!("click the map where the {} ends", t.label()),
-            );
+        if let Some(p) = &self.placing {
+            ui.colored_label(egui::Color32::from_rgb(217, 145, 15), p.hint());
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.weak("add:");
-            for kind in KINDS {
-                let label = format!("+ {}{}", &kind[..1].to_uppercase(), &kind[1..]);
-                if ui.button(label).clicked() {
-                    self.add_action(kind);
-                }
-            }
-        });
         let steps = self.steps();
-        let functions = self.route.functions();
         let mut remove = None;
         let mut nudge: Option<(usize, i32)> = None;
         let mut from_to: Option<(usize, usize)> = None;
         let mut select = None;
+        let mut toggle_lock = None;
         let selected = self.selected;
-        egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+        let list_id = ui.id().with("actions");
+        egui::ScrollArea::vertical().max_height(300.0).id_salt(list_id).show(ui, |ui| {
             let frame = egui::Frame::default().inner_margin(2.0);
             let (_, _dropped) = ui.dnd_drop_zone::<usize, ()>(frame, |ui| {
-                for (i, action) in self.route.actions.iter_mut().enumerate() {
+                for (i, item) in self.route.actions.iter().enumerate() {
                     let step = &steps[i];
                     let on = selected == Some(i);
                     let row = ui.horizontal(|ui| {
                         ui.dnd_drag_source(egui::Id::new(("route-action", i)), i, |ui| {
                             ui.label("≡").on_hover_text("drag to reorder");
                         });
-                        if ui.selectable_label(on, format!("{}.", i + 1)).clicked() {
+                        if ui.selectable_label(on, format!("{}. {}", i + 1, item.action.kind())).clicked() {
                             select = Some(i);
                         }
-                        ui.strong(action.kind());
-                        match action {
-                            Action::Straight { mm, then } => {
-                                ui.add(egui::DragValue::new(mm).speed(1.0).suffix(" mm"));
-                                end_combo(ui, ("then", i), then, &End::MOVES);
-                            }
-                            Action::Turn { deg } => {
-                                ui.add(egui::DragValue::new(deg).speed(1.0).suffix("°"));
-                                ui.weak(if *deg >= 0.0 { "right" } else { "left" });
-                            }
-                            Action::Curve { radius_mm, deg, then } => {
-                                ui.weak("r");
-                                ui.add(egui::DragValue::new(radius_mm).speed(1.0).suffix(" mm"));
-                                ui.add(egui::DragValue::new(deg).speed(1.0).suffix("°"));
-                                end_combo(ui, ("then", i), then, &End::MOVES);
-                            }
-                            Action::Stop { then, wait_ms } => {
-                                end_combo(ui, ("then", i), then, &End::STOPS);
-                                ui.weak("wait");
-                                ui.add(egui::DragValue::new(wait_ms).speed(10.0).range(0.0..=600000.0).suffix(" ms"));
-                            }
-                            Action::Custom { code } => {
-                                if !functions.is_empty() {
-                                    egui::ComboBox::from_id_salt(("call", i)).selected_text("call…").show_ui(ui, |ui| {
-                                        for f in &functions {
-                                            if ui.selectable_label(false, f).clicked() {
-                                                *code = format!("{f}()");
-                                            }
-                                        }
-                                    });
-                                }
-                                ui.add(egui::TextEdit::singleline(code).hint_text("line_follow()").desired_width(180.0));
-                            }
+                        if ui
+                            .small_button(if item.locked { "🔒" } else { "🔓" })
+                            .on_hover_text(if item.locked {
+                                "locked: click to unlock (⌘⇧L)"
+                            } else {
+                                "click to lock (⌘L)"
+                            })
+                            .clicked()
+                        {
+                            toggle_lock = Some(i);
                         }
                         if ui.small_button("↑").on_hover_text("earlier").clicked() {
                             nudge = Some((i, -1));
@@ -846,11 +1174,14 @@ impl SimulateTab {
                         if ui.small_button("↓").on_hover_text("later").clicked() {
                             nudge = Some((i, 1));
                         }
-                        if ui.small_button("×").on_hover_text("remove this action").clicked() {
+                        if ui
+                            .add_enabled(!item.locked, egui::Button::new("×").small())
+                            .on_hover_text("remove")
+                            .clicked()
+                        {
                             remove = Some(i);
                         }
                     });
-                    // a dragged row: a line where it would land, and the drop
                     if let (Some(pointer), Some(hovered)) =
                         (ui.input(|i| i.pointer.interact_pos()), row.response.dnd_hover_payload::<usize>())
                     {
@@ -864,17 +1195,32 @@ impl SimulateTab {
                         }
                     }
                     let end = step.end;
-                    let where_to = if matches!(action, Action::Straight { .. } | Action::Curve { .. } | Action::Turn { .. }) {
-                        format!(" → ({}, {}) {}°", end.x_mm.round(), end.y_mm.round(), end.yaw_deg.round())
+                    let link = if step.link.len() == 2 {
+                        let d = ((step.link[1][0] - step.link[0][0]).powi(2) + (step.link[1][1] - step.link[0][1]).powi(2)).sqrt();
+                        format!(" (drives {} mm to get there)", d.round())
                     } else {
                         String::new()
                     };
-                    ui.weak(format!("     {}{}", action.text(), where_to));
+                    ui.weak(format!(
+                        "     {}{} → ({}, {}) {}°",
+                        item.action.text(),
+                        link,
+                        end.x_mm.round(),
+                        end.y_mm.round(),
+                        end.yaw_deg.round()
+                    ));
                 }
             });
         });
         if let Some(i) = select {
             self.selected = Some(i);
+        }
+        if let Some(i) = toggle_lock {
+            let was = self.selected;
+            self.selected = Some(i);
+            let locked = self.is_locked(i);
+            self.set_locked(!locked);
+            self.selected = was.or(Some(i));
         }
         if let Some((from, to)) = from_to {
             self.move_action(from, to);
@@ -890,8 +1236,51 @@ impl SimulateTab {
         } else if let Some(i) = remove {
             self.remove_action(i);
         }
+        // the selected action's parameters
+        if let Some(i) = self.selected
+            && i < self.route.actions.len()
+        {
+            let functions = self.route.functions();
+            let wheel = self.chassis().map(|c| c.wheel_diameter_mm).unwrap_or(0.0);
+            let locked = self.route.actions[i].locked;
+            ui.add_space(4.0);
+            ui.separator();
+            ui.strong(format!(
+                "Action {}: {}{}",
+                i + 1,
+                self.route.actions[i].action.kind(),
+                if locked { " (locked)" } else { "" }
+            ));
+            let before = self.route.actions[i].action.clone();
+            let mut edited = before.clone();
+            ui.add_enabled_ui(!locked, |ui| {
+                action_fields(ui, &mut edited, &functions, wheel, "inspect");
+            });
+            if edited != before {
+                self.record();
+                self.route.actions[i].action = edited;
+            }
+            ui.horizontal(|ui| {
+                let mut lock = locked;
+                if ui.checkbox(&mut lock, "locked").on_hover_text("⌘L / ⌘⇧L").changed() {
+                    self.set_locked(lock);
+                }
+                if ui.button("Duplicate").on_hover_text("⌘C, ⌘V").clicked()
+                    && let Some(text) = self.copy_selected()
+                {
+                    self.paste(&text);
+                }
+                if ui
+                    .add_enabled(!locked, egui::Button::new("Delete"))
+                    .on_hover_text("Delete")
+                    .clicked()
+                {
+                    self.remove_selected();
+                }
+            });
+        }
         if !self.route.actions.is_empty() {
-            let end = self.end_pose();
+            let end = steps.last().map(|s| s.end).unwrap_or(self.route.start);
             ui.weak(format!(
                 "{} mm in all · ends at ({}, {}) heading {}°",
                 route::length_mm(&self.route).round(),
@@ -913,10 +1302,11 @@ impl SimulateTab {
                 self.run_route();
             }
             if ui
-                .add_enabled(!self.route.actions.is_empty(), egui::Button::new("Undo last"))
+                .add_enabled(!self.history.is_empty(), egui::Button::new("Undo"))
+                .on_hover_text("⌘Z")
                 .clicked()
             {
-                self.undo_segment();
+                self.undo();
             }
             if ui.add_enabled(!self.route.actions.is_empty(), egui::Button::new("Clear")).clicked() {
                 self.clear_route();
@@ -1385,8 +1775,9 @@ fn sane_pose(p: Pose) -> Pose {
 }
 
 /// A small combo for a move's or a stop's end state.
-fn end_combo(ui: &mut egui::Ui, salt: (&str, usize), then: &mut End, choices: &[End]) {
-    egui::ComboBox::from_id_salt(salt)
+fn end_combo(ui: &mut egui::Ui, scope: (&str, &str), then: &mut End, choices: &[End]) {
+    let id = ui.id().with(scope);
+    egui::ComboBox::from_id_salt(id)
         .selected_text(then.label())
         .width(84.0)
         .show_ui(ui, |ui| {
@@ -1394,6 +1785,101 @@ fn end_combo(ui: &mut egui::Ui, salt: (&str, usize), then: &mut End, choices: &[
                 ui.selectable_value(then, *e, e.label());
             }
         });
+}
+
+/// A speed in wheel degrees per second, with what that is in mm/s on
+/// the loaded chassis.
+fn speed_field(ui: &mut egui::Ui, label: &str, speed: &mut f64, wheel_mm: f64) {
+    ui.horizontal(|ui| {
+        ui.weak(label);
+        ui.add(egui::DragValue::new(speed).speed(5.0).range(10.0..=2000.0).suffix(" °/s"));
+        if wheel_mm > 0.0 {
+            ui.weak(format!("≈ {} mm/s", (*speed * std::f64::consts::PI * wheel_mm / 360.0).round()));
+        }
+    });
+}
+
+/// A move's end: continuous, or one of the stop kinds.
+fn end_fields(ui: &mut egui::Ui, then: &mut End, scope: &str) {
+    let mut continuous = *then == End::Continue;
+    if ui.checkbox(&mut continuous, "continuous (no stop at the end)").changed() {
+        *then = if continuous { End::Continue } else { End::Coast };
+    }
+    if !continuous {
+        ui.horizontal(|ui| {
+            ui.weak("then");
+            end_combo(ui, (scope, "then"), then, &End::STOPS);
+        });
+    }
+}
+
+/// The editable parameters of an action: the popup's and the inspector's.
+fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], wheel_mm: f64, scope: &str) {
+    let sweep = action.arc().map(|a| a.sweep_deg);
+    match action {
+        Action::Straight { speed, then, .. } => {
+            speed_field(ui, "speed", speed, wheel_mm);
+            end_fields(ui, then, scope);
+        }
+        Action::Curve {
+            start,
+            end,
+            radius_mm,
+            right,
+            speed,
+            then,
+        } => {
+            let chord = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
+            ui.horizontal(|ui| {
+                ui.weak("radius");
+                ui.add(
+                    egui::DragValue::new(radius_mm)
+                        .speed(1.0)
+                        .range((chord / 2.0).max(1.0)..=100000.0)
+                        .suffix(" mm"),
+                );
+                ui.selectable_value(right, true, "right");
+                ui.selectable_value(right, false, "left");
+                if let Some(deg) = sweep {
+                    ui.weak(format!("{}°", deg.round()));
+                }
+            });
+            speed_field(ui, "speed", speed, wheel_mm);
+            end_fields(ui, then, scope);
+        }
+        Action::Turn { heading_deg, speed, .. } => {
+            ui.horizontal(|ui| {
+                ui.weak("face");
+                ui.add(egui::DragValue::new(heading_deg).speed(1.0).suffix("°"));
+                ui.weak("(counter-clockwise from +x)");
+            });
+            speed_field(ui, "turn rate", speed, wheel_mm);
+        }
+        Action::Stop { then, wait_ms, .. } => {
+            ui.horizontal(|ui| {
+                ui.weak("then");
+                end_combo(ui, (scope, "then"), then, &End::STOPS);
+                ui.weak("wait");
+                ui.add(egui::DragValue::new(wait_ms).speed(10.0).range(0.0..=600000.0).suffix(" ms"));
+            });
+        }
+        Action::Custom { code, .. } => {
+            ui.horizontal(|ui| {
+                if !functions.is_empty() {
+                    egui::ComboBox::from_id_salt(ui.id().with((scope, "call")))
+                        .selected_text("call…")
+                        .show_ui(ui, |ui| {
+                            for f in functions {
+                                if ui.selectable_label(false, f).clicked() {
+                                    *code = format!("{f}()");
+                                }
+                            }
+                        });
+                }
+                ui.add(egui::TextEdit::singleline(code).hint_text("line_follow()").desired_width(200.0));
+            });
+        }
+    }
 }
 
 fn srgb_to_linear(c: f32) -> f32 {
@@ -1514,105 +2000,208 @@ mod tests {
     }
 
     #[test]
-    fn routes_are_planned_placed_drawn_and_turned_into_a_program() {
+    fn routes_are_placed_by_clicks_edited_copied_locked_and_turned_into_a_program() {
         let mut t = SimulateTab::new(None);
-        assert!(!t.map_click(10.0, 20.0), "nothing armed: the click is not used");
+        assert!(!t.map_click(10.0, 20.0, 5.0), "nothing armed: the click is not used");
         assert!(t.route_lines(false).is_empty(), "no map: nothing to draw");
         assert_eq!(t.route_program().unwrap_err(), "load a map with a chassis first");
         // the map arrives: the route starts at the chassis's spawn
         t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
-        assert_eq!(
-            t.route.start,
-            Pose2 {
-                x_mm: -547.0,
-                y_mm: -150.0,
-                yaw_deg: 90.0
-            }
-        );
+        assert_eq!(t.route.start, Pose2::at([-547.0, -150.0], 90.0));
         assert_eq!(t.route.world, "practice-line");
         assert_eq!(t.route_program().unwrap_err(), "add an action first");
         assert!(t.route_lines(true).len() >= 3, "the start's arrow");
-        // the point tools: a click dead ahead is one straight, a click off to the side an arc
-        t.pick = Some(Tool::StraightTo);
-        assert!(t.map_click(-547.04, 100.02));
-        assert!(t.pick.is_none(), "one point per arming");
-        assert_eq!(t.selected, Some(0));
-        t.pick = Some(Tool::CurveTo);
-        assert!(t.map_click(-447.0, 200.0));
-        assert_eq!(
-            t.route.actions,
-            vec![
-                Action::Straight {
-                    mm: 250.0,
-                    then: End::Coast
-                },
-                Action::Curve {
-                    radius_mm: 100.0,
-                    deg: 90.0,
-                    then: End::Coast
-                }
-            ],
-            "rounded to 0.1 mm"
+        assert!(t.hint().starts_with("pan: drag"));
+        // a straight: two clicks; the first snaps to the chassis's start; the popup opens; nothing is added until it says so
+        t.arm("straight");
+        assert!(
+            t.placing.as_ref().unwrap().hint().starts_with("straight: click where it starts"),
+            "{}",
+            t.hint()
         );
-        // a curve tool click straight ahead is still a line, and says so
-        t.pick = Some(Tool::CurveTo);
-        assert!(t.map_click(-300.0, 200.0));
-        assert_eq!(t.message, "straight ahead: a line, not an arc");
-        assert_eq!(t.route.actions.len(), 3);
-        // a click where the robot already is adds nothing
-        t.pick = Some(Tool::StraightTo);
-        assert!(t.map_click(-300.0, 200.0));
-        assert_eq!(t.route.actions.len(), 3);
-        // typed actions with their defaults; a stop; a custom call
-        t.add_action("turn");
-        t.add_action("stop");
-        t.add_action("custom");
-        assert_eq!(t.selected, Some(5));
-        assert_eq!(t.route.actions[3], Action::Turn { deg: 90.0 });
-        if let Action::Custom { code } = &mut t.route.actions[5] {
-            *code = "line_follow()".into();
-        }
+        assert!(t.map_click(-540.0, -146.0, 20.0));
+        assert_eq!(t.placing.as_ref().unwrap().points, vec![[-547.0, -150.0]], "snapped to the start");
+        assert!(t.hint().contains("click where it ends"));
+        t.hover = Some([-547.0, 0.0]);
+        assert!(t.route_lines(false).len() > 3, "the rubber band");
+        assert!(t.map_click(-547.04, 100.02, 20.0));
+        assert!(t.placing.is_none());
+        assert_eq!(t.hint(), "set the action's parameters in the popup");
+        assert_eq!(
+            t.draft.as_ref().expect("the popup").action,
+            Action::Straight {
+                start: [-547.0, -150.0],
+                end: [-547.0, 100.0],
+                speed: 350.0,
+                then: End::Coast
+            }
+        );
+        assert!(t.route.actions.is_empty());
+        t.commit_draft();
+        assert_eq!(t.route.actions.len(), 1);
+        assert_eq!(t.selected, Some(0));
+        // a curve from the straight's end (snapped) out to the side: a quarter circle by default
+        t.arm("curve");
+        assert!(t.map_click(-544.0, 104.0, 20.0) && t.map_click(-447.0, 200.0, 20.0));
+        let d = t.draft.clone().unwrap();
+        let Action::Curve {
+            start,
+            end,
+            radius_mm,
+            right,
+            ..
+        } = d.action
+        else {
+            panic!("{d:?}")
+        };
+        assert_eq!((start, end, right), ([-547.0, 100.0], [-447.0, 200.0], true));
+        assert!((radius_mm - 100.0).abs() < 0.1, "{radius_mm}");
+        t.commit_draft();
+        // a stop somewhere else (the plan drives there), a turn by two clicks, a custom call that moves
+        t.arm("stop");
+        assert!(t.map_click(-300.0, 200.0, 20.0));
+        t.commit_draft();
+        t.arm("turn");
+        assert!(t.map_click(-300.0, 200.0, 20.0));
+        assert!(t.hint().contains("click a point to face"), "{}", t.hint());
+        assert!(t.map_click(-300.0, 300.0, 20.0));
+        assert!(matches!(t.draft.as_ref().unwrap().action, Action::Turn { heading_deg, .. } if heading_deg == 90.0));
+        t.commit_draft();
+        t.arm("custom");
+        assert!(t.map_click(-300.0, 200.0, 20.0));
+        let mut d = t.draft.take().unwrap();
+        d.action = Action::Custom {
+            at: [-300.0, 200.0],
+            end: None,
+            code: "line_follow()".into(),
+        };
+        d.moves = true;
+        t.draft = Some(d);
+        t.commit_draft();
+        assert_eq!(t.placing.as_ref().map(|p| p.for_end), Some(Some(4)));
+        assert!(t.hint().contains("leaves the robot"), "{}", t.hint());
+        t.hover = Some([-300.0, 350.0]);
+        assert!(t.route_lines(false).len() > 40);
+        assert!(t.map_click(-300.0, 400.0, 20.0));
+        assert!(t.placing.is_none());
+        assert_eq!(t.route.actions[4].action.end(), [-300.0, 400.0]);
+        assert_eq!(t.route.actions.len(), 5);
+        // the program, with the definitions after the setup
         t.route.prelude = "def line_follow():\n    pass\n".into();
         let text = t.route_program().unwrap();
         assert!(text.contains("db.straight(250)") && text.contains("db.curve(100, 90)"), "{text}");
-        assert!(
-            text.contains("db.turn(90)") && text.contains("db.stop()") && text.contains("line_follow()"),
-            "{text}"
-        );
+        assert!(text.contains("db.stop()") && text.contains("line_follow()"), "{text}");
         assert!(text.contains("wheel_diameter_mm=86.4, axle_track_mm=135"), "{text}");
-        assert!(
-            text.find("def line_follow").unwrap() > text.find("DriveBase(").unwrap(),
-            "definitions after the setup"
-        );
-        assert!(
-            t.route_lines(false).len() > 30,
-            "lines, arcs, handles, the turn's heading and the marks"
-        );
+        assert!(text.find("def line_follow").unwrap() > text.find("DriveBase(").unwrap());
+        let steps = t.steps();
+        assert_eq!(steps[2].link.len(), 2, "the drive to the stop");
         // running writes the program and asks the server to run it
         t.run_route();
         let last = t.sent.last().unwrap().clone();
         assert_eq!(last["cmd"], "run");
         let script = last["script"].as_str().unwrap().to_string();
         assert!(std::fs::read_to_string(&script).unwrap().contains("db.curve(100, 90)"));
-        // the list: move, nudge past the ends, remove, undo, clear
-        t.move_action(5, 0);
-        assert!(matches!(t.route.actions[0], Action::Custom { .. }) && t.selected == Some(0));
-        t.move_action(0, 6);
-        assert!(matches!(t.route.actions[5], Action::Custom { .. }) && t.selected == Some(5));
-        t.move_action(9, 0);
-        t.move_action(0, 9);
-        assert_eq!(t.route.actions.len(), 6, "out of range: nothing happens");
-        t.remove_action(3);
+        // labels: one per action, the number at its start
+        let cam = crate::viewport::Camera {
+            target: Vec3::new(-400.0, 100.0, 0.0),
+            distance: 1500.0,
+            ..crate::viewport::Camera::top_down()
+        };
+        let labels = t.route_labels(&cam, 800.0, 600.0);
+        assert_eq!(labels.len(), 5);
+        assert_eq!(labels[0].1, "1");
+        // selection on the map: the straight by its path, nothing out on the mat
+        assert!(t.select_at([-547.0, 0.0], 10.0));
+        assert_eq!(t.selected, Some(0));
+        assert!(t.hint().starts_with("action 1:"), "{}", t.hint());
+        assert!(!t.select_at([0.0, -800.0], 10.0));
+        assert_eq!(t.selected, None);
+        // copy and paste: the copy lands a little to the side, after the selection, selected
+        t.selected = Some(0);
+        let clip = t.copy_selected().unwrap();
+        assert!(clip.contains(route::CLIP_FORMAT), "{clip}");
+        assert_eq!(t.paste(&clip), 1);
+        assert_eq!(t.route.actions.len(), 6);
+        assert_eq!(t.selected, Some(1));
+        assert_eq!(t.route.actions[1].action.start(), [-507.0, -110.0]);
+        assert_eq!(t.paste("nonsense"), 0);
+        assert_eq!(t.paste(r#"{"format":"openbricks-route-actions/1","actions":[]}"#), 0);
+        assert_eq!(t.paste(r#"{"format":"other","actions":[]}"#), 0);
+        assert_eq!(t.route.actions.len(), 6);
+        // a locked action: shown as such, no drag, no delete; unlocked it goes
+        t.set_locked(true);
+        assert!(t.is_locked(1) && t.hint().contains("locked"));
+        assert_eq!(t.route_labels(&cam, 800.0, 600.0)[1].1, "2 🔒");
+        assert!(!t.begin_handle_drag(1, Handle::End, [0.0, 0.0]));
+        t.remove_selected();
+        assert_eq!(t.route.actions.len(), 6);
+        assert!(t.message.contains("locked"), "{}", t.message);
+        t.set_locked(false);
+        t.remove_selected();
         assert_eq!(t.route.actions.len(), 5);
-        assert!(!matches!(t.route.actions[3], Action::Turn { .. }));
-        t.remove_action(42);
-        assert_eq!(t.route.actions.len(), 5);
-        t.undo_segment();
-        assert_eq!(t.route.actions.len(), 4);
-        t.pick = Some(Tool::CurveTo);
+        assert!(t.selected.is_none());
+        // undo brings it back (as it was: unlocked), then undoes the unlock, one change at a time
+        assert!(t.undo());
+        assert_eq!(t.route.actions.len(), 6);
+        assert!(!t.route.actions[1].locked);
+        assert!(t.undo());
+        assert!(t.route.actions[1].locked, "the unlock is undone next");
         t.selected = Some(1);
+        t.set_locked(false);
+        // a handle drag: the straight's end along y, the ghost at its new end; a body drag shifts it whole
+        assert!(t.begin_handle_drag(0, Handle::End, [-547.0, 100.0]));
+        assert_eq!(t.selected, Some(0));
+        assert_eq!(t.ghost.map(|g| g.y_mm), Some(100.0));
+        t.drag_handle(-547.0, 150.0);
+        assert_eq!(t.route.actions[0].action.end(), [-547.0, 150.0]);
+        assert_eq!(t.ghost.map(|g| g.y_mm), Some(150.0));
+        t.drag_chassis(Pose2::at([999.0, 999.0], 0.0));
+        assert_ne!(t.ghost.unwrap().x_mm, 999.0, "a handle drag is not a chassis drag");
+        t.end_handle_drag();
+        assert!(t.ghost.is_none());
+        assert!(t.begin_handle_drag(0, Handle::Body, [-547.0, 0.0]));
+        t.drag_handle(-537.0, 10.0);
+        assert_eq!(
+            (t.route.actions[0].action.start(), t.route.actions[0].action.end()),
+            ([-537.0, -140.0], [-537.0, 160.0])
+        );
+        t.end_handle_drag();
+        t.drag_handle(0.0, 0.0);
+        assert_eq!(
+            t.route.actions[0].action.start(),
+            [-537.0, -140.0],
+            "nothing dragged: nothing changes"
+        );
+        assert!(!t.begin_handle_drag(42, Handle::End, [0.0, 0.0]));
+        // handles on screen: the selected straight's end is found, a locked action's path is not
+        t.selected = Some(0);
+        let end = t.route.actions[0].action.end();
+        let sp = cam.project(Vec3::new(end[0] as f32, end[1] as f32, 3.0), 800.0, 600.0).unwrap();
+        assert_eq!(t.route_handle_at(&cam, sp.x, sp.y, 800.0, 600.0), Some((0, Handle::End)));
+        let mid = [-537.0, 10.0];
+        let mp = cam.project(Vec3::new(mid[0] as f32, mid[1] as f32, 3.0), 800.0, 600.0).unwrap();
+        assert_eq!(t.route_handle_at(&cam, mp.x, mp.y, 800.0, 600.0), Some((0, Handle::Body)));
+        t.set_locked(true);
+        assert_eq!(t.route_handle_at(&cam, mp.x, mp.y, 800.0, 600.0), None);
+        t.set_locked(false);
+        assert_eq!(t.route_handle_at(&cam, 5.0, 5.0, 800.0, 600.0), None);
+        // the list: move, nudge past the ends, out-of-range no-ops
+        t.move_action(5, 0);
+        assert!(matches!(t.route.actions[0].action, Action::Custom { .. }) && t.selected == Some(0));
+        t.move_action(0, 6);
+        assert!(matches!(t.route.actions[5].action, Action::Custom { .. }));
+        t.move_action(9, 0);
+        t.remove_action(42);
+        assert_eq!(t.route.actions.len(), 6);
+        // Escape drops a tool or a popup
+        t.arm("stop");
+        t.cancel();
+        assert!(t.placing.is_none() && t.draft.is_none());
         t.clear_route();
-        assert!(t.route.actions.is_empty() && t.pick.is_none() && t.selected.is_none());
+        assert!(t.route.actions.is_empty() && t.selected.is_none());
+        assert!(t.undo());
+        assert_eq!(t.route.actions.len(), 6);
+        t.clear_route();
         t.run_route();
         assert_eq!(t.message, "add an action first");
         // the chassis as the frames report it
@@ -1623,16 +2212,8 @@ mod tests {
             "{p:?}"
         );
         // placing it: the route starts there, the server is told, and every later load repeats it
-        t.place_chassis(Pose2 {
-            x_mm: 10.04,
-            y_mm: -20.0,
-            yaw_deg: 370.0,
-        });
-        let placed = Pose2 {
-            x_mm: 10.0,
-            y_mm: -20.0,
-            yaw_deg: 10.0,
-        };
+        t.place_chassis(Pose2::at([10.04, -20.0], 370.0));
+        let placed = Pose2::at([10.0, -20.0], 10.0);
         assert_eq!(t.route.start, placed);
         let last = t.sent.last().unwrap().clone();
         assert_eq!(
@@ -1647,98 +2228,30 @@ mod tests {
         // a drag: a ghost follows the pointer while the chassis stays; letting go places it
         let p0 = t.begin_chassis_drag().unwrap();
         assert_eq!(t.ghost, Some(p0));
-        t.drag_chassis(Pose2 {
-            x_mm: p0.x_mm + 50.0,
-            y_mm: p0.y_mm,
-            yaw_deg: p0.yaw_deg,
-        });
-        assert_eq!(t.ghost.unwrap().x_mm, p0.x_mm + 50.0, "the ghost is where the pointer is");
+        t.drag_chassis(Pose2::at([p0.x_mm + 50.0, p0.y_mm], p0.yaw_deg));
+        assert_eq!(t.ghost.unwrap().x_mm, p0.x_mm + 50.0);
         assert_eq!(t.chassis_pose().unwrap().x_mm, p0.x_mm, "the chassis waits for the drop");
         t.end_chassis_drag();
         assert_eq!(t.route.start.x_mm, p0.x_mm + 50.0);
         assert!(t.ghost.is_none());
         assert_eq!(t.sent.last().unwrap()["cmd"], "place");
-        assert!(t.chassis_pose().is_some());
         // not while a program runs
         t.apply(state("running"));
         t.place_chassis(placed);
         assert!(t.message.contains("stop the program"), "{}", t.message);
         assert!(t.begin_chassis_drag().is_none());
         t.apply(state("stopped"));
-        // an action's handle dragged on the map: the straight follows along its line, the ghost shows its end
-        let start = t.route.start;
-        t.add_action("straight");
-        t.add_action("stop");
-        assert!(!t.begin_handle_drag(7), "no such action");
-        assert!(t.begin_handle_drag(0));
-        assert_eq!(t.selected, Some(0));
-        let (hx, hy) = start.heading();
-        assert_eq!(
-            t.ghost
-                .map(|g| (g.x_mm - start.x_mm - hx * 200.0).abs() < 1e-6 && (g.y_mm - start.y_mm - hy * 200.0).abs() < 1e-6),
-            Some(true),
-            "{:?}",
-            t.ghost
-        );
-        t.drag_chassis(Pose2 {
-            x_mm: 999.0,
-            y_mm: 999.0,
-            yaw_deg: 0.0,
-        });
-        assert_ne!(t.ghost.unwrap().x_mm, 999.0, "a handle drag is not a chassis drag");
-        t.drag_handle(start.x_mm + hx * 320.0 + hy * 40.0, start.y_mm + hy * 320.0 - hx * 40.0);
-        assert_eq!(
-            t.route.actions[0],
-            Action::Straight {
-                mm: 320.0,
-                then: End::Coast
-            },
-            "the distance along the line, the side offset ignored"
-        );
-        assert!((t.ghost.unwrap().x_mm - start.x_mm - hx * 320.0).abs() < 1e-6);
-        t.end_chassis_drag();
-        assert!(t.ghost.is_some(), "the chassis drop does not end a handle drag");
-        t.end_handle_drag();
-        assert!(t.ghost.is_none());
-        t.drag_handle(0.0, 0.0);
-        assert!(
-            matches!(t.route.actions[0], Action::Straight { mm: 320.0, .. }),
-            "nothing dragged: nothing changes"
-        );
-        // the handles on screen: a camera over the map finds the straight's end and misses the stop
-        let cam = crate::viewport::Camera {
-            target: Vec3::new(start.x_mm as f32, start.y_mm as f32, 0.0),
-            pitch: 89.0,
-            distance: 1500.0,
-            ..Default::default()
-        };
-        let steps = t.steps();
-        let end = route::handle(&steps[0], &t.route.actions[0]).unwrap();
-        let sp = cam.project(Vec3::new(end[0] as f32, end[1] as f32, 3.0), 800.0, 600.0).unwrap();
-        assert_eq!(t.route_handle_at(&cam, sp.x, sp.y, 800.0, 600.0), Some(0));
-        assert_eq!(
-            t.route_handle_at(&cam, sp.x + 4.0, sp.y - 3.0, 800.0, 600.0),
-            Some(0),
-            "within the grab distance"
-        );
-        assert_eq!(t.route_handle_at(&cam, sp.x + 40.0, sp.y, 800.0, 600.0), None);
-        let sp0 = cam
-            .project(Vec3::new(start.x_mm as f32, start.y_mm as f32, 3.0), 800.0, 600.0)
-            .unwrap();
-        assert_eq!(t.route_handle_at(&cam, sp0.x, sp0.y, 800.0, 600.0), None, "the start is no handle");
-        t.clear_route();
         // save and load, with a route for another map
         let dir = std::env::temp_dir().join(format!("ob-tab-route-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        t.pick = Some(Tool::StraightTo);
-        t.map_click(0.0, 0.0);
+        t.route.actions.push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]]).into());
         t.save_route(dir.join("a.route.json"));
         assert!(t.message.starts_with("saved the route"), "{}", t.message);
         let mut other = SimulateTab::new(None);
         other.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
         other.world = "wro-2026-senior".into();
         other.load_route(dir.join("a.route.json"));
-        assert_eq!(other.route.actions.len(), 2, "a turn and a straight");
+        assert_eq!(other.route.actions.len(), 1);
         assert_eq!(other.world, "practice-line", "the route's map is chosen");
         assert!(
             other.pending_load || other.message.contains("no Python interpreter"),
@@ -1894,8 +2407,9 @@ mod tests {
             t.log
         );
         // a route runs as a program the server receives
-        t.pick = Some(Tool::StraightTo);
-        t.map_click(250.0, 120.0);
+        t.route
+            .actions
+            .push(Action::placed("straight", &[[250.0, -80.0], [250.0, 120.0]]).into());
         t.run_route();
         assert!(pump_until(&mut t, 30, |t| t.status == "running"), "{} {}", t.status, t.message);
         assert!(
@@ -2109,23 +2623,41 @@ mod tests {
             "{:?}",
             t.chassis_pose()
         );
-        t.pick = Some(Tool::StraightTo);
-        t.map_click(-400.0, 100.0);
-        t.pick = Some(Tool::CurveTo);
-        t.map_click(-300.0, 200.0);
-        // a continuous straight into a held stop, and a custom call, ride along
-        t.add_action("straight");
-        t.route.actions[2] = Action::Straight {
-            mm: 100.0,
-            then: End::Continue,
-        };
-        t.add_action("stop");
-        t.route.actions[3] = Action::Stop {
-            then: End::Hold,
-            wait_ms: 200.0,
-        };
-        t.add_action("custom");
-        t.route.actions[4] = Action::Custom { code: "say_hi()".into() };
+        // a straight north, a right quarter circle flowing (continuous) into a straight east, a held
+        // stop, and a custom call: placed on the map, chained end to start
+        t.route
+            .actions
+            .push(Action::placed("straight", &[[-400.0, -150.0], [-400.0, 100.0]]).into());
+        t.route.actions.push(
+            Action::Curve {
+                start: [-400.0, 100.0],
+                end: [-300.0, 200.0],
+                radius_mm: 100.0,
+                right: true,
+                speed: 350.0,
+                then: End::Continue,
+            }
+            .into(),
+        );
+        t.route
+            .actions
+            .push(Action::placed("straight", &[[-300.0, 200.0], [-200.0, 200.0]]).into());
+        t.route.actions.push(
+            Action::Stop {
+                at: [-200.0, 200.0],
+                then: End::Hold,
+                wait_ms: 200.0,
+            }
+            .into(),
+        );
+        t.route.actions.push(
+            Action::Custom {
+                at: [-200.0, 200.0],
+                end: None,
+                code: "say_hi()".into(),
+            }
+            .into(),
+        );
         t.route.prelude = "def say_hi():
     print('hi from the route')
 "
