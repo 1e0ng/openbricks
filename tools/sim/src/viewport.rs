@@ -336,9 +336,9 @@ impl Viewport {
             multiview_mask: None,
             cache: None,
         });
-        // ghosts: first their depth alone (so only the nearest surface of a ghost shows, not
-        // its back faces through it), then the same shading blended by the item's alpha
-        // wherever the depth matches
+        // ghosts: first their depth alone, in a pass with no colour attachment at all (so
+        // only the nearest surface of a ghost shows, not its back faces through it), then
+        // the same shading blended by the item's alpha wherever the depth matches
         let ghost_depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("ghost depth"),
             layout: Some(&layout),
@@ -348,16 +348,7 @@ impl Viewport {
                 buffers: std::slice::from_ref(&vertex_layout),
                 compilation_options: Default::default(),
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: FORMAT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::empty(),
-                })],
-                compilation_options: Default::default(),
-            }),
+            fragment: None,
             primitive: wgpu::PrimitiveState {
                 cull_mode: None,
                 ..Default::default()
@@ -937,21 +928,69 @@ impl Viewport {
                 pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, i as u32..i as u32 + 1);
             }
-            if !scene.ghost.is_empty() {
-                pass.set_bind_group(2, white, &[]);
-                for pipeline in [&self.ghost_depth_pipeline, &self.ghost_pipeline] {
-                    pass.set_pipeline(pipeline);
-                    for (k, it) in scene.ghost.iter().enumerate() {
-                        let Some(mesh) = self.meshes.get(&it.mesh) else { continue };
-                        if mesh.index_count == 0 {
-                            continue;
-                        }
-                        let i = (items.len() + scene.overlay.len() + k) as u32;
-                        pass.set_vertex_buffer(0, mesh.vbuf.slice(..));
-                        pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
-                        pass.draw_indexed(0..mesh.index_count, 0, i..i + 1);
+        }
+        if !scene.ghost.is_empty() {
+            let draw_ghosts = |pass: &mut wgpu::RenderPass<'_>| {
+                for (k, it) in scene.ghost.iter().enumerate() {
+                    let Some(mesh) = self.meshes.get(&it.mesh) else { continue };
+                    if mesh.index_count == 0 {
+                        continue;
                     }
+                    let i = (items.len() + scene.overlay.len() + k) as u32;
+                    pass.set_vertex_buffer(0, mesh.vbuf.slice(..));
+                    pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, i..i + 1);
                 }
+            };
+            {
+                // the ghosts' depth, with no colour attachment to write
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("ghost depth"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.ghost_depth_pipeline);
+                pass.set_bind_group(0, &self.globals_bg, &[]);
+                pass.set_bind_group(1, &self.instance_bg, &[]);
+                pass.set_bind_group(2, &self.textures["white"].bind_group, &[]);
+                draw_ghosts(&mut pass);
+            }
+            {
+                // then their colour, blended once where the depth matches
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("ghost"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: color,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.ghost_pipeline);
+                pass.set_bind_group(0, &self.globals_bg, &[]);
+                pass.set_bind_group(1, &self.instance_bg, &[]);
+                pass.set_bind_group(2, &self.textures["white"].bind_group, &[]);
+                draw_ghosts(&mut pass);
             }
         }
         if !scene.overlay.is_empty() {
@@ -1020,7 +1059,7 @@ struct Inst { model: mat4x4<f32>, color: vec4<f32>, flags: vec4<u32> };
 @group(2) @binding(0) var tex: texture_2d<f32>;
 @group(2) @binding(1) var samp: sampler;
 
-struct VOut { @builtin(position) pos: vec4<f32>, @location(0) nrm: vec3<f32>, @location(1) color: vec4<f32>, @location(2) wpos: vec3<f32>, @location(3) uv: vec2<f32>, @location(4) @interpolate(flat) textured: u32 };
+struct VOut { @builtin(position) @invariant pos: vec4<f32>, @location(0) nrm: vec3<f32>, @location(1) color: vec4<f32>, @location(2) wpos: vec3<f32>, @location(3) uv: vec2<f32>, @location(4) @interpolate(flat) textured: u32 };
 
 @vertex fn vs_main(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>, @builtin(instance_index) ii: u32) -> VOut {
   let inst = insts[ii];
@@ -1192,7 +1231,13 @@ mod tests {
             let i = ((y * w + x) * 4) as usize;
             [buf[i], buf[i + 1], buf[i + 2]]
         };
-        let mut compared = 0;
+        // 30 % of the solid pixel, blended in linear light and stored as sRGB
+        let expected = |s: u8| -> u8 {
+            let lin = ((s as f64 / 255.0 + 0.055) / 1.055).powf(2.4) * 0.3;
+            ((1.055 * lin.powf(1.0 / 2.4) - 0.055) * 255.0).round() as u8
+        };
+        let (mut compared, mut exact) = (0, 0);
+        let mut off = Vec::new();
         for y in 0..h {
             for x in 0..w {
                 let (bare, solid) = (pick(&bare_px, x, y), pick(&solid_px, x, y));
@@ -1202,13 +1247,24 @@ mod tests {
                 let gp = at(x, y);
                 assert!(sum(gp) > 0, "the ghost is visible at ({x}, {y})");
                 assert!(
-                    sum(gp) * 4 < sum(solid) * 3,
+                    sum(gp) * 10 < sum(solid) * 9,
                     "fainter than the solid box at ({x}, {y}): {gp:?} vs {solid:?}"
                 );
+                let want = solid.map(expected);
+                if (0..3).all(|c| (gp[c] as i32 - want[c] as i32).abs() <= 3) {
+                    exact += 1;
+                } else if off.len() < 8 {
+                    off.push(((x, y), gp, want));
+                }
                 compared += 1;
             }
         }
         assert!(compared > 200, "{compared} ghost-only pixels compared");
+        // the box's edges, where two faces share a depth, may blend twice; everywhere else it is the 30 % blend
+        assert!(
+            exact * 20 >= compared * 19,
+            "{exact} of {compared} pixels are the 30 % blend; off: {off:?}"
+        );
         vp.render(&device, &queue, &mut renderer, (w, h), &scene);
         // the y arrow points right across the box and is drawn over it (green beats blue)
         assert!(
