@@ -3,6 +3,43 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.13.0 — a curve is radius and angle from the robot's heading; paths three pixels wide
+
+A curve was placed as the circle through two clicked points at a
+chosen radius, so its entry heading and its ending direction fell out
+of the geometry, and the planner quietly turned the robot to the arc's
+start first. A curve now takes three clicks — where it starts, where
+it ends, and a point to face there — and nothing is typed: it enters
+the way the robot arrives at its start (kept in step with the previous
+action as you edit; a locked curve keeps its own) and reaches the end
+pose exactly, as one arc when the end pose lies on the circle tangent
+to the start, else as two arcs meeting tangentially (a biarc), which
+the program drives as continuous `db.curve` calls. The arc follows
+the pointer while you place it, and after the second click its end
+swings to face the pointer. Handles: the end, the arrow at the end for
+the heading, and the start, which carries the end along. Route files
+are `openbricks-route/4`; third-format files load, each curve keeping
+its shape.
+
+Route paths and markers are drawn three pixels wide at any zoom. The
+GPU's hardware lines are one pixel, which read as barely visible on a
+mat; the top-layer pass now widens every segment into a screen-space
+quad in the vertex shader.
+
+- Tests: the arc from a pose (ends, headings, a three-quarter turn, no
+  radius, no angle); the tangent arc through a point (ahead, behind,
+  dead ahead, on the spot); the biarc (an S of two semicircles, a U of
+  two quarters, the single arc and the straight run when the poses
+  allow, a sweep of end poses all reached facing the way asked);
+  placement by three clicks from the previous action's heading; the
+  handles (face, end, start carry, translation); the entry heading
+  following an edited predecessor unless locked; the plan and program
+  unchanged for the same geometry, two pieces flowing with
+  `then=Stop.NONE`; fourth-format round trip and third-format
+  conversion (shape kept, colours and locks kept, a malformed curve
+  refused); the arrowhead following a curve's end tangent; the
+  widened line's pixel rows at 3 px and at 9 px.
+
 ## 4.12.0 — paths on top of the map, in a colour of your own
 
 Route paths were drawn under the map: the renderer drew lines first,

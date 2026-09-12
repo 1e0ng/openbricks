@@ -29,7 +29,27 @@ struct Globals {
     view_proj: [[f32; 4]; 4],
     light_dir: [f32; 4],
     camera_pos: [f32; 4],
+    /// The view's width and height in pixels, the width of the lines on
+    /// top in pixels, and a spare.
+    viewport: [f32; 4],
 }
+
+/// A vertex of a line on top: both ends, which one this is, which side
+/// of the line it lies on, and the colour. The shader widens the
+/// segment into a quad of `top_line_px` pixels on the screen.
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct WideVertex {
+    a: [f32; 3],
+    b: [f32; 3],
+    t: f32,
+    side: f32,
+    color: [f32; 4],
+}
+
+/// How wide the lines on top (the route, the map's markers) are drawn,
+/// in pixels, at any zoom.
+pub const TOP_LINE_PX: f32 = 3.0;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -264,6 +284,10 @@ pub struct Viewport {
     instance_bg: wgpu::BindGroup,
     instance_capacity: usize,
     line_buf: wgpu::Buffer,
+    wide_buf: wgpu::Buffer,
+    wide_capacity: usize,
+    /// How wide the lines on top are drawn, in pixels of the render target.
+    pub top_line_px: f32,
     line_capacity: usize,
     meshes: HashMap<String, GpuMesh>,
     texture_layout: wgpu::BindGroupLayout,
@@ -514,15 +538,16 @@ impl Viewport {
             multiview_mask: None,
             cache: None,
         });
-        // the same lines, drawn last and never hidden by the scene
+        // lines on top: drawn last, never hidden by the scene, and widened into quads of
+        // `top_line_px` pixels on the screen (hardware lines are one pixel wide)
         let line_top_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("lines on top"),
             layout: Some(&line_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_line"),
+                entry_point: Some("vs_wide"),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<LineVertex>() as u64,
+                    array_stride: std::mem::size_of::<WideVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
                         wgpu::VertexAttribute {
@@ -531,9 +556,24 @@ impl Viewport {
                             shader_location: 0,
                         },
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x4,
+                            format: wgpu::VertexFormat::Float32x3,
                             offset: 12,
                             shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 24,
+                            shader_location: 2,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 28,
+                            shader_location: 3,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 32,
+                            shader_location: 4,
                         },
                     ],
                 }],
@@ -546,7 +586,7 @@ impl Viewport {
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -582,6 +622,8 @@ impl Viewport {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let wide_capacity = 4096;
+        let wide_buf = Self::wide_buffer(device, wide_capacity);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("texture"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -597,6 +639,7 @@ impl Viewport {
             composite_layout,
             line_pipeline,
             line_top_pipeline,
+            top_line_px: TOP_LINE_PX,
             globals,
             globals_bg,
             instance_layout,
@@ -604,6 +647,8 @@ impl Viewport {
             instance_bg,
             instance_capacity,
             line_buf,
+            wide_buf,
+            wide_capacity,
             line_capacity,
             meshes: HashMap::new(),
             color: None,
@@ -672,6 +717,15 @@ impl Viewport {
             ],
         });
         self.textures.insert(key.to_string(), GpuTexture { bind_group });
+    }
+
+    fn wide_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lines on top"),
+            size: (capacity * std::mem::size_of::<WideVertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
     }
 
     fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -981,6 +1035,7 @@ impl Viewport {
             view_proj: camera.view_proj(aspect).to_cols_array_2d(),
             light_dir: [light.x, light.y, light.z, 0.0],
             camera_pos: [eye.x, eye.y, eye.z, 1.0],
+            viewport: [size.0 as f32, size.1.max(1) as f32, self.top_line_px, 0.0],
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         let data: Vec<InstanceData> = items
@@ -1010,8 +1065,8 @@ impl Viewport {
         if !data.is_empty() {
             queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&data));
         }
-        let mut lv: Vec<LineVertex> = Vec::with_capacity((lines.len() + scene.top_lines.len()) * 2);
-        for l in lines.iter().chain(scene.top_lines.iter()) {
+        let mut lv: Vec<LineVertex> = Vec::with_capacity(lines.len() * 2);
+        for l in lines {
             lv.push(LineVertex {
                 pos: l.a.to_array(),
                 color: l.color,
@@ -1021,7 +1076,25 @@ impl Viewport {
                 color: l.color,
             });
         }
-        let n_under = (lines.len() * 2) as u32;
+        // each line on top is a quad: two triangles, widened by the shader
+        let mut wv: Vec<WideVertex> = Vec::with_capacity(scene.top_lines.len() * 6);
+        for l in scene.top_lines {
+            let v = |t: f32, side: f32| WideVertex {
+                a: l.a.to_array(),
+                b: l.b.to_array(),
+                t,
+                side,
+                color: l.color,
+            };
+            wv.extend([v(0.0, -1.0), v(0.0, 1.0), v(1.0, 1.0), v(0.0, -1.0), v(1.0, 1.0), v(1.0, -1.0)]);
+        }
+        if wv.len() > self.wide_capacity {
+            self.wide_capacity = wv.len().next_power_of_two();
+            self.wide_buf = Self::wide_buffer(device, self.wide_capacity);
+        }
+        if !wv.is_empty() {
+            queue.write_buffer(&self.wide_buf, 0, bytemuck::cast_slice(&wv));
+        }
         if lv.len() > self.line_capacity {
             self.line_capacity = lv.len().next_power_of_two();
             self.line_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1063,10 +1136,10 @@ impl Viewport {
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.globals_bg, &[]);
-            if n_under > 0 {
+            if !lv.is_empty() {
                 pass.set_pipeline(&self.line_pipeline);
                 pass.set_vertex_buffer(0, self.line_buf.slice(..));
-                pass.draw(0..n_under, 0..1);
+                pass.draw(0..lv.len() as u32, 0..1);
             }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(1, &self.instance_bg, &[]);
@@ -1149,7 +1222,7 @@ impl Viewport {
                 pass.draw(0..3, 0..1);
             }
         }
-        if (lv.len() as u32) > n_under {
+        if !wv.is_empty() {
             // the map's annotations: over the scene and the ghost, in their own order
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("lines on top"),
@@ -1174,8 +1247,8 @@ impl Viewport {
             });
             pass.set_pipeline(&self.line_top_pipeline);
             pass.set_bind_group(0, &self.globals_bg, &[]);
-            pass.set_vertex_buffer(0, self.line_buf.slice(..));
-            pass.draw(n_under..lv.len() as u32, 0..1);
+            pass.set_vertex_buffer(0, self.wide_buf.slice(..));
+            pass.draw(0..wv.len() as u32, 0..1);
         }
         if !scene.overlay.is_empty() {
             // handles: on top of everything, but still occluding each other
@@ -1236,7 +1309,7 @@ impl Viewport {
 }
 
 const SHADER: &str = r#"
-struct Globals { view_proj: mat4x4<f32>, light_dir: vec4<f32>, camera_pos: vec4<f32> };
+struct Globals { view_proj: mat4x4<f32>, light_dir: vec4<f32>, camera_pos: vec4<f32>, viewport: vec4<f32> };
 struct Inst { model: mat4x4<f32>, color: vec4<f32>, flags: vec4<u32> };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(1) @binding(0) var<storage, read> insts: array<Inst>;
@@ -1281,6 +1354,24 @@ struct LOut { @builtin(position) pos: vec4<f32>, @location(0) color: vec4<f32> }
   return o;
 }
 @fragment fn fs_line(i: LOut) -> @location(0) vec4<f32> { return i.color; }
+
+// a line on top: the segment a-b widened to g.viewport.z pixels on the screen, this vertex
+// being end t (0 = a, 1 = b) on side `side` (-1 / +1)
+@vertex fn vs_wide(@location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) t: f32,
+                   @location(3) side: f32, @location(4) c: vec4<f32>) -> LOut {
+  let ca = g.view_proj * vec4<f32>(a, 1.0);
+  let cb = g.view_proj * vec4<f32>(b, 1.0);
+  let half_px = g.viewport.xy * 0.5;
+  var d = (cb.xy / cb.w - ca.xy / ca.w) * half_px;
+  if (length(d) < 1e-4) { d = vec2<f32>(1.0, 0.0); }
+  d = normalize(d);
+  let n = vec2<f32>(-d.y, d.x) * side * g.viewport.z * 0.5;
+  let p = select(ca, cb, t > 0.5);
+  var o: LOut;
+  o.pos = vec4<f32>(p.xy + n / half_px * p.w, p.z, p.w);
+  o.color = c;
+  return o;
+}
 "#;
 
 /// The ghost composite: one triangle over the screen; each pixel takes
@@ -1758,6 +1849,25 @@ mod tests {
         };
         let c = at(b.x as u32, b.y as u32);
         assert!(c[1] > c[0] * 2 && c[1] > 150, "the line on top shows over the box: {c:?}");
+        // and it is TOP_LINE_PX wide on the screen, not a hardware hairline: count the green rows
+        // through the box's centre column, then widen the lines and count again
+        // (the mat is light grey: green means green, not merely "more green than red")
+        let green_rows = |px: &[u8]| {
+            (0..h)
+                .filter(|&y| {
+                    let i = ((y * w + b.x as u32) * 4) as usize;
+                    px[i + 1] > 150 && px[i] < 100 && px[i + 2] < 100
+                })
+                .count()
+        };
+        let n3 = green_rows(&px);
+        assert!((2..=4).contains(&n3), "{TOP_LINE_PX} px wide: {n3} green rows");
+        vp.top_line_px = 9.0;
+        vp.render(&device, &queue, &mut renderer, (w, h), &scene);
+        let (_, _, px) = vp.read_pixels(&device, &queue).unwrap();
+        let n9 = green_rows(&px);
+        assert!((8..=10).contains(&n9), "9 px wide: {n9} green rows");
+        vp.top_line_px = TOP_LINE_PX;
     }
 
     #[test]

@@ -40,7 +40,8 @@ impl Placing {
         let step = match (self.kind, self.points.len()) {
             ("marker", _) => "click where it goes; a name follows",
             ("straight" | "curve", 0) => "click where it starts",
-            ("straight" | "curve", _) => "click where it ends",
+            ("straight", _) | ("curve", 1) => "click where it ends",
+            ("curve", _) => "click a point to face at the end",
             ("turn", 0) => "click where it turns",
             ("turn", _) => "click a point to face",
             _ => ask,
@@ -534,6 +535,43 @@ impl SimulateTab {
     }
 
     /// The route worked out from its start.
+    /// Keep each curve entering the way the robot arrives at its start —
+    /// the previous action's end heading there, else the drive's direction
+    /// — so it joins smoothly as the route is edited; a locked curve keeps
+    /// its own.
+    pub fn sync_curves(&mut self) {
+        let mut pose = self.route.start;
+        for item in &mut self.route.actions {
+            if !item.locked
+                && let Action::Curve { start, heading_deg, .. } = &mut item.action
+            {
+                let (dx, dy) = (start[0] - pose.x_mm, start[1] - pose.y_mm);
+                let h = if (dx * dx + dy * dy).sqrt() < 0.5 {
+                    pose.yaw_deg
+                } else {
+                    dy.atan2(dx).to_degrees()
+                };
+                *heading_deg = (route::wrap_deg(h) * 10.0).round() / 10.0;
+            }
+            let a = &item.action;
+            let (_, _, from) = route::approach(pose, a.start(), a.start_heading());
+            pose = Pose2::at(a.end(), a.end_heading(from.yaw_deg));
+        }
+    }
+
+    /// The heading the robot arrives at `p` with: the last action's end
+    /// heading when `p` is that end (the route start's before any action),
+    /// else the way the plan's drive there faces.
+    pub fn heading_at(&self, p: Point) -> f64 {
+        let last = self.steps().last().map(|s| s.end).unwrap_or(self.route.start);
+        let (dx, dy) = (p[0] - last.x_mm, p[1] - last.y_mm);
+        if (dx * dx + dy * dy).sqrt() < 0.5 {
+            last.yaw_deg
+        } else {
+            dy.atan2(dx).to_degrees()
+        }
+    }
+
     pub fn steps(&self) -> Vec<route::Step> {
         route::plan(&self.route)
     }
@@ -715,7 +753,7 @@ impl SimulateTab {
         placing.points.push(p);
         if placing.points.len() >= route::clicks_needed(placing.kind) {
             self.draft = Some(Draft {
-                action: Action::placed(placing.kind, &placing.points),
+                action: Action::placed(placing.kind, &placing.points, self.heading_at(placing.points[0])),
                 moves: false,
                 at: None,
                 color: None,
@@ -1087,7 +1125,9 @@ impl SimulateTab {
                     }
                 }
             } else if let Some(first) = p.points.first() {
-                let preview = Action::placed(p.kind, &[*first, hover]);
+                let mut pts = p.points.clone();
+                pts.push(hover);
+                let preview = Action::placed(p.kind, &pts, self.heading_at(*first));
                 if let Some(mp) = on_screen(preview.label_point()) {
                     out.push((mp + glam::Vec2::new(8.0, 16.0), preview.brief()));
                 }
@@ -1258,7 +1298,9 @@ impl SimulateTab {
                         circle(&mut out, hover, 6.0, mark);
                     }
                 } else if let Some(first) = p.points.first() {
-                    let preview = Action::placed(p.kind, &[*first, hover]);
+                    let mut pts = p.points.clone();
+                    pts.push(hover);
+                    let preview = Action::placed(p.kind, &pts, self.heading_at(*first));
                     let path = preview.path();
                     for w in path.windows(2) {
                         seg(&mut out, w[0], w[1], mark, z);
@@ -1366,6 +1408,7 @@ impl SimulateTab {
     /// The route panel: the tools, the start, the actions with their
     /// parameters, and what to do with the route.
     pub fn route_ui(&mut self, ui: &mut egui::Ui) {
+        self.sync_curves();
         ui.horizontal(|ui| {
             ui.heading("Route");
             if ui.button("Save…").clicked()
@@ -2180,35 +2223,24 @@ fn end_fields(ui: &mut egui::Ui, then: &mut End, scope: &str) {
 
 /// The editable parameters of an action: the popup's and the inspector's.
 fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], wheel_mm: f64, scope: &str) {
-    let sweep = action.arc().map(|a| a.sweep_deg);
+    let brief = action.brief();
     match action {
         Action::Straight { speed, then, .. } => {
             speed_field(ui, "speed", speed, wheel_mm);
             end_fields(ui, then, scope);
         }
         Action::Curve {
-            start,
-            end,
-            radius_mm,
-            right,
+            heading_deg,
+            end_heading_deg,
             speed,
             then,
+            ..
         } => {
-            let chord = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
-            ui.horizontal(|ui| {
-                ui.weak("radius");
-                ui.add(
-                    egui::DragValue::new(radius_mm)
-                        .speed(1.0)
-                        .range((chord / 2.0).max(1.0)..=100000.0)
-                        .suffix(" mm"),
-                );
-                ui.selectable_value(right, true, "right");
-                ui.selectable_value(right, false, "left");
-                if let Some(deg) = sweep {
-                    ui.weak(format!("{}°", deg.round()));
-                }
-            });
+            ui.weak(format!(
+                "enters facing {}°, ends facing {}° · {brief} · drag the arrow at its end to face elsewhere",
+                heading_deg.round(),
+                end_heading_deg.round()
+            ));
             speed_field(ui, "speed", speed, wheel_mm);
             end_fields(ui, then, scope);
         }
@@ -2424,23 +2456,50 @@ mod tests {
         t.commit_draft();
         assert_eq!(t.route.actions.len(), 1);
         assert_eq!(t.selected, Some(0));
-        // a curve from the straight's end (snapped) out to the side: a quarter circle by default
+        // a curve from the straight's end (snapped) to a point out to the side, then a point to
+        // face there: entered the straight's way, facing +x at the end — one right quarter circle
         t.arm("curve");
         assert!(t.map_click(-544.0, 104.0, 20.0) && t.map_click(-447.0, 200.0, 20.0));
+        assert!(t.draft.is_none() && t.hint().contains("a point to face"), "{}", t.hint());
+        assert!(t.map_click(-347.0, 200.0, 20.0));
         let d = t.draft.clone().unwrap();
+        let pieces = d.action.pieces();
         let Action::Curve {
             start,
+            heading_deg,
             end,
-            radius_mm,
-            right,
+            end_heading_deg,
             ..
         } = d.action
         else {
             panic!("{d:?}")
         };
-        assert_eq!((start, end, right), ([-547.0, 100.0], [-447.0, 200.0], true));
-        assert!((radius_mm - 100.0).abs() < 0.1, "{radius_mm}");
+        assert_eq!(
+            (start, heading_deg, end, end_heading_deg),
+            ([-547.0, 100.0], 90.0, [-447.0, 200.0], 0.0)
+        );
+        assert!(matches!(pieces[..], [route::Piece::Arc { right: true, .. }]), "{pieces:?}");
+        assert_eq!(t.heading_at([-547.0, 100.0]), 90.0, "at the last end: its heading");
+        assert_eq!(t.heading_at([-447.0, 200.0]), 45.0, "elsewhere: the way the drive there faces");
         t.commit_draft();
+        // the curve enters the way the robot arrives: edit the straight and it follows; a locked
+        // curve keeps its own
+        let entry = |t: &SimulateTab| match t.route.actions[1].action {
+            Action::Curve { heading_deg, .. } => heading_deg,
+            _ => panic!(),
+        };
+        t.sync_curves();
+        assert_eq!(entry(&t), 90.0);
+        t.route.actions[0].action.drag(Handle::Start, [-647.0, -150.0]);
+        t.sync_curves();
+        assert!((entry(&t) - 68.2).abs() < 0.1, "the way the edited straight leaves: {}", entry(&t));
+        t.route.actions[1].locked = true;
+        t.route.actions[0].action.drag(Handle::Start, [-547.0, -150.0]);
+        t.sync_curves();
+        assert!((entry(&t) - 68.2).abs() < 0.1, "a locked curve keeps its heading");
+        t.route.actions[1].locked = false;
+        t.sync_curves();
+        assert_eq!(entry(&t), 90.0);
         // a stop somewhere else (the plan drives there), a turn by two clicks, a custom call that moves
         t.arm("stop");
         assert!(t.map_click(-300.0, 200.0, 20.0));
@@ -2657,7 +2716,9 @@ mod tests {
         assert_eq!(t.route_lines(false)[0].color, [0.5, 0.2, 0.75, 1.0], "an unselected flag is purple");
         t.selected_marker = Some(0);
         // a path in a colour of the user's, and back to the kind's default
-        t.route.actions.push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]]).into());
+        t.route
+            .actions
+            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0).into());
         assert!(
             t.route_lines(false)
                 .iter()
@@ -2687,7 +2748,7 @@ mod tests {
         // (200, 100) bending left ends heading +y, so the wings reach back to (∓8, 86)
         t.route
             .actions
-            .push(Action::placed("curve", &[[100.0, 0.0], [200.0, 100.0]]).into());
+            .push(Action::placed("curve", &[[100.0, 0.0], [200.0, 100.0]], 0.0).into());
         let lines = t.route_lines(false);
         let green = [26.0 / 255.0, 140.0 / 255.0, 64.0 / 255.0, 1.0];
         let end_heading = t.steps().last().unwrap().end.yaw_deg;
@@ -2703,7 +2764,7 @@ mod tests {
         let before = t.route_lines(false);
         t.route
             .actions
-            .push(Action::placed("turn", &[[200.0, 100.0], [200.0, 200.0]]).into());
+            .push(Action::placed("turn", &[[200.0, 100.0], [200.0, 200.0]], 0.0).into());
         let after = t.route_lines(false);
         let extra: Vec<_> = after.iter().filter(|l| !before.contains(l)).collect();
         assert_eq!(extra.len(), 8, "shaft + 3 head segments + 4 square sides: {extra:?}");
@@ -2724,8 +2785,8 @@ mod tests {
         t.cancel();
         // selection: the marker wins over an action at the same spot and clears the action
         // selection; an action away from any marker is selected and clears the marker's
-        t.route.actions.push(Action::placed("stop", &[[100.0, 100.0]]).into());
-        t.route.actions.push(Action::placed("stop", &[[-300.0, 200.0]]).into());
+        t.route.actions.push(Action::placed("stop", &[[100.0, 100.0]], 0.0).into());
+        t.route.actions.push(Action::placed("stop", &[[-300.0, 200.0]], 0.0).into());
         t.selected = Some(0);
         assert!(t.select_at([101.0, 100.0], 10.0));
         assert_eq!((t.selected_marker, t.selected), (Some(0), None));
@@ -2799,7 +2860,9 @@ mod tests {
         // save and load, with a route for another map
         let dir = std::env::temp_dir().join(format!("ob-tab-route-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        t.route.actions.push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]]).into());
+        t.route
+            .actions
+            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0).into());
         t.save_route(dir.join("a.route.json"));
         assert!(t.message.starts_with("saved the route"), "{}", t.message);
         let mut other = SimulateTab::new(None);
@@ -2964,7 +3027,7 @@ mod tests {
         // a route runs as a program the server receives
         t.route
             .actions
-            .push(Action::placed("straight", &[[250.0, -80.0], [250.0, 120.0]]).into());
+            .push(Action::placed("straight", &[[250.0, -80.0], [250.0, 120.0]], 0.0).into());
         t.run_route();
         assert!(pump_until(&mut t, 30, |t| t.status == "running"), "{} {}", t.status, t.message);
         assert!(
@@ -3183,13 +3246,13 @@ mod tests {
         // stop, and a custom call: placed on the map, chained end to start
         t.route
             .actions
-            .push(Action::placed("straight", &[[-400.0, -150.0], [-400.0, 100.0]]).into());
+            .push(Action::placed("straight", &[[-400.0, -150.0], [-400.0, 100.0]], 0.0).into());
         t.route.actions.push(
             Action::Curve {
                 start: [-400.0, 100.0],
+                heading_deg: 90.0,
                 end: [-300.0, 200.0],
-                radius_mm: 100.0,
-                right: true,
+                end_heading_deg: 0.0,
                 speed: 350.0,
                 then: End::Continue,
             }
@@ -3197,7 +3260,7 @@ mod tests {
         );
         t.route
             .actions
-            .push(Action::placed("straight", &[[-300.0, 200.0], [-200.0, 200.0]]).into());
+            .push(Action::placed("straight", &[[-300.0, 200.0], [-200.0, 200.0]], 0.0).into());
         t.route.actions.push(
             Action::Stop {
                 at: [-200.0, 200.0],
