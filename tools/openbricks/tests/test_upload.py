@@ -111,20 +111,31 @@ class _ScriptedLink:
         self.closed = True
 
 
+_IDLE = b"openbricks: idle. Press button to run /program.mpy\r\n"
+
+
 class UploadFlowTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
         self.tmp.write("print('hello')\n")
         self.tmp.close()
         self.addCleanup(os.unlink, self.tmp.name)
+        # a private hub cache: every test starts with an unknown hub
+        # unless it remembers one itself
+        self.cache = tempfile.mkdtemp()
+        env = patch.dict(os.environ, {"OPENBRICKS_CACHE_DIR": self.cache})
+        env.start()
+        self.addCleanup(env.stop)
 
-    def _standard_responses(self, stdout_msg, stage_rounds=1,
-                            fw_version=None):
-        out = [
-            b"",                          # drain after Ctrl-C interrupt
-            _BANNER,                      # raw-REPL banner
-        ]
-        if fw_version is not None:       # default flow: version probe
+    def _standard_responses(self, stdout_msg, fw_version=None,
+                            probe=True, idle=_IDLE):
+        """The hub side of one upload: the raw-REPL banner, the
+        firmware probe (only for an unknown hub in the default flow),
+        then the ONE staged program's paste ack and its stream — the
+        version line, the confirmation, and the launcher's idle
+        banner (the program never ends)."""
+        out = [_BANNER]
+        if fw_version is not None and probe:
             out += [
                 _R_SUPPORTED + _WINDOW_8K,
                 _CTRL_D,                  # end-of-paste ack
@@ -132,19 +143,13 @@ class UploadFlowTests(unittest.TestCase):
                 _CTRL_D,                  # empty stderr + EOT
                 b">",                     # raw-REPL prompt
             ]
-        for _ in range(stage_rounds):    # chunked staging execs
-            out += [
-                _R_SUPPORTED + _WINDOW_8K,
-                _CTRL_D,                  # end-of-paste ack
-                _CTRL_D,                  # empty stdout + EOT
-                _CTRL_D,                  # empty stderr + EOT
-                b">",                     # raw-REPL prompt
-            ]
+        version_line = fw_version if fw_version is not None else b"fwv=4.10.0\r\n"
         out += [
-            _R_SUPPORTED + _WINDOW_8K,    # confirm-program paste ack
+            _R_SUPPORTED + _WINDOW_8K,    # the staged program's paste ack
             _CTRL_D,                      # end-of-paste ack
-            stdout_msg + _CTRL_D,         # stdout + EOT
-            _CTRL_D,                      # stderr + EOT
+            version_line,                 # its first line
+            stdout_msg,                   # the confirmation
+            idle,                         # the idle loop's banner
         ]
         return out
 
@@ -153,7 +158,7 @@ class UploadFlowTests(unittest.TestCase):
             b"uploaded 59 bytes to '/program.mpy'\r\n",
             fw_version=b"fwv=1.92.0\r\n"))
 
-        async def _fake_connect(name, scan_timeout=5.0):
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
@@ -168,7 +173,8 @@ class UploadFlowTests(unittest.TestCase):
         # Raw REPL fully entered and cleanly exited.
         self.assertIn(b"\x01", joined)      # Ctrl-A (enter raw)
         self.assertIn(b"\x05A\x01", joined) # raw-paste request
-        self.assertIn(b"launcher.run()", joined)  # idle loop restored on exit
+        self.assertIn(b"launcher.run()", joined)  # the program ends in the idle loop
+        self.assertEqual(joined.count(b"\x05A\x01"), 2, "probe + ONE staged program")
         # 1.92.0 firmware: the COMPILED payload lands at /program.mpy
         # (.mpy header inside the staged repr), and the confirm
         # program clears the stale source sibling.
@@ -179,14 +185,102 @@ class UploadFlowTests(unittest.TestCase):
         # Confirmation printed to the user's terminal, and the final
         # ready-line names the path that was ACTUALLY staged.
         self.assertIn("uploaded", out.getvalue())
+        self.assertNotIn("fwv=", out.getvalue(), "the version line is not the user's")
         self.assertIn("/program.mpy", err.getvalue())
+        self.assertIn("staged in ", err.getvalue())
+        # the hub is remembered: the next upload skips the probe
+        from openbricks_dev import _hubcache
+        self.assertEqual(_hubcache.firmware_version("RobotA"), (1, 92, 0))
+
+    def test_a_remembered_hub_skips_the_probe(self):
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        fake = _ScriptedLink(self._standard_responses(
+            b"uploaded 59 bytes to '/program.mpy'\r\n",
+            fw_version=b"fwv=1.92.0\r\n", probe=False))
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO) as out, \
+             patch("sys.stderr", new_callable=io.StringIO):
+            rc = ul.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"\x05A\x01"), 1, "no probe: ONE exec")
+        self.assertIn(b"'/program.mpy'", joined)
+        self.assertIn(b"fwneedsrc", joined, "the staged program guards the .mpy itself")
+        self.assertIn("uploaded", out.getvalue())
+
+    def test_a_re_flashed_hub_is_caught_in_session_and_gets_source(self):
+        # The cache says 1.92.0 but the hub now runs 1.91.1: the staged
+        # program's guard refuses the .mpy, the host reads the version
+        # line, consumes the refusal, announces, and stages source.
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        responses = [
+            _BANNER,
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,     # the .mpy program
+            b"fwv=1.91.1\r\n" + _CTRL_D,             # its stdout: the version, then the end
+            b"Traceback (most recent call last):\r\nAssertionError: fwneedsrc\r\n" + _CTRL_D,
+            b">",
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,     # the source program
+            b"fwv=1.91.1\r\n",
+            b"uploaded 15 bytes to '/program.py'\r\n",
+            b"openbricks: idle. Press button to run /program.py\r\n",
+        ]
+        fake = _ScriptedLink(responses)
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO) as out, \
+             patch("sys.stderr", new_callable=io.StringIO) as err:
+            rc = ul.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"\x05A\x01"), 2)
+        self.assertIn(b"'/program.mpy'", joined)
+        self.assertIn(b"'/program.py'", joined)
+        self.assertIn("predates precompiled", err.getvalue())
+        self.assertIn("uploaded 15 bytes", out.getvalue())
+        self.assertEqual(_hubcache.firmware_version("RobotA"), (1, 91, 1))
+
+    def test_a_hub_error_before_the_idle_loop_is_an_upload_error(self):
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.92.0")
+        responses = [
+            _BANNER,
+            _R_SUPPORTED + _WINDOW_8K, _CTRL_D,
+            b"fwv=1.92.0\r\n",
+            b"uploaded 3 bytes to '/program.mpy'\r\n" + _CTRL_D,
+            b"AssertionError: size mismatch after staging\r\n" + _CTRL_D + b">",
+            # the restore that follows: banner
+            b"openbricks: idle. Press button to run /program.mpy\r\n",
+        ]
+        fake = _ScriptedLink(responses)
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(ul.UploadError) as ctx:
+                asyncio.run(ul._upload_async("RobotA", self.tmp.name, None, 5.0))
+        self.assertIn("size mismatch", str(ctx.exception))
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"launcher.run()"), 2, "the idle loop is restored after the failure")
+        self.assertTrue(fake.closed)
 
     def test_default_flow_old_firmware_stages_source_with_notice(self):
         fake = _ScriptedLink(self._standard_responses(
             b"uploaded 15 bytes to '/program.py'\r\n",
-            fw_version=b"fwv=1.91.1\r\n"))
+            fw_version=b"fwv=1.91.1\r\n",
+            idle=b"openbricks: idle. Press button to run /program.py\r\n"))
 
-        async def _fake_connect(name, scan_timeout=5.0):
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
@@ -206,9 +300,10 @@ class UploadFlowTests(unittest.TestCase):
 
     def test_custom_path_flag_stages_verbatim(self):
         fake = _ScriptedLink(self._standard_responses(
-            b"uploaded 15 bytes to '/main.py'\r\n"))
+            b"uploaded 15 bytes to '/main.py'\r\n",
+            idle=b"openbricks: idle. Press button to run /program.mpy\r\n"))
 
-        async def _fake_connect(name, scan_timeout=5.0):
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
@@ -219,9 +314,10 @@ class UploadFlowTests(unittest.TestCase):
         joined = b"".join(fake.writes)
         self.assertIn(b"'/main.py'", joined)
         # Custom boot flows get the file AS-IS: source bytes, no
-        # compile, no firmware-version probe.
+        # compile, no firmware-version probe, no .mpy guard.
         self.assertIn(b"hello", joined)
-        self.assertNotIn(b"fwv", joined)
+        self.assertEqual(joined.count(b"\x05A\x01"), 1, "no probe: ONE exec")
+        self.assertNotIn(b"fwneedsrc", joined)
         self.assertNotIn(b"os.remove", joined)
 
     def test_missing_script_raises_without_touching_ble(self):
@@ -246,7 +342,7 @@ class UploadFlowTests(unittest.TestCase):
         self.assertIn("soft limit", str(ctx.exception))
 
     def test_connect_failure_propagates_as_upload_error(self):
-        async def _raise(name, scan_timeout=5.0):
+        async def _raise(name, scan_timeout=5.0, debug=False):
             raise NUSError("no hub named 'Ghost'")
 
         with patch.object(ul.NUSLink, "connect", side_effect=_raise):
@@ -259,13 +355,14 @@ class UploadFlowTests(unittest.TestCase):
 
 class UploadRestoreFailureTests(UploadFlowTests):
     def test_raising_idle_restore_is_swallowed(self):
-        # _restore_idle_loop failing during teardown must not turn a
-        # successful upload into an error.
+        # _restore_idle_loop (the fallback when the staged program never
+        # reached the idle loop) failing must not mask the real error,
+        # and a successful upload never calls it at all.
         fake = _ScriptedLink(self._standard_responses(
             b"uploaded 59 bytes to '/program.mpy'\r\n",
             fw_version=b"fwv=1.92.0\r\n"))
 
-        async def _fake_connect(name, scan_timeout=5.0):
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
             return fake
 
         async def _bad_restore(link):

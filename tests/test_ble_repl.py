@@ -68,9 +68,13 @@ class StartStopTests(unittest.TestCase):
                         "RX must include FLAG_WRITE_NO_RESPONSE")
         # dupterm has the stream installed.
         self.assertIsNotNone(_FakeOsDupterm.installed_stream)
-        # Advertising started, interval 100 ms, payload includes the name.
-        self.assertEqual(_FakeBLE._adv_interval_us, 100_000)
+        # Advertising started, interval 40 ms (discovery and connection
+        # both wait for an advertisement), payload includes the name.
+        self.assertEqual(_FakeBLE._adv_interval_us, 40_000)
         self.assertIn(b"TestHub", _FakeBLE._adv_payload)
+        # The large ATT MTU was asked for before any central connects:
+        # the stack's default of 256 capped host writes at 253 bytes.
+        self.assertEqual(_FakeBLE._mtu, 512)
 
     def test_start_calls_gatts_set_buffer_with_append_mode(self):
         # Append mode is critical: without it, back-to-back writes

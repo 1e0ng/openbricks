@@ -278,6 +278,11 @@ class RunFlowTests(unittest.TestCase):
         self.tmp.write("print('hello from hub')\n")
         self.tmp.close()
         self.addCleanup(os.unlink, self.tmp.name)
+        # a private hub cache: every test starts with an unknown hub
+        self.cache = tempfile.mkdtemp()
+        env = patch.dict(os.environ, {"OPENBRICKS_CACHE_DIR": self.cache})
+        env.start()
+        self.addCleanup(env.stop)
 
     @staticmethod
     def _stage_round(n=1):
@@ -308,15 +313,17 @@ class RunFlowTests(unittest.TestCase):
         ]
 
     def _standard_responses(self, stdout_msg, stderr_msg=b"", stage_rounds=1,
-                            fw_version=b"fwv=1.92.0\r\n"):
+                            fw_version=b"fwv=1.92.0\r\n", probe=True):
+        """The hub side of one run: the raw-REPL banner, the firmware
+        probe (an unknown hub), then the ONE staged program — its
+        paste ack, its version line, the program's stdout and
+        stderr."""
         return [
-            b"",                          # drain after Ctrl-C interrupt
             _BANNER,                      # raw-REPL banner
-        ] + self._probe_round(fw_version) \
-          + self._stage_round(stage_rounds) + [
-            _R_SUPPORTED + _WINDOW_8K,    # runner paste ack + window
+        ] + (self._probe_round(fw_version) if probe else []) + [
+            _R_SUPPORTED + _WINDOW_8K,    # the staged program's paste ack + window
             _CTRL_D,                      # end-of-paste ack
-            stdout_msg + _CTRL_D,         # stdout + EOT
+            fw_version + stdout_msg + _CTRL_D,   # version line, stdout + EOT
             stderr_msg + _CTRL_D,         # stderr + EOT
         ]
 
@@ -417,7 +424,6 @@ class RunFlowTests(unittest.TestCase):
 class RawPasteErrorTests(unittest.TestCase):
     def test_hub_without_raw_paste_support_errors(self):
         responses = [
-            b"",
             _BANNER,
             b"R\x00",  # raw-paste NOT supported
         ]
@@ -485,7 +491,6 @@ class InlineCommandTests(unittest.TestCase):
 
     def test_command_bytes_reach_the_bootstrap(self):
         responses = [
-            b"",
             _BANNER,
             # probe round: firmware version
             _R_SUPPORTED + _WINDOW_8K,
@@ -493,16 +498,10 @@ class InlineCommandTests(unittest.TestCase):
             b"fwv=1.92.0\r\n" + _CTRL_D,
             _CTRL_D,
             b">",
-            # one staging round (inline code is < _STAGE_CHUNK_BYTES)
+            # the ONE staged program: its version line, then the run
             _R_SUPPORTED + _WINDOW_8K,
             _CTRL_D,
-            _CTRL_D,
-            _CTRL_D,
-            b">",
-            # runner round
-            _R_SUPPORTED + _WINDOW_8K,
-            _CTRL_D,
-            b"hello\r\n" + _CTRL_D,
+            b"fwv=1.92.0\r\nhello\r\n" + _CTRL_D,
             _CTRL_D,
         ]
         fake = _ScriptedLink(responses)
@@ -861,10 +860,14 @@ class HostInterruptForwardingTests(unittest.TestCase):
         async def _stub_pick(blink, l, *slot_pair):
             return run_mod._TARGET_PATH, False, None
 
+        async def _stub_version(blink, name):
+            return (4, 10, 0)
+
         patches = [
             ("_enter_raw_repl", _raw_repl),
             ("_pick_staging", _stub_pick),
             ("_stage_file", _stub_stage),
+            ("_read_version_line", _stub_version),
             ("_raw_paste_upload", _stub_upload),
             ("_stream_output", _stream),
             ("_restore_idle_loop", _restore),

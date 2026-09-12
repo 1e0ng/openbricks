@@ -28,6 +28,7 @@ import sys
 import time
 
 from openbricks_dev import mpycompile
+from openbricks_dev import _hubcache
 from openbricks_dev._nus import NUSLink, NUSError
 from openbricks_dev._uplock import UploadLock, UploadInProgress
 
@@ -216,17 +217,20 @@ _RAW_REPL_WAIT_S   = 4.0
 
 
 async def _enter_raw_repl(blink, link):
+    """Interrupt whatever the hub runs and put it in raw REPL mode.
+
+    One write carries both the interrupts and the Ctrl-A: the hub
+    handles Ctrl-C at the stdin layer the moment it arrives and the
+    REPL then reads the Ctrl-A, so nothing is gained by pausing
+    between them — the old 0.3 s "settle" wait was pure latency on
+    every command. Whatever the interrupted program printed is
+    skipped by the banner search."""
     last_err = None
     for attempt in range(1, _RAW_REPL_ATTEMPTS + 1):
         blink._step = (
-            "interrupting any running program (Ctrl-C, attempt %d/%d)"
-            % (attempt, _RAW_REPL_ATTEMPTS))
-        await link.write(b"\r" + _CTRL_C + _CTRL_C)
-        await blink.drain()
-        blink._step = (
-            "waiting for raw REPL banner after Ctrl-A (attempt %d/%d)"
-            % (attempt, _RAW_REPL_ATTEMPTS))
-        await link.write(b"\r" + _CTRL_A)
+            "waiting for raw REPL banner after Ctrl-C, Ctrl-A "
+            "(attempt %d/%d)" % (attempt, _RAW_REPL_ATTEMPTS))
+        await link.write(b"\r" + _CTRL_C + _CTRL_C + b"\r" + _CTRL_A)
         try:
             await blink.read_until(_RAW_REPL_BANNER,
                                    timeout=_RAW_REPL_WAIT_S)
@@ -538,6 +542,43 @@ def _compose_stage_chunk(target_path, chunk, first, hub_name):
             % (target_path, mode, repr(chunk))).encode()
 
 
+# The first line every staged program prints. The host reads it before
+# anything else: it refreshes the per-hub cache, and when the hub turns
+# out to be older than the cache said (re-flashed), the program's own
+# guard has already refused to write compiled code — the host then
+# stages source instead, announced.
+_VERSION_LINE_PREFIX = b"fwv="
+_MPY_GUARD_MARK = "fwneedsrc"
+
+
+def _compose_version_lines(guard_mpy):
+    lines = [
+        "import openbricks",
+        "print('fwv=' + openbricks.__version__)",
+    ]
+    if guard_mpy:
+        lines += [
+            "_fv = tuple(int(_p) for _p in "
+            "openbricks.__version__.split('.')[:3])",
+            "assert _fv >= (%d, %d, %d), %r" % (
+                _MIN_MPY_FIRMWARE + (_MPY_GUARD_MARK,)),
+        ]
+    return "\n".join(lines).encode() + b"\n"
+
+
+def _compose_staged_program(target_path, payload, hub_name, use_mpy,
+                            tail):
+    """ONE raw-paste program: the version line (and the .mpy guard),
+    the file written in place, then ``tail`` (the runner for ``run``,
+    the confirmation and idle loop for ``upload``). One exec where
+    there used to be three — probe, stage, run/confirm — each with
+    its own handshake round trips."""
+    return (_compose_version_lines(guard_mpy=use_mpy)
+            + _compose_stage_chunk(target_path, payload, first=True,
+                                   hub_name=hub_name)
+            + tail)
+
+
 def _compose_runner(target_path, remove_stale=None):
     """The fixed-size program that runs the staged program at
     ``target_path``: sync the RTC, then trigger the hub-side launcher.
@@ -610,10 +651,11 @@ async def _exec_step(blink, link, program, what):
 
 
 async def _stage_file(blink, link, target_path, payload, hub_name):
-    """Write ``payload`` to ``target_path`` in bounded chunks so peak
-    hub RAM is O(_STAGE_CHUNK_BYTES) regardless of script size.
-    ``hub_name`` keys the wire framing of large chunks — see
-    ``_compose_stage_chunk``."""
+    """Write ``payload`` to ``target_path`` on its own — one exec per
+    ``_STAGE_CHUNK_BYTES`` chunk, nothing run afterwards. ``run`` and
+    ``upload`` no longer stage this way (their file write rides in
+    the same exec as what follows it); this is the standalone form
+    for tools that only want the file there."""
     for i in range(0, len(payload), _STAGE_CHUNK_BYTES):
         chunk = payload[i:i + _STAGE_CHUNK_BYTES]
         program = _compose_stage_chunk(target_path, chunk,
@@ -727,25 +769,68 @@ def _install_sigint(loop, handler):
         return False
 
 
-async def _pick_staging(blink, link, mpy_target=_MPY_TARGET_PATH,
-                        src_target=_TARGET_PATH):
-    """Probe the hub's firmware version and return the staging plan
-    ``(target_path, use_mpy, remove_stale)`` for the given slot pair
-    (upload = the button's /program.*, run = its own /run.* — the
-    two intents must not clobber each other). Firmware >= 1.92.0
-    gets the host-compiled ``.mpy``; anything older (or a version
-    the probe can't parse) gets source, announced — never
-    silently."""
-    out = await _exec_step(blink, link, _PROBE_VERSION_PROGRAM,
-                           "probing firmware version")
-    fw = _parse_fw_version(out.decode("utf-8", "replace"))
+def _plan_for(fw, mpy_target=_MPY_TARGET_PATH, src_target=_TARGET_PATH):
+    """The staging plan ``(target_path, use_mpy, remove_stale)`` for a
+    firmware version: >= 1.92.0 gets the host-compiled ``.mpy`` (and
+    clears the stale source sibling), anything older or unknown gets
+    source."""
     if fw is not None and fw >= _MIN_MPY_FIRMWARE:
         return mpy_target, True, src_target
+    return src_target, False, None
+
+
+def _announce_source(fw):
     shown = ".".join(str(p) for p in fw) if fw else "unknown"
     print("hub firmware %s predates precompiled programs — sending "
           "source (flash firmware >= 1.92.0 for faster starts)" % shown,
           file=sys.stderr)
-    return src_target, False, None
+
+
+async def _pick_staging(blink, link, name, mpy_target=_MPY_TARGET_PATH,
+                        src_target=_TARGET_PATH):
+    """The staging plan ``(target_path, use_mpy, remove_stale)`` for a
+    hub: from what the CLI remembers of its firmware when it has met
+    the hub before (no round trip), else by probing it now. Firmware
+    >= 1.92.0 gets the host-compiled ``.mpy``; anything older gets
+    source, announced — never silently. The staged program prints its
+    version first either way, so a remembered hub that was re-flashed
+    to something older is caught in-session (``_read_version_line``)."""
+    fw = _hubcache.firmware_version(name)
+    if fw is None:
+        out = await _exec_step(blink, link, _PROBE_VERSION_PROGRAM,
+                               "probing firmware version")
+        fw = _parse_fw_version(out.decode("utf-8", "replace"))
+        if fw is not None:
+            _hubcache.remember_firmware(name, ".".join(str(p) for p in fw))
+    plan = _plan_for(fw, mpy_target, src_target)
+    if not plan[1]:
+        _announce_source(fw)
+    return plan
+
+
+async def _read_version_line(blink, name):
+    """The staged program's first line, ``fwv=X.Y.Z``: remembered for
+    the hub, returned as a tuple. Anything else is a broken hub side
+    and is raised with what arrived."""
+    blink._step = "reading the staged program's version line"
+    line = await blink.read_until(b"\n", timeout=10.0)
+    fw = _parse_fw_version(line.decode("utf-8", "replace"))
+    if fw is None:
+        raise RunError("the staged program did not report the firmware "
+                       "version (got %r)" % line[:120])
+    _hubcache.remember_firmware(name, ".".join(str(p) for p in fw))
+    return fw
+
+
+async def _consume_refused_exec(blink):
+    """After the .mpy guard tripped: the exec's stdout end, its stderr
+    (the guard's AssertionError) and the raw prompt, so the next
+    exec starts clean. Returns the stderr text."""
+    blink._step = "reading the refused program's output"
+    await blink.read_until(_CTRL_D)
+    err = await blink.read_until(_CTRL_D)
+    await blink.read_exact(1, timeout=10.0)
+    return err.decode("utf-8", "replace")
 
 
 async def _run_session(link, name, user_bytes, mpy_bytes, upload_lock):
@@ -755,11 +840,22 @@ async def _run_session(link, name, user_bytes, mpy_bytes, upload_lock):
         await _enter_raw_repl(blink, link)
         try:
             target, use_mpy, remove_stale = await _pick_staging(
-                blink, link)
-            payload = mpy_bytes if use_mpy else user_bytes
-            runner = _compose_runner(target, remove_stale)
-            await _stage_file(blink, link, target, payload, name)
-            await _raw_paste_upload(blink, link, runner)
+                blink, link, name)
+            for _attempt in (1, 2):
+                payload = mpy_bytes if use_mpy else user_bytes
+                program = _compose_staged_program(
+                    target, payload, name, use_mpy,
+                    _compose_runner(target, remove_stale))
+                await _raw_paste_upload(blink, link, program)
+                fw = await _read_version_line(blink, name)
+                if use_mpy and fw < _MIN_MPY_FIRMWARE:
+                    # the cache was stale (a re-flashed hub): the
+                    # program's guard refused to write compiled code
+                    await _consume_refused_exec(blink)
+                    _announce_source(fw)
+                    target, use_mpy, remove_stale = _plan_for(fw)
+                    continue
+                break
             # The program is staged and running: the transfer is over.
             # Streaming needs no lock — a later run/upload from another
             # terminal supersedes this program the way a button press

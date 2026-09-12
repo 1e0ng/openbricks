@@ -253,11 +253,32 @@ _RX_BUFFER_BYTES = 8192
 # once per read.
 _RX_COMPACT_AT = 1024
 
+# The ATT MTU we ask for. The central proposes on connect (macOS asks
+# for 527) and the smaller of the two preferences wins; NimBLE's own
+# default preference (256, ESP-IDF's CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU)
+# capped every host write at 253 bytes — twice the packets a staged
+# program needs. 512 is within NimBLE's 527 maximum and the RX
+# characteristic buffer above holds many such writes.
+_PREFERRED_MTU = 512
+
+# Advertising interval while waiting for a host. Discovery and the
+# connection itself both wait for an advertisement, so a shorter
+# interval trims tens of milliseconds off every ``openbricks run`` /
+# ``upload``; the power cost on a robot hub is nothing.
+_ADV_INTERVAL_US = 40_000
+
 
 class _BLEUART:
     def __init__(self, ble, name, rxbuf=_RX_BUFFER_BYTES):
         self._ble = ble
         self._ble.irq(self._irq)
+        # Ask for the large MTU before any central can connect; a
+        # stack that refuses the request keeps its default, which is
+        # slower but works — never fatal.
+        try:
+            self._ble.config(mtu=_PREFERRED_MTU)
+        except (OSError, ValueError) as e:
+            _log("mtu_config_err", str(e))
         ((self._tx_handle, self._rx_handle),) = self._ble.gatts_register_services(
             ((bluetooth.UUID(_UART_SERVICE_UUID), (
                 (bluetooth.UUID(_UART_TX_UUID), _FLAG_NOTIFY),
@@ -414,7 +435,7 @@ class _BLEUART:
         self._connections.clear()
         self._stop_advertising()
 
-    def _advertise(self, interval_us=100_000):
+    def _advertise(self, interval_us=_ADV_INTERVAL_US):
         self._ble.gap_advertise(interval_us, adv_data=self._payload)
         _log("advertise", interval_us, len(self._payload))
 

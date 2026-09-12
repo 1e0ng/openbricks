@@ -112,7 +112,10 @@ class NUSLink:
         t0 = time.monotonic()
         device = await _find_by_name(name, scan_timeout)
         t_scan = time.monotonic()
-        client = BleakClient(device)
+        # Discover only the NUS service: connect's service discovery is
+        # one round trip per service, characteristic and descriptor,
+        # and the hub has nothing else we need.
+        client = BleakClient(device, services=[UART_SERVICE_UUID])
         try:
             await client.connect()
         except Exception as e:
