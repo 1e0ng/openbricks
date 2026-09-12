@@ -61,6 +61,11 @@ pub struct Draft {
     pub color: Option<[u8; 3]>,
 }
 
+/// The arrowhead at the end of a path: its length along the heading and
+/// half its width, in mm on the map.
+pub const HEAD_MM: f64 = 14.0;
+pub const HEAD_HALF_MM: f64 = 8.0;
+
 /// The kind's default path colour, as drawn (sRGB bytes).
 pub fn default_color(kind: &str, dark: bool) -> [u8; 3] {
     match (kind, dark) {
@@ -1154,13 +1159,21 @@ impl SimulateTab {
                 );
             }
         };
+        // an arrowhead: the robot's heading at a point, as a closed triangle with its tip there
+        let head = |out: &mut Vec<Line>, tip: Point, heading_deg: f64, color: [f32; 4]| {
+            let (c, s) = (heading_deg.to_radians().cos(), heading_deg.to_radians().sin());
+            let back = [tip[0] - c * HEAD_MM, tip[1] - s * HEAD_MM];
+            let l = [back[0] - s * HEAD_HALF_MM, back[1] + c * HEAD_HALF_MM];
+            let r = [back[0] + s * HEAD_HALF_MM, back[1] - c * HEAD_HALF_MM];
+            seg(out, tip, l, color, z + 0.5);
+            seg(out, tip, r, color, z + 0.5);
+            seg(out, l, r, color, z + 0.5);
+        };
         let arrow = |out: &mut Vec<Line>, from: Point, heading_deg: f64, len: f64, color: [f32; 4]| {
             let (c, s) = (heading_deg.to_radians().cos(), heading_deg.to_radians().sin());
             let tip = [from[0] + c * len, from[1] + s * len];
-            let back = [from[0] + c * (len - 14.0), from[1] + s * (len - 14.0)];
             seg(out, from, tip, color, z);
-            seg(out, tip, [back[0] - s * 8.0, back[1] + c * 8.0], color, z);
-            seg(out, tip, [back[0] + s * 8.0, back[1] - c * 8.0], color, z);
+            head(out, tip, heading_deg, color);
         };
         // the map's markers first: a flag on a pole, the selected one lit with a handle; the
         // route is drawn after them and so lies over them
@@ -1193,6 +1206,10 @@ impl SimulateTab {
             }
             for w in step.points.windows(2) {
                 seg(&mut out, w[0], w[1], color, z);
+            }
+            // where a path ends, the way the robot faces there
+            if step.points.len() >= 2 {
+                head(&mut out, step.end.point(), step.end.yaw_deg, color);
             }
             match a {
                 Action::Turn { at, heading_deg, .. } => arrow(&mut out, *at, *heading_deg, route::TURN_HANDLE_MM, color),
@@ -1242,11 +1259,14 @@ impl SimulateTab {
                     }
                 } else if let Some(first) = p.points.first() {
                     let preview = Action::placed(p.kind, &[*first, hover]);
-                    for w in preview.path().windows(2) {
+                    let path = preview.path();
+                    for w in path.windows(2) {
                         seg(&mut out, w[0], w[1], mark, z);
                     }
                     if let Action::Turn { at, heading_deg, .. } = &preview {
                         arrow(&mut out, *at, *heading_deg, route::TURN_HANDLE_MM, mark);
+                    } else if path.len() >= 2 {
+                        head(&mut out, preview.end(), preview.end_heading(0.0), mark);
                     }
                     circle(&mut out, hover, 6.0, mark);
                 } else {
@@ -2649,6 +2669,50 @@ mod tests {
             t.route_lines(false).iter().any(|l| l.color == [1.0, 0.0, 128.0 / 255.0, 1.0]),
             "the chosen colour"
         );
+        // the end of a path carries an arrowhead the way the robot faces there: for a straight
+        // along +x ending at (100, 0), the wings reach back to (86, ±8) in the path's colour
+        let rgb_of = |c: [u8; 3]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0];
+        let pink = rgb_of([255, 0, 128]);
+        let near = |v: Vec3, p: [f64; 2]| (v.x as f64 - p[0]).abs() < 1e-3 && (v.y as f64 - p[1]).abs() < 1e-3;
+        let wing = |lines: &[Line], tip: [f64; 2], back: [f64; 2], c: [f32; 4]| {
+            lines
+                .iter()
+                .any(|l| l.color == c && ((near(l.a, tip) && near(l.b, back)) || (near(l.a, back) && near(l.b, tip))))
+        };
+        let lines = t.route_lines(false);
+        assert!(wing(&lines, [100.0, 0.0], [86.0, 8.0], pink), "left wing");
+        assert!(wing(&lines, [100.0, 0.0], [86.0, -8.0], pink), "right wing");
+        assert!(wing(&lines, [86.0, 8.0], [86.0, -8.0], pink), "and the base closes the head");
+        // a curve's head follows the arc's end tangent: a quarter circle from (100, 0) to
+        // (200, 100) bending left ends heading +y, so the wings reach back to (∓8, 86)
+        t.route
+            .actions
+            .push(Action::placed("curve", &[[100.0, 0.0], [200.0, 100.0]]).into());
+        let lines = t.route_lines(false);
+        let green = [26.0 / 255.0, 140.0 / 255.0, 64.0 / 255.0, 1.0];
+        let end_heading = t.steps().last().unwrap().end.yaw_deg;
+        let (c, s) = (end_heading.to_radians().cos(), end_heading.to_radians().sin());
+        let back = [200.0 - c * 14.0, 100.0 - s * 14.0];
+        assert!(
+            wing(&lines, [200.0, 100.0], [back[0] - s * 8.0, back[1] + c * 8.0], green),
+            "the curve's head points along its end heading {end_heading}"
+        );
+        // a turn shows its heading with the arrow it already has (a shaft and the same closed
+        // head) plus the square on its point: no second head
+        let was_selected = t.selected.take();
+        let before = t.route_lines(false);
+        t.route
+            .actions
+            .push(Action::placed("turn", &[[200.0, 100.0], [200.0, 200.0]]).into());
+        let after = t.route_lines(false);
+        let extra: Vec<_> = after.iter().filter(|l| !before.contains(l)).collect();
+        assert_eq!(extra.len(), 8, "shaft + 3 head segments + 4 square sides: {extra:?}");
+        assert!(
+            wing(&after, [200.0, 160.0], [192.0, 146.0], rgb_of([217, 115, 0])),
+            "the turn's head at its arrow tip"
+        );
+        t.route.actions.truncate(t.route.actions.len() - 3);
+        t.selected = was_selected;
         assert_eq!(default_color("curve", true), [102, 230, 128]);
         assert_eq!(default_color("turn", false), default_color("custom", false));
         t.route.actions.pop();

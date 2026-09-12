@@ -16,11 +16,17 @@ curves, orange turns, stops and calls) or one of your own, picked in
 the popup or the panel, kept in the route file, and put back to the
 default with one click.
 
+Every path ends in an arrowhead the way the robot faces there — the
+straight's direction, the curve's end tangent — in the path's colour,
+on the placed path and on the preview that follows the pointer, so a
+line on the map reads as a move and not just a segment.
+
 - Tests: a pixel check that a top-layer line shows over a nearer box
   while an ordinary line stays hidden; markers ordered before the
   route; a chosen colour reaching the lines, the defaults per kind and
   theme, the colour written to the file only when chosen; the panel's
-  "default" button.
+  "default" button; the arrowhead's wings at a straight's end, along a
+  curve's end tangent, and a turn keeping its single arrow.
 
 ## 4.11.0 — placing a path shows what it does, and markers on the map
 

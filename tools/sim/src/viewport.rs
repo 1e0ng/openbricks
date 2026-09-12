@@ -61,6 +61,7 @@ struct GpuTexture {
 }
 
 /// A line segment in world space (grid, axes, markers).
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Line {
     pub a: Vec3,
     pub b: Vec3,
