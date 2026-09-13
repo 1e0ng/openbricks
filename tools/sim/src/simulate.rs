@@ -153,6 +153,8 @@ pub struct SimulateTab {
     show_definitions: bool,
     /// Indices in the last `draw_items` result that draw the chassis.
     pub chassis_items: Vec<usize>,
+    /// The body each item of the last `draw_items` result belongs to.
+    pub item_bodies: Vec<usize>,
     /// The chassis's items in its own frame: mesh, placement, colour.
     chassis_locals: Vec<(String, Mat4, [f32; 4])>,
     /// The map editor: the prop lit on the map and in the list, by name
@@ -219,6 +221,7 @@ impl SimulateTab {
             show_program: false,
             show_definitions: false,
             chassis_items: vec![],
+            item_bodies: vec![],
             chassis_locals: vec![],
             selected_prop: None,
             hover_prop: None,
@@ -1779,6 +1782,7 @@ impl SimulateTab {
             return SimDraw::default();
         };
         let mut items = Vec::new();
+        let mut item_bodies = Vec::new();
         let mut chassis_items = Vec::new();
         let mut chassis_locals: Vec<(String, Mat4, [f32; 4])> = Vec::new();
         let chassis_id = scene.body_id("chassis");
@@ -1890,12 +1894,68 @@ impl SimulateTab {
                 chassis_items.push(items.len());
                 chassis_locals.push((key.clone(), local, color));
             }
+            item_bodies.push(g.body);
             items.push(DrawItem {
                 mesh: key,
                 model: body_pose(g.body) * local,
                 color,
                 texture,
             });
+        }
+        // a document placed as a prop: its exact bricks at the prop body's pose (its boxes are
+        // helper geometry the loop above skipped); a brick without a library mesh is its box
+        for prop in scene.props.iter().filter(|p| !p.bricks.is_empty()) {
+            let body = body_pose(prop.body);
+            for b in &prop.bricks {
+                let (key, mesh) = match b.ldraw.as_deref().and_then(|n| bundle.parts.get(n).map(|r| (n, r))) {
+                    Some((n, rec)) => {
+                        let key = format!("ld:{n}");
+                        let m = if viewport.has_mesh(&key) { None } else { rec.mesh.decode().ok() };
+                        (key, m)
+                    }
+                    None => {
+                        let key = format!("box:{}:{}:{}", b.half_m[0], b.half_m[1], b.half_m[2]);
+                        let m = if viewport.has_mesh(&key) {
+                            None
+                        } else {
+                            Some(geometry::box_mesh(
+                                [
+                                    2.0 * b.half_m[0] as f32 * M_TO_MM,
+                                    2.0 * b.half_m[1] as f32 * M_TO_MM,
+                                    2.0 * b.half_m[2] as f32 * M_TO_MM,
+                                ],
+                                [0.0; 3],
+                            ))
+                        };
+                        (key, m)
+                    }
+                };
+                if let Some(m) = mesh {
+                    viewport.add_mesh(device, &key, &m);
+                }
+                let q = Quat::from_xyzw(b.quat[1] as f32, b.quat[2] as f32, b.quat[3] as f32, b.quat[0] as f32).normalize();
+                // pos_m / quat place the brick's bounding-box centre; a library mesh sits in its own frame
+                let centre = b
+                    .ldraw
+                    .as_deref()
+                    .and_then(|n| bundle.parts.get(n))
+                    .map(|rec| {
+                        Vec3::new(
+                            ((rec.bbox[0][0] + rec.bbox[1][0]) * 0.5) as f32,
+                            ((rec.bbox[0][1] + rec.bbox[1][1]) * 0.5) as f32,
+                            ((rec.bbox[0][2] + rec.bbox[1][2]) * 0.5) as f32,
+                        )
+                    })
+                    .unwrap_or(Vec3::ZERO);
+                let pos = Vec3::new(b.pos_m[0] as f32, b.pos_m[1] as f32, b.pos_m[2] as f32) * M_TO_MM - q * centre;
+                item_bodies.push(prop.body);
+                items.push(DrawItem {
+                    mesh: key,
+                    model: body * Mat4::from_rotation_translation(q, pos),
+                    color: crate::app::cat_color(&b.category, dark),
+                    texture: None,
+                });
+            }
         }
         // the assembled chassis: exact bricks at the chassis body's pose
         if let (Some(cid), Some(doc)) = (chassis_id, self.chassis_doc.as_ref()) {
@@ -1962,6 +2022,7 @@ impl SimulateTab {
                 let color = crate::app::cat_color(&category, dark);
                 chassis_items.push(items.len());
                 chassis_locals.push((key.clone(), local, color));
+                item_bodies.push(cid);
                 items.push(DrawItem {
                     mesh: key,
                     model: body * local,
@@ -1988,6 +2049,7 @@ impl SimulateTab {
             }
         }
         self.chassis_items = chassis_items;
+        self.item_bodies = item_bodies;
         self.chassis_locals = chassis_locals;
         let lines = vec![
             Line {
@@ -2347,6 +2409,29 @@ impl SimulateTab {
         self.scene.as_ref()?.props.get(i).map(|p| p.name.clone())
     }
 
+    /// The prop a body belongs to: the body itself or an ancestor is a
+    /// prop's root.
+    pub fn prop_of_body(&self, body: usize) -> Option<usize> {
+        let scene = self.scene.as_ref()?;
+        let mut b = body;
+        for _ in 0..64 {
+            if let Some(i) = scene.props.iter().position(|p| p.body == b) {
+                return Some(i);
+            }
+            let parent = *scene.parents.get(b)?;
+            if parent == b || b == 0 {
+                return None;
+            }
+            b = parent;
+        }
+        None
+    }
+
+    /// The prop drawn by an item of the last `draw_items` result.
+    pub fn prop_of_item(&self, item: usize) -> Option<usize> {
+        self.prop_of_body(*self.item_bodies.get(item)?)
+    }
+
     /// A prop's pose on the map (mm, degrees) as the last frame has it.
     pub fn prop_pose(&self, i: usize) -> Option<Pose2> {
         let scene = self.scene.as_ref()?;
@@ -2411,8 +2496,9 @@ impl SimulateTab {
         (lo[0].is_finite() && hi[0].is_finite()).then_some((lo, hi))
     }
 
-    /// The prop under a screen point: the smallest whose footprint holds
-    /// it (4 px of slack).
+    /// The prop under a screen point of the plan, by footprint: the
+    /// smallest whose footprint holds it (4 px of slack).
+    #[cfg(test)]
     pub fn prop_at(&self, cam: &crate::viewport::Camera, px: f32, py: f32, w: f32, h: f32) -> Option<usize> {
         let (o, d) = cam.ray(px, py, w, h);
         let hit = crate::viewport::ray_plane_z(o, d, 0.0)?;
@@ -2528,6 +2614,69 @@ impl SimulateTab {
         self.send(serde_json::json!({"cmd": "add", "from": name, "x_mm": 0.0, "y_mm": 0.0, "yaw_deg": 0.0}));
     }
 
+    /// A document — a Workbench component, or one library brick — placed
+    /// as a new prop at the map's origin, selected once built.
+    pub fn add_model(&mut self, name: &str, doc: &crate::assembly::Document) {
+        if self.busy() {
+            self.message = "stop the program before adding a prop".into();
+            return;
+        }
+        if self.scene.is_none() {
+            self.message = "load a map first".into();
+            return;
+        }
+        let doc = match serde_json::to_value(doc) {
+            Ok(v) => v,
+            Err(e) => {
+                self.message = format!("the document cannot be sent: {e}");
+                return;
+            }
+        };
+        self.select_new_prop = true;
+        self.send(serde_json::json!({"cmd": "add_model", "name": name, "doc": doc, "x_mm": 0.0, "y_mm": 0.0, "yaw_deg": 0.0}));
+    }
+
+    /// Stick a prop to the map (nothing but the editor moves it) or free
+    /// it again; the server rebuilds the map.
+    pub fn set_fixed(&mut self, i: usize, fixed: bool) {
+        if self.busy() {
+            self.message = "stop the program before changing a prop".into();
+            return;
+        }
+        let Some(name) = self.prop_name(i) else { return };
+        self.send(serde_json::json!({"cmd": "fix", "name": name, "fixed": fixed}));
+    }
+
+    /// How many props the map has.
+    #[cfg(test)]
+    pub fn scene_props(&self) -> usize {
+        self.scene.as_ref().map(|s| s.props.len()).unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub fn prop_body(&self, i: usize) -> Option<usize> {
+        self.scene.as_ref()?.props.get(i).map(|p| p.body)
+    }
+
+    #[cfg(test)]
+    pub fn prop_kind(&self, i: usize) -> Option<String> {
+        self.scene.as_ref()?.props.get(i).map(|p| p.kind.clone())
+    }
+
+    /// A document prop's bricks (empty for an LDraw prop).
+    #[cfg(test)]
+    pub fn prop_bricks(&self, i: usize) -> Vec<crate::sim::Brick> {
+        self.scene
+            .as_ref()
+            .and_then(|s| s.props.get(i))
+            .map(|p| p.bricks.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn prop_is_fixed(&self, i: usize) -> bool {
+        self.scene.as_ref().and_then(|s| s.props.get(i)).map(|p| p.fixed).unwrap_or(false)
+    }
+
     pub fn remove_prop(&mut self, i: usize) {
         if self.busy() {
             self.message = "stop the program before removing a prop".into();
@@ -2607,6 +2756,11 @@ impl SimulateTab {
             if let Some(p) = self.prop_pose(i) {
                 let (c, s) = (p.yaw_deg.to_radians().cos(), p.yaw_deg.to_radians().sin());
                 seg([p.x_mm, p.y_mm], [p.x_mm + c * 30.0, p.y_mm + s * 30.0]);
+                if scene.props[i].fixed {
+                    // stuck to the map: a pin through its centre
+                    seg([p.x_mm - 10.0, p.y_mm - 10.0], [p.x_mm + 10.0, p.y_mm + 10.0]);
+                    seg([p.x_mm - 10.0, p.y_mm + 10.0], [p.x_mm + 10.0, p.y_mm - 10.0]);
+                }
             }
         }
         out
@@ -2632,7 +2786,9 @@ impl SimulateTab {
         }
         match &self.selected_prop {
             Some(n) => format!("{n}: drag to move · shift-drag turns · ⌘D duplicates · Del removes · Esc deselects"),
-            None => "drag a prop to move it · shift-drag turns it · click one to select it · save the map in the panel".into(),
+            None => {
+                "drag a prop to move it · shift-drag turns it · click one to select it · orbit: drag · pan: right-drag · zoom: wheel".into()
+            }
         }
     }
 
@@ -2654,7 +2810,12 @@ impl SimulateTab {
         let props: Vec<(String, String)> = self
             .scene
             .as_ref()
-            .map(|s| s.props.iter().map(|p| (p.name.clone(), p.kind.clone())).collect())
+            .map(|s| {
+                s.props
+                    .iter()
+                    .map(|p| (p.name.clone(), if p.fixed { format!("{} · stuck", p.kind) } else { p.kind.clone() }))
+                    .collect()
+            })
             .unwrap_or_default();
         if props.is_empty() {
             ui.weak("this map has no props to move");
@@ -2663,6 +2824,16 @@ impl SimulateTab {
             let on = self.selected_prop.as_deref() == Some(name.as_str());
             if ui.selectable_label(on, format!("{name} · {kind}")).clicked() {
                 self.selected_prop = if on { None } else { Some(name.clone()) };
+            }
+        }
+        if let Some(i) = self.selected_prop_index() {
+            let mut fixed = self.prop_is_fixed(i);
+            if ui
+                .checkbox(&mut fixed, "stuck to the map")
+                .on_hover_text("a stuck prop has no free joint: neither the physics nor the robot moves it, only the editor")
+                .changed()
+            {
+                self.set_fixed(i, fixed);
             }
         }
         ui.horizontal(|ui| {
@@ -3652,6 +3823,17 @@ mod tests {
         let p = t.prop_pose(0).unwrap();
         assert_eq!((p.x_mm, p.y_mm, p.yaw_deg), (300.0, 200.0, 0.0));
         assert_eq!(t.prop_name(1).as_deref(), Some("note"));
+        // a body belongs to the prop whose root it is or descends from; the chassis to none
+        assert_eq!(
+            (t.prop_of_body(2), t.prop_of_body(3), t.prop_of_body(4)),
+            (Some(0), Some(0), Some(1))
+        );
+        assert_eq!((t.prop_of_body(1), t.prop_of_body(0), t.prop_of_body(9)), (None, None, None));
+        t.item_bodies = vec![0, 1, 3, 4];
+        assert_eq!(
+            (t.prop_of_item(2), t.prop_of_item(3), t.prop_of_item(1), t.prop_of_item(7)),
+            (Some(0), Some(1), None, None)
+        );
         // under a screen point, through the plan camera
         let mut cam = crate::viewport::Camera::top_down();
         cam.fit_plan(Vec3::new(-1200.0, -900.0, 0.0), Vec3::new(1200.0, 900.0, 0.0), 4.0 / 3.0);
@@ -3715,6 +3897,8 @@ mod tests {
             kind: "note".into(),
             color: Some("red".into()),
             yaw_deg: 0.0,
+            fixed: false,
+            bricks: vec![],
         });
         t.apply(Event::Scene(Box::new(more)));
         assert_eq!(t.selected_prop.as_deref(), Some("note_2"));
@@ -3739,6 +3923,37 @@ mod tests {
         t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
         assert!(t.selected_prop.is_none());
         assert!(t.map_hint().starts_with("drag a prop"));
+        // a document placed as a prop: sent whole, the new prop selected once built
+        let doc = crate::assembly::subset(&crate::assembly::example(), &crate::assembly::example().robot.root).unwrap();
+        t.add_model("Whole Robot", &doc);
+        let sent = t.sent.last().unwrap();
+        assert_eq!(
+            (sent["cmd"].as_str(), sent["name"].as_str()),
+            (Some("add_model"), Some("Whole Robot"))
+        );
+        assert_eq!(sent["doc"]["format"], "openbricks-assembly/1");
+        assert!(t.select_new_prop);
+        t.select_new_prop = false;
+        // stuck to the map: asked of the server; a stuck prop's outline wears a pin
+        t.set_fixed(0, true);
+        assert_eq!(
+            t.sent.last().unwrap(),
+            &serde_json::json!({"cmd": "fix", "name": "clef", "fixed": true})
+        );
+        assert!(!t.prop_is_fixed(0));
+        let mut stuck: Scene = serde_json::from_str(SCENE_WITH_PROPS).unwrap();
+        stuck.props[0].fixed = true;
+        t.apply(Event::Scene(Box::new(stuck)));
+        assert!(t.prop_is_fixed(0) && !t.prop_is_fixed(1));
+        t.selected_prop = Some("clef".into());
+        t.hover_prop = None;
+        assert_eq!(
+            t.prop_lines(false).len(),
+            7,
+            "the outline, the heading tick and the pin's two strokes"
+        );
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        t.selected_prop = Some("clef".into());
         // save as: the server writes it; then the tab shows that map, its markers carried over
         t.markers.markers.push(crate::markers::Marker {
             name: "corner".into(),
@@ -3772,6 +3987,8 @@ mod tests {
         t.remove_prop(0);
         t.add_prop_like("clef");
         t.save_map_as("x");
+        t.set_fixed(0, true);
+        t.add_model("x", &doc);
         assert_eq!(t.sent.len(), n, "{}", t.message);
         let _ = std::fs::remove_dir_all(&mdir);
     }
@@ -4041,6 +4258,40 @@ mod tests {
         );
         t.shutdown();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_document_props_bricks_are_drawn_in_place_of_its_boxes() {
+        let Some((device, queue)) = test_device() else { return };
+        let mut vp = Viewport::new(&device, &queue);
+        let bundle_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../openbricks/openbricks_sim/bricks/technic_bundle.json.zlib");
+        let bundle = crate::bundle::load_bundle(&bundle_path).expect("the shipped brick bundle");
+        let num = bundle.parts.keys().next().unwrap().clone();
+        let scene = format!(
+            r#"{{"bodies":["world","tower"],"parents":[0,0],"geoms":[{{"name":"floor","type":"plane","body":0,"size":[1,1,0.1],"pos":[0,0,0],"quat":[1,0,0,0],"rgba":[1,1,1,1],"material":null,"group":0,"mesh":null}},{{"name":"tower_brick:b","type":"box","body":1,"size":[0.02,0.01,0.01],"pos":[0,0,0.01],"quat":[1,0,0,0],"rgba":[0.4,0.4,0.6,1],"material":null,"group":3,"mesh":null}}],"props":[{{"name":"tower","body":1,"kind":"m","color":null,"yaw_deg":0.0,"fixed":true,"bricks":[{{"path":"b","part":"p","ldraw":"{num}","pos_m":[0,0,0.01],"quat":[1,0,0,0],"half_m":[0.02,0.01,0.01],"category":"lego"}},{{"path":"c","part":"q","ldraw":null,"pos_m":[0.05,0,0.01],"quat":[1,0,0,0],"half_m":[0.01,0.01,0.01],"category":"other"}}]}}],"materials":{{}},"textures":{{}},"bricks":[],"timestep_ms":1}}"#
+        );
+        let mut t = SimulateTab::new(None);
+        t.apply(Event::Scene(Box::new(serde_json::from_str(&scene).unwrap())));
+        t.apply(Event::Frame {
+            t_ms: 0,
+            poses: vec![
+                Pose::default(),
+                Pose {
+                    pos: [0.3, 0.2, 0.0],
+                    quat: [1.0, 0.0, 0.0, 0.0],
+                },
+            ],
+        });
+        let draw = t.draw_items(&mut vp, &device, &queue, &bundle, false);
+        assert_eq!(draw.items.len(), 3, "the floor and the two bricks, not the helper box");
+        assert_eq!(t.item_bodies, vec![0, 1, 1]);
+        assert_eq!(draw.items[1].mesh, format!("ld:{num}"), "a library brick is its mesh");
+        assert!(draw.items[2].mesh.starts_with("box:"), "a brick without a mesh is its box");
+        assert_eq!((t.prop_of_item(1), t.prop_of_item(2), t.prop_of_item(0)), (Some(0), Some(0), None));
+        // the brick sits on the prop body: the mesh's translation carries the body's pose
+        let m = draw.items[1].model.to_cols_array_2d();
+        assert!((m[3][0] - 300.0).abs() < 60.0 && (m[3][1] - 200.0).abs() < 60.0, "{:?}", m[3]);
     }
 
     #[test]

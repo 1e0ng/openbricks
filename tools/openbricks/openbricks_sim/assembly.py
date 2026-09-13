@@ -343,6 +343,67 @@ def derive(doc, bundle=None):
     return spec, inertial, bricks_out, notes
 
 
+def prop_bricks(doc, bundle=None):
+    """A document placed as a prop: its bricks with their pose in the
+    root component's frame (the same records the chassis carries, plus
+    each brick's mass), and the total mass in grams. Needs no wheel
+    roles — a prop is any build, or a single brick."""
+    bundle = bundle if bundle is not None else bricks.load_bundle()
+    if doc.get("format") != "openbricks-assembly/1":
+        raise AssemblyError("not an openbricks-assembly/1 file")
+    root = (doc.get("robot") or {}).get("root")
+    if root not in doc.get("components", {}):
+        raise AssemblyError("robot.root must name a component")
+    mm = lambda v: round(v / 1000.0, 6)  # noqa: E731
+    out = []
+    total = 0.0
+    for leaf in flatten(doc, root):
+        part = doc["parts"].get(leaf["part"])
+        if part is None:
+            raise AssemblyError("brick %r is not in the library" % leaf["part"])
+        m, _, _, bbox = part_props(part, bundle)
+        centre = [(bbox[0][k] + bbox[1][k]) / 2 for k in range(3)]
+        half = [(bbox[1][k] - bbox[0][k]) / 2 for k in range(3)]
+        out.append({
+            "path": leaf["path"],
+            "part": leaf["part"],
+            "ldraw": part.get("ldraw"),
+            "pos_m": [mm(v) for v in _add(leaf["pos"], mat_vec(leaf["rot"], centre))],
+            "quat": [round(v, 6) for v in quat_from_mat(leaf["rot"])],
+            "half_m": [mm(max(v, 0.25)) for v in half],
+            "category": part.get("category", "other"),
+            "mass_g": round(m, 3),
+        })
+        total += m
+    if not out:
+        raise AssemblyError("component %r has no bricks" % root)
+    return out, total
+
+
+def prop_body_xml(name, pos_m, yaw_deg, fixed, bricks_out, indent="    "):
+    """The MJCF body of a document placed as a prop: one box per brick
+    that collides and carries the brick's mass (at least a gram, so a
+    free body has some), a free joint unless the prop is fixed to the
+    map, ``group="3"`` so a viewer draws the exact bricks instead."""
+    quat = ""
+    if yaw_deg:
+        half = math.radians(yaw_deg) / 2.0
+        quat = ' quat="%.6f 0 0 %.6f"' % (math.cos(half), math.sin(half))
+    inner = indent + "  "
+    lines = ['%s<body name="%s" pos="%.5f %.5f %.5f"%s>' % (indent, name, pos_m[0], pos_m[1], pos_m[2], quat)]
+    if not fixed:
+        lines.append(inner + "<freejoint/>")
+    for b in bricks_out:
+        lines.append(
+            '%s<geom name="%s_brick:%s" type="box" pos="%.5f %.5f %.5f" quat="%.6f %.6f %.6f %.6f" '
+            'size="%.5f %.5f %.5f" mass="%.6f" group="3" rgba="0.36 0.48 0.61 1"/>'
+            % (inner, name, b["path"], b["pos_m"][0], b["pos_m"][1], b["pos_m"][2],
+               b["quat"][0], b["quat"][1], b["quat"][2], b["quat"][3],
+               b["half_m"][0], b["half_m"][1], b["half_m"][2], max(float(b.get("mass_g", 0.0)), 1.0) / 1000.0))
+    lines.append(indent + "</body>")
+    return "\n".join(lines)
+
+
 def load(path, bundle=None):
     """``derive`` for a file path."""
     with open(path) as fh:

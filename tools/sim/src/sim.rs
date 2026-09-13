@@ -35,6 +35,13 @@ pub struct Prop {
     pub color: Option<String>,
     #[serde(default)]
     pub yaw_deg: f64,
+    /// Stuck to the map: no free joint, nothing but the editor moves it.
+    #[serde(default)]
+    pub fixed: bool,
+    /// A document's bricks (a Workbench build or one library brick), to
+    /// draw exactly; empty for an LDraw prop.
+    #[serde(default)]
+    pub bricks: Vec<Brick>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -68,7 +75,7 @@ pub struct Material {
 
 /// A brick of the assembled chassis, as the server placed it on the
 /// chassis body (metres, chassis frame).
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(PartialEq, Deserialize, Clone, Debug, Default)]
 #[allow(dead_code)] // the whole wire format is kept, used or not
 pub struct Brick {
     pub path: String,
@@ -333,14 +340,17 @@ def box(name, body, size, rgba):
 FLOOR = {"name": "floor", "type": "plane", "body": 0, "size": [1.2, 0.9, 0.1], "pos": [0, 0, 0],
          "quat": [1, 0, 0, 0], "rgba": [1, 1, 1, 1], "material": None, "group": 0, "mesh": None}
 # a prop "clef" of one 60 x 40 mm brick at (300, 200) mm, and after an add a second one
-PROPS = [{"name": "clef", "pos": [0.3, 0.2, 0.01], "yaw": 0.0}]
+PROPS = [{"name": "clef", "pos": [0.3, 0.2, 0.01], "yaw": 0.0, "fixed": False, "bricks": [], "kind": "clef"}]
 def scene():
     bodies = ["world", "chassis"] + [p["name"] for p in PROPS]
     geoms = [FLOOR, box("chassis_body", 1, [0.08, 0.06, 0.02], [0.3, 0.3, 0.8, 1])]
     for i, p in enumerate(PROPS):
-        geoms.append(box(p["name"] + "_brick", 2 + i, [0.03, 0.02, 0.01], [0.9, 0.2, 0.2, 1]))
+        g = box(p["name"] + "_brick", 2 + i, [0.03, 0.02, 0.01], [0.9, 0.2, 0.2, 1])
+        if p["bricks"]:
+            g["group"] = 3
+        geoms.append(g)
     return {"ev": "scene", "bodies": bodies, "parents": [0] * len(bodies), "geoms": geoms,
-            "props": [{"name": p["name"], "body": 2 + i, "kind": "clef", "color": None, "yaw_deg": p["yaw"]} for i, p in enumerate(PROPS)],
+            "props": [{"name": p["name"], "body": 2 + i, "kind": p["kind"], "color": None, "yaw_deg": p["yaw"], "fixed": p["fixed"], "bricks": p["bricks"]} for i, p in enumerate(PROPS)],
             "materials": {}, "textures": {}, "bricks": [],
             "chassis": {"wheel_diameter_mm": 86.4, "axle_track_mm": 135.0, "spawn": {"x_mm": -547.0, "y_mm": -150.0, "yaw_deg": 90.0}},
             "timestep_ms": 1}
@@ -369,7 +379,7 @@ for line in sys.stdin:
         send(ev="log", stream="stdout", text="hello from " + c["script"])
         CHASSIS[:] = [0.01, 0, 0.05, 1, 0, 0, 0]
         frame(10)
-    elif cmd in ("move", "add", "remove", "save_world"):
+    elif cmd in ("move", "add", "remove", "save_world", "add_model", "fix"):
         if status == "running":
             send(ev="error", text="a program is running; stop it first")
             continue
@@ -389,7 +399,33 @@ for line in sys.stdin:
             n = 2
             while any(p["name"] == "%s_%d" % (c["from"], n) for p in PROPS):
                 n += 1
-            PROPS.append({"name": "%s_%d" % (c["from"], n), "pos": [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, src["pos"][2]], "yaw": float(c.get("yaw_deg") or 0.0)})
+            PROPS.append(dict(src, name="%s_%d" % (c["from"], n), pos=[c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, src["pos"][2]], yaw=float(c.get("yaw_deg") or 0.0)))
+            send(**scene())
+            frame()
+        elif cmd == "add_model":
+            doc = c["doc"]
+            if doc.get("format") != "openbricks-assembly/1":
+                send(ev="error", text="add_model: not an openbricks-assembly/1 file")
+                continue
+            base = "_".join(c["name"].lower().split())
+            name = base
+            n = 2
+            while any(p["name"] == name for p in PROPS):
+                name = "%s_%d" % (base, n)
+                n += 1
+            parts = doc.get("parts") or {}
+            bricks_out = [{"path": "b", "part": pid, "ldraw": part.get("ldraw"), "pos_m": [0, 0, 0.01], "quat": [1, 0, 0, 0],
+                           "half_m": [0.02, 0.01, 0.01], "category": part.get("category", "lego")} for pid, part in list(parts.items())[:1]]
+            PROPS.append({"name": name, "pos": [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, 0.01], "yaw": float(c.get("yaw_deg") or 0.0),
+                          "fixed": False, "bricks": bricks_out, "kind": (doc.get("robot") or {}).get("name") or "model"})
+            send(**scene())
+            frame()
+        elif cmd == "fix":
+            p = next((p for p in PROPS if p["name"] == c["name"]), None)
+            if p is None:
+                send(ev="error", text="no prop named %r on this map" % c["name"])
+                continue
+            p["fixed"] = bool(c.get("fixed", True))
             send(**scene())
             frame()
         elif cmd == "remove":

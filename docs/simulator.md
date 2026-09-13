@@ -177,25 +177,41 @@ geom.
 
 ## The map editor
 
-**Map** edits the map itself: the props on it — the LEGO-built
-objects a mission puts on the mat, each a `<lego_prop>` in the world's
-MJCF — moved, turned, duplicated, added and removed, and the result
-saved as a map of your own. The view is the same fitted plan as the
-Simulate tab's. Drag a prop to move it (its outline lights under the
-pointer, the selected one carries its name), shift-drag to turn it;
-click one, or its row in the panel, to select it; `⌘D` or
-**Duplicate** puts another like it a little to the side, `Del` or
-**Remove** takes it away, **Add…** lists the kinds of prop the map has
-and puts one of that kind at the map's origin. Every move is sent to
-the run server, which moves the live body at once and rewrites the
+**Map** edits the map itself in a 3D view of its own — drag to orbit,
+right-drag to pan, scroll to zoom, **Fit** or `F` to frame the map,
+Iso / Top / Side / Front as on the Workbench. The props on it are the
+LEGO-built objects a mission puts on the mat (each a `<lego_prop>` in
+the world's MJCF) and whatever you add: drag a prop to move it (its
+outline lights under the pointer, the selected one carries its name),
+shift-drag to turn it; click one, or its row in the panel, to select
+it; `⌘D` or **Duplicate** puts another like it a little to the side,
+`Del` or **Remove** takes it away, **Add…** lists the kinds of prop the
+map has and puts one of that kind at the map's origin.
+
+**Adding what you built.** The panel puts a component of the build open
+in the Workbench on the map (**component…**), or one brick from the
+library (search it by number or name, then **+ to map**). Either lands
+at the origin as a prop of its own — an `<assembly_prop>` whose model
+is an `openbricks-assembly/1` document, kept under the data
+directory until the map is saved — drawn with the exact bricks and
+colliding as their boxes with their catalogue masses.
+
+**Free or stuck.** A prop is free by default: it has a free joint, so
+the physics settles it and the robot can push it. Tick **stuck to the
+map** on the selected prop to weld it there — no joint, nothing but the
+editor moves it; a stuck prop wears a pin through its centre, and its
+row says so. Every move, add, remove, stick and unstick is sent to the
+run server, which moves the live body at once (a chassis place, which
+resets the physics, keeps the prop where it was put) and rewrites the
 prop's placeholder in the world text it holds, so the physics, the
-picture and the text agree; adding or removing a prop rebuilds the
-world with the chassis where it stands. Nothing moves while a program
-runs.
+picture and the text agree; adding, removing, sticking and unsticking
+rebuild the world with the chassis where it stands. Nothing moves
+while a program runs.
 
 **Save as a new map** writes the world text as it stands — every prop
 where it is, the ones added included, with the map's artwork and the
-props' models — to `worlds/<name>/` under the data directory
+props' models (documents added since the load copied into the map's
+`props/`) — to `worlds/<name>/` under the data directory
 (`$OPENBRICKS_DATA_DIR`, else `$XDG_DATA_HOME/openbricks`, else
 `~/.local/share/openbricks`, the same place the markers live). The
 run server lists your maps beside the shipped ones (marked "yours"),

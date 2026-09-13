@@ -70,6 +70,8 @@ class ProtocolTests(unittest.TestCase):
                 json.dumps({"cmd": "move", "name": "clef", "x_mm": 100, "y_mm": 100, "yaw_deg": 90}),
                 json.dumps({"cmd": "add", "from": "clef", "x_mm": -100, "y_mm": -100}),
                 json.dumps({"cmd": "remove", "name": "clef_2"}),
+                json.dumps({"cmd": "fix", "name": "clef", "fixed": True}),
+                json.dumps({"cmd": "add_model", "name": "x", "doc": {"format": "nope"}, "x_mm": 0, "y_mm": 0}),
                 json.dumps({"cmd": "save_world", "name": "wired"}),
                 json.dumps({"cmd": "remove", "name": "ghost"}),
                 json.dumps({"cmd": "quit"}),
@@ -77,7 +79,8 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(server.serve(_Feed([(0, l) for l in lines]), out), 0)
             ev = _events(out.getvalue())
             kinds = [e["ev"] for e in ev]
-            self.assertEqual(kinds.count("scene"), 3, "load, add, remove")
+            self.assertEqual(kinds.count("scene"), 4, "load, add, remove, fix")
+            self.assertTrue(any(e["ev"] == "error" and "assembly" in e["text"] for e in ev), [e for e in ev if e["ev"] == "error"])
             self.assertIn("saved", kinds)
             self.assertTrue(any(e["ev"] == "error" and "ghost" in e["text"] for e in ev), [e for e in ev if e["ev"] == "error"])
             self.assertTrue(os.path.isfile(os.path.join(tmp, "worlds", "wired", "world.xml")))
@@ -184,6 +187,35 @@ class SessionTests(unittest.TestCase):
             cid = scene2["bodies"].index("chassis")
             self.assertAlmostEqual(frame["bodies"][cid][0], -0.4, places=3)
             self.assertAlmostEqual(s.robot.chassis_pose()[2], 90.0, places=3)
+            # a document placed as a prop: free at first, its bricks in the scene; stuck on request
+            from openbricks_sim import bricks
+            num = sorted(bricks.load_bundle()["parts"])[0]
+            doc = {"format": "openbricks-assembly/1", "parts": {"p": {"name": "brick", "category": "lego", "mass_g": 2.5, "ldraw": num}},
+                   "components": {"one": {"children": [{"name": "b", "part": "p", "pos": [0, 0, 0], "rot": [0, 0, 0]}]}},
+                   "robot": {"name": "One Brick", "root": "one"}}
+            model_name = s.add_model("One Brick", doc, 250.0, -100.0, 30.0)
+            self.assertEqual(model_name, "one_brick")
+            scene_m = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]
+            one = next(p for p in scene_m["props"] if p["name"] == "one_brick")
+            self.assertEqual((one["kind"], one["fixed"], one["yaw_deg"]), ("One Brick", False, 30.0))
+            self.assertEqual([b["ldraw"] for b in one["bricks"]], [num])
+            frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
+            self.assertAlmostEqual(frame["bodies"][one["body"]][0], 0.25, places=4)
+            self.assertIn(os.path.join(self.tmp.name, "props"), s.world_xml, "kept under the data directory until saved")
+            s.fix_prop("one_brick", True)
+            scene_f = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]
+            self.assertTrue(next(p for p in scene_f["props"] if p["name"] == "one_brick")["fixed"])
+            body = mujoco.mj_name2id(s.robot.model, mujoco.mjtObj.mjOBJ_BODY, "one_brick")
+            self.assertEqual(int(s.robot.model.body_jntnum[body]), 0, "stuck: no joint")
+            s.move_prop("one_brick", 100.0, 100.0, 0.0)
+            frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
+            self.assertAlmostEqual(frame["bodies"][body][0], 0.1, places=4, msg="a stuck prop still moves by the editor")
+            s.fix_prop("one_brick", False)
+            body = mujoco.mj_name2id(s.robot.model, mujoco.mjtObj.mjOBJ_BODY, "one_brick")
+            self.assertEqual(int(s.robot.model.body_jntnum[body]), 1, "free again")
+            with self.assertRaises(Exception):
+                s.add_model("bad", {"format": "nope"}, 0, 0)
+            s.remove_prop("one_brick")
             # remove: back to the original count
             s.remove_prop("note_red_2")
             scene3 = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]
@@ -207,6 +239,14 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(clef4["yaw_deg"], 45.0)
             with self.assertRaises(props.PropError):
                 s.save_world("practice-line")
+            s.add_model("Kept Brick", doc, 0.0, 0.0)
+            alias2 = s.save_world("With a model")
+            saved_dir = os.path.join(self.tmp.name, "worlds", alias2)
+            self.assertTrue(any(f.endswith(".assembly.json") for f in os.listdir(os.path.join(saved_dir, "props"))))
+            self.assertNotIn(self.tmp.name + os.sep + "props", open(os.path.join(saved_dir, "world.xml")).read())
+            s.load(world=alias2, assembly=_EXAMPLE)
+            scene_s = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]
+            self.assertTrue(any(p["name"] == "kept_brick" and p["bricks"] for p in scene_s["props"]))
             # the empty world has nothing to edit; a running program blocks edits
             e = self.session(io.StringIO())
             e.load(world="empty", assembly=_EXAMPLE)
