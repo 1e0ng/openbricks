@@ -18,6 +18,23 @@ pub struct WorldEntry {
     pub path: Option<String>,
     #[serde(default)]
     pub dir: Option<String>,
+    /// One of the user's own maps, saved from the map editor.
+    #[serde(default)]
+    pub user: bool,
+}
+
+/// A prop on the map: a body of the world's own that the map editor
+/// moves, duplicates and removes.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Prop {
+    pub name: String,
+    pub body: usize,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub yaw_deg: f64,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -77,6 +94,11 @@ pub struct ChassisInfo {
 #[allow(dead_code)] // the whole wire format is kept, used or not
 pub struct Scene {
     pub bodies: Vec<String>,
+    /// Each body's parent body (the world is its own).
+    #[serde(default)]
+    pub parents: Vec<usize>,
+    #[serde(default)]
+    pub props: Vec<Prop>,
     pub geoms: Vec<Geom>,
     #[serde(default)]
     pub materials: HashMap<String, Material>,
@@ -138,6 +160,11 @@ pub enum Event {
         error: Option<String>,
     },
     Error(String),
+    /// The map was saved as one of the user's own.
+    Saved {
+        alias: String,
+        path: String,
+    },
     Bye,
     /// The child process ended (or its output closed).
     Exited(String),
@@ -186,6 +213,10 @@ pub fn parse_event(line: &str) -> Result<Event, String> {
             error: v.get("error").and_then(Value::as_str).map(str::to_string),
         }),
         "error" => Ok(Event::Error(s("text"))),
+        "saved" => Ok(Event::Saved {
+            alias: s("alias"),
+            path: s("path"),
+        }),
         "bye" => Ok(Event::Bye),
         other => Err(format!("unknown event {other:?}")),
     }
@@ -296,14 +327,31 @@ send(ev="hello", version="fake")
 W = [{"alias": "practice-line", "path": "/w/practice_line/world.xml", "dir": "/w/practice_line"},
      {"alias": "wro-2026-senior", "path": "/w/senior/world.xml", "dir": "/w/senior"},
      {"alias": "empty", "path": "/w/empty.xml", "dir": "/w"}]
-SCENE = {"ev": "scene", "bodies": ["world", "chassis"],
-         "geoms": [{"name": "floor", "type": "plane", "body": 0, "size": [1.2, 0.9, 0.1], "pos": [0, 0, 0],
-                    "quat": [1, 0, 0, 0], "rgba": [1, 1, 1, 1], "material": None, "group": 0, "mesh": None},
-                   {"name": "chassis_body", "type": "box", "body": 1, "size": [0.08, 0.06, 0.02], "pos": [0, 0, 0],
-                    "quat": [1, 0, 0, 0], "rgba": [0.3, 0.3, 0.8, 1], "material": None, "group": 0, "mesh": None}],
-         "materials": {}, "textures": {}, "bricks": [],
-         "chassis": {"wheel_diameter_mm": 86.4, "axle_track_mm": 135.0, "spawn": {"x_mm": -547.0, "y_mm": -150.0, "yaw_deg": 90.0}},
-         "timestep_ms": 1}
+def box(name, body, size, rgba):
+    return {"name": name, "type": "box", "body": body, "size": size, "pos": [0, 0, 0], "quat": [1, 0, 0, 0],
+            "rgba": rgba, "material": None, "group": 0, "mesh": None}
+FLOOR = {"name": "floor", "type": "plane", "body": 0, "size": [1.2, 0.9, 0.1], "pos": [0, 0, 0],
+         "quat": [1, 0, 0, 0], "rgba": [1, 1, 1, 1], "material": None, "group": 0, "mesh": None}
+# a prop "clef" of one 60 x 40 mm brick at (300, 200) mm, and after an add a second one
+PROPS = [{"name": "clef", "pos": [0.3, 0.2, 0.01], "yaw": 0.0}]
+def scene():
+    bodies = ["world", "chassis"] + [p["name"] for p in PROPS]
+    geoms = [FLOOR, box("chassis_body", 1, [0.08, 0.06, 0.02], [0.3, 0.3, 0.8, 1])]
+    for i, p in enumerate(PROPS):
+        geoms.append(box(p["name"] + "_brick", 2 + i, [0.03, 0.02, 0.01], [0.9, 0.2, 0.2, 1]))
+    return {"ev": "scene", "bodies": bodies, "parents": [0] * len(bodies), "geoms": geoms,
+            "props": [{"name": p["name"], "body": 2 + i, "kind": "clef", "color": None, "yaw_deg": p["yaw"]} for i, p in enumerate(PROPS)],
+            "materials": {}, "textures": {}, "bricks": [],
+            "chassis": {"wheel_diameter_mm": 86.4, "axle_track_mm": 135.0, "spawn": {"x_mm": -547.0, "y_mm": -150.0, "yaw_deg": 90.0}},
+            "timestep_ms": 1}
+CHASSIS = [-0.547, -0.15, 0.05, 0.7071068, 0, 0, 0.7071068]
+def frame(t_ms=0):
+    import math
+    bodies = [[0, 0, 0, 1, 0, 0, 0], list(CHASSIS)]
+    for p in PROPS:
+        half = math.radians(p["yaw"]) / 2
+        bodies.append(p["pos"] + [math.cos(half), 0, 0, math.sin(half)])
+    send(ev="frame", t_ms=t_ms, bodies=bodies)
 status = "idle"
 for line in sys.stdin:
     c = json.loads(line)
@@ -313,13 +361,50 @@ for line in sys.stdin:
         continue
     if cmd == "load":
         status = "loaded"
-        send(**SCENE)
-        send(ev="frame", t_ms=0, bodies=[[0, 0, 0, 1, 0, 0, 0], [-0.547, -0.15, 0.05, 0.7071068, 0, 0, 0.7071068]])
+        send(**scene())
+        frame()
         send(ev="log", stream="server", text="loaded %s with %s" % (c.get("world"), c.get("assembly")))
     elif cmd == "run":
         status = "running"
         send(ev="log", stream="stdout", text="hello from " + c["script"])
-        send(ev="frame", t_ms=10, bodies=[[0, 0, 0, 1, 0, 0, 0], [0.01, 0, 0.05, 1, 0, 0, 0]])
+        CHASSIS[:] = [0.01, 0, 0.05, 1, 0, 0, 0]
+        frame(10)
+    elif cmd in ("move", "add", "remove", "save_world"):
+        if status == "running":
+            send(ev="error", text="a program is running; stop it first")
+            continue
+        if cmd == "move":
+            p = next((p for p in PROPS if p["name"] == c["name"]), None)
+            if p is None:
+                send(ev="error", text="no prop named %r on this map" % c["name"])
+                continue
+            p["pos"] = [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, p["pos"][2]]
+            p["yaw"] = float(c.get("yaw_deg") or 0.0)
+            frame()
+        elif cmd == "add":
+            src = next((p for p in PROPS if p["name"] == c["from"]), None)
+            if src is None:
+                send(ev="error", text="no prop named %r on this map" % c["from"])
+                continue
+            n = 2
+            while any(p["name"] == "%s_%d" % (c["from"], n) for p in PROPS):
+                n += 1
+            PROPS.append({"name": "%s_%d" % (c["from"], n), "pos": [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, src["pos"][2]], "yaw": float(c.get("yaw_deg") or 0.0)})
+            send(**scene())
+            frame()
+        elif cmd == "remove":
+            before = len(PROPS)
+            PROPS[:] = [p for p in PROPS if p["name"] != c["name"]]
+            if len(PROPS) == before:
+                send(ev="error", text="no prop named %r on this map" % c["name"])
+                continue
+            send(**scene())
+            frame()
+        else:
+            alias = "-".join(c["name"].lower().split())
+            W.append({"alias": alias, "path": "/me/worlds/%s/world.xml" % alias, "dir": "/me/worlds/" + alias, "user": True})
+            send(ev="worlds", worlds=W)
+            send(ev="saved", alias=alias, path="/me/worlds/%s/world.xml" % alias)
     elif cmd == "pause":
         status = "paused"
     elif cmd == "resume":
@@ -335,7 +420,8 @@ for line in sys.stdin:
             continue
         import math
         yaw = math.radians(float(c.get("yaw_deg") or 0.0))
-        send(ev="frame", t_ms=0, bodies=[[0, 0, 0, 1, 0, 0, 0], [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, 0.05, math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]])
+        CHASSIS[:] = [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, 0.05, math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]
+        frame()
         send(ev="log", stream="server", text="placed at %s %s %s" % (c["x_mm"], c["y_mm"], c.get("yaw_deg")))
     elif cmd == "quit":
         send(ev="bye")

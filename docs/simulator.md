@@ -94,15 +94,15 @@ Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 
 **Simulate** runs your program on a map with the chassis you
-assembled. Pick the map (any built-in world) and it appears in the
-view at once, as does the chassis (a `robot.assembly.json`, or the
-build open in the Workbench tab once it is saved) when you choose it;
-pick the program (`main.py`), then Run. The view is a plan: the map
-seen straight from above, north up, with no perspective — drag to
-pan, scroll to zoom, **Fit** or `F` to frame the whole map again, edge to edge
+assembled. Pick the map (a shipped world, or one you saved from the
+Map tab) and it appears in the view at once, as does the chassis (a
+`robot.assembly.json`, or the build open in the Workbench tab once it
+is saved) when you choose it; pick the program (`main.py`), then Run.
+The view is a plan: the whole map seen straight from above, north up,
+with no perspective, fitted edge to edge and never panned or zoomed
 (the Workbench keeps its own 3D camera). Pause, Resume and Stop do
 what they say; the speed slider runs the physics slower or faster
-than wall time; "follow the robot" keeps the view on the chassis;
+than wall time;
 the program's prints and errors appear in the log panel below the
 view, and while the map is not there yet the view says what the run
 server is doing. The loaded chassis stands on the map at true scale:
@@ -174,6 +174,35 @@ chassis is built from the assembly: the wheel, caster and sensor
 roles place the physics skeleton, the brick-by-brick mass properties
 become the body's inertia, and each brick rides along as a visual
 geom.
+
+## The map editor
+
+**Map** edits the map itself: the props on it — the LEGO-built
+objects a mission puts on the mat, each a `<lego_prop>` in the world's
+MJCF — moved, turned, duplicated, added and removed, and the result
+saved as a map of your own. The view is the same fitted plan as the
+Simulate tab's. Drag a prop to move it (its outline lights under the
+pointer, the selected one carries its name), shift-drag to turn it;
+click one, or its row in the panel, to select it; `⌘D` or
+**Duplicate** puts another like it a little to the side, `Del` or
+**Remove** takes it away, **Add…** lists the kinds of prop the map has
+and puts one of that kind at the map's origin. Every move is sent to
+the run server, which moves the live body at once and rewrites the
+prop's placeholder in the world text it holds, so the physics, the
+picture and the text agree; adding or removing a prop rebuilds the
+world with the chassis where it stands. Nothing moves while a program
+runs.
+
+**Save as a new map** writes the world text as it stands — every prop
+where it is, the ones added included, with the map's artwork and the
+props' models — to `worlds/<name>/` under the data directory
+(`$OPENBRICKS_DATA_DIR`, else `$XDG_DATA_HOME/openbricks`, else
+`~/.local/share/openbricks`, the same place the markers live). The
+run server lists your maps beside the shipped ones (marked "yours"),
+the tab switches to the new map, and its markers come along; saving
+again under the same name replaces it, and a shipped map's name is
+refused so it is never shadowed. Routes remember the map they were
+planned on by that name.
 
 ## The Assembly Workbench
 

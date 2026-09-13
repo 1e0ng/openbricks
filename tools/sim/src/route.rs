@@ -735,7 +735,7 @@ impl Action {
     /// The program lines for the action itself, from the pose it starts at.
     fn code(&self, from: Pose2) -> Vec<String> {
         match self {
-            Action::Straight { then, .. } => vec![format!("db.straight({}{})", num(self.length_mm()), then.arg())],
+            Action::Straight { then, .. } => vec![format!("robot.straight({}{})", num(self.length_mm()), then.arg())],
             Action::Curve { end_heading_deg, then, .. } => {
                 let pieces = self.pieces();
                 if pieces.is_empty() {
@@ -744,7 +744,7 @@ impl Action {
                     return if rel.abs() < 0.05 {
                         vec![]
                     } else {
-                        vec![format!("db.turn({})", num(-rel))]
+                        vec![format!("robot.turn({})", num(-rel))]
                     };
                 }
                 let mut heading = from.yaw_deg;
@@ -754,14 +754,14 @@ impl Action {
                     let arg = if i + 1 == pieces.len() { then.arg() } else { End::Continue.arg() };
                     out.push(match p {
                         Piece::Arc { arc, right, .. } => format!(
-                            "db.curve({}, {}{arg})",
+                            "robot.curve({}, {}{arg})",
                             num(arc.radius_mm),
                             num(if *right { arc.sweep_deg } else { -arc.sweep_deg })
                         ),
                         Piece::Line { from, to } => {
                             let (c, s) = (heading.to_radians().cos(), heading.to_radians().sin());
                             // backward when the run lies behind the heading
-                            format!("db.straight({}{arg})", num((to[0] - from[0]) * c + (to[1] - from[1]) * s))
+                            format!("robot.straight({}{arg})", num((to[0] - from[0]) * c + (to[1] - from[1]) * s))
                         }
                     });
                     heading = p.end_heading(heading);
@@ -773,13 +773,13 @@ impl Action {
                 if rel.abs() < 0.05 {
                     vec!["# already facing that way".to_string()]
                 } else {
-                    vec![format!("db.turn({})", num(-rel))]
+                    vec![format!("robot.turn({})", num(-rel))]
                 }
             }
             Action::Stop { then, wait_ms, .. } => {
                 let mut v = vec![match then {
-                    End::Coast => "db.stop()".to_string(),
-                    other => format!("db.stop(then={})", other.code()),
+                    End::Coast => "robot.stop()".to_string(),
+                    other => format!("robot.stop(then={})", other.code()),
                 }];
                 if *wait_ms > 0.0 {
                     v.push(format!("time.sleep_ms({})", wait_ms.round() as i64));
@@ -885,16 +885,16 @@ pub fn approach(from: Pose2, to: Point, heading: Option<f64>) -> (Vec<Point>, Ve
         let dir = heading_to(from.point(), to);
         let rel = wrap_deg(dir - pose.yaw_deg);
         if rel.abs() >= 0.05 {
-            code.push(format!("db.turn({})", num(-rel)));
+            code.push(format!("robot.turn({})", num(-rel)));
         }
-        code.push(format!("db.straight({})", num(d)));
+        code.push(format!("robot.straight({})", num(d)));
         link = vec![from.point(), to];
         pose = Pose2::at(to, dir);
     }
     if let Some(h) = heading {
         let rel = wrap_deg(h - pose.yaw_deg);
         if rel.abs() >= 0.05 {
-            code.push(format!("db.turn({})", num(-rel)));
+            code.push(format!("robot.turn({})", num(-rel)));
         }
         pose.yaw_deg = wrap_deg(h);
     }
@@ -1007,7 +1007,7 @@ pub fn program(route: &Route, wheel_diameter_mm: f64, axle_track_mm: f64) -> Str
     }
     out.push_str("from openbricks.robotics import DriveBase\n");
     out.push_str(&format!(
-        "\nleft = ST3032Motor(servo_id=1, tx=14, rx=41)\nright = ST3032Motor(servo_id=2, tx=14, rx=41, invert=True)\ndb = DriveBase(left, right, wheel_diameter_mm={}, axle_track_mm={})\n",
+        "\nleft = ST3032Motor(servo_id=1, tx=14, rx=41)\nright = ST3032Motor(servo_id=2, tx=14, rx=41, invert=True)\nrobot = DriveBase(left, right, wheel_diameter_mm={}, axle_track_mm={})\n",
         num(wheel_diameter_mm),
         num(axle_track_mm)
     ));
@@ -1025,11 +1025,11 @@ pub fn program(route: &Route, wheel_diameter_mm: f64, axle_track_mm: f64) -> Str
         match a {
             Action::Straight { speed, .. } | Action::Curve { speed, .. } if *speed != straight_speed => {
                 straight_speed = *speed;
-                out.push_str(&format!("db.settings(straight_speed={})\n", num(straight_speed)));
+                out.push_str(&format!("robot.settings(straight_speed={})\n", num(straight_speed)));
             }
             Action::Turn { speed, .. } if *speed != turn_rate => {
                 turn_rate = *speed;
-                out.push_str(&format!("db.settings(turn_rate={})\n", num(turn_rate)));
+                out.push_str(&format!("robot.settings(turn_rate={})\n", num(turn_rate)));
             }
             _ => {}
         }
@@ -1628,7 +1628,7 @@ mod tests {
         );
         assert!(
             text.contains(
-                "# 1: curve left 180° on r 25 mm, then curve right 180° on r 25 mm at 350°/s\ndb.curve(25, -180, then=Stop.NONE)\ndb.curve(25, 180)\n"
+                "# 1: curve left 180° on r 25 mm, then curve right 180° on r 25 mm at 350°/s\nrobot.curve(25, -180, then=Stop.NONE)\nrobot.curve(25, 180)\n"
             ),
             "{text}"
         );
@@ -1641,9 +1641,9 @@ mod tests {
             ..Default::default()
         };
         let text = program(&spin, 86.4, 135.0);
-        assert!(text.contains("# 1: curve (nowhere to go) at 350°/s\ndb.turn(-90)\n"), "{text}");
+        assert!(text.contains("# 1: curve (nowhere to go) at 350°/s\nrobot.turn(-90)\n"), "{text}");
         assert!(
-            text.contains("\n# 2: straight 100 mm at 350°/s\n# to its start\ndb.turn(90)\ndb.straight(100)\n"),
+            text.contains("\n# 2: straight 100 mm at 350°/s\n# to its start\nrobot.turn(90)\nrobot.straight(100)\n"),
             "{text}"
         );
     }
@@ -1687,31 +1687,31 @@ mod tests {
         assert!(near(length_mm(&route), 300.0 + 100.0 * std::f64::consts::FRAC_PI_2 + 200.0));
         let text = program(&route, 86.4, 135.0);
         assert!(
-            text.contains("db = DriveBase(left, right, wheel_diameter_mm=86.4, axle_track_mm=135)\n"),
+            text.contains("robot = DriveBase(left, right, wheel_diameter_mm=86.4, axle_track_mm=135)\n"),
             "{text}"
         );
-        assert!(text.contains("# 1: straight 300 mm at 350°/s\ndb.straight(300)\n"), "{text}");
+        assert!(text.contains("# 1: straight 300 mm at 350°/s\nrobot.straight(300)\n"), "{text}");
         assert!(
             text.contains(
-                "# 2: curve right 90° on r 100 mm at 350°/s, then continue\n# to its start\ndb.turn(-90)\ndb.curve(100, 90, then=Stop.NONE)\n"
+                "# 2: curve right 90° on r 100 mm at 350°/s, then continue\n# to its start\nrobot.turn(-90)\nrobot.curve(100, 90, then=Stop.NONE)\n"
             ),
             "{text}"
         );
         assert!(
-            text.contains("# 3: stop (coast)\n# to its start: the drive there\ndb.turn(-90)\ndb.straight(200)\ndb.stop()\n"),
+            text.contains("# 3: stop (coast)\n# to its start: the drive there\nrobot.turn(-90)\nrobot.straight(200)\nrobot.stop()\n"),
             "{text}"
         );
-        assert!(text.contains("# 4: turn to face 180° at 300°/s\ndb.turn(-90)\n"), "{text}");
+        assert!(text.contains("# 4: turn to face 180° at 300°/s\nrobot.turn(-90)\n"), "{text}");
         assert!(text.contains("from openbricks.parameters import Stop\n"), "{text}");
         assert!(!text.contains("import time"), "{text}");
-        assert!(!text.contains("db.settings"), "default speeds: no settings line");
+        assert!(!text.contains("robot.settings"), "default speeds: no settings line");
     }
 
     #[test]
     fn speeds_waits_and_definitions_reach_the_program() {
         let mut route = Route {
             start: Pose2::at([0.0, 0.0], 90.0),
-            prelude: "def line_follow():\n    db.drive(100, 0)\n".into(),
+            prelude: "def line_follow():\n    robot.drive(100, 0)\n".into(),
             ..Default::default()
         };
         route.actions.push(
@@ -1763,26 +1763,26 @@ mod tests {
         );
         assert!(text.contains("import time\n\n"), "{text}");
         assert!(
-            text.contains("\n# definitions: what the custom actions call\ndef line_follow():\n    db.drive(100, 0)\n"),
+            text.contains("\n# definitions: what the custom actions call\ndef line_follow():\n    robot.drive(100, 0)\n"),
             "{text}"
         );
         assert!(
             text.contains(
-                "# 1: straight 250 mm at 200°/s, then brake\ndb.settings(straight_speed=200)\ndb.straight(250, then=Stop.BRAKE)\n"
+                "# 1: straight 250 mm at 200°/s, then brake\nrobot.settings(straight_speed=200)\nrobot.straight(250, then=Stop.BRAKE)\n"
             ),
             "{text}"
         );
         assert!(
-            text.contains("# 2: turn to face 0° at 150°/s\ndb.settings(turn_rate=150)\ndb.turn(90)\n"),
+            text.contains("# 2: turn to face 0° at 150°/s\nrobot.settings(turn_rate=150)\nrobot.turn(90)\n"),
             "{text}"
         );
         assert!(
-            text.contains("# 3: stop (hold), wait 500 ms\ndb.stop(then=Stop.HOLD)\ntime.sleep_ms(500)\n"),
+            text.contains("# 3: stop (hold), wait 500 ms\nrobot.stop(then=Stop.HOLD)\ntime.sleep_ms(500)\n"),
             "{text}"
         );
         assert!(text.contains("# 4: line_follow(), moving 100 mm\nline_follow()\n"), "{text}");
         assert!(
-            text.contains("# 5: straight 100 mm at 200°/s\ndb.straight(100)\n"),
+            text.contains("# 5: straight 100 mm at 200°/s\nrobot.straight(100)\n"),
             "the speed is already set: no second settings line\n{text}"
         );
         assert_eq!(route.functions(), vec!["line_follow"]);

@@ -46,6 +46,8 @@ What's intentionally omitted:
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 from typing import Iterable, List, Tuple
 
@@ -337,7 +339,8 @@ def emit_prop_body(name: str,
                    freejoint: bool = True,
                    total_mass_kg: float = 0.05,
                    indent: str = "    ",
-                   color_override: int = None) -> str:
+                   color_override: int = None,
+                   yaw_deg: float = 0.0) -> str:
     """Convert an LDraw model into a complete MJCF ``<body>`` block.
 
     ``pos_world_m`` is the body's origin in the world frame; the
@@ -356,11 +359,16 @@ def emit_prop_body(name: str,
 
     inner = indent + "  "
     lines = []
+    quat = ""
+    if yaw_deg:
+        # turned about z: the map editor's yaw, as a w-x-y-z quaternion
+        half = math.radians(yaw_deg) / 2.0
+        quat = ' quat="{:.6f} 0 0 {:.6f}"'.format(math.cos(half), math.sin(half))
     lines.append('{indent}<body name="{name}" '
-                 'pos="{x:.5f} {y:.5f} {z:.5f}">'
+                 'pos="{x:.5f} {y:.5f} {z:.5f}"{quat}>'
                  .format(indent=indent, name=name,
                          x=pos_world_m[0], y=pos_world_m[1],
-                         z=pos_world_m[2]))
+                         z=pos_world_m[2], quat=quat))
     if freejoint:
         lines.append("{}<freejoint/>".format(inner))
     for placement in placements:
