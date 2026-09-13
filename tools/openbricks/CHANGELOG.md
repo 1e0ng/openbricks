@@ -3,6 +3,34 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.15.0 — the map editor in 3D; what the Workbench builds, and library bricks, as props; props stuck to the map
+
+The Map tab is a 3D view with a camera of its own (orbit, pan, zoom,
+Fit and the view presets), props picked by what is under the pointer.
+Two new ways to put a prop on the map: a component of the build open
+in the Workbench, or one brick from the library — either becomes an
+`<assembly_prop>` placeholder whose model is an
+`openbricks-assembly/1` document (kept under the data directory until
+the map is saved, then copied into the map's `props/`), built by the
+run server as colliding boxes with the bricks' catalogue masses and
+drawn with the exact bricks. A prop is free by default (a free joint:
+the physics settles it, the robot pushes it); "stuck to the map" welds
+it there, and a stuck prop wears a pin. New server commands
+`add_model` and `fix`; both placeholders take `fixed="true"`; the
+scene's props carry `fixed` and `bricks`.
+
+- Tests: assembly-document props (bricks and mass from a document,
+  the body free or stuck, loading in a world, a missing document
+  loud); placeholders of both kinds parsed, moved, copied, stuck,
+  freed, removed; models staged by content and copied into a saved
+  map with no absolute paths left; the session's add_model, fix (no
+  joint when stuck, still moved by the editor), save with a model;
+  the tab's body-to-prop walk, add_model, set_fixed, the pin, a
+  document prop drawn as its meshes in place of its boxes; the
+  harness Map tab in 3D (pick on a prop's top, library brick added
+  and drawn, stuck via the checkbox, a Workbench component added,
+  orbit, pan, zoom, Fit, cameras kept per tab).
+
 ## 4.14.0 — a Map tab: props moved, added, removed, and the map saved as your own
 
 The sim's third tab edits the map itself. Each `<lego_prop>` on a

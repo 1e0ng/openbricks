@@ -103,8 +103,38 @@ def _expand_lego_props(world_xml: str, world_dir: Path) -> str:
             m.group("name"), pos, ldr_text,
             total_mass_kg=float(m.group("mass")),
             color_override=color_override,
-            yaw_deg=float(m.group("yaw")) if m.group("yaw") is not None else 0.0)
+            yaw_deg=float(m.group("yaw")) if m.group("yaw") is not None else 0.0,
+            freejoint=not props._flag(m.group("fixed") or ""))
     return _LEGO_PROP_RE.sub(_expand, world_xml)
+
+
+def _expand_assembly_props(world_xml: str, world_dir: Path) -> str:
+    """Replace every ``<assembly_prop .../>`` placeholder with the body
+    of its ``openbricks-assembly/1`` document (a path relative to the
+    world's directory, or absolute for a model added to a map not yet
+    saved). A missing or unusable document is loud."""
+    from openbricks_sim import assembly as assembly_mod
+
+    def _expand(m):
+        name = m.group("name")
+        ref = Path(m.group("file"))
+        path = ref if ref.is_absolute() else world_dir / ref
+        if not path.is_file():
+            raise WorldLoadError("assembly_prop {!r} references missing file {!r}".format(name, str(path)))
+        try:
+            import json
+            with open(path) as fh:
+                doc = json.load(fh)
+            bricks_out, _ = assembly_mod.prop_bricks(doc)
+        except (ValueError, assembly_mod.AssemblyError) as e:
+            raise WorldLoadError("assembly_prop {!r}: {}".format(name, e)) from e
+        pos = tuple(float(t) for t in m.group("pos").split())
+        if len(pos) != 3:
+            raise WorldLoadError("assembly_prop {!r} pos must be 3 floats; got {!r}".format(name, m.group("pos")))
+        return assembly_mod.prop_body_xml(
+            name, pos, float(m.group("yaw")) if m.group("yaw") is not None else 0.0,
+            props._flag(m.group("fixed") or ""), bricks_out)
+    return props.MODEL_RE.sub(_expand, world_xml)
 
 
 def _extract_fragment_sections(fragment: str):
@@ -169,6 +199,7 @@ def load_world(world_path: str,
     # load time so editing a per-prop ``.ldr`` doesn't need a
     # separate build pass.
     world_xml = _expand_lego_props(world_xml, p.parent)
+    world_xml = _expand_assembly_props(world_xml, p.parent)
 
     fragment = chassis_mjcf(chassis_spec, name=chassis_name,
                             inertial=inertial, extra_geoms=extra_geoms)

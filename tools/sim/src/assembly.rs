@@ -532,6 +532,97 @@ pub fn component_contains(doc: &Document, id: &str, target: &str, stack: &mut Ve
     hit
 }
 
+/// The part of a document that one component needs: the components it
+/// reaches and the parts they use, with that component as the robot's
+/// root and no roles — what a map takes as a prop.
+pub fn subset(doc: &Document, root: &str) -> Option<Document> {
+    if !doc.components.contains_key(root) {
+        return None;
+    }
+    let mut components = BTreeMap::new();
+    let mut parts = BTreeMap::new();
+    let mut todo = vec![root.to_string()];
+    while let Some(id) = todo.pop() {
+        if components.contains_key(&id) {
+            continue;
+        }
+        let Some(comp) = doc.components.get(&id) else { continue };
+        for ch in &comp.children {
+            if let Some(p) = &ch.part
+                && let Some(part) = doc.parts.get(p)
+            {
+                parts.insert(p.clone(), part.clone());
+            }
+            if let Some(c) = &ch.component {
+                todo.push(c.clone());
+            }
+        }
+        components.insert(id, comp.clone());
+    }
+    Some(Document {
+        format: doc.format.clone(),
+        units: doc.units.clone(),
+        parts,
+        components,
+        robot: Robot {
+            name: root.to_string(),
+            root: root.to_string(),
+            roles: BTreeMap::new(),
+            spawn: Spawn::default(),
+            measured_mass_g: None,
+        },
+    })
+}
+
+/// One library brick as a document of its own — what a map takes as a
+/// prop when a brick is added from the library.
+pub fn brick_document(bundle: &Bundle, num: &str) -> Option<Document> {
+    let rec = bundle.parts.get(num)?;
+    let id = format!("lego_{num}");
+    let mut parts = BTreeMap::new();
+    parts.insert(
+        id.clone(),
+        Part {
+            name: rec.name.clone(),
+            category: "lego".into(),
+            mass_g: rec.mass_g,
+            source: rec.source.clone(),
+            source_note: rec.source_note.clone(),
+            ldraw: Some(num.to_string()),
+            shapes: vec![],
+            extra: Default::default(),
+        },
+    );
+    let mut components = BTreeMap::new();
+    components.insert(
+        "brick".to_string(),
+        Component {
+            note: String::new(),
+            children: vec![Instance {
+                name: "brick".into(),
+                part: Some(id),
+                component: None,
+                pos: [0.0; 3],
+                rot: [0.0; 3],
+                locked: false,
+            }],
+        },
+    );
+    Some(Document {
+        format: "openbricks-assembly/1".into(),
+        units: serde_json::json!({"length": "mm", "mass": "g"}),
+        parts,
+        components,
+        robot: Robot {
+            name: rec.name.clone(),
+            root: "brick".into(),
+            roles: BTreeMap::new(),
+            spawn: Spawn::default(),
+            measured_mass_g: None,
+        },
+    })
+}
+
 pub fn usage_count(doc: &Document, comp_id: &str) -> usize {
     doc.components
         .values()
@@ -1154,6 +1245,45 @@ mod tests {
         let sib = vec![inst("pin", "p", [0.0; 3], [0.0; 3]), inst("pin_2", "p", [0.0; 3], [0.0; 3])];
         assert_eq!(unique_name(&sib, "pin"), "pin_3");
         assert_eq!(slug("Drive Unit #2!"), "drive_unit_2");
+    }
+
+    #[test]
+    fn a_component_becomes_a_document_of_its_own_and_so_does_a_brick() {
+        let bundle_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../openbricks/openbricks_sim/bricks/technic_bundle.json.zlib");
+        let bundle = crate::bundle::load_bundle(&bundle_path).expect("the shipped brick bundle");
+        let doc = example();
+        let root = doc.robot.root.clone();
+        let sub = subset(&doc, &root).unwrap();
+        assert_eq!((sub.robot.root.as_str(), sub.robot.name.as_str()), (root.as_str(), root.as_str()));
+        assert!(sub.robot.roles.is_empty(), "a prop has no roles");
+        assert_eq!(sub.format, doc.format);
+        // every part the reachable components use, and nothing else
+        let used: std::collections::BTreeSet<String> = flatten(&sub, &root).iter().map(|l| l.part_id.clone()).collect();
+        assert_eq!(sub.parts.keys().cloned().collect::<std::collections::BTreeSet<_>>(), used);
+        assert_eq!(flatten(&sub, &root).len(), flatten(&doc, &root).len());
+        let (some_child, _) = doc
+            .components
+            .iter()
+            .find(|(id, _)| **id != root)
+            .map(|(id, c)| (id.clone(), c.clone()))
+            .expect("the example has a component besides the root");
+        let part = subset(&doc, &some_child).unwrap();
+        assert!(part.components.len() < doc.components.len());
+        assert!(subset(&doc, "nothing").is_none());
+        // a library brick: one part, one component, one instance
+        let num = bundle.parts.keys().next().unwrap().clone();
+        let b = brick_document(&bundle, &num).unwrap();
+        assert_eq!(b.format, "openbricks-assembly/1");
+        assert_eq!(b.robot.root, "brick");
+        assert_eq!(b.parts.len(), 1);
+        assert_eq!(b.parts.values().next().unwrap().ldraw.as_deref(), Some(num.as_str()));
+        assert_eq!(flatten(&b, "brick").len(), 1);
+        assert!(validate(&b, &bundle).is_empty(), "{:?}", validate(&b, &bundle));
+        assert!(brick_document(&bundle, "no-such-part").is_none());
+        let text = serde_json::to_string(&b).unwrap();
+        let back: Document = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.robot.root, "brick");
     }
 
     #[test]

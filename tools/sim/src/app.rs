@@ -46,9 +46,18 @@ enum Tab {
 }
 
 impl Tab {
-    /// The Map and Simulate tabs share the fixed plan view.
+    /// The Simulate tab is the fixed plan view; the others are 3D.
     fn plan(self) -> bool {
-        self != Tab::Workbench
+        self == Tab::Simulate
+    }
+
+    /// Each tab keeps a camera of its own.
+    fn index(self) -> usize {
+        match self {
+            Tab::Workbench => 0,
+            Tab::Map => 1,
+            Tab::Simulate => 2,
+        }
     }
 }
 
@@ -93,6 +102,8 @@ pub struct App {
     editor: Editor,
     tab: Tab,
     search: String,
+    /// The Map tab's search of the brick library.
+    map_search: String,
     group_name: String,
     gizmo_mode: Mode,
     hot: Option<Handle>,
@@ -101,7 +112,8 @@ pub struct App {
     viewport: Viewport,
     /// The camera of the tab not shown: the Workbench orbits in 3D, the
     /// Simulate tab is a fixed top-down plan; switching tabs swaps them.
-    other_camera: Camera,
+    /// Every tab's camera but the shown one (which lives in the viewport).
+    cameras: [Camera; 3],
     camera_tab: Tab,
     /// The plan view's size last frame: a change refits the map.
     plan_size: (u32, u32),
@@ -158,17 +170,28 @@ impl App {
         python: Option<String>,
     ) -> Self {
         let viewport = Viewport::new(&gpu.device, &gpu.queue);
+        // the map editor looks at the map from above and aside, in perspective
+        let map_camera = {
+            let mut c = viewport.camera.clone();
+            c.ortho = false;
+            c.yaw = -128.0;
+            c.pitch = 28.0;
+            c.distance = 3000.0;
+            c
+        };
+        let cameras = [viewport.camera.clone(), map_camera, Camera::top_down()];
         App {
             editor: Editor::new(bundle, doc),
             tab: Tab::Workbench,
             search: String::new(),
+            map_search: String::new(),
             group_name: String::new(),
             gizmo_mode: Mode::Move,
             hot: None,
             show_grid: true,
             show_com: true,
             viewport,
-            other_camera: Camera::top_down(),
+            cameras,
             camera_tab: Tab::Workbench,
             plan_size: (0, 0),
             drag: Drag::None,
@@ -485,7 +508,7 @@ impl App {
     }
 
     fn fit_view(&mut self) {
-        if self.tab.plan() {
+        if self.tab != Tab::Workbench {
             self.simulate.refit();
             return;
         }
@@ -884,6 +907,9 @@ impl App {
                     self.viewport.camera.yaw = yaw;
                     self.viewport.camera.pitch = pitch;
                 }
+            }
+            if self.tab == Tab::Map {
+                return;
             }
             ui.selectable_value(&mut self.gizmo_mode, Mode::Move, "Move")
                 .on_hover_text("W: arrows on the selection");
@@ -1641,9 +1667,60 @@ impl App {
             .size_range(300.0..=520.0)
             .resizable(true)
             .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.simulate.map_ui(ui));
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.simulate.map_ui(ui);
+                    self.map_add_ui(ui);
+                });
             });
         egui::CentralPanel::default().show(ui, |ui| self.sim_view_ui(ui, gpu));
+    }
+
+    /// Props from elsewhere: a component of the build open in the
+    /// Workbench, or one brick from the library, placed at the map's origin.
+    fn map_add_ui(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.strong("Add to the map");
+        ui.weak("a component of the build open in the Workbench, at the origin");
+        let ids: Vec<String> = self.editor.doc.components.keys().cloned().collect();
+        egui::ComboBox::from_id_salt("add-component")
+            .selected_text("component…")
+            .show_ui(ui, |ui| {
+                for id in ids {
+                    if ui.selectable_label(false, &id).clicked()
+                        && let Some(sub) = assembly::subset(&self.editor.doc, &id)
+                    {
+                        self.simulate.add_model(&id, &sub);
+                    }
+                }
+            });
+        ui.weak("or one brick from the library");
+        ui.add(egui::TextEdit::singleline(&mut self.map_search).hint_text("search bricks by number or name"));
+        let q = self.map_search.trim().to_lowercase();
+        if !q.is_empty() {
+            let hits: Vec<(String, String)> = self
+                .editor
+                .bundle
+                .parts
+                .iter()
+                .filter(|(n, r)| n.contains(&q) || r.name.to_lowercase().contains(&q))
+                .take(12)
+                .map(|(n, r)| (n.clone(), r.name.clone()))
+                .collect();
+            if hits.is_empty() {
+                ui.weak("no brick matches");
+            }
+            for (num, name) in hits {
+                ui.horizontal(|ui| {
+                    // the button first: a truncating label takes the width left, not the button's
+                    if ui.small_button("+ to map").clicked()
+                        && let Some(doc) = assembly::brick_document(&self.editor.bundle, &num)
+                    {
+                        self.simulate.add_model(&name, &doc);
+                    }
+                    ui.add(egui::Label::new(format!("{num} · {name}")).truncate());
+                });
+            }
+        }
     }
 
     fn simulate_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
@@ -1703,13 +1780,18 @@ impl App {
         } else {
             self.simulate.route_lines(dark)
         };
-        // the plan view never pans or zooms: it fits the map, and again whenever its size changes
-        if self.plan_size != size {
+        // the plan view never pans or zooms: it fits the map, and again whenever its size changes;
+        // the map editor's 3D camera is framed on the map once, then it is the user's
+        if !editing && self.plan_size != size {
             self.plan_size = size;
             self.simulate.refit();
         }
         if let Some((lo, hi)) = self.simulate.frame_target() {
-            self.viewport.camera.fit_plan(lo, hi, size.0 as f32 / size.1.max(1) as f32);
+            if editing {
+                self.viewport.camera.fit(lo, hi);
+            } else {
+                self.viewport.camera.fit_plan(lo, hi, size.0 as f32 / size.1.max(1) as f32);
+            }
         }
         let bg = if dark {
             [0.0067, 0.0093, 0.0122, 1.0]
@@ -1730,6 +1812,13 @@ impl App {
         };
         let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
         self.view_rect = response.rect;
+        if editing && response.hovered() {
+            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+            if scroll != 0.0 {
+                let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0);
+                self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(50.0, 50000.0);
+            }
+        }
         let rect = response.rect;
         let (w, h) = (size.0 as f32, size.1 as f32);
         let local = |p: egui::Pos2| (p.x - rect.min.x, p.y - rect.min.y);
@@ -1750,7 +1839,7 @@ impl App {
         self.simulate.hover_prop = if editing {
             response.hover_pos().and_then(|p| {
                 let (x, y) = local(p);
-                self.simulate.prop_at(&cam, x, y, w, h)
+                self.simulate.prop_of_item(self.viewport.pick(&items, x, y)?)
             })
         } else {
             None
@@ -1774,7 +1863,7 @@ impl App {
                 origin.and_then(|(x, y)| Some((self.simulate.route_handle_at(&cam, x, y, w, h)?, ground(x, y)?)))
             };
             let prop = if editing {
-                origin.and_then(|(x, y)| Some((self.simulate.prop_at(&cam, x, y, w, h)?, ground(x, y)?, x)))
+                origin.and_then(|(x, y)| Some((self.simulate.prop_of_item(self.viewport.pick(&items, x, y)?)?, ground(x, y)?, x)))
             } else {
                 None
             };
@@ -1805,15 +1894,20 @@ impl App {
                     && let Some(pose0) = self.simulate.begin_chassis_drag()
                 {
                     self.drag = Drag::Chassis { px0: x, pose0 };
+                } else if editing {
+                    self.drag = Drag::Orbit;
                 }
             }
+        }
+        if editing && (response.drag_started_by(egui::PointerButton::Secondary) || response.drag_started_by(egui::PointerButton::Middle)) {
+            self.drag = Drag::Pan;
         }
         // a click on the map: editing it, selects the prop under the pointer (or nothing); planning
         // a route, places the armed action's next point, or selects the path under it
         if editing && response.clicked_by(egui::PointerButton::Primary) {
             self.simulate.selected_prop = response.interact_pointer_pos().and_then(|pos| {
                 let (x, y) = local(pos);
-                let i = self.simulate.prop_at(&cam, x, y, w, h)?;
+                let i = self.simulate.prop_of_item(self.viewport.pick(&items, x, y)?)?;
                 self.simulate.prop_name(i)
             });
         }
@@ -1840,7 +1934,18 @@ impl App {
                 self.simulate.select_at(p, tol);
             }
         }
+        let delta = response.drag_delta();
         match &self.drag {
+            Drag::Orbit if response.dragged() => {
+                self.viewport.camera.yaw += delta.x * 0.5;
+                self.viewport.camera.pitch = (self.viewport.camera.pitch + delta.y * 0.5).clamp(-89.0, 89.0);
+            }
+            Drag::Pan if response.dragged() => {
+                let c = &mut self.viewport.camera;
+                let scale = c.distance * 0.0015;
+                let (r, u) = (c.right(), c.up());
+                c.target = c.target - r * delta.x * scale + u * delta.y * scale;
+            }
             Drag::Prop { i, px0, pose0, grab } if response.dragged() => {
                 let (i, px0, pose0, grab) = (*i, *px0, *pose0, *grab);
                 if let Some((x, y)) = response.interact_pointer_pos().map(local) {
@@ -2125,10 +2230,12 @@ impl App {
     /// One frame of the whole window, drawn with `gpu` (None shows a
     /// notice where the 3D views would be).
     pub fn frame_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
-        if self.tab.plan() != self.camera_tab.plan() {
-            std::mem::swap(&mut self.viewport.camera, &mut self.other_camera);
+        if self.tab != self.camera_tab {
+            // each tab keeps its camera: stow the shown one, take out the new tab's
+            let shown = std::mem::replace(&mut self.viewport.camera, self.cameras[self.tab.index()].clone());
+            self.cameras[self.camera_tab.index()] = shown;
+            self.camera_tab = self.tab;
         }
-        self.camera_tab = self.tab;
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         match self.tab {
@@ -2808,11 +2915,17 @@ mod tests {
                 h.step();
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
+            let a = h.state();
+            let sent: Vec<String> = a.simulate.sent.iter().rev().take(4).map(|c| c["cmd"].to_string()).collect();
             assert!(
-                f(h.state()),
-                "waited in vain: {} / {:?}",
-                h.state().simulate.status(),
-                h.state().simulate.log
+                f(a),
+                "waited in vain: {} / world {} / props {} / selected {:?} / sent {sent:?} / search {:?} / {:?}",
+                a.simulate.status_line(),
+                a.simulate.world(),
+                a.simulate.scene_props(),
+                a.simulate.selected_prop,
+                a.map_search,
+                a.simulate.log
             );
         };
         wait_for(&mut h, &|a| a.simulate.scene_loaded());
@@ -2820,11 +2933,14 @@ mod tests {
         assert_eq!(h.state().tab, Tab::Map);
         assert!(h.query_by_label("Props").is_some() && h.query_by_label("Route").is_none());
         let cam = h.state().viewport.camera.clone();
-        assert!(cam.ortho && cam.pitch == 90.0, "{cam:?}");
-        let map = |h: &Harness<'_, App>, p: [f64; 2]| on_screen(h.state(), Vec3::new(p[0] as f32, p[1] as f32, 0.0));
-        // the stand-in's prop stands at (300, 200) mm: under the pointer it lights, a drag moves
-        // it and the server hears the pose, the point taken hold of staying under the pointer
-        let at = map(&h, [305.0, 200.0]);
+        assert!(!cam.ortho && cam.pitch < 89.0, "the map editor is a 3D view: {cam:?}");
+        assert!(h.query_by_label("Fit").is_some() && h.query_by_label("Iso").is_some() && h.query_by_label("Move").is_none());
+        // a point on a prop's top face, on the screen
+        let top = |h: &Harness<'_, App>, x: f64, y: f64| on_screen(h.state(), Vec3::new(x as f32, y as f32, 20.0));
+        // the stand-in's prop stands at (300, 200) mm, 20 mm tall: under the pointer it lights, a
+        // drag moves it and the server hears the pose, the point taken hold of staying under the
+        // pointer
+        let at = top(&h, 300.0, 200.0);
         h.input_mut().events.push(Event::PointerMoved(at));
         steps(&mut h, 2);
         assert_eq!(h.state().simulate.hover_prop, Some(0));
@@ -2843,16 +2959,16 @@ mod tests {
             .cloned()
             .expect("a move");
         assert_eq!(moved["name"], "clef");
-        let upp = h.state().viewport.camera.units_per_px(h.state().view_rect.height()) as f64;
         let dx = moved["x_mm"].as_f64().unwrap() - 300.0;
-        assert!((dx - 60.0 * upp).abs() < 2.0 * upp + 1.0, "moved {dx} mm for 60 px at {upp} mm/px");
-        assert!((moved["y_mm"].as_f64().unwrap() - 200.0).abs() < 2.0 * upp + 1.0, "{moved}");
+        let dy = moved["y_mm"].as_f64().unwrap() - 200.0;
+        let far = (dx * dx + dy * dy).sqrt();
+        assert!(far > 20.0 && far < 1000.0, "moved ({dx}, {dy}) mm for 60 px");
         assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef"));
         wait_for(&mut h, &|a| {
             a.simulate.prop_pose(0).map(|p| (p.x_mm - 300.0 - dx).abs() < 1.0).unwrap_or(false)
         });
         // shift-drag turns it
-        let at = map(&h, [300.0 + dx, 200.0]);
+        let at = top(&h, 300.0 + dx, 200.0 + dy);
         press(&mut h, at, PointerButton::Primary, Modifiers::SHIFT);
         drag_to(&mut h, at + egui::vec2(10.0, 0.0), Modifiers::SHIFT);
         drag_to(&mut h, at + egui::vec2(100.0, 0.0), Modifiers::SHIFT);
@@ -2886,18 +3002,82 @@ mod tests {
         wait_for(&mut h, &|a| a.simulate.world() == "harness-map" && a.simulate.scene_loaded());
         assert!(crate::markers::Markers::file(&mdir, "harness-map").exists());
         assert!(h.state().simulate.worlds().iter().any(|w| w.alias == "harness-map" && w.user));
-        // Esc deselects; a press on the empty map drags nothing
-        h.get_by_label("clef · clef").click();
+        // a brick from the library: found by number, put on the map as a document, drawn as its
+        // mesh (the server sends the prop's bricks), selected once built
+        let num = h.state().editor.bundle.parts.keys().next().unwrap().clone();
+        let before = h.state().simulate.scene_props();
+        h.state_mut().map_search = num.clone();
         steps(&mut h, 2);
+        h.get_by_label("+ to map").click();
+        wait_for(&mut h, &|a| a.simulate.scene_props() == before + 1);
+        steps(&mut h, 2);
+        let added = h.state().simulate.selected_prop.clone().expect("the new prop is selected");
+        let i = h.state().simulate.selected_prop_index().unwrap();
+        assert!(
+            !h.state().simulate.prop_bricks(i).is_empty(),
+            "a document's prop carries its bricks"
+        );
+        let body = h.state().simulate.prop_body(i).unwrap();
+        assert!(h.state().simulate.item_bodies.contains(&body), "its brick is drawn");
+        // stuck to the map: the checkbox asks the server, the row says so
+        h.get_by_label("stuck to the map").click();
+        wait_for(&mut h, &|a| {
+            a.simulate
+                .selected_prop_index()
+                .map(|i| a.simulate.prop_is_fixed(i))
+                .unwrap_or(false)
+        });
+        steps(&mut h, 2);
+        let kind = h.state().simulate.prop_kind(i).unwrap();
+        assert!(h.query_by_label(&format!("{added} · {kind} · stuck")).is_some());
+        // a component of the Workbench's build, as a document of its own
+        let root = h.state().editor.doc.robot.root.clone();
+        assert!(h.query_by_label("Add to the map").is_some());
+        let sub = assembly::subset(&h.state().editor.doc, &root).unwrap();
+        h.state_mut().simulate.add_model(&root, &sub);
+        wait_for(&mut h, &|a| a.simulate.scene_props() == before + 2);
+        // the 3D view: a drag on the empty map orbits, a right drag pans, the wheel zooms, Fit
+        // frames the map again
         h.key_press(Key::Escape);
         steps(&mut h, 2);
         assert!(h.state().simulate.selected_prop.is_none());
         let rect = h.state().view_rect;
-        let empty = rect.center() - egui::vec2(200.0, 0.0);
+        let cam0 = h.state().viewport.camera.clone();
+        let empty = rect.left_top() + egui::vec2(30.0, 30.0);
         press(&mut h, empty, PointerButton::Primary, Modifiers::NONE);
         drag_to(&mut h, empty + egui::vec2(20.0, 0.0), Modifiers::NONE);
-        assert!(matches!(h.state().drag, Drag::None), "nothing to drag on the empty map, and no pan");
-        release(&mut h, empty + egui::vec2(20.0, 0.0), PointerButton::Primary);
+        assert!(matches!(h.state().drag, Drag::Orbit), "the empty map orbits");
+        drag_to(&mut h, empty + egui::vec2(60.0, 0.0), Modifiers::NONE);
+        release(&mut h, empty + egui::vec2(60.0, 0.0), PointerButton::Primary);
+        assert!((h.state().viewport.camera.yaw - cam0.yaw).abs() > 5.0);
+        press(&mut h, empty, PointerButton::Secondary, Modifiers::NONE);
+        drag_to(&mut h, empty + egui::vec2(20.0, 20.0), Modifiers::NONE);
+        drag_to(&mut h, empty + egui::vec2(60.0, 60.0), Modifiers::NONE);
+        release(&mut h, empty + egui::vec2(60.0, 60.0), PointerButton::Secondary);
+        assert_ne!(h.state().viewport.camera.target, cam0.target);
+        h.input_mut().events.push(Event::PointerMoved(rect.center()));
+        h.input_mut().events.push(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, 40.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        steps(&mut h, 2);
+        assert!(h.state().viewport.camera.distance < cam0.distance, "the wheel zooms in");
+        h.get_by_label("Fit").click();
+        steps(&mut h, 3);
+        assert!(
+            (h.state().viewport.camera.target.x).abs() < 1.0,
+            "{:?}",
+            h.state().viewport.camera.target
+        );
+        // the Simulate tab keeps its own, fixed plan camera
+        h.get_by_label("Simulate").click();
+        steps(&mut h, 2);
+        assert!(h.state().viewport.camera.ortho);
+        h.get_by_label("Map").click();
+        steps(&mut h, 2);
+        assert!(!h.state().viewport.camera.ortho);
         let _ = std::fs::remove_dir_all(&mdir);
     }
 

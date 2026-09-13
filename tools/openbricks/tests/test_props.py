@@ -2,6 +2,7 @@
 """The map editor's text side: props found, moved, added and removed in
 a world's MJCF, and maps saved as the user's own where the server
 lists them."""
+import json
 import os
 import tempfile
 import unittest
@@ -87,6 +88,33 @@ class PropTextTests(unittest.TestCase):
         with self.assertRaises(props.PropError):
             props.with_prop_removed(_TWO, "nothing")
 
+    def test_documents_are_props_too_and_props_can_be_stuck(self):
+        text, name = props.with_model_added(_TWO, "tower", "/abs/tower.assembly.json", 0.25, -0.1, 30.0)
+        self.assertEqual(name, "tower")
+        found = props.props_in(text)
+        self.assertEqual([p["name"] for p in found], ["clef", "note_red", "tower"])
+        t = found[2]
+        self.assertEqual((t["tag"], t["file"], t["pos"], t["yaw"], t["fixed"]), ("assembly_prop", "/abs/tower.assembly.json", (0.25, -0.1, 0.0), 30.0, False))
+        self.assertIn('    <assembly_prop name="tower" file="/abs/tower.assembly.json" pos="0.25000 -0.10000 0.00000" yaw="30"/>\n  </worldbody>', text)
+        text, name = props.with_model_added(text, "tower", "/abs/tower.assembly.json", 0.0, 0.0, 0.0)
+        self.assertEqual(name, "tower_2")
+        # stuck: the flag is written, moving keeps it, a copy keeps it, freeing drops it
+        stuck = props.with_prop_fixed(text, "tower", True)
+        self.assertIn('yaw="30" fixed="true"/>', stuck)
+        self.assertTrue(props.props_in(stuck)[2]["fixed"])
+        moved = props.with_prop_moved(stuck, "tower", 0.5, 0.5, 0.0)
+        self.assertIn('<assembly_prop name="tower" file="/abs/tower.assembly.json" pos="0.50000 0.50000 0.00000" fixed="true"/>', moved)
+        copied, cname = props.with_prop_added(moved, "tower", 0.6, 0.6, 0.0)
+        self.assertEqual(cname, "tower_3")
+        self.assertTrue(next(p for p in props.props_in(copied) if p["name"] == "tower_3")["fixed"], "a copy of a stuck prop is stuck")
+        freed = props.with_prop_fixed(moved, "tower", False)
+        self.assertNotIn("fixed=", freed)
+        lego_stuck = props.with_prop_fixed(_TWO, "note_red", True)
+        self.assertIn('yaw="30" color="red" fixed="true"/>', lego_stuck)
+        self.assertEqual(props.with_prop_removed(text, "tower_2").count("<assembly_prop"), 1)
+        with self.assertRaises(props.PropError):
+            props.with_model_added("<mujoco/>", "x", "/x", 0, 0, 0)
+
     def test_names_become_directory_slugs(self):
         self.assertEqual(props.slug("My Layout 2 "), "my-layout-2")
         self.assertEqual(props.slug("WRO/elementary: notes!"), "wro-elementary-notes")
@@ -125,6 +153,78 @@ class SaveTests(unittest.TestCase):
             # a map without a source directory (the text alone) still saves
             alias3, path3 = props.save_as(None, _TWO, "bare", env=env)
             self.assertEqual(sorted(p.name for p in Path(path3).parent.iterdir()), ["world.xml"])
+            # a model kept under the data directory comes into the map's props/, referenced from there;
+            # two different models of one name keep both
+            staged = props.stage_file('{"a": 1}', "Tower Two", "assembly.json", env=env)
+            self.assertTrue(staged.startswith(str(Path(tmp) / "props" / "tower-two-")) and staged.endswith(".assembly.json"))
+            self.assertEqual(props.stage_file('{"a": 1}', "tower two", "assembly.json", env=env), staged, "the same text is kept once")
+            other = props.stage_file('{"a": 2}', "tower two", "assembly.json", env=env)
+            text, _ = props.with_model_added(_TWO, "tower", staged, 0.1, 0.1, 0.0)
+            text, _ = props.with_model_added(text, "tower", other, 0.2, 0.2, 0.0)
+            alias4, path4 = props.save_as(src, text, "with models", env=env)
+            saved = Path(path4).read_text()
+            self.assertNotIn(tmp, saved, "no absolute paths in a saved map")
+            refs = [p["file"] for p in props.props_in(saved) if p["tag"] == "assembly_prop"]
+            self.assertEqual(len(refs), 2)
+            for ref in refs:
+                self.assertTrue(ref.startswith("props/") and (Path(path4).parent / ref).is_file(), ref)
+            self.assertNotEqual(refs[0], refs[1])
+            with self.assertRaises(props.PropError):
+                props.save_as(src, props.with_model_added(_TWO, "lost", "/no/such/model.assembly.json", 0, 0, 0)[0], "lost", env=env)
+
+    @unittest.skipIf(mujoco is None, "mujoco not installed")
+    def test_a_document_becomes_a_prop_body_free_or_stuck(self):
+        from openbricks_sim import assembly, bricks
+        from openbricks_sim.world import load_world, WorldLoadError
+        from openbricks_sim.chassis import ChassisSpec
+        bundle = bricks.load_bundle()
+        num = sorted(bundle["parts"])[0]
+        rec = bundle["parts"][num]
+        doc = {"format": "openbricks-assembly/1", "units": {"length": "mm"},
+               "parts": {"p": {"name": rec["name"], "category": "lego", "mass_g": rec["mass_g"], "ldraw": num}},
+               "components": {"pair": {"children": [{"name": "a", "part": "p", "pos": [0, 0, 0], "rot": [0, 0, 0]},
+                                                    {"name": "b", "part": "p", "pos": [40, 0, 0], "rot": [0, 0, 90]}]}},
+               "robot": {"name": "pair", "root": "pair"}}
+        out, total = assembly.prop_bricks(doc, bundle)
+        self.assertEqual([b["path"] for b in out], ["a", "b"])
+        self.assertAlmostEqual(total, 2 * rec["mass_g"], places=6)
+        self.assertEqual(out[1]["ldraw"], num)
+        self.assertAlmostEqual(out[1]["mass_g"], rec["mass_g"], places=3)
+        with self.assertRaises(assembly.AssemblyError):
+            assembly.prop_bricks({"format": "nope"}, bundle)
+        with self.assertRaises(assembly.AssemblyError):
+            assembly.prop_bricks(dict(doc, robot={"root": "missing"}), bundle)
+        with self.assertRaises(assembly.AssemblyError):
+            assembly.prop_bricks(dict(doc, components={"pair": {"children": []}}), bundle)
+        free = assembly.prop_body_xml("pair", (0.1, 0.2, 0.0), 90.0, False, out)
+        self.assertIn("<freejoint/>", free)
+        self.assertIn('quat="0.707107 0 0 0.707107"', free)
+        self.assertEqual(free.count("<geom "), 2)
+        stuck = assembly.prop_body_xml("pair", (0.1, 0.2, 0.0), 0.0, True, out)
+        self.assertNotIn("<freejoint/>", stuck)
+        self.assertNotIn("quat=", stuck.splitlines()[0])
+        # in a world: the placeholder expands, loads, and a stuck one has no joint
+        with tempfile.TemporaryDirectory() as tmp:
+            world = Path(tmp) / "w"
+            (world / "props").mkdir(parents=True)
+            (world / "props" / "pair.assembly.json").write_text(json.dumps(doc))
+            xml = _TWO.replace('<lego_prop name="clef" ldr="props/clef.ldr" pos="0.1 0.2 0.005" mass="0.05"/>', "").replace(
+                '<lego_prop name="note_red" ldr="props/note.ldr" pos="-0.3 0 0.005" mass="0.02" yaw="30" color="red"/>',
+                '<assembly_prop name="pair" file="props/pair.assembly.json" pos="0.1 0.2 0.02"/>\n'
+                '    <assembly_prop name="post" file="%s" pos="-0.2 0 0.02" yaw="45" fixed="true"/>' % (world / "props" / "pair.assembly.json"))
+            (world / "world.xml").write_text(xml)
+            m, d, merged = load_world(str(world / "world.xml"), chassis_spec=ChassisSpec())
+            self.assertIn('name="pair_brick:a"', merged)
+            pair = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "pair")
+            post = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "post")
+            self.assertEqual(int(m.body_jntnum[pair]), 1, "free")
+            self.assertEqual(int(m.body_jntnum[post]), 0, "stuck")
+            self.assertGreater(float(m.body_mass[pair]), 0.0)
+            mujoco.mj_forward(m, d)
+            self.assertAlmostEqual(float(d.xpos[post][0]), -0.2, places=5)
+            (world / "world.xml").write_text(xml.replace("props/pair.assembly.json", "props/gone.assembly.json"))
+            with self.assertRaises(WorldLoadError):
+                load_world(str(world / "world.xml"), chassis_spec=ChassisSpec())
 
     @unittest.skipIf(mujoco is None, "mujoco not installed")
     def test_a_saved_shipped_map_loads_with_its_props_where_they_were_put(self):

@@ -15,6 +15,8 @@ Commands (one JSON object per line on stdin)::
     {"cmd": "place", "x_mm": -547, "y_mm": -150, "yaw_deg": 90}
     {"cmd": "move", "name": "clef", "x_mm": 300, "y_mm": -200, "yaw_deg": 45}   # a prop
     {"cmd": "add", "from": "note_red", "x_mm": 0, "y_mm": 0, "yaw_deg": 0}     # another like it
+    {"cmd": "add_model", "name": "tower", "doc": {...openbricks-assembly/1...}, "x_mm": 0, "y_mm": 0, "yaw_deg": 0}
+    {"cmd": "fix", "name": "clef", "fixed": true}   # stuck to the map (false: free again)
     {"cmd": "remove", "name": "note_red_2"}
     {"cmd": "save_world", "name": "My layout"}   # the map as it stands, as the user's own
     {"cmd": "pause"}   {"cmd": "resume"}   {"cmd": "stop"}
@@ -26,7 +28,7 @@ Events (one JSON object per line on stdout)::
     {"ev": "worlds", "worlds": [{"alias", "path", "dir", "user"}, ...]}
     {"ev": "scene", "bodies": [...], "parents": [...], "geoms": [...], "materials": {...},
                     "textures": {...}, "meshes": {...}, "bricks": [...],
-                    "props": [{"name", "body", "kind", "color", "yaw_deg"}, ...],
+                    "props": [{"name", "body", "kind", "color", "yaw_deg", "fixed", "bricks": [...]}, ...],
                     "chassis": {"wheel_diameter_mm", "axle_track_mm", "spawn": {"x_mm", "y_mm", "yaw_deg"}},
                     "timestep_ms": 1}
     {"ev": "saved", "alias": "my-layout", "path": ".../worlds/my-layout/world.xml"}
@@ -248,17 +250,39 @@ class Session:
         self.protocol.send(ev="scene", **scene)
 
     def _props(self):
-        """The map's props as the viewer needs them: name, body id, the
-        model's file stem as its kind, colour and yaw."""
+        """The map's props as the viewer needs them: name, body id, kind
+        (an LDraw model's file stem, or a document's name), colour, yaw,
+        whether it is stuck to the map, and a document's bricks so the
+        viewer can draw them exactly."""
         if not self.world_xml:
             return []
         import mujoco
         out = []
+        world_dir = os.path.dirname(self.world_path) if self.world_path else ""
         for p in props.props_in(self.world_xml):
             bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, p["name"])
-            out.append({"name": p["name"], "body": int(bid), "kind": os.path.splitext(os.path.basename(p["ldr"]))[0],
-                        "color": p["color"], "yaw_deg": p["yaw"]})
+            entry = {"name": p["name"], "body": int(bid), "color": p.get("color"), "yaw_deg": p["yaw"], "fixed": bool(p["fixed"]), "bricks": []}
+            if p["tag"] == "lego_prop":
+                entry["kind"] = os.path.splitext(os.path.basename(p["ldr"]))[0]
+            else:
+                path = p["file"] if os.path.isabs(p["file"]) else os.path.join(world_dir, p["file"])
+                kind, bricks_out = self._model(path)
+                entry["kind"] = kind
+                entry["bricks"] = bricks_out
+            out.append(entry)
         return out
+
+    def _model(self, path):
+        """A document's name and bricks, read once per file."""
+        cache = self.__dict__.setdefault("_models", {})
+        if path not in cache:
+            from openbricks_sim import assembly as assembly_mod
+            with open(path) as fh:
+                doc = json.load(fh)
+            bricks_out, _ = assembly_mod.prop_bricks(doc)
+            robot = doc.get("robot") or {}
+            cache[path] = (robot.get("name") or robot.get("root") or "model", bricks_out)
+        return cache[path]
 
     # ------------------------------------------------------ the map editor
     def _editable(self, what):
@@ -307,6 +331,28 @@ class Session:
         xml, name = props.with_prop_added(self.world_xml, from_name, float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg))
         self._reload(xml)
         return name
+
+    def add_model(self, name, doc, x_mm, y_mm, yaw_deg=0.0):
+        """A document (what the Workbench builds, or one brick) placed as
+        a new, free prop: the document is kept under the data directory
+        until the map is saved, the map's text gains the prop, and the
+        world reloads. Returns the prop's name."""
+        self._editable("add to")
+        from openbricks_sim import assembly as assembly_mod
+        if not isinstance(doc, dict):
+            raise RuntimeError("add_model needs the document itself (a JSON object)")
+        assembly_mod.prop_bricks(doc)          # loud before anything is written
+        path = props.stage_file(json.dumps(doc, separators=(",", ":"), sort_keys=True), name, "assembly.json")
+        xml, prop_name = props.with_model_added(self.world_xml, props.slug(name).replace("-", "_"), path,
+                                                float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg))
+        self._reload(xml)
+        return prop_name
+
+    def fix_prop(self, name, fixed):
+        """Stick a prop to the map (no free joint: nothing moves it but
+        the editor), or free it again; the world reloads either way."""
+        self._editable("edit")
+        self._reload(props.with_prop_fixed(self.world_xml, name, bool(fixed)))
 
     def remove_prop(self, name):
         self._editable("edit")
@@ -491,6 +537,10 @@ def serve(stdin=None, stdout=None, frame_hz=60.0):
                 session.move_prop(cmd["name"], cmd["x_mm"], cmd["y_mm"], cmd.get("yaw_deg", 0.0))
             elif name == "add":
                 session.add_prop(cmd["from"], cmd["x_mm"], cmd["y_mm"], cmd.get("yaw_deg", 0.0))
+            elif name == "add_model":
+                session.add_model(cmd["name"], cmd["doc"], cmd["x_mm"], cmd["y_mm"], cmd.get("yaw_deg", 0.0))
+            elif name == "fix":
+                session.fix_prop(cmd["name"], cmd.get("fixed", True))
             elif name == "remove":
                 session.remove_prop(cmd["name"])
             elif name == "save_world":
