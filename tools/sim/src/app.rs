@@ -40,13 +40,30 @@ impl From<&RenderState> for Gpu {
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum Tab {
     Workbench,
+    /// The map editor: props moved, added, removed; the map saved as the user's own.
+    Map,
     Simulate,
+}
+
+impl Tab {
+    /// The Map and Simulate tabs share the fixed plan view.
+    fn plan(self) -> bool {
+        self != Tab::Workbench
+    }
 }
 
 enum Drag {
     None,
     Orbit,
     Pan,
+    /// A prop dragged on the map: which, the pointer x it started at, the
+    /// pose it started from, and where the pointer took hold of it.
+    Prop {
+        i: usize,
+        px0: f32,
+        pose0: Pose2,
+        grab: [f64; 2],
+    },
     Move {
         z0: f32,
         start: Vec3,
@@ -86,6 +103,8 @@ pub struct App {
     /// Simulate tab is a fixed top-down plan; switching tabs swaps them.
     other_camera: Camera,
     camera_tab: Tab,
+    /// The plan view's size last frame: a change refits the map.
+    plan_size: (u32, u32),
     drag: Drag,
     /// Where the 3D view was drawn last frame, in screen points.
     view_rect: egui::Rect,
@@ -151,6 +170,7 @@ impl App {
             viewport,
             other_camera: Camera::top_down(),
             camera_tab: Tab::Workbench,
+            plan_size: (0, 0),
             drag: Drag::None,
             view_rect: egui::Rect::ZERO,
             items: vec![],
@@ -465,7 +485,7 @@ impl App {
     }
 
     fn fit_view(&mut self) {
-        if self.tab == Tab::Simulate {
+        if self.tab.plan() {
             self.simulate.refit();
             return;
         }
@@ -806,6 +826,7 @@ impl App {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Workbench, "Workbench");
+            ui.selectable_value(&mut self.tab, Tab::Map, "Map");
             ui.selectable_value(&mut self.tab, Tab::Simulate, "Simulate");
             ui.separator();
             if ui.button("Open…").clicked()
@@ -846,16 +867,12 @@ impl App {
                 }
             }
             ui.separator();
-            if ui
-                .button("Fit")
-                .on_hover_text(if self.tab == Tab::Simulate { "F: the whole map" } else { "F" })
-                .clicked()
-            {
-                self.fit_view();
-            }
-            if self.tab == Tab::Simulate {
-                ui.weak("plan view: drag to pan, wheel to zoom");
+            if self.tab.plan() {
+                ui.weak("plan view: the whole map, fitted");
                 return;
+            }
+            if ui.button("Fit").on_hover_text("F").clicked() {
+                self.fit_view();
             }
             for (name, yaw, pitch) in [
                 ("Iso", -128.0f32, 28.0f32),
@@ -1613,6 +1630,22 @@ impl App {
         });
     }
 
+    /// The Map tab: the map editor's panel and the plan view.
+    fn map_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
+        self.simulate.ensure_loaded();
+        if self.simulate.pump() || self.simulate.is_live() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        }
+        egui::Panel::right("map-editor")
+            .default_size(360.0)
+            .size_range(300.0..=520.0)
+            .resizable(true)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.simulate.map_ui(ui));
+            });
+        egui::CentralPanel::default().show(ui, |ui| self.sim_view_ui(ui, gpu));
+    }
+
     fn simulate_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
         self.simulate.ensure_loaded();
         if self.simulate.pump() || self.simulate.is_live() {
@@ -1662,8 +1695,19 @@ impl App {
             .simulate
             .draw_items(&mut self.viewport, &gpu.device, &gpu.queue, &self.editor.bundle, dark);
         let (items, lines, ghost) = (draw.items, draw.lines, draw.ghost);
-        // markers and the route: over the map, whatever is drawn on it
-        let top = self.simulate.route_lines(dark);
+        let editing = self.tab == Tab::Map;
+        // over the map, whatever is drawn on it: the props' outlines when editing the map, else
+        // the markers and the route
+        let top = if editing {
+            self.simulate.prop_lines(dark)
+        } else {
+            self.simulate.route_lines(dark)
+        };
+        // the plan view never pans or zooms: it fits the map, and again whenever its size changes
+        if self.plan_size != size {
+            self.plan_size = size;
+            self.simulate.refit();
+        }
         if let Some((lo, hi)) = self.simulate.frame_target() {
             self.viewport.camera.fit_plan(lo, hi, size.0 as f32 / size.1.max(1) as f32);
         }
@@ -1686,13 +1730,6 @@ impl App {
         };
         let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
         self.view_rect = response.rect;
-        if response.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0);
-                self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(20.0, 50000.0);
-            }
-        }
         let rect = response.rect;
         let (w, h) = (size.0 as f32, size.1 as f32);
         let local = |p: egui::Pos2| (p.x - rect.min.x, p.y - rect.min.y);
@@ -1702,7 +1739,7 @@ impl App {
             viewport::ray_plane_z(o, d, 0.0)
         };
         let shift = ui.input(|i| i.modifiers.shift);
-        // the pointer on the map, for the rubber band of a placement
+        // the pointer on the map, for the rubber band of a placement, and the prop under it
         self.simulate.hover = response
             .hover_pos()
             .and_then(|p| {
@@ -1710,16 +1747,47 @@ impl App {
                 ground(x, y)
             })
             .map(|h| [h.x as f64, h.y as f64]);
-        // a press on a route handle drags it, on a path drags the path, on the chassis moves it; anywhere else pans
+        self.simulate.hover_prop = if editing {
+            response.hover_pos().and_then(|p| {
+                let (x, y) = local(p);
+                self.simulate.prop_at(&cam, x, y, w, h)
+            })
+        } else {
+            None
+        };
+        // a press on a prop (editing the map), a route handle or a path drags it, on the chassis
+        // moves it; anywhere else nothing: the plan view does not pan
         if response.drag_started_by(egui::PointerButton::Primary) {
             let origin = ui
                 .input(|i| i.pointer.press_origin())
                 .map(local)
                 .or(response.interact_pointer_pos().map(local));
-            self.drag = Drag::Pan;
-            let marker = origin.and_then(|(x, y)| self.simulate.marker_at(&cam, x, y, w, h));
-            let handle = origin.and_then(|(x, y)| Some((self.simulate.route_handle_at(&cam, x, y, w, h)?, ground(x, y)?)));
-            if let Some(i) = marker {
+            self.drag = Drag::None;
+            let marker = if editing {
+                None
+            } else {
+                origin.and_then(|(x, y)| self.simulate.marker_at(&cam, x, y, w, h))
+            };
+            let handle = if editing {
+                None
+            } else {
+                origin.and_then(|(x, y)| Some((self.simulate.route_handle_at(&cam, x, y, w, h)?, ground(x, y)?)))
+            };
+            let prop = if editing {
+                origin.and_then(|(x, y)| Some((self.simulate.prop_at(&cam, x, y, w, h)?, ground(x, y)?, x)))
+            } else {
+                None
+            };
+            if let Some((i, hit, x)) = prop {
+                if let Some(pose0) = self.simulate.begin_prop_drag(i) {
+                    self.drag = Drag::Prop {
+                        i,
+                        px0: x,
+                        pose0,
+                        grab: [pose0.x_mm - hit.x as f64, pose0.y_mm - hit.y as f64],
+                    };
+                }
+            } else if let Some(i) = marker {
                 if self.simulate.begin_marker_drag(i) {
                     self.drag = Drag::Marker;
                 }
@@ -1740,11 +1808,17 @@ impl App {
                 }
             }
         }
-        if response.drag_started_by(egui::PointerButton::Secondary) || response.drag_started_by(egui::PointerButton::Middle) {
-            self.drag = Drag::Pan;
+        // a click on the map: editing it, selects the prop under the pointer (or nothing); planning
+        // a route, places the armed action's next point, or selects the path under it
+        if editing && response.clicked_by(egui::PointerButton::Primary) {
+            self.simulate.selected_prop = response.interact_pointer_pos().and_then(|pos| {
+                let (x, y) = local(pos);
+                let i = self.simulate.prop_at(&cam, x, y, w, h)?;
+                self.simulate.prop_name(i)
+            });
         }
-        // a click on the map places the armed action's next point, or selects the path under it
-        if response.clicked_by(egui::PointerButton::Primary)
+        if !editing
+            && response.clicked_by(egui::PointerButton::Primary)
             && self.simulate.draft.is_none()
             && let Some(pos) = response.interact_pointer_pos()
             && let Some(hit) = {
@@ -1766,14 +1840,28 @@ impl App {
                 self.simulate.select_at(p, tol);
             }
         }
-        let delta = response.drag_delta();
         match &self.drag {
-            Drag::Pan if response.dragged() => {
-                // the map sticks to the pointer
-                let c = &mut self.viewport.camera;
-                let scale = c.units_per_px(h);
-                let (r, u) = (c.right(), c.up());
-                c.target = c.target - r * delta.x * scale + u * delta.y * scale;
+            Drag::Prop { i, px0, pose0, grab } if response.dragged() => {
+                let (i, px0, pose0, grab) = (*i, *px0, *pose0, *grab);
+                if let Some((x, y)) = response.interact_pointer_pos().map(local) {
+                    let pose = if shift {
+                        // shift turns it: a screen-width drag is a full turn
+                        Pose2 {
+                            yaw_deg: pose0.yaw_deg - ((x - px0) * 360.0 / w.max(1.0)) as f64,
+                            ..pose0
+                        }
+                    } else if let Some(hit) = ground(x, y) {
+                        // it keeps the point it was taken hold of under the pointer
+                        Pose2 {
+                            x_mm: hit.x as f64 + grab[0],
+                            y_mm: hit.y as f64 + grab[1],
+                            yaw_deg: pose0.yaw_deg,
+                        }
+                    } else {
+                        pose0
+                    };
+                    self.simulate.drag_prop(i, pose);
+                }
             }
             Drag::Chassis { px0, pose0 } if response.dragged() => {
                 let (px0, pose0) = (*px0, *pose0);
@@ -1815,6 +1903,7 @@ impl App {
         }
         if response.drag_stopped() {
             match self.drag {
+                Drag::Prop { .. } => self.simulate.end_prop_drag(),
                 Drag::Chassis { .. } => self.simulate.end_chassis_drag(),
                 Drag::RouteHandle => self.simulate.end_handle_drag(),
                 Drag::Marker => self.simulate.end_marker_drag(),
@@ -1822,7 +1911,29 @@ impl App {
             }
             self.drag = Drag::None;
         }
-        if !ui.ctx().egui_wants_keyboard_input() {
+        if editing && !ui.ctx().egui_wants_keyboard_input() {
+            let (esc, del, dup, fit) = ui.input(|i| {
+                (
+                    i.key_pressed(egui::Key::Escape),
+                    i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
+                    i.modifiers.command && i.key_pressed(egui::Key::D),
+                    i.key_pressed(egui::Key::F),
+                )
+            });
+            if esc {
+                self.simulate.selected_prop = None;
+            }
+            if del {
+                self.simulate.remove_selected_prop();
+            }
+            if dup {
+                self.simulate.duplicate_selected_prop();
+            }
+            if fit {
+                self.simulate.refit();
+            }
+        }
+        if !editing && !ui.ctx().egui_wants_keyboard_input() {
             let mut copy = false;
             let mut cut = false;
             let mut paste = None;
@@ -1913,7 +2024,12 @@ impl App {
                 egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180),
             )
         };
-        for (p, text) in self.simulate.route_labels(&cam, w, h) {
+        let labels = if editing {
+            self.simulate.prop_labels(&cam, w, h)
+        } else {
+            self.simulate.route_labels(&cam, w, h)
+        };
+        for (p, text) in labels {
             let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(13.0), label_color);
             let anchor = rect.min + egui::vec2(p.x, p.y);
             let r = egui::Rect::from_min_size(anchor - egui::vec2(0.0, galley.size().y), galley.size()).expand(2.0);
@@ -1924,11 +2040,13 @@ impl App {
             // the click's ring fades out and the rubber band follows the pointer
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
         }
-        self.simulate.draft_ui(ui.ctx());
+        if !editing {
+            self.simulate.draft_ui(ui.ctx());
+        }
         ui.painter().text(
             response.rect.left_bottom() + egui::vec2(8.0, -8.0),
             egui::Align2::LEFT_BOTTOM,
-            self.simulate.hint(),
+            if editing { self.simulate.map_hint() } else { self.simulate.hint() },
             egui::FontId::monospace(11.0),
             ui.visuals().weak_text_color(),
         );
@@ -2007,15 +2125,18 @@ impl App {
     /// One frame of the whole window, drawn with `gpu` (None shows a
     /// notice where the 3D views would be).
     pub fn frame_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
-        if self.tab != self.camera_tab {
+        if self.tab.plan() != self.camera_tab.plan() {
             std::mem::swap(&mut self.viewport.camera, &mut self.other_camera);
-            self.camera_tab = self.tab;
         }
+        self.camera_tab = self.tab;
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         match self.tab {
             Tab::Simulate => {
                 self.simulate_ui(ui, gpu);
+            }
+            Tab::Map => {
+                self.map_ui(ui, gpu);
             }
             Tab::Workbench => {
                 self.stl_window(ui.ctx());
@@ -2219,10 +2340,11 @@ mod tests {
         assert!(h.query_by_label("Iso").is_none() && h.query_by_label("Move").is_none() && h.query_by_label("ground").is_none());
         let cam = h.state().viewport.camera.clone();
         assert!(cam.ortho && cam.pitch == 90.0 && cam.yaw == -90.0, "{cam:?}");
-        assert!(!h.state().simulate.fit_is_pending());
-        h.get_by_label("Fit").click();
-        h.step();
-        assert!(h.state().simulate.fit_is_pending(), "Fit frames the map once it is there");
+        assert!(h.state().simulate.fit_is_pending(), "the plan fits the map as soon as it is there");
+        assert!(
+            h.query_by_label("Fit").is_none(),
+            "nothing to fit by hand: the plan is the whole map"
+        );
         // and back: the workbench's camera is as it was left
         h.get_by_label("Workbench").click();
         steps(&mut h, 2);
@@ -2616,58 +2738,40 @@ mod tests {
         h.get_by_label("clear").click();
         h.step();
         assert!(h.state().simulate.log.is_empty());
-        // the sim view is a plan: a drag pans it with the map stuck to the pointer, and never tilts it
+        // the sim view is a plan that neither pans nor zooms: a drag on the empty map, a right
+        // drag and the wheel leave the camera where the fit put it
         let rect = h.state().view_rect;
         let cam0 = h.state().viewport.camera.clone();
         assert!(cam0.ortho && cam0.pitch == 90.0, "{cam0:?}");
         // away from the chassis, which the run parked near the mat's centre
         let at = rect.center() + egui::vec2(300.0, 0.0);
-        let under0 = {
-            let (o, d) = cam0.ray(at.x - rect.min.x, at.y - rect.min.y, rect.width(), rect.height());
-            viewport::ray_plane_z(o, d, 0.0).unwrap()
-        };
         press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
         drag_to(&mut h, at + egui::vec2(10.0, 0.0), Modifiers::NONE);
-        assert!(matches!(h.state().drag, Drag::Pan), "empty map: pan");
+        assert!(matches!(h.state().drag, Drag::None), "empty map: nothing to drag");
         drag_to(&mut h, at + egui::vec2(50.0, 0.0), Modifiers::NONE);
         release(&mut h, at + egui::vec2(50.0, 0.0), PointerButton::Primary);
-        let cam = h.state().viewport.camera.clone();
-        assert_eq!((cam.yaw, cam.pitch, cam.ortho), (cam0.yaw, cam0.pitch, true));
-        let under = {
-            let p = at + egui::vec2(50.0, 0.0);
-            let (o, d) = cam.ray(p.x - rect.min.x, p.y - rect.min.y, rect.width(), rect.height());
-            viewport::ray_plane_z(o, d, 0.0).unwrap()
-        };
-        assert!(
-            (under - under0).length() < 1.0,
-            "the map point under the pointer came along: {under:?} vs {under0:?}"
-        );
-        assert!(cam.target.x < cam0.target.x - 10.0, "{:?} vs {:?}", cam.target, cam0.target);
-        let target0 = h.state().viewport.camera.target;
         press(&mut h, at, PointerButton::Secondary, Modifiers::NONE);
         drag_to(&mut h, at + egui::vec2(10.0, 10.0), Modifiers::NONE);
         drag_to(&mut h, at + egui::vec2(40.0, 40.0), Modifiers::NONE);
         release(&mut h, at + egui::vec2(40.0, 40.0), PointerButton::Secondary);
-        assert_ne!(h.state().viewport.camera.target, target0);
-        // F frames the whole map again
+        h.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, 40.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        steps(&mut h, 2);
+        let cam = h.state().viewport.camera.clone();
+        assert_eq!(
+            (cam.target, cam.distance, cam.yaw, cam.pitch, cam.ortho),
+            (cam0.target, cam0.distance, cam0.yaw, cam0.pitch, true)
+        );
+        // F asks for the fit again, which lands where it was
         h.key_press(Key::F);
         steps(&mut h, 2);
         let fitted = h.state().viewport.camera.clone();
-        assert!(
-            (fitted.target.x).abs() < 1.0 && (fitted.target.y).abs() < 1.0,
-            "{:?}",
-            fitted.target
-        );
-        // following keeps the camera on the chassis whatever the pan
-        h.get_by_label("follow the robot").click();
-        steps(&mut h, 2);
-        assert!(h.state().simulate.follows());
-        let on_robot = h.state().viewport.camera.target;
-        press(&mut h, at, PointerButton::Secondary, Modifiers::NONE);
-        drag_to(&mut h, at + egui::vec2(10.0, 10.0), Modifiers::NONE);
-        drag_to(&mut h, at + egui::vec2(40.0, 40.0), Modifiers::NONE);
-        release(&mut h, at + egui::vec2(40.0, 40.0), PointerButton::Secondary);
-        assert_eq!(h.state().viewport.camera.target, on_robot);
+        assert!((fitted.target - cam0.target).length() < 1.0, "{:?}", fitted.target);
+        assert!(h.query_by_label("follow the robot").is_none(), "nothing moves the plan view");
         // the workbench's build is offered once saved
         assert!(h.get_by_label("Use the workbench's build").accesskit_node().is_disabled());
         let path = fake.dir.join("robot.assembly.json");
@@ -2686,6 +2790,115 @@ mod tests {
         );
         h.state_mut().simulate.shutdown();
         let _ = std::fs::remove_dir_all(&fake.dir);
+    }
+
+    #[test]
+    fn the_map_tab_moves_duplicates_removes_and_saves_props() {
+        let Some(gpu) = gpu() else { return };
+        let Some(fake) = fake_server("map") else { return };
+        let mut h = harness(&gpu, None);
+        h.state_mut().simulate = SimulateTab::new_with_env(Some(fake.python.clone()), fake.env.clone());
+        let mdir = std::env::temp_dir().join(format!("ob-harness-map-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&mdir);
+        h.state_mut().simulate.markers_dir = mdir.clone();
+        h.get_by_label("Map").click();
+        let wait_for = |h: &mut Harness<'_, App>, f: &dyn Fn(&App) -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while !f(h.state()) && std::time::Instant::now() < deadline {
+                h.step();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(
+                f(h.state()),
+                "waited in vain: {} / {:?}",
+                h.state().simulate.status(),
+                h.state().simulate.log
+            );
+        };
+        wait_for(&mut h, &|a| a.simulate.scene_loaded());
+        steps(&mut h, 3);
+        assert_eq!(h.state().tab, Tab::Map);
+        assert!(h.query_by_label("Props").is_some() && h.query_by_label("Route").is_none());
+        let cam = h.state().viewport.camera.clone();
+        assert!(cam.ortho && cam.pitch == 90.0, "{cam:?}");
+        let map = |h: &Harness<'_, App>, p: [f64; 2]| on_screen(h.state(), Vec3::new(p[0] as f32, p[1] as f32, 0.0));
+        // the stand-in's prop stands at (300, 200) mm: under the pointer it lights, a drag moves
+        // it and the server hears the pose, the point taken hold of staying under the pointer
+        let at = map(&h, [305.0, 200.0]);
+        h.input_mut().events.push(Event::PointerMoved(at));
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.hover_prop, Some(0));
+        press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, at + egui::vec2(10.0, 0.0), Modifiers::NONE);
+        assert!(matches!(h.state().drag, Drag::Prop { i: 0, .. }), "a prop drag");
+        drag_to(&mut h, at + egui::vec2(60.0, 0.0), Modifiers::NONE);
+        release(&mut h, at + egui::vec2(60.0, 0.0), PointerButton::Primary);
+        steps(&mut h, 2);
+        let moved = h
+            .state()
+            .simulate
+            .sent
+            .iter()
+            .rfind(|c| c["cmd"] == "move")
+            .cloned()
+            .expect("a move");
+        assert_eq!(moved["name"], "clef");
+        let upp = h.state().viewport.camera.units_per_px(h.state().view_rect.height()) as f64;
+        let dx = moved["x_mm"].as_f64().unwrap() - 300.0;
+        assert!((dx - 60.0 * upp).abs() < 2.0 * upp + 1.0, "moved {dx} mm for 60 px at {upp} mm/px");
+        assert!((moved["y_mm"].as_f64().unwrap() - 200.0).abs() < 2.0 * upp + 1.0, "{moved}");
+        assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef"));
+        wait_for(&mut h, &|a| {
+            a.simulate.prop_pose(0).map(|p| (p.x_mm - 300.0 - dx).abs() < 1.0).unwrap_or(false)
+        });
+        // shift-drag turns it
+        let at = map(&h, [300.0 + dx, 200.0]);
+        press(&mut h, at, PointerButton::Primary, Modifiers::SHIFT);
+        drag_to(&mut h, at + egui::vec2(10.0, 0.0), Modifiers::SHIFT);
+        drag_to(&mut h, at + egui::vec2(100.0, 0.0), Modifiers::SHIFT);
+        release(&mut h, at + egui::vec2(100.0, 0.0), PointerButton::Primary);
+        steps(&mut h, 2);
+        let turned = h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "move").cloned().unwrap();
+        assert!(turned["yaw_deg"].as_f64().unwrap().abs() > 5.0, "{turned}");
+        // ⌘D duplicates (the newest prop selected once built), Del removes it
+        h.key_press_modifiers(Modifiers::COMMAND, Key::D);
+        wait_for(&mut h, &|a| a.simulate.prop_name(1).is_some());
+        assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef_2"));
+        h.key_press(Key::Delete);
+        wait_for(&mut h, &|a| a.simulate.prop_name(1).is_none());
+        assert!(h.state().simulate.selected_prop.is_none());
+        // the panel: a row selects, the buttons duplicate and remove, Save writes a map of the
+        // user's own that the tab then shows, listed as theirs, its markers carried over
+        h.get_by_label("clef · clef").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef"));
+        h.get_by_label("Duplicate").click();
+        wait_for(&mut h, &|a| a.simulate.prop_name(1).is_some());
+        h.get_by_label("Remove").click();
+        wait_for(&mut h, &|a| a.simulate.prop_name(1).is_none());
+        h.state_mut().simulate.markers.markers.push(crate::markers::Marker {
+            name: "corner".into(),
+            at: [1.0, 2.0],
+        });
+        h.state_mut().simulate.save_name = "Harness Map".into();
+        steps(&mut h, 2);
+        h.get_by_label("Save map").click();
+        wait_for(&mut h, &|a| a.simulate.world() == "harness-map" && a.simulate.scene_loaded());
+        assert!(crate::markers::Markers::file(&mdir, "harness-map").exists());
+        assert!(h.state().simulate.worlds().iter().any(|w| w.alias == "harness-map" && w.user));
+        // Esc deselects; a press on the empty map drags nothing
+        h.get_by_label("clef · clef").click();
+        steps(&mut h, 2);
+        h.key_press(Key::Escape);
+        steps(&mut h, 2);
+        assert!(h.state().simulate.selected_prop.is_none());
+        let rect = h.state().view_rect;
+        let empty = rect.center() - egui::vec2(200.0, 0.0);
+        press(&mut h, empty, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, empty + egui::vec2(20.0, 0.0), Modifiers::NONE);
+        assert!(matches!(h.state().drag, Drag::None), "nothing to drag on the empty map, and no pan");
+        release(&mut h, empty + egui::vec2(20.0, 0.0), PointerButton::Primary);
+        let _ = std::fs::remove_dir_all(&mdir);
     }
 
     #[test]

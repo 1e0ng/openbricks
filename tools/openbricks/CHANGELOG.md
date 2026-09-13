@@ -3,6 +3,45 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.14.0 — a Map tab: props moved, added, removed, and the map saved as your own
+
+The sim's third tab edits the map itself. Each `<lego_prop>` on a
+world is a prop: drag it to move it, shift-drag to turn it, `⌘D`
+duplicates it a little to the side, `Del` removes it, **Add…** puts
+one of any kind the map has at the origin. The run server moves the
+live body at once and rewrites the prop's placeholder in the world
+text it holds (a chassis place, which resets the physics, keeps the
+prop where it was put); adding or removing rebuilds the world with the
+chassis where it stands. **Save as a new map** writes that text —
+every prop where it is, the ones added included, with the artwork and
+the props' models — to `worlds/<name>/` under the data directory,
+where the server lists it beside the shipped ones ("yours"), the tab
+switches to it and its markers come along. New server commands
+`move`, `add`, `remove` and `save_world`; the scene event carries
+`props` and `parents`; `<lego_prop>` takes a `yaw`. Format: the
+world list marks user maps; `openbricks_sim.props` holds the text
+editing and the data directory rule.
+
+The plan view (Map and Simulate) is fixed: the whole map, fitted edge
+to edge, never panned or zoomed — the drag, the wheel and the Fit
+button that moved it are gone, as is "follow the robot" (the robot
+is always in view).
+
+The route planner's program calls its drive base `robot`, not `db`
+(`robot = DriveBase(left, right, …)`, `robot.straight(…)`), which
+reads as what it is when the program lands on a hub.
+
+- Tests: the props module (parsing, move/add/remove in the text,
+  slugs, saving with the map's files, listing, replacing by name,
+  refusing shipped names); the session's move (live pose, kept across
+  a place), add, remove and save with the real runtime, and the
+  editor commands over the protocol; the tab's footprints, hit test,
+  drag throttling, duplicate/add/remove, selection kept by name,
+  save switching the map with its markers, refusal while running;
+  the harness's Map tab (hover, drag, shift-turn, ⌘D, Del, the
+  panel's rows and buttons, Save); the plan neither panning nor
+  zooming; every program expectation reading `robot.`.
+
 ## 4.13.0 — a curve is radius and angle from the robot's heading; paths three pixels wide
 
 A curve was placed as the circle through two clicked points at a

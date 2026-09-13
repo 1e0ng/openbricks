@@ -114,7 +114,6 @@ pub struct SimulateTab {
     message: String,
     textures_loaded: HashMap<String, bool>,
     fit_pending: bool,
-    follow: bool,
     pending_load: bool,
     scene_gen: u32,
     /// The default map is loaded once, when the tab first shows.
@@ -156,6 +155,15 @@ pub struct SimulateTab {
     pub chassis_items: Vec<usize>,
     /// The chassis's items in its own frame: mesh, placement, colour.
     chassis_locals: Vec<(String, Mat4, [f32; 4])>,
+    /// The map editor: the prop lit on the map and in the list, by name
+    /// (props are renumbered when the map is rebuilt), the one under the
+    /// pointer, the pose last sent for a drag, whether the next map should
+    /// select its newest prop (just added), and the name to save the map as.
+    pub selected_prop: Option<String>,
+    pub hover_prop: Option<usize>,
+    prop_sent: Option<Pose2>,
+    select_new_prop: bool,
+    pub save_name: String,
     /// Every command sent, for tests.
     #[cfg(test)]
     pub sent: Vec<serde_json::Value>,
@@ -189,7 +197,6 @@ impl SimulateTab {
             message: String::new(),
             textures_loaded: HashMap::new(),
             fit_pending: false,
-            follow: false,
             pending_load: false,
             scene_gen: 0,
             auto_loaded: false,
@@ -213,16 +220,17 @@ impl SimulateTab {
             show_definitions: false,
             chassis_items: vec![],
             chassis_locals: vec![],
+            selected_prop: None,
+            hover_prop: None,
+            prop_sent: None,
+            select_new_prop: false,
+            save_name: String::new(),
             #[cfg(test)]
             sent: vec![],
         }
     }
 
     #[cfg(test)]
-    pub fn follows(&self) -> bool {
-        self.follow
-    }
-
     #[cfg(test)]
     pub fn status(&self) -> &str {
         &self.status
@@ -370,8 +378,32 @@ impl SimulateTab {
                         (None, Some(c)) => self.route.start = c.spawn,
                         (None, None) => {}
                     }
+                    // the selected prop stays selected by name; a prop just added (the one the map
+                    // did not have) is selected
+                    if self.select_new_prop {
+                        self.select_new_prop = false;
+                        let had: Vec<&str> = self
+                            .scene
+                            .iter()
+                            .flat_map(|old| old.props.iter().map(|p| p.name.as_str()))
+                            .collect();
+                        self.selected_prop = s.props.iter().find(|p| !had.contains(&p.name.as_str())).map(|p| p.name.clone());
+                    } else if let Some(n) = &self.selected_prop
+                        && !s.props.iter().any(|p| &p.name == n)
+                    {
+                        self.selected_prop = None;
+                    }
+                    self.hover_prop = None;
                     self.scene = Some(*s);
                     self.fit_pending = true;
+                }
+                Event::Saved { alias, path } => {
+                    // the map is the user's own now: its markers come along, and it is the map shown
+                    self.message = format!("saved as {alias}: {path}");
+                    self.markers.world = alias.clone();
+                    self.save_markers();
+                    self.world = alias;
+                    self.load();
                 }
                 Event::Frame { t_ms, poses } => {
                     self.t_ms = t_ms;
@@ -1997,17 +2029,10 @@ impl SimulateTab {
         }
     }
 
-    /// Where the camera should look: the mat's extent on first load, the
-    /// chassis while following.
+    /// Where the camera should look when a fit is due: the mat's extent
+    /// (the plan view never pans or zooms).
     pub fn frame_target(&mut self) -> Option<(Vec3, Vec3)> {
         let scene = self.scene.as_ref()?;
-        if self.follow
-            && let Some(cid) = scene.body_id("chassis")
-        {
-            let p = self.poses.get(cid)?;
-            let c = Vec3::new(p.pos[0] as f32, p.pos[1] as f32, p.pos[2] as f32) * M_TO_MM;
-            return Some((c - Vec3::splat(250.0), c + Vec3::splat(250.0)));
-        }
         if !self.fit_pending {
             return None;
         }
@@ -2027,30 +2052,7 @@ impl SimulateTab {
     pub fn controls(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label("map");
-            let aliases: Vec<String> = if self.worlds.is_empty() {
-                vec![
-                    "practice-line".into(),
-                    "practice-zones".into(),
-                    "practice-walls".into(),
-                    "wro-2026-elementary".into(),
-                    "wro-2026-junior".into(),
-                    "wro-2026-senior".into(),
-                    "empty".into(),
-                ]
-            } else {
-                self.worlds.iter().map(|w| w.alias.clone()).collect()
-            };
-            let before = self.world.clone();
-            egui::ComboBox::from_id_salt("world")
-                .selected_text(self.world.clone())
-                .show_ui(ui, |ui| {
-                    for a in aliases {
-                        ui.selectable_value(&mut self.world, a.clone(), a);
-                    }
-                });
-            if self.world != before {
-                self.reload();
-            }
+            self.world_picker(ui);
             ui.label("chassis");
             let chassis_label = self
                 .chassis
@@ -2116,7 +2118,6 @@ impl SimulateTab {
                 self.speed_sent = self.speed;
                 self.send(serde_json::json!({"cmd": "speed", "factor": self.speed}));
             }
-            ui.checkbox(&mut self.follow, "follow the robot");
             ui.separator();
             ui.monospace(format!("{} · t = {:.2} s", self.status, self.t_ms as f64 / 1000.0));
             if let Some(e) = &self.error {
@@ -2281,6 +2282,475 @@ fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], w
 
 fn srgb_to_linear(c: f32) -> f32 {
     c.clamp(0.0, 1.0).powf(2.2)
+}
+
+impl SimulateTab {
+    /// The map to load: the shipped ones and the user's own (marked), a
+    /// change loading it at once.
+    pub fn world_picker(&mut self, ui: &mut egui::Ui) {
+        let choices: Vec<(String, String)> = if self.worlds.is_empty() {
+            [
+                "practice-line",
+                "practice-zones",
+                "practice-walls",
+                "wro-2026-elementary",
+                "wro-2026-junior",
+                "wro-2026-senior",
+                "empty",
+            ]
+            .iter()
+            .map(|a| (a.to_string(), a.to_string()))
+            .collect()
+        } else {
+            self.worlds
+                .iter()
+                .map(|w| {
+                    (
+                        w.alias.clone(),
+                        if w.user { format!("{} (yours)", w.alias) } else { w.alias.clone() },
+                    )
+                })
+                .collect()
+        };
+        let before = self.world.clone();
+        egui::ComboBox::from_id_salt("world")
+            .selected_text(self.world.clone())
+            .show_ui(ui, |ui| {
+                for (alias, label) in choices {
+                    ui.selectable_value(&mut self.world, alias, label);
+                }
+            });
+        if self.world != before {
+            self.reload();
+        }
+    }
+
+    /// The map shown, by alias.
+    #[cfg(test)]
+    pub fn world(&self) -> &str {
+        &self.world
+    }
+
+    /// The maps the server lists.
+    #[cfg(test)]
+    pub fn worlds(&self) -> &[WorldEntry] {
+        &self.worlds
+    }
+
+    /// The selected prop's index in the map's props, when it is there.
+    pub fn selected_prop_index(&self) -> Option<usize> {
+        let name = self.selected_prop.as_deref()?;
+        self.scene.as_ref()?.props.iter().position(|p| p.name == name)
+    }
+
+    pub fn prop_name(&self, i: usize) -> Option<String> {
+        self.scene.as_ref()?.props.get(i).map(|p| p.name.clone())
+    }
+
+    /// A prop's pose on the map (mm, degrees) as the last frame has it.
+    pub fn prop_pose(&self, i: usize) -> Option<Pose2> {
+        let scene = self.scene.as_ref()?;
+        let p = self.poses.get(scene.props.get(i)?.body)?;
+        let [w, x, y, z] = p.quat;
+        let yaw = (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z)).to_degrees();
+        Some(Pose2 {
+            x_mm: p.pos[0] * 1000.0,
+            y_mm: p.pos[1] * 1000.0,
+            yaw_deg: route::wrap_deg(yaw),
+        })
+    }
+
+    /// A prop's footprint on the map, mm: the bounds of every geom of its
+    /// bodies as the frame places them (a mesh counts 20 mm around its
+    /// origin).
+    pub fn prop_bounds(&self, i: usize) -> Option<([f64; 2], [f64; 2])> {
+        let scene = self.scene.as_ref()?;
+        let root = scene.props.get(i)?.body;
+        let n = scene.bodies.len();
+        let mut mine = vec![false; n];
+        if root < n {
+            mine[root] = true;
+        }
+        for b in root + 1..n {
+            if let Some(&parent) = scene.parents.get(b)
+                && parent < n
+                && parent != b
+                && mine[parent]
+            {
+                mine[b] = true;
+            }
+        }
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        for g in scene
+            .geoms
+            .iter()
+            .filter(|g| g.kind != "plane" && mine.get(g.body).copied().unwrap_or(false))
+        {
+            let Some(pose) = self.poses.get(g.body) else { continue };
+            let c = rotate(pose.quat, g.pos);
+            // how far the geom reaches along each map axis: a box by its turned half-sizes, a
+            // round geom by its largest, a mesh 20 mm
+            let r = if g.kind == "box" {
+                let q = qmul(pose.quat, g.quat);
+                let (x, y, z) = (rotate(q, [1.0, 0.0, 0.0]), rotate(q, [0.0, 1.0, 0.0]), rotate(q, [0.0, 0.0, 1.0]));
+                [
+                    x[0].abs() * g.size[0] + y[0].abs() * g.size[1] + z[0].abs() * g.size[2],
+                    x[1].abs() * g.size[0] + y[1].abs() * g.size[1] + z[1].abs() * g.size[2],
+                ]
+            } else if g.kind == "mesh" {
+                [0.02, 0.02]
+            } else {
+                let r = g.size.iter().cloned().fold(0.0, f64::max).max(0.005);
+                [r, r]
+            };
+            for k in 0..2 {
+                lo[k] = lo[k].min((pose.pos[k] + c[k] - r[k]) * 1000.0);
+                hi[k] = hi[k].max((pose.pos[k] + c[k] + r[k]) * 1000.0);
+            }
+        }
+        (lo[0].is_finite() && hi[0].is_finite()).then_some((lo, hi))
+    }
+
+    /// The prop under a screen point: the smallest whose footprint holds
+    /// it (4 px of slack).
+    pub fn prop_at(&self, cam: &crate::viewport::Camera, px: f32, py: f32, w: f32, h: f32) -> Option<usize> {
+        let (o, d) = cam.ray(px, py, w, h);
+        let hit = crate::viewport::ray_plane_z(o, d, 0.0)?;
+        let (x, y) = (hit.x as f64, hit.y as f64);
+        let slack = 4.0 * cam.units_per_px(h) as f64;
+        let n = self.scene.as_ref()?.props.len();
+        (0..n)
+            .filter_map(|i| {
+                let (lo, hi) = self.prop_bounds(i)?;
+                (x >= lo[0] - slack && x <= hi[0] + slack && y >= lo[1] - slack && y <= hi[1] + slack)
+                    .then(|| (i, (hi[0] - lo[0]) * (hi[1] - lo[1])))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    }
+
+    /// A drag of a prop begins: it is selected, and its pose is where the
+    /// drag starts from. Refused while a program runs.
+    pub fn begin_prop_drag(&mut self, i: usize) -> Option<Pose2> {
+        if self.busy() {
+            self.message = "stop the program before moving a prop".into();
+            return None;
+        }
+        let pose = self.prop_pose(i)?;
+        self.selected_prop = self.scene.as_ref()?.props.get(i).map(|p| p.name.clone());
+        self.prop_sent = Some(pose);
+        Some(pose)
+    }
+
+    /// The prop follows the pointer: the server hears each pose that
+    /// differs from the last by 0.5 mm or 0.5°.
+    pub fn drag_prop(&mut self, i: usize, pose: Pose2) {
+        let pose = round_pose(pose);
+        if let Some(last) = self.prop_sent
+            && (last.x_mm - pose.x_mm).abs() < 0.5
+            && (last.y_mm - pose.y_mm).abs() < 0.5
+            && route::wrap_deg(last.yaw_deg - pose.yaw_deg).abs() < 0.5
+        {
+            return;
+        }
+        self.move_prop(i, pose);
+    }
+
+    pub fn end_prop_drag(&mut self) {
+        self.prop_sent = None;
+    }
+
+    /// Put a prop at a pose: the frame shows it there at once, the server
+    /// moves it and remembers it for the map's text.
+    pub fn move_prop(&mut self, i: usize, pose: Pose2) {
+        let Some((name, body)) = self.scene.as_ref().and_then(|s| s.props.get(i)).map(|p| (p.name.clone(), p.body)) else {
+            return;
+        };
+        let pose = round_pose(pose);
+        if let Some(local) = self.poses.get_mut(body) {
+            local.pos[0] = pose.x_mm / 1000.0;
+            local.pos[1] = pose.y_mm / 1000.0;
+            let half = pose.yaw_deg.to_radians() / 2.0;
+            local.quat = [half.cos(), 0.0, 0.0, half.sin()];
+        }
+        self.prop_sent = Some(pose);
+        self.send(serde_json::json!({"cmd": "move", "name": name, "x_mm": pose.x_mm, "y_mm": pose.y_mm, "yaw_deg": pose.yaw_deg}));
+    }
+
+    /// Another prop like this one, a little to the side, selected once the
+    /// server has built the map again.
+    pub fn duplicate_prop(&mut self, i: usize) {
+        if self.busy() {
+            self.message = "stop the program before adding a prop".into();
+            return;
+        }
+        let Some(name) = self.scene.as_ref().and_then(|s| s.props.get(i)).map(|p| p.name.clone()) else {
+            return;
+        };
+        let Some(pose) = self.prop_pose(i) else { return };
+        self.select_new_prop = true;
+        self.send(serde_json::json!({
+            "cmd": "add", "from": name,
+            "x_mm": round1(pose.x_mm + route::PASTE_OFFSET_MM), "y_mm": round1(pose.y_mm + route::PASTE_OFFSET_MM),
+            "yaw_deg": pose.yaw_deg,
+        }));
+    }
+
+    /// The kinds of prop the map has, each once, in order of first
+    /// appearance.
+    pub fn prop_kinds(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for p in self.scene.iter().flat_map(|s| s.props.iter()) {
+            if !out.contains(&p.kind) {
+                out.push(p.kind.clone());
+            }
+        }
+        out
+    }
+
+    /// A prop of a kind the map has (like its first such prop), at the
+    /// map's origin, selected once built.
+    pub fn add_prop_like(&mut self, kind: &str) {
+        if self.busy() {
+            self.message = "stop the program before adding a prop".into();
+            return;
+        }
+        let Some(name) = self
+            .scene
+            .as_ref()
+            .and_then(|s| s.props.iter().find(|p| p.kind == kind))
+            .map(|p| p.name.clone())
+        else {
+            self.message = format!("this map has no {kind} to copy");
+            return;
+        };
+        self.select_new_prop = true;
+        self.send(serde_json::json!({"cmd": "add", "from": name, "x_mm": 0.0, "y_mm": 0.0, "yaw_deg": 0.0}));
+    }
+
+    pub fn remove_prop(&mut self, i: usize) {
+        if self.busy() {
+            self.message = "stop the program before removing a prop".into();
+            return;
+        }
+        let Some(name) = self.scene.as_ref().and_then(|s| s.props.get(i)).map(|p| p.name.clone()) else {
+            return;
+        };
+        if self.selected_prop.as_deref() == Some(name.as_str()) {
+            self.selected_prop = None;
+        }
+        self.hover_prop = None;
+        self.send(serde_json::json!({"cmd": "remove", "name": name}));
+    }
+
+    pub fn remove_selected_prop(&mut self) {
+        if let Some(i) = self.selected_prop_index() {
+            self.remove_prop(i);
+        }
+    }
+
+    pub fn duplicate_selected_prop(&mut self) {
+        if let Some(i) = self.selected_prop_index() {
+            self.duplicate_prop(i);
+        }
+    }
+
+    /// Save the map as it stands — every prop where it is, the ones added
+    /// included — as one of the user's own; once the server has written
+    /// it, the tab shows that map.
+    pub fn save_map_as(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            self.message = "name the map first".into();
+            return;
+        }
+        if self.busy() {
+            self.message = "stop the program before saving the map".into();
+            return;
+        }
+        if self.scene.is_none() {
+            self.message = "load a map first".into();
+            return;
+        }
+        self.send(serde_json::json!({"cmd": "save_world", "name": name}));
+    }
+
+    /// The outlines of the prop under the pointer and the selected one,
+    /// with a tick the way each faces; over everything on the map.
+    pub fn prop_lines(&self, dark: bool) -> Vec<Line> {
+        let mut out = Vec::new();
+        let Some(scene) = self.scene.as_ref() else { return out };
+        let z = 3.0;
+        let lit = if dark { [1.0, 1.0, 1.0, 1.0] } else { [0.9, 0.1, 0.1, 1.0] };
+        let hover_c = if dark { [0.85, 0.6, 1.0, 1.0] } else { [0.5, 0.2, 0.75, 1.0] };
+        let sel = self.selected_prop_index();
+        for i in 0..scene.props.len() {
+            let color = if sel == Some(i) {
+                lit
+            } else if self.hover_prop == Some(i) {
+                hover_c
+            } else {
+                continue;
+            };
+            let Some((lo, hi)) = self.prop_bounds(i) else { continue };
+            let mut seg = |a: [f64; 2], b: [f64; 2]| {
+                out.push(Line {
+                    a: Vec3::new(a[0] as f32, a[1] as f32, z),
+                    b: Vec3::new(b[0] as f32, b[1] as f32, z),
+                    color,
+                });
+            };
+            seg([lo[0], lo[1]], [hi[0], lo[1]]);
+            seg([hi[0], lo[1]], [hi[0], hi[1]]);
+            seg([hi[0], hi[1]], [lo[0], hi[1]]);
+            seg([lo[0], hi[1]], [lo[0], lo[1]]);
+            if let Some(p) = self.prop_pose(i) {
+                let (c, s) = (p.yaw_deg.to_radians().cos(), p.yaw_deg.to_radians().sin());
+                seg([p.x_mm, p.y_mm], [p.x_mm + c * 30.0, p.y_mm + s * 30.0]);
+            }
+        }
+        out
+    }
+
+    /// The selected prop's name, by its footprint.
+    pub fn prop_labels(&self, cam: &crate::viewport::Camera, w: f32, h: f32) -> Vec<(glam::Vec2, String)> {
+        let mut out = Vec::new();
+        if let Some(i) = self.selected_prop_index()
+            && let Some((lo, hi)) = self.prop_bounds(i)
+            && let Some(name) = self.selected_prop.clone()
+            && let Some(sp) = cam.project(Vec3::new(lo[0] as f32, hi[1] as f32, 3.0), w, h)
+        {
+            out.push((sp + glam::Vec2::new(0.0, -18.0), name));
+        }
+        out
+    }
+
+    /// What the Map tab's view asks for.
+    pub fn map_hint(&self) -> String {
+        if self.scene.is_none() {
+            return self.status_line();
+        }
+        match &self.selected_prop {
+            Some(n) => format!("{n}: drag to move · shift-drag turns · ⌘D duplicates · Del removes · Esc deselects"),
+            None => "drag a prop to move it · shift-drag turns it · click one to select it · save the map in the panel".into(),
+        }
+    }
+
+    /// The Map tab's panel: the map, its props, and saving it as one of
+    /// the user's own.
+    pub fn map_ui(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Map");
+        self.world_picker(ui);
+        ui.weak(self.status_line());
+        if let Some(w) = self.worlds.iter().find(|w| w.alias == self.world)
+            && w.user
+            && let Some(dir) = &w.dir
+        {
+            ui.weak(format!("yours · {dir}"));
+        }
+        ui.separator();
+        ui.strong("Props");
+        ui.weak("drag a prop on the map to move it · shift turns it");
+        let props: Vec<(String, String)> = self
+            .scene
+            .as_ref()
+            .map(|s| s.props.iter().map(|p| (p.name.clone(), p.kind.clone())).collect())
+            .unwrap_or_default();
+        if props.is_empty() {
+            ui.weak("this map has no props to move");
+        }
+        for (name, kind) in &props {
+            let on = self.selected_prop.as_deref() == Some(name.as_str());
+            if ui.selectable_label(on, format!("{name} · {kind}")).clicked() {
+                self.selected_prop = if on { None } else { Some(name.clone()) };
+            }
+        }
+        ui.horizontal(|ui| {
+            let sel = self.selected_prop_index();
+            if ui
+                .add_enabled(sel.is_some(), egui::Button::new("Duplicate"))
+                .on_hover_text("⌘D")
+                .clicked()
+                && let Some(i) = sel
+            {
+                self.duplicate_prop(i);
+            }
+            if ui
+                .add_enabled(sel.is_some(), egui::Button::new("Remove"))
+                .on_hover_text("Del")
+                .clicked()
+                && let Some(i) = sel
+            {
+                self.remove_prop(i);
+            }
+            let kinds = self.prop_kinds();
+            if !kinds.is_empty() {
+                egui::ComboBox::from_id_salt("add-prop").selected_text("Add…").show_ui(ui, |ui| {
+                    for k in kinds {
+                        if ui.selectable_label(false, &k).clicked() {
+                            self.add_prop_like(&k);
+                        }
+                    }
+                });
+            }
+        });
+        ui.separator();
+        ui.strong("Save as a new map");
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.save_name)
+                    .hint_text("my layout")
+                    .desired_width(160.0),
+            );
+            let can = self.scene.is_some() && !self.busy() && !self.save_name.trim().is_empty();
+            if ui.add_enabled(can, egui::Button::new("Save map")).clicked() {
+                let name = self.save_name.clone();
+                self.save_map_as(&name);
+            }
+        });
+        ui.weak(format!(
+            "kept in {} · the props as they stand, the ones added included · listed with the maps",
+            crate::markers::data_dir().join("worlds").display()
+        ));
+        if !self.message.is_empty() {
+            ui.weak(self.message.clone());
+        }
+    }
+}
+
+fn round1(v: f64) -> f64 {
+    (v * 10.0).round() / 10.0
+}
+
+fn round_pose(p: Pose2) -> Pose2 {
+    Pose2 {
+        x_mm: round1(p.x_mm),
+        y_mm: round1(p.y_mm),
+        yaw_deg: route::wrap_deg(round1(p.yaw_deg)),
+    }
+}
+
+/// The quaternion `a` then `b` (w, x, y, z): turning by `b` in `a`'s frame.
+fn qmul(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    [
+        a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+        a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+        a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+        a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0],
+    ]
+}
+
+/// `v` turned by the quaternion `q` (w, x, y, z).
+fn rotate(q: [f64; 4], v: [f64; 3]) -> [f64; 3] {
+    let (w, u) = (q[0], [q[1], q[2], q[3]]);
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let uv = cross(u, v);
+    let uuv = cross(u, uv);
+    [
+        v[0] + 2.0 * (w * uv[0] + uuv[0]),
+        v[1] + 2.0 * (w * uv[1] + uuv[1]),
+        v[2] + 2.0 * (w * uv[2] + uuv[2]),
+    ]
 }
 
 #[cfg(test)]
@@ -2532,8 +3002,11 @@ mod tests {
         // the program, with the definitions after the setup
         t.route.prelude = "def line_follow():\n    pass\n".into();
         let text = t.route_program().unwrap();
-        assert!(text.contains("db.straight(250)") && text.contains("db.curve(100, 90)"), "{text}");
-        assert!(text.contains("db.stop()") && text.contains("line_follow()"), "{text}");
+        assert!(
+            text.contains("robot.straight(250)") && text.contains("robot.curve(100, 90)"),
+            "{text}"
+        );
+        assert!(text.contains("robot.stop()") && text.contains("line_follow()"), "{text}");
         assert!(text.contains("wheel_diameter_mm=86.4, axle_track_mm=135"), "{text}");
         assert!(text.find("def line_follow").unwrap() > text.find("DriveBase(").unwrap());
         let steps = t.steps();
@@ -2543,7 +3016,7 @@ mod tests {
         let last = t.sent.last().unwrap().clone();
         assert_eq!(last["cmd"], "run");
         let script = last["script"].as_str().unwrap().to_string();
-        assert!(std::fs::read_to_string(&script).unwrap().contains("db.curve(100, 90)"));
+        assert!(std::fs::read_to_string(&script).unwrap().contains("robot.curve(100, 90)"));
         // labels: each action's number at its start and its key parameters beside its path
         let labels: Vec<String> = t.route_labels(&cam, 800.0, 600.0).into_iter().map(|l| l.1).collect();
         assert_eq!(labels.len(), 10);
@@ -2951,7 +3424,7 @@ mod tests {
             t.message
         );
         assert!(t.log.iter().any(|(_, x)| x == "loaded practice-line with None"), "{:?}", t.log);
-        assert_eq!(t.poses.len(), 2);
+        assert_eq!(t.poses.len(), 3, "the world, the chassis and the stand-in's one prop");
         assert!(t.worlds.iter().any(|w| w.alias == "wro-2026-senior"));
         // another map: loaded as soon as it is chosen
         t.world = "wro-2026-senior".into();
@@ -3141,6 +3614,273 @@ mod tests {
     /// The real runtime: `OPENBRICKS_SIM_PYTHON` names an interpreter
     /// with `openbricks_sim` and MuJoCo installed (CI's Linux leg sets
     /// it); unset, the test is skipped.
+    const SCENE_WITH_PROPS: &str = r#"{"bodies":["world","chassis","clef","clef_brick","note"],"parents":[0,0,0,2,0],"geoms":[{"name":"floor","type":"plane","body":0,"size":[1.2,0.9,0.1],"pos":[0,0,0],"quat":[1,0,0,0],"rgba":[1,1,1,1],"material":null,"group":0,"mesh":null},{"name":"clef_b","type":"box","body":3,"size":[0.03,0.02,0.01],"pos":[0.01,0,0],"quat":[1,0,0,0],"rgba":[1,0,0,1],"material":null,"group":0,"mesh":null},{"name":"note_b","type":"mesh","body":4,"size":[0,0,0],"pos":[0,0,0],"quat":[1,0,0,0],"rgba":[0,0,1,1],"material":null,"group":0,"mesh":"m"}],"props":[{"name":"clef","body":2,"kind":"clef","color":null,"yaw_deg":0.0},{"name":"note","body":4,"kind":"note","color":"red","yaw_deg":0.0}],"materials":{},"textures":{},"bricks":[],"timestep_ms":1}"#;
+
+    #[test]
+    fn props_are_found_moved_duplicated_removed_and_the_map_saved() {
+        let mdir = std::env::temp_dir().join(format!("ob-map-markers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&mdir);
+        let mut t = SimulateTab::new(None);
+        t.markers_dir = mdir.clone();
+        t.world = "practice-line".into();
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        let up = [1.0, 0.0, 0.0, 0.0];
+        let at = |p: [f64; 3]| Pose { pos: p, quat: up };
+        t.apply(Event::Frame {
+            t_ms: 0,
+            poses: vec![
+                at([0.0; 3]),
+                at([-0.5, -0.1, 0.05]),
+                at([0.3, 0.2, 0.01]),
+                at([0.3, 0.2, 0.01]),
+                at([-0.1, 0.05, 0.01]),
+            ],
+        });
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+        // footprints: the brick, 10 mm off its body's origin, 60 × 40 mm; a mesh counts 20 mm around
+        let (lo, hi) = t.prop_bounds(0).unwrap();
+        assert!(near(lo, [280.0, 180.0]) && near(hi, [340.0, 220.0]), "{lo:?} {hi:?}");
+        let (lo, hi) = t.prop_bounds(1).unwrap();
+        assert!(near(lo, [-120.0, 30.0]) && near(hi, [-80.0, 70.0]), "{lo:?} {hi:?}");
+        assert!(t.prop_bounds(2).is_none());
+        // the brick's body turned 90°: the footprint turns with it (40 × 60 mm about (300, 210))
+        let half = std::f64::consts::FRAC_PI_4;
+        t.poses[3].quat = [half.cos(), 0.0, 0.0, half.sin()];
+        let (lo, hi) = t.prop_bounds(0).unwrap();
+        assert!(near(lo, [280.0, 180.0]) && near(hi, [320.0, 240.0]), "{lo:?} {hi:?}");
+        t.poses[3].quat = up;
+        let p = t.prop_pose(0).unwrap();
+        assert_eq!((p.x_mm, p.y_mm, p.yaw_deg), (300.0, 200.0, 0.0));
+        assert_eq!(t.prop_name(1).as_deref(), Some("note"));
+        // under a screen point, through the plan camera
+        let mut cam = crate::viewport::Camera::top_down();
+        cam.fit_plan(Vec3::new(-1200.0, -900.0, 0.0), Vec3::new(1200.0, 900.0, 0.0), 4.0 / 3.0);
+        let (w, h) = (800.0, 600.0);
+        let on = |x: f64, y: f64| cam.project(Vec3::new(x as f32, y as f32, 0.0), w, h).unwrap();
+        let s = on(310.0, 200.0);
+        assert_eq!(t.prop_at(&cam, s.x, s.y, w, h), Some(0));
+        let s = on(-100.0, 50.0);
+        assert_eq!(t.prop_at(&cam, s.x, s.y, w, h), Some(1));
+        let s = on(0.0, 0.0);
+        assert_eq!(t.prop_at(&cam, s.x, s.y, w, h), None);
+        // a drag: the frame shows it at once, the server hears each pose that differs enough
+        assert_eq!(t.begin_prop_drag(0), Some(p));
+        assert_eq!(t.selected_prop.as_deref(), Some("clef"));
+        t.drag_prop(
+            0,
+            Pose2 {
+                x_mm: 300.2,
+                y_mm: 200.1,
+                yaw_deg: 0.0,
+            },
+        );
+        assert!(t.sent.is_empty(), "too small a move to tell: {:?}", t.sent);
+        t.drag_prop(
+            0,
+            Pose2 {
+                x_mm: 350.04,
+                y_mm: 250.0,
+                yaw_deg: 90.0,
+            },
+        );
+        assert_eq!(
+            t.sent.last().unwrap(),
+            &serde_json::json!({"cmd": "move", "name": "clef", "x_mm": 350.0, "y_mm": 250.0, "yaw_deg": 90.0})
+        );
+        let p = t.prop_pose(0).unwrap();
+        assert!(
+            (p.x_mm - 350.0).abs() < 1e-6 && (p.y_mm - 250.0).abs() < 1e-6 && (p.yaw_deg - 90.0).abs() < 1e-6,
+            "{p:?}"
+        );
+        t.end_prop_drag();
+        // the outlines of the selected and the hovered prop, with heading ticks; the name label
+        t.hover_prop = Some(1);
+        assert_eq!(t.prop_lines(false).len(), 10);
+        let labels = t.prop_labels(&cam, w, h);
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].1, "clef");
+        assert!(t.map_hint().starts_with("clef:"));
+        // duplicate: a little to the side; the newest prop is selected once the map is back
+        t.duplicate_prop(1);
+        assert_eq!(
+            t.sent.last().unwrap(),
+            &serde_json::json!({"cmd": "add", "from": "note", "x_mm": -60.0, "y_mm": 90.0, "yaw_deg": 0.0})
+        );
+        let mut more: Scene = serde_json::from_str(SCENE_WITH_PROPS).unwrap();
+        more.bodies.push("note_2".into());
+        more.parents.push(0);
+        more.props.push(crate::sim::Prop {
+            name: "note_2".into(),
+            body: 5,
+            kind: "note".into(),
+            color: Some("red".into()),
+            yaw_deg: 0.0,
+        });
+        t.apply(Event::Scene(Box::new(more)));
+        assert_eq!(t.selected_prop.as_deref(), Some("note_2"));
+        assert_eq!(t.selected_prop_index(), Some(2));
+        assert_eq!(t.prop_kinds(), vec!["clef".to_string(), "note".to_string()]);
+        t.add_prop_like("clef");
+        assert_eq!(
+            t.sent.last().unwrap(),
+            &serde_json::json!({"cmd": "add", "from": "clef", "x_mm": 0.0, "y_mm": 0.0, "yaw_deg": 0.0})
+        );
+        t.add_prop_like("piano");
+        assert!(t.message.contains("no piano"), "{}", t.message);
+        t.select_new_prop = false; // the add above never came back
+        // remove the selected one; a rebuilt map keeps a selection by name and drops one that is gone
+        t.remove_selected_prop();
+        assert_eq!(t.sent.last().unwrap(), &serde_json::json!({"cmd": "remove", "name": "note_2"}));
+        assert!(t.selected_prop.is_none());
+        t.selected_prop = Some("clef".into());
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        assert_eq!(t.selected_prop.as_deref(), Some("clef"));
+        t.selected_prop = Some("gone".into());
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        assert!(t.selected_prop.is_none());
+        assert!(t.map_hint().starts_with("drag a prop"));
+        // save as: the server writes it; then the tab shows that map, its markers carried over
+        t.markers.markers.push(crate::markers::Marker {
+            name: "corner".into(),
+            at: [1.0, 2.0],
+        });
+        t.save_map_as("  ");
+        assert_eq!(t.message, "name the map first");
+        t.save_map_as("My Layout");
+        assert_eq!(
+            t.sent.last().unwrap(),
+            &serde_json::json!({"cmd": "save_world", "name": "My Layout"})
+        );
+        t.apply(Event::Saved {
+            alias: "my-layout".into(),
+            path: "/me/worlds/my-layout/world.xml".into(),
+        });
+        assert_eq!(t.world(), "my-layout");
+        assert_eq!(t.markers.world, "my-layout");
+        assert!(Markers::file(&mdir, "my-layout").exists(), "the markers come along");
+        // (with a server there, the map is loaded again: the stand-in and the real runtime tests)
+        assert_eq!(t.sent.last().unwrap()["cmd"], "save_world", "no server to load from here");
+        // the panel draws
+        let ctx = egui::Context::default();
+        t.save_name = "x".into();
+        let _ = ctx.run_ui(Default::default(), |ui| t.map_ui(ui));
+        // nothing moves while a program runs
+        t.status = "running".into();
+        assert!(t.begin_prop_drag(0).is_none());
+        let n = t.sent.len();
+        t.duplicate_prop(0);
+        t.remove_prop(0);
+        t.add_prop_like("clef");
+        t.save_map_as("x");
+        assert_eq!(t.sent.len(), n, "{}", t.message);
+        let _ = std::fs::remove_dir_all(&mdir);
+    }
+
+    #[test]
+    fn the_map_editor_saves_a_map_of_the_users_own_on_the_real_runtime() {
+        let Some(python) = std::env::var("OPENBRICKS_SIM_PYTHON").ok().filter(|p| !p.is_empty()) else {
+            eprintln!("OPENBRICKS_SIM_PYTHON is unset: skipping the map editor test");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("ob-map-e2e-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut t = SimulateTab::new_with_env(
+            Some(python),
+            vec![("OPENBRICKS_DATA_DIR".into(), dir.to_string_lossy().to_string())],
+        );
+        t.markers_dir = dir.join("markers-of-the-tab");
+        t.world = "wro-2026-elementary".into();
+        t.ensure_loaded();
+        assert!(
+            pump_until(&mut t, 60, |t| t.scene.is_some() && t.status == "loaded"),
+            "{} / {}",
+            t.status,
+            t.message
+        );
+        let clef = t
+            .scene
+            .as_ref()
+            .unwrap()
+            .props
+            .iter()
+            .position(|p| p.name == "clef")
+            .expect("the clef");
+        let n = t.scene.as_ref().unwrap().props.len();
+        // a move lands in the next frame, kept when the chassis is placed (a reset)
+        t.move_prop(
+            clef,
+            Pose2 {
+                x_mm: 300.0,
+                y_mm: -200.0,
+                yaw_deg: 45.0,
+            },
+        );
+        t.place_chassis(Pose2 {
+            x_mm: -400.0,
+            y_mm: 100.0,
+            yaw_deg: 90.0,
+        });
+        assert!(
+            pump_until(&mut t, 30, |t| t
+                .prop_pose(clef)
+                .map(|p| (p.x_mm - 300.0).abs() < 0.5 && (p.y_mm + 200.0).abs() < 0.5 && (p.yaw_deg - 45.0).abs() < 0.5)
+                .unwrap_or(false)),
+            "{:?} / {}",
+            t.prop_pose(clef),
+            t.message
+        );
+        // a duplicate, selected once the world is rebuilt with the chassis where it stood
+        t.duplicate_prop(clef);
+        assert!(
+            pump_until(&mut t, 60, |t| t.scene.as_ref().map(|s| s.props.len()).unwrap_or(0) == n + 1),
+            "{}",
+            t.message
+        );
+        assert_eq!(t.selected_prop.as_deref(), Some("clef_2"));
+        assert!(
+            pump_until(&mut t, 30, |t| t
+                .chassis_pose()
+                .map(|p| (p.x_mm + 400.0).abs() < 1.0)
+                .unwrap_or(false)),
+            "{:?}",
+            t.chassis_pose()
+        );
+        // saved as the user's own: listed, marked, and shown, with the clef where it was put
+        t.save_map_as("Harness Elementary");
+        assert!(
+            pump_until(&mut t, 60, |t| t.world() == "harness-elementary"
+                && t.scene.is_some()
+                && t.status == "loaded"
+                && t.scene_gen >= 3),
+            "{} / {}",
+            t.world(),
+            t.message
+        );
+        assert!(dir.join("worlds").join("harness-elementary").join("world.xml").is_file());
+        assert!(
+            dir.join("worlds").join("harness-elementary").join("mat.png").is_file(),
+            "the artwork came along"
+        );
+        assert!(
+            t.worlds().iter().any(|w| w.alias == "harness-elementary" && w.user),
+            "{:?}",
+            t.worlds().iter().map(|w| &w.alias).collect::<Vec<_>>()
+        );
+        let clef = t.scene.as_ref().unwrap().props.iter().position(|p| p.name == "clef").unwrap();
+        assert!(
+            pump_until(&mut t, 30, |t| t
+                .prop_pose(clef)
+                .map(|p| (p.x_mm - 300.0).abs() < 0.5 && (p.yaw_deg - 45.0).abs() < 0.5)
+                .unwrap_or(false)),
+            "{:?}",
+            t.prop_pose(clef)
+        );
+        assert_eq!(t.scene.as_ref().unwrap().props.len(), n + 1);
+        t.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_real_run_server_end_to_end() {
         let Some(python) = std::env::var("OPENBRICKS_SIM_PYTHON").ok().filter(|p| !p.is_empty()) else {
@@ -3471,11 +4211,9 @@ mod tests {
         assert_eq!(again.len(), 9);
         assert!(again[0].texture.is_none(), "no texture when the file is unreadable");
         assert!(t.log.iter().any(|(s, x)| s == "server" && x.starts_with("texture ")), "{:?}", t.log);
-        // the camera: the mat once, then the chassis while following
+        // the camera: the mat once
         assert!(t.frame_target().is_some());
         assert!(t.frame_target().is_none());
-        t.follow = true;
-        assert!(t.frame_target().is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3497,10 +4235,12 @@ mod tests {
         assert_eq!(lo, Vec3::new(-1200.0, -900.0, 0.0));
         assert_eq!(hi.x, 1200.0);
         assert!(t.frame_target().is_none());
-        t.follow = true;
+        // nothing but a refit moves the plan: the chassis moving does not
         t.poses[1].pos = [0.5, 0.25, 0.05];
-        let (lo, hi) = t.frame_target().unwrap();
-        assert_eq!((lo + hi) * 0.5, Vec3::new(500.0, 250.0, 50.0));
+        assert!(t.frame_target().is_none());
+        t.refit();
+        let (lo, _) = t.frame_target().unwrap();
+        assert_eq!(lo, Vec3::new(-1200.0, -900.0, 0.0));
     }
 
     #[test]
