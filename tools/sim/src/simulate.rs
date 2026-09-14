@@ -114,6 +114,13 @@ pub struct SimulateTab {
     message: String,
     textures_loaded: HashMap<String, bool>,
     fit_pending: bool,
+    /// The map editor's 3D camera frames a map once, when the map is new
+    /// to it (or on Fit): an edit's reload, and a save under a name of
+    /// the user's own, leave the view where the user put it.
+    frame_pending: bool,
+    /// The map the scene shown belongs to, by alias: a scene for another
+    /// map is a new map to frame.
+    scene_world: Option<String>,
     pending_load: bool,
     scene_gen: u32,
     /// The default map is loaded once, when the tab first shows.
@@ -199,6 +206,8 @@ impl SimulateTab {
             message: String::new(),
             textures_loaded: HashMap::new(),
             fit_pending: false,
+            frame_pending: false,
+            scene_world: None,
             pending_load: false,
             scene_gen: 0,
             auto_loaded: false,
@@ -397,14 +406,23 @@ impl SimulateTab {
                         self.selected_prop = None;
                     }
                     self.hover_prop = None;
+                    // the plan fits the map on every scene; the map editor's camera frames a map
+                    // once, when it is new to it — an edit's reload leaves the view where it is
+                    let new_map = self.scene_world.as_deref() != Some(self.world.as_str());
+                    self.scene_world = Some(self.world.clone());
                     self.scene = Some(*s);
                     self.fit_pending = true;
+                    if new_map {
+                        self.frame_pending = true;
+                    }
                 }
                 Event::Saved { alias, path } => {
                     // the map is the user's own now: its markers come along, and it is the map shown
                     self.message = format!("saved as {alias}: {path}");
                     self.markers.world = alias.clone();
                     self.save_markers();
+                    // the same map under its new name: the view stays where it is
+                    self.scene_world = Some(alias.clone());
                     self.world = alias;
                     self.load();
                 }
@@ -2071,9 +2089,14 @@ impl SimulateTab {
         SimDraw { items, lines, ghost }
     }
 
-    /// Frame the whole map again at the next frame.
+    /// Fit the plan to the whole map again at the next frame.
     pub fn refit(&mut self) {
         self.fit_pending = true;
+    }
+
+    /// Frame the whole map again in the map editor at the next frame.
+    pub fn frame_map(&mut self) {
+        self.frame_pending = true;
     }
 
     #[cfg(test)]
@@ -2091,14 +2114,10 @@ impl SimulateTab {
         }
     }
 
-    /// Where the camera should look when a fit is due: the mat's extent
-    /// (the plan view never pans or zooms).
-    pub fn frame_target(&mut self) -> Option<(Vec3, Vec3)> {
+    /// The map's extent: the mat's, or a metre about the origin when the
+    /// world has none.
+    fn map_extent(&self) -> Option<(Vec3, Vec3)> {
         let scene = self.scene.as_ref()?;
-        if !self.fit_pending {
-            return None;
-        }
-        self.fit_pending = false;
         let plane = scene.geoms.iter().find(|g| g.kind == "plane" && g.size[0] > 0.0);
         Some(match plane {
             Some(g) => (
@@ -2107,6 +2126,27 @@ impl SimulateTab {
             ),
             None => (Vec3::splat(-500.0), Vec3::new(500.0, 500.0, 200.0)),
         })
+    }
+
+    /// Where the plan camera should look when a fit is due: the mat's
+    /// extent (the plan view never pans or zooms).
+    pub fn frame_target(&mut self) -> Option<(Vec3, Vec3)> {
+        if self.scene.is_none() || !self.fit_pending {
+            return None;
+        }
+        self.fit_pending = false;
+        self.map_extent()
+    }
+
+    /// What the map editor's camera should frame, when a map is new to it
+    /// or Fit asked: once per map, so the view stays where the user put
+    /// it across the reloads the edits bring.
+    pub fn map_frame_target(&mut self) -> Option<(Vec3, Vec3)> {
+        if self.scene.is_none() || !self.frame_pending {
+            return None;
+        }
+        self.frame_pending = false;
+        self.map_extent()
     }
 
     // -------------------------------------------------------------- ui
@@ -2388,7 +2428,6 @@ impl SimulateTab {
     }
 
     /// The map shown, by alias.
-    #[cfg(test)]
     pub fn world(&self) -> &str {
         &self.world
     }
@@ -2544,6 +2583,30 @@ impl SimulateTab {
 
     pub fn end_prop_drag(&mut self) {
         self.prop_sent = None;
+    }
+
+    /// Turn a prop to a heading (degrees counter-clockwise from the map's
+    /// x axis) where it stands. Refused while a program runs.
+    pub fn turn_prop_to(&mut self, i: usize, yaw_deg: f64) {
+        if self.busy() {
+            self.message = "stop the program before turning a prop".into();
+            return;
+        }
+        let Some(pose) = self.prop_pose(i) else { return };
+        self.move_prop(i, Pose2 { yaw_deg, ..pose });
+    }
+
+    /// Turn a prop by an angle from where it points.
+    pub fn turn_prop(&mut self, i: usize, by_deg: f64) {
+        if let Some(pose) = self.prop_pose(i) {
+            self.turn_prop_to(i, pose.yaw_deg + by_deg);
+        }
+    }
+
+    pub fn turn_selected_prop(&mut self, by_deg: f64) {
+        if let Some(i) = self.selected_prop_index() {
+            self.turn_prop(i, by_deg);
+        }
     }
 
     /// Put a prop at a pose: the frame shows it there at once, the server
@@ -2785,9 +2848,9 @@ impl SimulateTab {
             return self.status_line();
         }
         match &self.selected_prop {
-            Some(n) => format!("{n}: drag to move · shift-drag turns · ⌘D duplicates · Del removes · Esc deselects"),
+            Some(n) => format!("{n}: drag to move · shift-drag turns · R turns 90° · ⌘D duplicates · Del removes · Esc deselects"),
             None => {
-                "drag a prop to move it · shift-drag turns it · click one to select it · orbit: drag · pan: right-drag · zoom: wheel".into()
+                "drag a prop to move it · shift-drag turns it · click one to select it · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch".into()
             }
         }
     }
@@ -2806,7 +2869,7 @@ impl SimulateTab {
         }
         ui.separator();
         ui.strong("Props");
-        ui.weak("drag a prop on the map to move it · shift turns it");
+        ui.weak("drag a prop on the map to move it · shift turns it · R turns the selected one 90°");
         let props: Vec<(String, String)> = self
             .scene
             .as_ref()
@@ -2827,6 +2890,20 @@ impl SimulateTab {
             }
         }
         if let Some(i) = self.selected_prop_index() {
+            ui.horizontal(|ui| {
+                ui.weak("heading");
+                let mut yaw = self.prop_pose(i).map(|p| p.yaw_deg).unwrap_or(0.0);
+                if ui
+                    .add(egui::DragValue::new(&mut yaw).speed(1.0).suffix("°"))
+                    .on_hover_text("degrees counter-clockwise from the map's x axis; shift-drag the prop to turn it by hand")
+                    .changed()
+                {
+                    self.turn_prop_to(i, yaw);
+                }
+                if ui.button("Turn 90°").on_hover_text("R").clicked() {
+                    self.turn_prop(i, 90.0);
+                }
+            });
             let mut fixed = self.prop_is_fixed(i);
             if ui
                 .checkbox(&mut fixed, "stuck to the map")
@@ -4492,6 +4569,100 @@ mod tests {
         t.refit();
         let (lo, _) = t.frame_target().unwrap();
         assert_eq!(lo, Vec3::new(-1200.0, -900.0, 0.0));
+    }
+
+    #[test]
+    fn the_map_editor_frames_a_map_once_and_keeps_its_view_across_edits_and_saves() {
+        let mdir = std::env::temp_dir().join(format!("ob-map-frame-markers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&mdir);
+        let mut t = SimulateTab::new(None);
+        t.markers_dir = mdir.clone();
+        t.world = "practice-line".into();
+        let scene = || -> Scene { serde_json::from_str(SCENE_WITH_PROPS).unwrap() };
+        assert!(t.map_frame_target().is_none(), "nothing to frame before a scene");
+        t.apply(Event::Scene(Box::new(scene())));
+        let (lo, hi) = t.map_frame_target().expect("a map new to the editor is framed");
+        assert_eq!((lo, hi.x), (Vec3::new(-1200.0, -900.0, 0.0), 1200.0));
+        assert!(t.map_frame_target().is_none(), "framed once");
+        // the plan fits the map on every scene, on a flag of its own
+        assert!(t.frame_target().is_some());
+        // an edit's reload sends the same map again: the view stays where the user put it
+        t.apply(Event::Scene(Box::new(scene())));
+        assert!(t.map_frame_target().is_none(), "an edit's reload does not move the view");
+        assert!(t.frame_target().is_some(), "the plan fits again");
+        // Fit asks for the frame; the plan's flag is its own
+        t.frame_map();
+        assert!(t.map_frame_target().is_some());
+        assert!(t.frame_target().is_none());
+        t.refit();
+        assert!(t.frame_target().is_some());
+        assert!(t.map_frame_target().is_none());
+        // another map is new to the editor
+        t.world = "wro-2026-senior".into();
+        t.apply(Event::Scene(Box::new(scene())));
+        assert!(t.map_frame_target().is_some());
+        // saved as one of the user's own it is the same map: the scene that follows the save
+        // leaves the view alone
+        t.apply(Event::Saved {
+            alias: "mine".into(),
+            path: "/w/mine/world.xml".into(),
+        });
+        assert_eq!(t.world(), "mine");
+        t.apply(Event::Scene(Box::new(scene())));
+        assert!(t.map_frame_target().is_none(), "a save keeps the view");
+        let _ = std::fs::remove_dir_all(&mdir);
+    }
+
+    #[test]
+    fn a_prop_turns_by_steps_and_to_a_heading() {
+        let mut t = SimulateTab::new(None);
+        t.world = "practice-line".into();
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        let up = [1.0, 0.0, 0.0, 0.0];
+        let at = |p: [f64; 3]| Pose { pos: p, quat: up };
+        t.apply(Event::Frame {
+            t_ms: 0,
+            poses: vec![
+                at([0.0; 3]),
+                at([-0.5, -0.1, 0.05]),
+                at([0.3, 0.2, 0.01]),
+                at([0.3, 0.2, 0.01]),
+                at([-0.1, 0.05, 0.01]),
+            ],
+        });
+        let sent = |t: &SimulateTab| {
+            let c = t.sent.last().unwrap();
+            (
+                c["cmd"].as_str().unwrap().to_string(),
+                c["name"].as_str().unwrap().to_string(),
+                c["x_mm"].as_f64().unwrap(),
+                c["yaw_deg"].as_f64().unwrap(),
+            )
+        };
+        // R: 90° counter-clockwise a press, where the prop stands, wrapping past 180
+        t.turn_prop(0, 90.0);
+        assert_eq!(sent(&t), ("move".into(), "clef".into(), 300.0, 90.0));
+        assert!((t.prop_pose(0).unwrap().yaw_deg - 90.0).abs() < 1e-6);
+        t.turn_prop(0, 90.0);
+        t.turn_prop(0, 90.0);
+        assert_eq!(sent(&t).3, -90.0);
+        assert!((t.prop_pose(0).unwrap().yaw_deg + 90.0).abs() < 1e-6);
+        // the heading field
+        t.turn_prop_to(0, 45.0);
+        assert_eq!(sent(&t), ("move".into(), "clef".into(), 300.0, 45.0));
+        // the key turns the selected prop, and nothing when none is
+        t.selected_prop = Some("note".into());
+        t.turn_selected_prop(90.0);
+        assert_eq!((sent(&t).1.as_str(), sent(&t).3), ("note", 90.0));
+        t.selected_prop = None;
+        let n = t.sent.len();
+        t.turn_selected_prop(90.0);
+        assert_eq!(t.sent.len(), n, "nothing selected, nothing sent");
+        // not while a program runs
+        t.status = "running".into();
+        t.turn_prop(0, 90.0);
+        assert_eq!(t.sent.len(), n);
+        assert!(t.message.contains("stop the program"), "{}", t.message);
     }
 
     #[test]
