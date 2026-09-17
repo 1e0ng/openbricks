@@ -96,7 +96,7 @@ sim = [
     # line and overruns the stop bar (tests/test_line_follow_sim.py);
     # 3.12 tracks it. Lift the bound once the chassis/contact model is
     # re-tuned against 3.13 - a physics job, not a packaging one.
-    "mujoco >= 3.2, < 3.13",
+    "mujoco >= 3.2, < 3.14",
     "numpy >= 1.24",
 ]
 dev = ["pytest", "coverage", "build"]
