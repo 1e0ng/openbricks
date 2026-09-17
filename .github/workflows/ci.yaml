@@ -840,7 +840,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
         if: runner.os == 'Linux'
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: runner.os == 'Linux'
         with:
           python-version: "3.11"
