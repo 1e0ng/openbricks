@@ -520,16 +520,11 @@ impl App {
     }
 
     fn fit_view(&mut self) {
-        match self.tab {
-            Tab::Map => {
-                self.simulate.frame_map();
-                return;
-            }
-            Tab::Simulate => {
-                self.simulate.refit();
-                return;
-            }
-            Tab::Workbench => {}
+        // the plan view has no Fit (it always fits the map): off the Workbench, Fit is the map
+        // editor's, and frames the map again
+        if self.tab != Tab::Workbench {
+            self.simulate.frame_map();
+            return;
         }
         let pr = self.editor.edited_props();
         if let Some(b) = pr.bbox {
@@ -1728,6 +1723,13 @@ impl App {
         Ok(())
     }
 
+    /// `open_build`, a refusal shown in the panel.
+    pub fn open_build_noted(&mut self, p: std::path::PathBuf) {
+        if let Err(e) = self.open_build(p) {
+            self.map_note = e;
+        }
+    }
+
     /// Props from elsewhere: a component of a build from the Workbench —
     /// the one open there, or any saved build opened here — or one brick
     /// from the library, placed at the map's origin.
@@ -1735,36 +1737,34 @@ impl App {
         ui.separator();
         ui.strong("Add to the map");
         ui.weak("a component of a build from the Workbench, at the origin");
-        let open_label = format!("{} · open in the Workbench", self.title_name());
-        let labels: Vec<String> = std::iter::once(open_label)
+        // the builds to add from: the Workbench's, then every saved build opened here; a row
+        // chooses the one whose components are listed
+        let title = self.title_name();
+        let names: Vec<String> = std::iter::once(format!("{title} · open in the Workbench"))
             .chain(self.map_builds.iter().map(|(p, _)| file_name(p)))
             .collect();
-        if self.map_build >= labels.len() {
-            self.map_build = 0;
-        }
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("map-build")
-                .selected_text(&labels[self.map_build])
-                .show_ui(ui, |ui| {
-                    for (k, l) in labels.iter().enumerate() {
-                        ui.selectable_value(&mut self.map_build, k, l);
-                    }
-                });
-            if ui
-                .button("Open a build…")
-                .on_hover_text("any saved assembly: its components join the list")
-                .clicked()
-                && let Some(p) = rfd::FileDialog::new().add_filter("assembly", &["json"]).pick_file()
-                && let Err(e) = self.open_build(p)
-            {
-                self.map_note = e;
+        for (k, name) in names.iter().enumerate() {
+            if ui.selectable_label(self.map_build == k, name).clicked() {
+                self.map_build = k;
             }
-        });
+        }
+        if ui
+            .button("Open a build…")
+            .on_hover_text("any saved assembly: its components join the list")
+            .clicked()
+            && let Some(p) = rfd::FileDialog::new().add_filter("assembly", &["json"]).pick_file()
+        {
+            self.open_build_noted(p);
+        }
+        if !self.map_note.is_empty() {
+            ui.colored_label(RED, &self.map_note);
+        }
         // the chosen build's components that hold bricks, the whole build first
-        let (doc, label) = if self.map_build == 0 {
-            (&self.editor.doc, self.title_name())
+        let shown = self.map_build.min(self.map_builds.len());
+        let (doc, label) = if shown == 0 {
+            (&self.editor.doc, title)
         } else {
-            let (p, d) = &self.map_builds[self.map_build - 1];
+            let (p, d) = &self.map_builds[shown - 1];
             (d, file_name(p))
         };
         let root = doc.robot.root.clone();
@@ -1794,9 +1794,6 @@ impl App {
         }
         if let Some((name, sub)) = to_add {
             self.simulate.add_model(&name, &sub);
-        }
-        if !self.map_note.is_empty() {
-            ui.colored_label(RED, &self.map_note);
         }
         ui.weak("or one brick from the library");
         ui.add(egui::TextEdit::singleline(&mut self.map_search).hint_text("search bricks by number or name"));
@@ -2341,9 +2338,7 @@ fn connector_summary(cs: &[crate::bundle::Connector]) -> String {
 
 /// A path's file name, for a list of builds.
 fn file_name(p: &std::path::Path) -> String {
-    p.file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_else(|| p.display().to_string())
+    p.file_name().unwrap_or(p.as_os_str()).to_string_lossy().to_string()
 }
 
 /// A build's name from its file name: what precedes the first dot
@@ -3072,10 +3067,8 @@ mod tests {
         assert!(h.query_by_label("Fit").is_some() && h.query_by_label("Iso").is_some() && h.query_by_label("Move").is_none());
         // the toolbar is the map's: the assembly's file buttons and its component path stay on
         // the Workbench, the map's name shows instead
-        assert!(
-            h.query_by_label("Open…").is_none() && h.query_by_label("Save as…").is_none() && h.query_by_label("Example").is_none(),
-            "the assembly's file buttons belong to the Workbench"
-        );
+        let file_buttons = ["Open…", "Save as…", "Example"].iter().any(|l| h.query_by_label(l).is_some());
+        assert!(!file_buttons, "the assembly's file buttons belong to the Workbench");
         let map_label = format!("map: {}", h.state().simulate.world());
         assert!(h.query_by_label(&map_label).is_some(), "{map_label}");
         // the view is the user's: panned aside (the right button), it stays there through the
@@ -3139,18 +3132,12 @@ mod tests {
         };
         h.key_press(Key::R);
         steps(&mut h, 2);
-        assert!(
-            crate::route::wrap_deg(last_yaw(&h) - y0 - 90.0).abs() < 0.2,
-            "R: {} from {y0}",
-            last_yaw(&h)
-        );
+        let y_r = last_yaw(&h);
+        assert!(crate::route::wrap_deg(y_r - y0 - 90.0).abs() < 0.2, "R: {y_r} from {y0}");
         h.get_by_label("Turn 90°").click();
         steps(&mut h, 2);
-        assert!(
-            crate::route::wrap_deg(last_yaw(&h) - y0 - 180.0).abs() < 0.2,
-            "the button: {} from {y0}",
-            last_yaw(&h)
-        );
+        let y_b = last_yaw(&h);
+        assert!(crate::route::wrap_deg(y_b - y0 - 180.0).abs() < 0.2, "the button: {y_b} from {y0}");
         // ⌘D duplicates (the newest prop selected once built), Del removes it
         h.key_press_modifiers(Modifiers::COMMAND, Key::D);
         wait_for(&mut h, &|a| a.simulate.prop_name(1).is_some());
@@ -3159,11 +3146,8 @@ mod tests {
         wait_for(&mut h, &|a| a.simulate.prop_name(1).is_none());
         assert!(h.state().simulate.selected_prop.is_none());
         steps(&mut h, 2);
-        assert_eq!(
-            h.state().viewport.camera.target,
-            panned,
-            "the edits' reloads left the view where it was put"
-        );
+        let target = h.state().viewport.camera.target;
+        assert_eq!(target, panned, "the edits' reloads left the view");
         // the panel: a row selects, the buttons duplicate and remove, Save writes a map of the
         // user's own that the tab then shows, listed as theirs, its markers carried over
         h.get_by_label("clef · clef").click();
@@ -3238,6 +3222,53 @@ mod tests {
         let again = h.state_mut().open_build(gate.clone());
         assert!(again.is_err(), "not an assembly: {again:?}");
         assert_eq!(h.state().map_builds.len(), 1, "a refused file is not listed");
+        // the rows choose the build listed: the Workbench's, then the saved one
+        let open_row = format!("{} · open in the Workbench", h.state().title_name());
+        h.get_by_label(&open_row).click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().map_build, 0);
+        assert!(h.query_by_label(&format!("+ {root}")).is_some(), "the Workbench's build is listed");
+        h.get_by_label("gate.assembly.json").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().map_build, 1);
+        // the same file opened again replaces its entry, with what it holds now
+        std::fs::write(&gate, serde_json::to_string(&sub).unwrap()).unwrap();
+        h.state_mut().open_build(gate.clone()).expect("the same file opens again");
+        steps(&mut h, 2);
+        assert_eq!((h.state().map_builds.len(), h.state().map_build), (1, 1));
+        assert!(h.query_by_label(&format!("+ {root}")).is_some(), "its components are the new ones");
+        // a file of another format is refused, and the panel says so; a build with no bricks
+        // says so too
+        let mut odd = brick.clone();
+        odd.format = "nope".into();
+        let odd_path = fake.dir.join("odd.assembly.json");
+        std::fs::write(&odd_path, serde_json::to_string(&odd).unwrap()).unwrap();
+        h.state_mut().open_build_noted(odd_path);
+        steps(&mut h, 2);
+        let note = h.state().map_note.clone();
+        assert!(note.contains("not an assembly file"), "{note}");
+        assert!(h.query_by_label(&note).is_some(), "the refusal shows in the panel");
+        let mut bare = brick.clone();
+        bare.components.get_mut("brick").unwrap().children.clear();
+        let bare_path = fake.dir.join("bare.assembly.json");
+        std::fs::write(&bare_path, serde_json::to_string(&bare).unwrap()).unwrap();
+        h.state_mut().open_build(bare_path).expect("a build with no bricks opens");
+        steps(&mut h, 2);
+        assert!(h.state().map_note.is_empty(), "a good open clears the note");
+        assert!(h.query_by_label("this build has no bricks yet").is_some());
+        // the heading field turns the selected prop: a drag on it
+        h.get_by_label("clef · clef").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef"));
+        let y1 = last_yaw(&h);
+        let field = h.get_by_role(egui::accesskit::Role::SpinButton).rect().center();
+        press(&mut h, field, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, field + egui::vec2(10.0, 0.0), Modifiers::NONE);
+        drag_to(&mut h, field + egui::vec2(60.0, 0.0), Modifiers::NONE);
+        release(&mut h, field + egui::vec2(60.0, 0.0), PointerButton::Primary);
+        steps(&mut h, 2);
+        let y2 = last_yaw(&h);
+        assert!((y2 - y1).abs() > 5.0, "the heading field turned it: {y2} from {y1}");
         // the 3D view: a drag on the empty map orbits, a right drag pans, the wheel zooms, Fit
         // frames the map again
         h.key_press(Key::Escape);

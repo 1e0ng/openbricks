@@ -199,10 +199,11 @@ and puts one of that kind at the map's origin.
 
 **Adding what you built.** The panel lists the components of a build
 from the Workbench — the build open there, or any saved build:
-**Open a build…** takes an `.assembly.json`, and the picker beside it
-chooses which build is listed. The whole build comes first, then each
-component that holds bricks, each with a **+** button that puts it on
-the map (the whole build is named after its file). Or add one brick
+**Open a build…** takes an `.assembly.json`, and the builds opened
+are listed under the Workbench's; click one to list its components.
+The whole build comes first, then each component that holds bricks,
+each with a **+** button that puts it on the map (the whole build is
+named after its file). Or add one brick
 from the library (search it by number or name, then **+ to map**).
 Either lands at the origin as a prop of its own — an `<assembly_prop>` whose model
 is an `openbricks-assembly/1` document, kept under the data

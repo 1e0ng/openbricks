@@ -13,9 +13,10 @@ Shift-drag (or ⌘-drag) on the map pans, for a trackpad with no right
 button, and a pinch zooms — on the Workbench too. A selected prop
 turns by `R` or **Turn 90°**, and a **heading** field sets its angle
 outright; shift-drag still turns it by hand. **Open a build…** opens
-any saved assembly for the map: the build picker lists the Workbench's
-open build and every build opened, the whole build first, then each
-component that holds bricks, each one click from the map. The toolbar
+any saved assembly for the map: the builds opened are listed under the
+Workbench's open build, and the one chosen shows its components — the
+whole build first, then each that holds bricks — each one click from
+the map. The toolbar
 on the Map and Simulate tabs names the map shown instead of the
 assembly's Open / Save / Save as… buttons and component path, which
 belong to the Workbench.
