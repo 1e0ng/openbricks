@@ -178,20 +178,34 @@ geom.
 ## The map editor
 
 **Map** edits the map itself in a 3D view of its own — drag to orbit,
-right-drag to pan, scroll to zoom, **Fit** or `F` to frame the map,
-Iso / Top / Side / Front as on the Workbench. The props on it are the
-LEGO-built objects a mission puts on the mat (each a `<lego_prop>` in
-the world's MJCF) and whatever you add: drag a prop to move it (its
-outline lights under the pointer, the selected one carries its name),
-shift-drag to turn it; click one, or its row in the panel, to select
-it; `⌘D` or **Duplicate** puts another like it a little to the side,
-`Del` or **Remove** takes it away, **Add…** lists the kinds of prop the
-map has and puts one of that kind at the map's origin.
+shift-drag (or right-drag) to pan, scroll or pinch to zoom, **Fit** or
+`F` to frame the map, Iso / Top / Side / Front as on the Workbench.
+Once a map is framed the view is yours: moving, adding, removing or
+sticking a prop rebuilds the map on the run server, but the camera
+stays where you put it, and so it does when you save the map under a
+name of your own; only loading another map, or **Fit**, frames it
+again. The toolbar on this tab names the map shown — the assembly's
+Open / Save / Save as… buttons and its component path belong to the
+Workbench tab. The props on the map are the LEGO-built objects a
+mission puts on the mat (each a `<lego_prop>` in the world's MJCF) and
+whatever you add: drag a prop to move it (its outline lights under the
+pointer, the selected one carries its name), shift-drag to turn it by
+hand, `R` or **Turn 90°** for a quarter turn, or set the **heading**
+field outright (degrees counter-clockwise from the map's x axis);
+click one, or its row in the panel, to select it; `⌘D` or
+**Duplicate** puts another like it a little to the side, `Del` or
+**Remove** takes it away, **Add…** lists the kinds of prop the map has
+and puts one of that kind at the map's origin.
 
-**Adding what you built.** The panel puts a component of the build open
-in the Workbench on the map (**component…**), or one brick from the
-library (search it by number or name, then **+ to map**). Either lands
-at the origin as a prop of its own — an `<assembly_prop>` whose model
+**Adding what you built.** The panel lists the components of a build
+from the Workbench — the build open there, or any saved build:
+**Open a build…** takes an `.assembly.json`, and the builds opened
+are listed under the Workbench's; click one to list its components.
+The whole build comes first, then each component that holds bricks,
+each with a **+** button that puts it on the map (the whole build is
+named after its file). Or add one brick
+from the library (search it by number or name, then **+ to map**).
+Either lands at the origin as a prop of its own — an `<assembly_prop>` whose model
 is an `openbricks-assembly/1` document, kept under the data
 directory until the map is saved — drawn with the exact bricks and
 colliding as their boxes with their catalogue masses.

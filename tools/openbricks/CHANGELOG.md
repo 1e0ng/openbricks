@@ -3,6 +3,24 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.16.0 — the map editor keeps your view, turns props by the numbers, adds any saved build; the toolbar is the map's
+
+The Map tab's camera is yours once a map is framed: an edit's reload
+(add, remove, stick, unstick) and a save under a name of your own
+leave the view where you put it — a scene for the same map no longer
+refits it; only loading another map, or Fit, frames it again.
+Shift-drag (or ⌘-drag) on the map pans, for a trackpad with no right
+button, and a pinch zooms — on the Workbench too. A selected prop
+turns by `R` or **Turn 90°**, and a **heading** field sets its angle
+outright; shift-drag still turns it by hand. **Open a build…** opens
+any saved assembly for the map: the builds opened are listed under the
+Workbench's open build, and the one chosen shows its components — the
+whole build first, then each that holds bricks — each one click from
+the map. The toolbar
+on the Map and Simulate tabs names the map shown instead of the
+assembly's Open / Save / Save as… buttons and component path, which
+belong to the Workbench.
+
 ## 4.15.0 — the map editor in 3D; what the Workbench builds, and library bricks, as props; props stuck to the map
 
 The Map tab is a 3D view with a camera of its own (orbit, pan, zoom,

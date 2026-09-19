@@ -104,6 +104,15 @@ pub struct App {
     search: String,
     /// The Map tab's search of the brick library.
     map_search: String,
+    /// Builds opened for the map editor beside the one open in the
+    /// Workbench: any saved assembly, so any component built there can go
+    /// on the map.
+    map_builds: Vec<(std::path::PathBuf, assembly::Document)>,
+    /// Which build the Map tab lists the components of: 0 the
+    /// Workbench's, then `map_builds` in order.
+    map_build: usize,
+    /// What the last attempt to open a build for the map said.
+    map_note: String,
     group_name: String,
     gizmo_mode: Mode,
     hot: Option<Handle>,
@@ -185,6 +194,9 @@ impl App {
             tab: Tab::Workbench,
             search: String::new(),
             map_search: String::new(),
+            map_builds: vec![],
+            map_build: 0,
+            map_note: String::new(),
             group_name: String::new(),
             gizmo_mode: Mode::Move,
             hot: None,
@@ -508,8 +520,10 @@ impl App {
     }
 
     fn fit_view(&mut self) {
+        // the plan view has no Fit (it always fits the map): off the Workbench, Fit is the map
+        // editor's, and frames the map again
         if self.tab != Tab::Workbench {
-            self.simulate.refit();
+            self.simulate.frame_map();
             return;
         }
         let pr = self.editor.edited_props();
@@ -561,13 +575,13 @@ impl App {
         let local = |p: egui::Pos2| (p.x - rect.min.x, p.y - rect.min.y);
         let cam = self.viewport.camera.clone();
         let handle_under = |x: f32, y: f32| gizmo.as_ref().and_then(|g| g.handle_at(&cam, x, y, w, h));
-        let shift = ui.input(|i| i.modifiers.shift);
+        let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
 
-        // zoom
+        // zoom: the wheel, or a pinch (a trackpad's)
         if response.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0);
+            let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+            let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0) / pinch.clamp(0.5, 2.0);
+            if f != 1.0 {
                 self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(20.0, 20000.0);
             }
         }
@@ -622,7 +636,9 @@ impl App {
                         self.editor.selection.clear();
                     }
                     if response.drag_started_by(egui::PointerButton::Primary) {
-                        self.drag = Drag::Orbit;
+                        // a drag on empty space orbits; with shift or ⌘ held it pans, for a pointer
+                        // with no right button
+                        self.drag = if shift || command { Drag::Pan } else { Drag::Orbit };
                     }
                 }
             }
@@ -708,7 +724,7 @@ impl App {
         }
         self.keys(ui, shift);
         let hud = format!(
-            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: right-drag · zoom: wheel · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° · S snaps · ⌘C/⌘V copy/paste · ⌘L locks, ⌘⇧L unlocks · Del · ⌘Z",
+            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° · S snaps · ⌘C/⌘V copy/paste · ⌘L locks, ⌘⇧L unlocks · Del · ⌘Z",
             self.editor.editing,
             if self.editor.selection.is_empty() {
                 String::new()
@@ -852,44 +868,51 @@ impl App {
             ui.selectable_value(&mut self.tab, Tab::Map, "Map");
             ui.selectable_value(&mut self.tab, Tab::Simulate, "Simulate");
             ui.separator();
-            if ui.button("Open…").clicked()
-                && let Some(p) = rfd::FileDialog::new().add_filter("assembly", &["json"]).pick_file()
-            {
-                self.editor.load_path(p);
-            }
-            if ui.button(if self.editor.dirty { "Save *" } else { "Save" }).clicked() {
-                self.save_file(false);
-            }
-            if ui.button("Save as…").clicked() {
-                self.save_file(true);
-            }
-            if ui.button("Example").clicked() {
-                self.editor.reset_to_example();
-            }
-            ui.separator();
-            for (i, id) in self.editor.crumbs.clone().iter().enumerate() {
-                if i > 0 {
-                    ui.label("›");
+            if self.tab == Tab::Workbench {
+                if ui.button("Open…").clicked()
+                    && let Some(p) = rfd::FileDialog::new().add_filter("assembly", &["json"]).pick_file()
+                {
+                    self.editor.load_path(p);
                 }
-                let label = if id == &self.editor.doc.robot.root {
-                    format!(
-                        "{} (robot)",
-                        if self.editor.doc.robot.name.is_empty() {
-                            id.clone()
-                        } else {
-                            self.editor.doc.robot.name.clone()
-                        }
-                    )
-                } else {
-                    id.clone()
-                };
-                if i + 1 == self.editor.crumbs.len() {
-                    ui.strong(label);
-                } else if ui.link(label).clicked() {
-                    self.editor.open_component(id, false);
+                if ui.button(if self.editor.dirty { "Save *" } else { "Save" }).clicked() {
+                    self.save_file(false);
                 }
+                if ui.button("Save as…").clicked() {
+                    self.save_file(true);
+                }
+                if ui.button("Example").clicked() {
+                    self.editor.reset_to_example();
+                }
+                ui.separator();
+                for (i, id) in self.editor.crumbs.clone().iter().enumerate() {
+                    if i > 0 {
+                        ui.label("›");
+                    }
+                    let label = if id == &self.editor.doc.robot.root {
+                        format!(
+                            "{} (robot)",
+                            if self.editor.doc.robot.name.is_empty() {
+                                id.clone()
+                            } else {
+                                self.editor.doc.robot.name.clone()
+                            }
+                        )
+                    } else {
+                        id.clone()
+                    };
+                    if i + 1 == self.editor.crumbs.len() {
+                        ui.strong(label);
+                    } else if ui.link(label).clicked() {
+                        self.editor.open_component(id, false);
+                    }
+                }
+                ui.separator();
+            } else {
+                // the assembly's file buttons and its component path belong to the Workbench: the
+                // other tabs name the map they show (the Map tab's panel saves it)
+                ui.weak(format!("map: {}", self.simulate.world()));
+                ui.separator();
             }
-            ui.separator();
             if self.tab.plan() {
                 ui.weak("plan view: the whole map, fitted");
                 return;
@@ -1675,24 +1698,103 @@ impl App {
         egui::CentralPanel::default().show(ui, |ui| self.sim_view_ui(ui, gpu));
     }
 
-    /// Props from elsewhere: a component of the build open in the
-    /// Workbench, or one brick from the library, placed at the map's origin.
+    /// A saved build, opened for the map editor: its components join the
+    /// list the Map tab adds from, and it is the build listed. A file
+    /// that is not an assembly is refused with the reason.
+    pub fn open_build(&mut self, p: std::path::PathBuf) -> Result<(), String> {
+        let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        let doc: assembly::Document = serde_json::from_str(&text).map_err(|e| format!("{}: not an assembly file ({e})", p.display()))?;
+        let errs = assembly::validate(&doc, &self.editor.bundle);
+        if errs.iter().any(|e| e.starts_with("format") || e.starts_with("robot.root")) {
+            return Err(format!("{}: not an assembly file: {}", p.display(), errs.join("; ")));
+        }
+        let k = match self.map_builds.iter().position(|(q, _)| q == &p) {
+            Some(k) => {
+                self.map_builds[k].1 = doc;
+                k
+            }
+            None => {
+                self.map_builds.push((p, doc));
+                self.map_builds.len() - 1
+            }
+        };
+        self.map_build = k + 1;
+        self.map_note.clear();
+        Ok(())
+    }
+
+    /// `open_build`, a refusal shown in the panel.
+    pub fn open_build_noted(&mut self, p: std::path::PathBuf) {
+        if let Err(e) = self.open_build(p) {
+            self.map_note = e;
+        }
+    }
+
+    /// Props from elsewhere: a component of a build from the Workbench —
+    /// the one open there, or any saved build opened here — or one brick
+    /// from the library, placed at the map's origin.
     fn map_add_ui(&mut self, ui: &mut egui::Ui) {
         ui.separator();
         ui.strong("Add to the map");
-        ui.weak("a component of the build open in the Workbench, at the origin");
-        let ids: Vec<String> = self.editor.doc.components.keys().cloned().collect();
-        egui::ComboBox::from_id_salt("add-component")
-            .selected_text("component…")
-            .show_ui(ui, |ui| {
-                for id in ids {
-                    if ui.selectable_label(false, &id).clicked()
-                        && let Some(sub) = assembly::subset(&self.editor.doc, &id)
-                    {
-                        self.simulate.add_model(&id, &sub);
-                    }
+        ui.weak("a component of a build from the Workbench, at the origin");
+        // the builds to add from: the Workbench's, then every saved build opened here; a row
+        // chooses the one whose components are listed
+        let title = self.title_name();
+        let names: Vec<String> = std::iter::once(format!("{title} · open in the Workbench"))
+            .chain(self.map_builds.iter().map(|(p, _)| file_name(p)))
+            .collect();
+        for (k, name) in names.iter().enumerate() {
+            if ui.selectable_label(self.map_build == k, name).clicked() {
+                self.map_build = k;
+            }
+        }
+        if ui
+            .button("Open a build…")
+            .on_hover_text("any saved assembly: its components join the list")
+            .clicked()
+            && let Some(p) = rfd::FileDialog::new().add_filter("assembly", &["json"]).pick_file()
+        {
+            self.open_build_noted(p);
+        }
+        if !self.map_note.is_empty() {
+            ui.colored_label(RED, &self.map_note);
+        }
+        // the chosen build's components that hold bricks, the whole build first
+        let shown = self.map_build.min(self.map_builds.len());
+        let (doc, label) = if shown == 0 {
+            (&self.editor.doc, title)
+        } else {
+            let (p, d) = &self.map_builds[shown - 1];
+            (d, file_name(p))
+        };
+        let root = doc.robot.root.clone();
+        let ids: Vec<String> = std::iter::once(root.clone())
+            .chain(doc.components.keys().filter(|id| **id != root).cloned())
+            .collect();
+        let mut to_add: Option<(String, assembly::Document)> = None;
+        let mut any = false;
+        for id in ids {
+            let Some(sub) = assembly::subset(doc, &id) else { continue };
+            let bricks = assembly::flatten(&sub, &id).len();
+            if bricks == 0 {
+                continue;
+            }
+            any = true;
+            ui.horizontal(|ui| {
+                if ui.small_button(format!("+ {id}")).clicked() {
+                    let name = if id == root { build_stem(&label) } else { id.clone() };
+                    to_add = Some((name, sub.clone()));
                 }
+                let what = if id == root { "the whole build" } else { "a component" };
+                ui.weak(format!("{what} · {bricks} brick{}", if bricks == 1 { "" } else { "s" }));
             });
+        }
+        if !any {
+            ui.weak("this build has no bricks yet");
+        }
+        if let Some((name, sub)) = to_add {
+            self.simulate.add_model(&name, &sub);
+        }
         ui.weak("or one brick from the library");
         ui.add(egui::TextEdit::singleline(&mut self.map_search).hint_text("search bricks by number or name"));
         let q = self.map_search.trim().to_lowercase();
@@ -1781,17 +1883,18 @@ impl App {
             self.simulate.route_lines(dark)
         };
         // the plan view never pans or zooms: it fits the map, and again whenever its size changes;
-        // the map editor's 3D camera is framed on the map once, then it is the user's
+        // the map editor's 3D camera frames a map when the map is new to it (or on Fit), then it
+        // is the user's: an edit's reload leaves it where it was put
         if !editing && self.plan_size != size {
             self.plan_size = size;
             self.simulate.refit();
         }
-        if let Some((lo, hi)) = self.simulate.frame_target() {
-            if editing {
+        if editing {
+            if let Some((lo, hi)) = self.simulate.map_frame_target() {
                 self.viewport.camera.fit(lo, hi);
-            } else {
-                self.viewport.camera.fit_plan(lo, hi, size.0 as f32 / size.1.max(1) as f32);
             }
+        } else if let Some((lo, hi)) = self.simulate.frame_target() {
+            self.viewport.camera.fit_plan(lo, hi, size.0 as f32 / size.1.max(1) as f32);
         }
         let bg = if dark {
             [0.0067, 0.0093, 0.0122, 1.0]
@@ -1813,9 +1916,10 @@ impl App {
         let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
         self.view_rect = response.rect;
         if editing && response.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0);
+            // the wheel zooms, and so does a pinch (a trackpad's)
+            let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+            let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0) / pinch.clamp(0.5, 2.0);
+            if f != 1.0 {
                 self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(50.0, 50000.0);
             }
         }
@@ -1827,7 +1931,7 @@ impl App {
             let (o, d) = cam.ray(x, y, w, h);
             viewport::ray_plane_z(o, d, 0.0)
         };
-        let shift = ui.input(|i| i.modifiers.shift);
+        let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
         // the pointer on the map, for the rubber band of a placement, and the prop under it
         self.simulate.hover = response
             .hover_pos()
@@ -1895,7 +1999,9 @@ impl App {
                 {
                     self.drag = Drag::Chassis { px0: x, pose0 };
                 } else if editing {
-                    self.drag = Drag::Orbit;
+                    // a drag on the map orbits; with shift or ⌘ held it pans, for a pointer with no
+                    // right button
+                    self.drag = if shift || command { Drag::Pan } else { Drag::Orbit };
                 }
             }
         }
@@ -2017,12 +2123,13 @@ impl App {
             self.drag = Drag::None;
         }
         if editing && !ui.ctx().egui_wants_keyboard_input() {
-            let (esc, del, dup, fit) = ui.input(|i| {
+            let (esc, del, dup, fit, turn) = ui.input(|i| {
                 (
                     i.key_pressed(egui::Key::Escape),
                     i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
                     i.modifiers.command && i.key_pressed(egui::Key::D),
                     i.key_pressed(egui::Key::F),
+                    i.key_pressed(egui::Key::R),
                 )
             });
             if esc {
@@ -2035,7 +2142,10 @@ impl App {
                 self.simulate.duplicate_selected_prop();
             }
             if fit {
-                self.simulate.refit();
+                self.simulate.frame_map();
+            }
+            if turn {
+                self.simulate.turn_selected_prop(90.0);
             }
         }
         if !editing && !ui.ctx().egui_wants_keyboard_input() {
@@ -2224,6 +2334,17 @@ fn connector_summary(cs: &[crate::bundle::Connector]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// A path's file name, for a list of builds.
+fn file_name(p: &std::path::Path) -> String {
+    p.file_name().unwrap_or(p.as_os_str()).to_string_lossy().to_string()
+}
+
+/// A build's name from its file name: what precedes the first dot
+/// (`gate.assembly.json` is `gate`).
+fn build_stem(name: &str) -> String {
+    name.split('.').next().filter(|s| !s.is_empty()).unwrap_or(name).to_string()
 }
 
 impl App {
@@ -2664,6 +2785,15 @@ mod tests {
         drag_to(&mut h, corner + egui::vec2(50.0, 40.0), Modifiers::NONE);
         release(&mut h, corner + egui::vec2(50.0, 40.0), PointerButton::Secondary);
         assert_ne!(h.state().viewport.camera.target, target0);
+        // ...and so does a shift-drag, for a pointer with no right button
+        let target1 = h.state().viewport.camera.target;
+        press(&mut h, corner, PointerButton::Primary, Modifiers::SHIFT);
+        drag_to(&mut h, corner + egui::vec2(10.0, 10.0), Modifiers::SHIFT);
+        assert!(matches!(h.state().drag, Drag::Pan), "a shift-drag on empty space pans");
+        drag_to(&mut h, corner + egui::vec2(50.0, 40.0), Modifiers::SHIFT);
+        release(&mut h, corner + egui::vec2(50.0, 40.0), PointerButton::Primary);
+        assert_ne!(h.state().viewport.camera.target, target1);
+        assert!(h.state().editor.selection.is_empty());
         // zoom: the wheel changes the distance
         let d0 = h.state().viewport.camera.distance;
         h.input_mut().events.push(Event::PointerMoved(rect.center()));
@@ -2935,6 +3065,23 @@ mod tests {
         let cam = h.state().viewport.camera.clone();
         assert!(!cam.ortho && cam.pitch < 89.0, "the map editor is a 3D view: {cam:?}");
         assert!(h.query_by_label("Fit").is_some() && h.query_by_label("Iso").is_some() && h.query_by_label("Move").is_none());
+        // the toolbar is the map's: the assembly's file buttons and its component path stay on
+        // the Workbench, the map's name shows instead
+        let file_buttons = ["Open…", "Save as…", "Example"].iter().any(|l| h.query_by_label(l).is_some());
+        assert!(!file_buttons, "the assembly's file buttons belong to the Workbench");
+        let map_label = format!("map: {}", h.state().simulate.world());
+        assert!(h.query_by_label(&map_label).is_some(), "{map_label}");
+        // the view is the user's: panned aside (the right button), it stays there through the
+        // edits below, each of which rebuilds the map
+        let rect = h.state().view_rect;
+        let empty = rect.left_top() + egui::vec2(30.0, 30.0);
+        press(&mut h, empty, PointerButton::Secondary, Modifiers::NONE);
+        drag_to(&mut h, empty + egui::vec2(10.0, 10.0), Modifiers::NONE);
+        drag_to(&mut h, empty + egui::vec2(40.0, 30.0), Modifiers::NONE);
+        release(&mut h, empty + egui::vec2(40.0, 30.0), PointerButton::Secondary);
+        steps(&mut h, 2);
+        let panned = h.state().viewport.camera.target;
+        assert_ne!(panned, cam.target, "the pan moved the view's centre");
         // a point on a prop's top face, on the screen
         let top = |h: &Harness<'_, App>, x: f64, y: f64| on_screen(h.state(), Vec3::new(x as f32, y as f32, 20.0));
         // the stand-in's prop stands at (300, 200) mm, 20 mm tall: under the pointer it lights, a
@@ -2976,6 +3123,21 @@ mod tests {
         steps(&mut h, 2);
         let turned = h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "move").cloned().unwrap();
         assert!(turned["yaw_deg"].as_f64().unwrap().abs() > 5.0, "{turned}");
+        // R turns it 90° more, the button another 90°
+        let y0 = turned["yaw_deg"].as_f64().unwrap();
+        let last_yaw = |h: &Harness<'_, App>| {
+            h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "move").unwrap()["yaw_deg"]
+                .as_f64()
+                .unwrap()
+        };
+        h.key_press(Key::R);
+        steps(&mut h, 2);
+        let y_r = last_yaw(&h);
+        assert!(crate::route::wrap_deg(y_r - y0 - 90.0).abs() < 0.2, "R: {y_r} from {y0}");
+        h.get_by_label("Turn 90°").click();
+        steps(&mut h, 2);
+        let y_b = last_yaw(&h);
+        assert!(crate::route::wrap_deg(y_b - y0 - 180.0).abs() < 0.2, "the button: {y_b} from {y0}");
         // ⌘D duplicates (the newest prop selected once built), Del removes it
         h.key_press_modifiers(Modifiers::COMMAND, Key::D);
         wait_for(&mut h, &|a| a.simulate.prop_name(1).is_some());
@@ -2983,6 +3145,9 @@ mod tests {
         h.key_press(Key::Delete);
         wait_for(&mut h, &|a| a.simulate.prop_name(1).is_none());
         assert!(h.state().simulate.selected_prop.is_none());
+        steps(&mut h, 2);
+        let target = h.state().viewport.camera.target;
+        assert_eq!(target, panned, "the edits' reloads left the view");
         // the panel: a row selects, the buttons duplicate and remove, Save writes a map of the
         // user's own that the tab then shows, listed as theirs, its markers carried over
         h.get_by_label("clef · clef").click();
@@ -3001,6 +3166,9 @@ mod tests {
         h.get_by_label("Save map").click();
         wait_for(&mut h, &|a| a.simulate.world() == "harness-map" && a.simulate.scene_loaded());
         assert!(crate::markers::Markers::file(&mdir, "harness-map").exists());
+        steps(&mut h, 2);
+        assert_eq!(h.state().viewport.camera.target, panned, "a save keeps the view");
+        assert!(h.query_by_label("map: harness-map").is_some(), "the toolbar names the map saved");
         assert!(h.state().simulate.worlds().iter().any(|w| w.alias == "harness-map" && w.user));
         // a brick from the library: found by number, put on the map as a document, drawn as its
         // mesh (the server sends the prop's bricks), selected once built
@@ -3036,6 +3204,71 @@ mod tests {
         let sub = assembly::subset(&h.state().editor.doc, &root).unwrap();
         h.state_mut().simulate.add_model(&root, &sub);
         wait_for(&mut h, &|a| a.simulate.scene_props() == before + 2);
+        // any saved build: opened for the map, it is the build listed, its components offered
+        // (the whole build first) and one goes on the map, named after the file
+        let gate = fake.dir.join("gate.assembly.json");
+        let brick = assembly::brick_document(&h.state().editor.bundle, &num).unwrap();
+        std::fs::write(&gate, serde_json::to_string(&brick).unwrap()).unwrap();
+        h.state_mut().open_build(gate.clone()).expect("a saved build opens");
+        steps(&mut h, 2);
+        assert_eq!(h.state().map_build, 1, "the build just opened is the one listed");
+        assert!(h.query_by_label("the whole build · 1 brick").is_some());
+        h.get_by_label("+ brick").click();
+        wait_for(&mut h, &|a| a.simulate.scene_props() == before + 3);
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("gate"));
+        assert!(h.state_mut().open_build(fake.dir.join("nowhere.assembly.json")).is_err());
+        std::fs::write(&gate, "{}").unwrap();
+        let again = h.state_mut().open_build(gate.clone());
+        assert!(again.is_err(), "not an assembly: {again:?}");
+        assert_eq!(h.state().map_builds.len(), 1, "a refused file is not listed");
+        // the rows choose the build listed: the Workbench's, then the saved one
+        let open_row = format!("{} · open in the Workbench", h.state().title_name());
+        h.get_by_label(&open_row).click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().map_build, 0);
+        assert!(h.query_by_label(&format!("+ {root}")).is_some(), "the Workbench's build is listed");
+        h.get_by_label("gate.assembly.json").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().map_build, 1);
+        // the same file opened again replaces its entry, with what it holds now
+        std::fs::write(&gate, serde_json::to_string(&sub).unwrap()).unwrap();
+        h.state_mut().open_build(gate.clone()).expect("the same file opens again");
+        steps(&mut h, 2);
+        assert_eq!((h.state().map_builds.len(), h.state().map_build), (1, 1));
+        assert!(h.query_by_label(&format!("+ {root}")).is_some(), "its components are the new ones");
+        // a file of another format is refused, and the panel says so; a build with no bricks
+        // says so too
+        let mut odd = brick.clone();
+        odd.format = "nope".into();
+        let odd_path = fake.dir.join("odd.assembly.json");
+        std::fs::write(&odd_path, serde_json::to_string(&odd).unwrap()).unwrap();
+        h.state_mut().open_build_noted(odd_path);
+        steps(&mut h, 2);
+        let note = h.state().map_note.clone();
+        assert!(note.contains("not an assembly file"), "{note}");
+        assert!(h.query_by_label(&note).is_some(), "the refusal shows in the panel");
+        let mut bare = brick.clone();
+        bare.components.get_mut("brick").unwrap().children.clear();
+        let bare_path = fake.dir.join("bare.assembly.json");
+        std::fs::write(&bare_path, serde_json::to_string(&bare).unwrap()).unwrap();
+        h.state_mut().open_build(bare_path).expect("a build with no bricks opens");
+        steps(&mut h, 2);
+        assert!(h.state().map_note.is_empty(), "a good open clears the note");
+        assert!(h.query_by_label("this build has no bricks yet").is_some());
+        // the heading field turns the selected prop: a drag on it
+        h.get_by_label("clef · clef").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef"));
+        let y1 = last_yaw(&h);
+        let field = h.get_by_role(egui::accesskit::Role::SpinButton).rect().center();
+        press(&mut h, field, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, field + egui::vec2(10.0, 0.0), Modifiers::NONE);
+        drag_to(&mut h, field + egui::vec2(60.0, 0.0), Modifiers::NONE);
+        release(&mut h, field + egui::vec2(60.0, 0.0), PointerButton::Primary);
+        steps(&mut h, 2);
+        let y2 = last_yaw(&h);
+        assert!((y2 - y1).abs() > 5.0, "the heading field turned it: {y2} from {y1}");
         // the 3D view: a drag on the empty map orbits, a right drag pans, the wheel zooms, Fit
         // frames the map again
         h.key_press(Key::Escape);
@@ -3055,6 +3288,19 @@ mod tests {
         drag_to(&mut h, empty + egui::vec2(60.0, 60.0), Modifiers::NONE);
         release(&mut h, empty + egui::vec2(60.0, 60.0), PointerButton::Secondary);
         assert_ne!(h.state().viewport.camera.target, cam0.target);
+        // a shift-drag pans too (a trackpad has no right button), and a pinch zooms
+        let t1 = h.state().viewport.camera.target;
+        press(&mut h, empty, PointerButton::Primary, Modifiers::SHIFT);
+        drag_to(&mut h, empty + egui::vec2(20.0, 20.0), Modifiers::SHIFT);
+        assert!(matches!(h.state().drag, Drag::Pan), "a shift-drag on the map pans");
+        drag_to(&mut h, empty + egui::vec2(60.0, 60.0), Modifiers::SHIFT);
+        release(&mut h, empty + egui::vec2(60.0, 60.0), PointerButton::Primary);
+        assert_ne!(h.state().viewport.camera.target, t1);
+        let d1 = h.state().viewport.camera.distance;
+        h.input_mut().events.push(Event::PointerMoved(rect.center()));
+        h.input_mut().events.push(Event::Zoom(1.25));
+        steps(&mut h, 2);
+        assert!(h.state().viewport.camera.distance < d1, "a pinch zooms in");
         h.input_mut().events.push(Event::PointerMoved(rect.center()));
         h.input_mut().events.push(Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
