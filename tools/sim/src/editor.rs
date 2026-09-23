@@ -467,6 +467,25 @@ impl Editor {
         }
     }
 
+    /// A new component of the given name, with nothing in it, joins the
+    /// library and opens for building; where it was made is a crumb back.
+    pub fn new_component(&mut self, name: &str) -> bool {
+        let before = self.doc.clone();
+        match assembly::new_component(&mut self.doc, name) {
+            Ok(id) => {
+                self.undo.push(before);
+                self.dirty = true;
+                self.open_component(&id, true);
+                self.status = format!("{id} is in the library, empty: add bricks to it, then use it from the library");
+                true
+            }
+            Err(e) => {
+                self.status = e;
+                false
+            }
+        }
+    }
+
     /// Rename the selected instance; roles that point at it follow.
     pub fn rename_selected(&mut self, new: &str) -> bool {
         let Some(inst) = self.selected_instances().into_iter().next() else {
@@ -1030,6 +1049,48 @@ mod tests {
         ed.selection.clear();
         ed.ungroup_selection();
         assert!(ed.status.starts_with("Ungrouped"));
+    }
+
+    #[test]
+    fn a_new_component_opens_empty_and_undo_takes_it_back() {
+        let mut ed = editor();
+        let root = ed.doc.robot.root.clone();
+        assert!(!ed.new_component(" "));
+        assert_eq!(ed.status, "Give the component a name");
+        assert!(!ed.new_component("drive_unit"), "the example already has one");
+        assert!(ed.status.contains("already exists"), "{}", ed.status);
+        assert!(ed.is_root() && !ed.dirty && ed.undo_depth() == 0);
+        ed.fit_pending = false;
+        assert!(ed.new_component("Sensor Mast"), "{}", ed.status);
+        assert_eq!(ed.editing, "sensor_mast");
+        assert_eq!(ed.crumbs, vec![root.clone(), "sensor_mast".to_string()]);
+        assert!(ed.children().is_empty() && ed.selection.is_empty());
+        assert!(ed.dirty && ed.fit_pending);
+        assert_eq!(
+            ed.status,
+            "sensor_mast is in the library, empty: add bricks to it, then use it from the library"
+        );
+        assert_eq!(ed.edited_props().count, 0);
+        assert!(ed.leaves.is_empty());
+        // undone: the component is gone and the robot is open again
+        ed.undo();
+        assert!(!ed.doc.components.contains_key("sensor_mast"));
+        assert!(ed.is_root());
+        assert_eq!(ed.crumbs, vec![root.clone()]);
+        // made again, built from a brick, then used from the robot
+        assert!(ed.new_component("sensor_mast"));
+        let id = ed.ensure_ldraw_part("32278").unwrap();
+        ed.add_instance(Some(id), None, [0.0; 3]);
+        assert_eq!(ed.children().len(), 1);
+        assert!(ed.edited_props().mass > 0.0);
+        ed.open_component(&root, false);
+        assert_eq!(ed.crumbs, vec![root.clone()]);
+        let n = ed.children().len();
+        ed.add_instance(None, Some("sensor_mast".into()), [0.0; 3]);
+        assert_eq!(ed.children().len(), n + 1);
+        assert_eq!(ed.component_of(&ed.selection[0].clone()), Some("sensor_mast".into()));
+        assert_eq!(assembly::usage_count(&ed.doc, "sensor_mast"), 1);
+        assert!(assembly::validate(&ed.doc, &ed.bundle).is_empty());
     }
 
     #[test]

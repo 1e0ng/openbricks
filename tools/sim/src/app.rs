@@ -114,6 +114,8 @@ pub struct App {
     /// What the last attempt to open a build for the map said.
     map_note: String,
     group_name: String,
+    /// The name typed beside the library's Components for a new one.
+    new_component_name: String,
     gizmo_mode: Mode,
     hot: Option<Handle>,
     show_grid: bool,
@@ -198,6 +200,7 @@ impl App {
             map_build: 0,
             map_note: String::new(),
             group_name: String::new(),
+            new_component_name: String::new(),
             gizmo_mode: Mode::Move,
             hot: None,
             show_grid: true,
@@ -987,6 +990,21 @@ impl App {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(6.0);
             ui.strong("Components");
+            ui.horizontal(|ui| {
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.new_component_name)
+                        .hint_text("new component")
+                        .desired_width(160.0),
+                );
+                let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let make = ui
+                    .small_button("New")
+                    .on_hover_text("an empty component of that name joins the library and opens to build")
+                    .clicked();
+                if (make || enter) && self.editor.new_component(&self.new_component_name.clone()) {
+                    self.new_component_name.clear();
+                }
+            });
             let ids: Vec<String> = self.editor.doc.components.keys().cloned().collect();
             let mut to_add: Option<(Option<String>, Option<String>)> = None;
             let mut to_open: Option<String> = None;
@@ -1253,6 +1271,9 @@ impl App {
             {
                 open = Some(c.clone());
             }
+        }
+        if children.is_empty() {
+            ui.weak("Nothing here yet: add bricks from the library");
         }
         if let Some(c) = open {
             self.editor.open_component(&c, true);
@@ -2622,6 +2643,57 @@ mod tests {
         assert!(h.query_by_label("+ add").is_none());
         h.state_mut().search.clear();
         h.step();
+    }
+
+    #[test]
+    fn the_library_starts_a_new_component_and_opens_it_to_build() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        // a taken name is refused, and stays to be corrected
+        h.state_mut().new_component_name = "drive_unit".into();
+        h.step();
+        h.get_by_label("New").click();
+        steps(&mut h, 3);
+        assert!(h.state().editor.is_root());
+        assert!(h.state().editor.status.contains("already exists"), "{}", h.state().editor.status);
+        assert_eq!(h.state().new_component_name, "drive_unit");
+        // a name of its own: in the library, empty, and open
+        h.state_mut().new_component_name = "Sensor Mast".into();
+        h.step();
+        h.get_by_label("New").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.editing, "sensor_mast");
+        assert!(h.state().editor.children().is_empty());
+        assert!(h.state().new_component_name.is_empty());
+        assert!(h.query_by_label("Component sensor_mast").is_some(), "the inspector shows its page");
+        assert!(h.query_by_label("Contents of sensor_mast").is_some());
+        assert!(h.query_by_label("Nothing here yet: add bricks from the library").is_some());
+        h.state_mut().search = "sensor_mast".into();
+        steps(&mut h, 2);
+        assert!(h.query_by_label("0 g Σ · used ×0").is_some(), "listed in the library");
+        assert!(h.query_by_label("+ add").is_none(), "not into itself");
+        h.state_mut().search.clear();
+        steps(&mut h, 2);
+        // a brick from the library goes into it
+        h.get_all_by_label("+").next().unwrap().click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.children().len(), 1);
+        assert!(h.query_by_label("Nothing here yet: add bricks from the library").is_none());
+        // the brick just added is selected: its page shows; with nothing selected, the component's
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
+        // back at the robot, it is added like any other component
+        h.get_by_label("Back to the robot").click();
+        steps(&mut h, 3);
+        assert!(h.state().editor.is_root());
+        let n = h.state().editor.children().len();
+        h.state_mut().search = "sensor_mast".into();
+        steps(&mut h, 2);
+        h.get_by_label("+ add").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.children().len(), n + 1);
+        assert_eq!(h.state().editor.selected_instances()[0].component.as_deref(), Some("sensor_mast"));
     }
 
     #[test]
