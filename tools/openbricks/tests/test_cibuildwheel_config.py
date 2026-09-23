@@ -12,7 +12,8 @@ post-build smoke import is skipped — a broken wheel can land on
 PyPI before anyone notices.
 
 We assert the contract this repo's publish workflow depends on:
-  * The CPython 3.9-3.13 build line.
+  * The CPython 3.9-3.14 build line, and the newest CPython named
+    the same in the classifiers, the README and the CI comment.
   * Skips for PyPy / musllinux / 32-bit.
   * The smoke ``test-command`` imports a real attribute of
     ``openbricks_sim._native``.
@@ -56,13 +57,38 @@ class CibuildwheelConfigTests(unittest.TestCase):
             "[tool.cibuildwheel] missing from pyproject.toml — the "
             "publish workflow's wheel build relies on it.")
 
-    def test_builds_cpython_39_through_313(self):
+    def test_builds_cpython_39_through_314(self):
         build_line = self.cfg.get("build", "")
-        for py in ("cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*"):
+        for py in ("cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*",
+                   "cp314-*"):
             self.assertIn(
                 py, build_line,
                 "build line missing %s — wheels for that interpreter "
                 "won't be produced." % py)
+
+    def test_the_newest_python_is_named_the_same_everywhere(self):
+        # A Python newer than the wheel matrix builds the sdist by hand:
+        # 4.18.1 found pipx on a Python 3.14 Mac compiling the native
+        # extension (and failing on its SDK) while cp39-cp313 wheels sat
+        # on PyPI. The matrix, the classifiers, the README's wheel note
+        # and the CI comment must all name the same newest CPython.
+        import re
+        build = self.cfg.get("build", "")
+        newest = max(int(m) for m in re.findall(r"cp3(\d+)-\*", build))
+        classifiers = _load_pyproject()["project"]["classifiers"]
+        named = [int(m) for c in classifiers
+                 for m in re.findall(r"Python :: 3\.(\d+)$", c)]
+        self.assertEqual(max(named), newest, "the classifiers")
+        readme = (_PKG_ROOT / "README.md").read_text()
+        m = re.search(r"CPython 3\.9–3\.(\d+)\)", readme)
+        self.assertIsNotNone(m, "the README's wheel note")
+        self.assertEqual(int(m.group(1)), newest, "the README")
+        ci = _PKG_ROOT.parent.parent / ".github" / "workflows" / "ci.yaml"
+        if not ci.exists():
+            self.skipTest("no repo checkout around the package")
+        m = re.search(r"cp39-cp3(\d+)", ci.read_text())
+        self.assertIsNotNone(m, "the CI comment")
+        self.assertEqual(int(m.group(1)), newest, "ci.yaml")
 
     def test_skips_musllinux_and_32bit(self):
         skip = self.cfg.get("skip", [])
