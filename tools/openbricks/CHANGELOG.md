@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.18.1 — wheels for Python 3.14
+
+PyPI now carries CPython 3.14 wheels (manylinux, macOS universal2,
+Windows) beside 3.9–3.13. Until now a Python 3.14 install — pipx's
+default on a current Mac — fell back to the sdist and compiled the
+native extension, which fails wherever there is no toolchain (or, on
+a Mac whose SDK has outrun its command-line tools, with a linker
+error). mujoco 3.12 ships 3.14 wheels, so the sim extra installs
+without a compiler too.
+
+- Tests: the cibuildwheel matrix names cp314, and the newest CPython
+  is named the same in the matrix, the classifiers, the README's
+  wheel note and the CI comment.
+
 ## 4.18.0 — chained straights run on; the first action starts the route; a route runs from its start
 
 Three fixes from users of the route planner. A straight clicked

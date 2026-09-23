@@ -777,7 +777,7 @@ jobs:
     #
     # cibuildwheel reads its build matrix from
     # ``tools/openbricks/pyproject.toml`` ``[tool.cibuildwheel]`` —
-    # cp39-cp313, manylinux_2_28 on Linux, universal2 on macOS,
+    # cp39-cp314, manylinux_2_28 on Linux, universal2 on macOS,
     # AMD64 on Windows.
     needs: [openbricks-host]
     strategy:
