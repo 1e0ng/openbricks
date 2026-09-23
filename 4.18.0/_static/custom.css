@@ -1,0 +1,124 @@
+/* docs.openbricks.dev branding on top of sphinx_rtd_theme. */
+
+/* Header / nav accent: brick orange instead of RTD blue. */
+.wy-side-nav-search,
+.wy-nav-top {
+  background: #d9531e;
+}
+
+.wy-side-nav-search > a,
+.wy-side-nav-search .wy-dropdown > a {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Keep long signatures readable. */
+.rst-content dl.py dt {
+  white-space: normal;
+}
+
+/* "Download PDF" button under the sidebar search box (injected by
+   _templates/layout.html). White-on-orange to sit on the accent
+   header block. */
+.obk-pdf-btn {
+  display: block;
+  margin: 10px 0 4px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 4px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff !important;
+}
+.obk-pdf-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  text-decoration: none;
+}
+
+/* Version pill + flyout menu (injected by _templates/layout.html,
+   populated from /versions.json by _static/version-switcher.js).
+   Without the manifest the pill is a static version label. */
+.obk-version {
+  display: block;
+  margin: 10px 0 0;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 4px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff !important;
+  cursor: default;
+}
+.obk-version-has-menu {
+  cursor: pointer;
+}
+.obk-version-has-menu::after {
+  content: " \25BE";
+}
+.obk-version-menu {
+  margin: 4px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+}
+.obk-version-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 10px;
+}
+.obk-version-row a {
+  color: #fff !important;
+}
+.obk-version-row-current a:first-child {
+  font-weight: 700;
+  text-decoration: underline;
+}
+.obk-version-pdf {
+  opacity: 0.8;
+}
+
+/* Banner shown on archived (/X.Y.Z/) pages, injected by
+   version-switcher.js. */
+.obk-version-banner {
+  padding: 10px 16px;
+  background: #fff3cd;
+  border-bottom: 2px solid #d9531e;
+  color: #533f03;
+  font-size: 14px;
+}
+.obk-version-banner a {
+  color: #d9531e;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------
+   System font stack.
+
+   The Read-the-Docs theme ships Lato and FontAwesome as web fonts,
+   and does it twice (_static/fonts/ and _static/css/fonts/). That is
+   ~2 MB of the built site — the difference between a 1.1 MB offline
+   bundle and a 308 KB one, for a typeface. ``openbricks docs`` ships
+   that bundle, so the fonts are dropped and the system stack is used
+   instead. Declared HERE rather than deleted from the output after
+   the fact, so what Sphinx builds is exactly what ships and the
+   drift check stays meaningful.
+
+   Layout, structure and every cross-reference are unaffected; only
+   the typeface changes.
+   --------------------------------------------------------------- */
+body,
+h1, h2, h3, h4, h5, h6,
+.rst-content .toctree-wrapper > p.caption,
+.wy-menu-vertical a,
+.wy-side-nav-search > a,
+.wy-nav-top a {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+}
+code, pre, .rst-content tt, .rst-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+               "Liberation Mono", monospace;
+}
