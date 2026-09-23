@@ -23,6 +23,9 @@ pub const DEFAULT_TURN_DPS: f64 = 300.0;
 pub const TURN_HANDLE_MM: f64 = 60.0;
 /// Where a pasted copy lands, relative to the original.
 pub const PASTE_OFFSET_MM: f64 = 40.0;
+/// How far off straight ahead a straight's end may be clicked and still
+/// land on the heading the robot arrives with.
+pub const CHAIN_SNAP_DEG: f64 = 7.5;
 const EPS_MM: f64 = 0.5;
 
 pub type Point = [f64; 2];
@@ -933,6 +936,20 @@ pub fn length_mm(route: &Route) -> f64 {
         .sum()
 }
 
+/// `p` pulled onto the ray from `start` along `heading_deg`, as far
+/// along it as it lay, when it is within `tol_deg` of straight ahead;
+/// else `p` itself. A straight clicked roughly ahead then runs exactly
+/// the way the robot arrives, so chained straights need no turn between
+/// them.
+pub fn snap_heading(start: Point, heading_deg: f64, p: Point, tol_deg: f64) -> Point {
+    if dist(start, p) < EPS_MM || wrap_deg(heading_to(start, p) - heading_deg).abs() > tol_deg {
+        return p;
+    }
+    let (c, s) = (heading_deg.to_radians().cos(), heading_deg.to_radians().sin());
+    let along = (p[0] - start[0]) * c + (p[1] - start[1]) * s;
+    [round1(start[0] + along * c), round1(start[1] + along * s)]
+}
+
 /// The nearest of `targets` within `tol_mm` of `p`, else `p` itself.
 pub fn snap(p: Point, targets: &[Point], tol_mm: f64) -> Point {
     targets
@@ -1788,6 +1805,42 @@ mod tests {
         assert_eq!(route.functions(), vec!["line_follow"]);
         let end = plan(&route).last().unwrap().end;
         assert!(pose_near(end, 200.0, 250.0, 0.0), "{end:?}");
+    }
+
+    #[test]
+    fn a_straight_clicked_roughly_ahead_lands_on_the_heading() {
+        // 400 mm on and 8 mm aside is 1.1° off: onto the ray, as far along it
+        assert_eq!(snap_heading([0.0, 0.0], 0.0, [400.0, 8.0], CHAIN_SNAP_DEG), [400.0, 0.0]);
+        // a real angle stays one
+        assert_eq!(snap_heading([0.0, 0.0], 0.0, [400.0, 100.0], CHAIN_SNAP_DEG), [400.0, 100.0]);
+        // any heading; the distance along it is what is kept
+        assert_eq!(snap_heading([100.0, 100.0], 90.0, [104.0, 400.0], CHAIN_SNAP_DEG), [100.0, 400.0]);
+        assert_eq!(snap_heading([0.0, 0.0], -180.0, [-300.0, -4.0], CHAIN_SNAP_DEG), [-300.0, 0.0]);
+        // behind is not ahead; on the spot is left alone
+        assert_eq!(snap_heading([0.0, 0.0], 0.0, [-400.0, 8.0], CHAIN_SNAP_DEG), [-400.0, 8.0]);
+        assert_eq!(snap_heading([0.0, 0.0], 0.0, [0.0, 0.0], CHAIN_SNAP_DEG), [0.0, 0.0]);
+        // two such straights, the first continuous: no turn comes between them
+        let end = snap_heading([400.0, 0.0], 0.0, [800.0, 8.0], CHAIN_SNAP_DEG);
+        let route = Route {
+            start: Pose2::at([0.0, 0.0], 0.0),
+            actions: vec![
+                Action::Straight {
+                    start: [0.0, 0.0],
+                    end: [400.0, 0.0],
+                    speed: DEFAULT_STRAIGHT_DPS,
+                    then: End::Continue,
+                }
+                .into(),
+                straight([400.0, 0.0], end).into(),
+            ],
+            ..Default::default()
+        };
+        let text = program(&route, 86.4, 135.0);
+        assert!(
+            text.contains("robot.straight(400, then=Stop.NONE)\n\n# 2: straight 400 mm at 350°/s\nrobot.straight(400)\n"),
+            "{text}"
+        );
+        assert!(!text.contains("robot.turn"), "{text}");
     }
 
     #[test]

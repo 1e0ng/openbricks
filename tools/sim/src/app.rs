@@ -1961,6 +1961,8 @@ impl App {
                 ground(x, y)
             })
             .map(|h| [h.x as f64, h.y as f64]);
+        // shift frees a straight's end from the heading it nears
+        self.simulate.free = shift;
         self.simulate.hover_prop = if editing {
             response.hover_pos().and_then(|p| {
                 let (x, y) = local(p);
@@ -3764,6 +3766,21 @@ mod tests {
         assert_eq!(h.state().simulate.route.actions.len(), 3);
         h.state_mut().simulate.shutdown();
         let _ = std::fs::remove_dir_all(&fake.dir);
+    }
+
+    #[test]
+    fn shift_frees_a_straight_from_the_heading_it_nears() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        h.get_by_label("Simulate").click();
+        steps(&mut h, 2);
+        assert!(!h.state().simulate.free);
+        h.input_mut().modifiers = Modifiers::SHIFT;
+        steps(&mut h, 2);
+        assert!(h.state().simulate.free, "shift held: any angle");
+        h.input_mut().modifiers = Modifiers::NONE;
+        steps(&mut h, 2);
+        assert!(!h.state().simulate.free);
     }
 
     #[test]
