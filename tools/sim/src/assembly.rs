@@ -700,17 +700,32 @@ pub fn remap_roles(doc: &mut Document, editing: &str, f: &dyn Fn(&str) -> Option
     doc.robot.roles = roles;
 }
 
+/// The library id a component named by the user gets: the name's slug,
+/// which must be something and not taken.
+pub fn component_id(doc: &Document, name: &str) -> Result<String, String> {
+    let id = slug(name);
+    if id.is_empty() {
+        return Err("Give the component a name".into());
+    }
+    if doc.components.contains_key(&id) {
+        return Err(format!("A component named {id} already exists"));
+    }
+    Ok(id)
+}
+
+/// A new component with nothing in it joins the library under the
+/// name's id, to be built from bricks.
+pub fn new_component(doc: &mut Document, name: &str) -> Result<String, String> {
+    let id = component_id(doc, name)?;
+    doc.components.insert(id.clone(), Component::default());
+    Ok(id)
+}
+
 /// Group the named top-level instances of `editing` into a new
 /// component `new_id`: the first one's frame becomes the new origin;
 /// world poses do not move; roles follow.
 pub fn group(doc: &mut Document, editing: &str, names: &[String], new_id: &str) -> Result<String, String> {
-    let new_id = slug(new_id);
-    if new_id.is_empty() {
-        return Err("Give the component a name".into());
-    }
-    if doc.components.contains_key(&new_id) {
-        return Err(format!("A component named {new_id} already exists"));
-    }
+    let new_id = component_id(doc, new_id)?;
     let comp = doc.components.get(editing).ok_or("no such component")?.clone();
     let chosen: Vec<Instance> = names
         .iter()
@@ -1245,6 +1260,51 @@ mod tests {
         let sib = vec![inst("pin", "p", [0.0; 3], [0.0; 3]), inst("pin_2", "p", [0.0; 3], [0.0; 3])];
         assert_eq!(unique_name(&sib, "pin"), "pin_3");
         assert_eq!(slug("Drive Unit #2!"), "drive_unit_2");
+    }
+
+    #[test]
+    fn a_new_component_starts_empty_in_the_library() {
+        let b = bundle();
+        let box10 = Shape::Box {
+            size: [10.0, 10.0, 10.0],
+            pos: [0.0; 3],
+        };
+        let mut doc = doc_with(
+            vec![("p", part(10.0, box10))],
+            vec![("robot", vec![inst("a", "p", [0.0; 3], [0.0; 3])])],
+        );
+        assert_eq!(component_id(&doc, " - "), Err("Give the component a name".into()));
+        assert_eq!(component_id(&doc, "Robot"), Err("A component named robot already exists".into()));
+        assert_eq!(new_component(&mut doc, "Sensor Mast"), Ok("sensor_mast".into()));
+        assert_eq!(
+            new_component(&mut doc, "sensor mast"),
+            Err("A component named sensor_mast already exists".into())
+        );
+        let comp = &doc.components["sensor_mast"];
+        assert!(comp.children.is_empty() && comp.note.is_empty());
+        assert!(validate(&doc, &b).is_empty());
+        assert_eq!(usage_count(&doc, "sensor_mast"), 0);
+        assert!(flatten(&doc, "sensor_mast").is_empty());
+        let mut errs = vec![];
+        let pr = component_props(&doc, &b, "sensor_mast", &mut HashMap::new(), &mut vec![], &mut errs);
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!((pr.mass, pr.count), (0.0, 0));
+        assert!(pr.bbox.is_none() && pr.com == DVec3::ZERO);
+        assert_eq!(doc.components["robot"].children.len(), 1, "the robot is untouched");
+        // an instance of it in the robot adds nothing, and is valid
+        doc.components.get_mut("robot").unwrap().children.push(Instance {
+            name: "mast".into(),
+            part: None,
+            component: Some("sensor_mast".into()),
+            pos: [0.0; 3],
+            rot: [0.0; 3],
+            locked: false,
+        });
+        assert!(validate(&doc, &b).is_empty());
+        let pr = component_props(&doc, &b, "robot", &mut HashMap::new(), &mut vec![], &mut errs);
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!((pr.mass, pr.count), (10.0, 1));
+        assert_eq!(usage_count(&doc, "sensor_mast"), 1);
     }
 
     #[test]

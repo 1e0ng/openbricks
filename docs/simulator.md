@@ -89,7 +89,11 @@ file, the bounding-box centre or the bottom centre), and a weighed
 mass or a density; the part gets its exact volume, centre of mass and
 inertia from the closed mesh (an open mesh gets a box's inertia and
 needs a mass), plus any 4.8 mm pin holes found on it, and lands in
-the library and the view.
+the library and the view. A component can start from nothing: type
+a name beside the library's **Components** and press **New** (or
+Enter), and an empty component of that name joins the library and
+opens for building; add bricks to it, then **+ add** it to the robot
+or any other component.
 Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 
@@ -255,7 +259,9 @@ robot as a tree of components:
 - **Components** are lists of bricks and other components, each
   placed by a position and a roll / pitch / yaw. Drag bricks from the
   library into the view, move and rotate them with the gizmos, select
-  what you built and *Group* it: the new component joins the library
+  what you built and *Group* it — or, in the sim's library, name a
+  component and press *New* to start it empty and build it from
+  bricks. Either way the new component joins the library
   and can be dropped anywhere, as many times as you like. Double-click
   an instance to edit its definition in place; every use follows.
 - **Connections.** Pins, axles and studs are real features of the

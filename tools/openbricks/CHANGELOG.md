@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.17.0 — a component from nothing: named in the library, opened to build
+
+The Workbench's library starts a component from scratch. Type a name
+beside **Components** and press **New** (or Enter): an empty component
+of that name joins the library and opens for building, where you
+were a crumb back. Add bricks to it from the library, then **+ add**
+it to the robot or any other component like the rest; until it holds
+something, its contents list says so. A blank or taken name is
+refused in the status line and stays to be corrected; undo takes the
+component away again. Before this the only way to a component was
+grouping a selection.
+
+- Tests: the id and the empty component in the document (slug, blank
+  and taken names, valid, zero mass and no extent, an instance of it
+  rolls up to nothing); the editor's create, open, undo, then a brick
+  in and the component used from the robot; the harness library (a
+  taken name refused, the new component's page and empty contents,
+  no adding it into itself, a brick in, back to the robot and added).
+
 ## 4.16.0 — the map editor keeps your view, turns props by the numbers, adds any saved build; the toolbar is the map's
 
 The Map tab's camera is yours once a map is framed: an edit's reload
