@@ -117,7 +117,10 @@ places the robot there (shift turns it) — or type the pose in the
 map. Click a tool — **→ Straight**, **⌒ Curve**, **↻ Turn**,
 **■ Stop** or **ƒ Custom** — then click the map: a straight takes
 its start and its end (the start snaps to where the previous action
-ends, or to the chassis, so paths chain); a curve takes its start,
+ends, or to the chassis, so paths chain; an end clicked within 7.5°
+of the way the robot arrives lands exactly on that heading, so
+chained straights run on with no turn between them — shift keeps any
+angle); a curve takes its start,
 its end, and a point to face at the end — it enters the way the robot
 arrives at its start and is one arc when the end pose allows it, else
 two arcs meeting smoothly, which the program drives as one continuous
@@ -143,7 +146,10 @@ stop's wait, a custom action's call (the picker lists what the
 **Definitions** box defines, such as `def line_follow(): …`) and
 whether it moves the robot, in which case one more click says where it
 ends. Where an action does not start where the previous one ends, a
-dashed line shows the drive the program inserts to get there. Every
+dashed line shows the drive the program inserts to get there; the
+first action placed on an empty route starts it, so the chassis goes
+to where that action begins, facing its way (drag the chassis
+afterwards for another start). Every
 action is an object on the map: click its path to select it and edit
 its parameters in the panel, drag its handles (a straight's ends; a
 curve's start, which carries its end along, its end, and the arrow at
@@ -166,7 +172,9 @@ whenever that map loads.
 Routes save and load as `*.route.json` (the map, the start pose, the
 actions and the definitions); **▶ Run route** writes the route as a
 hub-style program (`ST3032Motor` wheels and a `DriveBase` sized from
-the chassis; edit the motor lines for other wiring) and runs it, and
+the chassis; edit the motor lines for other wiring) and runs it from
+the route's start — the chassis is put there first, so a second run
+repeats the route — and
 "show the program" prints it. Under the hood the sim starts the
 MuJoCo runtime as a child process — the same runtime, driver shim and
 C cores

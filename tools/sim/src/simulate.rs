@@ -40,7 +40,8 @@ impl Placing {
         let step = match (self.kind, self.points.len()) {
             ("marker", _) => "click where it goes; a name follows",
             ("straight" | "curve", 0) => "click where it starts",
-            ("straight", _) | ("curve", 1) => "click where it ends",
+            ("straight", _) => "click where it ends (near ahead lands on the heading; shift: any angle)",
+            ("curve", 1) => "click where it ends",
             ("curve", _) => "click a point to face at the end",
             ("turn", 0) => "click where it turns",
             ("turn", _) => "click a point to face",
@@ -134,6 +135,8 @@ pub struct SimulateTab {
     pub draft: Option<Draft>,
     /// The pointer on the map, for the rubber band while placing.
     pub hover: Option<Point>,
+    /// Shift held: a straight's end takes any angle instead of the heading it nears.
+    pub free: bool,
     /// The last click on the map and when it landed: a marker shows there briefly.
     last_click: Option<(Point, std::time::Instant)>,
     /// The map's markers: named points kept per map on this machine.
@@ -216,6 +219,7 @@ impl SimulateTab {
             placing: None,
             draft: None,
             hover: None,
+            free: false,
             last_click: None,
             markers: Markers::empty(""),
             markers_dir: crate::markers::data_dir(),
@@ -688,6 +692,26 @@ impl SimulateTab {
         self.marker_draft = None;
     }
 
+    /// A straight's second point clicked near straight ahead lands on the
+    /// way the robot arrives at its first, so chained straights need no
+    /// turn between them; with shift (`free`) the point stands as clicked.
+    fn chain_snap(&self, p: &Placing, next: Point) -> Point {
+        match (p.kind, p.points.first()) {
+            ("straight", Some(start)) if !self.free && p.for_end.is_none() => {
+                route::snap_heading(*start, self.heading_at(*start), next, route::CHAIN_SNAP_DEG)
+            }
+            _ => next,
+        }
+    }
+
+    /// The placement's points with `next` (the pointer, or a click) as the
+    /// one to come, snapped as a click would be.
+    fn with_next(&self, p: &Placing, next: Point) -> Vec<Point> {
+        let mut pts = p.points.clone();
+        pts.push(self.chain_snap(p, next));
+        pts
+    }
+
     /// Where a click snaps: the chassis's start, every action's end, and
     /// the map's markers.
     fn snap_targets(&self) -> Vec<Point> {
@@ -801,7 +825,7 @@ impl SimulateTab {
         let p = if placing.points.is_empty() {
             route::snap(p, &self.snap_targets(), tol_mm)
         } else {
-            p
+            self.chain_snap(&placing, p)
         };
         placing.points.push(p);
         if placing.points.len() >= route::clicks_needed(placing.kind) {
@@ -827,6 +851,16 @@ impl SimulateTab {
         self.route.actions.push(item);
         let i = self.route.actions.len() - 1;
         self.selected = Some(i);
+        if i == 0 {
+            // the first action of a route starts it: the chassis goes to where it begins, facing
+            // its way — unless it begins where the chassis stands
+            let a = &self.route.actions[0].action;
+            let (start, here) = (a.start(), self.route.start.point());
+            if ((start[0] - here[0]).powi(2) + (start[1] - here[1]).powi(2)).sqrt() >= 0.5 {
+                let yaw = a.start_heading().unwrap_or(self.route.start.yaw_deg);
+                self.place_chassis(Pose2::at(start, yaw));
+            }
+        }
         if draft.moves {
             self.placing = Some(Placing {
                 kind: "custom",
@@ -1078,6 +1112,8 @@ impl SimulateTab {
             return;
         }
         self.script = Some(path);
+        // from the route's start, however the last run left the chassis
+        self.place_chassis(self.route.start);
         self.run();
     }
 
@@ -1178,8 +1214,7 @@ impl SimulateTab {
                     }
                 }
             } else if let Some(first) = p.points.first() {
-                let mut pts = p.points.clone();
-                pts.push(hover);
+                let pts = self.with_next(p, hover);
                 let preview = Action::placed(p.kind, &pts, self.heading_at(*first));
                 if let Some(mp) = on_screen(preview.label_point()) {
                     out.push((mp + glam::Vec2::new(8.0, 16.0), preview.brief()));
@@ -1351,8 +1386,8 @@ impl SimulateTab {
                         circle(&mut out, hover, 6.0, mark);
                     }
                 } else if let Some(first) = p.points.first() {
-                    let mut pts = p.points.clone();
-                    pts.push(hover);
+                    let pts = self.with_next(p, hover);
+                    let next = *pts.last().unwrap();
                     let preview = Action::placed(p.kind, &pts, self.heading_at(*first));
                     let path = preview.path();
                     for w in path.windows(2) {
@@ -1363,7 +1398,8 @@ impl SimulateTab {
                     } else if path.len() >= 2 {
                         head(&mut out, preview.end(), preview.end_heading(0.0), mark);
                     }
-                    circle(&mut out, hover, 6.0, mark);
+                    // the pointer's ring sits where the click would land
+                    circle(&mut out, next, 6.0, mark);
                 } else {
                     square(&mut out, hover, 6.0, mark);
                 }
@@ -3112,6 +3148,90 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn chained_straights_run_on_and_the_first_action_starts_the_route() {
+        let mut t = SimulateTab::new(None);
+        t.markers_dir = std::env::temp_dir().join(format!("ob-chain-{}", std::process::id()));
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        assert_eq!(t.route.start, Pose2::at([-547.0, -150.0], 90.0));
+        let cam = crate::viewport::Camera {
+            target: Vec3::new(600.0, 50.0, 0.0),
+            distance: 2500.0,
+            ..crate::viewport::Camera::top_down()
+        };
+        // a straight begun away from the chassis: placed, it starts the route — the chassis goes
+        // to where it begins, facing its way, and the program opens with no drive there
+        t.arm("straight");
+        assert!(t.map_click(0.0, 0.0, 20.0) && t.map_click(300.0, 0.0, 20.0));
+        t.commit_draft();
+        assert_eq!(t.route.start, Pose2::at([0.0, 0.0], 0.0));
+        assert_eq!(t.placed, Some(t.route.start));
+        assert_eq!(t.sent.last().unwrap()["cmd"], "place");
+        let text = t.route_program().unwrap();
+        assert!(!text.contains("# to its start"), "{text}");
+        // the next straight, clicked roughly ahead: its end lands on the heading the robot arrives
+        // with — in the rubber band and when placed — so no turn comes between them
+        t.arm("straight");
+        assert!(t.map_click(302.0, 3.0, 20.0));
+        assert_eq!(t.placing.as_ref().unwrap().points, vec![[300.0, 0.0]]);
+        t.hover = Some([600.0, 8.0]);
+        let live: Vec<String> = t.route_labels(&cam, 800.0, 600.0).into_iter().map(|l| l.1).collect();
+        assert_eq!(live.iter().filter(|l| *l == "300 mm").count(), 2, "{live:?}");
+        assert!(t.map_click(600.0, 8.0, 20.0));
+        let Some(Action::Straight { end, .. }) = t.draft.as_ref().map(|d| &d.action) else {
+            panic!("the popup")
+        };
+        assert_eq!(*end, [600.0, 0.0]);
+        if let Some(Action::Straight { then, .. }) = t.route.actions.get_mut(0).map(|i| &mut i.action) {
+            *then = End::Continue;
+        }
+        t.commit_draft();
+        let text = t.route_program().unwrap();
+        assert!(
+            text.contains("robot.straight(300, then=Stop.NONE)\n\n# 2: straight 300 mm at 350°/s\nrobot.straight(300)\n"),
+            "{text}"
+        );
+        assert!(!text.contains("robot.turn"), "{text}");
+        // a real angle stays one, and with shift held so does any angle
+        t.arm("straight");
+        assert!(t.map_click(600.0, 0.0, 20.0) && t.map_click(900.0, 100.0, 20.0));
+        let Some(Action::Straight { end, .. }) = t.draft.as_ref().map(|d| &d.action) else {
+            panic!("the popup")
+        };
+        assert_eq!(*end, [900.0, 100.0]);
+        t.commit_draft();
+        t.free = true;
+        t.arm("straight");
+        assert!(t.map_click(900.0, 100.0, 20.0) && t.map_click(1190.0, 210.0, 20.0));
+        let Some(Action::Straight { end, .. }) = t.draft.as_ref().map(|d| &d.action) else {
+            panic!("the popup")
+        };
+        assert_eq!(*end, [1190.0, 210.0]);
+        t.commit_draft();
+        t.free = false;
+        assert!(t.route_program().unwrap().contains("robot.turn"));
+        // running the route puts the chassis at the route's start first
+        t.sent.clear();
+        t.run_route();
+        let cmds: Vec<String> = t.sent.iter().map(|c| c["cmd"].as_str().unwrap().to_string()).collect();
+        assert_eq!(cmds, vec!["place".to_string(), "run".to_string()]);
+        assert_eq!(t.sent[0]["x_mm"], 0.0);
+        assert_eq!(t.sent[0]["yaw_deg"], 0.0);
+        // an action begun at the chassis leaves it where it stands
+        let mut t = SimulateTab::new(None);
+        t.markers_dir = std::env::temp_dir().join(format!("ob-chain-{}", std::process::id()));
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        t.arm("straight");
+        assert!(t.map_click(-545.0, -148.0, 20.0) && t.map_click(-544.0, 200.0, 20.0));
+        let Some(Action::Straight { end, .. }) = t.draft.as_ref().map(|d| &d.action) else {
+            panic!("the popup")
+        };
+        assert_eq!(*end, [-547.0, 200.0], "along the chassis's heading");
+        t.commit_draft();
+        assert_eq!(t.route.start, Pose2::at([-547.0, -150.0], 90.0));
+        assert!(t.sent.iter().all(|c| c["cmd"] != "place"));
     }
 
     #[test]

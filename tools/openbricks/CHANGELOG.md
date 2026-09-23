@@ -3,6 +3,30 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.18.0 — chained straights run on; the first action starts the route; a route runs from its start
+
+Three fixes from users of the route planner. A straight clicked
+roughly ahead now lands exactly on the heading the robot arrives
+with (within 7.5°; shift keeps any angle), in the rubber band and
+when placed, so a **continuous** straight followed by another no
+longer gets a one-degree `robot.turn` inserted between them — that
+turn stopped the robot, which read as "continuous still stops". The
+first action placed on an empty route starts it: the chassis goes to
+where that action begins, facing its way, so the program no longer
+opens with a drive from the map's spawn to the route ("the program
+of going there"); drag the chassis afterwards for another start.
+**▶ Run route** puts the chassis at the route's start before running,
+so a second run repeats the route instead of setting off from where
+the first one ended.
+
+- Tests: the heading snap (ahead, a real angle, any heading, behind,
+  on the spot) and a program of two snapped straights with no turn;
+  the tab's chained placement (the rubber band's label, the placed
+  end, the program with `then=Stop.NONE` and no turn, a real angle
+  kept, shift keeping any angle), the first action placing the
+  chassis (and not when it begins there), and the run's `place`
+  before `run`.
+
 ## 4.17.0 — a component from nothing: named in the library, opened to build
 
 The Workbench's library starts a component from scratch. Type a name
