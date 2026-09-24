@@ -939,7 +939,10 @@ impl Editor {
         starts
     }
 
-    /// The plane drag: every start moved by `dx, dy`, snapped.
+    /// The plane drag: every start moved by `dx, dy`, snapped; one item
+    /// dragged near a hole or a stud grid is pulled onto it, and lets go
+    /// again as the pointer moves on (the magnet works from the start
+    /// poses each frame, so nothing accumulates).
     pub fn move_by(&mut self, starts: &[(String, [f64; 3])], dx: f32, dy: f32) {
         for (name, p0) in starts {
             let nx = self.snap(p0[0] as f32 + dx);
@@ -950,6 +953,12 @@ impl Editor {
             });
         }
         self.recompute();
+        if self.magnet && starts.len() == 1 {
+            let name = starts[0].0.clone();
+            if assembly::snap_instance_within(&mut self.doc, &self.bundle, &self.editing, &name, assembly::PULL_MM).is_some() {
+                self.recompute();
+            }
+        }
     }
 
     /// The shift drag: lift every dragged item by `dz` (unsnapped until
@@ -1651,6 +1660,90 @@ mod tests {
         assert_eq!(ed.selection, vec!["part".to_string()]);
         assert_eq!(ed.status, "??? is in the library and in the view");
         assert!(ed.doc.parts.contains_key("sensor_bracket_2"));
+    }
+
+    #[test]
+    fn a_plate_pulls_onto_a_brick_s_stud_grid_and_squares_up() {
+        let mut ed = editor();
+        let root = ed.doc.robot.root.clone();
+        ed.doc.components.get_mut(&root).unwrap().children.clear();
+        ed.doc.robot.roles.clear();
+        ed.recompute();
+        ed.magnet = false;
+        ed.snap_mm = 0.0;
+        let brick = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(brick), None, [0.0; 3]);
+        let plate = ed.ensure_ldraw_part("3022").unwrap();
+        // a 2 x 2 plate let go above the brick, a little off and turned 5°
+        ed.add_instance(Some(plate.clone()), None, [2.0, 3.0, 4.5]);
+        let p1 = ed.selection[0].clone();
+        ed.set_pose(&p1, [2.0, 3.0, 4.5], [0.0, 0.0, 5.0]);
+        ed.magnet = true;
+        ed.snap_selection(true);
+        assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
+        let i = ed.selected_instances()[0].clone();
+        assert_eq!(i.pos, [0.0, 0.0, 3.2], "its underside on the brick's top face, grids in step");
+        assert_eq!(i.rot, [0.0, 0.0, 0.0]);
+        let cons = assembly::connections_of(&ed.doc, &ed.bundle, &ed.editing, &p1);
+        assert_eq!(
+            cons.iter().filter(|(m, o, _)| m == "stud_socket" && o == "stud").count(),
+            4,
+            "{cons:?}"
+        );
+        // a second plate on the first, 30° out of square: it squares up on the plate's four studs
+        ed.magnet = false;
+        ed.add_instance(Some(plate), None, [1.0, -2.0, 8.0]);
+        let p2 = ed.selection[0].clone();
+        ed.set_pose(&p2, [1.0, -2.0, 8.0], [0.0, 0.0, 30.0]);
+        ed.magnet = true;
+        ed.snap_selection(true);
+        let i = ed.selected_instances()[0].clone();
+        assert_eq!((i.pos, i.rot), ([0.0, 0.0, 6.4], [0.0, 0.0, 0.0]));
+        // dragged a little, it stays pulled; dragged clear, it lets go; let go near, it lands
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 2.5, 1.0);
+        assert_eq!(ed.selected_instances()[0].pos, [0.0, 0.0, 6.4], "pulled back onto the grid");
+        ed.move_by(&starts, 30.0, 0.0);
+        assert_eq!(ed.selected_instances()[0].pos, [30.0, 0.0, 6.4], "free of the magnet");
+        ed.move_by(&starts, 9.0, 0.0);
+        assert_eq!(ed.selected_instances()[0].pos, [8.0, 0.0, 6.4], "one stud over");
+        ed.end_move();
+        assert_eq!(ed.selected_instances()[0].pos, [8.0, 0.0, 6.4]);
+        // the magnet off: a drag is just a drag
+        ed.magnet = false;
+        ed.move_by(&starts, 2.5, 1.0);
+        assert_eq!(ed.selected_instances()[0].pos, [2.5, 1.0, 6.4]);
+    }
+
+    #[test]
+    fn a_beam_seats_on_two_pins_and_squares_up() {
+        let mut ed = editor();
+        let root = ed.doc.robot.root.clone();
+        ed.doc.components.get_mut(&root).unwrap().children.clear();
+        ed.doc.robot.roles.clear();
+        ed.recompute();
+        ed.magnet = false;
+        ed.snap_mm = 0.0;
+        // a beam 5 flat on the ground, two friction pins standing in its holes at y = ±8, half up
+        let beam = ed.ensure_ldraw_part("32316").unwrap();
+        ed.add_instance(Some(beam.clone()), None, [0.0; 3]);
+        let pin = ed.ensure_ldraw_part("2780").unwrap();
+        for y in [-8.0, 8.0] {
+            ed.add_instance(Some(pin.clone()), None, [0.0, y, 4.0]);
+            let name = ed.selection[0].clone();
+            ed.set_pose(&name, [0.0, y, 4.0], [0.0, 90.0, 0.0]);
+        }
+        // a second beam let go above them, off by a little and turned 10°: it seats on both pins
+        ed.add_instance(Some(beam), None, [0.5, 1.0, 8.6]);
+        let top = ed.selection[0].clone();
+        ed.set_pose(&top, [0.5, 1.0, 8.6], [0.0, 0.0, 10.0]);
+        ed.magnet = true;
+        ed.snap_selection(true);
+        assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
+        let i = ed.selected_instances()[0].clone();
+        assert_eq!((i.pos, i.rot), ([0.0, 0.0, 8.0], [0.0, 0.0, 0.0]));
+        let cons = assembly::connections_of(&ed.doc, &ed.bundle, &ed.editing, &top);
+        assert_eq!(cons.iter().filter(|(m, o, _)| m == "pin_hole" && o == "pin").count(), 2, "{cons:?}");
     }
 
     #[test]
