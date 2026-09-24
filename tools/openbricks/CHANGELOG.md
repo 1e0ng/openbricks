@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.22.0 — a component saved as a build of its own; builds imported into the library
+
+The Workbench saves a single component: **save** on its library row,
+or **Save as build…** on its page, writes it as an assembly file
+whose robot is that component, with the bricks and components it
+needs — to open, import or put on a map elsewhere. **Import…** in
+the toolbar brings a saved build's components and bricks into the
+open build's library, to add from: what is there already, the same,
+is left under its own id; a clash comes in under a new id and the
+build's own references follow; the same build twice adds nothing.
+One undo point.
+
+- Tests: the merge (skips, renames with references following,
+  re-import, a brick clash); the editor's save, a saved component
+  opened as a build, import round trip, nothing new, a renamed
+  clash, bad files; the harness buttons on the Workbench only.
+
 ## 4.21.0 — bricks placed in LEGO colours, by element number
 
 A brick's colour is a property of the placed brick, chosen from the

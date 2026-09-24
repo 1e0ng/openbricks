@@ -96,6 +96,12 @@ opens for building; add bricks to it, then **+ add** it to the robot
 or any other component.
 Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
+**Import…** brings a saved build's components and bricks into this
+library, to add from: what is here already, the same, is left, and a
+clash comes in under a new id. A component's **save** in the library
+(or **Save as build…** on its page) writes it as a build of its own —
+a file whose robot is that component, with the bricks and components
+it needs — to open, import or put on a map elsewhere.
 
 **Simulate** runs your program on a map with the chassis you
 assembled. Pick the map (a shipped world, or one you saved from the
