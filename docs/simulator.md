@@ -297,8 +297,15 @@ robot as a tree of components:
   LDraw parts, and 4.8 mm bores are recognised as pin holes on every
   mesh, imported STL files included. Let go of a part near a hole and
   it snaps: the pin axis aligns to the hole, a pin half centres in its
-  module, an axle keeps its position along the hole. The inspector
-  lists what each part is mated to.
+  module, an axle keeps its position along the hole. Bricks and plates
+  stack: under every stud a part has a socket, so a plate let go over
+  a brick lands on its stud grid, squared up, with every stud it
+  covers mated — the turn and shift that mate the most features win,
+  which also seats a two-pin connector in both holes. Dragging a part
+  near a hole or a grid pulls it on (it lets go again as the pointer
+  moves away); a stud also seats in a Technic hole or, for the
+  half-stud offset, in a tube. The inspector lists what each part is
+  mated to.
 - **Mass properties** are never typed in above the brick level.
   Volume, centre of mass and the inertia tensor of every LDraw and STL
   part come from its closed mesh, so a recorded weight becomes a full

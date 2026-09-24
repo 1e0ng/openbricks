@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.23.0 — bricks stack on stud grids; the magnet pulls while dragging
+
+Bricks and plates stack: under every stud a part now has a socket,
+as deep in its underside as the stud is tall, so a plate let go over
+a brick lands on its stud grid, squared up, with every stud it
+covers mated. The magnet solves for the whole match — the nearest
+pair sets the axis, the turns that bring two features of a kind in
+line with their holes are tried, and the turn and shift that mate
+the most features win (the tightest fit, then the least movement,
+breaking ties), seats within a stud's height before farther ones so
+a plate dragged over another slides on it rather than dropping
+through to the brick below — which also seats a two-pin connector
+in both holes. A plane drag pulls one item onto a hole or grid
+within 4 mm and lets go again as the pointer moves on. A stud also
+seats in a Technic hole or, for the half-stud offset, in a tube.
+
+- Tests: the sockets (position, axis, angled and SNOT studs) and the
+  rotation helpers; a plate let go off and turned 5° lands on the
+  brick's grid with four studs mated, a second one 30° out squares
+  up on the first, a drag pulls, frees and lands one stud over; a
+  beam let go 10° out over two pins seats on both.
+
 ## 4.22.0 — a component saved as a build of its own; builds imported into the library
 
 The Workbench saves a single component: **save** on its library row,
