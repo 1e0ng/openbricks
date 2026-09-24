@@ -3,6 +3,37 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.20.0 — the WRO sets 45811 and 45819 in the brick library; bricks fetch names itself
+
+Every part of the two World Robot Olympiad sets ships in the brick
+library: 45811, the Brick Set (2016 — the mission bricks, tiles,
+ribbed hoses and 52 mm balls: 9 kinds, 724 pieces), and 45819, the
+Expansion Set (2023: 70 kinds, 568 pieces, mostly Technic). The
+library's heading names the sets it holds complete, each row says
+how many a set holds ("45819 ×8"), and the search matches a set's
+number or name (type 45819, or WRO) and an inventory's own number
+for a part (78c18 finds LDraw's Technic Ribbed Hose 18L, 41250 the
+52 mm ball, 32005a the 6L link). The inventories come from
+Rebrickable's public data; the bundle records which sets hold each
+part, and a set part the library lacked would be listed as missing,
+which the shipped-bundle test forbids. Weights from BrickLink for
+the parts that had none; 14 it would not serve carry the usual
+placeholder mass and are flagged. The bundle grows from 129 to 173
+parts (2.1 to 2.9 MB).
+
+`openbricks bricks fetch` works again: library.ldraw.org answers
+Python's default User-Agent with 403, and the download now names
+itself.
+
+- Tests: the bundle holds the curated list and the sets, both sets
+  complete and counted, the aliases, the hose by its LDraw name;
+  apply_sets stamps records and lists what is missing; read_sets;
+  the download's request carries the User-Agent and the library URL;
+  the wheel carries every brick-library data file; the Rust bundle
+  reads and merges sets and aliases; the harness library lists a set
+  by number with the count on a row, finds the sets by name, and a
+  part by its inventory number.
+
 ## 4.19.0 — a colour for each component
 
 Every component in the Workbench can wear a colour of your own: pick
