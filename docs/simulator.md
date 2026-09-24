@@ -102,6 +102,13 @@ clash comes in under a new id. A component's **save** in the library
 (or **Save as build…** on its page) writes it as a build of its own —
 a file whose robot is that component, with the bricks and components
 it needs — to open, import or put on a map elsewhere.
+Unsaved work is kept: a couple of seconds after a change settles, the
+build and the route are written as drafts under the data directory
+(`~/.local/share/openbricks/drafts`, or `$OPENBRICKS_DATA_DIR`), and
+the next `openbricks sim` started without a file brings them back —
+the status line says so, and Save writes the build to the file it came
+from. Saving drops the draft. (The map editor's props are saved by
+**Save map** and are not drafted.)
 
 **Simulate** runs your program on a map with the chassis you
 assembled. Pick the map (a shipped world, or one you saved from the

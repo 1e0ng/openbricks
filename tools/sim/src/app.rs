@@ -287,7 +287,33 @@ impl App {
         python: Option<String>,
     ) -> Self {
         let gpu = Gpu::from(cc.wgpu_render_state.as_ref().expect("the wgpu renderer is required"));
-        Self::with_gpu(&gpu, bundle, doc, python)
+        let given = doc.is_some();
+        let mut app = Self::with_gpu(&gpu, bundle, doc, python);
+        if !given {
+            app.restore_drafts(crate::drafts::now_ms());
+        }
+        app
+    }
+
+    /// The drafts an earlier session kept come back: the build (unless a
+    /// file was named on the command line) and the route.
+    pub fn restore_drafts(&mut self, now_ms: i64) {
+        self.editor.restore_draft(now_ms);
+        self.simulate.restore_draft(now_ms);
+    }
+
+    /// Where the drafts are kept: the tests point it at a scratch directory.
+    #[cfg(test)]
+    pub fn drafts_in(&mut self, dir: std::path::PathBuf) {
+        self.editor.draft_dir = dir.clone();
+        self.simulate.draft_dir = dir;
+    }
+
+    /// Called every frame: drafts of unsaved work, a moment after a run
+    /// of changes settles.
+    pub fn autosave(&mut self, now: std::time::Instant, now_ms: i64) {
+        self.editor.autosave(now, now_ms);
+        self.simulate.autosave(now, now_ms);
     }
 
     pub fn with_gpu(
@@ -2647,6 +2673,7 @@ impl App {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::Title(format!("Openbricks Sim — {}*", self.title_name())));
         }
+        self.autosave(std::time::Instant::now(), crate::drafts::now_ms());
     }
 }
 
@@ -2715,7 +2742,9 @@ mod tests {
     }
 
     fn harness(gpu: &Gpu, python: Option<String>) -> Harness<'_, App> {
-        let app = App::with_gpu(gpu, real_bundle(), None, python);
+        let mut app = App::with_gpu(gpu, real_bundle(), None, python);
+        // never the user's own drafts: the frames would keep them there
+        app.drafts_in(std::env::temp_dir().join(format!("ob-harness-drafts-{}", std::process::id())));
         Harness::builder()
             .with_size(egui::vec2(1800.0, 2400.0))
             .with_step_dt(1.0 / 60.0)
@@ -4050,6 +4079,79 @@ mod tests {
         h.input_mut().modifiers = Modifiers::NONE;
         steps(&mut h, 2);
         assert!(!h.state().simulate.free);
+    }
+
+    #[test]
+    fn drafts_of_the_build_and_the_route_are_kept_and_come_back() {
+        use std::time::{Duration, Instant};
+        let Some(gpu) = gpu() else { return };
+        let dir = std::env::temp_dir().join(format!("ob-app-drafts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = App::with_gpu(&gpu, real_bundle(), None, None);
+        app.drafts_in(dir.clone());
+        let t0 = Instant::now();
+        app.autosave(t0 + Duration::from_secs(5), 5_000);
+        assert!(crate::drafts::take(&dir, crate::drafts::BUILD).is_none() && crate::drafts::take(&dir, crate::drafts::ROUTE).is_none());
+        // a change to each; a moment later both drafts are there
+        let name = app.editor.children()[0].name.clone();
+        app.editor.selection = vec![name];
+        app.editor.nudge_selection([8.0, 0.0, 0.0]);
+        app.simulate.place_chassis(crate::route::Pose2::at([123.0, 45.0], 90.0));
+        app.autosave(t0 + Duration::from_secs(6), 6_000);
+        app.autosave(t0 + Duration::from_secs(9), 9_000);
+        assert!(crate::drafts::take(&dir, crate::drafts::BUILD).is_some());
+        let (route_text, note) = crate::drafts::take(&dir, crate::drafts::ROUTE).expect("the route's draft");
+        assert!(route_text.contains("123") && note.kept_ms == 9_000);
+        // a fresh app restores both, and says so
+        let mut next = App::with_gpu(&gpu, real_bundle(), None, None);
+        next.drafts_in(dir.clone());
+        next.restore_drafts(9_000 + 3_600_000);
+        assert!(next.editor.dirty);
+        assert!(
+            next.editor.status.starts_with("Restored the unsaved draft kept 1 hour ago"),
+            "{}",
+            next.editor.status
+        );
+        assert_eq!(next.simulate.route.start, crate::route::Pose2::at([123.0, 45.0], 90.0));
+        assert_eq!(next.simulate.message, "restored the unsaved route draft kept 1 hour ago");
+        // saving the route drops its draft; an unreadable route draft is said
+        let file = dir.join("r.route.json");
+        next.simulate.save_route(file.clone());
+        assert!(crate::drafts::take(&dir, crate::drafts::ROUTE).is_none());
+        crate::drafts::keep(&dir, crate::drafts::ROUTE, "{", &crate::drafts::Note::default()).unwrap();
+        assert!(!next.simulate.restore_draft(0));
+        assert!(
+            next.simulate.message.starts_with("ignored an unreadable route draft"),
+            "{}",
+            next.simulate.message
+        );
+        next.simulate.load_route(file.clone());
+        assert!(crate::drafts::take(&dir, crate::drafts::ROUTE).is_none(), "a file took its place");
+        // a route that belongs to a file: the draft's note names it and the restore says so
+        next.simulate.place_chassis(crate::route::Pose2::at([1.0, 2.0], 0.0));
+        next.simulate.autosave(t0 + Duration::from_secs(20), 20_000);
+        next.simulate.autosave(t0 + Duration::from_secs(23), 23_000);
+        assert_eq!(
+            crate::drafts::take(&dir, crate::drafts::ROUTE).unwrap().1.path.as_deref(),
+            Some(file.as_path())
+        );
+        let mut third = App::with_gpu(&gpu, real_bundle(), None, None);
+        third.drafts_in(dir.clone());
+        assert!(third.simulate.restore_draft(23_000));
+        assert_eq!(
+            third.simulate.message,
+            format!("restored the unsaved route draft kept moments ago of {}", file.display())
+        );
+        // keeping into a place that cannot be written is said
+        std::fs::write(dir.join("blocker"), "").unwrap();
+        third.simulate.draft_dir = dir.join("blocker");
+        third.simulate.keep_draft(0);
+        assert!(
+            third.simulate.message.starts_with("could not keep a route draft"),
+            "{}",
+            third.simulate.message
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
