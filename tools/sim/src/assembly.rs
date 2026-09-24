@@ -1488,6 +1488,7 @@ mod tests {
             pos: [0.0; 3],
             rot: [0.0; 3],
             locked: false,
+            color: None,
         };
         // the library: brick p, component x of one p
         let mut doc = doc_with(
