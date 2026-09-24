@@ -24,7 +24,7 @@ pub const ROLES: [(&str, &str); 8] = [
     ("imu", "gyro → chassis_imu"),
 ];
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Document {
     pub format: String,
     #[serde(default)]
@@ -34,7 +34,7 @@ pub struct Document {
     pub robot: Robot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Part {
     pub name: String,
     #[serde(default)]
@@ -157,15 +157,19 @@ pub struct Instance {
     pub locked: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Component {
     #[serde(default)]
     pub note: String,
     #[serde(default)]
     pub children: Vec<Instance>,
+    /// A colour of the user's for everything under it: the nearest
+    /// enclosing component's wins; unset, a brick draws in its category's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Robot {
     #[serde(default)]
     pub name: String,
@@ -178,7 +182,7 @@ pub struct Robot {
     pub measured_mass_g: Option<f64>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Spawn {
     #[serde(default)]
     pub pos_mm: [f64; 2],
@@ -480,16 +484,38 @@ pub struct Leaf {
     pub part_id: String,
     pub pos: DVec3,
     pub rot: DMat3,
+    /// The nearest enclosing component's colour, when one is set.
+    pub color: Option<[u8; 3]>,
 }
 
 pub fn flatten(doc: &Document, comp_id: &str) -> Vec<Leaf> {
     let mut out = Vec::new();
     let mut stack = vec![comp_id.to_string()];
-    walk(doc, comp_id, DVec3::ZERO, DMat3::IDENTITY, &mut Vec::new(), &mut out, &mut stack);
+    let color = doc.components.get(comp_id).and_then(|c| c.color);
+    walk(
+        doc,
+        comp_id,
+        DVec3::ZERO,
+        DMat3::IDENTITY,
+        color,
+        &mut Vec::new(),
+        &mut out,
+        &mut stack,
+    );
     out
 }
 
-fn walk(doc: &Document, comp_id: &str, p0: DVec3, r0: DMat3, path: &mut Vec<String>, out: &mut Vec<Leaf>, stack: &mut Vec<String>) {
+#[allow(clippy::too_many_arguments)]
+fn walk(
+    doc: &Document,
+    comp_id: &str,
+    p0: DVec3,
+    r0: DMat3,
+    color: Option<[u8; 3]>,
+    path: &mut Vec<String>,
+    out: &mut Vec<Leaf>,
+    stack: &mut Vec<String>,
+) {
     let Some(comp) = doc.components.get(comp_id) else { return };
     for ch in &comp.children {
         let r = r0 * rot_mat(ch.rot);
@@ -501,12 +527,14 @@ fn walk(doc: &Document, comp_id: &str, p0: DVec3, r0: DMat3, path: &mut Vec<Stri
                 part_id: pid.clone(),
                 pos: p,
                 rot: r,
+                color,
             });
         } else if let Some(cid) = &ch.component
             && !stack.contains(cid)
         {
             stack.push(cid.clone());
-            walk(doc, cid, p, r, path, out, stack);
+            let inner = doc.components.get(cid).and_then(|c| c.color).or(color);
+            walk(doc, cid, p, r, inner, path, out, stack);
             stack.pop();
         }
         path.pop();
@@ -598,6 +626,7 @@ pub fn brick_document(bundle: &Bundle, num: &str) -> Option<Document> {
         "brick".to_string(),
         Component {
             note: String::new(),
+            color: None,
             children: vec![Instance {
                 name: "brick".into(),
                 part: Some(id),
@@ -766,6 +795,7 @@ pub fn group(doc: &mut Document, editing: &str, names: &[String], new_id: &str) 
         Component {
             note: String::new(),
             children,
+            color: None,
         },
     );
     let comp = doc.components.get_mut(editing).unwrap();
@@ -1081,6 +1111,7 @@ mod tests {
                         Component {
                             note: String::new(),
                             children: ch,
+                            color: None,
                         },
                     )
                 })
@@ -1305,6 +1336,60 @@ mod tests {
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!((pr.mass, pr.count), (10.0, 1));
         assert_eq!(usage_count(&doc, "sensor_mast"), 1);
+    }
+
+    #[test]
+    fn a_colour_on_a_component_reaches_the_bricks_under_it_and_the_nearest_wins() {
+        let b = bundle();
+        let box10 = Shape::Box {
+            size: [10.0, 10.0, 10.0],
+            pos: [0.0; 3],
+        };
+        let cinst = |name: &str, comp: &str| Instance {
+            name: name.into(),
+            part: None,
+            component: Some(comp.into()),
+            pos: [0.0; 3],
+            rot: [0.0; 3],
+            locked: false,
+        };
+        let mut doc = doc_with(
+            vec![("p", part(1.0, box10))],
+            vec![
+                ("robot", vec![inst("a", "p", [0.0; 3], [0.0; 3]), cinst("outer", "outer")]),
+                (
+                    "outer",
+                    vec![inst("b", "p", [0.0; 3], [0.0; 3]), cinst("inner", "inner"), cinst("plain", "plain")],
+                ),
+                ("inner", vec![inst("c", "p", [0.0; 3], [0.0; 3])]),
+                ("plain", vec![inst("d", "p", [0.0; 3], [0.0; 3])]),
+            ],
+        );
+        // nothing set: no leaf carries a colour, and the file says nothing about it
+        assert!(flatten(&doc, "robot").iter().all(|l| l.color.is_none()));
+        assert!(!serde_json::to_string(&doc).unwrap().contains("color"));
+        doc.components.get_mut("outer").unwrap().color = Some([255, 0, 0]);
+        doc.components.get_mut("inner").unwrap().color = Some([0, 0, 255]);
+        let leaves = flatten(&doc, "robot");
+        let of = |name: &str| {
+            leaves
+                .iter()
+                .find(|l| l.path.last().map(String::as_str) == Some(name))
+                .unwrap()
+                .color
+        };
+        assert_eq!(of("a"), None, "the robot's own brick");
+        assert_eq!(of("b"), Some([255, 0, 0]), "outer's");
+        assert_eq!(of("c"), Some([0, 0, 255]), "inner's wins over outer's");
+        assert_eq!(of("d"), Some([255, 0, 0]), "plain inherits outer's");
+        // editing outer itself: its own colour applies from the top
+        assert!(flatten(&doc, "outer").iter().all(|l| l.color.is_some()));
+        // the file carries it and reads back the same
+        let text = serde_json::to_string(&doc).unwrap();
+        assert!(text.contains("\"color\":[255,0,0]"), "{text}");
+        let back: Document = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, doc);
+        assert!(validate(&doc, &b).is_empty());
     }
 
     #[test]
