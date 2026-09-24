@@ -11,6 +11,17 @@
 # absorb rounding noise. A true regression in either surface still
 # fails CI; an asymmetric addition in the other doesn't.
 
+codecov:
+  notify:
+    # Six uploads reach Codecov per pull-request run (c-core twice,
+    # openbricks-py, openbricks-dev, openbricks-sim, sim-rs). Without this
+    # the patch status was posted after the first upload, while the Rust
+    # diff still counted as uncovered, and not always posted again once
+    # the last upload landed — #526 stayed at "72.60% of diff hit" in red
+    # while Codecov's own compare of the finished head showed 99.6%.
+    after_n_builds: 6
+    wait_for_ci: true
+
 coverage:
   status:
     project:
