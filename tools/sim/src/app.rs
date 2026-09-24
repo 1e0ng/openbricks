@@ -2571,7 +2571,7 @@ mod tests {
     use crate::viewport::testing::{test_device, test_renderer};
     use egui::{Event, Key, Modifiers, PointerButton, Pos2};
     use egui_kittest::Harness;
-    use egui_kittest::kittest::{NodeT, Queryable};
+    use egui_kittest::kittest::{By, NodeT, Queryable};
 
     #[test]
     fn colours_and_labels() {
@@ -4042,6 +4042,43 @@ mod tests {
         steps(&mut h, 2);
         assert!(h.state().items.iter().all(|i| i.color != grey));
         assert!(!serde_json::to_string(&h.state().editor.doc).unwrap().contains("\"color\""));
+        // the combos themselves: the library row's picks the colour + places, the page's recolours.
+        // A combo's selected text is its accessible value; the list's entries are labels, and the
+        // list scrolls, so entries near its top are the ones a click can reach.
+        {
+            let rec = &h.state().editor.bundle.parts["32278"];
+            assert!(
+                rec.colors.contains_key(&0) && rec.colors.contains_key(&1),
+                "black and blue beams exist"
+            );
+        }
+        h.state_mut().pick_color.insert("32278".into(), 4);
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
+        h.get(By::new().value("Red")).click();
+        steps(&mut h, 2);
+        let at = h.get_by_label("Blue").rect().center();
+        press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
+        release(&mut h, at, PointerButton::Primary);
+        steps(&mut h, 2);
+        assert_eq!(h.state().pick_color.get("32278"), Some(&1), "picked in the list");
+        h.get_all_by_label("+").next().unwrap().click();
+        steps(&mut h, 3);
+        let placed = h.state().editor.selected_instances()[0].clone();
+        assert_eq!(placed.color, Some(1));
+        h.state_mut().pick_color.insert("32278".into(), 4);
+        steps(&mut h, 2);
+        h.get(By::new().value("Blue")).click();
+        steps(&mut h, 2);
+        let at = h.get_by_label("Black").rect().center();
+        press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
+        release(&mut h, at, PointerButton::Primary);
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.selected_instances()[0].color, Some(0), "recoloured from its page");
+        assert!(h.state().editor.status.ends_with("in Black"), "{}", h.state().editor.status);
+        h.state_mut().editor.remove_selection();
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
         // several bricks at once are offered the colours they all come in
         let two: Vec<String> = h
             .state()

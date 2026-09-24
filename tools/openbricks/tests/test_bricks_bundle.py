@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 from openbricks_sim import bricks
 
@@ -169,6 +170,40 @@ class ColorsTests(unittest.TestCase):
             self.assertEqual(bundle["colors"], data["palette"])
             self.assertEqual(bundle["parts"]["32278"]["colors"]["72"], ["4210687", "32278199"])
             self.assertNotIn("colors", bundle["parts"]["6590"])
+
+
+    def test_the_tables_are_fetched_with_our_agent_and_main_writes_the_file(self):
+        import gzip
+        import json
+        import tempfile
+        from openbricks_sim.bricks import rebrickable
+        tables = {"colors": "id,name,rgb,is_trans\n72,Dark Bluish Gray,6C6E68,f\n",
+                  "elements": "element_id,part_num,color_id,design_id\n4210687,32278,72,\n"}
+        seen = []
+
+        def opener(req):
+            seen.append(req)
+            name = req.full_url.rsplit("/", 1)[1].split(".")[0]
+            return _FakeResponse(gzip.compress(tables[name].encode()))
+
+        rows = rebrickable.fetch_table("colors", opener=opener)
+        self.assertEqual(rows, [{"id": "72", "name": "Dark Bluish Gray", "rgb": "6C6E68", "is_trans": "f"}])
+        self.assertEqual(seen[0].full_url, rebrickable.DOWNLOADS + "colors.csv.gz")
+        self.assertEqual(seen[0].get_header("User-agent"), bricks.USER_AGENT)
+        elements = rebrickable.fetch_table("elements", opener=opener)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rebrickable, "fetch_table", lambda name, opener=None: rows if name == "colors" else elements):
+            out = os.path.join(tmp, "colors.json")
+            self.assertEqual(rebrickable.main([out]), 0)
+            with open(out) as fh:
+                data = json.load(fh)
+            self.assertEqual(data["parts"]["32278"], {"72": ["4210687"]})
+            self.assertEqual(data["palette"], {"72": {"name": "Dark Bluish Gray", "rgb": "6C6E68", "trans": False}})
+            self.assertIn("6590", data["without"])
+            self.assertEqual(data["rebrickable"]["3648"], "3648b")
+            if ldraw is not None:
+                self.assertEqual(ldraw.read_colors(out)["palette"]["72"]["name"], "Dark Bluish Gray")
+        self.assertEqual(rebrickable.main([]), 2, "usage")
 
 
 class SetsTests(unittest.TestCase):
