@@ -170,7 +170,7 @@ pub fn rgb_color(rgb: [u8; 3]) -> [f32; 4] {
 /// A LEGO colour chosen among those a part comes in: "—" for the
 /// category colour, else a swatch and the colour's name. Returns whether
 /// the choice changed.
-fn color_combo(ui: &mut egui::Ui, salt: &str, choices: &[(u32, String, [u8; 3])], picked: &mut Option<u32>) -> bool {
+fn color_combo(ui: &mut egui::Ui, id: &str, choices: &[(u32, String, [u8; 3])], picked: &mut Option<u32>) -> bool {
     let label = match *picked {
         None => "—".to_string(),
         Some(c) => choices
@@ -180,7 +180,7 @@ fn color_combo(ui: &mut egui::Ui, salt: &str, choices: &[(u32, String, [u8; 3])]
             .unwrap_or_else(|| format!("colour {c}")),
     };
     let mut changed = false;
-    egui::ComboBox::from_id_salt(salt)
+    egui::ComboBox::from_id_salt(id)
         .selected_text(label)
         .width(150.0)
         .show_ui(ui, |ui| {
