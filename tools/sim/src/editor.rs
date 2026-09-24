@@ -6,6 +6,7 @@
 
 use crate::assembly::{self, Component, Document, Instance, Leaf, Part, Props};
 use crate::bundle::Bundle;
+use crate::drafts;
 use crate::gizmo::{self, Handle};
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,9 @@ pub struct Editor {
     pub memo: HashMap<String, Props>,
     pub root_props: Props,
     pub leaves: Vec<Leaf>,
+    /// Where the build's draft is kept while it is unsaved.
+    pub draft_dir: PathBuf,
+    pub keeper: drafts::Keeper,
 }
 
 impl Editor {
@@ -83,10 +87,88 @@ impl Editor {
                 count: 0,
             },
             leaves: vec![],
+            draft_dir: drafts::dir(),
+            keeper: drafts::Keeper::default(),
         };
         ed.errors = assembly::validate(&ed.doc, &ed.bundle);
         ed.recompute();
         ed
+    }
+
+    // ---------------------------------------------------------- drafts
+
+    /// Called every frame: a draft of the build is kept once a run of
+    /// changes has settled, while there is anything unsaved.
+    pub fn autosave(&mut self, now: std::time::Instant, now_ms: i64) {
+        if self.dirty {
+            self.keeper.changed(self.edits, now);
+        }
+        if self.keeper.due(now) {
+            self.keep_draft(now_ms);
+            self.keeper.kept(self.edits);
+        }
+    }
+
+    /// The build kept as a draft, with where it belongs.
+    pub fn keep_draft(&mut self, now_ms: i64) {
+        let note = drafts::Note {
+            path: self.path.clone(),
+            kept_ms: now_ms,
+        };
+        if let Err(e) = serde_json::to_string_pretty(&self.doc)
+            .map_err(|e| e.to_string())
+            .and_then(|t| drafts::keep(&self.draft_dir, drafts::BUILD, &t, &note))
+        {
+            self.status = format!("Could not keep a draft: {e}");
+        }
+    }
+
+    /// The draft goes: the build is saved, or a file took its place.
+    pub fn drop_draft(&mut self) {
+        drafts::drop(&self.draft_dir, drafts::BUILD);
+        self.keeper.kept(self.edits);
+    }
+
+    /// A draft an earlier session kept comes back as the build, unsaved,
+    /// belonging where it did. Nothing happens without one; a draft that
+    /// is not an assembly is left and said so.
+    pub fn restore_draft(&mut self, now_ms: i64) -> bool {
+        let Some((text, note)) = drafts::take(&self.draft_dir, drafts::BUILD) else {
+            return false;
+        };
+        let at = self.draft_dir.join(drafts::BUILD);
+        let doc: Document = match serde_json::from_str(&text) {
+            Ok(d) => d,
+            Err(e) => {
+                self.status = format!("Ignored an unreadable draft at {}: {e}", at.display());
+                return false;
+            }
+        };
+        let errs = assembly::validate(&doc, &self.bundle);
+        if errs.iter().any(|e| e.starts_with("format") || e.starts_with("robot.root")) {
+            self.status = format!("Ignored a draft that is not an assembly at {}: {}", at.display(), errs.join("; "));
+            return false;
+        }
+        self.errors = errs;
+        self.doc = doc;
+        self.path = note.path.clone();
+        self.editing = self.doc.robot.root.clone();
+        self.crumbs = vec![self.editing.clone()];
+        self.selection.clear();
+        self.undo.clear();
+        self.dirty = true;
+        self.fit_pending = true;
+        self.recompute();
+        self.keeper.kept(self.edits);
+        self.status = format!(
+            "Restored the unsaved draft kept {}{}",
+            drafts::ago(note.kept_ms, now_ms),
+            match &note.path {
+                Some(p) => format!(" of {}: Save writes it there", p.display()),
+                None => ": Save as… gives it a file".to_string(),
+            }
+        );
+        true
     }
 
     // ------------------------------------------------------------ model
@@ -815,6 +897,7 @@ impl Editor {
                 self.dirty = false;
                 self.fit_pending = true;
                 self.recompute();
+                self.drop_draft();
                 self.status = format!("Opened {}", p.display());
             }
             Err(e) => self.status = format!("Could not open: {e}"),
@@ -904,6 +987,7 @@ impl Editor {
             Ok(()) => {
                 self.path = Some(path.to_path_buf());
                 self.dirty = false;
+                self.drop_draft();
                 self.status = format!("Saved {}", path.display());
             }
             Err(e) => self.status = format!("Could not save: {e}"),
@@ -1497,6 +1581,103 @@ mod tests {
         .unwrap();
         assert!(!third.import_build(dir.join("bad.json")));
         assert!(third.status.starts_with("Not an assembly file"), "{}", third.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unsaved_build_is_drafted_after_a_change_settles_and_restored_next_time() {
+        use std::time::{Duration, Instant};
+        let dir = std::env::temp_dir().join(format!("ob-editor-drafts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut ed = editor();
+        ed.draft_dir = dir.clone();
+        let t0 = Instant::now();
+        // nothing unsaved: nothing kept, however long it settles
+        ed.autosave(t0 + Duration::from_secs(10), 1_000);
+        assert!(drafts::take(&dir, drafts::BUILD).is_none());
+        // an edit, then a moment: the draft is kept, with where the build belongs (nowhere yet)
+        let name = ed.children()[0].name.clone();
+        ed.selection = vec![name.clone()];
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        ed.autosave(t0, 1_000);
+        ed.autosave(t0 + Duration::from_millis(1500), 2_000);
+        assert!(drafts::take(&dir, drafts::BUILD).is_none(), "not settled yet");
+        ed.autosave(t0 + Duration::from_secs(3), 3_000);
+        let (text, note) = drafts::take(&dir, drafts::BUILD).expect("kept");
+        assert_eq!(
+            note,
+            drafts::Note {
+                path: None,
+                kept_ms: 3_000
+            }
+        );
+        assert!(text.contains("\"components\""));
+        // unchanged since: not rewritten
+        std::fs::write(dir.join(drafts::BUILD), "stale").unwrap();
+        ed.autosave(t0 + Duration::from_secs(9), 9_000);
+        assert_eq!(drafts::take(&dir, drafts::BUILD).unwrap().0, "stale");
+        // another edit: rewritten once settled, now with the file it was saved to
+        let file = dir.join("robot.assembly.json");
+        ed.save_to(&file);
+        assert!(drafts::take(&dir, drafts::BUILD).is_none(), "saved: the draft goes");
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        ed.autosave(t0 + Duration::from_secs(10), 10_000);
+        ed.autosave(t0 + Duration::from_secs(13), 13_000);
+        let (_, note) = drafts::take(&dir, drafts::BUILD).expect("kept again");
+        assert_eq!(note.path.as_deref(), Some(file.as_path()));
+        // the next session restores it, unsaved, belonging to that file
+        let mut next = editor();
+        next.draft_dir = dir.clone();
+        assert!(next.restore_draft(13_000 + 120_000));
+        assert!(next.dirty && next.undo_depth() == 0);
+        assert_eq!(next.path.as_deref(), Some(file.as_path()));
+        assert_eq!(
+            next.children().iter().find(|c| c.name == name).unwrap().pos,
+            ed.children().iter().find(|c| c.name == name).unwrap().pos
+        );
+        assert_eq!(
+            next.status,
+            format!(
+                "Restored the unsaved draft kept 2 min ago of {}: Save writes it there",
+                file.display()
+            )
+        );
+        // opening a file drops the draft; nothing to restore after that
+        next.load_path(file.clone());
+        assert!(!next.restore_draft(0));
+        assert!(!next.dirty);
+        // a draft that cannot be read is left, and said so
+        drafts::keep(&dir, drafts::BUILD, "not json", &drafts::Note::default()).unwrap();
+        assert!(!next.restore_draft(0));
+        assert!(next.status.starts_with("Ignored an unreadable draft at"), "{}", next.status);
+        drafts::keep(
+            &dir,
+            drafts::BUILD,
+            r#"{"format": "x/9", "parts": {}, "components": {"x": {}}, "robot": {"root": "x"}}"#,
+            &drafts::Note::default(),
+        )
+        .unwrap();
+        assert!(!next.restore_draft(0));
+        assert!(
+            next.status.starts_with("Ignored a draft that is not an assembly"),
+            "{}",
+            next.status
+        );
+        // a draft that belongs nowhere says how to give it a file
+        drafts::keep(
+            &dir,
+            drafts::BUILD,
+            &serde_json::to_string(&assembly::example()).unwrap(),
+            &drafts::Note::default(),
+        )
+        .unwrap();
+        assert!(next.restore_draft(0));
+        assert!(next.status.ends_with(": Save as… gives it a file"), "{}", next.status);
+        // keeping into a place that cannot be written is said too
+        std::fs::write(dir.join("blocker"), "").unwrap();
+        ed.draft_dir = dir.join("blocker");
+        ed.keep_draft(0);
+        assert!(ed.status.starts_with("Could not keep a draft"), "{}", ed.status);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

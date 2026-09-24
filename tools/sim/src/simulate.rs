@@ -112,7 +112,7 @@ pub struct SimulateTab {
     speed_sent: f64,
     error: Option<String>,
     pub log: Vec<(String, String)>,
-    message: String,
+    pub message: String,
     textures_loaded: HashMap<String, bool>,
     fit_pending: bool,
     /// The map editor's 3D camera frames a map once, when the map is new
@@ -129,6 +129,11 @@ pub struct SimulateTab {
     /// The route being planned on this map.
     pub route: Route,
     route_path: Option<PathBuf>,
+    /// Bumped by every change to the route: what the draft keeper watches.
+    pub route_rev: u64,
+    /// Where the route's draft is kept while it is unsaved.
+    pub draft_dir: PathBuf,
+    pub keeper: crate::drafts::Keeper,
     /// An armed tool: the kind being placed and the map clicks so far.
     pub placing: Option<Placing>,
     /// A popup awaiting the parameters of a freshly placed action.
@@ -216,6 +221,9 @@ impl SimulateTab {
             auto_loaded: false,
             route: Route::default(),
             route_path: None,
+            route_rev: 0,
+            draft_dir: crate::drafts::dir(),
+            keeper: crate::drafts::Keeper::default(),
             placing: None,
             draft: None,
             hover: None,
@@ -559,6 +567,7 @@ impl SimulateTab {
             yaw_deg: route::wrap_deg((pose.yaw_deg * 10.0).round() / 10.0),
         };
         self.route.start = pose;
+        self.route_rev += 1;
         self.placed = Some(pose);
         if self.scene.is_some() {
             self.send(serde_json::json!({"cmd": "place", "x_mm": pose.x_mm, "y_mm": pose.y_mm, "yaw_deg": pose.yaw_deg}));
@@ -635,10 +644,80 @@ impl SimulateTab {
 
     /// Keep the route as it is, for undo.
     fn record(&mut self) {
+        self.route_rev += 1;
         if self.history.last() != Some(&self.route) {
             self.history.push(self.route.clone());
             if self.history.len() > HISTORY {
                 self.history.remove(0);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------- drafts
+
+    /// Called every frame: a draft of the route is kept once a run of
+    /// changes has settled.
+    pub fn autosave(&mut self, now: std::time::Instant, now_ms: i64) {
+        self.keeper.changed(self.route_rev, now);
+        if self.keeper.due(now) {
+            self.keep_draft(now_ms);
+            self.keeper.kept(self.route_rev);
+        }
+    }
+
+    /// The route kept as a draft, with the file it belongs to.
+    pub fn keep_draft(&mut self, now_ms: i64) {
+        let note = crate::drafts::Note {
+            path: self.route_path.clone(),
+            kept_ms: now_ms,
+        };
+        if let Err(e) = serde_json::to_string_pretty(&self.route)
+            .map_err(|e| e.to_string())
+            .and_then(|t| crate::drafts::keep(&self.draft_dir, crate::drafts::ROUTE, &t, &note))
+        {
+            self.message = format!("could not keep a route draft: {e}");
+        }
+    }
+
+    /// The draft goes: the route is saved, or a file took its place.
+    pub fn drop_draft(&mut self) {
+        crate::drafts::drop(&self.draft_dir, crate::drafts::ROUTE);
+        self.keeper.kept(self.route_rev);
+    }
+
+    /// A route draft an earlier session kept comes back, its map to
+    /// load when the tab shows and the chassis at its start.
+    pub fn restore_draft(&mut self, now_ms: i64) -> bool {
+        let Some((_, note)) = crate::drafts::take(&self.draft_dir, crate::drafts::ROUTE) else {
+            return false;
+        };
+        match Route::load(&self.draft_dir.join(crate::drafts::ROUTE)) {
+            Ok(r) => {
+                self.placing = None;
+                self.draft = None;
+                self.selected = None;
+                self.history.clear();
+                self.placed = Some(r.start);
+                if !r.world.is_empty() {
+                    self.world = r.world.clone();
+                }
+                self.route = r;
+                self.route_path = note.path.clone();
+                self.route_rev += 1;
+                self.keeper.kept(self.route_rev);
+                self.message = format!(
+                    "restored the unsaved route draft kept {}{}",
+                    crate::drafts::ago(note.kept_ms, now_ms),
+                    match &note.path {
+                        Some(p) => format!(" of {}", p.display()),
+                        None => String::new(),
+                    }
+                );
+                true
+            }
+            Err(e) => {
+                self.message = format!("ignored an unreadable route draft: {e}");
+                false
             }
         }
     }
@@ -1122,6 +1201,7 @@ impl SimulateTab {
             Ok(()) => {
                 self.message = format!("saved the route to {}", path.display());
                 self.route_path = Some(path);
+                self.drop_draft();
             }
             Err(e) => self.message = format!("could not save the route: {e}"),
         }
@@ -1140,6 +1220,8 @@ impl SimulateTab {
                 let other_map = !r.world.is_empty() && r.world != self.world;
                 self.route = r;
                 self.route_path = Some(path);
+                self.route_rev += 1;
+                self.drop_draft();
                 if other_map {
                     self.world = self.route.world.clone();
                     self.reload();

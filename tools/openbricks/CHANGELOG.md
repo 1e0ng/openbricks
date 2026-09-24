@@ -3,6 +3,25 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.24.0 — unsaved work is kept: drafts of the build and the route
+
+A forgotten Save loses nothing: a couple of seconds after a run of
+changes settles, the Workbench's build and the route are written as
+drafts under the data directory (`~/.local/share/openbricks/drafts`,
+or `$OPENBRICKS_DATA_DIR`), each with a note of the file it belongs
+to and when it was kept. The next `openbricks sim` started without a
+file brings both back, unsaved, and says so in the status line; Save
+writes the build to the file it came from. Saving, or opening a file,
+drops the draft. The map editor's props are saved by **Save map** and
+are not drafted.
+
+- Tests: the drafts module (keep, take, drop, notes, the keeper's
+  timing, the "kept … ago" text); the editor (nothing kept while
+  nothing is unsaved, kept once settled, not rewritten unchanged,
+  dropped on save, restored with its file and status, unreadable
+  drafts said); the app (both drafts kept and restored, the route
+  draft dropped on save and load).
+
 ## 4.23.0 — bricks stack on stud grids; the magnet pulls while dragging
 
 Bricks and plates stack: under every stud a part now has a socket,
