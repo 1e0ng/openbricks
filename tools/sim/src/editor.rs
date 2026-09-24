@@ -821,6 +821,81 @@ impl Editor {
         }
     }
 
+    /// A component as a build of its own, written to `path` (the robot the
+    /// file describes is that component, with the bricks and components
+    /// it needs); the build open here is untouched.
+    pub fn save_component(&mut self, id: &str, path: &Path) -> bool {
+        let Some(sub) = assembly::subset(&self.doc, id) else {
+            self.status = format!("No component {id}");
+            return false;
+        };
+        match serde_json::to_string_pretty(&sub)
+            .map_err(|e| e.to_string())
+            .and_then(|t| std::fs::write(path, t).map_err(|e| e.to_string()))
+        {
+            Ok(()) => {
+                self.status = format!("Saved {id} as {}", path.display());
+                true
+            }
+            Err(e) => {
+                self.status = format!("Could not save {id}: {e}");
+                false
+            }
+        }
+    }
+
+    /// A saved build's components and bricks join this library, to add
+    /// from; what is here already, the same, is left, a clash comes in
+    /// under a new id. One undo point.
+    pub fn import_build(&mut self, p: PathBuf) -> bool {
+        let doc = match std::fs::read_to_string(&p)
+            .map_err(|e| e.to_string())
+            .and_then(|t| serde_json::from_str::<Document>(&t).map_err(|e| e.to_string()))
+        {
+            Ok(d) => d,
+            Err(e) => {
+                self.status = format!("Could not import: {e}");
+                return false;
+            }
+        };
+        let errs = assembly::validate(&doc, &self.bundle);
+        if errs.iter().any(|e| e.starts_with("format") || e.starts_with("robot.root")) {
+            self.status = format!("Not an assembly file: {}", errs.join("; "));
+            return false;
+        }
+        let name = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+        let before = self.doc.clone();
+        let got = assembly::merge_library(&mut self.doc, &doc);
+        if got.components.is_empty() && got.parts.is_empty() {
+            self.doc = before;
+            self.status = format!("Nothing new in {name}: its components and bricks are here already");
+            return false;
+        }
+        self.undo.push(before);
+        self.dirty = true;
+        self.recompute();
+        let renamed = if got.renamed.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " ({})",
+                got.renamed
+                    .iter()
+                    .map(|(a, b)| format!("{a} as {b}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        self.status = format!(
+            "Imported {} component{} and {} brick{} from {name}{renamed}",
+            got.components.len(),
+            if got.components.len() == 1 { "" } else { "s" },
+            got.parts.len(),
+            if got.parts.len() == 1 { "" } else { "s" }
+        );
+        true
+    }
+
     pub fn save_to(&mut self, path: &Path) {
         match serde_json::to_string_pretty(&self.doc)
             .map_err(|e| e.to_string())
@@ -1344,6 +1419,75 @@ mod tests {
         assert!(other.status.starts_with("Could not open"), "{}", other.status);
         ed.save_to(&dir.join("no-such-dir").join("x.json"));
         assert!(ed.status.starts_with("Could not save"), "{}", ed.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_component_saves_as_a_build_of_its_own_and_imports_into_a_library() {
+        let mut ed = editor();
+        let dir = std::env::temp_dir().join(format!("ob-comp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let comp = ed
+            .children()
+            .iter()
+            .find(|c| c.component.is_some())
+            .unwrap()
+            .component
+            .clone()
+            .unwrap();
+        let path = dir.join(format!("{comp}.assembly.json"));
+        assert!(!ed.save_component("no-such", &path));
+        assert_eq!(ed.status, "No component no-such");
+        ed.dirty = false;
+        assert!(ed.save_component(&comp, &path), "{}", ed.status);
+        assert!(ed.status.starts_with(&format!("Saved {comp} as")), "{}", ed.status);
+        assert!(!ed.dirty && ed.path.is_none(), "the build here is untouched");
+        assert!(!ed.save_component(&comp, &dir.join("no-such-dir").join("x.json")));
+        assert!(ed.status.starts_with(&format!("Could not save {comp}")), "{}", ed.status);
+        // the file is a build whose robot is the component, with only what it needs
+        let mut other = editor();
+        other.load_path(path.clone());
+        assert!(other.status.starts_with("Opened"), "{}", other.status);
+        assert_eq!(other.doc.robot.root, comp);
+        assert!(other.doc.parts.len() < ed.doc.parts.len());
+        assert!(other.errors.is_empty(), "{:?}", other.errors);
+        // imported into a library that has it already: nothing new; into an empty one: it and its bricks
+        assert!(!ed.import_build(path.clone()));
+        assert!(ed.status.starts_with("Nothing new in"), "{}", ed.status);
+        let mut bare = Editor::new(real_bundle(), None);
+        bare.doc.parts.clear();
+        bare.doc.components.retain(|k, _| *k == bare.doc.robot.root);
+        bare.doc.components.get_mut(&bare.doc.robot.root).unwrap().children.clear();
+        bare.doc.robot.roles.clear();
+        bare.recompute();
+        let depth = bare.undo_depth();
+        assert!(bare.import_build(path.clone()), "{}", bare.status);
+        assert!(bare.doc.components.contains_key(&comp));
+        assert!(!bare.doc.parts.is_empty() && bare.dirty);
+        assert_eq!(bare.undo_depth(), depth + 1);
+        assert!(bare.status.starts_with("Imported 1 component"), "{}", bare.status);
+        assert!(bare.status.contains(&format!("from {comp}.assembly.json")), "{}", bare.status);
+        assert!(assembly::validate(&bare.doc, &bare.bundle).is_empty());
+        bare.undo();
+        assert!(!bare.doc.components.contains_key(&comp));
+        // a clash: the library's own robot id is taken, so the file's comes in renamed
+        let robot_file = dir.join("robot.assembly.json");
+        ed.save_to(&robot_file);
+        let mut third = editor();
+        third.selection = vec![third.children()[0].name.clone()];
+        third.nudge_selection([8.0, 0.0, 0.0]);
+        assert!(third.import_build(robot_file.clone()), "{}", third.status);
+        assert!(third.status.contains(" as "), "renamed: {}", third.status);
+        // not a file, not an assembly
+        assert!(!third.import_build(dir.join("missing.json")));
+        assert!(third.status.starts_with("Could not import"), "{}", third.status);
+        std::fs::write(
+            dir.join("bad.json"),
+            r#"{"format": "x/9", "parts": {}, "components": {"x": {}}, "robot": {"root": "x"}}"#,
+        )
+        .unwrap();
+        assert!(!third.import_build(dir.join("bad.json")));
+        assert!(third.status.starts_with("Not an assembly file"), "{}", third.status);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

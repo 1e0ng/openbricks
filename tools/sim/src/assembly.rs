@@ -582,6 +582,104 @@ pub fn subset(doc: &Document, root: &str) -> Option<Document> {
     })
 }
 
+/// What an import brought into a library.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Imported {
+    pub components: Vec<String>,
+    pub parts: Vec<String>,
+    /// Ids the import had to change: the library held something else by that name.
+    pub renamed: Vec<(String, String)>,
+}
+
+/// `base`, or `base_2`, `base_3`… — the first not `taken`.
+fn fresh_id(base: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(base) {
+        return base.to_string();
+    }
+    let mut k = 2;
+    loop {
+        let id = format!("{base}_{k}");
+        if !taken(&id) {
+            return id;
+        }
+        k += 1;
+    }
+}
+
+/// The parts and components of a saved build join `doc`'s library.
+/// What the library already holds, the same, is left as it is (under
+/// whatever id it has here); what it holds under the same id but
+/// different comes in under a new id, and the build's own references
+/// follow. Nothing is placed: the components are there to add. Bringing
+/// the same build in twice adds nothing the second time.
+pub fn merge_library(doc: &mut Document, other: &Document) -> Imported {
+    let mut out = Imported::default();
+    let mut part_ids: BTreeMap<String, String> = BTreeMap::new();
+    for (id, part) in &other.parts {
+        let target = match doc.parts.iter().find(|(_, mine)| *mine == part) {
+            Some((same, _)) => same.clone(),
+            None => {
+                let id2 = fresh_id(id, |k| doc.parts.contains_key(k));
+                doc.parts.insert(id2.clone(), part.clone());
+                out.parts.push(id2.clone());
+                id2
+            }
+        };
+        if target != *id {
+            out.renamed.push((id.clone(), target.clone()));
+        }
+        part_ids.insert(id.clone(), target);
+    }
+    let remap = |comp: &Component, comp_ids: &BTreeMap<String, String>| -> Component {
+        let mut c = comp.clone();
+        for ch in &mut c.children {
+            if let Some(p) = &ch.part {
+                ch.part = Some(part_ids.get(p).cloned().unwrap_or_else(|| p.clone()));
+            }
+            if let Some(cid) = &ch.component {
+                ch.component = Some(comp_ids.get(cid).cloned().unwrap_or_else(|| cid.clone()));
+            }
+        }
+        c
+    };
+    // components come in after the ones they refer to, so a component whose
+    // sub-components the library already has compares equal to its copy here
+    let mut comp_ids: BTreeMap<String, String> = BTreeMap::new();
+    let mut pending: Vec<String> = other.components.keys().cloned().collect();
+    while !pending.is_empty() {
+        let ready: Vec<String> = pending
+            .iter()
+            .filter(|id| {
+                other.components[*id]
+                    .children
+                    .iter()
+                    .filter_map(|ch| ch.component.as_ref())
+                    .all(|c| comp_ids.contains_key(c) || c == *id || !other.components.contains_key(c))
+            })
+            .cloned()
+            .collect();
+        let batch = if ready.is_empty() { vec![pending[0].clone()] } else { ready };
+        for id in batch {
+            pending.retain(|p| p != &id);
+            let comp = remap(&other.components[&id], &comp_ids);
+            let target = match doc.components.iter().find(|(_, mine)| **mine == comp) {
+                Some((same, _)) => same.clone(),
+                None => {
+                    let id2 = fresh_id(&id, |k| doc.components.contains_key(k));
+                    doc.components.insert(id2.clone(), comp);
+                    out.components.push(id2.clone());
+                    id2
+                }
+            };
+            if target != id {
+                out.renamed.push((id.clone(), target.clone()));
+            }
+            comp_ids.insert(id, target);
+        }
+    }
+    out
+}
+
 /// One library brick as a document of its own — what a map takes as a
 /// prop when a brick is added from the library.
 pub fn brick_document(bundle: &Bundle, num: &str) -> Option<Document> {
@@ -1371,6 +1469,75 @@ mod tests {
         let back: Document = serde_json::from_str(&text).unwrap();
         assert_eq!(back, doc);
         assert!(validate(&doc, &b).is_empty());
+    }
+
+    #[test]
+    fn a_saved_build_joins_a_library_and_clashes_come_in_renamed() {
+        let box10 = Shape::Box {
+            size: [10.0, 10.0, 10.0],
+            pos: [0.0; 3],
+        };
+        let box20 = Shape::Box {
+            size: [20.0, 10.0, 10.0],
+            pos: [0.0; 3],
+        };
+        let cinst = |name: &str, comp: &str| Instance {
+            name: name.into(),
+            part: None,
+            component: Some(comp.into()),
+            pos: [0.0; 3],
+            rot: [0.0; 3],
+            locked: false,
+        };
+        // the library: brick p, component x of one p
+        let mut doc = doc_with(
+            vec![("p", part(1.0, box10.clone()))],
+            vec![("robot", vec![cinst("x", "x")]), ("x", vec![inst("a", "p", [0.0; 3], [0.0; 3])])],
+        );
+        // the saved build: the same p, a new q, an x that differs, and y made of x and q
+        let other = doc_with(
+            vec![("p", part(1.0, box10.clone())), ("q", part(2.0, box20.clone()))],
+            vec![
+                ("robot", vec![cinst("y", "y")]),
+                ("x", vec![inst("a", "p", [8.0, 0.0, 0.0], [0.0; 3])]),
+                ("y", vec![cinst("x", "x"), inst("b", "q", [0.0; 3], [0.0; 3])]),
+            ],
+        );
+        let got = merge_library(&mut doc, &other);
+        assert_eq!(got.parts, vec!["q".to_string()], "p is here already");
+        assert_eq!(got.components, vec!["x_2".to_string(), "y".to_string(), "robot_2".to_string()]);
+        assert_eq!(
+            got.renamed,
+            vec![("x".to_string(), "x_2".to_string()), ("robot".to_string(), "robot_2".to_string())]
+        );
+        assert_eq!(
+            doc.components["y"].children[0].component.as_deref(),
+            Some("x_2"),
+            "y follows the rename"
+        );
+        assert_eq!(doc.components["x"].children[0].pos, [0.0; 3], "the library's x is untouched");
+        assert_eq!(doc.components["robot_2"].children[0].component.as_deref(), Some("y"));
+        assert!(validate(&doc, &bundle()).is_empty());
+        // the same build again brings nothing: everything compares equal to what is here
+        let again = merge_library(&mut doc, &other);
+        assert_eq!(
+            again,
+            Imported {
+                components: vec![],
+                parts: vec![],
+                renamed: vec![("x".into(), "x_2".into()), ("robot".into(), "robot_2".into())]
+            }
+        );
+        assert_eq!(doc.components.len(), 5);
+        // a brick that differs under the same id comes in renamed, and its users follow
+        let other2 = doc_with(
+            vec![("p", part(9.0, box10))],
+            vec![("robot", vec![inst("c", "p", [0.0; 3], [0.0; 3])])],
+        );
+        let got2 = merge_library(&mut doc, &other2);
+        assert_eq!(got2.parts, vec!["p_2".to_string()]);
+        assert_eq!(doc.components["robot_3"].children[0].part.as_deref(), Some("p_2"));
+        assert_eq!(fresh_id("z", |_| false), "z");
     }
 
     #[test]

@@ -929,6 +929,14 @@ impl App {
                 {
                     self.editor.load_path(p);
                 }
+                if ui
+                    .button("Import…")
+                    .on_hover_text("a saved build's components and bricks join this library, to add from")
+                    .clicked()
+                    && let Some(p) = rfd::FileDialog::new().add_filter("assembly", &["json"]).pick_file()
+                {
+                    self.editor.import_build(p);
+                }
                 if ui.button(if self.editor.dirty { "Save *" } else { "Save" }).clicked() {
                     self.save_file(false);
                 }
@@ -1014,6 +1022,19 @@ impl App {
         });
     }
 
+    /// A component saved as a build of its own, where the dialog says.
+    fn save_component_dialog(&mut self, id: &str) {
+        let mut dlg = rfd::FileDialog::new()
+            .add_filter("assembly", &["json"])
+            .set_file_name(format!("{id}.assembly.json"));
+        if let Some(p) = self.editor.path.as_ref().and_then(|p| p.parent()) {
+            dlg = dlg.set_directory(p);
+        }
+        if let Some(p) = dlg.save_file() {
+            self.editor.save_component(id, &p);
+        }
+    }
+
     fn save_file(&mut self, ask: bool) {
         let path = if ask || self.editor.path.is_none() {
             let mut dlg = rfd::FileDialog::new()
@@ -1060,6 +1081,7 @@ impl App {
             let ids: Vec<String> = self.editor.doc.components.keys().cloned().collect();
             let mut to_add: Option<(Option<String>, Option<String>)> = None;
             let mut to_open: Option<String> = None;
+            let mut to_save: Option<String> = None;
             let mut to_ldraw: Option<String> = None;
             for id in ids {
                 if !q.is_empty() && !id.contains(&q) {
@@ -1079,6 +1101,9 @@ impl App {
                     }
                     if can_add && ui.small_button("+ add").clicked() {
                         to_add = Some((None, Some(id.clone())));
+                    }
+                    if !is_root && ui.small_button("save").on_hover_text("as a build of its own").clicked() {
+                        to_save = Some(id.clone());
                     }
                 });
             }
@@ -1200,6 +1225,9 @@ impl App {
             }
             if let Some((p, c)) = to_add {
                 self.editor.add_instance(p, c, [0.0; 3]);
+            }
+            if let Some(id) = to_save {
+                self.save_component_dialog(&id);
             }
             if let Some(id) = to_open {
                 let push = id != self.editor.doc.robot.root && !self.editor.crumbs.contains(&id);
@@ -1547,6 +1575,14 @@ impl App {
                 let pr = self.editor.edited_props();
                 Self::computed_block(ui, &pr, &format!("{} frame", self.editor.editing));
                 ui.weak(format!("used ×{}", assembly::usage_count(&self.editor.doc, &self.editor.editing)));
+                if ui
+                    .button("Save as build…")
+                    .on_hover_text("this component as an assembly file of its own, to open or import elsewhere")
+                    .clicked()
+                {
+                    let id = self.editor.editing.clone();
+                    self.save_component_dialog(&id);
+                }
                 if ui.button("Back to the robot").clicked() {
                     let root = self.editor.doc.robot.root.clone();
                     self.editor.open_component(&root, false);
@@ -4095,6 +4131,35 @@ mod tests {
         assert!(h.query_by_label("colour").is_some(), "the selection's colour combo");
         h.state_mut().search.clear();
         h.step();
+    }
+
+    #[test]
+    fn a_component_can_be_saved_as_a_build_and_a_build_imported() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        // the Workbench's toolbar imports; the library's component rows save (not the robot's)
+        assert!(h.query_by_label("Import…").is_some());
+        let non_root = h.state().editor.doc.components.len() - 1;
+        assert_eq!(h.get_all_by_label("save").count(), non_root);
+        let cid = h
+            .state()
+            .editor
+            .doc
+            .components
+            .keys()
+            .find(|k| **k != h.state().editor.doc.robot.root)
+            .unwrap()
+            .clone();
+        h.state_mut().editor.open_component(&cid, true);
+        steps(&mut h, 2);
+        assert!(h.query_by_label("Save as build…").is_some(), "a component's page saves it");
+        // the other tabs carry neither
+        h.get_by_label("Map").click();
+        steps(&mut h, 2);
+        assert!(h.query_by_label("Import…").is_none() && h.query_by_label("save").is_none());
+        h.get_by_label("Workbench").click();
+        steps(&mut h, 2);
     }
 
     #[test]
