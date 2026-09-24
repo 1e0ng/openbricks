@@ -168,6 +168,9 @@ openbricks_sim = [
     # The sets the library holds complete (4.20.0): name, year, pieces,
     # parts and the inventory numbers LDraw spells differently.
     "bricks/sets.json",
+    # The colours each part comes in and their LEGO element numbers
+    # (4.21.0), from Rebrickable's public tables.
+    "bricks/colors.json",
     "bricks/LDRAW-LICENSE.md",
     "workbench/index.html",
 ]

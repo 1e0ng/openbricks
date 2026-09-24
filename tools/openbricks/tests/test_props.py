@@ -185,8 +185,10 @@ class SaveTests(unittest.TestCase):
                "components": {"pair": {"children": [{"name": "a", "part": "p", "pos": [0, 0, 0], "rot": [0, 0, 0]},
                                                     {"name": "b", "part": "p", "pos": [40, 0, 0], "rot": [0, 0, 90]}]}},
                "robot": {"name": "pair", "root": "pair"}}
+        doc["components"]["pair"]["children"][0]["color"] = 72   # placed in dark bluish gray (4.21.0)
         out, total = assembly.prop_bricks(doc, bundle)
         self.assertEqual([b["path"] for b in out], ["a", "b"])
+        self.assertEqual([b["color"] for b in out], [72, None], "the LEGO colour rides with each brick")
         self.assertAlmostEqual(total, 2 * rec["mass_g"], places=6)
         self.assertEqual(out[1]["ldraw"], num)
         self.assertAlmostEqual(out[1]["mass_g"], rec["mass_g"], places=3)

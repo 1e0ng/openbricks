@@ -276,11 +276,17 @@ robot as a tree of components:
   bricks. Either way the new component joins the library
   and can be dropped anywhere, as many times as you like. Double-click
   an instance to edit its definition in place; every use follows.
-  Each component can wear a colour of your own: pick it on the
-  component's page (on the robot's for the whole build, or on any
-  instance of it), and every brick under it draws in it, the nearest
-  enclosing component's colour winning; **default** goes back to the
-  bricks' category colours.
+  Every brick is placed in a LEGO colour: the library lists, for each
+  part, the colours it really comes in (from Rebrickable's tables), a
+  row's colour combo picks the one the next **+** places it in, and a
+  placed brick's page (or a selection's, for the colours they all
+  share) changes it. A part in a given colour is its own LEGO
+  *element* with the number set inventories print, and the page names
+  it; typing an element number into the library's search finds the
+  part and picks that colour. "—" leaves a brick in its category's
+  colour. The file records the colour as its LDraw id (`color` on the
+  instance), and the Map and Simulate tabs draw builds in their
+  colours too.
 - **Connections.** Pins, axles and studs are real features of the
   LDraw parts, and 4.8 mm bores are recognised as pin holes on every
   mesh, imported STL files included. Let go of a part near a hole and

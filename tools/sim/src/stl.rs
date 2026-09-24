@@ -834,6 +834,7 @@ mod tests {
                 parts: Default::default(),
                 missing: vec![],
                 sets: Default::default(),
+                colors: Default::default(),
             },
         ) {
             assembly::Geometry::Imported { volume_mm3, tris, .. } => {
@@ -850,6 +851,7 @@ mod tests {
                 parts: Default::default(),
                 missing: vec![],
                 sets: Default::default(),
+                colors: Default::default(),
             },
         );
         assert_eq!(pr.mass, 42.0);

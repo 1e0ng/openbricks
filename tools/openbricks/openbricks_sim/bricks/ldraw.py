@@ -554,6 +554,26 @@ def apply_sets(bundle, sets):
     return bundle
 
 
+def read_colors(path):
+    """The colours file ``openbricks_sim.bricks.rebrickable`` writes."""
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def apply_colors(bundle, colors):
+    """Stamp each record with the colours its part comes in (``colors``:
+    colour id → the LEGO element numbers of the part in that colour) and
+    give the bundle the palette those colours draw with (``colors``:
+    colour id → name, rgb, trans). A part the file knows nothing about
+    keeps no colours and draws in its category's."""
+    bundle["colors"] = dict(colors.get("palette", {}))
+    for num, rec in bundle["parts"].items():
+        entry = colors.get("parts", {}).get(num)
+        if entry:
+            rec["colors"] = {cid: list(els) for cid, els in entry.items()}
+    return bundle
+
+
 def read_list(path):
     """Part numbers from a list file: one per line, ``#`` comments."""
     numbers = []
@@ -581,7 +601,7 @@ def write_bundle(bundle, path):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) < 3:
-        print("usage: python -m openbricks_sim.bricks.ldraw LDRAW_DIR PARTS_LIST OUT[.zlib|.json] [--weights weights.json] [--sets sets.json]", file=sys.stderr)
+        print("usage: python -m openbricks_sim.bricks.ldraw LDRAW_DIR PARTS_LIST OUT[.zlib|.json] [--weights weights.json] [--sets sets.json] [--colors colors.json]", file=sys.stderr)
         return 2
     root, list_path, out_path = argv[0], argv[1], argv[2]
     weights = None
@@ -593,6 +613,8 @@ def main(argv=None):
     numbers += [n for n in set_numbers(sets) if n not in numbers]
     lib = Library(root)
     bundle = apply_sets(convert_parts(lib, numbers, weights, log=print), sets)
+    if "--colors" in argv:
+        bundle = apply_colors(bundle, read_colors(argv[argv.index("--colors") + 1]))
     n = write_bundle(bundle, out_path)
     print("parts: %d, missing: %s, json: %.1f KB" % (len(bundle["parts"]), bundle["missing"], n / 1024))
     return 0

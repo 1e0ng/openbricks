@@ -87,6 +87,7 @@ class WheelBundlesWorldsTests(unittest.TestCase):
                        "openbricks_sim/bricks/technic_parts.txt",
                        "openbricks_sim/bricks/weights.json",
                        "openbricks_sim/bricks/sets.json",
+                       "openbricks_sim/bricks/colors.json",
                        "openbricks_sim/bricks/LDRAW-LICENSE.md"):
             self.assertIn(wanted, names,
                           "wheel lacks %s — add it to "

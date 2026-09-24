@@ -110,6 +110,67 @@ class ShippedBundleTests(unittest.TestCase):
         self.assertLess(len(bricks.bundle_b64()), 4_000_000)
 
 
+class ColorsTests(unittest.TestCase):
+    """The colours a part comes in and the LEGO element numbers that name
+    each part-and-colour, from Rebrickable's tables (4.21.0)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bundle = bricks.load_bundle()
+        cls.colors = bricks.load_colors()
+
+    def test_the_bundle_carries_a_palette_and_every_part_its_colours(self):
+        palette = self.bundle["colors"]
+        self.assertEqual(palette, self.colors["palette"])
+        self.assertEqual(palette["72"], {"name": "Dark Bluish Gray", "rgb": "6C6E68", "trans": False})
+        without = [n for n, p in self.bundle["parts"].items() if not p.get("colors")]
+        self.assertEqual(without, self.colors["without"])
+        self.assertLessEqual(len(without), 1, without)
+        for num, part in self.bundle["parts"].items():
+            for cid, elements in part.get("colors", {}).items():
+                self.assertIn(cid, palette, num)
+                self.assertTrue(elements and all(e.isdigit() for e in elements), (num, cid))
+        # a beam 15 in dark bluish gray is element 4210687; in red 4163147
+        self.assertIn("4210687", self.bundle["parts"]["32278"]["colors"]["72"])
+        self.assertIn("4163147", self.bundle["parts"]["32278"]["colors"]["4"])
+
+    def test_an_element_number_names_one_colour(self):
+        # Rebrickable lists a few element numbers under two part numbers
+        # (a mould renumbered under one element), never under two colours:
+        # searching by element must land on one colour, whichever part.
+        seen = {}
+        for num, part in self.bundle["parts"].items():
+            for cid, elements in part.get("colors", {}).items():
+                for e in elements:
+                    self.assertEqual(seen.setdefault(e, cid), cid, "element %s in two colours (%s)" % (e, num))
+        self.assertGreater(len(seen), 4000)
+
+    def test_build_from_rows_and_apply_to_a_bundle(self):
+        from openbricks_sim.bricks import rebrickable
+        colors = [{"id": "72", "name": "Dark Bluish Gray", "rgb": "6C6E68", "is_trans": "f"},
+                  {"id": "4", "name": "Red", "rgb": "C91A09", "is_trans": "f"},
+                  {"id": "41", "name": "Trans-Light Blue", "rgb": "AEEFEC", "is_trans": "t"}]
+        elements = [{"element_id": "4210687", "part_num": "32278", "color_id": "72", "design_id": ""},
+                    {"element_id": "32278199", "part_num": "32278", "color_id": "72", "design_id": ""},
+                    {"element_id": "4163147", "part_num": "32278", "color_id": "4", "design_id": ""},
+                    {"element_id": "1", "part_num": "3648b", "color_id": "41", "design_id": ""},
+                    {"element_id": "2", "part_num": "9999", "color_id": "4", "design_id": ""}]
+        data = rebrickable.build(["32278", "3648", "6590"], colors, elements, {"3648": "3648b", "77": "x"})
+        self.assertEqual(data["parts"]["32278"], {"4": ["4163147"], "72": ["4210687", "32278199"]})
+        self.assertEqual(data["parts"]["3648"], {"41": ["1"]}, "Rebrickable's mould suffix is followed")
+        self.assertEqual(data["without"], ["6590"])
+        self.assertEqual(sorted(data["palette"]), ["4", "41", "72"], "only the colours used")
+        self.assertTrue(data["palette"]["41"]["trans"] and not data["palette"]["4"]["trans"])
+        self.assertEqual(data["rebrickable"], {"3648": "3648b"}, "only the numbers asked for")
+        self.assertEqual(rebrickable.rebrickable_numbers({"s": {"aliases": {"78c18": "72039"}}})["72039"], "78c18")
+        if ldraw is not None:
+            bundle = {"parts": {"32278": {"name": "Beam 15"}, "6590": {"name": "Bush"}}, "missing": []}
+            ldraw.apply_colors(bundle, data)
+            self.assertEqual(bundle["colors"], data["palette"])
+            self.assertEqual(bundle["parts"]["32278"]["colors"]["72"], ["4210687", "32278199"])
+            self.assertNotIn("colors", bundle["parts"]["6590"])
+
+
 class SetsTests(unittest.TestCase):
     @unittest.skipIf(ldraw is None, "numpy (the [sim] extra) is required")
     def test_apply_sets_stamps_records_and_lists_what_is_missing(self):

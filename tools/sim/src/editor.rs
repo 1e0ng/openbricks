@@ -251,6 +251,7 @@ impl Editor {
             pos,
             rot: [0.0; 3],
             locked: false,
+            color: None,
         });
         self.selection = vec![name.clone()];
         self.recompute();
@@ -258,6 +259,20 @@ impl Editor {
             self.snap_selection(false);
         }
         self.status = format!("Added {name} to {editing}");
+    }
+
+    /// A brick from the library placed at the origin, in a LEGO colour
+    /// when one was picked for it.
+    pub fn add_brick(&mut self, part_id: String, color: Option<u32>) {
+        let before = self.children().len();
+        self.add_instance(Some(part_id), None, [0.0; 3]);
+        if let Some(c) = color
+            && self.children().len() > before
+            && let Some(name) = self.selection.first().cloned()
+        {
+            self.set_instance(&name, |i| i.color = Some(c));
+            self.recompute();
+        }
     }
 
     /// The document's part for an LDraw number, recorded from the bundle
@@ -486,18 +501,40 @@ impl Editor {
         }
     }
 
-    /// The colour a component draws in, for everything under it; None
-    /// gives the bricks their category colours back. The picker reports
-    /// every step of a drag, so a run of changes to one component's
-    /// colour with nothing else edited between is one undo point.
-    pub fn set_component_color(&mut self, id: &str, color: Option<[u8; 3]>) {
-        let Some(comp) = self.doc.components.get(id) else { return };
-        if comp.color == color {
+    /// The LEGO colour the selected bricks are placed in (an LDraw colour
+    /// id the library's palette names); None gives them their category
+    /// colour back. Locked bricks keep theirs, and a component instance
+    /// has no colour of its own. A combo re-reports while it is open, so
+    /// a run of changes to one selection with nothing else edited between
+    /// is one undo point.
+    pub fn set_selection_color(&mut self, color: Option<u32>) {
+        let bricks: Vec<Instance> = self.selected_instances().into_iter().filter(|i| i.part.is_some()).collect();
+        let names: Vec<String> = bricks.iter().filter(|i| !i.locked).map(|i| i.name.clone()).collect();
+        if names.is_empty() {
+            self.status = if bricks.is_empty() {
+                "Select a brick to colour".into()
+            } else {
+                "Locked bricks keep their colour; unlock first".into()
+            };
             return;
         }
+        if bricks.iter().filter(|i| !i.locked).all(|i| i.color == color) {
+            return;
+        }
+        let editing = self.editing.clone();
         let continuing = self.undo.last().is_some_and(|top| {
             let mut now = self.doc.clone();
-            now.components.get_mut(id).unwrap().color = top.components.get(id).and_then(|c| c.color);
+            let was = |name: &str| {
+                top.components
+                    .get(&editing)
+                    .and_then(|c| c.children.iter().find(|i| i.name == name))
+                    .and_then(|i| i.color)
+            };
+            if let Some(comp) = now.components.get_mut(&editing) {
+                for i in comp.children.iter_mut().filter(|i| names.contains(&i.name)) {
+                    i.color = was(&i.name);
+                }
+            }
             now == *top
         });
         if continuing {
@@ -505,12 +542,49 @@ impl Editor {
         } else {
             self.push_undo();
         }
-        self.doc.components.get_mut(id).unwrap().color = color;
+        for name in &names {
+            self.set_instance(name, |i| i.color = color);
+        }
         self.recompute();
-        self.status = match color {
-            Some(c) => format!("{id} wears #{:02x}{:02x}{:02x}", c[0], c[1], c[2]),
-            None => format!("{id} draws in its bricks' colours"),
+        let n = names.len();
+        let what = format!("{n} brick{}", if n == 1 { "" } else { "s" });
+        self.status = match color.and_then(|c| self.bundle.colors.get(&c)) {
+            Some(c) => format!("{what} in {}", c.name),
+            None => match color {
+                Some(c) => format!("{what} in colour {c}"),
+                None => format!("{what} in the category colour"),
+            },
         };
+    }
+
+    /// The colours every selected brick comes in (the library's record
+    /// of its part): what a colour picker may offer the selection.
+    pub fn common_colors(&self) -> Vec<u32> {
+        let mut common: Option<Vec<u32>> = None;
+        for inst in self.selected_instances().iter().filter(|i| i.part.is_some()) {
+            let mine: Vec<u32> = self
+                .brick_record(inst)
+                .map(|rec| rec.colors.keys().copied().collect())
+                .unwrap_or_default();
+            common = Some(match common {
+                None => mine,
+                Some(c) => c.into_iter().filter(|x| mine.contains(x)).collect(),
+            });
+        }
+        common.unwrap_or_default()
+    }
+
+    /// The library's record of a brick instance's part, when it is one of the library's.
+    pub fn brick_record(&self, inst: &Instance) -> Option<&crate::bundle::PartRecord> {
+        let num = self.doc.parts.get(inst.part.as_ref()?)?.ldraw.as_ref()?;
+        self.bundle.parts.get(num)
+    }
+
+    /// The LEGO element numbers that name a brick's part in the colour it is placed in.
+    pub fn elements_of(&self, inst: &Instance) -> Vec<String> {
+        inst.color
+            .and_then(|c| self.brick_record(inst)?.colors.get(&c).cloned())
+            .unwrap_or_default()
     }
 
     /// Rename the selected instance; roles that point at it follow.
@@ -1121,37 +1195,79 @@ mod tests {
     }
 
     #[test]
-    fn a_component_colour_is_one_undo_point_per_run_of_changes() {
+    fn a_brick_colour_is_one_undo_point_per_run_of_changes() {
         let mut ed = editor();
-        let comp = ed.doc.components.keys().find(|k| **k != ed.doc.robot.root).unwrap().clone();
-        ed.set_component_color("no-such", Some([1, 2, 3]));
-        ed.set_component_color(&comp, None);
-        assert!(!ed.dirty && ed.undo_depth() == 0, "nothing to record");
+        ed.set_selection_color(Some(72));
+        assert_eq!(ed.status, "Select a brick to colour");
+        assert!(ed.common_colors().is_empty());
+        // bricks the library knows in at least two colours (the example's first frame comes in one)
+        let bricks: Vec<String> = ed
+            .children()
+            .iter()
+            .filter(|c| c.part.is_some() && ed.brick_record(c).is_some_and(|r| r.colors.len() >= 2))
+            .map(|c| c.name.clone())
+            .take(2)
+            .collect();
+        assert_eq!(bricks.len(), 2);
+        ed.selection = vec![bricks[0].clone()];
+        let cols = ed.common_colors();
+        assert!(cols.len() >= 2, "{cols:?}");
+        let (c1, c2) = (cols[0], cols[1]);
+        let name_of = |ed: &Editor, c: u32| ed.bundle.colors[&c].name.clone();
+        ed.set_selection_color(None);
+        assert!(!ed.dirty && ed.undo_depth() == 0, "already so: nothing recorded");
         let edits = ed.edits;
-        ed.set_component_color(&comp, Some([200, 30, 30]));
-        assert_eq!(ed.doc.components[&comp].color, Some([200, 30, 30]));
+        ed.set_selection_color(Some(c1));
+        assert_eq!(ed.selected_instances()[0].color, Some(c1));
         assert!(ed.dirty && ed.undo_depth() == 1 && ed.edits > edits);
-        assert_eq!(ed.status, format!("{comp} wears #c81e1e"));
-        // a drag in the picker: one undo point for the run
-        ed.set_component_color(&comp, Some([210, 40, 40]));
-        ed.set_component_color(&comp, Some([220, 50, 50]));
+        assert_eq!(ed.status, format!("1 brick in {}", name_of(&ed, c1)));
+        let inst = ed.selected_instances()[0].clone();
+        let expected = ed.brick_record(&inst).unwrap().colors[&c1].clone();
+        assert_eq!(ed.elements_of(&inst), expected);
+        assert!(!expected.is_empty());
+        // a combo re-reports: one undo point for the run
+        ed.set_selection_color(Some(c2));
+        ed.set_selection_color(Some(c1));
         assert_eq!(ed.undo_depth(), 1);
-        // the bricks under it carry it
-        ed.open_component(&comp, true);
-        assert!(!ed.leaves.is_empty() && ed.leaves.iter().all(|l| l.color == Some([220, 50, 50])));
-        ed.set_component_color(&comp, None);
-        assert_eq!(ed.status, format!("{comp} draws in its bricks' colours"));
-        assert_eq!(ed.undo_depth(), 1, "still the same run");
-        assert!(ed.leaves.iter().all(|l| l.color.is_none()));
+        assert!(ed.leaves.iter().any(|l| l.color == Some(c1)));
+        ed.set_selection_color(None);
+        assert_eq!(ed.status, "1 brick in the category colour");
+        assert_eq!(ed.undo_depth(), 1);
+        assert!(ed.elements_of(&ed.selected_instances()[0]).is_empty());
         ed.undo();
-        assert_eq!(ed.doc.components[&comp].color, None);
-        // another edit between two colour changes starts a new run
-        ed.set_component_color(&comp, Some([1, 2, 3]));
-        let name = ed.children()[0].name.clone();
-        ed.selection = vec![name];
+        assert_eq!(ed.selected_instances()[0].color, None);
+        // a colour the palette lacks still applies, named by its id
+        ed.set_selection_color(Some(999_999));
+        assert_eq!(ed.status, "1 brick in colour 999999");
+        ed.undo();
+        // several at once: a locked one keeps its colour, a component instance is passed over
+        ed.selection = vec![bricks[1].clone()];
+        ed.lock_selection(true);
+        let comp_inst = ed.children().iter().find(|c| c.component.is_some()).unwrap().name.clone();
+        ed.selection = vec![bricks[0].clone(), bricks[1].clone(), comp_inst.clone()];
+        let shared = ed.common_colors();
+        assert!(shared.contains(&c1) || shared.is_empty(), "{shared:?}");
+        ed.set_selection_color(Some(c1));
+        assert_eq!(ed.status, format!("1 brick in {}", name_of(&ed, c1)));
+        let by_name = |ed: &Editor, n: &str| ed.children().iter().find(|c| c.name == n).unwrap().color;
+        assert_eq!(by_name(&ed, &bricks[0]), Some(c1));
+        assert_eq!(by_name(&ed, &bricks[1]), None, "locked");
+        assert_eq!(by_name(&ed, &comp_inst), None, "not a brick");
+        ed.selection = vec![bricks[1].clone()];
+        ed.set_selection_color(Some(c1));
+        assert_eq!(ed.status, "Locked bricks keep their colour; unlock first");
+        ed.selection = vec![comp_inst];
+        ed.set_selection_color(Some(c1));
+        assert_eq!(ed.status, "Select a brick to colour");
+        // the same brick recoloured again continues the run the selection change did not end;
+        // another edit between two colour changes starts a new one
+        ed.selection = vec![bricks[0].clone()];
+        let depth = ed.undo_depth();
+        ed.set_selection_color(Some(c2));
+        assert_eq!(ed.undo_depth(), depth);
         ed.nudge_selection([8.0, 0.0, 0.0]);
-        ed.set_component_color(&comp, Some([4, 5, 6]));
-        assert_eq!(ed.undo_depth(), 3);
+        ed.set_selection_color(Some(c1));
+        assert_eq!(ed.undo_depth(), depth + 2);
     }
 
     #[test]

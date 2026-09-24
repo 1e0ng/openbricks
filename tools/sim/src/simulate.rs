@@ -2006,7 +2006,11 @@ impl SimulateTab {
                 items.push(DrawItem {
                     mesh: key,
                     model: body * Mat4::from_rotation_translation(q, pos),
-                    color: crate::app::cat_color(&b.category, dark),
+                    color: b
+                        .color
+                        .and_then(|c| bundle.color_rgb(c))
+                        .map(crate::app::rgb_color)
+                        .unwrap_or_else(|| crate::app::cat_color(&b.category, dark)),
                     texture: None,
                 });
             }
@@ -2073,7 +2077,11 @@ impl SimulateTab {
                 };
                 let pos = Vec3::new(b.pos_m[0] as f32, b.pos_m[1] as f32, b.pos_m[2] as f32) * M_TO_MM - q * centre;
                 let local = Mat4::from_rotation_translation(q, pos);
-                let color = crate::app::cat_color(&category, dark);
+                let color = b
+                    .color
+                    .and_then(|c| bundle.color_rgb(c))
+                    .map(crate::app::rgb_color)
+                    .unwrap_or_else(|| crate::app::cat_color(&category, dark));
                 chassis_items.push(items.len());
                 chassis_locals.push((key.clone(), local, color));
                 item_bodies.push(cid);
