@@ -139,8 +139,9 @@ pub struct App {
     stl_prepared: Option<stl::Prepared>,
 }
 
-pub fn cat_color(category: &str, dark: bool) -> [f32; 4] {
-    let hex = match (category, dark) {
+/// A brick category's colour as written, sRGB hex.
+pub fn cat_hex(category: &str, dark: bool) -> u32 {
+    match (category, dark) {
         ("lego", false) => 0x5B7A9C,
         ("lego", true) => 0x6F90B4,
         ("electronics", false) => 0x4A8A69,
@@ -151,8 +152,20 @@ pub fn cat_color(category: &str, dark: bool) -> [f32; 4] {
         ("wheel", true) => 0x5A6369,
         (_, false) => 0x9A8562,
         (_, true) => 0xB49C74,
-    };
-    srgb(hex)
+    }
+}
+
+pub fn cat_color(category: &str, dark: bool) -> [f32; 4] {
+    srgb(cat_hex(category, dark))
+}
+
+/// A colour of the user's (a component's), for the same pipeline.
+pub fn rgb_color(rgb: [u8; 3]) -> [f32; 4] {
+    srgb(((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32)
+}
+
+pub fn hex_rgb(hex: u32) -> [u8; 3] {
+    [((hex >> 16) & 0xFF) as u8, ((hex >> 8) & 0xFF) as u8, (hex & 0xFF) as u8]
 }
 
 const ACCENT: [f32; 4] = [0.71, 0.29, 0.005, 1.0];
@@ -370,7 +383,7 @@ impl App {
             items.push(DrawItem {
                 mesh,
                 model: Mat4::from_rotation_translation(q, leaf.pos.as_vec3()),
-                color: cat_color(&part.category, dark),
+                color: leaf.color.map(rgb_color).unwrap_or_else(|| cat_color(&part.category, dark)),
                 texture: None,
             });
         }
@@ -432,7 +445,7 @@ impl App {
             let selected = sel.contains(&leaf.path[0]);
             let q = Quat::from_mat3(&leaf.rot.as_mat3());
             let model = Mat4::from_rotation_translation(q, leaf.pos.as_vec3());
-            let mut color = cat_color(&part.category, dark);
+            let mut color = leaf.color.map(rgb_color).unwrap_or_else(|| cat_color(&part.category, dark));
             if locked.contains(&leaf.path[0]) {
                 // locked: faded towards the ground colour
                 let g = if dark { 0.05 } else { 0.55 };
@@ -1334,6 +1347,18 @@ impl App {
         }
     }
 
+    /// The colour a component draws in, for everything under it: a
+    /// picker, and the way back to the bricks' own category colours.
+    fn component_color_ui(&mut self, ui: &mut egui::Ui, id: &str) {
+        let dark = ui.visuals().dark_mode;
+        let before = self.editor.doc.components.get(id).and_then(|c| c.color);
+        let mut color = before;
+        crate::simulate::color_field(ui, &mut color, hex_rgb(cat_hex("lego", dark)));
+        if color != before {
+            self.editor.set_component_color(id, color);
+        }
+    }
+
     fn robot_ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("Robot");
         let mut name = self.editor.doc.robot.name.clone();
@@ -1341,6 +1366,8 @@ impl App {
             self.editor.doc.robot.name = name;
             self.editor.dirty = true;
         }
+        let root = self.editor.doc.robot.root.clone();
+        self.component_color_ui(ui, &root);
         let pr = self.editor.root_props.clone();
         Self::computed_block(ui, &pr, "assembly frame");
         ui.add_space(6.0);
@@ -1422,6 +1449,8 @@ impl App {
                 let pr = self.editor.edited_props();
                 Self::computed_block(ui, &pr, &format!("{} frame", self.editor.editing));
                 ui.weak(format!("used ×{}", assembly::usage_count(&self.editor.doc, &self.editor.editing)));
+                let editing = self.editor.editing.clone();
+                self.component_color_ui(ui, &editing);
                 if ui.button("Back to the robot").clicked() {
                     let root = self.editor.doc.robot.root.clone();
                     self.editor.open_component(&root, false);
@@ -1626,6 +1655,8 @@ impl App {
             if let Some(pr) = pr {
                 Self::computed_block(ui, &pr, &format!("{cid} frame"));
             }
+            self.component_color_ui(ui, cid);
+            ui.weak(format!("every use of {cid} wears it"));
             ui.horizontal(|ui| {
                 if ui.button(format!("Open {cid}")).clicked() {
                     self.editor.open_component(cid, true);
@@ -2444,6 +2475,9 @@ mod tests {
     fn colours_and_labels() {
         assert_ne!(cat_color("lego", false), cat_color("lego", true));
         assert_eq!(cat_color("mystery", false), cat_color("other", false));
+        assert_eq!(hex_rgb(0x5B7A9C), [0x5B, 0x7A, 0x9C]);
+        assert_eq!(rgb_color(hex_rgb(cat_hex("lego", false))), cat_color("lego", false));
+        assert_ne!(rgb_color([200, 30, 30]), rgb_color([30, 30, 200]));
         assert_eq!(vec_text(DVec3::new(1.0, 2.5, -3.0)), "1, 2.5, -3");
         assert_eq!(bbox_text(&[[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]]), "10 × 20 × 30");
         assert_eq!(inertia_text(0.4), "0");
@@ -3833,6 +3867,52 @@ mod tests {
         h.step();
         assert!(h.state().stl.is_none());
         assert_eq!(h.state().editor.children().len(), n + 1);
+    }
+
+    #[test]
+    fn components_wear_the_colour_picked_for_them() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        // the robot's page offers a colour; none set: default
+        assert!(h.query_by_label("colour").is_some());
+        assert!(h.query_by_label("default").is_some(), "the robot draws in its bricks' colours");
+        // a component's page too; a colour set shows the way back
+        let cid = h
+            .state()
+            .editor
+            .doc
+            .components
+            .keys()
+            .find(|k| **k != h.state().editor.doc.robot.root)
+            .unwrap()
+            .clone();
+        h.state_mut().editor.open_component(&cid, true);
+        steps(&mut h, 2);
+        h.state_mut().editor.set_component_color(&cid, Some([200, 30, 30]));
+        steps(&mut h, 3);
+        let red = rgb_color([200, 30, 30]);
+        assert!(!h.state().items.is_empty());
+        assert!(h.state().items.iter().any(|i| i.color == red), "the bricks under it draw in it");
+        h.get_by_label("default").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.doc.components[&cid].color, None);
+        assert!(h.state().items.iter().all(|i| i.color != red), "back to the bricks' colours");
+        // an instance of it at the robot offers the same picker
+        let root = h.state().editor.doc.robot.root.clone();
+        h.state_mut().editor.open_component(&root, false);
+        let inst = h
+            .state()
+            .editor
+            .children()
+            .iter()
+            .find(|c| c.component.as_deref() == Some(cid.as_str()))
+            .unwrap()
+            .name
+            .clone();
+        h.state_mut().editor.selection = vec![inst];
+        steps(&mut h, 2);
+        assert!(h.query_by_label(&format!("every use of {cid} wears it")).is_some());
     }
 
     #[test]

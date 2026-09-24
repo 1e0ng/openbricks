@@ -272,6 +272,11 @@ robot as a tree of components:
   bricks. Either way the new component joins the library
   and can be dropped anywhere, as many times as you like. Double-click
   an instance to edit its definition in place; every use follows.
+  Each component can wear a colour of your own: pick it on the
+  component's page (on the robot's for the whole build, or on any
+  instance of it), and every brick under it draws in it, the nearest
+  enclosing component's colour winning; **default** goes back to the
+  bricks' category colours.
 - **Connections.** Pins, axles and studs are real features of the
   LDraw parts, and 4.8 mm bores are recognised as pin holes on every
   mesh, imported STL files included. Let go of a part near a hole and

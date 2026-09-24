@@ -2329,7 +2329,7 @@ fn speed_field(ui: &mut egui::Ui, label: &str, speed: &mut f64, wheel_mm: f64) {
 }
 
 /// The path's colour: a picker, and a way back to the kind's default.
-fn color_field(ui: &mut egui::Ui, color: &mut Option<[u8; 3]>, default: [u8; 3]) {
+pub(crate) fn color_field(ui: &mut egui::Ui, color: &mut Option<[u8; 3]>, default: [u8; 3]) {
     ui.horizontal(|ui| {
         ui.weak("colour");
         let mut rgb = color.unwrap_or(default);

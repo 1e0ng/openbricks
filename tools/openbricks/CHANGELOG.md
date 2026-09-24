@@ -3,6 +3,27 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.19.0 — a colour for each component
+
+Every component in the Workbench can wear a colour of your own: pick
+it on the component's page (or the robot's, for the whole build, or
+on any instance of it), and every brick under it draws in it — in
+the view and in the library's thumbnails — the nearest enclosing
+component's colour winning, so a coloured module inside a coloured
+robot keeps its own. **default** goes back to the bricks' category
+colours. The colour is saved with the assembly (`color` on the
+component; absent when unset, so older files read as before), and a
+drag in the picker is one undo point. The Map and Simulate tabs
+still draw builds in category colours.
+
+- Tests: the colour on leaves (none set, the nearest enclosing
+  component's, inheritance, the edited component's own from the
+  top, the file round trip with the field absent when unset); the
+  editor's set (unknown ids and no-ops, dirty, one undo point per
+  run of changes, the status line); the harness (the robot's and a
+  component's page offer it, the drawn bricks carry it, default
+  takes it back, an instance's page offers it).
+
 ## 4.18.1 — wheels for Python 3.14
 
 PyPI now carries CPython 3.14 wheels (manylinux, macOS universal2,

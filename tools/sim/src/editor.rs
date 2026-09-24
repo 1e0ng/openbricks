@@ -486,6 +486,33 @@ impl Editor {
         }
     }
 
+    /// The colour a component draws in, for everything under it; None
+    /// gives the bricks their category colours back. The picker reports
+    /// every step of a drag, so a run of changes to one component's
+    /// colour with nothing else edited between is one undo point.
+    pub fn set_component_color(&mut self, id: &str, color: Option<[u8; 3]>) {
+        let Some(comp) = self.doc.components.get(id) else { return };
+        if comp.color == color {
+            return;
+        }
+        let continuing = self.undo.last().is_some_and(|top| {
+            let mut now = self.doc.clone();
+            now.components.get_mut(id).unwrap().color = top.components.get(id).and_then(|c| c.color);
+            now == *top
+        });
+        if continuing {
+            self.dirty = true;
+        } else {
+            self.push_undo();
+        }
+        self.doc.components.get_mut(id).unwrap().color = color;
+        self.recompute();
+        self.status = match color {
+            Some(c) => format!("{id} wears #{:02x}{:02x}{:02x}", c[0], c[1], c[2]),
+            None => format!("{id} draws in its bricks' colours"),
+        };
+    }
+
     /// Rename the selected instance; roles that point at it follow.
     pub fn rename_selected(&mut self, new: &str) -> bool {
         let Some(inst) = self.selected_instances().into_iter().next() else {
@@ -1091,6 +1118,40 @@ mod tests {
         assert_eq!(ed.component_of(&ed.selection[0].clone()), Some("sensor_mast".into()));
         assert_eq!(assembly::usage_count(&ed.doc, "sensor_mast"), 1);
         assert!(assembly::validate(&ed.doc, &ed.bundle).is_empty());
+    }
+
+    #[test]
+    fn a_component_colour_is_one_undo_point_per_run_of_changes() {
+        let mut ed = editor();
+        let comp = ed.doc.components.keys().find(|k| **k != ed.doc.robot.root).unwrap().clone();
+        ed.set_component_color("no-such", Some([1, 2, 3]));
+        ed.set_component_color(&comp, None);
+        assert!(!ed.dirty && ed.undo_depth() == 0, "nothing to record");
+        let edits = ed.edits;
+        ed.set_component_color(&comp, Some([200, 30, 30]));
+        assert_eq!(ed.doc.components[&comp].color, Some([200, 30, 30]));
+        assert!(ed.dirty && ed.undo_depth() == 1 && ed.edits > edits);
+        assert_eq!(ed.status, format!("{comp} wears #c81e1e"));
+        // a drag in the picker: one undo point for the run
+        ed.set_component_color(&comp, Some([210, 40, 40]));
+        ed.set_component_color(&comp, Some([220, 50, 50]));
+        assert_eq!(ed.undo_depth(), 1);
+        // the bricks under it carry it
+        ed.open_component(&comp, true);
+        assert!(!ed.leaves.is_empty() && ed.leaves.iter().all(|l| l.color == Some([220, 50, 50])));
+        ed.set_component_color(&comp, None);
+        assert_eq!(ed.status, format!("{comp} draws in its bricks' colours"));
+        assert_eq!(ed.undo_depth(), 1, "still the same run");
+        assert!(ed.leaves.iter().all(|l| l.color.is_none()));
+        ed.undo();
+        assert_eq!(ed.doc.components[&comp].color, None);
+        // another edit between two colour changes starts a new run
+        ed.set_component_color(&comp, Some([1, 2, 3]));
+        let name = ed.children()[0].name.clone();
+        ed.selection = vec![name];
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        ed.set_component_color(&comp, Some([4, 5, 6]));
+        assert_eq!(ed.undo_depth(), 3);
     }
 
     #[test]
