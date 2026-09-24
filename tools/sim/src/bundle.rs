@@ -20,6 +20,32 @@ pub struct Bundle {
     /// The sets the bundle holds every part of, by set id.
     #[serde(default)]
     pub sets: BTreeMap<String, SetInfo>,
+    /// The LEGO colours the parts come in, by LDraw colour id: what a
+    /// brick's `color` draws with.
+    #[serde(default)]
+    pub colors: BTreeMap<u32, ColorInfo>,
+}
+
+/// A LEGO colour, as Rebrickable's tables name and paint it.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct ColorInfo {
+    #[serde(default)]
+    pub name: String,
+    /// Six hex digits of sRGB.
+    #[serde(default)]
+    pub rgb: String,
+    #[serde(default)]
+    pub trans: bool,
+}
+
+impl ColorInfo {
+    pub fn rgb_u8(&self) -> Option<[u8; 3]> {
+        if self.rgb.len() != 6 {
+            return None;
+        }
+        let h = u32::from_str_radix(&self.rgb, 16).ok()?;
+        Some([((h >> 16) & 0xFF) as u8, ((h >> 8) & 0xFF) as u8, (h & 0xFF) as u8])
+    }
 }
 
 /// A LEGO set the bundle holds complete.
@@ -62,6 +88,10 @@ pub struct PartRecord {
     /// The numbers it goes by in set inventories where LDraw names it differently.
     #[serde(default)]
     pub aliases: Vec<String>,
+    /// The colours it comes in (LDraw colour ids), each with the LEGO
+    /// element numbers that name the part in that colour.
+    #[serde(default)]
+    pub colors: BTreeMap<u32, Vec<String>>,
 }
 
 fn one() -> f64 {
@@ -177,10 +207,23 @@ pub fn parse_bundle(bytes: &[u8], compressed: bool) -> Result<Bundle, String> {
 }
 
 impl Bundle {
-    /// Later bundles win on the same part number, and bring their sets.
+    /// Later bundles win on the same part number, and bring their sets
+    /// and colours.
     pub fn merge(&mut self, other: Bundle) {
         self.parts.extend(other.parts);
         self.sets.extend(other.sets);
+        self.colors.extend(other.colors);
+    }
+
+    /// What a colour id draws as, when the palette has it.
+    pub fn color_rgb(&self, id: u32) -> Option<[u8; 3]> {
+        self.colors.get(&id).and_then(ColorInfo::rgb_u8)
+    }
+
+    /// A colour as a picker lists it: id, name and swatch.
+    pub fn color_choice(&self, id: u32) -> Option<(u32, String, [u8; 3])> {
+        let c = self.colors.get(&id)?;
+        Some((id, c.name.clone(), c.rgb_u8()?))
     }
 }
 
@@ -306,5 +349,27 @@ mod tests {
         a.merge(b);
         assert_eq!(a.sets.len(), 1);
         assert_eq!(a.parts["1"].sets["45811"], 4);
+        // colours: the palette by LDraw id, a part's colours with their element numbers
+        let with_colors = json.replace(
+            r#""mass_g":2.5}}"#,
+            r#""mass_g":2.5,"colors":{"72":["4210687","32278199"],"4":["4163147"]}}},"colors":{"72":{"name":"Dark Bluish Gray","rgb":"6C6E68","trans":false},"4":{"name":"Red","rgb":"C91A09"},"41":{"name":"Trans-Light Blue","rgb":"AEEFEC","trans":true}}"#,
+        );
+        let c = parse_bundle(with_colors.as_bytes(), false).unwrap();
+        assert_eq!(c.parts["1"].colors[&72], vec!["4210687".to_string(), "32278199".to_string()]);
+        assert_eq!(c.color_rgb(72), Some([0x6C, 0x6E, 0x68]));
+        assert_eq!(c.color_choice(4), Some((4, "Red".to_string(), [0xC9, 0x1A, 0x09])));
+        assert!(c.colors[&41].trans && !c.colors[&4].trans);
+        assert_eq!(c.color_rgb(9999), None, "not in the palette");
+        assert_eq!(
+            ColorInfo {
+                rgb: "xyz".into(),
+                ..Default::default()
+            }
+            .rgb_u8(),
+            None
+        );
+        assert!(plain.parts["1"].colors.is_empty() && plain.colors.is_empty());
+        a.merge(c);
+        assert_eq!(a.colors.len(), 3);
     }
 }

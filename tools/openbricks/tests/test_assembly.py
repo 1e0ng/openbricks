@@ -30,6 +30,19 @@ class DeriveTests(unittest.TestCase):
         cls.doc = _example()
         cls.spec, cls.inertial, cls.bricks, cls.notes = assembly.derive(cls.doc, cls.bundle)
 
+    def test_a_brick_placed_in_a_lego_colour_carries_it_to_the_scene(self):
+        # 4.21.0: the file names a brick's LEGO colour by its LDraw id; the scene's bricks carry it
+        # (the sim draws them in it), and a brick without one carries None
+        doc = copy.deepcopy(self.doc)
+        root = doc["robot"]["root"]
+        brick = next(ch for ch in doc["components"][root]["children"] if ch.get("part"))
+        brick["color"] = 72
+        _, _, bricks_out, _ = assembly.derive(doc, self.bundle)
+        colors = {b["path"]: b["color"] for b in bricks_out}
+        self.assertEqual(colors[brick["name"]], 72)
+        self.assertIn(None, colors.values())
+        self.assertEqual(set(colors.values()), {72, None})
+
     def test_locked_instances_are_plain_instances(self):
         # the sim's editor saves ``locked: true`` on instances it protects; the loader treats them like any other
         doc = copy.deepcopy(self.doc)

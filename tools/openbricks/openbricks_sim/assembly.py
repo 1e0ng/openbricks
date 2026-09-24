@@ -174,7 +174,8 @@ def flatten(doc, comp_id, p0=(0.0, 0.0, 0.0), r0=None, path=(), stack=()):
         p = _add(list(p0), mat_vec(r0, ch["pos"]))
         cpath = path + (ch["name"],)
         if ch.get("part"):
-            out.append({"path": "/".join(cpath), "part": ch["part"], "pos": p, "rot": r})
+            # the brick's LEGO colour id, when the file names one (4.21.0)
+            out.append({"path": "/".join(cpath), "part": ch["part"], "pos": p, "rot": r, "color": ch.get("color")})
         elif ch.get("component"):
             if ch["component"] in stack:
                 raise AssemblyError("component %r contains itself" % ch["component"])
@@ -297,6 +298,7 @@ def derive(doc, bundle=None):
             "quat": [round(v, 6) for v in quat_from_mat(leaf["rot"])],
             "half_m": [mm(max(v, 0.25)) for v in half],
             "category": part.get("category", "other"),
+            "color": leaf.get("color"),
         })
     fields = dict(
         wheel_radius=mm(r_l), wheel_width=mm(w_l), wheel_mass=mm(part_l["mass_g"]), axle_length=mm(track),
@@ -372,6 +374,7 @@ def prop_bricks(doc, bundle=None):
             "quat": [round(v, 6) for v in quat_from_mat(leaf["rot"])],
             "half_m": [mm(max(v, 0.25)) for v in half],
             "category": part.get("category", "other"),
+            "color": leaf.get("color"),
             "mass_g": round(m, 3),
         })
         total += m

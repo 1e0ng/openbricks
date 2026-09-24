@@ -116,6 +116,9 @@ pub struct App {
     group_name: String,
     /// The name typed beside the library's Components for a new one.
     new_component_name: String,
+    /// The LEGO colour picked in the library for each part number: what
+    /// the next brick of it is placed in.
+    pick_color: std::collections::HashMap<String, u32>,
     gizmo_mode: Mode,
     hot: Option<Handle>,
     show_grid: bool,
@@ -159,13 +162,40 @@ pub fn cat_color(category: &str, dark: bool) -> [f32; 4] {
     srgb(cat_hex(category, dark))
 }
 
-/// A colour of the user's (a component's), for the same pipeline.
+/// A LEGO colour from the library's palette, for the same pipeline.
 pub fn rgb_color(rgb: [u8; 3]) -> [f32; 4] {
     srgb(((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32)
 }
 
-pub fn hex_rgb(hex: u32) -> [u8; 3] {
-    [((hex >> 16) & 0xFF) as u8, ((hex >> 8) & 0xFF) as u8, (hex & 0xFF) as u8]
+/// A LEGO colour chosen among those a part comes in: "—" for the
+/// category colour, else a swatch and the colour's name. Returns whether
+/// the choice changed.
+fn color_combo(ui: &mut egui::Ui, id: &str, choices: &[(u32, String, [u8; 3])], picked: &mut Option<u32>) -> bool {
+    let label = match *picked {
+        None => "—".to_string(),
+        Some(c) => choices
+            .iter()
+            .find(|(id, ..)| *id == c)
+            .map(|(_, name, _)| name.clone())
+            .unwrap_or_else(|| format!("colour {c}")),
+    };
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(label)
+        .width(150.0)
+        .show_ui(ui, |ui| {
+            changed |= ui.selectable_value(picked, None, "—").changed();
+            for (id, name, rgb) in choices {
+                let resp = ui
+                    .horizontal(|ui| {
+                        egui::color_picker::show_color(ui, egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]), egui::vec2(14.0, 14.0));
+                        ui.selectable_value(picked, Some(*id), name)
+                    })
+                    .inner;
+                changed |= resp.changed();
+            }
+        });
+    changed
 }
 
 const ACCENT: [f32; 4] = [0.71, 0.29, 0.005, 1.0];
@@ -214,6 +244,7 @@ impl App {
             map_note: String::new(),
             group_name: String::new(),
             new_component_name: String::new(),
+            pick_color: Default::default(),
             gizmo_mode: Mode::Move,
             hot: None,
             show_grid: true,
@@ -383,7 +414,11 @@ impl App {
             items.push(DrawItem {
                 mesh,
                 model: Mat4::from_rotation_translation(q, leaf.pos.as_vec3()),
-                color: leaf.color.map(rgb_color).unwrap_or_else(|| cat_color(&part.category, dark)),
+                color: leaf
+                    .color
+                    .and_then(|c| self.editor.bundle.color_rgb(c))
+                    .map(rgb_color)
+                    .unwrap_or_else(|| cat_color(&part.category, dark)),
                 texture: None,
             });
         }
@@ -445,7 +480,11 @@ impl App {
             let selected = sel.contains(&leaf.path[0]);
             let q = Quat::from_mat3(&leaf.rot.as_mat3());
             let model = Mat4::from_rotation_translation(q, leaf.pos.as_vec3());
-            let mut color = leaf.color.map(rgb_color).unwrap_or_else(|| cat_color(&part.category, dark));
+            let mut color = leaf
+                .color
+                .and_then(|c| self.editor.bundle.color_rgb(c))
+                .map(rgb_color)
+                .unwrap_or_else(|| cat_color(&part.category, dark));
             if locked.contains(&leaf.path[0]) {
                 // locked: faded towards the ground colour
                 let g = if dark { 0.05 } else { 0.55 };
@@ -1061,6 +1100,8 @@ impl App {
             for num in nums {
                 let rec = &self.editor.bundle.parts[&num];
                 // by number, name, an inventory's own number for it, or a set that holds it (id or name)
+                // a LEGO element number names the part in one colour: it finds the part and picks the colour
+                let element_color = rec.colors.iter().find(|(_, els)| els.contains(&q)).map(|(c, _)| *c);
                 let hit = q.is_empty()
                     || num.contains(&q)
                     || rec.name.to_lowercase().contains(&q)
@@ -1068,10 +1109,15 @@ impl App {
                     || rec
                         .sets
                         .keys()
-                        .any(|s| s.contains(&q) || self.editor.bundle.sets.get(s).is_some_and(|i| i.name.to_lowercase().contains(&q)));
+                        .any(|s| s.contains(&q) || self.editor.bundle.sets.get(s).is_some_and(|i| i.name.to_lowercase().contains(&q)))
+                    || element_color.is_some();
                 if !hit {
                     continue;
                 }
+                if let Some(c) = element_color {
+                    self.pick_color.insert(num.clone(), c);
+                }
+                let choices: Vec<(u32, String, [u8; 3])> = rec.colors.keys().filter_map(|c| self.editor.bundle.color_choice(*c)).collect();
                 let dens = if rec.volume_mm3 > 0.0 {
                     rec.mass_g / (rec.volume_mm3 / 1000.0)
                 } else {
@@ -1080,9 +1126,15 @@ impl App {
                 let in_sets: String = rec.sets.iter().map(|(s, n)| format!(" · {s} ×{n}")).collect();
                 let (name, mass) = (rec.name.clone(), rec.mass_g);
                 let thumb = self.part_thumb(gpu, &mut budget, &num, dark);
+                let had = self.pick_color.get(&num).copied();
+                let mut picked = had;
                 ui.horizontal(|ui| {
                     thumb_slot(ui, thumb);
-                    if ui.small_button("+").on_hover_text("add to the view").clicked() {
+                    if ui
+                        .small_button("+")
+                        .on_hover_text("add to the view, in the colour chosen")
+                        .clicked()
+                    {
                         to_ldraw = Some(num.clone());
                     }
                     ui.add(egui::Label::new(&name).truncate());
@@ -1092,7 +1144,20 @@ impl App {
                         )
                         .truncate(),
                     );
+                    if !choices.is_empty() {
+                        color_combo(ui, &format!("lib-color-{num}"), &choices, &mut picked);
+                    }
                 });
+                if picked != had {
+                    match picked {
+                        Some(c) => {
+                            self.pick_color.insert(num.clone(), c);
+                        }
+                        None => {
+                            self.pick_color.remove(&num);
+                        }
+                    }
+                }
             }
             ui.add_space(8.0);
             let mut import = false;
@@ -1130,7 +1195,8 @@ impl App {
             if let Some(num) = to_ldraw
                 && let Some(id) = self.editor.ensure_ldraw_part(&num)
             {
-                self.editor.add_instance(Some(id), None, [0.0; 3]);
+                let color = self.pick_color.get(&num).copied();
+                self.editor.add_brick(id, color);
             }
             if let Some((p, c)) = to_add {
                 self.editor.add_instance(p, c, [0.0; 3]);
@@ -1367,16 +1433,30 @@ impl App {
         }
     }
 
-    /// The colour a component draws in, for everything under it: a
-    /// picker, and the way back to the bricks' own category colours.
-    fn component_color_ui(&mut self, ui: &mut egui::Ui, id: &str) {
-        let dark = ui.visuals().dark_mode;
-        let before = self.editor.doc.components.get(id).and_then(|c| c.color);
-        let mut color = before;
-        crate::simulate::color_field(ui, &mut color, hex_rgb(cat_hex("lego", dark)));
-        if color != before {
-            self.editor.set_component_color(id, color);
+    /// The colour combo for the selected bricks: the colours every one of
+    /// them comes in, the choice applied to them all.
+    fn selection_color_ui(&mut self, ui: &mut egui::Ui, insts: &[Instance]) {
+        let choices: Vec<(u32, String, [u8; 3])> = self
+            .editor
+            .common_colors()
+            .iter()
+            .filter_map(|c| self.editor.bundle.color_choice(*c))
+            .collect();
+        if choices.is_empty() {
+            return;
         }
+        let colors: Vec<Option<u32>> = insts.iter().filter(|i| i.part.is_some()).map(|i| i.color).collect();
+        let mut picked = if colors.windows(2).all(|w| w[0] == w[1]) {
+            colors.first().copied().flatten()
+        } else {
+            None
+        };
+        ui.horizontal(|ui| {
+            ui.weak("colour");
+            if color_combo(ui, "selection-color", &choices, &mut picked) {
+                self.editor.set_selection_color(picked);
+            }
+        });
     }
 
     fn robot_ui(&mut self, ui: &mut egui::Ui) {
@@ -1386,8 +1466,6 @@ impl App {
             self.editor.doc.robot.name = name;
             self.editor.dirty = true;
         }
-        let root = self.editor.doc.robot.root.clone();
-        self.component_color_ui(ui, &root);
         let pr = self.editor.root_props.clone();
         Self::computed_block(ui, &pr, "assembly frame");
         ui.add_space(6.0);
@@ -1469,8 +1547,6 @@ impl App {
                 let pr = self.editor.edited_props();
                 Self::computed_block(ui, &pr, &format!("{} frame", self.editor.editing));
                 ui.weak(format!("used ×{}", assembly::usage_count(&self.editor.doc, &self.editor.editing)));
-                let editing = self.editor.editing.clone();
-                self.component_color_ui(ui, &editing);
                 if ui.button("Back to the robot").clicked() {
                     let root = self.editor.doc.robot.root.clone();
                     self.editor.open_component(&root, false);
@@ -1498,6 +1574,7 @@ impl App {
                 })
                 .sum();
             ui.monospace(format!("together {} g", assembly::fmt(together)));
+            self.selection_color_ui(ui, &insts);
             let locked = self.editor.locked_count();
             if locked > 0 {
                 ui.weak(format!("🔒 {locked} locked"));
@@ -1571,6 +1648,13 @@ impl App {
         });
         if changed {
             self.editor.set_pose(&inst.name, pos, rot);
+        }
+        if inst.part.is_some() {
+            self.selection_color_ui(ui, std::slice::from_ref(&inst));
+            let elements = self.editor.elements_of(&inst);
+            if !elements.is_empty() {
+                ui.weak(format!("LEGO element {}", elements.join(", ")));
+            }
         }
         if let Some(pid) = &inst.part {
             if let Some(part) = self.editor.doc.parts.get(pid).cloned() {
@@ -1675,8 +1759,6 @@ impl App {
             if let Some(pr) = pr {
                 Self::computed_block(ui, &pr, &format!("{cid} frame"));
             }
-            self.component_color_ui(ui, cid);
-            ui.weak(format!("every use of {cid} wears it"));
             ui.horizontal(|ui| {
                 if ui.button(format!("Open {cid}")).clicked() {
                     self.editor.open_component(cid, true);
@@ -2489,14 +2571,13 @@ mod tests {
     use crate::viewport::testing::{test_device, test_renderer};
     use egui::{Event, Key, Modifiers, PointerButton, Pos2};
     use egui_kittest::Harness;
-    use egui_kittest::kittest::{NodeT, Queryable};
+    use egui_kittest::kittest::{By, NodeT, Queryable};
 
     #[test]
     fn colours_and_labels() {
         assert_ne!(cat_color("lego", false), cat_color("lego", true));
         assert_eq!(cat_color("mystery", false), cat_color("other", false));
-        assert_eq!(hex_rgb(0x5B7A9C), [0x5B, 0x7A, 0x9C]);
-        assert_eq!(rgb_color(hex_rgb(cat_hex("lego", false))), cat_color("lego", false));
+        assert_eq!(rgb_color([0x5B, 0x7A, 0x9C]), cat_color("lego", false));
         assert_ne!(rgb_color([200, 30, 30]), rgb_color([30, 30, 200]));
         assert_eq!(vec_text(DVec3::new(1.0, 2.5, -3.0)), "1, 2.5, -3");
         assert_eq!(bbox_text(&[[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]]), "10 × 20 × 30");
@@ -3918,49 +3999,102 @@ mod tests {
     }
 
     #[test]
-    fn components_wear_the_colour_picked_for_them() {
+    fn bricks_are_placed_in_a_lego_colour_from_the_library_and_recoloured_in_the_inspector() {
         let Some(gpu) = gpu() else { return };
         let mut h = harness(&gpu, None);
         steps(&mut h, 2);
-        // the robot's page offers a colour; none set: default
-        assert!(h.query_by_label("colour").is_some());
-        assert!(h.query_by_label("default").is_some(), "the robot draws in its bricks' colours");
-        // a component's page too; a colour set shows the way back
-        let cid = h
-            .state()
-            .editor
-            .doc
-            .components
-            .keys()
-            .find(|k| **k != h.state().editor.doc.robot.root)
-            .unwrap()
-            .clone();
-        h.state_mut().editor.open_component(&cid, true);
+        let (grey_elements, red_element, grey) = {
+            let b = &h.state().editor.bundle;
+            let rec = &b.parts["32278"];
+            (
+                rec.colors[&72].clone(),
+                rec.colors[&4][0].clone(),
+                rgb_color(b.color_rgb(72).unwrap()),
+            )
+        };
+        // a LEGO element number typed in the search finds its part and picks its colour
+        h.state_mut().search = red_element.clone();
         steps(&mut h, 2);
-        h.state_mut().editor.set_component_color(&cid, Some([200, 30, 30]));
+        assert_eq!(h.get_all_by_label("+").count(), 1, "one part answers to element {red_element}");
+        assert_eq!(h.state().pick_color.get("32278"), Some(&4));
+        // the colour picked in the library is what + places the brick in
+        h.state_mut().pick_color.insert("32278".into(), 72);
+        h.state_mut().search = "32278".into();
+        steps(&mut h, 2);
+        let n = h.state().editor.children().len();
+        h.get_all_by_label("+").next().unwrap().click();
         steps(&mut h, 3);
-        let red = rgb_color([200, 30, 30]);
-        assert!(!h.state().items.is_empty());
-        assert!(h.state().items.iter().any(|i| i.color == red), "the bricks under it draw in it");
-        h.get_by_label("default").click();
+        assert_eq!(h.state().editor.children().len(), n + 1);
+        let inst = h.state().editor.selected_instances()[0].clone();
+        assert_eq!(inst.color, Some(72));
+        // its page offers the part's colours and names the LEGO element(s) of the part in that colour
+        assert!(h.query_by_label("colour").is_some());
+        assert!(h.query_by_label(&format!("LEGO element {}", grey_elements.join(", "))).is_some());
+        // drawn in dark bluish gray once it is not tinted as the selection
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
+        assert!(h.state().items.iter().any(|i| i.color == grey), "drawn in the colour");
+        // back to the category colour: nothing drawn in it, nothing in the file
+        h.state_mut().editor.selection = vec![inst.name.clone()];
+        h.step();
+        h.state_mut().editor.set_selection_color(None);
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
+        assert!(h.state().items.iter().all(|i| i.color != grey));
+        assert!(!serde_json::to_string(&h.state().editor.doc).unwrap().contains("\"color\""));
+        // the combos themselves: the library row's picks the colour + places, the page's recolours.
+        // A combo's selected text is its accessible value; the list's entries are labels, and the
+        // list scrolls, so entries near its top are the ones a click can reach.
+        {
+            let rec = &h.state().editor.bundle.parts["32278"];
+            assert!(
+                rec.colors.contains_key(&0) && rec.colors.contains_key(&1),
+                "black and blue beams exist"
+            );
+        }
+        h.state_mut().pick_color.insert("32278".into(), 4);
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
+        h.get(By::new().value("Red")).click();
+        steps(&mut h, 2);
+        let at = h.get_by_label("Blue").rect().center();
+        press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
+        release(&mut h, at, PointerButton::Primary);
+        steps(&mut h, 2);
+        assert_eq!(h.state().pick_color.get("32278"), Some(&1), "picked in the list");
+        h.get_all_by_label("+").next().unwrap().click();
         steps(&mut h, 3);
-        assert_eq!(h.state().editor.doc.components[&cid].color, None);
-        assert!(h.state().items.iter().all(|i| i.color != red), "back to the bricks' colours");
-        // an instance of it at the robot offers the same picker
-        let root = h.state().editor.doc.robot.root.clone();
-        h.state_mut().editor.open_component(&root, false);
-        let inst = h
+        let placed = h.state().editor.selected_instances()[0].clone();
+        assert_eq!(placed.color, Some(1));
+        h.state_mut().pick_color.insert("32278".into(), 4);
+        steps(&mut h, 2);
+        h.get(By::new().value("Blue")).click();
+        steps(&mut h, 2);
+        let at = h.get_by_label("Black").rect().center();
+        press(&mut h, at, PointerButton::Primary, Modifiers::NONE);
+        release(&mut h, at, PointerButton::Primary);
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.selected_instances()[0].color, Some(0), "recoloured from its page");
+        assert!(h.state().editor.status.ends_with("in Black"), "{}", h.state().editor.status);
+        h.state_mut().editor.remove_selection();
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
+        // several bricks at once are offered the colours they all come in
+        let two: Vec<String> = h
             .state()
             .editor
             .children()
             .iter()
-            .find(|c| c.component.as_deref() == Some(cid.as_str()))
-            .unwrap()
-            .name
-            .clone();
-        h.state_mut().editor.selection = vec![inst];
+            .filter(|c| c.part.as_deref().is_some_and(|p| p.starts_with("lego_")))
+            .map(|c| c.name.clone())
+            .take(2)
+            .collect();
+        h.state_mut().editor.selection = two;
         steps(&mut h, 2);
-        assert!(h.query_by_label(&format!("every use of {cid} wears it")).is_some());
+        assert!(h.query_by_label("2 selected").is_some());
+        assert!(h.query_by_label("colour").is_some(), "the selection's colour combo");
+        h.state_mut().search.clear();
+        h.step();
     }
 
     #[test]

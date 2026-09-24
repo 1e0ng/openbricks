@@ -3,6 +3,36 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.21.0 — bricks placed in LEGO colours, by element number
+
+A brick's colour is a property of the placed brick, chosen from the
+colours that part really comes in — not, as 4.19.0 had it, a colour
+painted over a whole component. The library now knows, for every
+part but one, the colours it exists in and the LEGO element numbers
+that name the part in each colour (from Rebrickable's public tables;
+`openbricks_sim.bricks.rebrickable` rebuilds `colors.json`). In the
+Workbench each library row has a colour combo that decides what the
+next **+** places the brick in, a placed brick's page (or a
+selection's, for the colours they all share) changes it and names
+the LEGO element(s) of the part in that colour, and typing an
+element number into the search finds the part and picks the colour.
+The file records the colour by its LDraw id (`color` on the
+instance); the Map and Simulate tabs draw builds in their colours.
+The 4.19.0 component colour is gone; a file saved with one reads as
+before it was set.
+
+- Tests: the colour tables (a palette by id, every part's colours
+  with element numbers, one colour per element, the importer from
+  rows, the stamping, the wheel carrying the file); the Python
+  emitters passing a brick's colour to the scene; the Rust bundle
+  reading and merging palettes and element numbers; the editor's
+  selection colouring (locked bricks kept, component instances
+  passed over, one undo point per run, the status line, the element
+  numbers of a brick); the harness library (an element number finds
+  its part and picks its colour, + places the brick in the colour
+  picked, the page names its elements, the view draws it, the
+  selection's combo).
+
 ## 4.20.0 — the WRO sets 45811 and 45819 in the brick library; bricks fetch names itself
 
 Every part of the two World Robot Olympiad sets ships in the brick

@@ -87,6 +87,9 @@ pub struct Brick {
     pub half_m: [f64; 3],
     #[serde(default)]
     pub category: String,
+    /// The LEGO colour id the brick was placed in, when the file names one.
+    #[serde(default)]
+    pub color: Option<u32>,
 }
 
 /// The chassis geometry a route planner needs, as the server loaded it.

@@ -38,6 +38,7 @@ LDRAW_URL = "https://library.ldraw.org/library/updates/complete.zip"
 USER_AGENT = "openbricks (+https://openbricks.dev)"
 BUNDLE_NAME = "technic_bundle.json.zlib"
 SETS_NAME = "sets.json"
+COLORS_NAME = "colors.json"
 _HERE = pathlib.Path(__file__).resolve().parent
 
 
@@ -61,6 +62,14 @@ def bundle_b64():
 def load_bundle():
     """The shipped bundle as a dict (``parts`` keyed by LDraw number)."""
     return json.loads(zlib.decompress(bundle_bytes()).decode())
+
+
+def load_colors():
+    """The colours the library's parts come in, as
+    ``openbricks_sim.bricks.rebrickable`` wrote them: ``palette`` (colour
+    id → name, rgb, trans) and ``parts`` (LDraw number → colour id → the
+    LEGO element numbers of the part in that colour)."""
+    return json.loads(data_path(COLORS_NAME).read_text())
 
 
 def load_sets():

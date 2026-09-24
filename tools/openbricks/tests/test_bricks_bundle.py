@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 from openbricks_sim import bricks
 
@@ -108,6 +109,101 @@ class ShippedBundleTests(unittest.TestCase):
 
     def test_bundle_fits_the_page_budget(self):
         self.assertLess(len(bricks.bundle_b64()), 4_000_000)
+
+
+class ColorsTests(unittest.TestCase):
+    """The colours a part comes in and the LEGO element numbers that name
+    each part-and-colour, from Rebrickable's tables (4.21.0)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bundle = bricks.load_bundle()
+        cls.colors = bricks.load_colors()
+
+    def test_the_bundle_carries_a_palette_and_every_part_its_colours(self):
+        palette = self.bundle["colors"]
+        self.assertEqual(palette, self.colors["palette"])
+        self.assertEqual(palette["72"], {"name": "Dark Bluish Gray", "rgb": "6C6E68", "trans": False})
+        without = [n for n, p in self.bundle["parts"].items() if not p.get("colors")]
+        self.assertEqual(without, self.colors["without"])
+        self.assertLessEqual(len(without), 1, without)
+        for num, part in self.bundle["parts"].items():
+            for cid, elements in part.get("colors", {}).items():
+                self.assertIn(cid, palette, num)
+                self.assertTrue(elements and all(e.isdigit() for e in elements), (num, cid))
+        # a beam 15 in dark bluish gray is element 4210687; in red 4163147
+        self.assertIn("4210687", self.bundle["parts"]["32278"]["colors"]["72"])
+        self.assertIn("4163147", self.bundle["parts"]["32278"]["colors"]["4"])
+
+    def test_an_element_number_names_one_colour(self):
+        # Rebrickable lists a few element numbers under two part numbers
+        # (a mould renumbered under one element), never under two colours:
+        # searching by element must land on one colour, whichever part.
+        seen = {}
+        for num, part in self.bundle["parts"].items():
+            for cid, elements in part.get("colors", {}).items():
+                for e in elements:
+                    self.assertEqual(seen.setdefault(e, cid), cid, "element %s in two colours (%s)" % (e, num))
+        self.assertGreater(len(seen), 4000)
+
+    def test_build_from_rows_and_apply_to_a_bundle(self):
+        from openbricks_sim.bricks import rebrickable
+        colors = [{"id": "72", "name": "Dark Bluish Gray", "rgb": "6C6E68", "is_trans": "f"},
+                  {"id": "4", "name": "Red", "rgb": "C91A09", "is_trans": "f"},
+                  {"id": "41", "name": "Trans-Light Blue", "rgb": "AEEFEC", "is_trans": "t"}]
+        elements = [{"element_id": "4210687", "part_num": "32278", "color_id": "72", "design_id": ""},
+                    {"element_id": "32278199", "part_num": "32278", "color_id": "72", "design_id": ""},
+                    {"element_id": "4163147", "part_num": "32278", "color_id": "4", "design_id": ""},
+                    {"element_id": "1", "part_num": "3648b", "color_id": "41", "design_id": ""},
+                    {"element_id": "2", "part_num": "9999", "color_id": "4", "design_id": ""}]
+        data = rebrickable.build(["32278", "3648", "6590"], colors, elements, {"3648": "3648b", "77": "x"})
+        self.assertEqual(data["parts"]["32278"], {"4": ["4163147"], "72": ["4210687", "32278199"]})
+        self.assertEqual(data["parts"]["3648"], {"41": ["1"]}, "Rebrickable's mould suffix is followed")
+        self.assertEqual(data["without"], ["6590"])
+        self.assertEqual(sorted(data["palette"]), ["4", "41", "72"], "only the colours used")
+        self.assertTrue(data["palette"]["41"]["trans"] and not data["palette"]["4"]["trans"])
+        self.assertEqual(data["rebrickable"], {"3648": "3648b"}, "only the numbers asked for")
+        self.assertEqual(rebrickable.rebrickable_numbers({"s": {"aliases": {"78c18": "72039"}}})["72039"], "78c18")
+        if ldraw is not None:
+            bundle = {"parts": {"32278": {"name": "Beam 15"}, "6590": {"name": "Bush"}}, "missing": []}
+            ldraw.apply_colors(bundle, data)
+            self.assertEqual(bundle["colors"], data["palette"])
+            self.assertEqual(bundle["parts"]["32278"]["colors"]["72"], ["4210687", "32278199"])
+            self.assertNotIn("colors", bundle["parts"]["6590"])
+
+
+    def test_the_tables_are_fetched_with_our_agent_and_main_writes_the_file(self):
+        import gzip
+        import json
+        import tempfile
+        from openbricks_sim.bricks import rebrickable
+        tables = {"colors": "id,name,rgb,is_trans\n72,Dark Bluish Gray,6C6E68,f\n",
+                  "elements": "element_id,part_num,color_id,design_id\n4210687,32278,72,\n"}
+        seen = []
+
+        def opener(req):
+            seen.append(req)
+            name = req.full_url.rsplit("/", 1)[1].split(".")[0]
+            return _FakeResponse(gzip.compress(tables[name].encode()))
+
+        rows = rebrickable.fetch_table("colors", opener=opener)
+        self.assertEqual(rows, [{"id": "72", "name": "Dark Bluish Gray", "rgb": "6C6E68", "is_trans": "f"}])
+        self.assertEqual(seen[0].full_url, rebrickable.DOWNLOADS + "colors.csv.gz")
+        self.assertEqual(seen[0].get_header("User-agent"), bricks.USER_AGENT)
+        elements = rebrickable.fetch_table("elements", opener=opener)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rebrickable, "fetch_table", lambda name, opener=None: rows if name == "colors" else elements):
+            out = os.path.join(tmp, "colors.json")
+            self.assertEqual(rebrickable.main([out]), 0)
+            with open(out) as fh:
+                data = json.load(fh)
+            self.assertEqual(data["parts"]["32278"], {"72": ["4210687"]})
+            self.assertEqual(data["palette"], {"72": {"name": "Dark Bluish Gray", "rgb": "6C6E68", "trans": False}})
+            self.assertIn("6590", data["without"])
+            self.assertEqual(data["rebrickable"]["3648"], "3648b")
+            if ldraw is not None:
+                self.assertEqual(ldraw.read_colors(out)["palette"]["72"]["name"], "Dark Bluish Gray")
+        self.assertEqual(rebrickable.main([]), 2, "usage")
 
 
 class SetsTests(unittest.TestCase):
