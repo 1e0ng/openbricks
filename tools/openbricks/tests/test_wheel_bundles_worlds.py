@@ -74,7 +74,24 @@ class WheelBundlesWorldsTests(unittest.TestCase):
                 "install via ``pip install build`` (already in the "
                 "[dev] extras of ``openbricks``)")
 
-    def test_wheel_contains_the_firmware_package(self):
+    def test_wheel_contains_the_brick_library(self):
+        # 4.20.0: the bricks' data files are listed one by one in
+        # package-data (no glob), so a new file ships only when it is
+        # named there — sets.json would otherwise be missing from every
+        # wheel while ``bricks.load_sets()`` reads it at runtime.
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = _build_wheel_into(tmp)
+            with zipfile.ZipFile(wheel) as zf:
+                names = zf.namelist()
+        for wanted in ("openbricks_sim/bricks/technic_bundle.json.zlib",
+                       "openbricks_sim/bricks/technic_parts.txt",
+                       "openbricks_sim/bricks/weights.json",
+                       "openbricks_sim/bricks/sets.json",
+                       "openbricks_sim/bricks/LDRAW-LICENSE.md"):
+            self.assertIn(wanted, names,
+                          "wheel lacks %s — add it to "
+                          "[tool.setuptools.package-data] openbricks_sim" % wanted)
+
         # 3.6.0: the sim runs the FIRMWARE'S driver code (its shim
         # subclasses openbricks.drivers.*, user scripts import them),
         # so the wheel must carry the ``openbricks`` package that

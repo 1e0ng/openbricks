@@ -1082,6 +1082,7 @@ mod tests {
             source: String::new(),
             parts: BTreeMap::new(),
             missing: vec![],
+            sets: BTreeMap::new(),
         }
     }
 
@@ -1480,6 +1481,8 @@ mod tests {
             source: String::new(),
             source_note: String::new(),
             density_g_cm3: None,
+            sets: BTreeMap::new(),
+            aliases: vec![],
         };
         b.parts.insert("beam".into(), rec(hole));
         b.parts.insert("pin".into(), rec(pin));

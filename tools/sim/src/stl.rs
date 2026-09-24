@@ -833,6 +833,7 @@ mod tests {
                 source: String::new(),
                 parts: Default::default(),
                 missing: vec![],
+                sets: Default::default(),
             },
         ) {
             assembly::Geometry::Imported { volume_mm3, tris, .. } => {
@@ -848,6 +849,7 @@ mod tests {
                 source: String::new(),
                 parts: Default::default(),
                 missing: vec![],
+                sets: Default::default(),
             },
         );
         assert_eq!(pr.mass, 42.0);

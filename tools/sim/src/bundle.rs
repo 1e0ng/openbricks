@@ -17,6 +17,20 @@ pub struct Bundle {
     pub parts: BTreeMap<String, PartRecord>,
     #[serde(default)]
     pub missing: Vec<String>,
+    /// The sets the bundle holds every part of, by set id.
+    #[serde(default)]
+    pub sets: BTreeMap<String, SetInfo>,
+}
+
+/// A LEGO set the bundle holds complete.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct SetInfo {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub year: u32,
+    #[serde(default)]
+    pub pieces: u32,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -42,6 +56,12 @@ pub struct PartRecord {
     pub source_note: String,
     #[serde(default)]
     pub density_g_cm3: Option<f64>,
+    /// How many of it each set holds, by set id.
+    #[serde(default)]
+    pub sets: BTreeMap<String, u32>,
+    /// The numbers it goes by in set inventories where LDraw names it differently.
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 fn one() -> f64 {
@@ -157,9 +177,10 @@ pub fn parse_bundle(bytes: &[u8], compressed: bool) -> Result<Bundle, String> {
 }
 
 impl Bundle {
-    /// Later bundles win on the same part number.
+    /// Later bundles win on the same part number, and bring their sets.
     pub fn merge(&mut self, other: Bundle) {
         self.parts.extend(other.parts);
+        self.sets.extend(other.sets);
     }
 }
 
@@ -265,5 +286,25 @@ mod tests {
         other.parts.get_mut("1").unwrap().mass_g = 9.0;
         a.merge(other);
         assert_eq!(a.parts["1"].mass_g, 9.0);
+        // without sets or aliases a record has none; with them, they read and merge
+        assert!(plain.sets.is_empty() && plain.parts["1"].sets.is_empty() && plain.parts["1"].aliases.is_empty());
+        let with_sets = json.replace(
+            r#""mass_g":2.5}}"#,
+            r#""mass_g":2.5,"sets":{"45811":4},"aliases":["41250"]}},"sets":{"45811":{"name":"WRO Brick Set","year":2016,"pieces":724}}"#,
+        );
+        let b = parse_bundle(with_sets.as_bytes(), false).unwrap();
+        assert_eq!(b.parts["1"].sets["45811"], 4);
+        assert_eq!(b.parts["1"].aliases, vec!["41250".to_string()]);
+        assert_eq!(
+            b.sets["45811"],
+            SetInfo {
+                name: "WRO Brick Set".into(),
+                year: 2016,
+                pieces: 724
+            }
+        );
+        a.merge(b);
+        assert_eq!(a.sets.len(), 1);
+        assert_eq!(a.parts["1"].sets["45811"], 4);
     }
 }
