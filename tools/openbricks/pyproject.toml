@@ -165,6 +165,9 @@ openbricks_sim = [
     "bricks/technic_bundle.json.zlib",
     "bricks/technic_parts.txt",
     "bricks/weights.json",
+    # The sets the library holds complete (4.20.0): name, year, pieces,
+    # parts and the inventory numbers LDraw spells differently.
+    "bricks/sets.json",
     "bricks/LDRAW-LICENSE.md",
     "workbench/index.html",
 ]

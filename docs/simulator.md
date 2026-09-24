@@ -259,7 +259,11 @@ robot as a tree of components:
   library](https://www.ldraw.org) (CC BY 2.0 / 4.0): beams in every
   common length, bent and L beams, frames, Technic bricks and plates,
   pins, axles, bushes, connectors, gears, a few rims and tyres, and
-  fairing panels, with BrickLink catalogue weights where known.
+  fairing panels, with BrickLink catalogue weights where known — and
+  every part of the two WRO sets, 45811 (the Brick Set: the mission
+  bricks, tiles, hoses and balls) and 45819 (the Expansion Set). Type
+  a set number, or "WRO", into the library's search to see a set's
+  bricks, each with how many the set holds.
   Servos, boards and wheels are recorded as boxes, cylinders and
   spheres, and any part you have as a mesh comes in through
   **Import a part from an STL file** (binary or ASCII; mm, cm, inch
@@ -312,7 +316,9 @@ $ openbricks bricks convert NUMBER [NUMBER ...] [--out FILE] [--weights FILE] [-
 $ openbricks sim workbench --bricks FILE
 ```
 
-The wheel ships the curated Technic set; the whole LDraw library
+The wheel ships the curated Technic set and every part of the WRO
+sets 45811 and 45819 (the library says which sets hold a brick, and
+how many); the whole LDraw library
 (every LEGO part ever catalogued, 145 MB to download, about 600 MB
 unpacked) is one command away. `bricks fetch` unpacks it into
 `~/.cache/openbricks/ldraw` (or `$OPENBRICKS_LDRAW_DIR`), and `bricks

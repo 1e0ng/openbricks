@@ -26,13 +26,37 @@ class ShippedBundleTests(unittest.TestCase):
         self.assertGreaterEqual(len(self.bundle["parts"]), 120)
         self.assertEqual(self.bundle.get("missing", []), [])
 
-    def test_curated_list_matches_the_bundle(self):
-        listed = []
+    def test_the_bundle_holds_the_curated_list_and_the_sets(self):
+        listed = set()
         for line in bricks.data_path("technic_parts.txt").read_text().splitlines():
             line = line.split("#", 1)[0].strip()
             if line:
-                listed.append(line)
+                listed.add(line)
+        for s in bricks.load_sets().values():
+            listed.update(s["parts"])
         self.assertEqual(sorted(listed), sorted(self.bundle["parts"]))
+
+    def test_the_wro_sets_are_complete_and_counted(self):
+        # 45811 is the WRO Brick Set (2016, the mission bricks); 45819 the
+        # WRO Expansion Set (2023). Every part of both is in the bundle,
+        # stamped with how many the set holds, and the inventory numbers
+        # LDraw spells differently are kept as aliases.
+        sets = bricks.load_sets()
+        self.assertEqual(sorted(sets), ["45811", "45819"])
+        self.assertEqual({sid: s["pieces"] for sid, s in sets.items()}, {"45811": 724, "45819": 568})
+        for sid, s in sets.items():
+            with self.subTest(set=sid):
+                self.assertEqual(self.bundle["sets"][sid], {"name": s["name"], "year": s["year"], "pieces": s["pieces"]})
+                self.assertIn("World Robot Olympiad", s["name"])
+                self.assertEqual(sum(s["parts"].values()), s["pieces"])
+                for num, qty in s["parts"].items():
+                    self.assertEqual(self.bundle["parts"][num]["sets"][sid], qty, num)
+                for other, num in s["aliases"].items():
+                    self.assertIn(other, self.bundle["parts"][num]["aliases"], num)
+        self.assertEqual(sets["45811"]["aliases"], {"41250": "22119", "78c18": "72039"})
+        self.assertEqual(sets["45819"]["aliases"], {"32005a": "32005"})
+        self.assertEqual(self.bundle["parts"]["72039"]["name"], "Technic Ribbed Hose 18L")
+        self.assertEqual(self.bundle["parts"]["3001"]["sets"], {"45811": 288})
 
     def test_every_part_is_a_closed_mesh_with_mass_properties(self):
         for num, part in self.bundle["parts"].items():
@@ -84,6 +108,30 @@ class ShippedBundleTests(unittest.TestCase):
 
     def test_bundle_fits_the_page_budget(self):
         self.assertLess(len(bricks.bundle_b64()), 4_000_000)
+
+
+class SetsTests(unittest.TestCase):
+    @unittest.skipIf(ldraw is None, "numpy (the [sim] extra) is required")
+    def test_apply_sets_stamps_records_and_lists_what_is_missing(self):
+        bundle = {"parts": {"3001": {"name": "Brick 2 x 4"}, "22119": {"name": "Ball 52mm Diameter"}}, "missing": []}
+        sets = {"45811": {"name": "WRO Brick Set", "year": 2016, "pieces": 6,
+                          "parts": {"3001": 4, "22119": 1, "9999": 1}, "aliases": {"41250": "22119"}}}
+        out = ldraw.apply_sets(bundle, sets)
+        self.assertIs(out, bundle)
+        self.assertEqual(bundle["sets"], {"45811": {"name": "WRO Brick Set", "year": 2016, "pieces": 6}})
+        self.assertEqual(bundle["parts"]["3001"]["sets"], {"45811": 4})
+        self.assertEqual(bundle["parts"]["22119"]["aliases"], ["41250"])
+        self.assertNotIn("aliases", bundle["parts"]["3001"])
+        self.assertEqual(bundle["missing"], ["9999"], "a set part the bundle lacks is never quiet")
+        self.assertEqual(ldraw.set_numbers(sets), ["22119", "3001", "9999"])
+        # the file reader keeps the sets and drops the source note
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "sets.json")
+            with open(path, "w") as fh:
+                json.dump({"source": "a note", **sets}, fh)
+            self.assertEqual(ldraw.read_sets(path), sets)
 
 
 class BundleHelperTests(unittest.TestCase):
@@ -147,6 +195,16 @@ class FetchLibraryTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_the_download_names_itself(self):
+        # library.ldraw.org answers Python's default agent with 403: the
+        # request carries our own User-Agent, and goes to the library URL.
+        opener = self.opener_for({"ldraw/parts/1.dat": "0 One\n", "ldraw/p/x.dat": "0 X\n"})
+        bricks.fetch_library(dest=os.path.join(self.tmp.name, "lib"), opener=opener)
+        req = self.calls[0]
+        self.assertEqual(req.full_url, bricks.LDRAW_URL)
+        self.assertEqual(req.get_header("User-agent"), bricks.USER_AGENT)
+        self.assertTrue(bricks.USER_AGENT.startswith("openbricks"))
+
     def opener_for(self, members):
         payload = _zip_bytes(members)
 
@@ -166,7 +224,7 @@ class FetchLibraryTests(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(dest, "parts", "s", "9999s01.dat")))
         self.assertTrue(os.path.exists(os.path.join(dest, "CAreadme.txt")))
         self.assertFalse(os.path.exists(os.path.join(dest, "complete.zip.part")))
-        self.assertEqual(self.calls, [bricks.LDRAW_URL])
+        self.assertEqual([c.full_url for c in self.calls], [bricks.LDRAW_URL])
         self.assertTrue(any("1 part files" in s for s in said), said)
         bricks.fetch_library(dest=dest, opener=opener, progress=said.append)
         self.assertEqual(len(self.calls), 1)                      # already there: no second download

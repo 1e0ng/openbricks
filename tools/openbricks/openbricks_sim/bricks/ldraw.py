@@ -20,9 +20,11 @@ X forward, Y left, Z up in millimetres: ``ours = (X, Z, -Y) * 0.4``, a
 proper rotation, so face winding (and therefore the sign of the
 volume) is preserved.
 
-``python -m openbricks_sim.bricks.ldraw LDRAW_DIR LIST OUT`` rebuilds
-the shipped bundle; ``openbricks bricks convert`` converts parts on
-demand from the cached library.
+``python -m openbricks_sim.bricks.ldraw LDRAW_DIR LIST OUT --weights
+weights.json --sets sets.json`` rebuilds the shipped bundle: the curated
+list plus every part of the sets, each record stamped with the sets that
+hold it; ``openbricks bricks convert`` converts parts on demand from the
+cached library.
 """
 import base64
 import json
@@ -513,6 +515,45 @@ def convert_parts(lib, numbers, weights=None, log=None):
     return bundle
 
 
+def read_sets(path):
+    """The sets file: ``{set id: {name, year, pieces, parts: {LDraw
+    number: how many}, aliases: {inventory number: LDraw number}}}``;
+    a top-level ``source`` string says where the inventories came from."""
+    with open(path) as fh:
+        data = json.load(fh)
+    return {k: v for k, v in data.items() if isinstance(v, dict)}
+
+
+def set_numbers(sets):
+    """Every LDraw number the sets hold, sorted."""
+    return sorted({num for s in sets.values() for num in s.get("parts", {})})
+
+
+def apply_sets(bundle, sets):
+    """Stamp each record with the sets that hold it (``sets``: set id →
+    how many) and the numbers it goes by in their inventories where LDraw
+    names it differently (``aliases``); the bundle lists the sets
+    themselves under ``sets``. A set part the bundle lacks joins
+    ``missing``, so a set is never quietly incomplete."""
+    bundle["sets"] = {sid: {"name": s["name"], "year": s["year"], "pieces": s["pieces"]} for sid, s in sets.items()}
+    for sid, s in sets.items():
+        for num, qty in s.get("parts", {}).items():
+            rec = bundle["parts"].get(num)
+            if rec is None:
+                if num not in bundle["missing"]:
+                    bundle["missing"].append(num)
+                continue
+            rec.setdefault("sets", {})[sid] = qty
+        for other, num in s.get("aliases", {}).items():
+            rec = bundle["parts"].get(num)
+            if rec is not None and other not in rec.setdefault("aliases", []):
+                rec["aliases"].append(other)
+    for rec in bundle["parts"].values():
+        if "aliases" in rec:
+            rec["aliases"].sort()
+    return bundle
+
+
 def read_list(path):
     """Part numbers from a list file: one per line, ``#`` comments."""
     numbers = []
@@ -540,15 +581,18 @@ def write_bundle(bundle, path):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) < 3:
-        print("usage: python -m openbricks_sim.bricks.ldraw LDRAW_DIR PARTS_LIST OUT[.zlib|.json] [--weights weights.json]", file=sys.stderr)
+        print("usage: python -m openbricks_sim.bricks.ldraw LDRAW_DIR PARTS_LIST OUT[.zlib|.json] [--weights weights.json] [--sets sets.json]", file=sys.stderr)
         return 2
     root, list_path, out_path = argv[0], argv[1], argv[2]
     weights = None
     if "--weights" in argv:
         with open(argv[argv.index("--weights") + 1]) as fh:
             weights = json.load(fh)
+    sets = read_sets(argv[argv.index("--sets") + 1]) if "--sets" in argv else {}
+    numbers = read_list(list_path)
+    numbers += [n for n in set_numbers(sets) if n not in numbers]
     lib = Library(root)
-    bundle = convert_parts(lib, read_list(list_path), weights, log=print)
+    bundle = apply_sets(convert_parts(lib, numbers, weights, log=print), sets)
     n = write_bundle(bundle, out_path)
     print("parts: %d, missing: %s, json: %.1f KB" % (len(bundle["parts"]), bundle["missing"], n / 1024))
     return 0

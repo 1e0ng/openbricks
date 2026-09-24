@@ -1044,15 +1044,32 @@ impl App {
                 });
             }
             ui.add_space(8.0);
+            let sets_note = if self.editor.bundle.sets.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; sets {} complete",
+                    self.editor.bundle.sets.keys().cloned().collect::<Vec<_>>().join(" and ")
+                )
+            };
             ui.strong(format!(
-                "LEGO Technic  ({} parts, exact LDraw geometry)",
+                "LEGO  ({} parts, exact LDraw geometry{sets_note})",
                 self.editor.bundle.parts.len()
             ));
             let mut nums: Vec<String> = self.editor.bundle.parts.keys().cloned().collect();
             nums.sort_by_key(|n| self.editor.bundle.parts[n].name.to_lowercase());
             for num in nums {
                 let rec = &self.editor.bundle.parts[&num];
-                if !(q.is_empty() || num.contains(&q) || rec.name.to_lowercase().contains(&q)) {
+                // by number, name, an inventory's own number for it, or a set that holds it (id or name)
+                let hit = q.is_empty()
+                    || num.contains(&q)
+                    || rec.name.to_lowercase().contains(&q)
+                    || rec.aliases.iter().any(|a| a.contains(&q))
+                    || rec
+                        .sets
+                        .keys()
+                        .any(|s| s.contains(&q) || self.editor.bundle.sets.get(s).is_some_and(|i| i.name.to_lowercase().contains(&q)));
+                if !hit {
                     continue;
                 }
                 let dens = if rec.volume_mm3 > 0.0 {
@@ -1060,6 +1077,7 @@ impl App {
                 } else {
                     0.0
                 };
+                let in_sets: String = rec.sets.iter().map(|(s, n)| format!(" · {s} ×{n}")).collect();
                 let (name, mass) = (rec.name.clone(), rec.mass_g);
                 let thumb = self.part_thumb(gpu, &mut budget, &num, dark);
                 ui.horizontal(|ui| {
@@ -1069,8 +1087,10 @@ impl App {
                     }
                     ui.add(egui::Label::new(&name).truncate());
                     ui.add(
-                        egui::Label::new(egui::RichText::new(format!("{num} · {} g · {:.2} g/cm³", assembly::fmt(mass), dens)).weak())
-                            .truncate(),
+                        egui::Label::new(
+                            egui::RichText::new(format!("{num} · {} g · {:.2} g/cm³{in_sets}", assembly::fmt(mass), dens)).weak(),
+                        )
+                        .truncate(),
                     );
                 });
             }
@@ -2677,6 +2697,34 @@ mod tests {
         h.state_mut().search = "zzzz-nothing".into();
         h.step();
         assert!(h.query_by_label("+ add").is_none());
+        // the WRO sets: a set's number lists its bricks, each row saying how many the set holds;
+        // the sets' names find them too, and so does an inventory's own number for a part
+        let (in_45819, in_any, beam13) = {
+            let bundle = &h.state().editor.bundle;
+            assert_eq!(bundle.sets["45811"].pieces, 724);
+            let rec = &bundle.parts["41239"];
+            let dens = rec.mass_g / (rec.volume_mm3 / 1000.0);
+            (
+                bundle.parts.values().filter(|r| r.sets.contains_key("45819")).count(),
+                bundle.parts.values().filter(|r| !r.sets.is_empty()).count(),
+                format!("41239 · {} g · {dens:.2} g/cm³ · 45819 ×8", assembly::fmt(rec.mass_g)),
+            )
+        };
+        assert!(in_45819 >= 60 && in_any > in_45819, "{in_45819} / {in_any}");
+        h.state_mut().search = "45819".into();
+        h.step();
+        assert_eq!(h.get_all_by_label("+").count(), in_45819);
+        assert!(h.query_by_label(&beam13).is_some(), "{beam13}");
+        h.state_mut().search = "olympiad".into();
+        h.step();
+        assert_eq!(h.get_all_by_label("+").count(), in_any);
+        h.state_mut().search = "78c18".into();
+        h.step();
+        assert_eq!(h.get_all_by_label("+").count(), 1);
+        assert!(
+            h.query_by_label("Technic Ribbed Hose 18L").is_some(),
+            "the inventory's number finds LDraw's part"
+        );
         h.state_mut().search.clear();
         h.step();
     }

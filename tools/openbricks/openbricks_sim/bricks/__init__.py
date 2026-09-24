@@ -33,7 +33,11 @@ except ImportError:                     # pragma: no cover
     _files = None
 
 LDRAW_URL = "https://library.ldraw.org/library/updates/complete.zip"
+# library.ldraw.org answers Python's default agent with 403 (2026-09-24);
+# the download names itself.
+USER_AGENT = "openbricks (+https://openbricks.dev)"
 BUNDLE_NAME = "technic_bundle.json.zlib"
+SETS_NAME = "sets.json"
 _HERE = pathlib.Path(__file__).resolve().parent
 
 
@@ -57,6 +61,14 @@ def bundle_b64():
 def load_bundle():
     """The shipped bundle as a dict (``parts`` keyed by LDraw number)."""
     return json.loads(zlib.decompress(bundle_bytes()).decode())
+
+
+def load_sets():
+    """The sets the shipped bundle holds complete, by set id: name,
+    year, pieces, ``parts`` (LDraw number → how many) and ``aliases``
+    (an inventory's number → LDraw's)."""
+    data = json.loads(data_path(SETS_NAME).read_text())
+    return {k: v for k, v in data.items() if isinstance(v, dict)}
 
 
 def merge_bundles(base, extras):
@@ -105,7 +117,8 @@ def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=u
     root.mkdir(parents=True, exist_ok=True)
     tmp_zip = root / "complete.zip.part"
     say("downloading %s" % url)
-    with opener(url) as resp, open(tmp_zip, "wb") as out:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with opener(request) as resp, open(tmp_zip, "wb") as out:
         total = 0
         next_mark = progress_every
         while True:

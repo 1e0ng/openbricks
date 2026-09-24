@@ -71,6 +71,7 @@ fn main() -> eframe::Result {
         source: String::new(),
         parts: Default::default(),
         missing: vec![],
+        sets: Default::default(),
     };
     for p in &args.bricks {
         match bundle::load_bundle(p) {
