@@ -16,6 +16,7 @@ use eframe::egui;
 use eframe::egui_wgpu::{self, RenderState, wgpu};
 use glam::{DVec3, Mat4, Quat, Vec3};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// The GPU handles the app draws with: eframe's render state, or a
@@ -98,8 +99,80 @@ enum Drag {
     Marker,
 }
 
+/// The kinds of file the Workbench's dialogs ask for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileKind {
+    Assembly,
+    Stl,
+}
+
+impl FileKind {
+    fn filter(self) -> (&'static str, &'static [&'static str]) {
+        match self {
+            FileKind::Assembly => ("assembly", &["json"]),
+            FileKind::Stl => ("STL", &["stl"]),
+        }
+    }
+}
+
+/// The file dialogs the toolbar and the library open: the native ones,
+/// or, under test, answers set beforehand — the handlers behind the
+/// buttons run either way.
+type PickFn = Box<dyn Fn(FileKind) -> Option<PathBuf>>;
+type SaveFn = Box<dyn Fn(FileKind, &str, Option<&Path>) -> Option<PathBuf>>;
+
+pub struct Dialogs {
+    pick: PickFn,
+    save: SaveFn,
+}
+
+/// The native open dialog.
+fn native_pick(kind: FileKind) -> Option<PathBuf> {
+    let (name, ext) = kind.filter();
+    rfd::FileDialog::new().add_filter(name, ext).pick_file()
+}
+
+/// The native save dialog, in `dir` when there is one.
+fn native_save(kind: FileKind, file_name: &str, dir: Option<&Path>) -> Option<PathBuf> {
+    let (name, ext) = kind.filter();
+    let mut dlg = rfd::FileDialog::new().add_filter(name, ext).set_file_name(file_name);
+    if let Some(d) = dir {
+        dlg = dlg.set_directory(d);
+    }
+    dlg.save_file()
+}
+
+impl Dialogs {
+    pub fn native() -> Self {
+        Dialogs {
+            pick: Box::new(native_pick),
+            save: Box::new(native_save),
+        }
+    }
+
+    /// Dialogs that answer every question with `path` (None: declined).
+    #[cfg(test)]
+    pub fn answering(path: Option<PathBuf>) -> Self {
+        let picked = path.clone();
+        Dialogs {
+            pick: Box::new(move |_| picked.clone()),
+            save: Box::new(move |_, _, _| path.clone()),
+        }
+    }
+
+    pub fn pick(&self, kind: FileKind) -> Option<PathBuf> {
+        (self.pick)(kind)
+    }
+
+    pub fn save(&self, kind: FileKind, file_name: &str, dir: Option<&Path>) -> Option<PathBuf> {
+        (self.save)(kind, file_name, dir)
+    }
+}
+
 pub struct App {
     editor: Editor,
+    /// The file dialogs, native unless a test answers them.
+    dialogs: Dialogs,
     tab: Tab,
     search: String,
     /// The Map tab's search of the brick library.
@@ -236,6 +309,7 @@ impl App {
         let cameras = [viewport.camera.clone(), map_camera, Camera::top_down()];
         App {
             editor: Editor::new(bundle, doc),
+            dialogs: Dialogs::native(),
             tab: Tab::Workbench,
             search: String::new(),
             map_search: String::new(),
@@ -925,7 +999,7 @@ impl App {
             ui.separator();
             if self.tab == Tab::Workbench {
                 if ui.button("Open…").clicked()
-                    && let Some(p) = rfd::FileDialog::new().add_filter("assembly", &["json"]).pick_file()
+                    && let Some(p) = self.dialogs.pick(FileKind::Assembly)
                 {
                     self.editor.load_path(p);
                 }
@@ -933,7 +1007,7 @@ impl App {
                     .button("Import…")
                     .on_hover_text("a saved build's components and bricks join this library, to add from")
                     .clicked()
-                    && let Some(p) = rfd::FileDialog::new().add_filter("assembly", &["json"]).pick_file()
+                    && let Some(p) = self.dialogs.pick(FileKind::Assembly)
                 {
                     self.editor.import_build(p);
                 }
@@ -1024,26 +1098,16 @@ impl App {
 
     /// A component saved as a build of its own, where the dialog says.
     fn save_component_dialog(&mut self, id: &str) {
-        let mut dlg = rfd::FileDialog::new()
-            .add_filter("assembly", &["json"])
-            .set_file_name(format!("{id}.assembly.json"));
-        if let Some(p) = self.editor.path.as_ref().and_then(|p| p.parent()) {
-            dlg = dlg.set_directory(p);
-        }
-        if let Some(p) = dlg.save_file() {
+        let dir = self.editor.path.as_ref().and_then(|p| p.parent());
+        if let Some(p) = self.dialogs.save(FileKind::Assembly, &format!("{id}.assembly.json"), dir) {
             self.editor.save_component(id, &p);
         }
     }
 
     fn save_file(&mut self, ask: bool) {
         let path = if ask || self.editor.path.is_none() {
-            let mut dlg = rfd::FileDialog::new()
-                .add_filter("assembly", &["json"])
-                .set_file_name("robot.assembly.json");
-            if let Some(p) = self.editor.path.as_ref().and_then(|p| p.parent()) {
-                dlg = dlg.set_directory(p);
-            }
-            match dlg.save_file() {
+            let dir = self.editor.path.as_ref().and_then(|p| p.parent());
+            match self.dialogs.save(FileKind::Assembly, "robot.assembly.json", dir) {
                 Some(p) => p,
                 None => return,
             }
@@ -1240,7 +1304,7 @@ impl App {
     }
 
     fn import_stl(&mut self) {
-        let Some(p) = rfd::FileDialog::new().add_filter("STL", &["stl"]).pick_file() else {
+        let Some(p) = self.dialogs.pick(FileKind::Stl) else {
             return;
         };
         match stl::Import::from_path(&p) {
@@ -2614,6 +2678,12 @@ mod tests {
         assert_ne!(cat_color("lego", false), cat_color("lego", true));
         assert_eq!(cat_color("mystery", false), cat_color("other", false));
         assert_eq!(rgb_color([0x5B, 0x7A, 0x9C]), cat_color("lego", false));
+        assert_eq!(FileKind::Assembly.filter(), ("assembly", &["json"][..]));
+        assert_eq!(FileKind::Stl.filter(), ("STL", &["stl"][..]));
+        let answered = Dialogs::answering(Some(PathBuf::from("/x/y.json")));
+        assert_eq!(answered.pick(FileKind::Stl), Some(PathBuf::from("/x/y.json")));
+        assert_eq!(answered.save(FileKind::Assembly, "a.json", None), Some(PathBuf::from("/x/y.json")));
+        assert_eq!(Dialogs::answering(None).pick(FileKind::Assembly), None);
         assert_ne!(rgb_color([200, 30, 30]), rgb_color([30, 30, 200]));
         assert_eq!(vec_text(DVec3::new(1.0, 2.5, -3.0)), "1, 2.5, -3");
         assert_eq!(bbox_text(&[[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]]), "10 × 20 × 30");
@@ -4160,6 +4230,72 @@ mod tests {
         assert!(h.query_by_label("Import…").is_none() && h.query_by_label("save").is_none());
         h.get_by_label("Workbench").click();
         steps(&mut h, 2);
+        // the buttons at work, the dialogs answered: the page's button writes the component as
+        // a build; Import… of that file finds nothing new; Open… opens it; Save as… writes it
+        let dir = std::env::temp_dir().join(format!("ob-app-files-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("comp.assembly.json");
+        h.state_mut().dialogs = Dialogs::answering(Some(file.clone()));
+        h.get_by_label("Save as build…").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.status, format!("Saved {cid} as {}", file.display()));
+        assert!(
+            !h.state().editor.dirty || h.state().editor.path.is_none(),
+            "the build here is untouched"
+        );
+        h.get_by_label("Import…").click();
+        steps(&mut h, 3);
+        assert!(h.state().editor.status.starts_with("Nothing new in"), "{}", h.state().editor.status);
+        h.get_by_label("Open…").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.doc.robot.root, cid);
+        assert_eq!(h.state().editor.path.as_deref(), Some(file.as_path()));
+        let other = dir.join("again.assembly.json");
+        h.state_mut().dialogs = Dialogs::answering(Some(other.clone()));
+        h.get_by_label("Save as…").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.path.as_deref(), Some(other.as_path()));
+        // a library row's save button, and Save with a file already: no dialog needed
+        h.state_mut().editor.selection.clear();
+        h.state_mut().search = cid.clone();
+        steps(&mut h, 2);
+        h.state_mut().dialogs = Dialogs::answering(Some(dir.join("row.assembly.json")));
+        assert!(h.query_by_label("save").is_none(), "the root has no save button");
+        h.state_mut().search.clear();
+        h.state_mut().editor.reset_to_example();
+        steps(&mut h, 2);
+        h.get_all_by_label("save").next().unwrap().click();
+        steps(&mut h, 3);
+        assert!(dir.join("row.assembly.json").exists(), "{}", h.state().editor.status);
+        // an STL through the same dialogs; a declined dialog does nothing
+        let stl = dir.join("tri.stl");
+        std::fs::write(
+            &stl,
+            "solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nendloop\nendfacet\nendsolid t\n",
+        )
+        .unwrap();
+        h.state_mut().dialogs = Dialogs::answering(Some(stl));
+        // the button sits below the library's long list: a search that hides the list brings it up
+        h.state_mut().search = "zzzz-nothing".into();
+        steps(&mut h, 2);
+        h.get_by_label("Import STL…").click();
+        steps(&mut h, 2);
+        assert!(
+            h.state().stl.is_some(),
+            "the import form opens on the file: {}",
+            h.state().editor.status
+        );
+        h.state_mut().stl = None;
+        h.state_mut().stl_prepared = None;
+        h.state_mut().dialogs = Dialogs::answering(None);
+        let status = h.state().editor.status.clone();
+        h.get_by_label("Import…").click();
+        h.get_by_label("Import STL…").click();
+        h.get_by_label("Save as…").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.status, status, "declined: nothing happened");
+        assert!(h.state().stl.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
