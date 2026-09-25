@@ -312,7 +312,10 @@ robot as a tree of components:
   near a hole or a grid pulls it on (it lets go again as the pointer
   moves away); a stud also seats in a Technic hole or, for the
   half-stud offset, in a tube. The inspector lists what each part is
-  mated to.
+  mated to. So that a stack stays legible, the sim draws every brick
+  with its edges — the seams between stacked bricks, the rims of studs
+  and holes — in a darker shade of its own colour; **edges** in the
+  toolbar turns them off.
 - **Mass properties** are never typed in above the brick level.
   Volume, centre of mass and the inertia tensor of every LDraw and STL
   part come from its closed mesh, so a recorded weight becomes a full

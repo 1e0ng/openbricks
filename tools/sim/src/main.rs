@@ -7,6 +7,7 @@ mod app;
 mod assembly;
 mod bundle;
 mod drafts;
+mod edges;
 mod editor;
 mod geometry;
 mod gizmo;

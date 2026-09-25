@@ -1115,6 +1115,8 @@ impl App {
                 });
             ui.checkbox(&mut self.editor.magnet, "snap to holes");
             ui.checkbox(&mut self.show_grid, "ground");
+            ui.checkbox(&mut self.viewport.edges, "edges")
+                .on_hover_text("the bricks' edges: the seams of a stack, the rims of studs");
             ui.checkbox(&mut self.show_com, "COM");
             if ui.button("Snap").on_hover_text("S").clicked() {
                 self.editor.snap_selection(true);
@@ -2845,8 +2847,10 @@ mod tests {
         h.get_by_label("ground").click();
         h.get_by_label("COM").click();
         h.get_by_label("snap to holes").click();
+        h.get_by_label("edges").click();
         h.step();
         assert!(!h.state().show_grid && !h.state().show_com && !h.state().editor.magnet);
+        assert!(!h.state().viewport.edges, "the edges toggle turns the bricks' edges off");
         h.get_by_label("Snap").click();
         h.step();
         assert_eq!(h.state().editor.status, "Select one item to snap");
