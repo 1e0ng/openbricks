@@ -3030,6 +3030,7 @@ mod tests {
         assert!(h.query_by_label("2458 is not in the library").is_some());
         h.get_by_label("Fetch 2458 from LDraw").click();
         steps(&mut h, 2);
+        // under way (the stand-in takes a moment on purpose): its row says so
         assert!(h.state().fetch.is_some(), "{}", h.state().fetch_note);
         assert!(h.query_by_label_contains("fetching 2458").is_some());
         wait_until(&mut h, |a| a.fetch.is_none());

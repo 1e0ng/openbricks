@@ -506,7 +506,7 @@ for line in sys.stdin:
     }
 
     const FAKE_FETCH: &str = r#"
-import json, os, shutil, sys
+import json, os, shutil, sys, time
 args = sys.argv[1:]
 number = args[0]
 out = args[args.index("--out") + 1]
@@ -519,6 +519,7 @@ if number.startswith("9909"):
 if number.startswith("9908"):
     sys.stdout.write('{"ev": "weird"}\n'); sys.stdout.flush(); sys.exit(0)
 emit(ev="log", text="fetched parts/%s.dat" % number)
+time.sleep(0.3)   # long enough for the sim to show the fetch under way, on any machine
 os.makedirs(os.path.dirname(out), exist_ok=True)
 shutil.copyfile(os.environ["OB_FAKE_RECORD"], out)
 name = json.load(open(out))["parts"][number]["name"]
