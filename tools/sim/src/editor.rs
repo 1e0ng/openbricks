@@ -686,11 +686,29 @@ impl Editor {
     }
 
     /// The document's part for an LDraw number, recorded from the bundle
-    /// on first use.
+    /// on first use. A part fetched by number carries its record along
+    /// (mesh, box, mass properties, connectors), so the build opens on a
+    /// machine whose library lacks it.
     pub fn ensure_ldraw_part(&mut self, num: &str) -> Option<String> {
         let rec = self.bundle.parts.get(num)?;
         let id = format!("lego_{num}");
         if !self.doc.parts.contains_key(&id) {
+            let mut extra: serde_json::Map<String, serde_json::Value> = Default::default();
+            if rec.fetched {
+                let put = |extra: &mut serde_json::Map<String, serde_json::Value>, k: &str, v: serde_json::Value| {
+                    extra.insert(k.to_string(), v);
+                };
+                put(&mut extra, "mesh", serde_json::to_value(&rec.mesh).unwrap_or_default());
+                put(&mut extra, "bbox", serde_json::to_value(rec.bbox).unwrap_or_default());
+                put(&mut extra, "com", serde_json::to_value(rec.com).unwrap_or_default());
+                put(
+                    &mut extra,
+                    "inertia_per_g",
+                    serde_json::to_value(rec.inertia_per_g).unwrap_or_default(),
+                );
+                put(&mut extra, "connectors", serde_json::to_value(&rec.connectors).unwrap_or_default());
+                put(&mut extra, "volume_mm3", serde_json::to_value(rec.volume_mm3).unwrap_or_default());
+            }
             self.doc.parts.insert(
                 id.clone(),
                 Part {
@@ -701,11 +719,19 @@ impl Editor {
                     source_note: rec.source_note.clone(),
                     ldraw: Some(num.to_string()),
                     shapes: vec![],
-                    extra: Default::default(),
+                    extra,
                 },
             );
         }
         Some(id)
+    }
+
+    /// A part's record changed (fetched, or fetched again): what was
+    /// derived from the old one goes, and the document is checked afresh.
+    pub fn forget_part(&mut self, num: &str) {
+        self.shapes.remove(&format!("ld:{num}"));
+        self.errors = assembly::validate(&self.doc, &self.bundle);
+        self.recompute();
     }
 
     pub fn remove_selection(&mut self) {
@@ -2383,6 +2409,61 @@ mod tests {
             ed.status
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_fetched_part_carries_its_record_and_opens_without_the_library() {
+        // a library with one fetched part: the 2x4 brick's record under another number
+        let full = real_bundle();
+        let mut rec = full.parts["3001"].clone();
+        rec.fetched = true;
+        let mut lib = real_bundle();
+        lib.parts.insert("2458".into(), rec);
+        let mut ed = Editor::new(lib, None);
+        let id = ed.ensure_ldraw_part("2458").unwrap();
+        let part = ed.doc.parts[&id].clone();
+        assert_eq!(part.ldraw.as_deref(), Some("2458"));
+        for k in ["mesh", "bbox", "com", "inertia_per_g", "connectors", "volume_mm3"] {
+            assert!(part.extra.contains_key(k), "{k} carried along");
+        }
+        // a shipped part carries nothing extra
+        let id2 = ed.ensure_ldraw_part("3001").unwrap();
+        assert!(ed.doc.parts[&id2].extra.is_empty());
+        ed.add_instance(Some(id.clone()), None, [0.0, 0.0, 40.0]);
+        let doc = ed.doc.clone();
+        // opened with the shipped library alone: no error, the record's geometry in use
+        let other = Editor::new(real_bundle(), Some((PathBuf::from("x.assembly.json"), doc)));
+        assert!(other.errors.is_empty(), "{:?}", other.errors);
+        let g = assembly::geometry_of(&other.doc.parts[&id], &other.bundle);
+        assert!(matches!(g, Geometry::Imported { .. }));
+        let leaf = other.leaves.iter().find(|l| l.part_id == id).unwrap();
+        assert_eq!(leaf.pos.z, 40.0);
+        assert!(
+            !assembly::connectors_of_leaf(&other.doc, &other.bundle, leaf).is_empty(),
+            "its studs and tubes too"
+        );
+        // and the overlap rule measures it: a second copy in the same place is refused
+        let mut again = Editor::new(real_bundle(), Some((PathBuf::from("x.assembly.json"), other.doc.clone())));
+        again.magnet = false;
+        again.add_instance(Some(id.clone()), None, [0.0, 0.0, 40.0]);
+        assert_ne!(again.selected_instances()[0].pos, [0.0, 0.0, 40.0], "{}", again.status);
+        // forgetting a part checks the document afresh
+        let mut third = Editor::new(real_bundle(), None);
+        third.doc.parts.insert(
+            "ghost".into(),
+            Part {
+                name: "Ghost".into(),
+                category: "lego".into(),
+                mass_g: 1.0,
+                source: String::new(),
+                source_note: String::new(),
+                ldraw: Some("0000".into()),
+                shapes: vec![],
+                extra: Default::default(),
+            },
+        );
+        third.forget_part("0000");
+        assert!(third.errors.iter().any(|e| e.contains("0000")), "{:?}", third.errors);
     }
 
     #[test]

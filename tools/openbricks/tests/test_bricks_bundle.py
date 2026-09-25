@@ -311,12 +311,17 @@ class FetchLibraryTests(unittest.TestCase):
 
     def test_downloads_unpacks_and_skips_when_present(self):
         opener = self.opener_for({"ldraw/parts/9999.dat": "0 Test\n", "ldraw/parts/s/9999s01.dat": "0 Sub\n",
-                                  "ldraw/p/4-4cyli.dat": "0 Cyl\n", "ldraw/CAreadme.txt": "licence\n", "ldraw/models/car.ldr": "0 model\n"})
+                                  "ldraw/p/4-4cyli.dat": "0 Cyl\n", "ldraw/CAreadme.txt": "licence\n", "ldraw/models/car.ldr": "0 model\n",
+                                  "ldraw/LDConfig.ldr": "0 Configuration\n"})
         said = []
         dest = os.path.join(self.tmp.name, "lib")
+        # a cache grown part by part is there but not complete: it does not stop the download
+        os.makedirs(os.path.join(dest, "parts"))
+        os.makedirs(os.path.join(dest, "p"))
+        self.assertTrue(bricks.library_present(dest) and not bricks.library_complete(dest))
         root = bricks.fetch_library(dest=dest, opener=opener, progress=said.append)
         self.assertEqual(str(root), dest)
-        self.assertTrue(bricks.library_present(root))
+        self.assertTrue(bricks.library_present(root) and bricks.library_complete(root))
         self.assertTrue(os.path.exists(os.path.join(dest, "parts", "s", "9999s01.dat")))
         self.assertTrue(os.path.exists(os.path.join(dest, "CAreadme.txt")))
         self.assertFalse(os.path.exists(os.path.join(dest, "complete.zip.part")))

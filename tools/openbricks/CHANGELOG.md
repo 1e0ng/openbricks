@@ -3,6 +3,46 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.27.0 — any LEGO part by its number: fetched from ldraw.org
+
+The library holds a curated set; the LEGO catalogue holds twenty
+thousand more. Type a part number the library lacks — the design id
+printed on the part, `2458` — and the library says so and offers
+**Fetch 2458 from LDraw**: the part's own file and the few subparts
+and primitives it references come from ldraw.org one by one (a
+median part is fifteen files and a few dozen kilobytes, not the
+145 MB library), into the same cache the whole library unpacks into;
+the part is converted like the shipped ones, gets the colours
+Rebrickable lists for it, joins the library at once (drawn, measured,
+edged and pictured afresh) and is kept under the data directory
+(`~/.local/share/openbricks/bricks`, or `$OPENBRICKS_DATA_DIR`) for
+every later launch. A build that uses a fetched part carries its
+record along — mesh, box, mass properties, connectors — so it opens on
+a machine whose library never fetched it. A number ldraw.org has not,
+official or on the tracker, is said so under the line; a file that
+cannot be had is an error, never a part with a hole in it; ldraw.org's
+sixty requests a minute are waited out once. `openbricks bricks fetch
+2458 3005` does the same from a terminal (`bricks fetch` alone still
+brings the whole library, which a part-by-part cache no longer
+passes for).
+
+- Tests: the fetcher (where a reference may live; a part and its
+  references landing in the cache layout with our agent, and nothing
+  fetched twice; `~Moved to`, the tracker and a 429 waited out; a part
+  nobody has, a broken reference, a dead route and a second 429 as
+  errors; a one-part bundle with its colours, the tables cached; no
+  colours, and a table that cannot be had; the JSON lines and exit
+  codes; the real converter through `main`; the data directory; a
+  sparse cache is present but not complete); the CLI (`fetch NUMBER`
+  keeping the parts under the data directory, its failures, and the
+  extra it needs); the sim (a fetch's progress, file and failures
+  through the child; the user's fetched parts loading in name order
+  with a bad file named; a fetched part carrying its record and
+  opening without the library; the library's line and button, the
+  fetch joining the part, **+** placing it with the record carried,
+  a number ldraw.org has not, a fetcher that dies, and the note when
+  no Python is at hand).
+
 ## 4.26.0 — no two bricks overlap
 
 A brick can no longer be left inside another. A brick let go, nudged,

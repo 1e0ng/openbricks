@@ -5,6 +5,7 @@
 
 use crate::assembly::{self, Geometry, Instance, Part, Props};
 use crate::editor::{self, Editor};
+use crate::fetch::{Outcome, PartFetch};
 use crate::geometry;
 use crate::gizmo::{self, Gizmo, Handle, Mode};
 use crate::route::Pose2;
@@ -206,6 +207,16 @@ pub struct App {
     drag: Drag,
     /// Set in the frame Escape abandoned a drag, so the key does not also drop the selection.
     escaped_drag: bool,
+    /// The Python the sim was started with: what fetches a part by number.
+    python: Option<String>,
+    /// Environment for the fetcher (tests point PYTHONPATH at a stand-in).
+    fetch_env: Vec<(String, String)>,
+    /// Where fetched parts are kept (the data directory's `bricks`).
+    bricks_dir: std::path::PathBuf,
+    /// A fetch by number in progress.
+    fetch: Option<PartFetch>,
+    /// Why the last fetch failed, under the library's line about the part.
+    fetch_note: String,
     /// Where the 3D view was drawn last frame, in screen points.
     view_rect: egui::Rect,
     items: Vec<DrawItem>,
@@ -280,12 +291,20 @@ const THUMB_SIZE: egui::Vec2 = egui::vec2(44.0, 33.0);
 const THUMBS_PER_FRAME: usize = 4;
 const RED: egui::Color32 = egui::Color32::from_rgb(196, 68, 42);
 
+/// Whether a search looks like an LDraw part number (a LEGO design id,
+/// digits with an optional mould suffix: `2458`, `3648b`, `32013`).
+fn looks_like_part_number(q: &str) -> bool {
+    let b = q.as_bytes();
+    b.len() >= 2 && b.iter().take_while(|c| c.is_ascii_digit()).count() >= 2 && b.iter().all(|c| c.is_ascii_alphanumeric())
+}
+
 impl App {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         bundle: crate::bundle::Bundle,
         doc: Option<(std::path::PathBuf, assembly::Document)>,
         python: Option<String>,
+        notes: Vec<String>,
     ) -> Self {
         let gpu = Gpu::from(cc.wgpu_render_state.as_ref().expect("the wgpu renderer is required"));
         let given = doc.is_some();
@@ -293,6 +312,9 @@ impl App {
         if !given {
             app.restore_drafts(crate::drafts::now_ms());
         }
+        // what went wrong on the way in (a fetched part's file that would not read) is listed
+        // with the build's own problems
+        app.editor.errors.extend(notes);
         app
     }
 
@@ -308,6 +330,67 @@ impl App {
     pub fn drafts_in(&mut self, dir: std::path::PathBuf) {
         self.editor.draft_dir = dir.clone();
         self.simulate.draft_dir = dir;
+    }
+
+    /// Where fetched parts are kept, and how the fetcher is run: the
+    /// tests point both at a stand-in.
+    #[cfg(test)]
+    pub fn fetching_with(&mut self, env: Vec<(String, String)>, dir: std::path::PathBuf) {
+        self.fetch_env = env;
+        self.bricks_dir = dir;
+    }
+
+    // ------------------------------------------------------------ fetch
+
+    /// Start fetching part `number` from ldraw.org into the bricks
+    /// directory, with the sim's Python.
+    fn start_fetch(&mut self, number: &str) {
+        let Some(python) = self.python.clone() else {
+            self.fetch_note = "fetching needs the openbricks Python: start the sim with `openbricks sim`".into();
+            return;
+        };
+        let out = self.bricks_dir.join(format!("{number}.json"));
+        match PartFetch::start(&python, &self.fetch_env, number, &out) {
+            Ok(f) => {
+                self.fetch = Some(f);
+                self.fetch_note.clear();
+            }
+            Err(e) => self.fetch_note = e,
+        }
+    }
+
+    /// Called every frame: a fetch that has ended joins its part to the
+    /// library (drawn, measured and pictured afresh) or leaves its
+    /// reason under the library's line.
+    fn poll_fetch(&mut self, ui: &egui::Ui, gpu: Option<&Gpu>) {
+        let Some(f) = &mut self.fetch else { return };
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        let Some(outcome) = f.poll() else { return };
+        let number = f.number.clone();
+        self.fetch = None;
+        match outcome {
+            Outcome::Fetched { name, files, colors, out } => match crate::bundle::load_bundle(&out) {
+                Ok(b) => {
+                    self.editor.bundle.merge(b);
+                    self.viewport.remove_mesh(&format!("ld:{number}"));
+                    if let Some(gpu) = gpu {
+                        let mut renderer = gpu.renderer.write();
+                        let stale = format!("thumb:ld:{number}:");
+                        self.viewport.retain_thumbs(&mut renderer, |k| !k.starts_with(&stale));
+                    }
+                    self.editor.forget_part(&number);
+                    self.editor.status = format!(
+                        "{number} {name} joined the library ({files} file{}, {colors} colour{}); it is kept at {}",
+                        if files == 1 { "" } else { "s" },
+                        if colors == 1 { "" } else { "s" },
+                        out.display()
+                    );
+                }
+                Err(e) => self.fetch_note = format!("{number} was fetched but its file would not read: {e}"),
+            },
+            Outcome::Failed(text) => self.fetch_note = text,
+        }
+        ui.ctx().request_repaint();
     }
 
     /// Called every frame: drafts of unsaved work, a moment after a run
@@ -356,6 +439,11 @@ impl App {
             plan_size: (0, 0),
             drag: Drag::None,
             escaped_drag: false,
+            python: python.clone(),
+            fetch_env: vec![],
+            bricks_dir: crate::markers::data_dir().join("bricks"),
+            fetch: None,
+            fetch_note: String::new(),
             view_rect: egui::Rect::ZERO,
             items: vec![],
             item_tops: vec![],
@@ -1204,6 +1292,7 @@ impl App {
             ));
             let mut nums: Vec<String> = self.editor.bundle.parts.keys().cloned().collect();
             nums.sort_by_key(|n| self.editor.bundle.parts[n].name.to_lowercase());
+            let mut hits = 0;
             for num in nums {
                 let rec = &self.editor.bundle.parts[&num];
                 // by number, name, an inventory's own number for it, or a set that holds it (id or name)
@@ -1221,6 +1310,7 @@ impl App {
                 if !hit {
                     continue;
                 }
+                hits += 1;
                 if let Some(c) = element_color {
                     self.pick_color.insert(num.clone(), c);
                 }
@@ -1264,6 +1354,28 @@ impl App {
                             self.pick_color.remove(&num);
                         }
                     }
+                }
+            }
+            // a number the library lacks: say so, and offer to fetch it from ldraw.org
+            if hits == 0 && looks_like_part_number(&q) {
+                ui.add_space(4.0);
+                ui.label(format!("{q} is not in the library"));
+                match &self.fetch {
+                    Some(f) if f.number == q => {
+                        ui.weak(format!("fetching {q}… {}", f.last));
+                    }
+                    _ => {
+                        if ui
+                            .button(format!("Fetch {q} from LDraw"))
+                            .on_hover_text("its files from ldraw.org, converted, with the colours it comes in; kept for every later launch")
+                            .clicked()
+                        {
+                            self.start_fetch(&q.clone());
+                        }
+                    }
+                }
+                if !self.fetch_note.is_empty() {
+                    ui.colored_label(RED, &self.fetch_note);
                 }
             }
             ui.add_space(8.0);
@@ -2669,6 +2781,7 @@ impl App {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::Title(format!("Openbricks Sim — {}*", self.title_name())));
         }
+        self.poll_fetch(ui, gpu);
         self.autosave(std::time::Instant::now(), crate::drafts::now_ms());
     }
 }
@@ -2690,7 +2803,7 @@ impl Drop for App {
 mod tests {
     use super::*;
     use crate::editor::testing::real_bundle;
-    use crate::sim::testing::fake_server;
+    use crate::sim::testing::{fake_fetcher, fake_server};
     use crate::viewport::testing::{test_device, test_renderer};
     use egui::{Event, Key, Modifiers, PointerButton, Pos2};
     use egui_kittest::Harness;
@@ -2874,6 +2987,119 @@ mod tests {
         steps(&mut h, 2);
         assert_eq!(h.state().editor.selected_instances()[0].pos, [40.0, 0.0, 0.0]);
         assert_eq!(h.state().editor.undo_depth(), depth + 1);
+    }
+
+    /// Steps frames until `done` holds, a little while at most.
+    fn wait_until(h: &mut Harness<'_, App>, done: impl Fn(&App) -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        // a frame first: a click just made takes effect in the next one
+        h.step();
+        while !done(h.state()) {
+            assert!(std::time::Instant::now() < deadline, "waited in vain");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            h.step();
+        }
+    }
+
+    #[test]
+    fn a_part_the_library_lacks_is_fetched_by_number_and_joins_it() {
+        let Some(gpu) = gpu() else { return };
+        // the fetcher stand-in hands back the library's 2x4 brick under the number asked for
+        let bundle = real_bundle();
+        let mut rec = bundle.parts["3001"].clone();
+        rec.name = "Brick  1 x  2 with Pin".into();
+        rec.ldraw = "2458".into();
+        rec.fetched = true;
+        let one = crate::bundle::Bundle {
+            format: bundle.format.clone(),
+            source: "test".into(),
+            parts: [("2458".to_string(), rec)].into_iter().collect(),
+            missing: vec![],
+            sets: Default::default(),
+            colors: Default::default(),
+        };
+        let Some(fake) = fake_fetcher("app", &serde_json::to_string(&one).unwrap()) else {
+            return;
+        };
+        let mut h = harness(&gpu, Some(fake.python.clone()));
+        h.state_mut().fetching_with(fake.env.clone(), fake.dir.join("bricks"));
+        assert!(!looks_like_part_number("wro") && !looks_like_part_number("1") && looks_like_part_number("3648b"));
+        // a search for a number the library lacks says so and offers the fetch
+        h.state_mut().search = "2458".into();
+        steps(&mut h, 2);
+        assert!(h.query_by_label("2458 is not in the library").is_some());
+        h.get_by_label("Fetch 2458 from LDraw").click();
+        steps(&mut h, 2);
+        // under way (the stand-in takes a moment on purpose): its row says so
+        assert!(h.state().fetch.is_some(), "{}", h.state().fetch_note);
+        assert!(h.query_by_label_contains("fetching 2458").is_some());
+        wait_until(&mut h, |a| a.fetch.is_none());
+        assert!(h.state().fetch_note.is_empty(), "{}", h.state().fetch_note);
+        assert!(h.state().editor.bundle.parts.contains_key("2458"));
+        assert!(
+            h.state()
+                .editor
+                .status
+                .starts_with("2458 Brick  1 x  2 with Pin joined the library (19 files, 15 colours)"),
+            "{}",
+            h.state().editor.status
+        );
+        assert!(fake.dir.join("bricks").join("2458.json").exists());
+        steps(&mut h, 2);
+        // the row is there now; + places it, with the record carried in the build
+        assert!(h.query_by_label("2458 is not in the library").is_none());
+        let n = h.state().editor.children().len();
+        h.get_by_label("+").click();
+        steps(&mut h, 3);
+        assert_eq!(h.state().editor.children().len(), n + 1);
+        let part = h.state().editor.doc.parts["lego_2458"].clone();
+        assert_eq!(part.ldraw.as_deref(), Some("2458"));
+        assert!(
+            part.extra.contains_key("mesh") && part.extra.contains_key("connectors"),
+            "carried along"
+        );
+        // a library without the part still opens the build: its geometry comes from the record
+        let doc = h.state().editor.doc.clone();
+        let ed = Editor::new(real_bundle(), Some((std::path::PathBuf::from("x.assembly.json"), doc)));
+        assert!(ed.errors.is_empty(), "{:?}", ed.errors);
+        assert!(matches!(
+            assembly::geometry_of(&ed.doc.parts["lego_2458"], &ed.bundle),
+            assembly::Geometry::Imported { .. }
+        ));
+        assert!(ed.leaves.iter().any(|l| l.part_id == "lego_2458"));
+        // ldraw.org has no such part, and a fetcher that dies is said too
+        h.state_mut().search = "4040001".into();
+        steps(&mut h, 2);
+        h.get_by_label("Fetch 4040001 from LDraw").click();
+        wait_until(&mut h, |a| a.fetch.is_none());
+        assert_eq!(h.state().fetch_note, "ldraw.org has no part 4040001");
+        steps(&mut h, 2);
+        assert!(h.query_by_label("ldraw.org has no part 4040001").is_some());
+        h.state_mut().search = "crash".into();
+        steps(&mut h, 2);
+        assert!(h.query_by_label_contains("is not in the library").is_none(), "not a number");
+        h.state_mut().search = "99090001".into();
+        steps(&mut h, 2);
+        h.get_by_label("Fetch 99090001 from LDraw").click();
+        wait_until(&mut h, |a| a.fetch.is_none());
+        assert!(
+            h.state().fetch_note.contains("without a word") || h.state().fetch_note.contains("would not read"),
+            "{}",
+            h.state().fetch_note
+        );
+        let _ = std::fs::remove_dir_all(&fake.dir);
+    }
+
+    #[test]
+    fn without_a_python_the_fetch_says_what_it_needs() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        h.state_mut().search = "2458".into();
+        steps(&mut h, 2);
+        h.get_by_label("Fetch 2458 from LDraw").click();
+        steps(&mut h, 2);
+        assert!(h.state().fetch.is_none());
+        assert!(h.state().fetch_note.contains("openbricks sim"), "{}", h.state().fetch_note);
     }
 
     #[test]

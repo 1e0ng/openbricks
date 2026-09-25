@@ -480,6 +480,52 @@ for line in sys.stdin:
         pub dir: PathBuf,
     }
 
+    /// A stand-in `openbricks_sim.bricks.fetch`: writes the record JSON
+    /// given here to `--out` for any number, says so as the real one
+    /// does; a number starting `404` is one ldraw.org has not, `9909`
+    /// dies mid-way, `9908` speaks nonsense.
+    pub fn fake_fetcher(tag: &str, record_json: &str) -> Option<FakeServer> {
+        let python = ["python3", "python"]
+            .into_iter()
+            .find(|p| Command::new(p).arg("--version").output().is_ok())?;
+        let dir = std::env::temp_dir().join(format!("ob-fake-fetch-{}-{tag}", std::process::id()));
+        std::fs::create_dir_all(dir.join("openbricks_sim/bricks")).unwrap();
+        std::fs::write(dir.join("openbricks_sim/__init__.py"), "").unwrap();
+        std::fs::write(dir.join("openbricks_sim/bricks/__init__.py"), "").unwrap();
+        std::fs::write(dir.join("record.json"), record_json).unwrap();
+        std::fs::write(dir.join("openbricks_sim/bricks/fetch.py"), FAKE_FETCH).unwrap();
+        let env = vec![
+            ("PYTHONPATH".to_string(), dir.to_string_lossy().to_string()),
+            ("OB_FAKE_RECORD".to_string(), dir.join("record.json").to_string_lossy().to_string()),
+        ];
+        Some(FakeServer {
+            python: python.to_string(),
+            env,
+            dir,
+        })
+    }
+
+    const FAKE_FETCH: &str = r#"
+import json, os, shutil, sys, time
+args = sys.argv[1:]
+number = args[0]
+out = args[args.index("--out") + 1]
+def emit(**ev):
+    sys.stdout.write(json.dumps(ev) + "\n"); sys.stdout.flush()
+if number.startswith("404"):
+    emit(ev="error", text="ldraw.org has no part " + number); sys.exit(2)
+if number.startswith("9909"):
+    emit(ev="log", text="about to crash"); sys.exit(3)
+if number.startswith("9908"):
+    sys.stdout.write('{"ev": "weird"}\n'); sys.stdout.flush(); sys.exit(0)
+emit(ev="log", text="fetched parts/%s.dat" % number)
+time.sleep(0.3)   # long enough for the sim to show the fetch under way, on any machine
+os.makedirs(os.path.dirname(out), exist_ok=True)
+shutil.copyfile(os.environ["OB_FAKE_RECORD"], out)
+name = json.load(open(out))["parts"][number]["name"]
+emit(ev="fetched", number=number, name=name, files=19, colors=15, out=out)
+"#;
+
     pub fn fake_server(tag: &str) -> Option<FakeServer> {
         let python = ["python3", "python"]
             .into_iter()

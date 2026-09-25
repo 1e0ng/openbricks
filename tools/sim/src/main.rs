@@ -9,6 +9,7 @@ mod bundle;
 mod drafts;
 mod edges;
 mod editor;
+mod fetch;
 mod geometry;
 mod gizmo;
 mod markers;
@@ -77,10 +78,21 @@ fn main() -> eframe::Result {
         sets: Default::default(),
         colors: Default::default(),
     };
+    let mut notes = Vec::new();
     for p in &args.bricks {
         match bundle::load_bundle(p) {
             Ok(b) => bundle.merge(b),
             Err(e) => eprintln!("warning: {e}"),
+        }
+    }
+    // the parts fetched by number, kept under the data directory
+    for (p, r) in bundle::user_bricks(&markers::data_dir().join("bricks")) {
+        match r {
+            Ok(b) => bundle.merge(b),
+            Err(e) => {
+                eprintln!("warning: {}: {e}", p.display());
+                notes.push(format!("fetched part file {}: {e}", p.display()));
+            }
         }
     }
     let doc = args.file.and_then(|p| {
@@ -105,7 +117,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "openbricks-sim",
         options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(cc, bundle, doc, args.python)))),
+        Box::new(move |cc| Ok(Box::new(app::App::new(cc, bundle, doc, args.python, notes)))),
     )
 }
 

@@ -855,6 +855,11 @@ impl Viewport {
         self.meshes.contains_key(key)
     }
 
+    /// A mesh dropped (a part fetched again): built afresh on its next use.
+    pub fn remove_mesh(&mut self, key: &str) {
+        self.meshes.remove(key);
+    }
+
     pub fn add_mesh(&mut self, device: &wgpu::Device, key: &str, data: &MeshData) {
         use wgpu::util::DeviceExt;
         let verts: Vec<Vertex> = data

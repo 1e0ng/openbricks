@@ -92,6 +92,11 @@ pub struct PartRecord {
     /// element numbers that name the part in that colour.
     #[serde(default)]
     pub colors: BTreeMap<u32, Vec<String>>,
+    /// Fetched from ldraw.org by number (`openbricks_sim.bricks.fetch`):
+    /// kept under the user's data directory, so a build that uses it
+    /// carries the record along for machines without it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fetched: bool,
 }
 
 fn one() -> f64 {
@@ -187,6 +192,20 @@ impl MeshRecord {
 
 /// Load a bundle from `.json.zlib` (the wheel's file) or plain `.json`
 /// (what `openbricks bricks convert` writes).
+/// The parts the user fetched by number, one bundle file each under
+/// `dir` (`<data dir>/bricks/<number>.json`), in name order; a file
+/// that cannot be read comes back with its reason. Nothing when the
+/// directory is not there.
+pub fn user_bricks(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Result<Bundle, String>)> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
+    let mut files: Vec<std::path::PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    files.into_iter().map(|p| (p.clone(), load_bundle(&p))).collect()
+}
+
 pub fn load_bundle(path: &std::path::Path) -> Result<Bundle, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     parse_bundle(&bytes, path.to_string_lossy().ends_with(".zlib"))
@@ -224,6 +243,44 @@ impl Bundle {
     pub fn color_choice(&self, id: u32) -> Option<(u32, String, [u8; 3])> {
         let c = self.colors.get(&id)?;
         Some((id, c.name.clone(), c.rgb_u8()?))
+    }
+}
+
+#[cfg(test)]
+mod user_bricks_tests {
+    use super::*;
+
+    #[test]
+    fn the_users_fetched_parts_load_in_name_order_and_a_bad_file_is_named() {
+        let dir = std::env::temp_dir().join(format!("ob-user-bricks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(user_bricks(&dir).is_empty(), "no directory yet");
+        std::fs::create_dir_all(&dir).unwrap();
+        let one = |num: &str| {
+            format!(
+                r#"{{"format":"openbricks-brick-bundle/1","parts":{{"{num}":{{"name":"P{num}","ldraw":"{num}","mesh":{{"verts":0,"tris":0,"pos":"","nrm":"","idx":""}},"bbox":[[0,0,0],[1,1,1]],"com":[0,0,0],"inertia_per_g":[[1,0,0],[0,1,0],[0,0,1]],"fetched":true}}}}}}"#
+            )
+        };
+        std::fs::write(dir.join("3005.json"), one("3005")).unwrap();
+        std::fs::write(dir.join("2458.json"), one("2458")).unwrap();
+        std::fs::write(dir.join("notes.txt"), "not a bundle").unwrap();
+        std::fs::write(dir.join("broken.json"), "{").unwrap();
+        let got = user_bricks(&dir);
+        let names: Vec<String> = got
+            .iter()
+            .map(|(p, _)| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, ["2458.json", "3005.json", "broken.json"]);
+        assert!(got[0].1.as_ref().unwrap().parts["2458"].fetched);
+        assert!(got[2].1.as_ref().unwrap_err().contains("bundle JSON"));
+        // a record that says nothing about it is not fetched, and the flag is left out when false
+        let plain: PartRecord = serde_json::from_str(
+            r#"{"name":"x","mesh":{"verts":0,"tris":0,"pos":"","nrm":"","idx":""},"bbox":[[0,0,0],[1,1,1]],"com":[0,0,0],"inertia_per_g":[[1,0,0],[0,1,0],[0,0,1]]}"#,
+        )
+        .unwrap();
+        assert!(!plain.fetched);
+        assert!(!serde_json::to_string(&plain).unwrap().contains("fetched"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

@@ -22,7 +22,7 @@ from tests.ldraw_fixture import write_mini_library
 class FetchTests(unittest.TestCase):
     def test_fetch_calls_the_library_downloader(self):
         with mock.patch("openbricks_sim.bricks.fetch_library", return_value="/x/ldraw") as fetch, \
-                mock.patch("openbricks_sim.bricks.library_present", return_value=True):
+                mock.patch("openbricks_sim.bricks.library_complete", return_value=True):
             out = io.StringIO()
             with redirect_stdout(out):
                 rc = cli.main(["bricks", "fetch", "--dest", "/x/ldraw", "--force"])
@@ -32,9 +32,52 @@ class FetchTests(unittest.TestCase):
 
     def test_fetch_reports_failure(self):
         with mock.patch("openbricks_sim.bricks.fetch_library", return_value="/x/ldraw"), \
-                mock.patch("openbricks_sim.bricks.library_present", return_value=False):
+                mock.patch("openbricks_sim.bricks.library_complete", return_value=False):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(cli.main(["bricks", "fetch"]), 1)
+
+    def test_fetch_by_number_keeps_the_parts_under_the_data_dir(self):
+        from openbricks_sim.bricks import fetch
+
+        def fake(number, root=None, say=None, colors=True):
+            say("fetched parts/%s.dat" % number)
+            if number == "0000":
+                raise fetch.NotInLibrary(number, ["u"])
+            if number == "5000":
+                raise fetch.FetchError("u5", "HTTP 500")
+            return {"format": "openbricks-brick-bundle/1", "files": 1, "parts": {number: {"name": "Part " + number}}}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"OPENBRICKS_DATA_DIR": tmp}), \
+                mock.patch.object(fetch, "fetch_part", fake):
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = cli.main(["bricks", "fetch", "2458", "3005"])
+            self.assertEqual(rc, 0, err.getvalue())
+            for number in ("2458", "3005"):
+                with open(os.path.join(tmp, "bricks", number + ".json")) as fh:
+                    self.assertEqual(json.load(fh)["parts"][number]["name"], "Part " + number)
+            self.assertIn("fetched parts/2458.dat", out.getvalue())
+            self.assertIn("openbricks sim", out.getvalue())
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(["bricks", "fetch", "0000", "3005", "--no-colors"]), 1)
+                self.assertEqual(cli.main(["bricks", "fetch", "5000"]), 1)
+            self.assertIn("no part 0000", err.getvalue())
+            self.assertIn("HTTP 500", err.getvalue())
+            self.assertTrue(os.path.exists(os.path.join(tmp, "bricks", "3005.json")), "the good one still lands")
+
+    def test_fetch_by_number_without_numpy_points_at_the_extra(self):
+        import builtins
+        real_import = builtins.__import__
+
+        def no_numpy(name, *a, **k):
+            if name.startswith("openbricks_sim.bricks.ldraw"):
+                raise ImportError("no numpy")
+            return real_import(name, *a, **k)
+        with mock.patch.object(builtins, "__import__", no_numpy):
+            err = io.StringIO()
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(["bricks", "fetch", "2458"]), 1)
+        self.assertIn("pip install openbricks[sim]", err.getvalue())
 
     def test_help_parses(self):
         for argv in (["bricks", "--help"], ["bricks", "fetch", "--help"], ["bricks", "convert", "--help"]):
