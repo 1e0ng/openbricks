@@ -96,15 +96,73 @@ def encode_bundle(bundle):
     return base64.b64encode(zlib.compress(json.dumps(bundle, separators=(",", ":")).encode(), 9)).decode()
 
 
+def cache_dir():
+    """Where downloads are cached: ``$XDG_CACHE_HOME/openbricks``, else
+    ``~/.cache/openbricks``."""
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return pathlib.Path(cache) / "openbricks"
+
+
 def ldraw_dir():
     """Where ``openbricks bricks fetch`` puts the library:
-    ``$OPENBRICKS_LDRAW_DIR``, else ``$XDG_CACHE_HOME/openbricks/ldraw``,
-    else ``~/.cache/openbricks/ldraw``."""
+    ``$OPENBRICKS_LDRAW_DIR``, else ``ldraw`` under :func:`cache_dir`."""
     env = os.environ.get("OPENBRICKS_LDRAW_DIR")
     if env:
         return pathlib.Path(env).expanduser()
-    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
-    return pathlib.Path(cache) / "openbricks" / "ldraw"
+    return cache_dir() / "ldraw"
+
+
+def user_bricks_dir():
+    """Where the parts fetched by number are kept: ``bricks`` under the
+    data directory (:func:`openbricks_sim.props.data_dir`)."""
+    from openbricks_sim import props
+    return props.data_dir() / "bricks"
+
+
+def load_user_bricks(directory=None):
+    """The parts fetched by number, one bundle file each under
+    ``directory`` (:func:`user_bricks_dir`), in name order: ``(path,
+    bundle)`` pairs, a file that will not read carrying its reason (a
+    string) instead of a bundle. Nothing when the directory is not there."""
+    directory = pathlib.Path(directory) if directory else user_bricks_dir()
+    if not directory.is_dir():
+        return []
+    out = []
+    for path in sorted(p for p in directory.iterdir() if p.suffix == ".json"):
+        try:
+            with open(str(path)) as fh:
+                bundle = json.load(fh)
+            if not isinstance(bundle, dict) or not isinstance(bundle.get("parts"), dict):
+                raise ValueError("not a brick bundle (no \"parts\" object)")
+            for rec in bundle["parts"].values():
+                rec["fetched"] = True         # it came from the user's directory: it travels with a build
+            out.append((path, bundle))
+        except (OSError, ValueError) as e:
+            out.append((path, str(e)))
+    return out
+
+
+def library_bundle(directory=None):
+    """The library as the sim loads it: the shipped bundle plus the
+    user's fetched parts, the shipped record winning on the same number
+    (a fetched copy of a shipped part is left out and said so). Returns
+    the bundle and the notes: files left out or unreadable."""
+    bundle = load_bundle()
+    notes = []
+    for path, extra in load_user_bricks(directory):
+        if isinstance(extra, str):
+            notes.append("fetched part file %s: %s" % (path, extra))
+            continue
+        for num, rec in extra["parts"].items():
+            if num in bundle["parts"]:
+                notes.append("%s: the library ships %s (%s); the fetched copy is ignored, remove the file"
+                             % (path, num, bundle["parts"][num].get("name", "")))
+                continue
+            bundle["parts"][num] = rec
+        colors = extra.get("colors")
+        if isinstance(colors, dict):
+            bundle.setdefault("colors", {}).update(colors)
+    return bundle, notes
 
 
 def library_present(root):

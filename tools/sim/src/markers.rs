@@ -32,28 +32,54 @@ pub struct Markers {
     pub markers: Vec<Marker>,
 }
 
-/// Where this machine keeps its markers (and other per-user data).
+/// Where this machine keeps its markers (and other per-user data: the
+/// drafts, the maps, the parts fetched by number).
 pub fn data_dir() -> PathBuf {
     data_dir_from(
         std::env::var_os("OPENBRICKS_DATA_DIR"),
         std::env::var_os("XDG_DATA_HOME"),
         std::env::var_os("HOME"),
+        std::env::var_os("USERPROFILE"),
     )
 }
 
-/// The data dir from the environment's three candidates: an explicit
-/// `OPENBRICKS_DATA_DIR`, else `XDG_DATA_HOME/openbricks`, else
-/// `~/.local/share/openbricks` (the working directory when there is no
-/// home at all).
-pub fn data_dir_from(explicit: Option<std::ffi::OsString>, xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> PathBuf {
+/// The data dir from the environment: an explicit `OPENBRICKS_DATA_DIR`,
+/// else `XDG_DATA_HOME/openbricks`, else `~/.local/share/openbricks`,
+/// with `~` the home directory — `HOME`, else `USERPROFILE` (Windows),
+/// else the working directory — and a leading `~` in either variable
+/// standing for it (a shell would have expanded it; a plist, a .env
+/// file or a Windows variable does not). The package's
+/// `openbricks_sim.props.data_dir` applies the same rule, so what
+/// `openbricks bricks fetch` keeps is what the sim loads;
+/// `tests/data_dir_cases.json` over there pins both.
+pub fn data_dir_from(
+    explicit: Option<std::ffi::OsString>,
+    xdg: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+) -> PathBuf {
+    let home = home
+        .filter(|h| !h.is_empty())
+        .or(userprofile.filter(|u| !u.is_empty()))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     if let Some(d) = explicit.filter(|d| !d.is_empty()) {
-        return PathBuf::from(d);
+        return tilde(&d.to_string_lossy(), &home);
     }
     if let Some(x) = xdg.filter(|x| !x.is_empty()) {
-        return PathBuf::from(x).join("openbricks");
+        return tilde(&x.to_string_lossy(), &home).join("openbricks");
     }
-    let home = home.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
     home.join(".local").join("share").join("openbricks")
+}
+
+fn tilde(path: &str, home: &std::path::Path) -> PathBuf {
+    if path == "~" {
+        return home.to_path_buf();
+    }
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        return home.join(rest);
+    }
+    PathBuf::from(path)
 }
 
 fn file_stem(world: &str) -> String {
@@ -195,15 +221,38 @@ mod tests {
     #[test]
     fn the_data_dir_follows_the_environment() {
         let os = |s: &str| Some(std::ffi::OsString::from(s));
-        assert_eq!(data_dir_from(os("/x/ob"), os("/y"), os("/h")), PathBuf::from("/x/ob"));
+        assert_eq!(data_dir_from(os("/x/ob"), os("/y"), os("/h"), None), PathBuf::from("/x/ob"));
         assert_eq!(
-            data_dir_from(os(""), os("/y"), os("/h")),
+            data_dir_from(os(""), os("/y"), os("/h"), None),
             PathBuf::from("/y/openbricks"),
             "an empty override does not count"
         );
-        assert_eq!(data_dir_from(None, os(""), os("/h")), PathBuf::from("/h/.local/share/openbricks"));
-        assert_eq!(data_dir_from(None, None, None), PathBuf::from("./.local/share/openbricks"));
+        assert_eq!(
+            data_dir_from(None, os(""), os("/h"), None),
+            PathBuf::from("/h/.local/share/openbricks")
+        );
+        assert_eq!(data_dir_from(None, None, None, None), PathBuf::from("./.local/share/openbricks"));
+        assert_eq!(
+            data_dir_from(None, None, None, os("/u")),
+            PathBuf::from("/u/.local/share/openbricks")
+        );
+        assert_eq!(data_dir_from(os("~/ob"), None, os("/h"), None), PathBuf::from("/h/ob"));
         // the real one has the same shape
         assert!(data_dir().to_string_lossy().contains("openbricks") || std::env::var_os("OPENBRICKS_DATA_DIR").is_some());
+    }
+
+    #[test]
+    fn the_data_dir_rule_is_the_packages_rule() {
+        // the same cases the Python side pins, from the one file
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../openbricks/tests/data_dir_cases.json")).unwrap();
+        let cases = cases["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for case in cases {
+            let var = |k: &str| case.get(k).and_then(|v| v.as_str()).map(std::ffi::OsString::from);
+            let got = data_dir_from(var("OPENBRICKS_DATA_DIR"), var("XDG_DATA_HOME"), var("HOME"), var("USERPROFILE"));
+            let got = got.to_string_lossy().replace('\\', "/");
+            let got = got.strip_prefix("./").unwrap_or(&got);
+            assert_eq!(got, case["expect"].as_str().unwrap(), "{case}");
+        }
     }
 }

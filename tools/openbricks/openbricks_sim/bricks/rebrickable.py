@@ -69,12 +69,17 @@ def build(numbers, colors_rows, elements_rows, rebrickable=None):
     [numbers with no data]}`` for the given LDraw numbers."""
     rebrickable = rebrickable or {}
     colors = {r["id"]: r for r in colors_rows}
-    by_part = {}
+    by_part, by_design = {}, {}
     for r in elements_rows:
         by_part.setdefault(r["part_num"], {}).setdefault(r["color_id"], []).append(r["element_id"])
+        if r.get("design_id"):
+            by_design.setdefault(r["design_id"], {}).setdefault(r["color_id"], []).append(r["element_id"])
     parts, without, used = {}, [], set()
     for num in numbers:
-        entry = by_part.get(rebrickable.get(num, num))
+        # Rebrickable's spelling of the number, the number itself, then the
+        # LEGO design id its elements carry (a number Rebrickable spells
+        # with a mould suffix it does not know is still that design)
+        entry = by_part.get(rebrickable.get(num, num)) or by_part.get(num) or by_design.get(num)
         if not entry:
             without.append(num)
             continue

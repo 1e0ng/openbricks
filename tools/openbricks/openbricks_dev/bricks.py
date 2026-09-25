@@ -39,10 +39,12 @@ def add_parser(sub):
                         "the files it needs and kept under the sim's data directory. None: the "
                         "whole library.")
     f.add_argument("--dest", default=None, metavar="DIR",
-                   help="Where to unpack the whole library. Default: $OPENBRICKS_LDRAW_DIR, "
-                        "else ~/.cache/openbricks/ldraw.")
+                   help="The LDraw cache: where the whole library is unpacked, and where parts fetched "
+                        "by number keep their files. Default: $OPENBRICKS_LDRAW_DIR, else "
+                        "~/.cache/openbricks/ldraw.")
     f.add_argument("--force", action="store_true",
-                   help="Download again even if the library is already there.")
+                   help="Download again: the whole library even if it is already there; a part's files "
+                        "and Rebrickable's colour tables even if the cache has them.")
     f.add_argument("--no-colors", action="store_true",
                    help="Fetch parts without the colours Rebrickable lists for them.")
     c = bs.add_parser("convert", help="Convert LDraw part numbers into a brick bundle.")
@@ -84,24 +86,28 @@ def _fetch_parts(args):
     except ImportError:
         print("error: ``openbricks bricks fetch NUMBER`` needs numpy: pip install openbricks[sim]", file=sys.stderr)
         return 1
+    from openbricks_sim import bricks
     out_dir = fetch.bricks_dir()
+    shipped = bricks.load_bundle()["parts"]
     failed = 0
     for number in args.numbers:
+        if number in shipped:
+            # the shipped record (weighed, in its sets) wins over a fetched one: nothing to fetch
+            print("error: %s is in the library already (%s)" % (number, shipped[number].get("name", "")), file=sys.stderr)
+            failed += 1
+            continue
         try:
-            bundle = fetch.fetch_part(number, root=args.dest, say=lambda s: print("  " + s), colors=not args.no_colors)
-        except fetch.NotInLibrary as e:
+            bundle = fetch.fetch_part(number, root=args.dest, say=lambda s: print("  " + s), colors=not args.no_colors,
+                                      force=args.force)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out = out_dir / (number + ".json")
+            tmp = out.with_name(out.name + ".part")
+            tmp.write_text(json.dumps(bundle, separators=(",", ":")))
+            tmp.replace(out)
+        except (fetch.NotInLibrary, fetch.FetchError, OSError) as e:
             print("error: %s" % e, file=sys.stderr)
             failed += 1
             continue
-        except fetch.FetchError as e:
-            print("error: %s" % e, file=sys.stderr)
-            failed += 1
-            continue
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out = out_dir / (number + ".json")
-        tmp = out.with_name(out.name + ".part")
-        tmp.write_text(json.dumps(bundle, separators=(",", ":")))
-        tmp.replace(out)
         print("%s %s -> %s" % (number, bundle["parts"][number]["name"], out))
     if not failed:
         print("in the sim's library from its next launch: openbricks sim")

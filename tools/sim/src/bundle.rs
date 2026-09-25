@@ -190,12 +190,12 @@ impl MeshRecord {
     }
 }
 
-/// Load a bundle from `.json.zlib` (the wheel's file) or plain `.json`
-/// (what `openbricks bricks convert` writes).
 /// The parts the user fetched by number, one bundle file each under
 /// `dir` (`<data dir>/bricks/<number>.json`), in name order; a file
 /// that cannot be read comes back with its reason. Nothing when the
-/// directory is not there.
+/// directory is not there. Every record found there is marked
+/// `fetched`: it came from the user's directory, so a build that uses
+/// it carries it along, whatever the file says.
 pub fn user_bricks(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Result<Bundle, String>)> {
     let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
     let mut files: Vec<std::path::PathBuf> = entries
@@ -203,9 +203,49 @@ pub fn user_bricks(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Result<Bun
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
         .collect();
     files.sort();
-    files.into_iter().map(|p| (p.clone(), load_bundle(&p))).collect()
+    files
+        .into_iter()
+        .map(|p| {
+            let loaded = load_bundle(&p).map(|mut b| {
+                b.parts.values_mut().for_each(|r| r.fetched = true);
+                b
+            });
+            (p, loaded)
+        })
+        .collect()
 }
 
+/// The user's fetched parts join `bundle`. A number the library already
+/// carries keeps the library's record (weighed, in its sets) and the
+/// file is noted; so is a file that will not read. The notes come back
+/// for the inspector.
+pub fn merge_user_bricks(bundle: &mut Bundle, dir: &std::path::Path) -> Vec<String> {
+    let mut notes = vec![];
+    for (p, r) in user_bricks(dir) {
+        match r {
+            Ok(b) => {
+                for (num, rec) in b.parts {
+                    match bundle.parts.get(&num) {
+                        Some(have) => notes.push(format!(
+                            "{}: the library ships {num} ({}); the fetched copy is ignored, remove the file",
+                            p.display(),
+                            have.name
+                        )),
+                        None => {
+                            bundle.parts.insert(num, rec);
+                        }
+                    }
+                }
+                bundle.colors.extend(b.colors);
+            }
+            Err(e) => notes.push(format!("fetched part file {}: {e}", p.display())),
+        }
+    }
+    notes
+}
+
+/// Load a bundle from `.json.zlib` (the wheel's file) or plain `.json`
+/// (what `openbricks bricks convert` writes).
 pub fn load_bundle(path: &std::path::Path) -> Result<Bundle, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     parse_bundle(&bytes, path.to_string_lossy().ends_with(".zlib"))
@@ -265,14 +305,20 @@ mod user_bricks_tests {
         std::fs::write(dir.join("2458.json"), one("2458")).unwrap();
         std::fs::write(dir.join("notes.txt"), "not a bundle").unwrap();
         std::fs::write(dir.join("broken.json"), "{").unwrap();
+        // a converted record dropped into the directory by hand says nothing about being fetched
+        std::fs::write(dir.join("3001.json"), one("3001").replace(r#","fetched":true"#, "")).unwrap();
         let got = user_bricks(&dir);
         let names: Vec<String> = got
             .iter()
             .map(|(p, _)| p.file_name().unwrap().to_string_lossy().to_string())
             .collect();
-        assert_eq!(names, ["2458.json", "3005.json", "broken.json"]);
+        assert_eq!(names, ["2458.json", "3001.json", "3005.json", "broken.json"]);
         assert!(got[0].1.as_ref().unwrap().parts["2458"].fetched);
-        assert!(got[2].1.as_ref().unwrap_err().contains("bundle JSON"));
+        assert!(
+            got[1].1.as_ref().unwrap().parts["3001"].fetched,
+            "it came from the directory: it travels"
+        );
+        assert!(got[3].1.as_ref().unwrap_err().contains("bundle JSON"));
         // a record that says nothing about it is not fetched, and the flag is left out when false
         let plain: PartRecord = serde_json::from_str(
             r#"{"name":"x","mesh":{"verts":0,"tris":0,"pos":"","nrm":"","idx":""},"bbox":[[0,0,0],[1,1,1]],"com":[0,0,0],"inertia_per_g":[[1,0,0],[0,1,0],[0,0,1]]}"#,
@@ -280,6 +326,33 @@ mod user_bricks_tests {
         .unwrap();
         assert!(!plain.fetched);
         assert!(!serde_json::to_string(&plain).unwrap().contains("fetched"));
+        // joining the library: the shipped record of the same number wins, and the file is named
+        let mut lib = Bundle {
+            format: String::new(),
+            source: String::new(),
+            parts: [("3001".to_string(), {
+                let mut r = plain.clone();
+                r.name = "Brick  2 x  4".into();
+                r
+            })]
+            .into_iter()
+            .collect(),
+            missing: vec![],
+            sets: Default::default(),
+            colors: Default::default(),
+        };
+        let notes = merge_user_bricks(&mut lib, &dir);
+        assert_eq!(lib.parts.len(), 3, "{:?}", lib.parts.keys());
+        assert_eq!(lib.parts["3001"].name, "Brick  2 x  4");
+        assert!(lib.parts["2458"].fetched && lib.parts["3005"].fetched);
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(
+            notes[0].contains("3001.json") && notes[0].contains("ships 3001 (Brick  2 x  4)"),
+            "{}",
+            notes[0]
+        );
+        assert!(notes[1].contains("broken.json") && notes[1].contains("bundle JSON"), "{}", notes[1]);
+        assert!(merge_user_bricks(&mut lib, &dir.join("nowhere")).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

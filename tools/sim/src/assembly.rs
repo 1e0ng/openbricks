@@ -974,7 +974,9 @@ pub fn connectors_of_leaf(doc: &Document, bundle: &Bundle, leaf: &Leaf) -> Vec<W
     let Some(part) = doc.parts.get(&leaf.part_id) else { return vec![] };
     let list: Vec<Connector> = match geometry_of(part, bundle) {
         Geometry::Record(rec) => with_stud_sockets(&rec.connectors, &rec.bbox),
-        Geometry::Imported { connectors, .. } => connectors,
+        // a fetched part's record travels without its sockets: derived here as for the library's
+        // (nothing to derive for an STL import, which has no studs)
+        Geometry::Imported { connectors, bbox, .. } => with_stud_sockets(&connectors, &[bbox.min.to_array(), bbox.max.to_array()]),
         _ => vec![],
     };
     list.into_iter()

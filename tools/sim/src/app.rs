@@ -213,10 +213,11 @@ pub struct App {
     fetch_env: Vec<(String, String)>,
     /// Where fetched parts are kept (the data directory's `bricks`).
     bricks_dir: std::path::PathBuf,
-    /// A fetch by number in progress.
+    /// A fetch by number in progress (one at a time: a second one would kill it).
     fetch: Option<PartFetch>,
-    /// Why the last fetch failed, under the library's line about the part.
-    fetch_note: String,
+    /// Why the last fetch failed: the number, and the reason drawn under
+    /// the library's line about that number alone.
+    fetch_note: Option<(String, String)>,
     /// Where the 3D view was drawn last frame, in screen points.
     view_rect: egui::Rect,
     items: Vec<DrawItem>,
@@ -312,10 +313,16 @@ impl App {
         if !given {
             app.restore_drafts(crate::drafts::now_ms());
         }
-        // what went wrong on the way in (a fetched part's file that would not read) is listed
-        // with the build's own problems
-        app.editor.errors.extend(notes);
+        // what went wrong on the way in (a fetched part's file that would not read, or one the
+        // library ships a better record for) is listed with the build's own problems, and stays
+        // listed however often those are checked afresh
+        app.editor.notes.extend(notes);
         app
+    }
+
+    #[cfg(test)]
+    fn note_text(&self) -> String {
+        self.fetch_note.as_ref().map(|n| n.1.clone()).unwrap_or_default()
     }
 
     /// The drafts an earlier session kept come back: the build (unless a
@@ -345,17 +352,32 @@ impl App {
     /// Start fetching part `number` from ldraw.org into the bricks
     /// directory, with the sim's Python.
     fn start_fetch(&mut self, number: &str) {
+        if let Some(f) = &self.fetch {
+            // one at a time: starting another would kill this one half way
+            self.fetch_note = Some((number.into(), format!("{} is still being fetched", f.number)));
+            return;
+        }
         let Some(python) = self.python.clone() else {
-            self.fetch_note = "fetching needs the openbricks Python: start the sim with `openbricks sim`".into();
+            self.fetch_note = Some((
+                number.into(),
+                "fetching needs the openbricks Python: start the sim with `openbricks sim`".into(),
+            ));
             return;
         };
         let out = self.bricks_dir.join(format!("{number}.json"));
         match PartFetch::start(&python, &self.fetch_env, number, &out) {
             Ok(f) => {
                 self.fetch = Some(f);
-                self.fetch_note.clear();
+                self.fetch_note = None;
             }
-            Err(e) => self.fetch_note = e,
+            Err(e) => self.fetch_note = Some((number.into(), e)),
+        }
+    }
+
+    /// The fetch under way is stopped; nothing of it is kept.
+    fn cancel_fetch(&mut self) {
+        if let Some(f) = self.fetch.take() {
+            self.editor.status = format!("The fetch of {} was cancelled", f.number);
         }
     }
 
@@ -369,7 +391,13 @@ impl App {
         let number = f.number.clone();
         self.fetch = None;
         match outcome {
-            Outcome::Fetched { name, files, colors, out } => match crate::bundle::load_bundle(&out) {
+            Outcome::Fetched {
+                name,
+                files,
+                colors,
+                note,
+                out,
+            } => match crate::bundle::load_bundle(&out) {
                 Ok(b) => {
                     self.editor.bundle.merge(b);
                     self.viewport.remove_mesh(&format!("ld:{number}"));
@@ -379,16 +407,19 @@ impl App {
                         self.viewport.retain_thumbs(&mut renderer, |k| !k.starts_with(&stale));
                     }
                     self.editor.forget_part(&number);
+                    let colours = match note {
+                        Some(why) => why,
+                        None => format!("{colors} colour{}", if colors == 1 { "" } else { "s" }),
+                    };
                     self.editor.status = format!(
-                        "{number} {name} joined the library ({files} file{}, {colors} colour{}); it is kept at {}",
+                        "{number} {name} joined the library ({files} file{}, {colours}); it is kept at {}",
                         if files == 1 { "" } else { "s" },
-                        if colors == 1 { "" } else { "s" },
                         out.display()
                     );
                 }
-                Err(e) => self.fetch_note = format!("{number} was fetched but its file would not read: {e}"),
+                Err(e) => self.fetch_note = Some((number.clone(), format!("{number} was fetched but its file would not read: {e}"))),
             },
-            Outcome::Failed(text) => self.fetch_note = text,
+            Outcome::Failed(text) => self.fetch_note = Some((number, text)),
         }
         ui.ctx().request_repaint();
     }
@@ -443,7 +474,7 @@ impl App {
             fetch_env: vec![],
             bricks_dir: crate::markers::data_dir().join("bricks"),
             fetch: None,
-            fetch_note: String::new(),
+            fetch_note: None,
             view_rect: egui::Rect::ZERO,
             items: vec![],
             item_tops: vec![],
@@ -1360,11 +1391,25 @@ impl App {
             if hits == 0 && looks_like_part_number(&q) {
                 ui.add_space(4.0);
                 ui.label(format!("{q} is not in the library"));
+                let mut cancel = false;
                 match &self.fetch {
                     Some(f) if f.number == q => {
-                        ui.weak(format!("fetching {q}… {}", f.last));
+                        ui.horizontal_wrapped(|ui| {
+                            ui.weak(format!("fetching {q}… {}", f.last));
+                            if ui
+                                .small_button("Cancel")
+                                .on_hover_text("stop this fetch; nothing of it is kept")
+                                .clicked()
+                            {
+                                cancel = true;
+                            }
+                        });
                     }
-                    _ => {
+                    // one at a time: another fetch now would kill that one half way
+                    Some(f) => {
+                        ui.weak(format!("fetching {} first…", f.number));
+                    }
+                    None => {
                         if ui
                             .button(format!("Fetch {q} from LDraw"))
                             .on_hover_text("its files from ldraw.org, converted, with the colours it comes in; kept for every later launch")
@@ -1374,8 +1419,13 @@ impl App {
                         }
                     }
                 }
-                if !self.fetch_note.is_empty() {
-                    ui.colored_label(RED, &self.fetch_note);
+                if cancel {
+                    self.cancel_fetch();
+                }
+                if let Some((number, why)) = &self.fetch_note
+                    && *number == q
+                {
+                    ui.colored_label(RED, why);
                 }
             }
             ui.add_space(8.0);
@@ -1782,9 +1832,9 @@ impl App {
                     self.editor.open_component(&root, false);
                 }
             }
-            if !self.editor.errors.is_empty() {
+            if !self.editor.errors.is_empty() || !self.editor.notes.is_empty() {
                 ui.add_space(6.0);
-                for e in &self.editor.errors {
+                for e in self.editor.errors.iter().chain(&self.editor.notes) {
                     ui.colored_label(RED, e);
                 }
             }
@@ -3031,10 +3081,10 @@ mod tests {
         h.get_by_label("Fetch 2458 from LDraw").click();
         steps(&mut h, 2);
         // under way (the stand-in takes a moment on purpose): its row says so
-        assert!(h.state().fetch.is_some(), "{}", h.state().fetch_note);
+        assert!(h.state().fetch.is_some(), "{}", h.state().note_text());
         assert!(h.query_by_label_contains("fetching 2458").is_some());
         wait_until(&mut h, |a| a.fetch.is_none());
-        assert!(h.state().fetch_note.is_empty(), "{}", h.state().fetch_note);
+        assert!(h.state().fetch_note.is_none(), "{}", h.state().note_text());
         assert!(h.state().editor.bundle.parts.contains_key("2458"));
         assert!(
             h.state()
@@ -3067,14 +3117,29 @@ mod tests {
             assembly::Geometry::Imported { .. }
         ));
         assert!(ed.leaves.iter().any(|l| l.part_id == "lego_2458"));
-        // ldraw.org has no such part, and a fetcher that dies is said too
+        let leaf = ed.leaves.iter().find(|l| l.part_id == "lego_2458").unwrap();
+        assert!(
+            assembly::connectors_of_leaf(&ed.doc, &ed.bundle, leaf)
+                .iter()
+                .any(|c| c.kind == "stud_socket"),
+            "it seats on studs there too"
+        );
+        // ldraw.org has no such part, and a fetcher that dies is said too — under that number's
+        // line alone
         h.state_mut().search = "4040001".into();
         steps(&mut h, 2);
         h.get_by_label("Fetch 4040001 from LDraw").click();
         wait_until(&mut h, |a| a.fetch.is_none());
-        assert_eq!(h.state().fetch_note, "ldraw.org has no part 4040001");
+        assert_eq!(
+            h.state().fetch_note,
+            Some(("4040001".into(), "ldraw.org has no part 4040001".into()))
+        );
         steps(&mut h, 2);
         assert!(h.query_by_label("ldraw.org has no part 4040001").is_some());
+        h.state_mut().search = "4040002".into();
+        steps(&mut h, 2);
+        assert!(h.query_by_label("ldraw.org has no part 4040001").is_none(), "another number's line");
+        assert!(h.query_by_label("Fetch 4040002 from LDraw").is_some());
         h.state_mut().search = "crash".into();
         steps(&mut h, 2);
         assert!(h.query_by_label_contains("is not in the library").is_none(), "not a number");
@@ -3083,10 +3148,62 @@ mod tests {
         h.get_by_label("Fetch 99090001 from LDraw").click();
         wait_until(&mut h, |a| a.fetch.is_none());
         assert!(
-            h.state().fetch_note.contains("without a word") || h.state().fetch_note.contains("would not read"),
+            h.state().note_text().contains("without a word") || h.state().note_text().contains("would not read"),
             "{}",
-            h.state().fetch_note
+            h.state().note_text()
         );
+        // a fetched file that will not read is said under its number
+        h.state_mut().search = "99040001".into();
+        steps(&mut h, 2);
+        h.get_by_label("Fetch 99040001 from LDraw").click();
+        wait_until(&mut h, |a| a.fetch.is_none());
+        assert!(
+            h.state()
+                .note_text()
+                .starts_with("99040001 was fetched but its file would not read"),
+            "{}",
+            h.state().note_text()
+        );
+        // a part without colours says so in the status line
+        h.state_mut().search = "99050001".into();
+        steps(&mut h, 2);
+        h.get_by_label("Fetch 99050001 from LDraw").click();
+        wait_until(&mut h, |a| a.fetch.is_none());
+        assert!(
+            h.state()
+                .editor
+                .status
+                .contains("(19 files, Rebrickable lists no colours for 99050001)"),
+            "{}",
+            h.state().editor.status
+        );
+        // one fetch at a time: while one runs, another number's line says so instead of offering
+        // a button, and the running one can be cancelled
+        h.state_mut().search = "99060001".into();
+        steps(&mut h, 2);
+        h.get_by_label("Fetch 99060001 from LDraw").click();
+        steps(&mut h, 2);
+        assert!(h.state().fetch.is_some(), "{}", h.state().note_text());
+        h.state_mut().search = "99060002".into();
+        steps(&mut h, 2);
+        assert!(h.query_by_label_contains("fetching 99060001 first").is_some());
+        assert!(h.query_by_label("Fetch 99060002 from LDraw").is_none());
+        h.state_mut().start_fetch("99060002");
+        assert_eq!(
+            h.state().fetch.as_ref().map(|f| f.number.as_str()),
+            Some("99060001"),
+            "not replaced"
+        );
+        assert_eq!(h.state().note_text(), "99060001 is still being fetched");
+        h.state_mut().search = "99060001".into();
+        steps(&mut h, 2);
+        assert!(h.query_by_label_contains("fetching 99060001").is_some());
+        h.get_by_label("Cancel").click();
+        steps(&mut h, 2);
+        assert!(h.state().fetch.is_none());
+        assert_eq!(h.state().editor.status, "The fetch of 99060001 was cancelled");
+        assert!(h.query_by_label("Fetch 99060001 from LDraw").is_some(), "offered again");
+        assert!(!h.state().editor.bundle.parts.contains_key("99060001"));
         let _ = std::fs::remove_dir_all(&fake.dir);
     }
 
@@ -3099,7 +3216,29 @@ mod tests {
         h.get_by_label("Fetch 2458 from LDraw").click();
         steps(&mut h, 2);
         assert!(h.state().fetch.is_none());
-        assert!(h.state().fetch_note.contains("openbricks sim"), "{}", h.state().fetch_note);
+        assert!(h.state().note_text().contains("openbricks sim"), "{}", h.state().note_text());
+        // a Python that will not start is said too
+        h.state_mut().python = Some("/no/such/python".into());
+        h.state_mut().start_fetch("2458");
+        assert!(h.state().fetch.is_none());
+        assert!(
+            h.state().note_text().contains("could not start /no/such/python"),
+            "{}",
+            h.state().note_text()
+        );
+        // what went wrong on the way in is listed with the build's problems, and stays there
+        // when they are checked afresh
+        h.state_mut()
+            .editor
+            .notes
+            .push("fetched part file /x/bricks/2458.json: bundle JSON: EOF".into());
+        h.state_mut().editor.selection.clear();
+        steps(&mut h, 2);
+        assert!(h.query_by_label_contains("fetched part file /x/bricks/2458.json").is_some());
+        h.state_mut().editor.reset_to_example();
+        h.state_mut().editor.forget_part("2458");
+        steps(&mut h, 2);
+        assert!(h.query_by_label_contains("fetched part file /x/bricks/2458.json").is_some());
     }
 
     #[test]
@@ -3821,17 +3960,28 @@ mod tests {
         steps(&mut h, 2);
         let turned = h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "move").cloned().unwrap();
         assert!(turned["yaw_deg"].as_f64().unwrap().abs() > 5.0, "{turned}");
-        // R turns it 90° more, the button another 90°
+        // R turns it 90° more, the button another 90° — each from the pose the server reports,
+        // so each waits for the server to have heard the last turn
         let y0 = turned["yaw_deg"].as_f64().unwrap();
         let last_yaw = |h: &Harness<'_, App>| {
             h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "move").unwrap()["yaw_deg"]
                 .as_f64()
                 .unwrap()
         };
+        let heard = |yaw: f64| {
+            move |a: &App| {
+                a.simulate
+                    .prop_pose(0)
+                    .map(|p| crate::route::wrap_deg(p.yaw_deg - yaw).abs() < 0.2)
+                    .unwrap_or(false)
+            }
+        };
+        wait_for(&mut h, &heard(y0));
         h.key_press(Key::R);
         steps(&mut h, 2);
         let y_r = last_yaw(&h);
         assert!(crate::route::wrap_deg(y_r - y0 - 90.0).abs() < 0.2, "R: {y_r} from {y0}");
+        wait_for(&mut h, &heard(y_r));
         h.get_by_label("Turn 90°").click();
         steps(&mut h, 2);
         let y_b = last_yaw(&h);

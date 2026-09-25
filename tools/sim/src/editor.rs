@@ -47,6 +47,10 @@ pub struct Editor {
     pub magnet: bool,
     pub status: String,
     pub errors: Vec<String>,
+    /// What went wrong on the way in, listed with the errors but kept
+    /// across them: a fetched part's file that would not read, or one
+    /// the library ships a better record for. Validation never clears it.
+    pub notes: Vec<String>,
     /// Set when the view should frame the edited component again.
     pub fit_pending: bool,
     /// Counts recomputes: anything derived from the document (thumbnails) keys on it.
@@ -130,6 +134,7 @@ impl Editor {
             magnet: true,
             status: String::new(),
             errors: vec![],
+            notes: vec![],
             fit_pending: true,
             edits: 0,
             memo: HashMap::new(),
@@ -2438,9 +2443,20 @@ mod tests {
         assert!(matches!(g, Geometry::Imported { .. }));
         let leaf = other.leaves.iter().find(|l| l.part_id == id).unwrap();
         assert_eq!(leaf.pos.z, 40.0);
+        let conns = assembly::connectors_of_leaf(&other.doc, &other.bundle, leaf);
+        assert!(!conns.is_empty(), "its studs and tubes too");
         assert!(
-            !assembly::connectors_of_leaf(&other.doc, &other.bundle, leaf).is_empty(),
-            "its studs and tubes too"
+            conns.iter().any(|c| c.kind == "stud_socket"),
+            "the sockets under its studs are derived here as for the library's own: {:?}",
+            conns.iter().map(|c| c.kind.as_str()).collect::<std::collections::BTreeSet<_>>()
+        );
+        assert_eq!(
+            conns.iter().filter(|c| c.kind == "stud_socket").count(),
+            assembly::connectors_of_leaf(&ed.doc, &ed.bundle, ed.leaves.iter().find(|l| l.part_id == id).unwrap())
+                .iter()
+                .filter(|c| c.kind == "stud_socket")
+                .count(),
+            "as many as on the machine that fetched it"
         );
         // and the overlap rule measures it: a second copy in the same place is refused
         let mut again = Editor::new(real_bundle(), Some((PathBuf::from("x.assembly.json"), other.doc.clone())));
@@ -2464,6 +2480,16 @@ mod tests {
         );
         third.forget_part("0000");
         assert!(third.errors.iter().any(|e| e.contains("0000")), "{:?}", third.errors);
+        // what went wrong on the way in stays listed through every fresh check
+        third.notes.push("fetched part file /x/2458.json: bundle JSON: EOF".into());
+        third.forget_part("0000");
+        third.reset_to_example();
+        let doc = third.doc.clone();
+        third.load_path(PathBuf::from("/nowhere/x.assembly.json"));
+        third.restore_draft(1);
+        assert_eq!(third.notes, ["fetched part file /x/2458.json: bundle JSON: EOF"]);
+        assert!(!third.errors.iter().any(|e| e.contains("2458.json")), "not an error of the build");
+        assert_eq!(third.doc.components.len(), doc.components.len());
     }
 
     #[test]

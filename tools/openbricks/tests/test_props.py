@@ -34,6 +34,23 @@ class DataDirTests(unittest.TestCase):
         self.assertEqual(props.data_dir({"OPENBRICKS_DATA_DIR": "/x/data"}, home="/h"), Path("/x/data"))
         self.assertEqual(props.data_dir({"XDG_DATA_HOME": "/xdg"}, home="/h"), Path("/xdg/openbricks"))
         self.assertEqual(props.data_dir({}, home="/h"), Path("/h/.local/share/openbricks"))
+        # the one rule, pinned for both sides (the sim's markers::data_dir reads the same file)
+        with open(os.path.join(os.path.dirname(__file__), "data_dir_cases.json")) as fh:
+            cases = json.load(fh)["cases"]
+        self.assertGreaterEqual(len(cases), 10)
+        for case in cases:
+            env = {k: v for k, v in case.items() if k != "expect"}
+            got = props.data_dir(env)
+            self.assertEqual(got.as_posix().lstrip("./") if got.as_posix().startswith("./") else got.as_posix(),
+                             case["expect"], case)
+        self.assertEqual(props.home_dir({"HOME": "/h", "USERPROFILE": "/u"}), "/h")
+        self.assertEqual(props.home_dir({"USERPROFILE": "C:\\Users\\me"}), "C:\\Users\\me")
+        self.assertEqual(props.home_dir({}), ".")
+        self.assertEqual(props.data_dir({"OPENBRICKS_DATA_DIR": "~\\ob", "USERPROFILE": "C:\\Users\\me"}),
+                         Path(os.path.join("C:\\Users\\me", "ob")))
+        # the real environment goes through the same function
+        with mock.patch.dict(os.environ, {"OPENBRICKS_DATA_DIR": "/x/data"}):
+            self.assertEqual(props.data_dir(), Path("/x/data"))
         self.assertEqual(props.user_worlds_dir({}, home="/h"), Path("/h/.local/share/openbricks/worlds"))
         self.assertEqual(props.list_user_worlds({"OPENBRICKS_DATA_DIR": "/does/not/exist"}), [])
 

@@ -1,0 +1,17 @@
+{
+  "what": "The data directory rule, as openbricks_sim.props.data_dir (Python) and markers::data_dir_from (the sim, Rust) both apply it: OPENBRICKS_DATA_DIR, else XDG_DATA_HOME/openbricks, else ~/.local/share/openbricks, with ~ = HOME, else USERPROFILE, else the working directory, and a leading ~ in either variable standing for it. Paths are written POSIX-style; each side compares with its separators normalised. A key that is missing is an unset variable; an empty string is a variable set to nothing, which does not count.",
+  "cases": [
+    {"OPENBRICKS_DATA_DIR": "/x/ob", "XDG_DATA_HOME": "/y", "HOME": "/h", "expect": "/x/ob"},
+    {"OPENBRICKS_DATA_DIR": "", "XDG_DATA_HOME": "/y", "HOME": "/h", "expect": "/y/openbricks"},
+    {"XDG_DATA_HOME": "", "HOME": "/h", "expect": "/h/.local/share/openbricks"},
+    {"expect": ".local/share/openbricks"},
+    {"OPENBRICKS_DATA_DIR": "~/ob", "HOME": "/h", "expect": "/h/ob"},
+    {"OPENBRICKS_DATA_DIR": "~", "HOME": "/h", "expect": "/h"},
+    {"OPENBRICKS_DATA_DIR": "~ob", "HOME": "/h", "expect": "~ob"},
+    {"XDG_DATA_HOME": "~/data", "HOME": "/h", "expect": "/h/data/openbricks"},
+    {"USERPROFILE": "/u", "expect": "/u/.local/share/openbricks"},
+    {"HOME": "", "USERPROFILE": "/u", "expect": "/u/.local/share/openbricks"},
+    {"HOME": "/h", "USERPROFILE": "/u", "expect": "/h/.local/share/openbricks"},
+    {"OPENBRICKS_DATA_DIR": "~/ob", "USERPROFILE": "/u", "expect": "/u/ob"}
+  ]
+}

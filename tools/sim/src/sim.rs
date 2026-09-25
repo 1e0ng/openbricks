@@ -481,9 +481,12 @@ for line in sys.stdin:
     }
 
     /// A stand-in `openbricks_sim.bricks.fetch`: writes the record JSON
-    /// given here to `--out` for any number, says so as the real one
-    /// does; a number starting `404` is one ldraw.org has not, `9909`
-    /// dies mid-way, `9908` speaks nonsense.
+    /// given here to `--out` under the number asked for, says so as the
+    /// real one does; a number starting `404` is one ldraw.org has not,
+    /// `9909` dies mid-way (a traceback on stderr), `9908` speaks
+    /// nonsense, `9907` a long line in another alphabet, `9906` takes
+    /// three seconds, `9905` comes without colours, `9904` writes a file
+    /// that will not read, `9903` warns on stderr for three seconds.
     pub fn fake_fetcher(tag: &str, record_json: &str) -> Option<FakeServer> {
         let python = ["python3", "python"]
             .into_iter()
@@ -515,15 +518,40 @@ def emit(**ev):
 if number.startswith("404"):
     emit(ev="error", text="ldraw.org has no part " + number); sys.exit(2)
 if number.startswith("9909"):
-    emit(ev="log", text="about to crash"); sys.exit(3)
+    emit(ev="log", text="about to crash")
+    sys.stderr.write("Traceback (most recent call last):\n  File \"fetch.py\", line 1\nValueError: boom\n")
+    sys.stderr.flush()
+    sys.exit(3)
 if number.startswith("9908"):
     sys.stdout.write('{"ev": "weird"}\n'); sys.stdout.flush(); sys.exit(0)
+if number.startswith("9907"):
+    sys.stdout.buffer.write((u"é" * 300 + "\n").encode("utf-8")); sys.stdout.flush(); sys.exit(0)
+if number.startswith("9906"):
+    emit(ev="log", text="taking my time")
+    time.sleep(3)
+if number.startswith("9904"):
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w") as fh:
+        fh.write("{")
+    emit(ev="fetched", number=number, name="Broken", files=1, colors=0, out=out); sys.exit(0)
+if number.startswith("9903"):
+    for i in range(60):
+        sys.stderr.write("warning %d\n" % i); sys.stderr.flush(); time.sleep(0.05)
+    sys.exit(0)
 emit(ev="log", text="fetched parts/%s.dat" % number)
 time.sleep(0.3)   # long enough for the sim to show the fetch under way, on any machine
 os.makedirs(os.path.dirname(out), exist_ok=True)
-shutil.copyfile(os.environ["OB_FAKE_RECORD"], out)
-name = json.load(open(out))["parts"][number]["name"]
-emit(ev="fetched", number=number, name=name, files=19, colors=15, out=out)
+bundle = json.load(open(os.environ["OB_FAKE_RECORD"]))
+rec = next(iter(bundle["parts"].values()))
+rec["ldraw"] = number
+bundle["parts"] = {number: rec}
+with open(out, "w") as fh:
+    json.dump(bundle, fh)
+ev = dict(ev="fetched", number=number, name=rec["name"], files=19, colors=15, out=out)
+if number.startswith("9905"):
+    ev["colors"] = 0
+    ev["note"] = "Rebrickable lists no colours for " + number
+emit(**ev)
 "#;
 
     pub fn fake_server(tag: &str) -> Option<FakeServer> {

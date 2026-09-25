@@ -3,6 +3,93 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.27.1 — fetch by number, reviewed: every pause waited out, one rule for the data directory, sockets and wheels that travel
+
+An adversarial review of 4.27.0 found sixteen defects; all are
+fixed here, each with a test.
+
+The fetcher waited out one rate-limit pause per fetch, so a part of
+more than two windows' worth of files (`75972`, `45601`, `95652`:
+the hubs and sensors of the LEGO robotics sets) failed on its first
+try; every pause ldraw.org asks for is waited out now (up to ten). A
+connection that stalls hung the fetch for good and a body cut short
+died without a word: thirty seconds is the limit and a cut body is
+an error naming the URL. A page served with a 200 in place of a file
+was written into the cache; it is refused. A subfile ldraw.org has
+not was reported as "no part *subfile*", exit 2, as if the part
+itself were absent; it is "*part* needs *subfile*, which ldraw.org
+has not", exit 1. An alias of an alias (`2455` → `3755` → `3755a`)
+came down named "Moved to 3755a"; the chain is followed to the part.
+Colours were looked up by the typed number alone, so a number
+Rebrickable knows only under its moved target or as a design id
+(`3070`, half of LDraw's plain numbers) came down colourless in
+silence; the resolved number and the design id are tried, and a part
+Rebrickable has nothing on says so in the status line. `bricks fetch
+NUMBER --force` was accepted and ignored; it fetches the part's files
+and the tables again. An `--out` that could not be written ended in a
+traceback rather than the error event (the CLI likewise); it is the
+error event, and the CLI goes on to the next number. Rebrickable's
+tables were cached beside `$OPENBRICKS_LDRAW_DIR`, in a directory
+the user never chose; they live under the cache directory.
+
+Three data-directory rules disagreed — the fetcher, the maps and the
+sim — so on Windows (no `HOME`) the CLI kept a part where the sim
+never looked, and a literal `~` in `OPENBRICKS_DATA_DIR` meant three
+different places. There is one rule now, pinned by one fixture file
+both sides read: `$OPENBRICKS_DATA_DIR`, else `$XDG_DATA_HOME/openbricks`,
+else `~/.local/share/openbricks`, with `~` `$HOME`, else `%USERPROFILE%`,
+else the working directory, and a leading `~` in either variable
+expanded. (The sim's data on Windows moves from the working directory
+to `%USERPROFILE%\.local\share\openbricks`.)
+
+In the sim, a fetched record shadowed a shipped one of the same
+number (an estimated mass in place of the weighed one, out of its
+sets); the shipped record wins, the file is noted, and `bricks fetch`
+refuses a number the library ships. A fetched brick opened elsewhere
+had no stud sockets and could not seat on studs; they are derived on
+arrival as for the library's own. The MuJoCo runtime never saw a
+fetched part unless the build carried it, and a fetched wheel with
+its record carried failed to simulate; the runtime loads the data
+directory's parts and reads the carried record. Clicking **Fetch**
+for a second number killed the fetch in progress unannounced; one
+runs at a time, the other number's line says so, and **Cancel** stops
+the one running. A failed number's red note was drawn under whatever
+number the search showed next; it is tied to its number. The notes
+about unreadable fetched files vanished at the next check of the
+build; they stay. A record dropped into the data directory by hand
+did not travel with a build; everything in that directory does. A
+fetcher's traceback could be outrun by its exit marker, and a long
+line in another alphabet could stop the reader for good; the marker
+waits for the traceback, and lines are cut at characters.
+
+The docs said a fetch was "a few dozen kilobytes" and the pauses
+"waited out once"; they say the tables come too and every pause is
+waited out, and show the CLI's real forms.
+
+- Tests: the fetcher (an LDraw file's first line; the tables' cache
+  directory against `OPENBRICKS_LDRAW_DIR`; the one data-directory
+  rule from the shared fixture, on both sides; the user's parts
+  joining the runtime's library without shadowing a shipped one; a
+  part's files fetched again on `--force`, the primitives not; a page
+  refused; a 429 on every third request waited out, the figure
+  honoured within reason, a site that never stops given up on; a
+  missing subfile naming the part; a body cut short, a stall and a
+  reset naming the URL; colours by the resolved number, by the design
+  id, and none with a note; a table cut short; `--force`,
+  `--no-colors` and the note through `main`, an `--out` that cannot
+  be written; an alias of an alias); the CLI (`--force` and `--dest`
+  reaching the fetcher, a shipped number refused, a file that cannot
+  be written going on to the next number); the runtime (a fetched
+  wheel by its carried record; the data directory's parts sizing the
+  drive, the shipped 3001 winning and noted); the sim (the fetched
+  event's note, a crash's traceback every time, nonsense in any
+  alphabet; a hand-made file marked fetched, the shipped record
+  winning on merge with the file named; the data-directory rule's
+  fixture; stud sockets on the machine that never fetched the part,
+  as many as on the one that did; the notes outliving every fresh
+  check; the note under its own number's line, the status line
+  without colours, one fetch at a time, and Cancel).
+
 ## 4.27.0 — any LEGO part by its number: fetched from ldraw.org
 
 The library holds a curated set; the LEGO catalogue holds twenty
