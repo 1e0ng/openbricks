@@ -3,6 +3,33 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.25.0 — bricks are drawn with their edges
+
+A stack of bricks no longer renders as one mass: the sim draws every
+brick with its edges — the seams between stacked bricks, the rims of
+studs and holes — in a darker shade of its own colour (lighter on a
+black brick). The edges come from the mesh itself, the boundary of
+every open shell and every crease of more than 30°, which on LDraw
+parts is close to the edge lines LDraw's own files draw (every one of
+a 2x4 brick's 472); the seams where LDraw's primitives meet within one
+face are told apart and left silent, and imported STL parts get their
+edges the same way. WebGPU allows no depth bias on lines, so the
+shader pulls each edge a pixel and a half nearer than its face, never
+more than a millimetre, so nothing beneath a plate shows through it
+however far the camera stands. Ghosts draw their edges too;
+thumbnails, where they would be noise, do not. **edges** in the
+Workbench toolbar turns them off.
+
+- Tests: the edge extraction (a box's twelve edges and no diagonals, a
+  cylinder's rims and no side lines, an open shell's rim, a fin on a
+  flat seam, a T-junction within one face against one on a crease,
+  degenerate and grid-collinear triangles, the tolerance weld, the 2x4
+  brick's 472 edges and a Technic brick's); the render (the seam
+  between two stacked boxes of one colour is invisible without edges
+  and drawn along its whole length with them, darker on grey and
+  lighter on black; a stack of real bricks with a plate, a beam and a
+  pin); the toolbar toggle.
+
 ## 4.24.0 — unsaved work is kept: drafts of the build and the route
 
 A forgotten Save loses nothing: a couple of seconds after a run of
