@@ -71,14 +71,16 @@ class DeriveTests(unittest.TestCase):
         self.assertEqual(self.notes, [])
 
     def test_mass_properties_match_the_workbench(self):
+        # 4.26.0 restacked the example's boards (the controller on the rails, the mux and the
+        # battery on it) and dropped the servo's shaft: the centre of mass rose 3.9 mm
         self.assertAlmostEqual(self.inertial["mass_kg"], 0.33053, places=4)
         com = [v * 1000 for v in self.inertial["com_m"]]
         self.assertAlmostEqual(com[0], -22.9, delta=0.2)
-        self.assertAlmostEqual(com[2], 16.6, delta=0.2)
+        self.assertAlmostEqual(com[2], 20.5, delta=0.2)
         diag = [v * 1e9 for v in self.inertial["fullinertia"][:3]]
-        self.assertAlmostEqual(diag[0], 545818, delta=50)
-        self.assertAlmostEqual(diag[1], 563762, delta=50)
-        self.assertAlmostEqual(diag[2], 796247, delta=50)
+        self.assertAlmostEqual(diag[0], 585107, delta=50)
+        self.assertAlmostEqual(diag[1], 603822, delta=50)
+        self.assertAlmostEqual(diag[2], 795545, delta=50)
 
     def test_every_brick_becomes_a_geom(self):
         self.assertEqual(len(self.bricks), 21)

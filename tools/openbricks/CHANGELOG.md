@@ -3,6 +3,61 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.26.0 — no two bricks overlap
+
+A brick can no longer be left inside another. A brick let go, nudged,
+turned or given a pose where its material would pass through a
+neighbour's is put back where it was, and the status line names both
+(*plate_2 put back: it would overlap brick_1*); while it is dragged it
+flushes red wherever it would overlap, and Escape abandons the drag.
+The test is the parts' own meshes: a face crossing a face by more than
+0.2 mm (the least push that would part them), faces in one plane
+facing the same way, or one part wholly inside another; faces in one
+plane facing each other are contact, so a plate on a brick's studs, a
+pin in a hole, an axle through a beam and turned in it, a bush on an
+axle and two meshed gears all touch. Parts with a feature seated in
+the other's (within the inspector's 0.4 mm; an axle anywhere along a
+hole it runs through) are a joint whatever LDraw's geometry does at
+the join — a friction pin's lip is wider than its hole — while a
+brick sunk into the one below, its tubes still over the studs, is not.
+Several bricks moved together keep their gaps and may not be turned
+into each other. A new brick lands beside what is already at the
+origin (and the magnet has the first say: a plate added over a brick
+lands on its studs); a duplicate or a paste goes as far along −y as it
+needs to be clear; the Snap key is refused into a taken hole. A file
+that already holds overlaps opens and says how many, and stays
+editable: an old overlap may be moved out of, not further in; undo is
+never refused; a file that redefines a part is measured afresh. The
+example robot's boards, which sat 1.5 mm into their beams, are
+restacked, and its servo's shaft, hidden in the wheel, is gone.
+
+The edges shipped in 4.25.0 gain their regression pins (a beam's
+corner lines, the frame's and a Technic brick's seams) and a test that
+nothing beneath a plate shows through it, from the plan view or far
+off.
+
+- Tests: the overlap test on real bricks (touching: a plate on its
+  stud grid, brick on brick, end to end and side by side, a pin in a
+  beam's hole from either side and in a Technic brick, an axle through
+  a hole and turned in it, a bush on an axle, meshed gears, a wall
+  0.1 mm into a tall neighbour; overlapping: the same brick twice, a
+  brick pushed 1 mm into its neighbour, a plate sunk into a brick, a
+  pin or an axle off centre, a bush off its axle, tooth on tooth, a
+  box wholly inside another; 0.1 ms a pair); the editor (a brick
+  dragged, lifted, handle-dragged, nudged, turned or typed into a
+  neighbour is put back and says so, with no undo point and nothing
+  left unsaved; an abandoned drag goes back at once; a plate dragged
+  onto studs is kept; instances turned together may not turn into each
+  other; a selection moved together keeps its gaps; an old overlap may
+  be moved out of but not further in; only a seated mate is a joint;
+  the Snap key into a taken hole; a brick added where one is lands
+  beside it; duplicates and pastes land clear; a file with overlaps
+  opens, says so and refuses only new ones; a redefined part is
+  measured afresh; the example and each of its components open with
+  none); the app (a brick dragged into its neighbour flushes red and
+  is put back, Escape abandons the drag, a drag clear of it is kept and
+  not red).
+
 ## 4.25.0 — bricks are drawn with their edges
 
 A stack of bricks no longer renders as one mass: the sim draws every

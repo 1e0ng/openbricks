@@ -1707,6 +1707,110 @@ mod tests {
     }
 
     #[test]
+    fn nothing_beneath_a_plate_shows_through_it_however_far_the_camera_stands() {
+        // a plate on a brick's studs, seen from the plan view and from a perspective camera
+        // far enough off that the pull's cap (a millimetre, less than the plate's 3.2) is what
+        // holds: within the plate's footprint, the only pixels the edges change are the
+        // plate's own edges — the rims of the studs beneath it stay hidden
+        let Some((device, queue)) = test_device() else { return };
+        let mut renderer = test_renderer(&device);
+        let mut vp = Viewport::new(&device, &queue);
+        let bundle = crate::editor::testing::real_bundle();
+        for num in ["3001", "3022"] {
+            vp.add_mesh(&device, num, &bundle.parts[num].mesh.decode().unwrap());
+        }
+        let color = srgb(0xA0A5A9);
+        let brick = DrawItem {
+            mesh: "3001".into(),
+            model: Mat4::IDENTITY,
+            color,
+            texture: None,
+        };
+        let plate = DrawItem {
+            mesh: "3022".into(),
+            model: Mat4::from_translation(Vec3::new(0.0, 0.0, 3.2)),
+            color,
+            texture: None,
+        };
+        let (w, h) = (640u32, 480u32);
+        let plan = {
+            let mut c = Camera::top_down();
+            c.target = Vec3::new(0.0, 0.0, 3.2);
+            c.distance = 600.0;
+            c
+        };
+        let far = Camera {
+            target: Vec3::new(0.0, 0.0, 3.2),
+            yaw: 30.0,
+            pitch: 35.0,
+            distance: 600.0,
+            fov_deg: 38.0,
+            ortho: false,
+        };
+        assert_eq!(plan.edge_pull(h as f32)[1], f32::INFINITY, "a plan view's cap is applied here");
+        // at this distance a pixel is more than a millimetre: the cap is what holds
+        let [pull, cap] = far.edge_pull(h as f32);
+        assert!(cap < pull * 600.0, "the cap bites: {pull} {cap}");
+        for camera in [plan, far] {
+            vp.camera = camera;
+            let mut render = |items: &[DrawItem], edges: bool| {
+                vp.edges = edges;
+                let scene = Scene {
+                    items,
+                    lines: &[],
+                    top_lines: &[],
+                    ghost: &[],
+                    overlay: &[],
+                    background: [0.0, 0.0, 0.0, 1.0],
+                };
+                vp.render(&device, &queue, &mut renderer, (w, h), &scene);
+                vp.read_pixels(&device, &queue).unwrap().2
+            };
+            let both = [brick.clone(), plate.clone()];
+            let alone = [plate.clone()];
+            let (both_off, both_on) = (render(&both, false), render(&both, true));
+            let (alone_off, alone_on) = (render(&alone, false), render(&alone, true));
+            // the plate's footprint, less its rim of one pixel: along a grazing ray at the very
+            // edge the plate is thinner than the pull
+            let inside = |k: usize| alone_off[k * 4..k * 4 + 3] != [0, 0, 0];
+            let body = |k: usize| {
+                let (x, y) = ((k % w as usize) as i32, (k / w as usize) as i32);
+                (-1..=1).all(|dy| {
+                    (-1..=1).all(|dx| {
+                        let (nx, ny) = (x + dx, y + dy);
+                        nx >= 0 && ny >= 0 && nx < w as i32 && ny < h as i32 && inside((ny * w as i32 + nx) as usize)
+                    })
+                })
+            };
+            let (mut footprint, mut own, mut beneath) = (0, 0, 0);
+            for k in 0..(w * h) as usize {
+                if !body(k) {
+                    continue;
+                }
+                let i = k * 4;
+                footprint += 1;
+                let changed = both_off[i..i + 3] != both_on[i..i + 3];
+                let its_own = alone_off[i..i + 3] != alone_on[i..i + 3];
+                if changed && its_own {
+                    own += 1;
+                } else if changed {
+                    beneath += 1;
+                }
+            }
+            assert!(
+                footprint > 100 && own > 20,
+                "ortho {}: plate {footprint} px, own edges {own}",
+                vp.camera.ortho
+            );
+            assert_eq!(
+                beneath, 0,
+                "ortho {}: pixels changed by edges from beneath the plate",
+                vp.camera.ortho
+            );
+        }
+    }
+
+    #[test]
     fn a_stack_of_real_bricks_shows_its_seams_and_stud_rims() {
         let Some((device, queue)) = test_device() else { return };
         let mut renderer = test_renderer(&device);

@@ -12,6 +12,7 @@ mod editor;
 mod geometry;
 mod gizmo;
 mod markers;
+mod overlap;
 mod route;
 mod sim;
 mod simulate;

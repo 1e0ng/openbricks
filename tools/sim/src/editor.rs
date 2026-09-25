@@ -4,14 +4,17 @@
 //! perform on them. `app.rs` only draws it and feeds it input, so
 //! everything here runs under `cargo test`.
 
-use crate::assembly::{self, Component, Document, Instance, Leaf, Part, Props};
-use crate::bundle::Bundle;
+use crate::assembly::{self, Component, Document, Geometry, Instance, Leaf, Part, Props};
+use crate::bundle::{Bundle, MeshData};
 use crate::drafts;
+use crate::geometry;
 use crate::gizmo::{self, Handle};
+use crate::overlap::{self, Overlap, Pose, Shape};
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 pub const MODULE_MM: f64 = 8.0;
 const UNDO_DEPTH: usize = 60;
@@ -54,6 +57,57 @@ pub struct Editor {
     /// Where the build's draft is kept while it is unsaved.
     pub draft_dir: PathBuf,
     pub keeper: drafts::Keeper,
+    /// Each part's collision shape, built on first use.
+    shapes: HashMap<String, Rc<Shape>>,
+    /// The change in progress, if any: what to go back to should it
+    /// make new overlaps.
+    pending: Option<Pending>,
+    /// Whether the build was unsaved when the last undo point was taken.
+    dirty_before: bool,
+    /// Whether the status line holds a refusal (cleared by the next change kept).
+    refused: bool,
+    /// The new overlaps the change in progress would make: the bricks to
+    /// tint and the note for the status line.
+    pub overlapping: Vec<(String, String, Overlap)>,
+}
+
+/// A leaf's index, collision shape, pose and world box, for the overlap test.
+type Placed = (usize, Rc<Shape>, Pose, (DVec3, DVec3));
+
+/// A pair of instances that overlap, how, and how much their boxes
+/// share (mm³): the measure of whether an old overlap is made worse.
+type Found = (String, String, Overlap, f64);
+
+/// A change of some instances in progress: the document to go back to
+/// should it make new overlaps, the undo depth once its own point was
+/// taken, whether the build was unsaved before it, and the overlaps the
+/// instances had already (with how much their boxes shared), so that
+/// only new overlaps — or old ones made worse — count against it, and
+/// a file that already holds some can still be edited.
+struct Pending {
+    names: Vec<String>,
+    doc: Document,
+    dirty: bool,
+    undo_len: usize,
+    before: BTreeMap<(String, String), f64>,
+}
+
+/// Where new instances ended up when moved clear of the others.
+enum Room {
+    /// Where they were put: nothing was in the way.
+    Clear,
+    /// Moved along until nothing overlapped.
+    Moved,
+    /// Still overlapping this instance after 400 steps (3.2 m).
+    Stuck(String),
+}
+
+/// The key the viewport and the overlap test file a part's geometry under.
+pub fn mesh_key(part_id: &str, part: &Part) -> String {
+    match &part.ldraw {
+        Some(n) => format!("ld:{n}"),
+        None => format!("part:{part_id}"),
+    }
 }
 
 impl Editor {
@@ -89,6 +143,11 @@ impl Editor {
             leaves: vec![],
             draft_dir: drafts::dir(),
             keeper: drafts::Keeper::default(),
+            shapes: HashMap::new(),
+            pending: None,
+            dirty_before: false,
+            refused: false,
+            overlapping: vec![],
         };
         ed.errors = assembly::validate(&ed.doc, &ed.bundle);
         ed.recompute();
@@ -151,6 +210,8 @@ impl Editor {
         }
         self.errors = errs;
         self.doc = doc;
+        self.shapes.clear();
+        self.pending = None;
         self.path = note.path.clone();
         self.editing = self.doc.robot.root.clone();
         self.crumbs = vec![self.editing.clone()];
@@ -161,14 +222,270 @@ impl Editor {
         self.recompute();
         self.keeper.kept(self.edits);
         self.status = format!(
-            "Restored the unsaved draft kept {}{}",
+            "Restored the unsaved draft kept {}{}{}",
             drafts::ago(note.kept_ms, now_ms),
             match &note.path {
                 Some(p) => format!(" of {}: Save writes it there", p.display()),
                 None => ": Save as… gives it a file".to_string(),
-            }
+            },
+            self.overlap_report()
         );
         true
+    }
+
+    // ---------------------------------------------------------- overlap
+
+    /// A part's mesh: the bundle's record, an imported mesh, or its shapes.
+    pub fn mesh_of(&self, part: &Part) -> Option<MeshData> {
+        match assembly::geometry_of(part, &self.bundle) {
+            Geometry::Record(rec) => rec.mesh.decode().ok(),
+            Geometry::Imported { .. } => {
+                let m: crate::bundle::MeshRecord = serde_json::from_value(part.extra.get("mesh")?.clone()).ok()?;
+                m.decode().ok()
+            }
+            Geometry::Shapes => {
+                let mut out = MeshData::default();
+                for s in &part.shapes {
+                    let m = geometry::shape_mesh(s);
+                    let base = out.positions.len() as u32;
+                    out.positions.extend(m.positions);
+                    out.normals.extend(m.normals);
+                    out.indices.extend(m.indices.iter().map(|i| i + base));
+                }
+                Some(out)
+            }
+            Geometry::None => None,
+        }
+    }
+
+    fn shape_of(&mut self, part_id: &str) -> Option<Rc<Shape>> {
+        let part = self.doc.parts.get(part_id)?;
+        let key = mesh_key(part_id, part);
+        if let Some(s) = self.shapes.get(&key) {
+            return Some(s.clone());
+        }
+        let shape = Rc::new(Shape::from_mesh(&self.mesh_of(part)?));
+        self.shapes.insert(key, shape.clone());
+        Some(shape)
+    }
+
+    /// The pairs of instances of the edited component whose bricks
+    /// overlap, each with its worst overlap and how much their boxes
+    /// share: every pair with one of `moved` in it (both may be: what
+    /// turns together may turn into each other), or every pair when
+    /// `moved` is None. Two bricks with a feature seated in the other's
+    /// (a pin all the way in its hole, a plate down on its studs —
+    /// within the inspector's 0.4 mm) are a joint, whatever LDraw's
+    /// parts do to each other there (a friction pin's lip is wider than
+    /// its hole, a frame's countersink shallower than a collar), and are
+    /// never an overlap.
+    fn overlaps(&mut self, moved: Option<&HashSet<String>>) -> Vec<Found> {
+        let leaves = self.leaves.clone();
+        let mut placed: Vec<Placed> = Vec::new();
+        for (i, leaf) in leaves.iter().enumerate() {
+            let Some(shape) = self.shape_of(&leaf.part_id) else { continue };
+            let pose = Pose {
+                pos: leaf.pos,
+                rot: leaf.rot,
+            };
+            let bb = shape.world_bbox(&pose);
+            placed.push((i, shape, pose, bb));
+        }
+        let mut conns: HashMap<usize, Vec<assembly::WorldConnector>> = HashMap::new();
+        let mut connectors = |i: usize, doc: &Document, bundle: &Bundle| -> Vec<assembly::WorldConnector> {
+            conns
+                .entry(i)
+                .or_insert_with(|| assembly::connectors_of_leaf(doc, bundle, &leaves[i]))
+                .clone()
+        };
+        let pad = DVec3::splat(overlap::TOL_MM);
+        let rank = |o: &Overlap| match o {
+            Overlap::Inside => (2, 0.0),
+            Overlap::Crossing(d) => (1, *d),
+            Overlap::Coplanar(a) => (0, *a),
+        };
+        let mut worst: BTreeMap<(String, String), (Overlap, f64)> = BTreeMap::new();
+        for (k, (i, sa, pa, (alo, ahi))) in placed.iter().enumerate() {
+            let top_a = &leaves[*i].path[0];
+            if moved.is_some_and(|m| !m.contains(top_a)) {
+                continue;
+            }
+            let from = if moved.is_none() { k + 1 } else { 0 };
+            for (l, (j, sb, pb, (blo, bhi))) in placed.iter().enumerate().skip(from) {
+                let top_b = &leaves[*j].path[0];
+                // a pair of moved ones is looked at once, from its earlier leaf
+                if top_b == top_a || (moved.is_some_and(|m| m.contains(top_b)) && l <= k) {
+                    continue;
+                }
+                if (*alo - pad).cmpgt(*bhi).any() || (*ahi + pad).cmplt(*blo).any() {
+                    continue;
+                }
+                let (ca, cb) = (connectors(*i, &self.doc, &self.bundle), connectors(*j, &self.doc, &self.bundle));
+                if assembly::seated(&ca, &cb) {
+                    continue;
+                }
+                if let Some(o) = overlap::overlap(sa, pa, sb, pb) {
+                    let shared = (ahi.min(*bhi) - alo.max(*blo)).max(DVec3::ZERO);
+                    let volume = shared.x * shared.y * shared.z;
+                    let key = if top_a < top_b {
+                        (top_a.clone(), top_b.clone())
+                    } else {
+                        (top_b.clone(), top_a.clone())
+                    };
+                    let e = worst.entry(key).or_insert((o, volume));
+                    if rank(&o) > rank(&e.0) {
+                        e.0 = o;
+                    }
+                    e.1 = e.1.max(volume);
+                }
+            }
+        }
+        // the moved one first in each pair
+        worst
+            .into_iter()
+            .map(|((a, b), (o, v))| {
+                if moved.is_some_and(|m| !m.contains(&a) && m.contains(&b)) {
+                    (b, a, o, v)
+                } else {
+                    (a, b, o, v)
+                }
+            })
+            .collect()
+    }
+
+    fn pair(a: &str, b: &str) -> (String, String) {
+        if a < b {
+            (a.to_string(), b.to_string())
+        } else {
+            (b.to_string(), a.to_string())
+        }
+    }
+
+    /// Called once a change of `names` has its undo point: the change
+    /// in progress is now this one, with what the instances overlapped
+    /// already.
+    fn note_before(&mut self, names: &[String]) {
+        let set: HashSet<String> = names.iter().cloned().collect();
+        let before = self
+            .overlaps(Some(&set))
+            .into_iter()
+            .map(|(a, b, _, v)| (Self::pair(&a, &b), v))
+            .collect();
+        self.pending = Some(Pending {
+            names: names.to_vec(),
+            doc: self.undo.last().cloned().unwrap_or_else(|| self.doc.clone()),
+            dirty: self.dirty_before,
+            undo_len: self.undo.len(),
+            before,
+        });
+        self.overlapping.clear();
+    }
+
+    /// The overlaps the change in progress makes that its instances did
+    /// not have before, or had and are made worse: an old overlap may be
+    /// moved out of, not further in (the boxes' share grows by more than
+    /// a twentieth and a cubic millimetre).
+    fn new_overlaps(&mut self) -> Vec<(String, String, Overlap)> {
+        let Some(p) = &self.pending else { return vec![] };
+        let names: HashSet<String> = p.names.iter().cloned().collect();
+        let before = p.before.clone();
+        self.overlaps(Some(&names))
+            .into_iter()
+            .filter(|(a, b, _, v)| before.get(&Self::pair(a, b)).is_none_or(|old| *v > old * 1.05 + 1.0))
+            .map(|(a, b, o, _)| (a, b, o))
+            .collect()
+    }
+
+    /// While the change in progress goes on: what it would overlap, live.
+    fn watch(&mut self) {
+        self.overlapping = self.new_overlaps();
+    }
+
+    /// The change in progress is done: kept unless it made new overlaps,
+    /// in which case the document goes back to before it (with the undo
+    /// points the change took) and the status line names what `what`
+    /// would have overlapped. True when it was taken back.
+    fn settle(&mut self, what: &str) -> bool {
+        let new = self.new_overlaps();
+        self.overlapping.clear();
+        let Some(p) = self.pending.take() else { return false };
+        let Some((a, b, o)) = new.first().cloned() else {
+            // a refusal's note does not outlive the next change that is kept
+            if self.refused {
+                self.status.clear();
+                self.refused = false;
+            }
+            return false;
+        };
+        self.refused = true;
+        self.undo.truncate(p.undo_len.saturating_sub(1));
+        self.doc = p.doc;
+        self.dirty = p.dirty;
+        self.recompute();
+        self.status = format!("{a} {what}: it would {}", o.phrase(&b));
+        true
+    }
+
+    /// The change in progress abandoned (Escape during a drag): the
+    /// document goes back to before it.
+    pub fn cancel_change(&mut self) {
+        self.overlapping.clear();
+        if let Some(p) = self.pending.take() {
+            self.undo.truncate(p.undo_len.saturating_sub(1));
+            self.doc = p.doc;
+            self.dirty = p.dirty;
+            self.recompute();
+            self.status = format!("{} put back", p.names.join(", "));
+        }
+    }
+
+    /// What the change in progress would overlap, for the status line.
+    pub fn overlap_note(&self) -> String {
+        match self.overlapping.first() {
+            Some((a, b, o)) => format!("{a} would {}", o.phrase(b)),
+            None => String::new(),
+        }
+    }
+
+    /// How many pairs of instances overlap in the component being edited.
+    pub fn overlap_count(&mut self) -> usize {
+        self.overlaps(None).len()
+    }
+
+    /// New instances `names` moved along `step` until they overlap
+    /// nothing (a brick added at the origin lands beside what is there):
+    /// how far that was, or what still overlaps after 400 steps.
+    fn clear_of_others(&mut self, names: &[String], step: [f64; 3]) -> Room {
+        self.overlapping.clear();
+        let set: HashSet<String> = names.iter().cloned().collect();
+        let mut moved = false;
+        for _ in 0..400 {
+            if self.overlaps(Some(&set)).is_empty() {
+                return if moved { Room::Moved } else { Room::Clear };
+            }
+            moved = true;
+            for name in names {
+                self.set_instance(name, |i| {
+                    for (p, s) in i.pos.iter_mut().zip(step) {
+                        *p = assembly::round3(*p + s);
+                    }
+                });
+            }
+            self.recompute();
+        }
+        match self.overlaps(Some(&set)).into_iter().next() {
+            Some((_, other, _, _)) => Room::Stuck(other),
+            None => Room::Moved,
+        }
+    }
+
+    /// The load report's count of overlapping pairs, when there are any.
+    fn overlap_report(&mut self) -> String {
+        match self.overlap_count() {
+            0 => String::new(),
+            1 => " · one pair of bricks overlaps".into(),
+            n => format!(" · {n} pairs of bricks overlap"),
+        }
     }
 
     // ------------------------------------------------------------ model
@@ -199,6 +516,7 @@ impl Editor {
     }
 
     pub fn push_undo(&mut self) {
+        self.dirty_before = self.dirty;
         self.undo.push(self.doc.clone());
         if self.undo.len() > UNDO_DEPTH {
             self.undo.remove(0);
@@ -212,6 +530,8 @@ impl Editor {
     }
 
     pub fn undo(&mut self) {
+        self.overlapping.clear();
+        self.pending = None;
         if let Some(d) = self.undo.pop() {
             self.doc = d;
             self.recompute();
@@ -340,7 +660,15 @@ impl Editor {
         if self.magnet {
             self.snap_selection(false);
         }
-        self.status = format!("Added {name} to {editing}");
+        let room = self.clear_of_others(std::slice::from_ref(&name), [MODULE_MM, 0.0, 0.0]);
+        self.status = format!(
+            "Added {name} to {editing}{}",
+            match room {
+                Room::Clear => String::new(),
+                Room::Moved => ", beside what was there".into(),
+                Room::Stuck(other) => format!(", still overlapping {other}: no free place along x within 3.2 m"),
+            }
+        );
     }
 
     /// A brick from the library placed at the origin, in a LEGO colour
@@ -447,8 +775,9 @@ impl Editor {
             comp.children.insert(idx, copy.clone());
             made.push(copy.name);
         }
-        self.selection = made;
+        self.selection = made.clone();
         self.recompute();
+        let _ = self.clear_of_others(&made, [0.0, -MODULE_MM, 0.0]);
     }
 
     /// The unlocked selection, or a status line when everything selected is locked.
@@ -466,10 +795,12 @@ impl Editor {
             return;
         }
         self.push_undo();
-        for name in names {
-            self.set_instance(&name, |i| i.rot[axis] = wrap_deg(i.rot[axis] + deg));
+        self.note_before(&names);
+        for name in &names {
+            self.set_instance(name, |i| i.rot[axis] = wrap_deg(i.rot[axis] + deg));
         }
         self.recompute();
+        self.settle("stays");
     }
 
     pub fn nudge_selection(&mut self, d: [f64; 3]) {
@@ -478,14 +809,16 @@ impl Editor {
             return;
         }
         self.push_undo();
-        for name in names {
-            self.set_instance(&name, |i| {
+        self.note_before(&names);
+        for name in &names {
+            self.set_instance(name, |i| {
                 for (k, dk) in d.iter().enumerate() {
                     i.pos[k] = assembly::round3(i.pos[k] + dk);
                 }
             });
         }
         self.recompute();
+        self.settle("stays");
     }
 
     /// The keyboard's nudge step: one grid step, or 1 mm with shift.
@@ -507,15 +840,32 @@ impl Editor {
             }
             return;
         }
+        // a change of its own (the S key, the Snap button) is judged like any other; within a
+        // drag or an add it belongs to that change
+        let own = self.pending.is_none();
+        if own {
+            self.push_undo();
+            self.note_before(std::slice::from_ref(&name));
+        }
         let before = self.doc.clone();
         match assembly::snap_instance(&mut self.doc, &self.bundle, &self.editing, &name) {
             Some(path) => {
-                self.undo.push(before);
-                self.dirty = true;
-                self.status = format!("Snapped {name} into {}", path.join("/"));
+                if !own {
+                    self.undo.push(before);
+                    self.dirty = true;
+                }
                 self.recompute();
+                if own && self.settle("stays") {
+                    return;
+                }
+                self.status = format!("Snapped {name} into {}", path.join("/"));
             }
             None => {
+                if own {
+                    self.pending = None;
+                    self.undo.pop();
+                    self.dirty = self.dirty_before;
+                }
                 if announce {
                     self.status = "No hole within reach".into();
                 }
@@ -702,11 +1052,14 @@ impl Editor {
             return;
         }
         self.push_undo();
+        let names = vec![name.to_string()];
+        self.note_before(&names);
         self.set_instance(name, |i| {
             i.pos = pos.map(assembly::round3);
             i.rot = rot.map(wrap_deg);
         });
         self.recompute();
+        self.settle("stays");
     }
 
     pub fn set_role(&mut self, role: &str, value: String) {
@@ -725,6 +1078,8 @@ impl Editor {
     pub fn reset_to_example(&mut self) {
         self.push_undo();
         self.doc = assembly::example();
+        self.shapes.clear();
+        self.pending = None;
         self.path = None;
         self.editing = self.doc.robot.root.clone();
         self.crumbs = vec![self.editing.clone()];
@@ -855,6 +1210,7 @@ impl Editor {
         self.dirty = true;
         self.selection = made.clone();
         self.recompute();
+        let _ = self.clear_of_others(&made, [0.0, -MODULE_MM, 0.0]);
         self.status = format!(
             "Pasted {}{}",
             made.len(),
@@ -890,6 +1246,8 @@ impl Editor {
                 self.errors = errs;
                 self.push_undo();
                 self.doc = doc;
+                self.shapes.clear();
+                self.pending = None;
                 self.path = Some(p.clone());
                 self.editing = self.doc.robot.root.clone();
                 self.crumbs = vec![self.editing.clone()];
@@ -898,7 +1256,7 @@ impl Editor {
                 self.fit_pending = true;
                 self.recompute();
                 self.drop_draft();
-                self.status = format!("Opened {}", p.display());
+                self.status = format!("Opened {}{}", p.display(), self.overlap_report());
             }
             Err(e) => self.status = format!("Could not open: {e}"),
         }
@@ -1019,6 +1377,8 @@ impl Editor {
             self.movable();
         } else {
             self.push_undo();
+            let names: Vec<String> = starts.iter().map(|s| s.0.clone()).collect();
+            self.note_before(&names);
         }
         starts
     }
@@ -1043,6 +1403,7 @@ impl Editor {
                 self.recompute();
             }
         }
+        self.watch();
     }
 
     /// The shift drag: lift every dragged item by `dz` (unsnapped until
@@ -1052,9 +1413,11 @@ impl Editor {
             self.set_instance(name, |i| i.pos[2] = assembly::round3(i.pos[2] + dz));
         }
         self.recompute();
+        self.watch();
     }
 
-    /// The plane drag let go: heights land on the grid, then the magnet.
+    /// The plane drag let go: heights land on the grid, then the magnet;
+    /// then, if the drag made the bricks overlap others, it is taken back.
     pub fn end_move(&mut self) {
         if self.snap_mm > 0.0 {
             for name in self.unlocked_selection() {
@@ -1066,6 +1429,7 @@ impl Editor {
         if self.magnet {
             self.snap_selection(false);
         }
+        self.settle("put back");
     }
 
     /// Start a handle drag: the starting poses, after the undo point.
@@ -1080,6 +1444,8 @@ impl Editor {
             self.movable();
         } else {
             self.push_undo();
+            let names: Vec<String> = starts.iter().map(|s| s.0.clone()).collect();
+            self.note_before(&names);
         }
         starts
     }
@@ -1107,14 +1473,17 @@ impl Editor {
             }
         }
         self.recompute();
+        self.watch();
     }
 
-    /// A handle drag let go: the magnet has a look.
+    /// A handle drag let go: the magnet has a look; then, if the drag
+    /// made the bricks overlap others, it is taken back.
     pub fn end_handle(&mut self) {
         self.recompute();
         if self.magnet {
             self.snap_selection(false);
         }
+        self.settle("put back");
     }
 }
 
@@ -1143,6 +1512,21 @@ mod tests {
 
     fn editor() -> Editor {
         Editor::new(real_bundle(), None)
+    }
+
+    /// An editor on an empty build with one brick `num` at the origin,
+    /// the magnet off: its name comes back with it.
+    fn solo(num: &str) -> (Editor, String) {
+        let mut ed = editor();
+        let root = ed.doc.robot.root.clone();
+        ed.doc.components.get_mut(&root).unwrap().children.clear();
+        ed.doc.robot.roles.clear();
+        ed.recompute();
+        ed.magnet = false;
+        let id = ed.ensure_ldraw_part(num).unwrap();
+        ed.add_instance(Some(id), None, [0.0; 3]);
+        let name = ed.selection[0].clone();
+        (ed, name)
     }
 
     #[test]
@@ -1233,16 +1617,18 @@ mod tests {
     }
 
     #[test]
-    fn duplicates_sit_two_modules_over() {
-        let mut ed = editor();
-        let first = ed.children()[0].clone();
-        ed.selection = vec![first.name.clone()];
+    fn duplicates_sit_two_modules_over_or_the_next_free_two() {
+        let (mut ed, first) = solo("3001");
         ed.duplicate_selection();
         assert_eq!(ed.selection.len(), 1);
         let copy = ed.selected_instances()[0].clone();
-        assert_ne!(copy.name, first.name);
-        assert_eq!(copy.pos[1], assembly::round3(first.pos[1] - 16.0));
+        assert_ne!(copy.name, first);
+        assert_eq!(copy.pos, [0.0, -16.0, 0.0]);
         assert_eq!(ed.children()[1].name, copy.name);
+        // that spot taken, the next duplicate of the first goes two modules further
+        ed.selection = vec![first.clone()];
+        ed.duplicate_selection();
+        assert_eq!(ed.selected_instances()[0].pos, [0.0, -32.0, 0.0]);
         ed.selection.clear();
         let n = ed.children().len();
         ed.duplicate_selection();
@@ -1251,9 +1637,7 @@ mod tests {
 
     #[test]
     fn rotate_nudge_and_pose_wrap_and_round() {
-        let mut ed = editor();
-        let name = ed.children()[0].name.clone();
-        ed.selection = vec![name.clone()];
+        let (mut ed, name) = solo("3001");
         let rot0 = ed.selected_instances()[0].rot;
         ed.rotate_selection(2, 90.0);
         ed.rotate_selection(2, 90.0);
@@ -1463,9 +1847,7 @@ mod tests {
 
     #[test]
     fn undo_is_bounded_and_the_example_comes_back() {
-        let mut ed = editor();
-        let name = ed.children()[0].name.clone();
-        ed.selection = vec![name];
+        let (mut ed, _) = solo("3001");
         for _ in 0..70 {
             ed.nudge_selection([1.0, 0.0, 0.0]);
         }
@@ -1567,8 +1949,9 @@ mod tests {
         let robot_file = dir.join("robot.assembly.json");
         ed.save_to(&robot_file);
         let mut third = editor();
-        third.selection = vec![third.children()[0].name.clone()];
+        third.selection = vec!["imu".into()];
         third.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(third.selected_instances()[0].pos[0], 38.0, "{}", third.status);
         assert!(third.import_build(robot_file.clone()), "{}", third.status);
         assert!(third.status.contains(" as "), "renamed: {}", third.status);
         // not a file, not an assembly
@@ -1595,10 +1978,12 @@ mod tests {
         // nothing unsaved: nothing kept, however long it settles
         ed.autosave(t0 + Duration::from_secs(10), 1_000);
         assert!(drafts::take(&dir, drafts::BUILD).is_none());
-        // an edit, then a moment: the draft is kept, with where the build belongs (nowhere yet)
-        let name = ed.children()[0].name.clone();
+        // an edit (the IMU slides along the frame), then a moment: the draft is kept, with where
+        // the build belongs (nowhere yet)
+        let name = "imu".to_string();
         ed.selection = vec![name.clone()];
         ed.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos[0], 38.0, "{}", ed.status);
         ed.autosave(t0, 1_000);
         ed.autosave(t0 + Duration::from_millis(1500), 2_000);
         assert!(drafts::take(&dir, drafts::BUILD).is_none(), "not settled yet");
@@ -1682,12 +2067,328 @@ mod tests {
     }
 
     #[test]
-    fn locked_instances_stay_put_until_unlocked() {
+    fn the_example_opens_with_no_overlapping_bricks() {
         let mut ed = editor();
-        ed.magnet = false;
-        let id = ed.ensure_ldraw_part("32278").unwrap();
+        assert_eq!(ed.overlap_count(), 0);
+        assert!(!ed.status.contains("overlap"), "{}", ed.status);
+        // nor has any of its components one within
+        let ids: Vec<String> = ed.doc.components.keys().cloned().collect();
+        for id in ids {
+            ed.open_component(&id, false);
+            assert_eq!(ed.overlap_count(), 0, "{id}");
+        }
+    }
+
+    #[test]
+    fn a_brick_added_where_one_is_lands_beside_it() {
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [0.0; 3]);
+        let b = ed.selection[0].clone();
+        assert_ne!(a, b);
+        assert_eq!(ed.selected_instances()[0].pos, [32.0, 0.0, 0.0], "the first free module along x");
+        assert!(ed.status.ends_with(", beside what was there"), "{}", ed.status);
+        let plate = ed.ensure_ldraw_part("3022").unwrap();
+        ed.add_instance(Some(plate), None, [0.0; 3]);
+        assert_eq!(ed.selected_instances()[0].pos, [56.0, 0.0, 0.0], "past both bricks");
+        assert_eq!(ed.overlap_count(), 0);
+    }
+
+    #[test]
+    fn a_brick_dragged_into_another_is_put_back_and_says_so() {
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [0.0; 3]);
+        let b = ed.selection[0].clone();
+        let depth = ed.undo_depth();
+        let starts = ed.begin_move();
+        ed.move_by(&starts, -8.0, 0.0);
+        assert_eq!(ed.selected_instances()[0].pos, [24.0, 0.0, 0.0]);
+        assert_eq!(ed.overlapping.len(), 1, "{:?}", ed.overlapping);
+        assert_eq!(ed.overlap_note(), format!("{b} would overlap {a}"));
+        ed.end_move();
+        assert_eq!(ed.selected_instances()[0].pos, [32.0, 0.0, 0.0], "put back");
+        assert_eq!(ed.status, format!("{b} put back: it would overlap {a}"));
+        assert!(ed.overlapping.is_empty() && ed.overlap_note().is_empty());
+        assert_eq!(ed.undo_depth(), depth, "the drag left no undo point");
+        // dragged clear, it stays
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 8.0, 0.0);
+        assert!(ed.overlapping.is_empty());
+        ed.end_move();
+        assert_eq!(ed.selected_instances()[0].pos, [40.0, 0.0, 0.0]);
+        assert_eq!(ed.undo_depth(), depth + 1);
+        // a lift into the other brick is put back too (from 40, one module over only touches)
+        let starts = ed.begin_move();
+        ed.move_by(&starts, -8.0, 0.0);
+        assert!(ed.overlapping.is_empty(), "end to end: touching");
+        ed.move_by(&starts, -16.0, 0.0);
+        ed.lift_by(&starts, 4.0);
+        assert_eq!(ed.overlapping.len(), 1);
+        ed.end_move();
+        assert_eq!(ed.selected_instances()[0].pos, [40.0, 0.0, 0.0]);
+        // a handle drag likewise
+        let starts = ed.begin_handle();
+        ed.drag_handle(Handle::Axis(0), -16.0, DVec3::ZERO, &starts, false);
+        assert_eq!(ed.overlapping.len(), 1);
+        ed.end_handle();
+        assert_eq!(ed.selected_instances()[0].pos, [40.0, 0.0, 0.0]);
+        assert!(ed.status.starts_with(&format!("{b} put back")), "{}", ed.status);
+    }
+
+    #[test]
+    fn nudges_turns_and_typed_poses_into_a_neighbour_stay() {
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [0.0; 3]);
+        let b = ed.selection[0].clone();
+        ed.dirty = false;
+        ed.nudge_selection([-8.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos, [32.0, 0.0, 0.0]);
+        assert_eq!(ed.status, format!("{b} stays: it would overlap {a}"));
+        assert!(!ed.dirty, "a refused change leaves nothing unsaved");
+        ed.set_pose(&b, [24.0, 0.0, 0.0], [0.0; 3]);
+        assert_eq!(ed.selected_instances()[0].pos, [32.0, 0.0, 0.0]);
+        assert!(ed.status.starts_with(&format!("{b} stays")), "{}", ed.status);
+        // on top of the other brick it sits; turned flat it still sits on the studs; stood on
+        // end it would pass through the brick below
+        ed.set_pose(&b, [0.0, 0.0, 9.6], [0.0; 3]);
+        assert_eq!(ed.selected_instances()[0].pos, [0.0, 0.0, 9.6], "{}", ed.status);
+        ed.rotate_selection(2, 90.0);
+        assert_eq!(ed.selected_instances()[0].rot, [0.0, 0.0, 90.0], "{}", ed.status);
+        ed.rotate_selection(1, 90.0);
+        assert_eq!(ed.selected_instances()[0].rot, [0.0, 0.0, 90.0]);
+        assert_eq!(ed.status, format!("{b} stays: it would overlap {a}"));
+    }
+
+    #[test]
+    fn a_file_with_overlaps_opens_and_says_so_and_only_new_overlaps_are_refused() {
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
         ed.add_instance(Some(id.clone()), None, [0.0; 3]);
-        let a = ed.selection[0].clone();
+        let b = ed.selection[0].clone();
+        // a file from before the rule: b right on a
+        ed.set_instance(&b, |i| i.pos = [0.0; 3]);
+        ed.recompute();
+        let dir = std::env::temp_dir().join(format!("ob-overlap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.assembly.json");
+        ed.save_to(&path);
+        let mut other = editor();
+        other.load_path(path.clone());
+        assert!(other.status.ends_with(" · one pair of bricks overlaps"), "{}", other.status);
+        assert_eq!(other.overlap_count(), 1);
+        // b can still be moved while it overlaps a: that pair is not new
+        other.selection = vec![b.clone()];
+        other.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(other.selected_instances()[0].pos, [8.0, 0.0, 0.0], "{}", other.status);
+        // a third brick lands free; b may not be moved into it
+        other.magnet = false;
+        other.add_instance(Some(id), None, [0.0; 3]);
+        let c = other.selection[0].clone();
+        assert_eq!(other.selected_instances()[0].pos, [40.0, 0.0, 0.0]);
+        other.selection = vec![b.clone()];
+        other.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(other.selected_instances()[0].pos, [8.0, 0.0, 0.0]);
+        assert!(
+            other.status.starts_with(&format!("{b} stays: it would overlap {c}")),
+            "{}",
+            other.status
+        );
+        // undo is never refused
+        other.undo();
+        assert_eq!(other.status, "Undone");
+        let _ = a;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_abandoned_drag_goes_back_at_once() {
+        let (mut ed, _) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [0.0; 3]);
+        let b = ed.selection[0].clone();
+        ed.dirty = false;
+        let depth = ed.undo_depth();
+        let starts = ed.begin_move();
+        ed.move_by(&starts, -16.0, 0.0);
+        assert_eq!(ed.overlapping.len(), 1);
+        ed.cancel_change();
+        assert_eq!(ed.selected_instances()[0].pos, [32.0, 0.0, 0.0]);
+        assert_eq!(ed.status, format!("{b} put back"));
+        assert!(ed.overlapping.is_empty() && !ed.dirty && ed.undo_depth() == depth);
+        // the release that follows has nothing to judge
+        ed.end_move();
+        assert_eq!(ed.selected_instances()[0].pos, [32.0, 0.0, 0.0]);
+        assert_eq!(ed.overlap_count(), 0);
+    }
+
+    #[test]
+    fn instances_turned_together_may_not_turn_into_each_other() {
+        let (mut ed, a) = solo("32278");
+        let id = ed.ensure_ldraw_part("32278").unwrap();
+        ed.add_instance(Some(id), None, [16.0, 0.0, 0.0]);
+        let b = ed.selection[0].clone();
+        ed.selection = vec![a.clone(), b.clone()];
+        // side by side; each turned about its own origin they would lie across each other
+        ed.rotate_selection(2, 90.0);
+        assert!(ed.selected_instances().iter().all(|i| i.rot == [0.0; 3]), "{}", ed.status);
+        assert!(ed.status.contains("stays: it would overlap"), "{}", ed.status);
+        assert_eq!(ed.overlap_count(), 0);
+    }
+
+    #[test]
+    fn a_selection_moved_together_keeps_its_gaps() {
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id.clone()), None, [40.0, 0.0, 0.0]);
+        let b = ed.selection[0].clone();
+        ed.add_instance(Some(id), None, [80.0, 0.0, 0.0]);
+        let c = ed.selection[0].clone();
+        ed.selection = vec![a.clone(), b.clone()];
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 48.0, 0.0);
+        assert_eq!(ed.overlapping.len(), 1, "{:?}", ed.overlapping);
+        assert_eq!((&ed.overlapping[0].0, &ed.overlapping[0].1), (&b, &c));
+        ed.end_move();
+        let pos = |ed: &Editor, n: &str| ed.children().iter().find(|i| i.name == n).unwrap().pos;
+        assert_eq!((pos(&ed, &a), pos(&ed, &b)), ([0.0; 3], [40.0, 0.0, 0.0]), "both put back");
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 8.0, 0.0);
+        assert!(ed.overlapping.is_empty(), "{:?}", ed.overlapping);
+        ed.end_move();
+        assert_eq!(
+            (pos(&ed, &a), pos(&ed, &b)),
+            ([8.0, 0.0, 0.0], [48.0, 0.0, 0.0]),
+            "end to end with {c}: {}",
+            ed.status
+        );
+    }
+
+    #[test]
+    fn an_old_overlap_may_be_moved_out_of_but_not_further_in() {
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [0.0; 3]);
+        let b = ed.selection[0].clone();
+        ed.set_instance(&b, |i| i.pos = [16.0, 0.0, 0.0]);
+        ed.recompute();
+        assert_eq!(ed.overlap_count(), 1, "half into {a}");
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos, [24.0, 0.0, 0.0], "out a little: {}", ed.status);
+        ed.nudge_selection([-16.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos, [24.0, 0.0, 0.0], "further in: refused");
+        assert_eq!(ed.status, format!("{b} stays: it would overlap {a}"));
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos, [32.0, 0.0, 0.0], "clear: {}", ed.status);
+        assert_eq!(ed.overlap_count(), 0);
+    }
+
+    #[test]
+    fn only_a_seated_mate_is_a_joint() {
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [0.0; 3]);
+        let b = ed.selection[0].clone();
+        // stacked a stud grid over: a joint
+        ed.set_pose(&b, [8.0, 0.0, 9.6], [0.0; 3]);
+        assert_eq!(ed.selected_instances()[0].pos, [8.0, 0.0, 9.6], "{}", ed.status);
+        // sunk 2 mm: its tubes are still over the studs (the loose mate the magnet works with),
+        // but nothing is seated, and its top slab crosses the studs
+        ed.set_pose(&b, [8.0, 0.0, 7.6], [0.0; 3]);
+        assert_eq!(ed.selected_instances()[0].pos, [8.0, 0.0, 9.6]);
+        assert_eq!(ed.status, format!("{b} stays: it would overlap {a}"));
+        // at the half-stud offset its tubes are over studs too (the loose mate), but its walls
+        // would stand on the studs it does not cover: no brick sits there, sunk or not
+        for z in [9.6, 7.6, 4.4, 3.6] {
+            ed.set_pose(&b, [4.0, 4.0, z], [0.0; 3]);
+            assert_eq!(ed.selected_instances()[0].pos, [8.0, 0.0, 9.6], "at the half-stud offset, z {z}");
+            assert_eq!(ed.status, format!("{b} stays: it would overlap {a}"));
+        }
+        // the refusal's note goes with the next change that is kept
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos, [16.0, 0.0, 9.6]);
+        assert_eq!(ed.status, "");
+    }
+
+    #[test]
+    fn the_snap_key_is_refused_into_a_taken_hole() {
+        // a beam 5 with a pin standing in its hole at y = -16; a second pin let go beside that
+        // hole snaps into it — onto the first — and is refused; beside a free hole it snaps
+        let (mut ed, _) = solo("32316");
+        ed.snap_mm = 0.0;
+        let pin = ed.ensure_ldraw_part("2780").unwrap();
+        ed.add_instance(Some(pin.clone()), None, [0.0, 40.0, 4.0]);
+        let p1 = ed.selection[0].clone();
+        ed.set_instance(&p1, |i| {
+            i.pos = [0.0, -16.0, 4.0];
+            i.rot = [0.0, 90.0, 0.0];
+        });
+        ed.add_instance(Some(pin), None, [0.0, 60.0, 4.0]);
+        let p2 = ed.selection[0].clone();
+        ed.set_instance(&p2, |i| {
+            i.pos = [0.4, -15.6, 4.3];
+            i.rot = [0.0, 90.0, 0.0];
+        });
+        ed.recompute();
+        assert_eq!(ed.overlap_count(), 2, "the second pin lies across the first and the beam");
+        ed.magnet = true;
+        let depth = ed.undo_depth();
+        ed.snap_selection(true);
+        assert_eq!(ed.selected_instances()[0].pos, [0.4, -15.6, 4.3]);
+        assert_eq!(ed.status, format!("{p2} stays: it would overlap {p1}"));
+        assert_eq!(ed.undo_depth(), depth);
+        ed.set_instance(&p2, |i| i.pos = [0.4, -7.6, 4.3]);
+        ed.recompute();
+        ed.snap_selection(true);
+        assert_eq!(ed.selected_instances()[0].pos, [0.0, -8.0, 4.0], "{}", ed.status);
+        assert!(ed.status.starts_with("Snapped"));
+        assert_eq!(ed.undo_depth(), depth + 1);
+    }
+
+    #[test]
+    fn a_file_that_redefines_a_part_refreshes_its_shape() {
+        let (mut ed, a) = solo("3001");
+        let mut part = Part {
+            name: "Box".into(),
+            category: "electronics".into(),
+            mass_g: 1.0,
+            source: "placeholder".into(),
+            source_note: String::new(),
+            ldraw: None,
+            shapes: vec![assembly::Shape::Box {
+                size: [10.0, 10.0, 10.0],
+                pos: [0.0; 3],
+            }],
+            extra: Default::default(),
+        };
+        let id = ed.import_part(part.clone());
+        let inst = ed.selection[0].clone();
+        ed.set_pose(&inst, [48.0, 0.0, 0.0], [0.0; 3]);
+        assert_eq!(ed.overlap_count(), 0, "a 10 mm box 48 mm out clears the brick");
+        let dir = std::env::temp_dir().join(format!("ob-shape-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.assembly.json");
+        part.shapes = vec![assembly::Shape::Box {
+            size: [80.0, 10.0, 10.0],
+            pos: [0.0; 3],
+        }];
+        let mut doc = ed.doc.clone();
+        doc.parts.insert(id.clone(), part);
+        std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
+        ed.load_path(path);
+        assert!(
+            ed.status.ends_with(" · one pair of bricks overlaps"),
+            "the 80 mm box reaches {a}: {}",
+            ed.status
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locked_instances_stay_put_until_unlocked() {
+        let (mut ed, a) = solo("32278");
+        let id = ed.ensure_ldraw_part("32278").unwrap();
         ed.add_instance(Some(id), None, [40.0, 0.0, 0.0]);
         let b = ed.selection[0].clone();
         ed.selection = vec![a.clone()];
@@ -1767,7 +2468,9 @@ mod tests {
         assert!(pasted.iter().all(|i| !i.locked));
         assert!(pasted.iter().all(|i| i.name != brick && i.name != comp_inst.name));
         let original = ed.children().iter().find(|c| c.name == brick).unwrap().pos;
-        assert_eq!(pasted[0].pos[1], assembly::round3(original[1] - 16.0));
+        // two modules over, or further along -y where that spot overlaps a neighbour
+        assert!(pasted[0].pos[1] <= assembly::round3(original[1] - 16.0), "{:?}", pasted[0].pos);
+        assert_eq!((pasted[0].pos[0], pasted[0].pos[2]), (original[0], original[2]));
         assert!(ed.status.starts_with("Pasted 2"), "{}", ed.status);
         // into another component: positions stay
         let cid = comp_inst.component.clone().unwrap();
@@ -1777,7 +2480,9 @@ mod tests {
         let n = ed.children().len();
         assert_eq!(ed.paste(&brick_text), 1);
         assert_eq!(ed.children().len(), n + 1);
-        assert_eq!(ed.children()[n].pos, original);
+        let at = ed.children()[n].pos;
+        assert_eq!((at[0], at[2]), (original[0], original[2]));
+        assert!(at[1] <= original[1], "{at:?}: where it was, or along -y when that overlaps");
         assert_eq!(ed.children()[n].name, brick);
         let root = ed.doc.robot.root.clone();
         ed.open_component(&root, false);
@@ -1855,10 +2560,10 @@ mod tests {
         let brick = ed.ensure_ldraw_part("3001").unwrap();
         ed.add_instance(Some(brick), None, [0.0; 3]);
         let plate = ed.ensure_ldraw_part("3022").unwrap();
-        // a 2 x 2 plate let go above the brick, a little off and turned 5°
-        ed.add_instance(Some(plate.clone()), None, [2.0, 3.0, 4.5]);
+        // a 2 x 2 plate let go above the brick (clear of its studs), a little off and turned 5°
+        ed.add_instance(Some(plate.clone()), None, [2.0, 3.0, 5.0]);
         let p1 = ed.selection[0].clone();
-        ed.set_pose(&p1, [2.0, 3.0, 4.5], [0.0, 0.0, 5.0]);
+        ed.set_pose(&p1, [2.0, 3.0, 5.0], [0.0, 0.0, 5.0]);
         ed.magnet = true;
         ed.snap_selection(true);
         assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
@@ -1914,10 +2619,15 @@ mod tests {
             let name = ed.selection[0].clone();
             ed.set_pose(&name, [0.0, y, 4.0], [0.0, 90.0, 0.0]);
         }
-        // a second beam let go above them, off by a little and turned 10°: it seats on both pins
-        ed.add_instance(Some(beam), None, [0.5, 1.0, 8.6]);
+        // a second beam let go above them, off by a little and turned 10° (the pose a drag
+        // passes through: set directly, as the pins would cross its holes there): it seats on both
+        ed.add_instance(Some(beam), None, [0.0, 0.0, 40.0]);
         let top = ed.selection[0].clone();
-        ed.set_pose(&top, [0.5, 1.0, 8.6], [0.0, 0.0, 10.0]);
+        ed.set_instance(&top, |i| {
+            i.pos = [0.5, 1.0, 8.6];
+            i.rot = [0.0, 0.0, 10.0];
+        });
+        ed.recompute();
         ed.magnet = true;
         ed.snap_selection(true);
         assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
@@ -1929,10 +2639,7 @@ mod tests {
 
     #[test]
     fn plane_drags_snap_and_the_lift_lands_on_the_grid() {
-        let mut ed = editor();
-        ed.magnet = false;
-        let id = ed.ensure_ldraw_part("32278").unwrap();
-        ed.add_instance(Some(id), None, [0.0; 3]);
+        let (mut ed, _) = solo("32278");
         let starts = ed.begin_move();
         assert_eq!(starts.len(), 1);
         ed.move_by(&starts, 11.0, -3.0);
@@ -1952,11 +2659,8 @@ mod tests {
 
     #[test]
     fn handle_drags_move_and_turn_about_the_pivot() {
-        let mut ed = editor();
-        ed.magnet = false;
+        let (mut ed, a) = solo("32278");
         let id = ed.ensure_ldraw_part("32278").unwrap();
-        ed.add_instance(Some(id.clone()), None, [0.0; 3]);
-        let a = ed.selection[0].clone();
         ed.add_instance(Some(id), None, [16.0, 0.0, 0.0]);
         let b = ed.selection[0].clone();
         ed.selection = vec![a.clone(), b.clone()];
