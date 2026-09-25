@@ -1,17 +1,20 @@
 //! The edges of a brick worth a line: where a stack of bricks would
 //! otherwise render as one mass, the seams; on a stud, its rims. They
 //! come from the mesh itself — the boundary of every open shell and
-//! every crease — which on LDraw parts is exactly the set of edge lines
-//! LDraw's own files draw (checked on 3001, 32316, 2780, 3700, 3713,
-//! 32523 and 3648: every one of their edge lines is found).
+//! every crease — which on LDraw parts is close to the set of edge
+//! lines LDraw's own files draw: every one of a 2x4 brick's 472, all
+//! but a few on beams, pins and bushes, fewer on parts whose detail
+//! bends by less than the crease angle (tyres, rims, gear teeth).
 
 use crate::bundle::MeshData;
 use glam::Vec3;
 use std::collections::HashMap;
 
 /// The angle between two faces from which their shared edge is drawn,
-/// in degrees. The brick converter smooths normals below the same
-/// angle, so drawn edges and shading creases agree.
+/// in degrees (strictly more than it, so a twelve-sided cylinder's
+/// facets at exactly 30° stay silent). The brick converter smooths
+/// normals below the same angle, so drawn edges and shading creases
+/// agree.
 pub const CREASE_DEG: f32 = 30.0;
 
 /// How close two vertices must be to count as one, in mm: far below
@@ -24,9 +27,20 @@ pub const WELD_MM: f32 = 0.002;
 /// `WELD_MM` are joined (a stud's base and the face it stands on meet
 /// exactly in the bundle; a cylinder's seam only up to rounding); an
 /// edge is kept when it belongs to one face only (the boundary of an
-/// open shell), or when two of its faces meet at `CREASE_DEG` or more.
+/// open shell), or when two of its faces meet at more than `CREASE_DEG`.
 /// Triangulation diagonals and the facets of a 16-sided cylinder stay
-/// silent. Degenerate triangles are ignored.
+/// silent, and so does a boundary edge that merely lies along the edge
+/// of a neighbouring face in the same surface (LDraw builds a Technic
+/// brick's face from primitives that meet at T-junctions: those seams
+/// are not edges). Degenerate triangles are ignored.
+/// A line in space, by its direction and the point nearest the origin,
+/// quantised so edges on one line share a key; and an edge's extent
+/// along its line.
+type LineKey = ([i32; 3], [i32; 3]);
+type Span = (f32, f32);
+/// The edges on one line, each with its extent.
+type OnLine = Vec<((u32, u32), Span)>;
+
 pub fn feature_edges(mesh: &MeshData) -> Vec<[f32; 3]> {
     let (welded, remap) = weld(&mesh.positions, WELD_MM);
     let mut normals: Vec<Vec3> = Vec::new();
@@ -38,8 +52,11 @@ pub fn feature_edges(mesh: &MeshData) -> Vec<[f32; 3]> {
             Vec3::from(welded[b as usize]),
             Vec3::from(welded[c as usize]),
         );
-        let n = (pb - pa).cross(pc - pa);
-        if n.length_squared() < 1e-12 {
+        // degenerate: the corner's sine below rounding noise (three points in a line on
+        // the 0.01 mm grid leave a cross product of residue, not a normal)
+        let (ab, ac) = (pb - pa, pc - pa);
+        let n = ab.cross(ac);
+        if n.length_squared() <= 1e-12 * ab.length_squared() * ac.length_squared() {
             continue;
         }
         let f = normals.len() as u32;
@@ -50,16 +67,61 @@ pub fn feature_edges(mesh: &MeshData) -> Vec<[f32; 3]> {
             }
         }
     }
-    let flat = CREASE_DEG.to_radians().cos();
+    let flat = CREASE_DEG.to_radians().cos() - 1e-4;
     let creased = |faces: &[u32]| {
         faces
             .iter()
             .enumerate()
             .any(|(i, &x)| faces[i + 1..].iter().any(|&y| normals[x as usize].dot(normals[y as usize]) < flat))
     };
+    // every edge by the line it lies on, for the T-junction test
+    let point = |i: u32| Vec3::from(welded[i as usize]);
+    let line_of = |u: u32, v: u32| -> Option<(LineKey, Span)> {
+        let (p, q) = (point(u), point(v));
+        let mut d = q - p;
+        let len = d.length();
+        if len < 1e-6 {
+            return None;
+        }
+        d /= len;
+        let lead = d.to_array().into_iter().find(|c| c.abs() > 1e-6).unwrap_or(1.0);
+        if lead < 0.0 {
+            d = -d;
+        }
+        let foot = p - d * p.dot(d);
+        let key = (
+            d.to_array().map(|c| (c * 1000.0).round() as i32),
+            foot.to_array().map(|c| (c * 200.0).round() as i32),
+        );
+        let (a, b) = (p.dot(d), q.dot(d));
+        Some((key, (a.min(b), a.max(b))))
+    };
+    let mut on_line: HashMap<LineKey, OnLine> = HashMap::new();
+    for &(u, v) in faces_of.keys() {
+        if let Some((key, span)) = line_of(u, v) {
+            on_line.entry(key).or_default().push(((u, v), span));
+        }
+    }
+    // a boundary edge lying along other edges whose faces are all smooth with its own is a
+    // seam within one surface, not an edge
+    let seam = |e: (u32, u32), faces: &[u32]| -> bool {
+        let Some((key, (lo, hi))) = line_of(e.0, e.1) else { return false };
+        let f = faces[0] as usize;
+        let mut partners = 0;
+        for &(other, (olo, ohi)) in &on_line[&key] {
+            if other == e || hi.min(ohi) - lo.max(olo) <= 5e-3 {
+                continue;
+            }
+            partners += 1;
+            if faces_of[&other].iter().any(|&g| normals[f].dot(normals[g as usize]) < flat) {
+                return false;
+            }
+        }
+        partners > 0
+    };
     let mut kept: Vec<(u32, u32)> = faces_of
         .iter()
-        .filter(|(_, faces)| faces.len() == 1 || creased(faces))
+        .filter(|(e, faces)| if faces.len() == 1 { !seam(**e, faces) } else { creased(faces) })
         .map(|(k, _)| *k)
         .collect();
     kept.sort_unstable();
@@ -186,10 +248,76 @@ mod tests {
     }
 
     #[test]
+    fn a_t_junction_within_one_face_is_silent_and_on_a_crease_is_kept() {
+        // two squares side by side and, above them, one twice as wide whose lower edge runs
+        // along both their upper edges: three shells meeting at T-junctions in one plane
+        let quad = |m: &mut MeshData, pts: [[f32; 3]; 4], n: [f32; 3]| {
+            let b = m.positions.len() as u32;
+            m.positions.extend(pts);
+            m.normals.extend([n; 4]);
+            m.indices.extend([b, b + 1, b + 2, b, b + 2, b + 3]);
+        };
+        let mut flat = MeshData::default();
+        quad(
+            &mut flat,
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            [0.0, 0.0, 1.0],
+        );
+        quad(
+            &mut flat,
+            [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 1.0, 0.0], [1.0, 1.0, 0.0]],
+            [0.0, 0.0, 1.0],
+        );
+        quad(
+            &mut flat,
+            [[0.0, 1.0, 0.0], [2.0, 1.0, 0.0], [2.0, 2.0, 0.0], [0.0, 2.0, 0.0]],
+            [0.0, 0.0, 1.0],
+        );
+        let segs = segments(&feature_edges(&flat));
+        // the outline of the 2 × 2 square only (in the seven pieces the shells cut it into):
+        // the seam at y = 1 is silent
+        assert_eq!(segs.len(), 7, "{segs:?}");
+        assert!(segs.iter().all(|(a, b)| !(a.y == 1.0 && b.y == 1.0)), "{segs:?}");
+        // the wide one standing up instead: its lower edge is a crease, and stays
+        let mut bent = MeshData::default();
+        quad(
+            &mut bent,
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            [0.0, 0.0, 1.0],
+        );
+        quad(
+            &mut bent,
+            [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 1.0, 0.0], [1.0, 1.0, 0.0]],
+            [0.0, 0.0, 1.0],
+        );
+        quad(
+            &mut bent,
+            [[0.0, 1.0, 0.0], [2.0, 1.0, 0.0], [2.0, 1.0, 1.0], [0.0, 1.0, 1.0]],
+            [0.0, -1.0, 0.0],
+        );
+        let segs = segments(&feature_edges(&bent));
+        assert_eq!(
+            segs.iter()
+                .filter(|(a, b)| a.y == 1.0 && b.y == 1.0 && a.z == 0.0 && b.z == 0.0)
+                .count(),
+            3,
+            "{segs:?}"
+        );
+    }
+
+    #[test]
     fn degenerate_triangles_and_empty_meshes_draw_nothing() {
         assert!(feature_edges(&MeshData::default()).is_empty());
         let m = MeshData {
             positions: vec![[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            indices: vec![0, 1, 2],
+            uvs: vec![],
+        };
+        assert!(feature_edges(&m).is_empty());
+        // three grid points in a line whose f32 cross product is rounding residue, not zero
+        let m = MeshData {
+            positions: vec![[0.07, 0.11, 0.13], [10.07, 20.11, 30.13], [20.07, 40.11, 60.13]],
             normals: vec![[0.0, 0.0, 1.0]; 3],
             indices: vec![0, 1, 2],
             uvs: vec![],
@@ -208,5 +336,10 @@ mod tests {
         let m = bundle.parts["32316"].mesh.decode().unwrap();
         let n = feature_edges(&m).len() / 2;
         assert!((900..=1100).contains(&n), "{n}");
+        // a Technic brick's faces are built from primitives meeting at T-junctions: none of
+        // those seams is drawn (LDraw draws 308 edge lines on 3700)
+        let m = bundle.parts["3700"].mesh.decode().unwrap();
+        let n = feature_edges(&m).len() / 2;
+        assert!((308..=320).contains(&n), "{n}");
     }
 }
