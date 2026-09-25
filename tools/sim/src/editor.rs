@@ -422,7 +422,7 @@ impl Editor {
         self.doc = p.doc;
         self.dirty = p.dirty;
         self.recompute();
-        self.status = format!("{a} {what}: it would {}", o.account(&b));
+        self.status = format!("{a} {what}: it would {}", o.phrase(&b));
         true
     }
 
@@ -442,7 +442,7 @@ impl Editor {
     /// What the change in progress would overlap, for the status line.
     pub fn overlap_note(&self) -> String {
         match self.overlapping.first() {
-            Some((a, b, o)) => format!("{a} would {}", o.account(b)),
+            Some((a, b, o)) => format!("{a} would {}", o.phrase(b)),
             None => String::new(),
         }
     }

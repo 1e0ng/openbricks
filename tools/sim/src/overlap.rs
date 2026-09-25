@@ -38,7 +38,7 @@ impl Overlap {
     /// What a status line says this part would do to `other`. No
     /// number: a crossing's depth and a shared area are what one pair of
     /// faces does, not how far the parts interpenetrate.
-    pub fn account(&self, other: &str) -> String {
+    pub fn phrase(&self, other: &str) -> String {
         match self {
             Overlap::Crossing(_) | Overlap::Coplanar(_) => format!("overlap {other}"),
             Overlap::Inside => format!("lie wholly inside {other}"),
@@ -661,10 +661,10 @@ mod tests {
     }
 
     #[test]
-    fn the_account_names_the_other_part_and_whole_containment() {
-        assert_eq!(Overlap::Crossing(1.26).account("b"), "overlap b");
-        assert_eq!(Overlap::Coplanar(512.0).account("b"), "overlap b");
-        assert_eq!(Overlap::Inside.account("b"), "lie wholly inside b");
+    fn the_phrase_names_the_other_part_and_whole_containment() {
+        assert_eq!(Overlap::Crossing(1.26).phrase("b"), "overlap b");
+        assert_eq!(Overlap::Coplanar(512.0).phrase("b"), "overlap b");
+        assert_eq!(Overlap::Inside.phrase("b"), "lie wholly inside b");
         let e = Shape::from_mesh(&MeshData::default());
         assert_eq!(overlap(&e, &at(0.0, 0.0, 0.0), &e, &at(0.0, 0.0, 0.0)), None);
     }
