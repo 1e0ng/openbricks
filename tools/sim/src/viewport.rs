@@ -4,6 +4,7 @@
 //! slot holding its model matrix and colour.
 
 use crate::bundle::MeshData;
+use crate::edges;
 use eframe::egui_wgpu::{self, wgpu};
 use glam::{Mat4, Vec3};
 use std::collections::HashMap;
@@ -32,6 +33,11 @@ struct Globals {
     /// The view's width and height in pixels, the width of the lines on
     /// top in pixels, and a spare.
     viewport: [f32; 4],
+    /// The bricks' edges: the clip-space depth they are pulled nearer by
+    /// (see `EDGE_PULL_PX`), the most that pull may be in mm times the
+    /// near plane (a perspective vertex at eye depth `w` is pulled at
+    /// most `y / w`), and two spares.
+    edge: [f32; 4],
 }
 
 /// A vertex of a line on top: both ends, which one this is, which side
@@ -51,6 +57,21 @@ struct WideVertex {
 /// in pixels, at any zoom.
 pub const TOP_LINE_PX: f32 = 3.0;
 
+/// How much nearer the bricks' edges are drawn than their faces, in
+/// pixels of depth: enough that a line lying on a face beats the face's
+/// own depth across a pixel (faces up to about 70° from the screen),
+/// and small enough that a line behind a plate stays behind it at any
+/// zoom where the plate is thicker than that on the screen. WebGPU
+/// allows no hardware depth bias on lines, so the vertex shader applies
+/// it in clip space, where for a perspective camera the pull of a
+/// fixed number of pixels is a constant (`Camera::edge_pull`).
+pub const EDGE_PULL_PX: f32 = 1.5;
+
+/// The most the edges are pulled nearer in the world, in mm: less than
+/// a stud is tall, so however far the camera stands a plate on studs
+/// never shows the rims beneath it.
+pub const EDGE_PULL_MAX_MM: f32 = 1.0;
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceData {
@@ -63,6 +84,9 @@ pub struct GpuMesh {
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,
     index_count: u32,
+    /// The mesh's feature edges, as line-list vertices, when it has any.
+    ebuf: Option<wgpu::Buffer>,
+    edge_count: u32,
     pub bbox: (Vec3, Vec3),
 }
 
@@ -170,19 +194,47 @@ impl Camera {
         self.distance * (self.fov_deg.to_radians() / 2.0).tan()
     }
     pub fn proj(&self, aspect: f32) -> Mat4 {
-        let far = self.distance * 40.0 + 1000.0;
+        let (near, far) = self.planes();
         if self.ortho {
             let hh = self.half_height();
             let hw = hh * aspect.max(0.01);
-            return glam::camera::rh::proj::directx::orthographic(-hw, hw, -hh, hh, 0.5, far);
+            return glam::camera::rh::proj::directx::orthographic(-hw, hw, -hh, hh, near, far);
         }
-        let near = (self.distance / 200.0).max(0.5);
         glam::camera::rh::proj::directx::perspective(self.fov_deg.to_radians(), aspect.max(0.01), near, far)
     }
     /// World units per pixel at the target of a view `h` pixels tall.
     pub fn units_per_px(&self, h: f32) -> f32 {
         2.0 * self.half_height() / h.max(1.0)
     }
+    /// The near and far clip planes: near a two-hundredth of the distance
+    /// (fixed for a plan view), far forty distances out.
+    pub fn planes(&self) -> (f32, f32) {
+        let far = self.distance * 40.0 + 1000.0;
+        let near = if self.ortho { 0.5 } else { (self.distance / 200.0).max(0.5) };
+        (near, far)
+    }
+
+    /// The bricks' edge pull on a view `height_px` pixels tall, for the
+    /// shader: the clip-space depth of `EDGE_PULL_PX` pixels, and the
+    /// cap of `EDGE_PULL_MAX_MM` as the shader applies it. A pixel spans
+    /// `2 z tan(fov/2) / height` mm at eye depth `z`, and a pull of
+    /// `f z` is `f × near` in clip space, so the cap is `max × near / z`
+    /// there; a plan view's pixel is `2 × half height / height` mm at
+    /// any depth, so its cap is applied here.
+    pub fn edge_pull(&self, height_px: f32) -> [f32; 2] {
+        let (near, far) = self.planes();
+        let height = height_px.max(1.0);
+        if self.ortho {
+            let pull_mm = (EDGE_PULL_PX * 2.0 * self.half_height() / height).min(EDGE_PULL_MAX_MM);
+            [pull_mm / (far - near), f32::INFINITY]
+        } else {
+            [
+                EDGE_PULL_PX * 2.0 * (self.fov_deg.to_radians() * 0.5).tan() / height * near,
+                EDGE_PULL_MAX_MM * near,
+            ]
+        }
+    }
+
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
         self.proj(aspect) * self.view()
     }
@@ -277,6 +329,10 @@ pub struct Viewport {
     line_pipeline: wgpu::RenderPipeline,
     /// Lines that ignore depth: the map's annotations, over the scene.
     line_top_pipeline: wgpu::RenderPipeline,
+    /// The bricks' edges: one-pixel lines over their faces.
+    edge_pipeline: wgpu::RenderPipeline,
+    /// Whether the bricks' edges are drawn (the seams of a stack, a stud's rims).
+    pub edges: bool,
     globals: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,
     instance_layout: wgpu::BindGroupLayout,
@@ -538,6 +594,51 @@ impl Viewport {
             multiview_mask: None,
             cache: None,
         });
+        // the bricks' edges: one-pixel lines drawn after the meshes, depth-tested against them
+        // and nudged a few depth steps nearer in the shader, so a line lying on a face wins
+        let edge_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("edges"),
+            bind_group_layouts: &[Some(&globals_layout), Some(&instance_layout)],
+            ..Default::default()
+        });
+        let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("edges"),
+            layout: Some(&edge_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_edge"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 12,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_line"),
+                targets: &[Some(FORMAT.into())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                ..Default::default()
+            },
+            // edges write depth: a ghost's outline pixels then reach the composite with the
+            // ghost's own depth, not the cleared one behind everything
+            depth_stencil: Some(wgpu::DepthStencilState {
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                ..depth_state.clone()
+            }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
         // lines on top: drawn last, never hidden by the scene, and widened into quads of
         // `top_line_px` pixels on the screen (hardware lines are one pixel wide)
         let line_top_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -639,6 +740,8 @@ impl Viewport {
             composite_layout,
             line_pipeline,
             line_top_pipeline,
+            edge_pipeline,
+            edges: true,
             top_line_px: TOP_LINE_PX,
             globals,
             globals_bg,
@@ -785,12 +888,22 @@ impl Viewport {
             contents: bytemuck::cast_slice(&data.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
+        let edge_pts = edges::feature_edges(data);
+        let ebuf = (!edge_pts.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(key),
+                contents: bytemuck::cast_slice(&edge_pts),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
         self.meshes.insert(
             key.to_string(),
             GpuMesh {
                 vbuf,
                 ibuf,
                 index_count: data.indices.len() as u32,
+                ebuf,
+                edge_count: edge_pts.len() as u32,
                 bbox: (lo, hi),
             },
         );
@@ -994,7 +1107,11 @@ impl Viewport {
             overlay: &[],
             background,
         };
+        // at thumbnail size a brick's edges are noise: none there
+        let edges = self.edges;
+        self.edges = false;
         self.render_to(device, queue, &color_view, &depth_view, (size, size), &camera, &scene, None);
+        self.edges = edges;
         let id = renderer.register_native_texture(device, &color_view, wgpu::FilterMode::Linear);
         self.thumbs.insert(key.to_string(), (color, id));
         id
@@ -1015,6 +1132,28 @@ impl Viewport {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// The edges of `items` over their faces, when edges are on: the
+    /// items' instance slots start at `first`.
+    fn draw_edges<'p>(&'p self, pass: &mut wgpu::RenderPass<'p>, items: &[DrawItem], first: u32) {
+        if !self.edges {
+            return;
+        }
+        pass.set_pipeline(&self.edge_pipeline);
+        pass.set_bind_group(0, &self.globals_bg, &[]);
+        pass.set_bind_group(1, &self.instance_bg, &[]);
+        for (k, it) in items.iter().enumerate() {
+            // a textured item is the mat: no outline on it
+            if it.texture.is_some() {
+                continue;
+            }
+            let Some(mesh) = self.meshes.get(&it.mesh) else { continue };
+            let Some(ebuf) = &mesh.ebuf else { continue };
+            let i = first + k as u32;
+            pass.set_vertex_buffer(0, ebuf.slice(..));
+            pass.draw(0..mesh.edge_count, i..i + 1);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_to(
         &mut self,
@@ -1036,6 +1175,10 @@ impl Viewport {
             light_dir: [light.x, light.y, light.z, 0.0],
             camera_pos: [eye.x, eye.y, eye.z, 1.0],
             viewport: [size.0 as f32, size.1.max(1) as f32, self.top_line_px, 0.0],
+            edge: {
+                let [pull, cap] = camera.edge_pull(size.1 as f32);
+                [pull, cap, 0.0, 0.0]
+            },
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         let data: Vec<InstanceData> = items
@@ -1160,6 +1303,7 @@ impl Viewport {
                 pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, i as u32..i as u32 + 1);
             }
+            self.draw_edges(&mut pass, items, 0);
         }
         if let (false, Some(gt)) = (scene.ghost.is_empty(), ghost) {
             // the ghosts, opaque, into their own colour and depth (so a ghost's nearest
@@ -1200,6 +1344,7 @@ impl Viewport {
                     pass.set_index_buffer(mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..mesh.index_count, 0, i..i + 1);
                 }
+                self.draw_edges(&mut pass, scene.ghost, (items.len() + scene.overlay.len()) as u32);
             }
             // ... then blended over the frame by their alpha, where the scene is not nearer
             {
@@ -1309,7 +1454,7 @@ impl Viewport {
 }
 
 const SHADER: &str = r#"
-struct Globals { view_proj: mat4x4<f32>, light_dir: vec4<f32>, camera_pos: vec4<f32>, viewport: vec4<f32> };
+struct Globals { view_proj: mat4x4<f32>, light_dir: vec4<f32>, camera_pos: vec4<f32>, viewport: vec4<f32>, edge: vec4<f32> };
 struct Inst { model: mat4x4<f32>, color: vec4<f32>, flags: vec4<u32> };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(1) @binding(0) var<storage, read> insts: array<Inst>;
@@ -1354,6 +1499,22 @@ struct LOut { @builtin(position) pos: vec4<f32>, @location(0) color: vec4<f32> }
   return o;
 }
 @fragment fn fs_line(i: LOut) -> @location(0) vec4<f32> { return i.color; }
+
+// a brick's edge: the instance's colour darkened well below its darkest shading (lightened
+// on a near-black brick), pulled nearer than the faces it lies on by g.edge.x, at most
+// g.edge.y / w (see EDGE_PULL_MAX_MM)
+@vertex fn vs_edge(@location(0) p: vec3<f32>, @builtin(instance_index) ii: u32) -> LOut {
+  let inst = insts[ii];
+  let wp = inst.model * vec4<f32>(p, 1.0);
+  var o: LOut;
+  o.pos = g.view_proj * wp;
+  o.pos.z = o.pos.z - min(g.edge.x, g.edge.y / max(o.pos.w, 1e-6));
+  let c = inst.color.rgb;
+  let luma = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+  let shade = select(c * 0.12, mix(c, vec3<f32>(1.0), 0.12), luma < 0.02);
+  o.color = vec4<f32>(shade, inst.color.a);
+  return o;
+}
 
 // a line on top: the segment a-b widened to g.viewport.z pixels on the screen, this vertex
 // being end t (0 = a, 1 = b) on side `side` (-1 / +1)
@@ -1443,6 +1604,168 @@ mod tests {
     use super::*;
     use crate::geometry;
     use crate::gizmo::{self, Gizmo, Handle, Mode};
+
+    /// Where a world point lands on a `w`×`h` render of `camera`.
+    fn on_screen(camera: &Camera, w: u32, h: u32, p: Vec3) -> (u32, u32) {
+        let c = camera.view_proj(w as f32 / h as f32) * p.extend(1.0);
+        let n = c.truncate() / c.w;
+        (
+            ((n.x + 1.0) * 0.5 * w as f32).round() as u32,
+            ((1.0 - n.y) * 0.5 * h as f32).round() as u32,
+        )
+    }
+
+    #[test]
+    fn the_seam_between_two_stacked_boxes_is_drawn_as_an_edge() {
+        let Some((device, queue)) = test_device() else { return };
+        let mut renderer = test_renderer(&device);
+        let mut vp = Viewport::new(&device, &queue);
+        vp.camera = Camera {
+            target: Vec3::new(0.0, 0.0, 50.0),
+            yaw: 20.0,
+            pitch: 10.0,
+            distance: 500.0,
+            fov_deg: 38.0,
+            ortho: false,
+        };
+        let (w, h) = (320u32, 240u32);
+        vp.add_mesh(&device, "box", &geometry::box_mesh([100.0; 3], [0.0; 3]));
+        // two boxes of one colour, one on the other: their faces shade alike, so without
+        // edges the seam between them is invisible — the user's stack of bricks
+        // in light bluish grey the seam is darker than the faces; on a black brick, lighter
+        for (color, lighter) in [(srgb(0xA0A5A9), false), (srgb(0x05131D), true)] {
+            let items = [
+                DrawItem {
+                    mesh: "box".into(),
+                    model: Mat4::IDENTITY,
+                    color,
+                    texture: None,
+                },
+                DrawItem {
+                    mesh: "box".into(),
+                    model: Mat4::from_translation(Vec3::new(0.0, 0.0, 100.0)),
+                    color,
+                    texture: None,
+                },
+            ];
+            let scene = Scene {
+                items: &items,
+                lines: &[],
+                top_lines: &[],
+                ghost: &[],
+                overlay: &[],
+                background: [0.0, 0.0, 0.0, 1.0],
+            };
+            // the face turned to the camera, and points along its seam at z = 50
+            let eye = vp.camera.eye();
+            let seam = |t: f32| {
+                if eye.x.abs() > eye.y.abs() {
+                    Vec3::new(50.0 * eye.x.signum(), t, 50.0)
+                } else {
+                    Vec3::new(t, 50.0 * eye.y.signum(), 50.0)
+                }
+            };
+            let sum = |px: &[u8], x: u32, y: u32| {
+                let i = ((y * w + x) * 4) as usize;
+                px[i] as i32 + px[i + 1] as i32 + px[i + 2] as i32
+            };
+            for edges in [false, true] {
+                vp.edges = edges;
+                vp.render(&device, &queue, &mut renderer, (w, h), &scene);
+                let (_, _, px) = vp.read_pixels(&device, &queue).unwrap();
+                if let Some(p) = std::env::var_os("OPENBRICKS_SIM_RENDER_PNG") {
+                    let mut p = std::path::PathBuf::from(p);
+                    p.set_file_name(format!("seam-edges-{edges}.png"));
+                    image::save_buffer(p, &px, w, h, image::ColorType::Rgba8).unwrap();
+                }
+                let mut marked = 0;
+                let mut same = 0;
+                for k in 0..=16 {
+                    let t = -40.0 + 5.0 * k as f32;
+                    let (x, y) = on_screen(&vp.camera, w, h, seam(t));
+                    // the line takes one of the rows around the rounded one
+                    let rows = (y - 1..=y + 1).map(|r| sum(&px, x, r));
+                    let line = if lighter { rows.max().unwrap() } else { rows.min().unwrap() };
+                    let (above, below) = (sum(&px, x, y - 5), sum(&px, x, y + 5));
+                    assert!(above > 12 && (above - below).abs() <= 6, "faces alike at {x},{y}: {above} {below}");
+                    if (lighter && line > above + 30) || (!lighter && line < above - 40) {
+                        marked += 1;
+                    } else if (line - above).abs() <= 8 {
+                        same += 1;
+                    }
+                }
+                if edges {
+                    assert_eq!(
+                        marked, 17,
+                        "the seam is drawn along its whole length ({marked} of 17, lighter {lighter})"
+                    );
+                } else {
+                    assert_eq!(same, 17, "without edges the seam is invisible ({same} of 17 alike)");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_stack_of_real_bricks_shows_its_seams_and_stud_rims() {
+        let Some((device, queue)) = test_device() else { return };
+        let mut renderer = test_renderer(&device);
+        let mut vp = Viewport::new(&device, &queue);
+        let bundle = crate::editor::testing::real_bundle();
+        for num in ["3001", "3022", "2780", "32316"] {
+            vp.add_mesh(&device, num, &bundle.parts[num].mesh.decode().unwrap());
+        }
+        let color = srgb(0xA0A5A9);
+        let at = |mesh: &str, x: f32, y: f32, z: f32| DrawItem {
+            mesh: mesh.into(),
+            model: Mat4::from_translation(Vec3::new(x, y, z)),
+            color,
+            texture: None,
+        };
+        // three 2x4 bricks stacked (the origin is the top face), a 2x2 plate on top, and a
+        // pin in a beam beside them
+        let items = [
+            at("3001", 0.0, 0.0, 0.0),
+            at("3001", 0.0, 0.0, 9.6),
+            at("3001", 0.0, 0.0, 19.2),
+            at("3022", 4.0, 0.0, 22.4),
+            at("32316", 40.0, 0.0, -1.8),
+            at("2780", 40.0, 0.0, -1.8),
+        ];
+        vp.camera.fit(Vec3::new(-20.0, -20.0, -10.0), Vec3::new(60.0, 20.0, 26.0));
+        vp.camera.distance *= 0.7;
+        let (w, h) = (640u32, 480u32);
+        let scene = Scene {
+            items: &items,
+            lines: &[],
+            top_lines: &[],
+            ghost: &[],
+            overlay: &[],
+            background: [0.83, 0.87, 0.89, 1.0],
+        };
+        let mut dark = [0usize; 2];
+        for (k, edges) in [false, true].into_iter().enumerate() {
+            vp.edges = edges;
+            vp.render(&device, &queue, &mut renderer, (w, h), &scene);
+            let (_, _, px) = vp.read_pixels(&device, &queue).unwrap();
+            if let Some(p) = std::env::var_os("OPENBRICKS_SIM_RENDER_PNG") {
+                let mut p = std::path::PathBuf::from(p);
+                p.set_file_name(format!("bricks-edges-{edges}.png"));
+                image::save_buffer(p, &px, w, h, image::ColorType::Rgba8).unwrap();
+            }
+            dark[k] = px
+                .chunks_exact(4)
+                .filter(|c| (c[0] as u32 + c[1] as u32 + c[2] as u32) < 250)
+                .count();
+        }
+        // the edges add many dark pixels: the seams, the stud rims, the beam's hole rims
+        assert!(
+            dark[1] > dark[0] + 2000,
+            "dark pixels without / with edges: {} / {}",
+            dark[0],
+            dark[1]
+        );
+    }
 
     #[test]
     fn renders_bricks_and_handles_offscreen() {
