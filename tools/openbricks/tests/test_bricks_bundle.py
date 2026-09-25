@@ -155,14 +155,19 @@ class ColorsTests(unittest.TestCase):
                     {"element_id": "32278199", "part_num": "32278", "color_id": "72", "design_id": ""},
                     {"element_id": "4163147", "part_num": "32278", "color_id": "4", "design_id": ""},
                     {"element_id": "1", "part_num": "3648b", "color_id": "41", "design_id": ""},
-                    {"element_id": "2", "part_num": "9999", "color_id": "4", "design_id": ""}]
-        data = rebrickable.build(["32278", "3648", "6590"], colors, elements, {"3648": "3648b", "77": "x"})
+                    {"element_id": "2", "part_num": "9999", "color_id": "4", "design_id": ""},
+                    {"element_id": "3", "part_num": "3070b", "color_id": "72", "design_id": "3070"},
+                    {"element_id": "4", "part_num": "3069b", "color_id": "4", "design_id": "3069"}]
+        data = rebrickable.build(["32278", "3648", "6590", "3070", "3069b"], colors, elements,
+                                 {"3648": "3648b", "77": "x", "3069b": "3069z"})
         self.assertEqual(data["parts"]["32278"], {"4": ["4163147"], "72": ["4210687", "32278199"]})
         self.assertEqual(data["parts"]["3648"], {"41": ["1"]}, "Rebrickable's mould suffix is followed")
+        self.assertEqual(data["parts"]["3070"], {"72": ["3"]}, "a number known only as a design id")
+        self.assertEqual(data["parts"]["3069b"], {"4": ["4"]}, "the number itself, when its alias misses")
         self.assertEqual(data["without"], ["6590"])
         self.assertEqual(sorted(data["palette"]), ["4", "41", "72"], "only the colours used")
         self.assertTrue(data["palette"]["41"]["trans"] and not data["palette"]["4"]["trans"])
-        self.assertEqual(data["rebrickable"], {"3648": "3648b"}, "only the numbers asked for")
+        self.assertEqual(data["rebrickable"], {"3069b": "3069z", "3648": "3648b"}, "only the numbers asked for")
         self.assertEqual(rebrickable.rebrickable_numbers({"s": {"aliases": {"78c18": "72039"}}})["72039"], "78c18")
         if ldraw is not None:
             bundle = {"parts": {"32278": {"name": "Beam 15"}, "6590": {"name": "Bush"}}, "missing": []}

@@ -56,16 +56,40 @@ class PropError(ValueError):
     """A prop the world does not have, or a map that cannot be saved."""
 
 
-def data_dir(env=None, home=None):
-    """Where this machine keeps the user's openbricks data."""
+def home_dir(env=None):
+    """The home directory as the sim sees it: ``$HOME``, else
+    ``$USERPROFILE`` (Windows), else the working directory."""
     env = os.environ if env is None else env
+    return env.get("HOME") or env.get("USERPROFILE") or "."
+
+
+def _tilde(path, home):
+    """A leading ``~`` stands for the home directory (a shell would have
+    expanded it; a .env file, a plist or a Windows variable does not)."""
+    if path == "~":
+        return home
+    if path.startswith("~/") or path.startswith("~\\"):
+        return os.path.join(home, path[2:])
+    return path
+
+
+def data_dir(env=None, home=None):
+    """Where this machine keeps the user's openbricks data:
+    ``$OPENBRICKS_DATA_DIR``, else ``$XDG_DATA_HOME/openbricks``, else
+    ``~/.local/share/openbricks``, with ``~`` :func:`home_dir` and a
+    leading ``~`` in either variable standing for it. The sim's
+    ``markers::data_dir`` applies the same rule (``tests/data_dir_cases.json``
+    pins both), so what ``openbricks bricks fetch`` keeps is what
+    ``openbricks sim`` loads."""
+    env = os.environ if env is None else env
+    home = home_dir(env) if home is None else home
     explicit = env.get("OPENBRICKS_DATA_DIR")
     if explicit:
-        return Path(explicit)
+        return Path(_tilde(explicit, home))
     xdg = env.get("XDG_DATA_HOME")
     if xdg:
-        return Path(xdg) / "openbricks"
-    return Path(home if home is not None else Path.home()) / ".local" / "share" / "openbricks"
+        return Path(_tilde(xdg, home)) / "openbricks"
+    return Path(home) / ".local" / "share" / "openbricks"
 
 
 def user_worlds_dir(env=None, home=None):

@@ -39,7 +39,10 @@ class FetchTests(unittest.TestCase):
     def test_fetch_by_number_keeps_the_parts_under_the_data_dir(self):
         from openbricks_sim.bricks import fetch
 
-        def fake(number, root=None, say=None, colors=True):
+        calls = []
+
+        def fake(number, root=None, say=None, colors=True, force=False):
+            calls.append((number, root, colors, force))
             say("fetched parts/%s.dat" % number)
             if number == "0000":
                 raise fetch.NotInLibrary(number, ["u"])
@@ -58,12 +61,34 @@ class FetchTests(unittest.TestCase):
                     self.assertEqual(json.load(fh)["parts"][number]["name"], "Part " + number)
             self.assertIn("fetched parts/2458.dat", out.getvalue())
             self.assertIn("openbricks sim", out.getvalue())
+            self.assertEqual(calls[-1], ("3005", None, True, False))
             with redirect_stdout(io.StringIO()), redirect_stderr(err):
                 self.assertEqual(cli.main(["bricks", "fetch", "0000", "3005", "--no-colors"]), 1)
                 self.assertEqual(cli.main(["bricks", "fetch", "5000"]), 1)
             self.assertIn("no part 0000", err.getvalue())
             self.assertIn("HTTP 500", err.getvalue())
             self.assertTrue(os.path.exists(os.path.join(tmp, "bricks", "3005.json")), "the good one still lands")
+            # --force and --dest reach the fetcher: the part's files and the tables again, into that cache
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(["bricks", "fetch", "2458", "--force", "--dest", "/x/ldraw"]), 0)
+            self.assertEqual(calls[-1], ("2458", "/x/ldraw", True, True))
+            # a number the library ships is refused: the shipped record would win anyway
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(["bricks", "fetch", "3001", "3005"]), 1)
+            self.assertIn("3001 is in the library already (Brick  2 x  4)", err.getvalue())
+            self.assertEqual(calls[-1][0], "3005", "the others are still fetched")
+            # a file that cannot be written is an error line, and the next number is still tried
+            err = io.StringIO()
+            with open(os.path.join(tmp, "blocked"), "w") as fh:
+                fh.write("x")
+            with mock.patch.dict(os.environ, {"OPENBRICKS_DATA_DIR": os.path.join(tmp, "blocked")}), \
+                    redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(["bricks", "fetch", "2458", "3005"]), 1)
+            self.assertIn("error:", err.getvalue())
+            self.assertIn("blocked", err.getvalue())
+            self.assertNotIn("Traceback", err.getvalue())
+            self.assertEqual([c[0] for c in calls[-2:]], ["2458", "3005"])
 
     def test_fetch_by_number_without_numpy_points_at_the_extra(self):
         import builtins

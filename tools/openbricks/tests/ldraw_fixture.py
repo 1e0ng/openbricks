@@ -112,6 +112,10 @@ def write_mini_library(root):
         "1 16 -40 0 0 -1 0 0 0 1 0 0 0 1 9999.dat",
     ])
     _write(os.path.join(parts, "8888.dat"), "~Moved to 9999", ["1 16 0 0 0 1 0 0 0 1 0 0 0 1 9999.dat"])
+    # an alias of an alias: 8887 -> 8888 -> 9999; one whose target is not there; one that names itself
+    _write(os.path.join(parts, "8887.dat"), "~Moved to 8888", ["1 16 0 0 0 1 0 0 0 1 0 0 0 1 8888.dat"])
+    _write(os.path.join(parts, "8886.dat"), "~Moved to 0000", ["1 16 0 0 0 1 0 0 0 1 0 0 0 1 0000.dat"])
+    _write(os.path.join(parts, "8885.dat"), "~Moved to 8885", box_lines(5, 5, 5))
     _write(os.path.join(parts, "7777.dat"), "Test Ring with Pin Hole", ring_lines(15, 6, -10, 10))
     _write(os.path.join(prims, "confric5.dat"), "Technic Friction Pin 1.0 Slotted with Split Base Collar (test stand-in)",
            cylinder_lines(6, -20, 0))

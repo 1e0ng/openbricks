@@ -215,7 +215,9 @@ def _wheel_geometry(part, bundle, rot):
     for s in part.get("shapes") or []:
         if s.get("type") == "cylinder":
             return float(s["radius"]), float(s["length"])
-    rec = bundle["parts"].get(part.get("ldraw")) if part.get("ldraw") else part if part.get("bbox") else None
+    rec = bundle["parts"].get(part.get("ldraw")) if part.get("ldraw") else None
+    if rec is None and part.get("bbox"):
+        rec = part                  # a fetched part carries its record along, as part_props reads it
     if rec is None:
         raise AssemblyError("wheel brick %r needs a cylinder shape or a mesh" % part.get("name"))
     size = [rec["bbox"][1][k] - rec["bbox"][0][k] for k in range(3)]
@@ -236,8 +238,13 @@ def _look_vector(part, rot):
 def derive(doc, bundle=None):
     """The chassis of an assembly: a :class:`ChassisSpec`, the build's
     mass properties relative to the axle midpoint, and the brick geoms.
-    Raises :class:`AssemblyError` when the wheel roles are missing."""
-    bundle = bundle if bundle is not None else bricks.load_bundle()
+    Raises :class:`AssemblyError` when the wheel roles are missing.
+    Without a ``bundle`` the library is the sim's: the shipped parts
+    plus the user's fetched ones (:func:`bricks.library_bundle`), whose
+    notes join the derivation's."""
+    library_notes = []
+    if bundle is None:
+        bundle, library_notes = bricks.library_bundle()
     if doc.get("format") != "openbricks-assembly/1":
         raise AssemblyError("not an openbricks-assembly/1 file")
     robot = doc.get("robot") or {}
@@ -333,7 +340,7 @@ def derive(doc, bundle=None):
     if l2 is not None:
         c = rel(l2["pos"])
         fields.update(line_sensor_2_x=mm(c[0]), line_sensor_2_y=mm(c[1]))
-    notes = fields.pop("notes", [])
+    notes = library_notes + fields.pop("notes", [])
     spec = ChassisSpec(**fields)
     inertial = {
         "mass_kg": mass / 1000.0,
@@ -350,7 +357,7 @@ def prop_bricks(doc, bundle=None):
     root component's frame (the same records the chassis carries, plus
     each brick's mass), and the total mass in grams. Needs no wheel
     roles — a prop is any build, or a single brick."""
-    bundle = bundle if bundle is not None else bricks.load_bundle()
+    bundle = bundle if bundle is not None else bricks.library_bundle()[0]
     if doc.get("format") != "openbricks-assembly/1":
         raise AssemblyError("not an openbricks-assembly/1 file")
     root = (doc.get("robot") or {}).get("root")

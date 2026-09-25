@@ -450,16 +450,20 @@ def merge_connectors(conns, extra_ours=()):
 # ------------------------------------------------------------- records
 def convert_part(lib, builder, number, weights=None):
     """One part number → a brick record, or ``None`` when the library
-    has no such part (or it has no faces). Follows ``~Moved to``."""
+    has no such part (or it has no faces). Follows ``~Moved to``, hop by
+    hop (an alias may point at an alias), to the part that is there."""
     path = lib.resolve(number + ".dat")
     if path is None:
         return None
     entry = lib.parse(path)
-    moved = re.match(r"~Moved to (\S+)", entry["title"])
-    if moved:
+    for _ in range(8):
+        moved = re.match(r"~Moved to (\S+)", entry["title"])
+        if not moved:
+            break
         path2 = lib.resolve(moved.group(1) + ".dat")
-        if path2:
-            path, entry = path2, lib.parse(path2)
+        if not path2 or path2 == path:
+            break
+        path, entry = path2, lib.parse(path2)
     tris_ldu, conns = builder.build(path)
     if len(tris_ldu) == 0:
         return None

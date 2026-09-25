@@ -4,7 +4,9 @@ brick geoms, and the model MuJoCo builds from them."""
 import copy
 import json
 import os
+import tempfile
 import unittest
+from unittest import mock
 
 from openbricks_sim import assembly, bricks
 from openbricks_sim.chassis import ChassisSpec, brick_geoms_xml, chassis_mjcf
@@ -131,6 +133,36 @@ class DeriveTests(unittest.TestCase):
         self.assertLess(w, 2 * r)
         with self.assertRaises(assembly.AssemblyError):
             assembly._wheel_geometry({"name": "x", "mass_g": 1}, self.bundle, assembly.rot_mat([0, 0, 0]))
+        # a fetched wheel carries its record along: the number is not in this library, the box is
+        rec = self.bundle["parts"]["56145"]
+        fetched = {"name": "rim", "mass_g": 3.0, "ldraw": "5614500", "bbox": rec["bbox"], "mesh": rec["mesh"],
+                   "com": rec["com"], "inertia_per_g": rec["inertia_per_g"]}
+        self.assertEqual(assembly._wheel_geometry(fetched, self.bundle, assembly.rot_mat([0, 0, 0])), (r, w))
+        with self.assertRaises(assembly.AssemblyError):
+            assembly._wheel_geometry({"name": "x", "mass_g": 1, "ldraw": "5614500"}, self.bundle, assembly.rot_mat([0, 0, 0]))
+
+    def test_the_runtime_library_holds_the_users_fetched_parts(self):
+        # a wheel fetched by number, kept under the data directory and used by the build by number alone
+        doc = copy.deepcopy(self.doc)
+        rec = copy.deepcopy(self.bundle["parts"]["56145"])
+        rec["fetched"] = True
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "bricks"))
+            with open(os.path.join(tmp, "bricks", "5614500.json"), "w") as fh:
+                json.dump({"format": "openbricks-brick-bundle/1", "parts": {"5614500": rec}}, fh)
+            with open(os.path.join(tmp, "bricks", "3001.json"), "w") as fh:
+                json.dump({"format": "openbricks-brick-bundle/1", "parts": {"3001": rec}}, fh)
+            doc["parts"]["wheel_86"] = {"name": "Fetched wheel", "category": "lego", "mass_g": 30.0, "ldraw": "5614500"}
+            with mock.patch.dict(os.environ, {"OPENBRICKS_DATA_DIR": tmp}):
+                spec, inertial, bricks_out, notes = assembly.derive(doc)
+                with self.assertRaises(assembly.AssemblyError):
+                    assembly.derive(doc, self.bundle)      # the shipped library alone has no 5614500
+                self.assertEqual(len(assembly.prop_bricks(doc)[0]), len(bricks_out))
+        r_mm, _ = assembly._wheel_geometry({"name": "rim", "mass_g": 3.0, "ldraw": "56145"}, self.bundle, assembly.rot_mat([0, 0, 0]))
+        self.assertAlmostEqual(spec.wheel_radius, r_mm / 1000.0, places=5, msg="the fetched wheel sizes the drive")
+        self.assertNotAlmostEqual(spec.wheel_radius, self.spec.wheel_radius, places=3)
+        self.assertTrue(any(b["ldraw"] == "5614500" for b in bricks_out))
+        self.assertTrue(any("ships 3001" in n for n in notes), notes)
 
     def test_quaternion_and_rotation_round_trip(self):
         for rpy in ([0, 0, 90], [90, 0, 0], [0, 90, 0], [30, -40, 120], [0, 0, 180], [180, 0, 0], [0, 180, 0]):

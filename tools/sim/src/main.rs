@@ -85,15 +85,10 @@ fn main() -> eframe::Result {
             Err(e) => eprintln!("warning: {e}"),
         }
     }
-    // the parts fetched by number, kept under the data directory
-    for (p, r) in bundle::user_bricks(&markers::data_dir().join("bricks")) {
-        match r {
-            Ok(b) => bundle.merge(b),
-            Err(e) => {
-                eprintln!("warning: {}: {e}", p.display());
-                notes.push(format!("fetched part file {}: {e}", p.display()));
-            }
-        }
+    // the parts fetched by number, kept under the data directory (the library's own win)
+    for note in bundle::merge_user_bricks(&mut bundle, &markers::data_dir().join("bricks")) {
+        eprintln!("warning: {note}");
+        notes.push(note);
     }
     let doc = args.file.and_then(|p| {
         match std::fs::read_to_string(&p)

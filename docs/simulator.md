@@ -281,15 +281,20 @@ robot as a tree of components:
   and the library says so and offers **Fetch 2458 from LDraw**: the
   part's own file and the few subparts and primitives it references
   come from ldraw.org (a few dozen kilobytes, not the whole 145 MB
-  library), are converted like the shipped parts, get the colours
-  Rebrickable lists for the part, and the part joins the library at
-  once and for every later launch, kept under
-  `~/.local/share/openbricks/bricks` (or `$OPENBRICKS_DATA_DIR`). A
-  build that uses a fetched part carries its record along, so it
-  opens on a machine whose library never fetched it. Fetching needs
+  library; the first fetch also brings Rebrickable's colour tables,
+  1.1 MB, once), are converted like the shipped parts, get the
+  colours Rebrickable lists for the part (or a note that it lists
+  none), and the part joins the library at once and for every later
+  launch, kept under `~/.local/share/openbricks/bricks` (or
+  `$OPENBRICKS_DATA_DIR`; on Windows `~` is `%USERPROFILE%`). One
+  fetch runs at a time, and **Cancel** stops it. A build that uses a
+  fetched part carries its record along — mesh, mass properties and
+  connectors, the stud sockets derived on arrival — so it opens, and
+  stacks, on a machine whose library never fetched it. Fetching needs
   the sim to have been started by `openbricks sim` (it runs the
   package's Python); `openbricks bricks fetch 2458 3005` does the same
-  from a terminal.
+  from a terminal, and a fetched part is in the MuJoCo runtime's
+  library too, so a fetched wheel drives.
   Servos, boards and wheels are recorded as boxes, cylinders and
   spheres, and any part you have as a mesh comes in through
   **Import a part from an STL file** (binary or ASCII; mm, cm, inch
@@ -365,7 +370,7 @@ between visits).
 ## The brick library
 
 ```console
-$ openbricks bricks fetch NUMBER [NUMBER ...] [--no-colors]
+$ openbricks bricks fetch NUMBER [NUMBER ...] [--dest DIR] [--force] [--no-colors]
 $ openbricks bricks fetch [--dest DIR] [--force]
 $ openbricks bricks convert NUMBER [NUMBER ...] [--out FILE] [--weights FILE] [--ldraw DIR]
 $ openbricks sim workbench --bricks FILE
@@ -380,9 +385,18 @@ a full library is used as it is and a sparse one grows), converts it,
 adds the colours Rebrickable lists for it, and keeps it under the
 sim's data directory, where `openbricks sim` finds it on every launch
 — what the sim's own library does from its search box. A number
-ldraw.org has not, official or on the tracker, is said so; a file
-that cannot be had is an error, never a part with a hole in it;
-ldraw.org's sixty requests a minute are waited out once. The whole
+ldraw.org has not, official or on the tracker, is said so; a file the
+part needs that ldraw.org has not is an error naming the part and the
+file, never a part with a hole in it; every pause ldraw.org asks for
+(sixty requests a minute; a part of two hundred files takes a few) is
+waited out, a connection that stalls for thirty seconds is an error,
+and a page served in place of a file is refused. A number the library
+ships is refused — the shipped record, weighed and in its sets, wins
+over a fetched copy, and one left under the data directory by an
+earlier fetch is ignored and noted at launch. `--force` fetches a
+part's files (its own and its subparts, not the primitives) and
+Rebrickable's tables again; `--dest` is the LDraw cache for both
+forms. The whole
 LDraw library (every LEGO part ever catalogued, 145 MB to download,
 about 600 MB unpacked) is `bricks fetch` alone, and `bricks convert`
 turns any part numbers — the LEGO design ids printed on the parts,
