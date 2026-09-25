@@ -4,8 +4,7 @@
 //! only draws it and feeds it input.
 
 use crate::assembly::{self, Geometry, Instance, Part, Props};
-use crate::bundle::MeshData;
-use crate::editor::Editor;
+use crate::editor::{self, Editor};
 use crate::geometry;
 use crate::gizmo::{self, Gizmo, Handle, Mode};
 use crate::route::Pose2;
@@ -205,6 +204,8 @@ pub struct App {
     /// The plan view's size last frame: a change refits the map.
     plan_size: (u32, u32),
     drag: Drag,
+    /// Set in the frame Escape abandoned a drag, so the key does not also drop the selection.
+    escaped_drag: bool,
     /// Where the 3D view was drawn last frame, in screen points.
     view_rect: egui::Rect,
     items: Vec<DrawItem>,
@@ -354,6 +355,7 @@ impl App {
             camera_tab: Tab::Workbench,
             plan_size: (0, 0),
             drag: Drag::None,
+            escaped_drag: false,
             view_rect: egui::Rect::ZERO,
             items: vec![],
             item_tops: vec![],
@@ -365,40 +367,11 @@ impl App {
 
     // --------------------------------------------------------- viewport
 
-    fn mesh_key(part_id: &str, part: &Part) -> String {
-        match &part.ldraw {
-            Some(n) => format!("ld:{n}"),
-            None => format!("part:{part_id}"),
-        }
-    }
-
-    fn mesh_for(&self, part: &Part) -> Option<MeshData> {
-        match assembly::geometry_of(part, &self.editor.bundle) {
-            Geometry::Record(rec) => rec.mesh.decode().ok(),
-            Geometry::Imported { .. } => {
-                let m: crate::bundle::MeshRecord = serde_json::from_value(part.extra.get("mesh")?.clone()).ok()?;
-                m.decode().ok()
-            }
-            Geometry::Shapes => {
-                let mut out = MeshData::default();
-                for s in &part.shapes {
-                    let m = geometry::shape_mesh(s);
-                    let base = out.positions.len() as u32;
-                    out.positions.extend(m.positions);
-                    out.normals.extend(m.normals);
-                    out.indices.extend(m.indices.iter().map(|i| i + base));
-                }
-                Some(out)
-            }
-            Geometry::None => None,
-        }
-    }
-
     /// The viewport mesh of a part, built on first use; None without geometry.
     fn ensure_part_mesh(&mut self, device: &eframe::egui_wgpu::wgpu::Device, part_id: &str, part: &Part) -> Option<String> {
-        let key = Self::mesh_key(part_id, part);
+        let key = editor::mesh_key(part_id, part);
         if !self.viewport.has_mesh(&key) {
-            let m = self.mesh_for(part)?;
+            let m = self.editor.mesh_of(part)?;
             self.viewport.add_mesh(device, &key, &m);
         }
         Some(key)
@@ -602,6 +575,15 @@ impl App {
                     color[2] * 0.5 + ACCENT[2] * 0.6,
                     1.0,
                 ];
+            }
+            if self
+                .editor
+                .overlapping
+                .iter()
+                .any(|(a, b, _)| *a == leaf.path[0] || *b == leaf.path[0])
+            {
+                // would overlap: flushed red while the drag goes on
+                color = [color[0] * 0.35 + 0.65, color[1] * 0.35 + 0.03, color[2] * 0.35 + 0.02, 1.0];
             }
             items.push(DrawItem {
                 mesh: key,
@@ -861,7 +843,14 @@ impl App {
             _ => {}
         }
         if response.drag_stopped() {
+            // Escape ends a drag (egui lets go of it): the brick is put back where it was,
+            // and the key does not also drop the selection
+            let escaped = ui.input(|i| i.key_pressed(egui::Key::Escape));
             match self.drag {
+                Drag::Move { .. } | Drag::Handle { .. } if escaped => {
+                    self.editor.cancel_change();
+                    self.escaped_drag = true;
+                }
                 Drag::Move { .. } => self.editor.end_move(),
                 Drag::Handle { .. } => self.editor.end_handle(),
                 _ => {}
@@ -907,6 +896,7 @@ impl App {
         if ui.ctx().egui_wants_keyboard_input() {
             return;
         }
+
         let mut copy = false;
         let mut cut = false;
         let mut paste = None;
@@ -951,7 +941,7 @@ impl App {
         if dup {
             self.editor.duplicate_selection();
         }
-        if esc {
+        if esc && !std::mem::take(&mut self.escaped_drag) {
             self.editor.selection.clear();
         }
         if fit {
@@ -1957,6 +1947,10 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(&self.editor.status);
+                let note = self.editor.overlap_note();
+                if !note.is_empty() {
+                    ui.colored_label(egui::Color32::from_rgb(214, 62, 48), note);
+                }
             });
         });
     }
@@ -2804,6 +2798,85 @@ mod tests {
     }
 
     #[test]
+    fn a_brick_dragged_into_its_neighbour_is_flushed_red_and_put_back() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        {
+            let app = h.state_mut();
+            let root = app.editor.doc.robot.root.clone();
+            app.editor.doc.components.get_mut(&root).unwrap().children.clear();
+            app.editor.doc.robot.roles.clear();
+            app.editor.recompute();
+            app.editor.magnet = false;
+            let id = app.editor.ensure_ldraw_part("3001").unwrap();
+            app.editor.add_instance(Some(id.clone()), None, [0.0; 3]);
+            app.editor.add_instance(Some(id), None, [0.0; 3]);
+            app.editor.fit_pending = true;
+        }
+        steps(&mut h, 3);
+        let b = h.state().editor.selection[0].clone();
+        assert_eq!(h.state().editor.selected_instances()[0].pos, [32.0, 0.0, 0.0], "beside the first");
+        // nothing selected (so no gizmo under the pointer): press on the second brick's top face
+        // and drag it one module into the first
+        h.state_mut().editor.selection.clear();
+        h.state_mut().viewport.camera.distance *= 1.6;
+        steps(&mut h, 2);
+        let from = on_screen(h.state(), Vec3::new(40.0, -4.0, 0.0));
+        let to = on_screen(h.state(), Vec3::new(32.0, -4.0, 0.0));
+        let rect = h.state().view_rect;
+        assert!(rect.contains(from) && rect.contains(to), "{from:?} {to:?} in {rect:?}");
+        press(&mut h, from, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, from + (to - from) * 0.5, Modifiers::NONE);
+        drag_to(&mut h, to, Modifiers::NONE);
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.selection, vec![b.clone()]);
+        assert_eq!(h.state().editor.selected_instances()[0].pos, [24.0, 0.0, 0.0]);
+        assert!(!h.state().editor.overlapping.is_empty(), "{}", h.state().editor.status);
+        let i = h.state().item_tops.iter().position(|t| *t == b).unwrap();
+        let c = h.state().items[i].color;
+        assert!(c[0] > 0.6 && c[0] > c[1] * 2.0, "flushed red while it would overlap: {c:?}");
+        h.get_by_label_contains("would overlap");
+        release(&mut h, to, PointerButton::Primary);
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.selected_instances()[0].pos, [32.0, 0.0, 0.0], "put back");
+        assert!(
+            h.state().editor.status.starts_with(&format!("{b} put back")),
+            "{}",
+            h.state().editor.status
+        );
+        assert!(h.state().editor.overlapping.is_empty());
+        // Escape in the middle of such a drag abandons it: the brick goes back at once and the
+        // release that follows does nothing
+        let depth = h.state().editor.undo_depth();
+        press(&mut h, from, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, from + (to - from) * 0.5, Modifiers::NONE);
+        drag_to(&mut h, to, Modifiers::NONE);
+        assert_eq!(h.state().editor.selected_instances()[0].pos, [24.0, 0.0, 0.0]);
+        h.key_press(Key::Escape);
+        h.step();
+        assert_eq!(h.state().editor.selected_instances()[0].pos, [32.0, 0.0, 0.0], "abandoned");
+        assert!(matches!(h.state().drag, Drag::None));
+        release(&mut h, to, PointerButton::Primary);
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.selected_instances()[0].pos, [32.0, 0.0, 0.0]);
+        assert_eq!(h.state().editor.undo_depth(), depth, "no undo point from an abandoned drag");
+        // dragged the other way it is kept, and not red
+        let away = on_screen(h.state(), Vec3::new(48.0, -4.0, 0.0));
+        press(&mut h, from, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, from + (away - from) * 0.5, Modifiers::NONE);
+        drag_to(&mut h, away, Modifiers::NONE);
+        steps(&mut h, 2);
+        assert!(h.state().editor.overlapping.is_empty());
+        let i = h.state().item_tops.iter().position(|t| *t == b).unwrap();
+        let c = h.state().items[i].color;
+        assert!(c[0] < 0.6 || c[0] < c[1] * 2.0, "not red: {c:?}");
+        release(&mut h, away, PointerButton::Primary);
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.selected_instances()[0].pos, [40.0, 0.0, 0.0]);
+        assert_eq!(h.state().editor.undo_depth(), depth + 1);
+    }
+
+    #[test]
     fn toolbar_buttons_and_mode_keys_drive_the_view() {
         let Some(gpu) = gpu() else { return };
         let mut h = harness(&gpu, None);
@@ -3005,7 +3078,8 @@ mod tests {
         let Some(gpu) = gpu() else { return };
         let mut h = harness(&gpu, None);
         steps(&mut h, 2);
-        let brick = h.state().editor.children().iter().find(|c| c.part.is_some()).unwrap().name.clone();
+        // the IMU board: free to turn on the frame (the frame itself is held by its pins)
+        let brick = "imu".to_string();
         h.state_mut().editor.selection = vec![brick.clone()];
         steps(&mut h, 3);
         let rot0 = h.state().editor.selected_instances()[0].rot;
@@ -3076,7 +3150,8 @@ mod tests {
         let mut h = harness(&gpu, None);
         steps(&mut h, 2);
         h.state_mut().editor.magnet = false;
-        let brick = h.state().editor.children().iter().find(|c| c.part.is_some()).unwrap().name.clone();
+        // the IMU board: free to turn and slide on the frame (the frame itself is held by its pins)
+        let brick = "imu".to_string();
         h.state_mut().editor.selection = vec![brick.clone()];
         h.step();
         let start = h.state().editor.selected_instances()[0].clone();
@@ -3086,11 +3161,12 @@ mod tests {
             h.state().editor.selected_instances()[0].rot[2],
             crate::editor::wrap_deg(start.rot[2] + 90.0)
         );
+        // along the frame only: a step towards either rail would put the board into it
         h.key_press(Key::ArrowUp);
-        h.key_press(Key::ArrowRight);
+        h.key_press(Key::ArrowUp);
         h.step();
         let p = h.state().editor.selected_instances()[0].pos;
-        assert_eq!((p[0], p[1]), (start.pos[0] + 8.0, start.pos[1] - 8.0));
+        assert_eq!((p[0], p[1]), (start.pos[0] + 16.0, start.pos[1]), "{}", h.state().editor.status);
         h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
         h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
         h.step();
@@ -3187,6 +3263,24 @@ mod tests {
         );
         h.get_by_label("Fit").click();
         steps(&mut h, 2);
+        // two bricks of their own, well apart, so the brick dragged, lifted, pulled and turned
+        // below meets nothing (the example's boards are hemmed in by their neighbours)
+        {
+            let app = h.state_mut();
+            let root = app.editor.doc.robot.root.clone();
+            app.editor.doc.components.get_mut(&root).unwrap().children.clear();
+            app.editor.doc.robot.roles.clear();
+            app.editor.recompute();
+            let id = app.editor.ensure_ldraw_part("3001").unwrap();
+            app.editor.add_instance(Some(id.clone()), None, [0.0; 3]);
+            app.editor.add_instance(Some(id), None, [64.0, 0.0, 0.0]);
+            app.editor.selection.clear();
+            app.editor.fit_pending = true;
+        }
+        steps(&mut h, 3);
+        // stood back so that a 90-pixel drag is more than half a module in each direction
+        h.state_mut().viewport.camera.distance *= 2.5;
+        steps(&mut h, 2);
         // a drag from a brick selects the one in front and moves it on the ground plane in 8 mm steps
         let before: std::collections::HashMap<String, [f64; 3]> =
             h.state().editor.children().iter().map(|c| (c.name.clone(), c.pos)).collect();
@@ -3278,6 +3372,8 @@ mod tests {
         let rot = h.state().editor.children().iter().find(|c| c.name == top).unwrap().rot;
         assert_ne!(rot, rot0);
         // a double-click on a component instance opens it: find a brick of one that is in front
+        h.state_mut().editor.reset_to_example();
+        steps(&mut h, 3);
         h.get_by_label("Iso").click();
         h.get_by_label("Fit").click();
         steps(&mut h, 2);
@@ -4096,10 +4192,10 @@ mod tests {
         let t0 = Instant::now();
         app.autosave(t0 + Duration::from_secs(5), 5_000);
         assert!(crate::drafts::take(&dir, crate::drafts::BUILD).is_none() && crate::drafts::take(&dir, crate::drafts::ROUTE).is_none());
-        // a change to each; a moment later both drafts are there
-        let name = app.editor.children()[0].name.clone();
-        app.editor.selection = vec![name];
+        // a change to each (the IMU slides along the frame); a moment later both drafts are there
+        app.editor.selection = vec!["imu".into()];
         app.editor.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(app.editor.selected_instances()[0].pos[0], 38.0, "{}", app.editor.status);
         app.simulate.place_chassis(crate::route::Pose2::at([123.0, 45.0], 90.0));
         app.autosave(t0 + Duration::from_secs(6), 6_000);
         app.autosave(t0 + Duration::from_secs(9), 9_000);

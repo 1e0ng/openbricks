@@ -316,6 +316,18 @@ robot as a tree of components:
   with its edges — the seams between stacked bricks, the rims of studs
   and holes — in a darker shade of its own colour (lighter on a black
   brick); **edges** in the toolbar turns them off.
+- **No two bricks overlap.** A brick let go, nudged, turned or given a
+  pose where its material would pass through a neighbour's is put back
+  where it was, and the status line names both — while it is dragged
+  it flushes red wherever it would overlap, and Escape abandons the
+  drag. Touching is not overlapping, and two parts with a feature
+  seated in the other's (a pin all the way in its hole, a plate down on
+  its studs, an axle anywhere along a hole it runs through) are a joint
+  whatever LDraw's geometry does at the join. A new brick lands beside
+  what is already at the origin; a duplicate or a paste goes as far
+  along −y as it needs to be clear. A file that already holds overlaps
+  opens and says how many, and stays editable: an old overlap may be
+  moved out of, not further in.
 - **Mass properties** are never typed in above the brick level.
   Volume, centre of mass and the inertia tensor of every LDraw and STL
   part come from its closed mesh, so a recorded weight becomes a full

@@ -341,5 +341,12 @@ mod tests {
         let m = bundle.parts["3700"].mesh.decode().unwrap();
         let n = feature_edges(&m).len() / 2;
         assert!((308..=320).contains(&n), "{n}");
+        // pinned counts: a beam 5 keeps the sixteen pieces of each of its four corner lines
+        // (1028, not 960 without them), a beam 15, a 16-long Technic brick with holes and the
+        // frame, whose flat faces would carry hundreds of seams unfiltered
+        for (num, want) in [("32316", 1028), ("32278", 3268), ("3703", 3392), ("64178", 4930)] {
+            let m = bundle.parts[num].mesh.decode().unwrap();
+            assert_eq!(feature_edges(&m).len() / 2, want, "{num}");
+        }
     }
 }

@@ -1105,6 +1105,19 @@ pub fn mated_pairs<'a>(mine: &'a [WorldConnector], others: &'a [WorldConnector],
     out
 }
 
+/// Whether any feature of `mine` sits seated in one of `others`: a
+/// mate within `MATE_MM` and `MATE_DEG` with no slack along the axis (a
+/// pin all the way in its hole, a stud down on its socket — a brick
+/// sunk into the one below is not), or an axle anywhere along a hole
+/// it runs through; which the overlap rule excuses as a joint.
+pub fn seated(mine: &[WorldConnector], others: &[WorldConnector]) -> bool {
+    mated_pairs(mine, others, MATE_MM, MATE_DEG).iter().any(|p| {
+        let male = if mates(&p.m.kind).is_empty() { p.o } else { p.m };
+        let d = p.o.centre - p.m.centre;
+        male.kind == "axle" || d.dot(p.o.axis).abs() <= MATE_MM
+    })
+}
+
 /// Move `inst` (top-level in `editing`) so its features sit in the holes
 /// and on the studs of the other instances: the nearest compatible pair
 /// sets the axis, then among the turns about it the other pairs suggest
@@ -1237,6 +1250,11 @@ pub fn snap_instance_within(doc: &mut Document, bundle: &Bundle, editing: &str, 
     Some(path)
 }
 
+/// How close two features must sit, in mm and degrees, to count as
+/// mated: what the inspector lists, and what the overlap rule excuses.
+pub const MATE_MM: f64 = 0.4;
+pub const MATE_DEG: f64 = 3.0;
+
 pub fn connections_of(doc: &Document, bundle: &Bundle, editing: &str, name: &str) -> Vec<(String, String, Vec<String>)> {
     let leaves = flatten(doc, editing);
     let mine: Vec<WorldConnector> = leaves
@@ -1250,7 +1268,7 @@ pub fn connections_of(doc: &Document, bundle: &Bundle, editing: &str, name: &str
         .flat_map(|l| connectors_of_leaf(doc, bundle, l))
         .collect();
     let mut seen = HashSet::new();
-    mated_pairs(&mine, &others, 0.4, 3.0)
+    mated_pairs(&mine, &others, MATE_MM, MATE_DEG)
         .into_iter()
         .filter(|p| seen.insert((p.m.centre.to_array().map(|v| (v * 10.0).round() as i64), p.o.path.join("/"))))
         .map(|p| (p.m.kind.clone(), p.o.kind.clone(), p.o.path.clone()))
