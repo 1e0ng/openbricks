@@ -108,8 +108,18 @@ def ldraw_dir():
 
 
 def library_present(root):
+    """Whether ``root`` has the library's two directories (a sparse cache
+    grown part by part has them too)."""
     root = pathlib.Path(root)
     return (root / "parts").is_dir() and (root / "p").is_dir()
+
+
+def library_complete(root):
+    """Whether ``root`` holds the whole library, as ``bricks fetch``
+    unpacks it: its directories and the ``LDConfig.ldr`` the archive
+    carries, which a part-by-part cache never has."""
+    root = pathlib.Path(root)
+    return library_present(root) and (root / "LDConfig.ldr").is_file()
 
 
 def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=urllib.request.urlopen,
@@ -120,7 +130,7 @@ def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=u
     ``force``. ``progress`` receives short status lines."""
     say = progress or (lambda s: None)
     root = pathlib.Path(dest) if dest else ldraw_dir()
-    if library_present(root) and not force:
+    if library_complete(root) and not force:
         say("LDraw library already at %s (use --force to refresh)" % root)
         return root
     root.mkdir(parents=True, exist_ok=True)

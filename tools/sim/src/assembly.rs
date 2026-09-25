@@ -302,10 +302,13 @@ pub enum Geometry<'a> {
 
 pub fn geometry_of<'a>(part: &'a Part, bundle: &'a Bundle) -> Geometry<'a> {
     if let Some(num) = &part.ldraw {
-        return match bundle.parts.get(num) {
-            Some(rec) => Geometry::Record(rec),
-            None => Geometry::None,
-        };
+        if let Some(rec) = bundle.parts.get(num) {
+            return Geometry::Record(rec);
+        }
+        // a part fetched by number carries its record in the build, for a library without it
+        if !part.extra.contains_key("mesh") {
+            return Geometry::None;
+        }
     }
     if part.extra.contains_key("mesh") {
         let v = |k: &str| part.extra.get(k).cloned().unwrap_or(serde_json::Value::Null);
@@ -1295,7 +1298,7 @@ pub fn validate(doc: &Document, bundle: &Bundle) -> Vec<String> {
             errs.push(format!("brick {id} needs mass_g > 0"));
         }
         if let Some(num) = &p.ldraw {
-            if !bundle.parts.contains_key(num) {
+            if !bundle.parts.contains_key(num) && !p.extra.contains_key("mesh") {
                 errs.push(format!("brick {id} needs LDraw part {num}, which this library does not carry"));
             }
         } else if p.shapes.is_empty() && !p.extra.contains_key("mesh") {
@@ -1861,6 +1864,7 @@ mod tests {
             density_g_cm3: None,
             sets: BTreeMap::new(),
             aliases: vec![],
+            fetched: false,
             colors: BTreeMap::new(),
         };
         b.parts.insert("beam".into(), rec(hole));

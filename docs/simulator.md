@@ -276,7 +276,20 @@ robot as a tree of components:
   every part of the two WRO sets, 45811 (the Brick Set: the mission
   bricks, tiles, hoses and balls) and 45819 (the Expansion Set). Type
   a set number, or "WRO", into the library's search to see a set's
-  bricks, each with how many the set holds.
+  bricks, each with how many the set holds. Type a part number the
+  library lacks — the LEGO design id printed on the part, `2458` —
+  and the library says so and offers **Fetch 2458 from LDraw**: the
+  part's own file and the few subparts and primitives it references
+  come from ldraw.org (a few dozen kilobytes, not the whole 145 MB
+  library), are converted like the shipped parts, get the colours
+  Rebrickable lists for the part, and the part joins the library at
+  once and for every later launch, kept under
+  `~/.local/share/openbricks/bricks` (or `$OPENBRICKS_DATA_DIR`). A
+  build that uses a fetched part carries its record along, so it
+  opens on a machine whose library never fetched it. Fetching needs
+  the sim to have been started by `openbricks sim` (it runs the
+  package's Python); `openbricks bricks fetch 2458 3005` does the same
+  from a terminal.
   Servos, boards and wheels are recorded as boxes, cylinders and
   spheres, and any part you have as a mesh comes in through
   **Import a part from an STL file** (binary or ASCII; mm, cm, inch
@@ -352,6 +365,7 @@ between visits).
 ## The brick library
 
 ```console
+$ openbricks bricks fetch NUMBER [NUMBER ...] [--no-colors]
 $ openbricks bricks fetch [--dest DIR] [--force]
 $ openbricks bricks convert NUMBER [NUMBER ...] [--out FILE] [--weights FILE] [--ldraw DIR]
 $ openbricks sim workbench --bricks FILE
@@ -359,17 +373,25 @@ $ openbricks sim workbench --bricks FILE
 
 The wheel ships the curated Technic set and every part of the WRO
 sets 45811 and 45819 (the library says which sets hold a brick, and
-how many); the whole LDraw library
-(every LEGO part ever catalogued, 145 MB to download, about 600 MB
-unpacked) is one command away. `bricks fetch` unpacks it into
-`~/.cache/openbricks/ldraw` (or `$OPENBRICKS_LDRAW_DIR`), and `bricks
-convert` turns any part numbers — the LEGO design ids printed on the
-parts, `3648` for the 24-tooth gear — into a bundle file that
+how many). Any other part is a number away: `bricks fetch 2458`
+gets the part's files from ldraw.org one by one (the same
+`~/.cache/openbricks/ldraw` layout the whole library unpacks into, so
+a full library is used as it is and a sparse one grows), converts it,
+adds the colours Rebrickable lists for it, and keeps it under the
+sim's data directory, where `openbricks sim` finds it on every launch
+— what the sim's own library does from its search box. A number
+ldraw.org has not, official or on the tracker, is said so; a file
+that cannot be had is an error, never a part with a hole in it;
+ldraw.org's sixty requests a minute are waited out once. The whole
+LDraw library (every LEGO part ever catalogued, 145 MB to download,
+about 600 MB unpacked) is `bricks fetch` alone, and `bricks convert`
+turns any part numbers — the LEGO design ids printed on the parts,
+`3648` for the 24-tooth gear — from it into a bundle file that
 `openbricks sim --bricks` (and `openbricks sim workbench --bricks`)
-adds to the library. Converted
-parts without a weight carry a volume estimate at 1.05 g/cm³ and are
-flagged until you weigh them; pass `--weights` with a JSON of
-`{"3648": {"g": 1.62}}` to record real ones.
+adds to the library. Converted parts without a weight carry a volume
+estimate at 1.05 g/cm³ and are flagged until you weigh them; pass
+`--weights` with a JSON of `{"3648": {"g": 1.62}}` to record real
+ones.
 
 LEGO® and Technic are trademarks of the LEGO Group, which does not
 sponsor or endorse openbricks. The geometry is the LDraw community's
