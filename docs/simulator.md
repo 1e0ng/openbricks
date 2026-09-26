@@ -330,11 +330,15 @@ robot as a tree of components:
   which also seats a two-pin connector in both holes. Dragging a part
   near a hole or a grid pulls it on (it lets go again as the pointer
   moves away); a stud also seats in a Technic hole or, for the
-  half-stud offset, in a tube. Several selected parts — an assembled
-  hinge, a stack — are pulled and seated as one, keeping their own
-  fit: their features together against everything else, the first
-  selected part taking the turn and shift and the rest riding along.
-  The inspector lists what each part is mated to. So that a stack stays legible, the sim draws every brick
+  half-stud offset, in a tube — sitting at the hole's mouth, as a
+  stud does. Several selected parts — an assembled hinge, a stack —
+  are pulled and seated as one, keeping their own fit: their features
+  together against everything else, the first selected part taking
+  the turn and shift and the rest riding along. A part let go lands
+  with its height on the stud module (1.6 mm: a plate is two, a beam
+  five, a brick six) and its plan position on the 8 mm grid, and the
+  magnet takes it from there. The inspector lists what each part is
+  mated to. So that a stack stays legible, the sim draws every brick
   with its edges — the seams between stacked bricks, the rims of studs
   and holes — in a darker shade of its own colour (lighter on a black
   brick); **edges** in the toolbar turns them off.

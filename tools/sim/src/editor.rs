@@ -17,6 +17,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 pub const MODULE_MM: f64 = 8.0;
+/// The height module: a stud's height, which every LEGO height stacks
+/// on — a plate is two, a beam five, a brick six. Heights let go land on
+/// it, not on the 8 mm plan grid (which would sink a plate into the one
+/// below, or a brick 1.6 mm into its base).
+pub const HEIGHT_MM: f64 = 1.6;
 const UNDO_DEPTH: usize = 60;
 pub const CLIPBOARD_FORMAT: &str = "openbricks-clipboard/1";
 
@@ -1449,13 +1454,13 @@ impl Editor {
         self.watch();
     }
 
-    /// The plane drag let go: heights land on the grid, then the magnet;
-    /// then, if the drag made the bricks overlap others, it is taken back.
+    /// The plane drag let go: heights land on the height module, then
+    /// the magnet; then, if the drag made the bricks overlap others, it
+    /// is taken back.
     pub fn end_move(&mut self) {
         if self.snap_mm > 0.0 {
             for name in self.unlocked_selection() {
-                let s = self.snap_mm;
-                self.set_instance(&name, |i| i.pos[2] = (i.pos[2] / s).round() * s);
+                self.set_instance(&name, |i| i.pos[2] = assembly::round3((i.pos[2] / HEIGHT_MM).round() * HEIGHT_MM));
             }
         }
         self.recompute();
@@ -2468,9 +2473,10 @@ mod tests {
     #[test]
     fn a_selection_moved_together_is_seated_as_one() {
         // two 2 x 4s end to end on the ground beside a third; both selected and dragged onto it:
-        // the drop lands their height on the 8 mm grid, 1.6 mm into the brick below, and the
-        // magnet lifts the pair onto its studs as one — before 4.28.0 it did that for one item
-        // only, and a pair was refused as an overlap
+        // the drop lands their height on the height module and the magnet seats the pair on
+        // its studs as one — before 4.28.0 the magnet did that for one item only (and the drop
+        // rounded heights to the 8 mm grid, 1.6 mm into the brick below), and a pair was
+        // refused as an overlap
         let (mut ed, base) = solo("3001");
         let id = ed.ensure_ldraw_part("3001").unwrap();
         ed.add_instance(Some(id.clone()), None, [0.0, 48.0, 0.0]);
@@ -2517,6 +2523,87 @@ mod tests {
         ed.selection.clear();
         ed.snap_selection(true);
         assert_eq!(ed.status, "Select an item to snap");
+    }
+
+    #[test]
+    fn a_brick_lands_on_an_assembled_hinge() {
+        // the hinge pair assembled at the origin, on the ground; a 2 x 4 let go on top of it
+        // lands on its studs. The drop puts the brick on the 8 mm grid, 1.6 mm low; the stud
+        // grid (four sockets) must then win over the loose tube seat, whose three tubes used
+        // to vote twice each (a tube is a stud hole and a pin hole in one place) and kept the
+        // brick low, into the hinge, refused
+        let (mut ed, _) = solo("3831");
+        let ht = ed.ensure_ldraw_part("3830").unwrap();
+        ed.add_instance(Some(ht), None, [0.0, 0.0, 0.0]);
+        assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.magnet = true;
+        for (at, expect) in [
+            ([0.0, 0.0, 9.6], [0.0, 0.0, 9.6]),
+            ([0.0, 8.0, 9.6], [0.0, 8.0, 9.6]),
+            ([8.0, 0.0, 9.6], [8.0, 0.0, 9.6]),
+            ([0.0, 0.0, 19.2], [0.0, 0.0, 19.2]),
+        ] {
+            ed.add_instance(Some(id.clone()), None, [200.0, 200.0, 9.6]);
+            let brick = ed.selection[0].clone();
+            ed.set_instance(&brick, |inst| inst.pos = at);
+            ed.recompute();
+            assert_eq!(ed.overlap_count(), 0, "at {at:?}: {:?}", ed.overlapping);
+            let starts = ed.begin_move();
+            ed.move_by(&starts, 0.0, 0.0);
+            ed.end_move();
+            let pos = ed.children().iter().find(|c| c.name == brick).unwrap().pos;
+            assert_eq!(pos, expect, "let go at {at:?}: {}", ed.status);
+            assert!(!ed.status.contains("put back"), "{}", ed.status);
+            assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+            ed.remove_selection();
+        }
+    }
+
+    #[test]
+    fn plates_and_bricks_let_go_at_their_own_heights_stack() {
+        // a 2 x 2 plate on a 2 x 2 plate: let go at a plate's height it stays there — the drop
+        // used to round it to the 8 mm grid, into the plate below, from where the magnet's
+        // nearest seat was the loose tube one, refused as an overlap; near it, it lands there
+        let (mut ed, base) = solo("3022");
+        let plate = ed.ensure_ldraw_part("3022").unwrap();
+        let brick = ed.ensure_ldraw_part("3001").unwrap();
+        ed.magnet = true;
+        let drop = |ed: &mut Editor, part: &str, at: [f64; 3]| -> ([f64; 3], String) {
+            ed.add_instance(Some(part.to_string()), None, [200.0, 200.0, at[2]]);
+            let name = ed.selection[0].clone();
+            ed.set_instance(&name, |i| i.pos = at);
+            ed.recompute();
+            let starts = ed.begin_move();
+            ed.move_by(&starts, 0.0, 0.0);
+            ed.end_move();
+            let pos = ed.children().iter().find(|c| c.name == name).unwrap().pos;
+            let status = ed.status.clone();
+            ed.remove_selection();
+            (pos, status)
+        };
+        for z in [3.2, 2.4, 4.0, 4.8, 6.4] {
+            let (pos, status) = drop(&mut ed, &plate, [0.0, 0.0, z]);
+            assert_eq!(pos, [0.0, 0.0, 3.2], "a plate let go at {z} on {base}: {status}");
+            assert!(!status.contains("put back"), "{status}");
+        }
+        // a brick on the plate (its origin is its top face: a brick's height up), and a plate
+        // on a brick (a plate's height up)
+        for z in [9.6, 8.8, 10.4] {
+            let (pos, status) = drop(&mut ed, &brick, [0.0, 0.0, z]);
+            assert_eq!(pos, [0.0, 0.0, 9.6], "a brick let go at {z} on {base}: {status}");
+        }
+        ed.add_instance(Some(brick.clone()), None, [48.0, 0.0, 0.0]);
+        for z in [3.2, 2.4, 4.0] {
+            let (pos, status) = drop(&mut ed, &plate, [48.0, 0.0, z]);
+            assert_eq!(pos, [48.0, 0.0, 3.2], "a plate let go at {z} on a brick: {status}");
+        }
+        // heights land on the module even with nothing to seat on
+        let (pos, _) = drop(&mut ed, &plate, [-96.0, -96.0, 5.0]);
+        assert_eq!(pos, [-96.0, -96.0, 4.8]);
+        ed.snap_mm = 0.0;
+        let (pos, _) = drop(&mut ed, &plate, [-96.0, -96.0, 5.0]);
+        assert_eq!(pos, [-96.0, -96.0, 5.0], "no grid, no rounding");
     }
 
     #[test]
@@ -2887,7 +2974,7 @@ mod tests {
     }
 
     #[test]
-    fn plane_drags_snap_and_the_lift_lands_on_the_grid() {
+    fn plane_drags_snap_and_the_lift_lands_on_the_height_module() {
         let (mut ed, _) = solo("32278");
         let starts = ed.begin_move();
         assert_eq!(starts.len(), 1);
@@ -2896,13 +2983,17 @@ mod tests {
         ed.lift_by(&starts, 5.2);
         assert_eq!(ed.selected_instances()[0].pos[2], 5.2);
         ed.end_move();
-        assert_eq!(ed.selected_instances()[0].pos, [8.0, 0.0, 8.0]);
+        assert_eq!(
+            ed.selected_instances()[0].pos,
+            [8.0, 0.0, 4.8],
+            "a stud's height, not the plan grid"
+        );
         ed.snap_mm = 0.0;
         ed.move_by(&starts, 1.2345, 0.0);
         assert_eq!(ed.selected_instances()[0].pos[0], 1.235);
         ed.lift_by(&starts, 0.3);
         ed.end_move();
-        assert_eq!(ed.selected_instances()[0].pos[2], 8.3);
+        assert_eq!(ed.selected_instances()[0].pos[2], 5.1);
         assert_eq!(ed.snap(3.9), 3.9);
     }
 
