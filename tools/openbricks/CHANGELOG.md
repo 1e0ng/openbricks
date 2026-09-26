@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.29.2 — the edges of black bricks show
+
+A stack of black bricks was one black mass: an edge is drawn in the
+brick's colour darkened well below its shading, and black is not
+black (LDraw's is a very dark blue, luma 0.07), so its edges were
+darkened to nothing; only a truly black brick was lightened, and by
+too little. On a dark brick — luma under 0.2: black, dark red, the
+dark browns and blues — the edge is now the colour lightened a third
+of the way to white, and shows.
+
+- Tests: the seam between two black boxes reads well over a third of
+  the way to white along its whole length (the light bluish grey
+  seam darker than its faces, as before).
+
 ## 4.29.1 — tiles seat, and the grid is half a stud
 
 A 1 x 2 tile could not be put on a 2 x 2 plate in line: a tile has
