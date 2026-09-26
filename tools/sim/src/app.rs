@@ -3291,7 +3291,7 @@ mod tests {
         assert!(!h.state().viewport.edges, "the edges toggle turns the bricks' edges off");
         h.get_by_label("Snap").click();
         h.step();
-        assert_eq!(h.state().editor.status, "Select one item to snap");
+        assert_eq!(h.state().editor.status, "Select an item to snap");
         h.get_by_label("Example").click();
         h.step();
         assert!(h.state().editor.dirty);
@@ -3567,7 +3567,7 @@ mod tests {
         assert_eq!(h.state().editor.children().len(), n);
         h.key_press(Key::S);
         h.step();
-        assert_eq!(h.state().editor.status, "Select one item to snap");
+        assert_eq!(h.state().editor.status, "Select an item to snap");
         h.key_press(Key::Escape);
         h.step();
         assert!(h.state().editor.selection.is_empty());

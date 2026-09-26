@@ -3,6 +3,31 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.28.0 — several parts seat as one: the magnet works on a selection
+
+A selection of two or more parts dropped onto a brick was refused as
+an overlap: the drop rounded their height to the 8 mm grid, 1.6 mm
+into the brick below, and the magnet that lifts one part back onto
+the studs ran for one part only. An assembled hinge (3831 + 3830), a
+stack, a pair of bricks end to end — none could be moved onto a base
+together. The magnet now seats a selection as one rigid group: its
+features together against everything else, the first selected part
+taking the turn and shift and the rest riding along with their own
+fit kept. That is what the drag's pull does while a selection is
+under way, what the drop does, and what `S` does on a selection.
+
+The old 1 x 4 hinge bricks of the WRO Expansion Set assemble as they
+should: 3830's pin seats in 3831's socket when the top is let go
+beside the base at the same height, and stacked a brick higher
+instead (a stud stack) the pin hangs above the socket, as it does with
+the real bricks — tests pin both.
+
+- Tests: the hinge pair assembling side by side, pin in socket, and
+  not when stacked; an assembled hinge moved onto a 2 x 4 as one;
+  a pair of bricks moved onto a base as one, pulled on during the
+  drag, snapped by `S` together, a locked member left behind, and
+  nothing selected said so.
+
 ## 4.27.1 — fetch by number, reviewed: every pause waited out, one rule for the data directory, sockets and wheels that travel
 
 An adversarial review of 4.27.0 found sixteen defects; all are

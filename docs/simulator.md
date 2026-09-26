@@ -76,7 +76,8 @@ three arrows (**Move**, `W`) to slide it along one world axis in grid
 steps, or three rings (**Rotate**, `E`) to turn it about one axis in
 15° steps — hold shift for free movement or rotation; several
 selected items move and turn together about the first one's origin.
-`R` turns the selection 90°, `S` snaps it into the nearest hole,
+`R` turns the selection 90°, `S` snaps it — one item, or several as
+one — into the nearest hole,
 arrows nudge, `Delete` removes, `⌘Z` undoes. `⌘C` copies the selection
 and `⌘V` pastes it: back into the same component two modules over,
 into another component as it was, or into another window (the
@@ -329,8 +330,11 @@ robot as a tree of components:
   which also seats a two-pin connector in both holes. Dragging a part
   near a hole or a grid pulls it on (it lets go again as the pointer
   moves away); a stud also seats in a Technic hole or, for the
-  half-stud offset, in a tube. The inspector lists what each part is
-  mated to. So that a stack stays legible, the sim draws every brick
+  half-stud offset, in a tube. Several selected parts — an assembled
+  hinge, a stack — are pulled and seated as one, keeping their own
+  fit: their features together against everything else, the first
+  selected part taking the turn and shift and the rest riding along.
+  The inspector lists what each part is mated to. So that a stack stays legible, the sim draws every brick
   with its edges — the seams between stacked bricks, the rims of studs
   and holes — in a darker shade of its own colour (lighter on a black
   brick); **edges** in the toolbar turns them off.

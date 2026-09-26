@@ -1123,30 +1123,31 @@ pub fn seated(mine: &[WorldConnector], others: &[WorldConnector]) -> bool {
     })
 }
 
-/// Move `inst` (top-level in `editing`) so its features sit in the holes
-/// and on the studs of the other instances: the nearest compatible pair
-/// sets the axis, then among the turns about it the other pairs suggest
-/// and the shifts each pair asks for, the turn and shift that mate the
-/// most features win (a plate lands on a brick's whole stud grid, a
-/// two-pin connector in both holes), the least movement breaking ties.
-/// Returns the mated path.
-pub fn snap_instance(doc: &mut Document, bundle: &Bundle, editing: &str, name: &str) -> Option<Vec<String>> {
-    snap_instance_within(doc, bundle, editing, name, SNAP_MM)
-}
-
-pub fn snap_instance_within(doc: &mut Document, bundle: &Bundle, editing: &str, name: &str, tol_mm: f64) -> Option<Vec<String>> {
+/// Move the instances `names` (top-level in `editing`), as one rigid
+/// group, so their features sit in the holes and on the studs of the
+/// other instances: the nearest compatible pair sets the axis, then
+/// among the turns about it the other pairs suggest and the shifts each
+/// pair asks for, the turn and shift that mate the most features win (a
+/// plate lands on a brick's whole stud grid, a two-pin connector in both
+/// holes), the least movement breaking ties. The first name is the
+/// reference whose turn and shift the others follow, so an assembled
+/// hinge or a stack let go together lands on a base as it is. Returns
+/// the mated path.
+pub fn snap_group_within(doc: &mut Document, bundle: &Bundle, editing: &str, names: &[String], tol_mm: f64) -> Option<Vec<String>> {
     let leaves = flatten(doc, editing);
+    let is_mine = |top: &str| names.iter().any(|n| n == top);
     let mine: Vec<WorldConnector> = leaves
         .iter()
-        .filter(|l| l.path[0] == name)
+        .filter(|l| is_mine(&l.path[0]))
         .flat_map(|l| connectors_of_leaf(doc, bundle, l))
         .collect();
-    let inst = doc.components.get(editing)?.children.iter().find(|c| c.name == name)?.clone();
+    let first = names.first()?;
+    let inst = doc.components.get(editing)?.children.iter().find(|c| c.name == *first)?.clone();
     let pos = DVec3::from_array(inst.pos);
     let reach = mine.iter().map(|c| (c.centre - pos).length()).fold(0.0, f64::max) * 2.0 + tol_mm + 20.0;
     let others: Vec<WorldConnector> = leaves
         .iter()
-        .filter(|l| l.path[0] != name)
+        .filter(|l| !is_mine(&l.path[0]))
         .flat_map(|l| connectors_of_leaf(doc, bundle, l))
         .filter(|c| (c.centre - pos).length() <= reach)
         .collect();
@@ -1248,10 +1249,22 @@ pub fn snap_instance_within(doc: &mut Document, bundle: &Bundle, editing: &str, 
         }
     }
     let (_, r, new_pos, path) = choice?;
+    // the reference takes the turn and the shift; the rest of the group rides along rigidly,
+    // turned about the reference's origin
+    let delta = r * r0t;
+    let round2 = |v: f64| (v * 100.0).round() / 100.0;
     let comp = doc.components.get_mut(editing)?;
-    let inst = comp.children.iter_mut().find(|c| c.name == name)?;
-    inst.rot = euler_from(&r).map(|v| (v * 100.0).round() / 100.0);
-    inst.pos = new_pos.to_array().map(|v| (v * 100.0).round() / 100.0);
+    for child in comp.children.iter_mut().filter(|c| is_mine(&c.name)) {
+        if child.name == *first {
+            child.rot = euler_from(&r).map(round2);
+            child.pos = new_pos.to_array().map(round2);
+        } else {
+            let rb = delta * rot_mat(child.rot);
+            let pb = new_pos + delta * (DVec3::from_array(child.pos) - pos);
+            child.rot = euler_from(&rb).map(round2);
+            child.pos = pb.to_array().map(round2);
+        }
+    }
     Some(path)
 }
 
@@ -1891,7 +1904,7 @@ mod tests {
                 ],
             )],
         );
-        let mated = snap_instance(&mut doc, &b, "robot", "pin").unwrap();
+        let mated = snap_group_within(&mut doc, &b, "robot", &["pin".to_string()], SNAP_MM).unwrap();
         assert_eq!(mated, vec!["beam".to_string()]);
         let p = &doc.components["robot"].children[1];
         assert!(
@@ -1911,7 +1924,7 @@ mod tests {
         let inst_axle = doc.components.get_mut("robot").unwrap().children.get_mut(1).unwrap();
         inst_axle.pos = [50.4, 0.3, 7.0];
         inst_axle.rot = [0.0; 3];
-        snap_instance(&mut doc, &b, "robot", "pin").unwrap();
+        snap_group_within(&mut doc, &b, "robot", &["pin".to_string()], SNAP_MM).unwrap();
         let p = &doc.components["robot"].children[1];
         assert!((p.pos[2] - 7.0).abs() < 0.05 && (p.pos[0] - 50.0).abs() < 0.05, "{:?}", p.pos);
     }
