@@ -241,6 +241,16 @@ class SaveTests(unittest.TestCase):
             self.assertGreater(float(m.body_mass[pair]), 0.0)
             mujoco.mj_forward(m, d)
             self.assertAlmostEqual(float(d.xpos[post][0]), -0.2, places=5)
+            self.assertAlmostEqual(float(d.xpos[post][2]), 0.02, places=5, msg="a prop standing above the floor stays put")
+            # a prop the map put under the floor (a build placed at 0 with bricks below its
+            # origin) is lifted onto it: never under the map
+            sunk = xml.replace('pos="0.1 0.2 0.02"', 'pos="0.1 0.2 0"')
+            (world / "world.xml").write_text(sunk)
+            m2, d2, _ = load_world(str(world / "world.xml"), chassis_spec=ChassisSpec())
+            mujoco.mj_forward(m2, d2)
+            pair2 = mujoco.mj_name2id(m2, mujoco.mjtObj.mjOBJ_BODY, "pair")
+            self.assertAlmostEqual(float(d2.xpos[pair2][2]), -assembly.prop_lowest_m(out), places=5)
+            self.assertGreater(float(d2.xpos[pair2][2]), 0.0)
             (world / "world.xml").write_text(xml.replace("props/pair.assembly.json", "props/gone.assembly.json"))
             with self.assertRaises(WorldLoadError):
                 load_world(str(world / "world.xml"), chassis_spec=ChassisSpec())

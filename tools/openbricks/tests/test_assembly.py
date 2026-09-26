@@ -141,6 +141,28 @@ class DeriveTests(unittest.TestCase):
         with self.assertRaises(assembly.AssemblyError):
             assembly._wheel_geometry({"name": "x", "mass_g": 1, "ldraw": "5614500"}, self.bundle, assembly.rot_mat([0, 0, 0]))
 
+    def test_a_props_lowest_point_is_its_bricks_reach_below_their_centres(self):
+        # a 2 x 4 at the origin: its LDraw origin is its top face, so it reaches 9.6 mm below;
+        # turned on its side (90° about x) its 8 mm half-width points down
+        doc = {"format": "openbricks-assembly/1",
+               "parts": {"p": {"name": "brick", "category": "lego", "mass_g": 2.5, "ldraw": "3001"}},
+               "components": {"one": {"children": [{"name": "b", "part": "p", "pos": [0, 0, 0], "rot": [0, 0, 0]}]}},
+               "robot": {"name": "One Brick", "root": "one"}}
+        out, _ = assembly.prop_bricks(doc, self.bundle)
+        self.assertAlmostEqual(assembly.prop_lowest_m(out), -0.0096, places=6)
+        doc["components"]["one"]["children"][0]["rot"] = [90, 0, 0]
+        out, _ = assembly.prop_bricks(doc, self.bundle)
+        self.assertAlmostEqual(assembly.prop_lowest_m(out), -0.008, places=6)
+        # one raised above its origin reaches nothing below it; the whole example robot stands on
+        # its wheels
+        doc["components"]["one"]["children"][0]["rot"] = [0, 0, 0]
+        doc["components"]["one"]["children"][0]["pos"] = [0, 0, 20]
+        out, _ = assembly.prop_bricks(doc, self.bundle)
+        self.assertAlmostEqual(assembly.prop_lowest_m(out), 0.0104, places=6)
+        out, _ = assembly.prop_bricks(self.doc, self.bundle)
+        self.assertAlmostEqual(assembly.prop_lowest_m(out), -self.spec.wheel_radius, places=4)
+        self.assertEqual(assembly.prop_lowest_m([]), 0.0)
+
     def test_the_runtime_library_holds_the_users_fetched_parts(self):
         # a wheel fetched by number, kept under the data directory and used by the build by number alone
         doc = copy.deepcopy(self.doc)
