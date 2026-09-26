@@ -967,6 +967,7 @@ pub struct WorldConnector {
     pub centre: DVec3,
     pub axis: DVec3,
     pub length: f64,
+    pub r: f64,
     pub path: Vec<String>,
 }
 
@@ -987,6 +988,7 @@ pub fn connectors_of_leaf(doc: &Document, bundle: &Bundle, leaf: &Leaf) -> Vec<W
             centre: leaf.pos + leaf.rot * DVec3::from_array(c.centre),
             axis: (leaf.rot * DVec3::from_array(c.axis)).normalize_or_zero(),
             length: c.length,
+            r: c.r,
             path: leaf.path.clone(),
         })
         .collect()
@@ -1127,13 +1129,46 @@ pub fn mated_pairs<'a>(mine: &'a [WorldConnector], others: &'a [WorldConnector],
 /// mate within `MATE_MM` and `MATE_DEG` with no slack along the axis (a
 /// pin all the way in its hole, a stud down on its socket — a brick
 /// sunk into the one below is not), or an axle anywhere along a hole
-/// it runs through; which the overlap rule excuses as a joint.
+/// it runs through. (The overlap rule works from [`joints`].)
+#[cfg(test)]
 pub fn seated(mine: &[WorldConnector], others: &[WorldConnector]) -> bool {
-    mated_pairs(mine, others, MATE_MM, MATE_DEG).iter().any(|p| {
-        let male = if mates(&p.m.kind).is_empty() { p.o } else { p.m };
-        let d = p.o.centre - p.m.centre;
-        male.kind == "axle" || d.dot(p.o.axis).abs() <= MATE_MM
-    })
+    !joints(mine, others).is_empty()
+}
+
+/// How far beyond the two features a joint's room reaches, in mm: the
+/// friction pin's lip (2.55 mm in a 2.4 mm hole), a hinge knuckle in
+/// its socket, and the facets of a 16-sided cylinder.
+pub const JOINT_MM: f64 = 0.6;
+
+/// The joints between `mine` and `others` — every seated mate (see
+/// [`seated`]) — as the room the overlap rule gives each: a cylinder
+/// about the male feature's axis, `JOINT_MM` wider than the wider of
+/// the two and reaching `JOINT_MM` past both along it. Inside them the
+/// two parts' faces may cross: that is the press fit ABS allows, a
+/// feature pushed in firmly. Anywhere else a crossing counts.
+pub fn joints(mine: &[WorldConnector], others: &[WorldConnector]) -> Vec<crate::overlap::Joint> {
+    mated_pairs(mine, others, MATE_MM, MATE_DEG)
+        .iter()
+        .filter(|p| {
+            let male = if mates(&p.m.kind).is_empty() { p.o } else { p.m };
+            let d = p.o.centre - p.m.centre;
+            male.kind == "axle" || d.dot(p.o.axis).abs() <= MATE_MM
+        })
+        .map(|p| {
+            let male = if mates(&p.m.kind).is_empty() { p.o } else { p.m };
+            let axis = male.axis;
+            let (lo, hi) = [p.m, p.o].iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| {
+                let at = c.centre.dot(axis);
+                (lo.min(at - c.length / 2.0), hi.max(at + c.length / 2.0))
+            });
+            crate::overlap::Joint {
+                centre: male.centre + axis * ((lo + hi) / 2.0 - male.centre.dot(axis)),
+                axis,
+                r: p.m.r.max(p.o.r) + JOINT_MM,
+                half: (hi - lo) / 2.0 + JOINT_MM,
+            }
+        })
+        .collect()
 }
 
 /// A place the magnet could put a group: every member's position
@@ -1866,6 +1901,7 @@ mod tests {
             centre: DVec3::ZERO,
             axis: DVec3::Z,
             length: 1.6,
+            r: 2.4,
             path: vec![],
         };
         let b = WorldConnector {

@@ -339,11 +339,10 @@ impl Editor {
                 if (*alo - pad).cmpgt(*bhi).any() || (*ahi + pad).cmplt(*blo).any() {
                     continue;
                 }
+                // at a joint the two may cross (LDraw's geometry does); anywhere else, not
                 let (ca, cb) = (connectors(*i, &self.doc, &self.bundle), connectors(*j, &self.doc, &self.bundle));
-                if assembly::seated(&ca, &cb) {
-                    continue;
-                }
-                if let Some(o) = overlap::overlap(sa, pa, sb, pb) {
+                let joints = assembly::joints(&ca, &cb);
+                if let Some(o) = overlap::overlap_outside(sa, pa, sb, pb, &joints) {
                     let shared = (ahi.min(*bhi) - alo.max(*blo)).max(DVec3::ZERO);
                     let volume = shared.x * shared.y * shared.z;
                     let (pa, pb) = (leaves[*i].path.join("/"), leaves[*j].path.join("/"));
@@ -3098,8 +3097,9 @@ mod tests {
             "{cons:?}"
         );
         // a second plate on the first, 30° out of square: it used to be squared up on the
-        // plate's four studs; now it goes down on the one stud a socket of it can take, turned
-        // 30° as it was let go
+        // plate's four studs; the magnet never turns it now, and down on the one stud a socket
+        // of it can take, its walls stand through the other three — a seated stud excuses the
+        // crossings at that stud, not the pair (it did until 4.30.2) — so it is refused
         ed.magnet = false;
         ed.add_instance(Some(plate), None, [1.0, -2.0, 8.0]);
         let p2 = ed.selection[0].clone();
@@ -3107,8 +3107,8 @@ mod tests {
         ed.magnet = true;
         ed.snap_selection(true);
         let i = ed.selected_instances()[0].clone();
-        assert_eq!((i.pos[2], i.rot), (6.4, [0.0, 0.0, 30.0]), "{}", ed.status);
-        assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
+        assert_eq!((i.pos, i.rot), ([1.0, -2.0, 8.0], [0.0, 0.0, 30.0]), "{}", ed.status);
+        assert_eq!(ed.status, format!("{p2} stays: it would overlap {p1}"));
         // squared by hand, it lands on the plate's four studs
         ed.set_pose(&p2, [1.0, -2.0, 8.0], [0.0; 3]);
         ed.snap_selection(true);
