@@ -341,10 +341,13 @@ class Session:
         from openbricks_sim import assembly as assembly_mod
         if not isinstance(doc, dict):
             raise RuntimeError("add_model needs the document itself (a JSON object)")
-        assembly_mod.prop_bricks(doc)          # loud before anything is written
+        bricks_out, _ = assembly_mod.prop_bricks(doc)          # loud before anything is written
         path = props.stage_file(json.dumps(doc, separators=(",", ":"), sort_keys=True), name, "assembly.json")
+        # standing on the map: a build's origin is wherever its author put it (a brick's is its
+        # top face), so its lowest brick goes on the floor
         xml, prop_name = props.with_model_added(self.world_xml, props.slug(name).replace("-", "_"), path,
-                                                float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg))
+                                                float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg),
+                                                z_m=-assembly_mod.prop_lowest_m(bricks_out))
         self._reload(xml)
         return prop_name
 

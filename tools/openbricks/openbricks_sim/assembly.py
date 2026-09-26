@@ -390,6 +390,22 @@ def prop_bricks(doc, bundle=None):
     return out, total
 
 
+def prop_lowest_m(bricks_out):
+    """The lowest point of a prop's bricks in the prop's own frame, in
+    metres: each brick's box reaches below its centre by its half
+    extents turned by its quaternion. A prop placed with its origin at
+    ``-prop_lowest_m`` stands on the floor; lower, it is under the map."""
+    lowest = None
+    for b in bricks_out:
+        w, x, y, z = b["quat"]
+        # the third row of the rotation matrix: how much of each box axis points up
+        r20, r21, r22 = 2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)
+        reach = abs(r20) * b["half_m"][0] + abs(r21) * b["half_m"][1] + abs(r22) * b["half_m"][2]
+        low = b["pos_m"][2] - reach
+        lowest = low if lowest is None else min(lowest, low)
+    return round(lowest if lowest is not None else 0.0, 6)
+
+
 def prop_body_xml(name, pos_m, yaw_deg, fixed, bricks_out, indent="    "):
     """The MJCF body of a document placed as a prop: one box per brick
     that collides and carries the brick's mass (at least a gram, so a

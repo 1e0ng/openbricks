@@ -201,6 +201,13 @@ class SessionTests(unittest.TestCase):
             self.assertEqual([b["ldraw"] for b in one["bricks"]], [num])
             frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
             self.assertAlmostEqual(frame["bodies"][one["body"]][0], 0.25, places=4)
+            # standing on the map: the brick's origin is its top face, so the prop is lifted by
+            # the brick's height, never put under the mat
+            from openbricks_sim import assembly as assembly_mod
+            stand = -assembly_mod.prop_lowest_m(assembly_mod.prop_bricks(doc)[0])
+            self.assertGreater(stand, 0.0, "a brick's origin is its top face: it reaches below")
+            self.assertAlmostEqual(frame["bodies"][one["body"]][2], stand, places=4, msg="its lowest brick on the floor")
+            self.assertIn('pos="0.25000 -0.10000 %.5f"' % stand, s.world_xml)
             self.assertIn(os.path.join(self.tmp.name, "props"), s.world_xml, "kept under the data directory until saved")
             s.fix_prop("one_brick", True)
             scene_f = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]

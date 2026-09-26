@@ -237,10 +237,14 @@ The whole build comes first, then each component that holds bricks,
 each with a **+** button that puts it on the map (the whole build is
 named after its file). Or add one brick
 from the library (search it by number or name, then **+ to map**).
-Either lands at the origin as a prop of its own — an `<assembly_prop>` whose model
+Either lands at the origin, standing on the map — its lowest brick
+on the floor, whatever the build's own origin is (a brick's is its
+top face) — as a prop of its own: an `<assembly_prop>` whose model
 is an `openbricks-assembly/1` document, kept under the data
 directory until the map is saved — drawn with the exact bricks and
-colliding as their boxes with their catalogue masses.
+colliding as their boxes with their catalogue masses. Nothing sits
+under the map: a prop a map file places so low that a brick of it
+would be below the floor is lifted onto the floor when the map loads.
 
 **Free or stuck.** A prop is free by default: it has a free joint, so
 the physics settles it and the robot can push it. Tick **stuck to the
