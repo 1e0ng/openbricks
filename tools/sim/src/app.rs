@@ -699,7 +699,7 @@ impl App {
                 .editor
                 .overlapping
                 .iter()
-                .any(|(a, b, _)| *a == leaf.path[0] || *b == leaf.path[0])
+                .any(|(a, b, ..)| *a == leaf.path[0] || *b == leaf.path[0])
             {
                 // would overlap: flushed red while the drag goes on
                 color = [color[0] * 0.35 + 0.65, color[1] * 0.35 + 0.03, color[2] * 0.35 + 0.02, 1.0];

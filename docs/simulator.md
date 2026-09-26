@@ -353,8 +353,13 @@ robot as a tree of components:
   half-stud offset, in a tube — sitting at the hole's mouth, as a
   stud does. Several selected parts — an assembled hinge, a stack —
   are pulled and seated as one, keeping their own fit: their features
-  together against everything else, the first selected part taking
-  the turn and shift and the rest riding along. A part let go lands
+  together against everything else, shifted alike. The magnet never
+  turns a part: a heading is yours to set (`R`, the rotate handles),
+  and a part let go askew of a hole stays askew. Of the seats within
+  reach it takes the one the most features agree on; one that would
+  land the part on a neighbour is passed over for the next as good (a
+  pin let go nearer a taken hole than a free one lands in the free
+  one), and when none as good fits, the drop is refused. A part let go lands
   with its height on the stud module (1.6 mm: a plate is two, a beam
   five, a brick six) and its plan position on the 4 mm half-stud
   grid, and the magnet takes it from there. The inspector lists what each part is
@@ -364,7 +369,8 @@ robot as a tree of components:
   brick); **edges** in the toolbar turns them off.
 - **No two bricks overlap.** A brick let go, nudged, turned or given a
   pose where its material would pass through a neighbour's is put back
-  where it was, and the status line names both — while it is dragged
+  where it was, and the status line names both, a brick inside a
+  component by its path (`aa/lego_2`) — while it is dragged
   it flushes red wherever it would overlap, and Escape abandons the
   drag. Touching is not overlapping, and two parts with a feature
   seated in the other's (a pin all the way in its hole, a plate down on

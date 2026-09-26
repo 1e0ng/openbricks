@@ -1076,43 +1076,14 @@ fn compatible(a: &WorldConnector, b: &WorldConnector) -> bool {
     mates(&a.kind).contains(&b.kind.as_str()) || mates(&b.kind).contains(&a.kind.as_str())
 }
 
-/// The rotation taking unit vector `a` onto unit vector `b` (Rodrigues).
-fn rotation_between(a: DVec3, b: DVec3) -> DMat3 {
-    let cr = a.cross(b);
-    let sn = cr.length();
-    let cs = a.dot(b);
-    if sn <= 1e-6 {
-        return if cs >= 0.0 {
-            DMat3::IDENTITY
-        } else {
-            axis_angle(a.any_orthonormal_vector(), std::f64::consts::PI)
-        };
-    }
-    let k = cr / sn;
-    let kk = DMat3::from_cols(DVec3::new(0.0, k.z, -k.y), DVec3::new(-k.z, 0.0, k.x), DVec3::new(k.y, -k.x, 0.0));
-    DMat3::IDENTITY + kk * sn + kk * kk * (1.0 - cs)
-}
-
-/// The rotation of `angle` radians about the unit vector `axis`.
-fn axis_angle(axis: DVec3, angle: f64) -> DMat3 {
-    let k = axis;
-    let kk = DMat3::from_cols(DVec3::new(0.0, k.z, -k.y), DVec3::new(-k.z, 0.0, k.x), DVec3::new(k.y, -k.x, 0.0));
-    DMat3::IDENTITY + kk * angle.sin() + kk * kk * (1.0 - angle.cos())
-}
-
-/// The turn about `n` that takes the direction of `u` onto that of `v`.
-fn signed_angle(u: DVec3, v: DVec3, n: DVec3) -> f64 {
-    n.dot(u.cross(v)).atan2(u.dot(v))
-}
-
 /// How close a feature must come to a hole (or a stud to a socket) for
 /// the magnet to take it: on letting go, and while it is dragged near.
 pub const SNAP_MM: f64 = 6.0;
 pub const PULL_MM: f64 = 4.0;
 
-/// A snap the solver may settle on: (mates, spread, movement), the
-/// rotation, the position, the mated path.
-type Choice = ((usize, f64, f64), DMat3, DVec3, Vec<String>);
+/// A seat the magnet may settle on: (mates, spread, movement), the
+/// shift, the mated path.
+type Choice = ((usize, f64, f64), DVec3, Vec<String>);
 
 pub struct Mate<'a> {
     pub m: &'a WorldConnector,
@@ -1165,17 +1136,54 @@ pub fn seated(mine: &[WorldConnector], others: &[WorldConnector]) -> bool {
     })
 }
 
+/// A place the magnet could put a group: every member's position
+/// (all shifted alike — the magnet never turns a part), how many
+/// features it mates there, and the path of what it mates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Seat {
+    pub poses: Vec<(String, [f64; 3])>,
+    pub mates: usize,
+    pub path: Vec<String>,
+}
+
+/// How many seats the magnet offers, best first.
+pub const SEATS_MAX: usize = 8;
+
 /// Move the instances `names` (top-level in `editing`), as one rigid
 /// group, so their features sit in the holes and on the studs of the
-/// other instances: the nearest compatible pair sets the axis, then
-/// among the turns about it the other pairs suggest and the shifts each
-/// pair asks for, the turn and shift that mate the most features win (a
-/// plate lands on a brick's whole stud grid, a two-pin connector in both
-/// holes), the least movement breaking ties. The first name is the
-/// reference whose turn and shift the others follow, so an assembled
-/// hinge or a stack let go together lands on a base as it is. Returns
-/// the mated path.
+/// other instances: the best of [`group_seats`]. Returns the mated
+/// path. (The editor takes the first seat its overlap rule accepts.)
+#[cfg(test)]
 pub fn snap_group_within(doc: &mut Document, bundle: &Bundle, editing: &str, names: &[String], tol_mm: f64) -> Option<Vec<String>> {
+    let seat = group_seats(doc, bundle, editing, names, tol_mm).into_iter().next()?;
+    seat_group(doc, editing, &seat);
+    Some(seat.path)
+}
+
+/// Put the group where `seat` says.
+pub fn seat_group(doc: &mut Document, editing: &str, seat: &Seat) {
+    let Some(comp) = doc.components.get_mut(editing) else { return };
+    for (name, pos) in &seat.poses {
+        if let Some(child) = comp.children.iter_mut().find(|c| c.name == *name) {
+            child.pos = *pos;
+        }
+    }
+}
+
+/// The seats within `tol_mm` for the instances `names` (top-level in
+/// `editing`) moved as one rigid group, best first: the shift each
+/// compatible pair of features asks for (a feature within `tol_mm` of
+/// a hole along its own axis, within 5° of it), clustered; the shift
+/// the most features agree on ranks first (a plate lands on a brick's
+/// whole stud grid, a two-pin connector in both holes), the tightest
+/// agreement next, the least movement last; at most [`SEATS_MAX`]
+/// distinct ones. The magnet never turns a part: a heading is the
+/// user's to set (a pair of 1 x 6 let go under a 2 x 4 lying across
+/// them used to be turned along it for the four extra studs, and land
+/// where the bricks beside it stood). A caller that can judge a seat
+/// (the editor, by its overlap rule) takes the first it accepts among
+/// those mating as many features as the best.
+pub fn group_seats(doc: &Document, bundle: &Bundle, editing: &str, names: &[String], tol_mm: f64) -> Vec<Seat> {
     let leaves = flatten(doc, editing);
     let is_mine = |top: &str| names.iter().any(|n| n == top);
     let mine: Vec<WorldConnector> = leaves
@@ -1183,8 +1191,11 @@ pub fn snap_group_within(doc: &mut Document, bundle: &Bundle, editing: &str, nam
         .filter(|l| is_mine(&l.path[0]))
         .flat_map(|l| connectors_of_leaf(doc, bundle, l))
         .collect();
-    let first = names.first()?;
-    let inst = doc.components.get(editing)?.children.iter().find(|c| c.name == *first)?.clone();
+    let Some(first) = names.first() else { return vec![] };
+    let Some(comp) = doc.components.get(editing) else { return vec![] };
+    let Some(inst) = comp.children.iter().find(|c| c.name == *first) else {
+        return vec![];
+    };
     let pos = DVec3::from_array(inst.pos);
     let reach = mine.iter().map(|c| (c.centre - pos).length()).fold(0.0, f64::max) * 2.0 + tol_mm + 20.0;
     let others: Vec<WorldConnector> = leaves
@@ -1194,136 +1205,92 @@ pub fn snap_group_within(doc: &mut Document, bundle: &Bundle, editing: &str, nam
         .filter(|c| (c.centre - pos).length() <= reach)
         .collect();
     if mine.is_empty() || others.is_empty() {
-        return None;
+        return vec![];
     }
-    let pairs = mated_pairs(&mine, &others, tol_mm, 30.0);
-    let best = pairs.first()?;
-    let (m0, o0) = (best.m.clone(), best.o.clone());
-    let r0 = rot_mat(inst.rot);
-    let r0t = r0.transpose();
-    // 1. the axis: turn the instance so the nearest pair's axes lie together
-    let s = if m0.axis.dot(o0.axis) >= 0.0 { 1.0 } else { -1.0 };
-    let ut = o0.axis * s;
-    let r1 = rotation_between(m0.axis, ut) * r0;
-    let local: Vec<(DVec3, DVec3)> = mine.iter().map(|c| (r0t * (c.centre - pos), r0t * c.axis)).collect();
-    // 2. the turns about that axis worth trying: none, and each that brings the offset between
-    //    two of my features of a kind in line with the offset between the two holes (or studs)
-    //    they are nearest — the stud grid, a second pin hole
-    let near: Vec<&Mate> = pairs.iter().take(16).collect();
-    let mut yaws: Vec<f64> = vec![0.0];
-    for (i, a) in near.iter().enumerate() {
-        for b in near.iter().skip(i + 1) {
-            if a.m.kind != b.m.kind || a.o.kind != b.o.kind {
-                continue;
-            }
-            let dm = r1 * (r0t * (b.m.centre - a.m.centre));
-            let dn = b.o.centre - a.o.centre;
-            let (dm, dn) = (dm - ut * dm.dot(ut), dn - ut * dn.dot(ut));
-            if dm.length() < 1.0 || dn.length() < 1.0 {
-                continue;
-            }
-            let ang = signed_angle(dm, dn, ut);
-            if yaws.iter().all(|y| (y - ang).abs() > 1.0_f64.to_radians()) {
-                yaws.push(ang);
-            }
-        }
-    }
-    // 3. each turn, scored: the shift every pair asks for, clustered; the most agreeing
-    //    features win, then the tightest agreement, then the least movement. Seats within a
-    //    stud's height along the axis come first: a plate dragged over another slides on it
-    //    rather than dropping through it onto the brick below, which offers more studs.
+    // the shift every pair asks for, clustered; the most agreeing features rank first, then
+    // the tightest agreement, then the least movement. Seats within a stud's height along
+    // the axis come first: a plate dragged over another slides on it rather than dropping
+    // through it onto the brick below, which offers more studs.
     let cos_tol = 5.0_f64.to_radians().cos();
-    let mut choice: Option<Choice> = None;
+    let mut choices: Vec<Choice> = Vec::new();
     for along_tol in [1.8_f64.min(tol_mm), tol_mm] {
-        if choice.is_some() {
+        if !choices.is_empty() {
             break;
         }
-        for &yaw in &yaws {
-            let r = axis_angle(ut, yaw) * r1;
-            let placed: Vec<(DVec3, DVec3)> = local.iter().map(|(p, a)| (pos + r * *p, (r * *a).normalize_or_zero())).collect();
-            let mut asks: Vec<(usize, DVec3, &WorldConnector)> = Vec::new();
-            for (i, (pc, pa)) in placed.iter().enumerate() {
-                let m = &mine[i];
-                for o in &others {
-                    if !compatible(m, o) || pa.dot(o.axis).abs() < cos_tol {
-                        continue;
-                    }
-                    let off = *pc - o.centre;
-                    let along = off.dot(o.axis);
-                    let perp = off - o.axis * along;
-                    if perp.length() > tol_mm {
-                        continue;
-                    }
-                    let slack = ((m.length.max(o.length) - m.length.min(o.length)) / 2.0).max(0.0);
-                    let kept = if (o.length - m.length).abs() < 1.0 {
-                        0.0
-                    } else if m.kind == "stud" {
-                        // a stud in a tube or a Technic hole goes in up to its base: it sits at
-                        // the hole's mouth on its own side, not anywhere along
-                        slack * pa.dot(o.axis).signum()
-                    } else if o.kind == "stud" {
-                        -slack
-                    } else {
-                        along.clamp(-slack, slack)
-                    };
-                    if (along - kept).abs() > along_tol {
-                        continue;
-                    }
-                    asks.push((i, -perp + o.axis * (kept - along), o));
+        let mut asks: Vec<(usize, DVec3, &WorldConnector)> = Vec::new();
+        for (i, m) in mine.iter().enumerate() {
+            for o in &others {
+                if !compatible(m, o) || m.axis.dot(o.axis).abs() < cos_tol {
+                    continue;
                 }
-            }
-            // a feature is where it is, whatever it is called twice over: a tube is a stud
-            // hole and a pin hole in one place, and votes once
-            let spot = |i: usize| {
-                let c = placed[i].0;
-                [
-                    (c.x * 10.0).round() as i64,
-                    (c.y * 10.0).round() as i64,
-                    (c.z * 10.0).round() as i64,
-                ]
-            };
-            for (_, shift, o) in &asks {
-                let mut seen = HashSet::new();
-                let members: Vec<DVec3> = asks
-                    .iter()
-                    .filter(|(i, s, _)| (*s - *shift).length() <= 1.0 && seen.insert(spot(*i)))
-                    .map(|(_, s, _)| *s)
-                    .collect();
-                let count = members.len();
-                let mean = members.iter().fold(DVec3::ZERO, |acc, s| acc + *s) / count as f64;
-                let residual: f64 = members.iter().map(|s| (*s - mean).length()).sum();
-                let movement = mean.length() + yaw.abs() * 10.0;
-                let better = match &choice {
-                    None => true,
-                    Some(((c, res, mv), ..)) => {
-                        count > *c
-                            || (count == *c && (residual < *res - 1e-9 || ((residual - *res).abs() <= 1e-9 && movement < *mv - 1e-9)))
-                    }
+                let off = m.centre - o.centre;
+                let along = off.dot(o.axis);
+                let perp = off - o.axis * along;
+                if perp.length() > tol_mm {
+                    continue;
+                }
+                let slack = ((m.length.max(o.length) - m.length.min(o.length)) / 2.0).max(0.0);
+                let kept = if (o.length - m.length).abs() < 1.0 {
+                    0.0
+                } else if m.kind == "stud" {
+                    // a stud in a tube or a Technic hole goes in up to its base: it sits at
+                    // the hole's mouth on its own side, not anywhere along
+                    slack * m.axis.dot(o.axis).signum()
+                } else if o.kind == "stud" {
+                    -slack
+                } else {
+                    along.clamp(-slack, slack)
                 };
-                if better {
-                    choice = Some(((count, residual, movement), r, pos + mean, o.path.clone()));
+                if (along - kept).abs() > along_tol {
+                    continue;
                 }
+                asks.push((i, -perp + o.axis * (kept - along), o));
             }
         }
-    }
-    let (_, r, new_pos, path) = choice?;
-    // the reference takes the turn and the shift; the rest of the group rides along rigidly,
-    // turned about the reference's origin
-    let delta = r * r0t;
-    let round2 = |v: f64| (v * 100.0).round() / 100.0;
-    let comp = doc.components.get_mut(editing)?;
-    for child in comp.children.iter_mut().filter(|c| is_mine(&c.name)) {
-        if child.name == *first {
-            child.rot = euler_from(&r).map(round2);
-            child.pos = new_pos.to_array().map(round2);
-        } else {
-            let rb = delta * rot_mat(child.rot);
-            let pb = new_pos + delta * (DVec3::from_array(child.pos) - pos);
-            child.rot = euler_from(&rb).map(round2);
-            child.pos = pb.to_array().map(round2);
+        // a feature is where it is, whatever it is called twice over: a tube is a stud
+        // hole and a pin hole in one place, and votes once
+        let spot = |i: usize| {
+            let c = mine[i].centre;
+            [
+                (c.x * 10.0).round() as i64,
+                (c.y * 10.0).round() as i64,
+                (c.z * 10.0).round() as i64,
+            ]
+        };
+        for (_, shift, o) in &asks {
+            let mut seen = HashSet::new();
+            let members: Vec<DVec3> = asks
+                .iter()
+                .filter(|(i, s, _)| (*s - *shift).length() <= 1.0 && seen.insert(spot(*i)))
+                .map(|(_, s, _)| *s)
+                .collect();
+            let count = members.len();
+            let mean = members.iter().fold(DVec3::ZERO, |acc, s| acc + *s) / count as f64;
+            let residual: f64 = members.iter().map(|s| (*s - mean).length()).sum();
+            choices.push(((count, residual, mean.length()), mean, o.path.clone()));
         }
     }
-    Some(path)
+    // best first; a tie (to a micron) keeps the order found
+    let micron = |v: f64| (v * 1e6).round() as i64;
+    choices.sort_by_key(|((count, residual, movement), ..)| (std::cmp::Reverse(*count), micron(*residual), micron(*movement)));
+    let round2 = |v: f64| (v * 100.0).round() / 100.0;
+    let mut seats: Vec<Seat> = Vec::new();
+    for ((mates, ..), shift, path) in choices {
+        let poses: Vec<(String, [f64; 3])> = comp
+            .children
+            .iter()
+            .filter(|c| is_mine(&c.name))
+            .map(|child| (child.name.clone(), (DVec3::from_array(child.pos) + shift).to_array().map(round2)))
+            .collect();
+        if seats.iter().any(|s| s.poses == poses) {
+            continue;
+        }
+        seats.push(Seat { poses, mates, path });
+        if seats.len() >= SEATS_MAX {
+            break;
+        }
+    }
+    seats
 }
 
 /// How close two features must sit, in mm and degrees, to count as
@@ -1894,14 +1861,6 @@ mod tests {
             with_stud_sockets(&[stud([4.0, 4.0, 0.8], [0.0, 0.0, -1.0])], &bbox, "Tile with a stud").len() == 2,
             "its own stud rules"
         );
-        // the helpers
-        let r = rotation_between(DVec3::X, DVec3::Y);
-        assert!((r * DVec3::X - DVec3::Y).length() < 1e-9);
-        assert!((rotation_between(DVec3::X, DVec3::X) * DVec3::Y - DVec3::Y).length() < 1e-9);
-        assert!((rotation_between(DVec3::X, -DVec3::X) * DVec3::X + DVec3::X).length() < 1e-9);
-        assert!((axis_angle(DVec3::Z, std::f64::consts::FRAC_PI_2) * DVec3::X - DVec3::Y).length() < 1e-9);
-        assert!((signed_angle(DVec3::X, DVec3::Y, DVec3::Z) - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
-        assert!((signed_angle(DVec3::Y, DVec3::X, DVec3::Z) + std::f64::consts::FRAC_PI_2).abs() < 1e-9);
         let a = WorldConnector {
             kind: "stud".into(),
             centre: DVec3::ZERO,
@@ -1983,10 +1942,16 @@ mod tests {
                 "robot",
                 vec![
                     inst("beam", "beam", [50.0, 0.0, 0.0], [0.0; 3]),
-                    inst("pin", "pin", [51.5, 0.8, 0.9], [4.0, 3.0, 0.0]),
+                    inst("pin", "pin", [51.5, 0.8, 0.9], [2.0, 1.0, 0.0]),
                 ],
             )],
         );
+        let seats = group_seats(&doc, &b, "robot", &["pin".to_string()], SNAP_MM);
+        assert_eq!(seats.len(), 1, "{seats:?}");
+        assert_eq!((seats[0].mates, &seats[0].path), (1, &vec!["beam".to_string()]));
+        assert!(group_seats(&doc, &b, "robot", &["no such".to_string()], SNAP_MM).is_empty());
+        assert!(group_seats(&doc, &b, "robot", &[], SNAP_MM).is_empty());
+        assert!(group_seats(&doc, &b, "nowhere", &["pin".to_string()], SNAP_MM).is_empty());
         let mated = snap_group_within(&mut doc, &b, "robot", &["pin".to_string()], SNAP_MM).unwrap();
         assert_eq!(mated, vec!["beam".to_string()]);
         let p = &doc.components["robot"].children[1];
@@ -1995,6 +1960,8 @@ mod tests {
             "{:?}",
             p.pos
         );
+        assert_eq!(p.rot, [2.0, 1.0, 0.0], "the magnet never turns a part");
+        seat_group(&mut doc, "nowhere", &seats[0]);
         assert_eq!(connections_of(&doc, &b, "robot", "pin").len(), 1);
         // an axle keeps its position along a hole
         b.parts.get_mut("pin").unwrap().connectors = vec![Connector {

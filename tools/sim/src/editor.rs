@@ -81,7 +81,10 @@ pub struct Editor {
     refused: bool,
     /// The new overlaps the change in progress would make: the bricks to
     /// tint and the note for the status line.
-    pub overlapping: Vec<(String, String, Overlap)>,
+    /// What the change in progress would overlap: the moved instance, the
+    /// other, how, and the other's leaf (a brick inside a component by
+    /// its path) for the status line.
+    pub overlapping: Vec<(String, String, Overlap, String)>,
 }
 
 /// A leaf's index, collision shape, pose and world box, for the overlap test.
@@ -89,7 +92,9 @@ type Placed = (usize, Rc<Shape>, Pose, (DVec3, DVec3));
 
 /// A pair of instances that overlap, how, and how much their boxes
 /// share (mm³): the measure of whether an old overlap is made worse.
-type Found = (String, String, Overlap, f64);
+/// An overlap: the two top-level instances (the moved one first when
+/// one was), how, the boxes' shared volume, and the second's leaf path.
+type Found = (String, String, Overlap, f64, String);
 
 /// A change of some instances in progress: the document to go back to
 /// should it make new overlaps, the undo depth once its own point was
@@ -318,7 +323,7 @@ impl Editor {
             Overlap::Crossing(d) => (1, *d),
             Overlap::Coplanar(a) => (0, *a),
         };
-        let mut worst: BTreeMap<(String, String), (Overlap, f64)> = BTreeMap::new();
+        let mut worst: BTreeMap<(String, String), (Overlap, f64, String, String)> = BTreeMap::new();
         for (k, (i, sa, pa, (alo, ahi))) in placed.iter().enumerate() {
             let top_a = &leaves[*i].path[0];
             if moved.is_some_and(|m| !m.contains(top_a)) {
@@ -341,14 +346,16 @@ impl Editor {
                 if let Some(o) = overlap::overlap(sa, pa, sb, pb) {
                     let shared = (ahi.min(*bhi) - alo.max(*blo)).max(DVec3::ZERO);
                     let volume = shared.x * shared.y * shared.z;
-                    let key = if top_a < top_b {
-                        (top_a.clone(), top_b.clone())
+                    let (pa, pb) = (leaves[*i].path.join("/"), leaves[*j].path.join("/"));
+                    let (key, la, lb) = if top_a < top_b {
+                        ((top_a.clone(), top_b.clone()), pa, pb)
                     } else {
-                        (top_b.clone(), top_a.clone())
+                        ((top_b.clone(), top_a.clone()), pb, pa)
                     };
-                    let e = worst.entry(key).or_insert((o, volume));
+                    let e = worst.entry(key).or_insert((o, volume, la.clone(), lb.clone()));
                     if rank(&o) > rank(&e.0) {
-                        e.0 = o;
+                        // the worst of the pair's leaves is the one named
+                        *e = (o, e.1, la, lb);
                     }
                     e.1 = e.1.max(volume);
                 }
@@ -357,11 +364,11 @@ impl Editor {
         // the moved one first in each pair
         worst
             .into_iter()
-            .map(|((a, b), (o, v))| {
+            .map(|((a, b), (o, v, la, lb))| {
                 if moved.is_some_and(|m| !m.contains(&a) && m.contains(&b)) {
-                    (b, a, o, v)
+                    (b, a, o, v, la)
                 } else {
-                    (a, b, o, v)
+                    (a, b, o, v, lb)
                 }
             })
             .collect()
@@ -383,7 +390,7 @@ impl Editor {
         let before = self
             .overlaps(Some(&set))
             .into_iter()
-            .map(|(a, b, _, v)| (Self::pair(&a, &b), v))
+            .map(|(a, b, _, v, _)| (Self::pair(&a, &b), v))
             .collect();
         self.pending = Some(Pending {
             names: names.to_vec(),
@@ -399,14 +406,14 @@ impl Editor {
     /// not have before, or had and are made worse: an old overlap may be
     /// moved out of, not further in (the boxes' share grows by more than
     /// a twentieth and a cubic millimetre).
-    fn new_overlaps(&mut self) -> Vec<(String, String, Overlap)> {
+    fn new_overlaps(&mut self) -> Vec<(String, String, Overlap, String)> {
         let Some(p) = &self.pending else { return vec![] };
         let names: HashSet<String> = p.names.iter().cloned().collect();
         let before = p.before.clone();
         self.overlaps(Some(&names))
             .into_iter()
-            .filter(|(a, b, _, v)| before.get(&Self::pair(a, b)).is_none_or(|old| *v > old * 1.05 + 1.0))
-            .map(|(a, b, o, _)| (a, b, o))
+            .filter(|(a, b, _, v, _)| before.get(&Self::pair(a, b)).is_none_or(|old| *v > old * 1.05 + 1.0))
+            .map(|(a, b, o, _, leaf)| (a, b, o, leaf))
             .collect()
     }
 
@@ -423,7 +430,7 @@ impl Editor {
         let new = self.new_overlaps();
         self.overlapping.clear();
         let Some(p) = self.pending.take() else { return false };
-        let Some((a, b, o)) = new.first().cloned() else {
+        let Some((a, _, o, leaf)) = new.first().cloned() else {
             // a refusal's note does not outlive the next change that is kept
             if self.refused {
                 self.status.clear();
@@ -436,7 +443,7 @@ impl Editor {
         self.doc = p.doc;
         self.dirty = p.dirty;
         self.recompute();
-        self.status = format!("{a} {what}: it would {}", o.phrase(&b));
+        self.status = format!("{a} {what}: it would {}", o.phrase(&leaf));
         true
     }
 
@@ -456,7 +463,7 @@ impl Editor {
     /// What the change in progress would overlap, for the status line.
     pub fn overlap_note(&self) -> String {
         match self.overlapping.first() {
-            Some((a, b, o)) => format!("{a} would {}", o.phrase(b)),
+            Some((a, _, o, leaf)) => format!("{a} would {}", o.phrase(leaf)),
             None => String::new(),
         }
     }
@@ -488,7 +495,7 @@ impl Editor {
             self.recompute();
         }
         match self.overlaps(Some(&set)).into_iter().next() {
-            Some((_, other, _, _)) => Room::Stuck(other),
+            Some((_, _, _, _, leaf)) => Room::Stuck(leaf),
             None => Room::Moved,
         }
     }
@@ -866,6 +873,29 @@ impl Editor {
         if shift { 1.0 } else { self.snap_mm.max(1.0) }
     }
 
+    /// The magnet on `names`, within `tol_mm`: the best seat that makes
+    /// no new overlap. A seat the overlap rule would refuse is passed
+    /// over for the next as good (mating as many features: a pin let go
+    /// nearer a taken hole than a free one lands in the free one); a
+    /// lesser seat is no substitute, so when every seat as good as the
+    /// best overlaps, the best is taken and the refusal names what it
+    /// hits. Returns the mated path.
+    fn snap_fitting(&mut self, names: &[String], tol_mm: f64) -> Option<Vec<String>> {
+        let seats = assembly::group_seats(&self.doc, &self.bundle, &self.editing, names, tol_mm);
+        let first = seats.first()?.clone();
+        for seat in seats.iter().take_while(|s| s.mates == first.mates) {
+            assembly::seat_group(&mut self.doc, &self.editing, seat);
+            self.leaves = assembly::flatten(&self.doc, &self.editing);
+            if self.new_overlaps().is_empty() {
+                self.recompute();
+                return Some(seat.path.clone());
+            }
+        }
+        assembly::seat_group(&mut self.doc, &self.editing, &first);
+        self.recompute();
+        Some(first.path)
+    }
+
     pub fn snap_selection(&mut self, announce: bool) {
         if self.selection.is_empty() {
             if announce {
@@ -889,7 +919,7 @@ impl Editor {
             self.note_before(&names);
         }
         let before = self.doc.clone();
-        match assembly::snap_group_within(&mut self.doc, &self.bundle, &self.editing, &names, assembly::SNAP_MM) {
+        match self.snap_fitting(&names, assembly::SNAP_MM) {
             Some(path) => {
                 if !own {
                     self.undo.push(before);
@@ -1441,9 +1471,7 @@ impl Editor {
         self.recompute();
         if self.magnet && !starts.is_empty() {
             let names: Vec<String> = starts.iter().map(|s| s.0.clone()).collect();
-            if assembly::snap_group_within(&mut self.doc, &self.bundle, &self.editing, &names, assembly::PULL_MM).is_some() {
-                self.recompute();
-            }
+            self.snap_fitting(&names, assembly::PULL_MM);
         }
         self.watch();
     }
@@ -2530,6 +2558,104 @@ mod tests {
     }
 
     #[test]
+    fn a_pair_let_go_under_a_brick_lying_across_it_keeps_its_heading() {
+        // the user's build: a 2 x 4 one brick up, lying across two 1 x 6 side by side, its
+        // other half on two 2 x 4s of a component standing beside the pair. The pair, dragged
+        // to sit centred under it, used to be turned a quarter for the four extra studs that
+        // seats — a turn the drag's pull (4 mm) never showed and the drop's snap (6 mm) took —
+        // and land on the component's bricks: "lego_6 put back: it would overlap aa"
+        let pos = |ed: &Editor, n: &str| ed.children().iter().find(|i| i.name == n).unwrap().pos;
+        let rot = |ed: &Editor, n: &str| ed.children().iter().find(|i| i.name == n).unwrap().rot;
+        let (mut ed, top) = solo("3001");
+        ed.set_instance(&top, |i| {
+            i.pos = [0.0, 0.0, 9.6];
+            i.rot = [0.0, 0.0, 90.0];
+        });
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id.clone()), None, [8.0, 8.0, 0.0]);
+        let under = ed.selection[0].clone();
+        ed.add_instance(Some(id), None, [8.0, 24.0, 0.0]);
+        let behind = ed.selection[0].clone();
+        ed.selection = vec![under.clone(), behind];
+        assert!(ed.group_selection("aa"), "{}", ed.status);
+        let id = ed.ensure_ldraw_part("3009").unwrap();
+        ed.add_instance(Some(id.clone()), None, [16.0, -12.0, 0.0]);
+        let a = ed.selection[0].clone();
+        ed.add_instance(Some(id), None, [16.0, -4.0, 0.0]);
+        let b = ed.selection[0].clone();
+        ed.recompute();
+        assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+        ed.selection = vec![a.clone(), b.clone()];
+        ed.magnet = true;
+        let starts = ed.begin_move();
+        ed.move_by(&starts, -16.0, 0.0);
+        assert!(ed.overlapping.is_empty(), "{:?}", ed.overlapping);
+        ed.end_move();
+        assert_eq!((pos(&ed, &a), pos(&ed, &b)), ([0.0, -12.0, 0.0], [0.0, -4.0, 0.0]), "{}", ed.status);
+        assert_eq!((rot(&ed, &a), rot(&ed, &b)), ([0.0; 3], [0.0; 3]), "the magnet never turns");
+        assert!(ed.status.starts_with(&format!("Snapped {a}, {b} into {top}")), "{}", ed.status);
+        assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+        // nothing beside it either: the pair keeps the heading it was dragged with, on the
+        // four studs it covers (the eight of the turned seat are not the magnet's to take)
+        ed.select("aa", false);
+        ed.remove_selection();
+        ed.selection = vec![a.clone(), b.clone()];
+        ed.nudge_selection([16.0, 0.0, 0.0]);
+        let starts = ed.begin_move();
+        ed.move_by(&starts, -16.0, 0.0);
+        ed.end_move();
+        assert_eq!((pos(&ed, &a), pos(&ed, &b)), ([0.0, -12.0, 0.0], [0.0, -4.0, 0.0]), "{}", ed.status);
+        assert_eq!((rot(&ed, &a), rot(&ed, &b)), ([0.0; 3], [0.0; 3]));
+        // a refusal names a brick inside a component by its path
+        ed.magnet = false;
+        ed.set_pose(&a, [0.0, -12.0, 9.6], [0.0; 3]);
+        assert_eq!(pos(&ed, &a), [0.0, -12.0, 0.0]);
+        assert_eq!(ed.status, format!("{a} stays: it would overlap {top}"));
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [8.0, 8.0, 0.0]);
+        let under = ed.selection[0].clone();
+        ed.group_selection("bb");
+        ed.select(&a, false);
+        ed.set_pose(&a, [0.0, 4.0, 0.0], [0.0; 3]);
+        assert_eq!(pos(&ed, &a), [0.0, -12.0, 0.0]);
+        assert_eq!(ed.status, format!("{a} stays: it would overlap bb/{under}"));
+    }
+
+    #[test]
+    fn the_magnet_passes_over_a_seat_the_overlap_rule_refuses() {
+        // a beam 5 with a pin in its hole at y = -16; a second pin let go 3 mm from that hole
+        // and 5 mm from the free one at y = -8 ranks the taken hole first (the least movement)
+        // — and lands in the free one, since the first is refused; with no free seat within
+        // reach it is refused as before, naming the pin it would hit
+        let (mut ed, _) = solo("32316");
+        ed.snap_mm = 0.0;
+        let pin = ed.ensure_ldraw_part("2780").unwrap();
+        ed.add_instance(Some(pin.clone()), None, [0.0, 40.0, 4.0]);
+        let p1 = ed.selection[0].clone();
+        ed.set_instance(&p1, |i| {
+            i.pos = [0.0, -16.0, 4.0];
+            i.rot = [0.0, 90.0, 0.0];
+        });
+        ed.add_instance(Some(pin), None, [0.0, 60.0, 4.0]);
+        let p2 = ed.selection[0].clone();
+        ed.set_instance(&p2, |i| {
+            i.pos = [0.0, -13.0, 4.0];
+            i.rot = [0.0, 90.0, 0.0];
+        });
+        ed.recompute();
+        ed.magnet = true;
+        ed.snap_selection(true);
+        assert_eq!(ed.selected_instances()[0].pos, [0.0, -8.0, 4.0], "{}", ed.status);
+        assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
+        assert_eq!(ed.overlap_count(), 0);
+        ed.set_instance(&p2, |i| i.pos = [0.4, -15.6, 4.3]);
+        ed.recompute();
+        ed.snap_selection(true);
+        assert_eq!(ed.selected_instances()[0].pos, [0.4, -15.6, 4.3]);
+        assert_eq!(ed.status, format!("{p2} stays: it would overlap {p1}"));
+    }
+
+    #[test]
     fn a_brick_lands_on_an_assembled_hinge() {
         // the hinge pair assembled at the origin, on the ground; a 2 x 4 let go on top of it
         // lands on its studs. The drop puts the brick on the 8 mm grid, 1.6 mm low; the stud
@@ -2935,7 +3061,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plate_pulls_onto_a_brick_s_stud_grid_and_squares_up() {
+    fn a_plate_pulls_onto_a_brick_s_stud_grid_and_is_never_turned() {
         let mut ed = editor();
         let root = ed.doc.robot.root.clone();
         ed.doc.components.get_mut(&root).unwrap().children.clear();
@@ -2946,23 +3072,34 @@ mod tests {
         let brick = ed.ensure_ldraw_part("3001").unwrap();
         ed.add_instance(Some(brick), None, [0.0; 3]);
         let plate = ed.ensure_ldraw_part("3022").unwrap();
-        // a 2 x 2 plate let go above the brick (clear of its studs), a little off and turned 5°
+        // a 2 x 2 plate let go above the brick (clear of its studs), a little off and turned 5°:
+        // its four sockets agree on the shift onto the studs, but turned 5° its walls stand on
+        // them — the magnet used to square it up; it never turns a part now, no seat as good
+        // fits (the two-stud seat beside is no substitute), and the plate is refused as let go
         ed.add_instance(Some(plate.clone()), None, [2.0, 3.0, 5.0]);
         let p1 = ed.selection[0].clone();
         ed.set_pose(&p1, [2.0, 3.0, 5.0], [0.0, 0.0, 5.0]);
         ed.magnet = true;
         ed.snap_selection(true);
+        let i = ed.selected_instances()[0].clone();
+        assert_eq!((i.pos, i.rot), ([2.0, 3.0, 5.0], [0.0, 0.0, 5.0]), "{}", ed.status);
+        assert_eq!(ed.status, format!("{p1} stays: it would overlap lego_3001"));
+        // set square, it seats on all four
+        ed.set_pose(&p1, [2.0, 3.0, 5.0], [0.0; 3]);
+        ed.snap_selection(true);
         assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
         let i = ed.selected_instances()[0].clone();
         assert_eq!(i.pos, [0.0, 0.0, 3.2], "its underside on the brick's top face, grids in step");
-        assert_eq!(i.rot, [0.0, 0.0, 0.0]);
+        assert_eq!(i.rot, [0.0; 3]);
         let cons = assembly::connections_of(&ed.doc, &ed.bundle, &ed.editing, &p1);
         assert_eq!(
             cons.iter().filter(|(m, o, _)| m == "stud_socket" && o == "stud").count(),
             4,
             "{cons:?}"
         );
-        // a second plate on the first, 30° out of square: it squares up on the plate's four studs
+        // a second plate on the first, 30° out of square: it used to be squared up on the
+        // plate's four studs; now it goes down on the one stud a socket of it can take, turned
+        // 30° as it was let go
         ed.magnet = false;
         ed.add_instance(Some(plate), None, [1.0, -2.0, 8.0]);
         let p2 = ed.selection[0].clone();
@@ -2970,7 +3107,13 @@ mod tests {
         ed.magnet = true;
         ed.snap_selection(true);
         let i = ed.selected_instances()[0].clone();
-        assert_eq!((i.pos, i.rot), ([0.0, 0.0, 6.4], [0.0, 0.0, 0.0]));
+        assert_eq!((i.pos[2], i.rot), (6.4, [0.0, 0.0, 30.0]), "{}", ed.status);
+        assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
+        // squared by hand, it lands on the plate's four studs
+        ed.set_pose(&p2, [1.0, -2.0, 8.0], [0.0; 3]);
+        ed.snap_selection(true);
+        let i = ed.selected_instances()[0].clone();
+        assert_eq!((i.pos, i.rot), ([0.0, 0.0, 6.4], [0.0, 0.0, 0.0]), "{}", ed.status);
         // dragged a little, it stays pulled; dragged clear, it lets go; let go near, it lands
         let starts = ed.begin_move();
         ed.move_by(&starts, 2.5, 1.0);
@@ -2988,7 +3131,7 @@ mod tests {
     }
 
     #[test]
-    fn a_beam_seats_on_two_pins_and_squares_up() {
+    fn a_beam_askew_on_two_pins_is_not_squared_up() {
         let mut ed = editor();
         let root = ed.doc.robot.root.clone();
         ed.doc.components.get_mut(&root).unwrap().children.clear();
@@ -3000,13 +3143,17 @@ mod tests {
         let beam = ed.ensure_ldraw_part("32316").unwrap();
         ed.add_instance(Some(beam.clone()), None, [0.0; 3]);
         let pin = ed.ensure_ldraw_part("2780").unwrap();
+        let mut pins = vec![];
         for y in [-8.0, 8.0] {
             ed.add_instance(Some(pin.clone()), None, [0.0, y, 4.0]);
             let name = ed.selection[0].clone();
             ed.set_pose(&name, [0.0, y, 4.0], [0.0, 90.0, 0.0]);
+            pins.push(name);
         }
         // a second beam let go above them, off by a little and turned 10° (the pose a drag
-        // passes through: set directly, as the pins would cross its holes there): it seats on both
+        // passes through: set directly, as the pins would cross its holes there): the magnet
+        // used to square it up on both; it never turns a part now, and the beam, 10° off with
+        // one hole on its pin, has the other pin through its wall — refused
         ed.add_instance(Some(beam), None, [0.0, 0.0, 40.0]);
         let top = ed.selection[0].clone();
         ed.set_instance(&top, |i| {
@@ -3015,6 +3162,17 @@ mod tests {
         });
         ed.recompute();
         ed.magnet = true;
+        ed.snap_selection(true);
+        let i = ed.selected_instances()[0].clone();
+        assert_eq!((i.pos, i.rot), ([0.5, 1.0, 8.6], [0.0, 0.0, 10.0]), "{}", ed.status);
+        assert!(
+            pins.iter().any(|p| ed.status == format!("{top} stays: it would overlap {p}")),
+            "{}",
+            ed.status
+        );
+        // squared by hand, it seats on both
+        ed.set_instance(&top, |i| i.rot = [0.0; 3]);
+        ed.recompute();
         ed.snap_selection(true);
         assert!(ed.status.starts_with("Snapped"), "{}", ed.status);
         let i = ed.selected_instances()[0].clone();

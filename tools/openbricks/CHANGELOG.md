@@ -3,6 +3,32 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.30.1 — the magnet never turns a part, and passes over a seat that would overlap
+
+Two 1 x 6 bricks side by side, dragged to sit centred under a 2 x 4
+lying across them, bounced back: "lego_6 put back: it would overlap
+aa". The magnet, scoring seats by the features they mate, turned the
+pair a quarter to lie along the 2 x 4 for eight seated studs instead
+of four — a turn the drag's 4 mm pull never showed and the drop's 6 mm
+snap took — and the turned pair landed on the bricks standing beside
+it, so the overlap rule refused the whole drop.
+
+The magnet never turns a part now. A heading is the user's to set
+(`R`, the rotate handles); the magnet only shifts a part, or a
+selection as one, onto the nearest seat, and a part let go askew of a
+hole stays askew (and is refused if it then overlaps). And a seat the
+overlap rule would refuse is passed over for the next as good: the
+magnet ranks the seats within reach (the most agreeing features, the
+tightest agreement, the least movement, up to eight distinct) and the
+editor takes the first, among those mating as many features as the
+best, that makes no new overlap — a pin let go nearer a taken hole
+than a free one lands in the free one. A lesser seat is no substitute:
+when every seat as good as the best overlaps, the drop is refused,
+naming what the best one hits.
+
+A refusal names a brick inside a component by its path (`aa/lego_2`),
+not the component alone.
+
 ## 4.30.0 — no two props overlap on the map; the elementary microphone is a real build
 
 The map editor let a prop be dragged or turned into another, or into
