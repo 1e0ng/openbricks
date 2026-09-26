@@ -1215,6 +1215,12 @@ pub fn snap_group_within(doc: &mut Document, bundle: &Bundle, editing: &str, nam
                     let slack = ((m.length.max(o.length) - m.length.min(o.length)) / 2.0).max(0.0);
                     let kept = if (o.length - m.length).abs() < 1.0 {
                         0.0
+                    } else if m.kind == "stud" {
+                        // a stud in a tube or a Technic hole goes in up to its base: it sits at
+                        // the hole's mouth on its own side, not anywhere along
+                        slack * pa.dot(o.axis).signum()
+                    } else if o.kind == "stud" {
+                        -slack
                     } else {
                         along.clamp(-slack, slack)
                     };
@@ -1224,11 +1230,21 @@ pub fn snap_group_within(doc: &mut Document, bundle: &Bundle, editing: &str, nam
                     asks.push((i, -perp + o.axis * (kept - along), o));
                 }
             }
+            // a feature is where it is, whatever it is called twice over: a tube is a stud
+            // hole and a pin hole in one place, and votes once
+            let spot = |i: usize| {
+                let c = placed[i].0;
+                [
+                    (c.x * 10.0).round() as i64,
+                    (c.y * 10.0).round() as i64,
+                    (c.z * 10.0).round() as i64,
+                ]
+            };
             for (_, shift, o) in &asks {
                 let mut seen = HashSet::new();
                 let members: Vec<DVec3> = asks
                     .iter()
-                    .filter(|(i, s, _)| (*s - *shift).length() <= 1.0 && seen.insert(*i))
+                    .filter(|(i, s, _)| (*s - *shift).length() <= 1.0 && seen.insert(spot(*i)))
                     .map(|(_, s, _)| *s)
                     .collect();
                 let count = members.len();

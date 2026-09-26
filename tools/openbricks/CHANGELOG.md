@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.28.1 — plates stack, and a brick lands on a hinge: heights on the stud module, tubes vote once
+
+A 2 x 2 plate could not be put on another: a part let go had its
+height rounded to the 8 mm plan grid, which sank a plate into the
+one below (a plate is 3.2 mm), from where the magnet's nearest seat
+was the loose tube one — refused as an overlap. Heights now land on
+the stud module, 1.6 mm, which every LEGO height stacks on: a plate
+is two, a beam five, a brick six. A 2 x 4 let go on an assembled
+hinge bounced back for a second reason: a tube is a stud hole and a
+pin hole in one place, and voted twice for the tube seat, three tubes
+outvoting the four sockets of the stud grid and leaving the brick
+1.6 mm low, into the hinge. A feature now votes once, wherever it is
+called twice. And a stud in a tube or a Technic hole seats at the
+hole's mouth on its own side, as a stud does, rather than anywhere
+along the hole.
+
+- Tests: plates and bricks let go at and near their own heights on a
+  plate and on a brick land seated, on the module with nothing to
+  seat on, unrounded without the grid; a 2 x 4 let go on the
+  assembled hinge at three plan offsets lands on its studs, and one
+  let go high floats; the lift lands on the module.
+
 ## 4.28.0 — several parts seat as one: the magnet works on a selection
 
 A selection of two or more parts dropped onto a brick was refused as
