@@ -183,6 +183,12 @@ pub struct SimulateTab {
     pub hover_prop: Option<usize>,
     prop_sent: Option<Pose2>,
     select_new_prop: bool,
+    /// A prop just added lands at the origin (or beside its original): once
+    /// the scene shows it, it is moved off anything it landed on.
+    clear_pending: bool,
+    /// The props' shapes for the overlap rule, by library number, mesh
+    /// name or box size.
+    shapes: HashMap<String, std::rc::Rc<crate::overlap::Shape>>,
     pub save_name: String,
     /// Every command sent, for tests.
     #[cfg(test)]
@@ -251,6 +257,8 @@ impl SimulateTab {
             hover_prop: None,
             prop_sent: None,
             select_new_prop: false,
+            clear_pending: false,
+            shapes: HashMap::new(),
             save_name: String::new(),
             #[cfg(test)]
             sent: vec![],
@@ -376,6 +384,7 @@ impl SimulateTab {
                 }
                 Event::Scene(s) => {
                     self.textures_loaded.clear();
+                    self.shapes.retain(|k, _| !k.starts_with("mesh:"));
                     self.scene_gen += 1;
                     self.poses = vec![
                         Pose {
@@ -2720,14 +2729,20 @@ impl SimulateTab {
     }
 
     /// The prop follows the pointer: the server hears each pose that
-    /// differs from the last by 0.5 mm or 0.5°.
-    pub fn drag_prop(&mut self, i: usize, pose: Pose2) {
+    /// differs from the last by 0.5 mm or 0.5°. A pose where it would
+    /// overlap another prop, or the robot, is not taken: it stays where
+    /// it last was clear, and says so.
+    pub fn drag_prop(&mut self, i: usize, pose: Pose2, bundle: &Bundle) {
         let pose = round_pose(pose);
         if let Some(last) = self.prop_sent
             && (last.x_mm - pose.x_mm).abs() < 0.5
             && (last.y_mm - pose.y_mm).abs() < 0.5
             && route::wrap_deg(last.yaw_deg - pose.yaw_deg).abs() < 0.5
         {
+            return;
+        }
+        if let Some(other) = self.prop_overlap(i, pose, bundle) {
+            self.message = format!("{} stays: it would overlap {other}", self.prop_name(i).unwrap_or_default());
             return;
         }
         self.move_prop(i, pose);
@@ -2738,26 +2753,261 @@ impl SimulateTab {
     }
 
     /// Turn a prop to a heading (degrees counter-clockwise from the map's
-    /// x axis) where it stands. Refused while a program runs.
-    pub fn turn_prop_to(&mut self, i: usize, yaw_deg: f64) {
+    /// x axis) where it stands. Refused while a program runs, and when
+    /// turned it would overlap another prop or the robot.
+    pub fn turn_prop_to(&mut self, i: usize, yaw_deg: f64, bundle: &Bundle) {
         if self.busy() {
             self.message = "stop the program before turning a prop".into();
             return;
         }
         let Some(pose) = self.prop_pose(i) else { return };
-        self.move_prop(i, Pose2 { yaw_deg, ..pose });
+        let pose = Pose2 { yaw_deg, ..pose };
+        if let Some(other) = self.prop_overlap(i, pose, bundle) {
+            self.message = format!("{} stays: turned, it would overlap {other}", self.prop_name(i).unwrap_or_default());
+            return;
+        }
+        self.move_prop(i, pose);
     }
 
     /// Turn a prop by an angle from where it points.
-    pub fn turn_prop(&mut self, i: usize, by_deg: f64) {
+    pub fn turn_prop(&mut self, i: usize, by_deg: f64, bundle: &Bundle) {
         if let Some(pose) = self.prop_pose(i) {
-            self.turn_prop_to(i, pose.yaw_deg + by_deg);
+            self.turn_prop_to(i, pose.yaw_deg + by_deg, bundle);
         }
     }
 
-    pub fn turn_selected_prop(&mut self, by_deg: f64) {
+    pub fn turn_selected_prop(&mut self, by_deg: f64, bundle: &Bundle) {
         if let Some(i) = self.selected_prop_index() {
-            self.turn_prop(i, by_deg);
+            self.turn_prop(i, by_deg, bundle);
+        }
+    }
+
+    // ------------------------------------------------------ overlaps
+
+    /// The bodies a prop is made of: its root and the bodies under it.
+    fn prop_bodies(&self, i: usize) -> Vec<bool> {
+        let Some(scene) = self.scene.as_ref() else { return vec![] };
+        let n = scene.bodies.len();
+        let mut mine = vec![false; n];
+        let Some(root) = scene.props.get(i).map(|p| p.body) else {
+            return mine;
+        };
+        if root < n {
+            mine[root] = true;
+        }
+        for b in root + 1..n {
+            if let Some(&parent) = scene.parents.get(b)
+                && parent < n
+                && parent != b
+                && mine[parent]
+            {
+                mine[b] = true;
+            }
+        }
+        mine
+    }
+
+    /// A shape by key, made on first use.
+    fn shape(&mut self, key: String, make: impl FnOnce() -> Option<crate::bundle::MeshData>) -> Option<std::rc::Rc<crate::overlap::Shape>> {
+        if let Some(s) = self.shapes.get(&key) {
+            return Some(s.clone());
+        }
+        let mesh = make()?;
+        if mesh.indices.is_empty() {
+            return None;
+        }
+        let s = std::rc::Rc::new(crate::overlap::Shape::from_mesh(&mesh));
+        self.shapes.insert(key, s.clone());
+        Some(s)
+    }
+
+    /// A brick's shape and its pose in its body's frame (mm): the library's
+    /// mesh for a library brick (placed by its own origin, which the
+    /// brick's box centre is not), the box otherwise.
+    fn brick_part(&mut self, b: &crate::sim::Brick, bundle: &Bundle) -> Option<(std::rc::Rc<crate::overlap::Shape>, crate::overlap::Pose)> {
+        let rot = quat_mat(b.quat);
+        let pos = glam::DVec3::new(b.pos_m[0], b.pos_m[1], b.pos_m[2]) * 1000.0;
+        if let Some(num) = b.ldraw.as_deref()
+            && let Some(rec) = bundle.parts.get(num)
+        {
+            let centre = glam::DVec3::new(
+                (rec.bbox[0][0] + rec.bbox[1][0]) / 2.0,
+                (rec.bbox[0][1] + rec.bbox[1][1]) / 2.0,
+                (rec.bbox[0][2] + rec.bbox[1][2]) / 2.0,
+            );
+            let mesh = rec.mesh.clone();
+            let shape = self.shape(format!("ld:{num}"), move || mesh.decode().ok())?;
+            return Some((
+                shape,
+                crate::overlap::Pose {
+                    pos: pos - rot * centre,
+                    rot,
+                },
+            ));
+        }
+        let size = [
+            (b.half_m[0] * 2000.0) as f32,
+            (b.half_m[1] * 2000.0) as f32,
+            (b.half_m[2] * 2000.0) as f32,
+        ];
+        let key = format!("box:{:.2}:{:.2}:{:.2}", size[0], size[1], size[2]);
+        let shape = self.shape(key, move || Some(geometry::box_mesh(size, [0.0; 3])))?;
+        Some((shape, crate::overlap::Pose { pos, rot }))
+    }
+
+    /// A geom's shape (a mesh asset, a box, a round geom as a cylinder or a
+    /// box) in its own frame, mm.
+    fn geom_shape(&mut self, g: &crate::sim::Geom) -> Option<std::rc::Rc<crate::overlap::Shape>> {
+        let size = [
+            (g.size[0] * 1000.0) as f32,
+            (g.size[1] * 1000.0) as f32,
+            (g.size[2] * 1000.0) as f32,
+        ];
+        match g.kind.as_str() {
+            "mesh" => {
+                let name = g.mesh.clone()?;
+                let rec = self.scene.as_ref()?.meshes.get(&name)?.clone();
+                self.shape(format!("mesh:{name}"), move || rec.decode().ok())
+            }
+            "box" => self.shape(
+                format!("box:{:.2}:{:.2}:{:.2}", size[0] * 2.0, size[1] * 2.0, size[2] * 2.0),
+                move || Some(geometry::box_mesh([size[0] * 2.0, size[1] * 2.0, size[2] * 2.0], [0.0; 3])),
+            ),
+            "cylinder" => self.shape(format!("cyl:{:.2}:{:.2}", size[0], size[1] * 2.0), move || {
+                Some(geometry::cylinder_mesh(size[0], size[1] * 2.0, "z", [0.0; 3], 24))
+            }),
+            "sphere" | "capsule" => {
+                let r = size[0];
+                let len = if g.kind == "capsule" { size[1] * 2.0 + 2.0 * r } else { 2.0 * r };
+                self.shape(format!("cyl:{r:.2}:{len:.2}"), move || {
+                    Some(geometry::cylinder_mesh(r, len, "z", [0.0; 3], 24))
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// A prop's parts for the overlap rule: each shape with its pose in the
+    /// prop's root body's frame, mm — a build's bricks, else the geoms of
+    /// its bodies as the last frame places them.
+    fn prop_parts(&mut self, i: usize, bundle: &Bundle) -> Vec<(std::rc::Rc<crate::overlap::Shape>, crate::overlap::Pose)> {
+        let Some(prop) = self.scene.as_ref().and_then(|s| s.props.get(i)).cloned() else {
+            return vec![];
+        };
+        if !prop.bricks.is_empty() {
+            return prop.bricks.iter().filter_map(|b| self.brick_part(b, bundle)).collect();
+        }
+        let mine = self.prop_bodies(i);
+        let geoms: Vec<crate::sim::Geom> = self
+            .scene
+            .as_ref()
+            .map(|s| {
+                s.geoms
+                    .iter()
+                    .filter(|g| g.kind != "plane" && mine.get(g.body).copied().unwrap_or(false))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let root = self.poses.get(prop.body).cloned().unwrap_or_default();
+        let root_inv = pose_inverse(&frame_pose(&root));
+        let mut out = Vec::new();
+        for g in &geoms {
+            let Some(shape) = self.geom_shape(g) else { continue };
+            let body = self.poses.get(g.body).cloned().unwrap_or_default();
+            let local = crate::overlap::Pose {
+                pos: glam::DVec3::new(g.pos[0], g.pos[1], g.pos[2]) * 1000.0,
+                rot: quat_mat(g.quat),
+            };
+            out.push((shape, pose_compose(&root_inv, &pose_compose(&frame_pose(&body), &local))));
+        }
+        out
+    }
+
+    /// The robot's bricks, in its chassis body's frame, mm.
+    fn chassis_parts(&mut self, bundle: &Bundle) -> Vec<(std::rc::Rc<crate::overlap::Shape>, crate::overlap::Pose)> {
+        let bricks: Vec<crate::sim::Brick> = self.scene.as_ref().map(|s| s.bricks.clone()).unwrap_or_default();
+        bricks.iter().filter_map(|b| self.brick_part(b, bundle)).collect()
+    }
+
+    /// What prop `i`, put at `pose` (flat, at its present height), would
+    /// overlap: the name of the first other prop any part of it runs
+    /// into, or "the robot"; None when it is clear. Faces that only
+    /// touch are not overlaps, so props stack and stand side by side.
+    pub fn prop_overlap(&mut self, i: usize, pose: Pose2, bundle: &Bundle) -> Option<String> {
+        let mine = self.prop_parts(i, bundle);
+        if mine.is_empty() {
+            return None;
+        }
+        let (root, n) = self.scene.as_ref().map(|s| (s.props[i].body, s.props.len()))?;
+        let z = self.poses.get(root).map(|p| p.pos[2] * 1000.0).unwrap_or(0.0);
+        let at = crate::overlap::Pose {
+            pos: glam::DVec3::new(pose.x_mm, pose.y_mm, z),
+            rot: glam::DMat3::from_rotation_z(pose.yaw_deg.to_radians()),
+        };
+        let placed: Vec<_> = mine.iter().map(|(s, p)| (s.clone(), pose_compose(&at, p))).collect();
+        let mut others: Vec<(String, usize)> = (0..n)
+            .filter(|&j| j != i)
+            .map(|j| (self.prop_name(j).unwrap_or_default(), j))
+            .collect();
+        others.sort();
+        for (name, j) in others {
+            let base = self
+                .scene
+                .as_ref()
+                .and_then(|s| s.props.get(j))
+                .and_then(|p| self.poses.get(p.body))
+                .cloned();
+            let Some(base) = base else { continue };
+            let parts = self.prop_parts(j, bundle);
+            if hits(&placed, &parts, &frame_pose(&base)) {
+                return Some(name);
+            }
+        }
+        let chassis = self
+            .scene
+            .as_ref()
+            .and_then(|s| s.body_id("chassis"))
+            .and_then(|b| self.poses.get(b))
+            .cloned();
+        if let Some(base) = chassis {
+            let parts = self.chassis_parts(bundle);
+            if hits(&placed, &parts, &frame_pose(&base)) {
+                return Some("the robot".into());
+            }
+        }
+        None
+    }
+
+    /// A prop just added: once the scene shows it, it is moved along +x
+    /// until it overlaps nothing, and says so. Called every frame.
+    pub fn settle_new_prop(&mut self, bundle: &Bundle) {
+        if !self.clear_pending || self.select_new_prop {
+            return;
+        }
+        let Some(i) = self.selected_prop_index() else {
+            self.clear_pending = false;
+            return;
+        };
+        let Some(pose) = self.prop_pose(i) else { return };
+        if self.poses.iter().all(|p| p.pos == [0.0; 3]) {
+            return; // no frame yet
+        }
+        self.clear_pending = false;
+        let mut at = pose;
+        let mut beside = None;
+        for step in 0..64 {
+            at.x_mm = round1(pose.x_mm + step as f64 * crate::editor::MODULE_MM);
+            match self.prop_overlap(i, at, bundle) {
+                Some(other) => beside = Some(other),
+                None => break,
+            }
+        }
+        if at.x_mm != pose.x_mm
+            && let Some(other) = beside
+        {
+            self.move_prop(i, at);
+            self.message = format!("{} placed beside {other}", self.prop_name(i).unwrap_or_default());
         }
     }
 
@@ -2790,6 +3040,7 @@ impl SimulateTab {
         };
         let Some(pose) = self.prop_pose(i) else { return };
         self.select_new_prop = true;
+        self.clear_pending = true;
         self.send(serde_json::json!({
             "cmd": "add", "from": name,
             "x_mm": round1(pose.x_mm + route::PASTE_OFFSET_MM), "y_mm": round1(pose.y_mm + route::PASTE_OFFSET_MM),
@@ -2826,6 +3077,7 @@ impl SimulateTab {
             return;
         };
         self.select_new_prop = true;
+        self.clear_pending = true;
         self.send(serde_json::json!({"cmd": "add", "from": name, "x_mm": 0.0, "y_mm": 0.0, "yaw_deg": 0.0}));
     }
 
@@ -2848,6 +3100,7 @@ impl SimulateTab {
             }
         };
         self.select_new_prop = true;
+        self.clear_pending = true;
         self.send(serde_json::json!({"cmd": "add_model", "name": name, "doc": doc, "x_mm": 0.0, "y_mm": 0.0, "yaw_deg": 0.0}));
     }
 
@@ -3009,7 +3262,7 @@ impl SimulateTab {
 
     /// The Map tab's panel: the map, its props, and saving it as one of
     /// the user's own.
-    pub fn map_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn map_ui(&mut self, ui: &mut egui::Ui, bundle: &Bundle) {
         ui.heading("Map");
         self.world_picker(ui);
         ui.weak(self.status_line());
@@ -3050,10 +3303,10 @@ impl SimulateTab {
                     .on_hover_text("degrees counter-clockwise from the map's x axis; shift-drag the prop to turn it by hand")
                     .changed()
                 {
-                    self.turn_prop_to(i, yaw);
+                    self.turn_prop_to(i, yaw, bundle);
                 }
                 if ui.button("Turn 90°").on_hover_text("R").clicked() {
-                    self.turn_prop(i, 90.0);
+                    self.turn_prop(i, 90.0, bundle);
                 }
             });
             let mut fixed = self.prop_is_fixed(i);
@@ -3122,6 +3375,55 @@ fn round1(v: f64) -> f64 {
     (v * 10.0).round() / 10.0
 }
 
+/// A frame's quaternion (w, x, y, z) as a rotation matrix.
+fn quat_mat(q: [f64; 4]) -> glam::DMat3 {
+    glam::DMat3::from_quat(glam::DQuat::from_xyzw(q[1], q[2], q[3], q[0]).normalize())
+}
+
+/// A frame's body pose in mm.
+fn frame_pose(p: &Pose) -> crate::overlap::Pose {
+    crate::overlap::Pose {
+        pos: glam::DVec3::new(p.pos[0], p.pos[1], p.pos[2]) * 1000.0,
+        rot: quat_mat(p.quat),
+    }
+}
+
+fn pose_compose(a: &crate::overlap::Pose, b: &crate::overlap::Pose) -> crate::overlap::Pose {
+    crate::overlap::Pose {
+        pos: a.pos + a.rot * b.pos,
+        rot: a.rot * b.rot,
+    }
+}
+
+fn pose_inverse(a: &crate::overlap::Pose) -> crate::overlap::Pose {
+    let rot = a.rot.transpose();
+    crate::overlap::Pose { pos: -(rot * a.pos), rot }
+}
+
+/// Whether any of `mine` (placed in the world) overlaps any of `theirs`
+/// (in a body's frame, placed by `base`): the boxes first, the shapes
+/// only where the boxes meet.
+fn hits(
+    mine: &[(std::rc::Rc<crate::overlap::Shape>, crate::overlap::Pose)],
+    theirs: &[(std::rc::Rc<crate::overlap::Shape>, crate::overlap::Pose)],
+    base: &crate::overlap::Pose,
+) -> bool {
+    for (sb, pb) in theirs {
+        let wb = pose_compose(base, pb);
+        let (blo, bhi) = sb.world_bbox(&wb);
+        for (sa, wa) in mine {
+            let (alo, ahi) = sa.world_bbox(wa);
+            if alo.x > bhi.x || blo.x > ahi.x || alo.y > bhi.y || blo.y > ahi.y || alo.z > bhi.z || blo.z > ahi.z {
+                continue;
+            }
+            if crate::overlap::overlap(sa, wa, sb, &wb).is_some() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn round_pose(p: Pose2) -> Pose2 {
     Pose2 {
         x_mm: round1(p.x_mm),
@@ -3158,6 +3460,13 @@ mod tests {
     use super::*;
     use crate::assembly::{self, Part, Shape};
     use crate::sim::testing::fake_server;
+
+    /// The shipped brick library, for the overlap rule's shapes.
+    fn shipped_bundle() -> Bundle {
+        let bundle_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../openbricks/openbricks_sim/bricks/technic_bundle.json.zlib");
+        crate::bundle::load_bundle(&bundle_path).expect("the shipped brick bundle")
+    }
     use crate::viewport::testing::{test_device, test_renderer};
     use std::time::{Duration, Instant};
 
@@ -4163,6 +4472,7 @@ mod tests {
                 y_mm: 200.1,
                 yaw_deg: 0.0,
             },
+            &shipped_bundle(),
         );
         assert!(t.sent.is_empty(), "too small a move to tell: {:?}", t.sent);
         t.drag_prop(
@@ -4172,6 +4482,7 @@ mod tests {
                 y_mm: 250.0,
                 yaw_deg: 90.0,
             },
+            &shipped_bundle(),
         );
         assert_eq!(
             t.sent.last().unwrap(),
@@ -4286,7 +4597,8 @@ mod tests {
         // the panel draws
         let ctx = egui::Context::default();
         t.save_name = "x".into();
-        let _ = ctx.run_ui(Default::default(), |ui| t.map_ui(ui));
+        let lib = shipped_bundle();
+        let _ = ctx.run_ui(Default::default(), |ui| t.map_ui(ui, &lib));
         // nothing moves while a program runs
         t.status = "running".into();
         assert!(t.begin_prop_drag(0).is_none());
@@ -4861,6 +5173,127 @@ mod tests {
         assert!(u.map_click(-347.0, -50.0, 20.0) && u.draft.is_some(), "another end is");
     }
 
+    /// A map with three props — two 2 x 4 bricks, `a` at the origin and `b` 50 mm along x, and
+    /// `m`, an LDraw mesh prop shaped like a 2 x 4, 200 mm along — and the robot, one 2 x 4
+    /// standing 40 mm to the -x side; all on the floor.
+    fn three_props(lib: &Bundle) -> SimulateTab {
+        let brick = |name: &str, body: usize| {
+            format!(
+                r#"{{"name":"{name}","body":{body},"kind":"brick","yaw_deg":0,"fixed":false,"bricks":[{{"path":"b","part":"lego_3001","ldraw":"3001","pos_m":[0,0,-0.004],"quat":[1,0,0,0],"half_m":[0.016,0.008,0.0056],"category":"lego"}}]}}"#
+            )
+        };
+        let mesh = serde_json::to_string(&lib.parts["3001"].mesh).unwrap();
+        let scene = format!(
+            r#"{{"bodies":["world","chassis","a","b","m"],"parents":[0,0,0,0,0],"props":[{},{},{{"name":"m","body":4,"kind":"mesh","yaw_deg":0,"fixed":false}}],"geoms":[{{"name":"floor","type":"plane","body":0,"size":[1.2,0.9,0.1],"pos":[0,0,0],"quat":[1,0,0,0],"rgba":[1,1,1,1],"material":null,"group":0,"mesh":null}},{{"name":"m_mesh","type":"mesh","body":4,"size":[0,0,0],"pos":[0,0,0],"quat":[1,0,0,0],"rgba":[1,1,1,1],"material":null,"group":0,"mesh":"mesh_m"}}],"materials":{{}},"textures":{{}},"meshes":{{"mesh_m":{mesh}}},"bricks":[{{"path":"body","part":"lego_3001","ldraw":"3001","pos_m":[0,0,-0.004],"quat":[1,0,0,0],"half_m":[0.016,0.008,0.0056],"category":"lego"}}],"chassis":{{"wheel_diameter_mm":86.4,"axle_track_mm":135.0,"spawn":{{"x_mm":-40.0,"y_mm":0.0,"yaw_deg":0.0}}}},"timestep_ms":1}}"#,
+            brick("a", 2),
+            brick("b", 3)
+        );
+        let mut t = SimulateTab::new(None);
+        t.apply(Event::Scene(Box::new(serde_json::from_str(&scene).unwrap())));
+        let at = |x: f64, y: f64| Pose {
+            pos: [x, y, 0.0096],
+            quat: [1.0, 0.0, 0.0, 0.0],
+        };
+        t.apply(Event::Frame {
+            t_ms: 0,
+            poses: vec![at(0.0, 0.0), at(-0.04, 0.0), at(0.0, 0.0), at(0.05, 0.0), at(0.2, 0.0)],
+        });
+        t
+    }
+
+    #[test]
+    fn a_prop_is_neither_dragged_nor_turned_into_another_prop_or_the_robot() {
+        let lib = shipped_bundle();
+        let mut t = three_props(&lib);
+        let at = |x_mm: f64, y_mm: f64, yaw_deg: f64| Pose2 { x_mm, y_mm, yaw_deg };
+        // where each would overlap what: 30 mm along, a runs into b; 18 mm along its end touches
+        // b's, which is no overlap; 190 mm along it is inside the mesh prop; 30 mm back, the robot
+        assert_eq!(t.prop_overlap(0, at(30.0, 0.0, 0.0), &lib), Some("b".into()));
+        assert_eq!(t.prop_overlap(0, at(18.0, 0.0, 0.0), &lib), None, "end to end: touching");
+        assert_eq!(t.prop_overlap(0, at(190.0, 0.0, 0.0), &lib), Some("m".into()));
+        assert_eq!(t.prop_overlap(0, at(-30.0, 0.0, 0.0), &lib), Some("the robot".into()));
+        assert_eq!(t.prop_overlap(0, at(0.0, 40.0, 0.0), &lib), None);
+        // a drag into b is not taken: the prop stays, nothing is sent, and the message says so
+        assert!(t.begin_prop_drag(0).is_some());
+        let n = t.sent.len();
+        t.drag_prop(0, at(30.0, 0.0, 0.0), &lib);
+        assert_eq!(t.sent.len(), n, "{:?}", t.sent.last());
+        assert_eq!(t.message, "a stays: it would overlap b");
+        assert_eq!(t.prop_pose(0).unwrap().x_mm, 0.0);
+        // a free pose is taken as before
+        t.drag_prop(0, at(0.0, 40.0, 0.0), &lib);
+        assert_eq!(t.sent.len(), n + 1);
+        assert_eq!(t.prop_pose(0).unwrap().y_mm, 40.0);
+        t.end_prop_drag();
+        // turned where it stands into b's corner: refused; turned in the clear: taken
+        t.move_prop(0, at(28.0, 20.0, 0.0));
+        let n = t.sent.len();
+        t.turn_prop_to(0, 90.0, &lib);
+        assert_eq!(t.sent.len(), n);
+        assert_eq!(t.message, "a stays: turned, it would overlap b");
+        assert_eq!(t.prop_pose(0).unwrap().yaw_deg, 0.0);
+        t.move_prop(0, at(0.0, 60.0, 0.0));
+        t.turn_prop(0, 90.0, &lib);
+        assert!((t.prop_pose(0).unwrap().yaw_deg - 90.0).abs() < 1e-6, "{}", t.message);
+        // the mesh prop is bound by the rule too, against a brick prop
+        t.selected_prop = Some("m".into());
+        t.move_prop(2, at(50.0, 20.0, 0.0));
+        t.turn_selected_prop(90.0, &lib);
+        assert!(t.message.starts_with("m stays"), "{}", t.message);
+    }
+
+    #[test]
+    fn a_prop_added_onto_another_is_moved_beside_it() {
+        let lib = shipped_bundle();
+        let mut t = three_props(&lib);
+        t.duplicate_prop(0);
+        assert!(t.select_new_prop && t.clear_pending);
+        // the server builds the map again with the copy, which it put on top of the original
+        let brick = |name: &str, body: usize| {
+            format!(
+                r#"{{"name":"{name}","body":{body},"kind":"brick","yaw_deg":0,"fixed":false,"bricks":[{{"path":"b","part":"lego_3001","ldraw":"3001","pos_m":[0,0,-0.004],"quat":[1,0,0,0],"half_m":[0.016,0.008,0.0056],"category":"lego"}}]}}"#
+            )
+        };
+        let scene = format!(
+            r#"{{"bodies":["world","chassis","a","b","m","a_2"],"parents":[0,0,0,0,0,0],"props":[{},{},{{"name":"m","body":4,"kind":"mesh","yaw_deg":0,"fixed":false}},{}],"geoms":[{{"name":"floor","type":"plane","body":0,"size":[1.2,0.9,0.1],"pos":[0,0,0],"quat":[1,0,0,0],"rgba":[1,1,1,1],"material":null,"group":0,"mesh":null}}],"materials":{{}},"textures":{{}},"bricks":[],"chassis":{{"wheel_diameter_mm":86.4,"axle_track_mm":135.0,"spawn":{{"x_mm":-40.0,"y_mm":0.0,"yaw_deg":0.0}}}},"timestep_ms":1}}"#,
+            brick("a", 2),
+            brick("b", 3),
+            brick("a_2", 5)
+        );
+        t.apply(Event::Scene(Box::new(serde_json::from_str(&scene).unwrap())));
+        assert_eq!(t.selected_prop.as_deref(), Some("a_2"));
+        t.settle_new_prop(&lib);
+        assert!(t.clear_pending, "no frame yet: nothing to go on");
+        let at = |x: f64| Pose {
+            pos: [x, 0.0, 0.0096],
+            quat: [1.0, 0.0, 0.0, 0.0],
+        };
+        t.apply(Event::Frame {
+            t_ms: 1,
+            poses: vec![at(0.0), at(-0.04), at(0.0), at(0.05), at(0.2), at(0.0)],
+        });
+        let n = t.sent.len();
+        t.settle_new_prop(&lib);
+        assert!(!t.clear_pending);
+        // along +x a module at a time, past a and past b: the first clear place
+        assert_eq!(t.prop_pose(3).unwrap().x_mm, 88.0, "{}", t.message);
+        assert_eq!(t.sent.len(), n + 1);
+        assert_eq!(t.sent.last().unwrap()["name"], "a_2");
+        assert_eq!(t.message, "a_2 placed beside b");
+        // settled once: nothing more happens
+        t.settle_new_prop(&lib);
+        assert_eq!(t.sent.len(), n + 1);
+        // a copy that lands clear stays where the server put it, and says nothing
+        t.message.clear();
+        t.duplicate_prop(1);
+        t.clear_pending = true;
+        t.select_new_prop = false;
+        t.selected_prop = Some("b".into());
+        t.settle_new_prop(&lib);
+        assert_eq!(t.sent.len(), n + 2, "the add only");
+        assert_eq!(t.message, "");
+    }
+
     #[test]
     fn frame_target_fits_the_mat_once() {
         let mut t = SimulateTab::new(None);
@@ -4969,28 +5402,29 @@ mod tests {
                 c["yaw_deg"].as_f64().unwrap(),
             )
         };
+        let lib = shipped_bundle();
         // R: 90° counter-clockwise a press, where the prop stands, wrapping past 180
-        t.turn_prop(0, 90.0);
+        t.turn_prop(0, 90.0, &lib);
         assert_eq!(sent(&t), ("move".into(), "clef".into(), 300.0, 90.0));
         assert!((t.prop_pose(0).unwrap().yaw_deg - 90.0).abs() < 1e-6);
-        t.turn_prop(0, 90.0);
-        t.turn_prop(0, 90.0);
+        t.turn_prop(0, 90.0, &lib);
+        t.turn_prop(0, 90.0, &lib);
         assert_eq!(sent(&t).3, -90.0);
         assert!((t.prop_pose(0).unwrap().yaw_deg + 90.0).abs() < 1e-6);
         // the heading field
-        t.turn_prop_to(0, 45.0);
+        t.turn_prop_to(0, 45.0, &lib);
         assert_eq!(sent(&t), ("move".into(), "clef".into(), 300.0, 45.0));
         // the key turns the selected prop, and nothing when none is
         t.selected_prop = Some("note".into());
-        t.turn_selected_prop(90.0);
+        t.turn_selected_prop(90.0, &lib);
         assert_eq!((sent(&t).1.as_str(), sent(&t).3), ("note", 90.0));
         t.selected_prop = None;
         let n = t.sent.len();
-        t.turn_selected_prop(90.0);
+        t.turn_selected_prop(90.0, &lib);
         assert_eq!(t.sent.len(), n, "nothing selected, nothing sent");
         // not while a program runs
         t.status = "running".into();
-        t.turn_prop(0, 90.0);
+        t.turn_prop(0, 90.0, &lib);
         assert_eq!(t.sent.len(), n);
         assert!(t.message.contains("stop the program"), "{}", t.message);
     }

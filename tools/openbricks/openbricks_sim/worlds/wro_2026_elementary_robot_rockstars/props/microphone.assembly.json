@@ -1,0 +1,693 @@
+{
+ "components": {
+  "microphone": {
+   "children": [
+    {
+     "color": 15,
+     "name": "lego_3",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -40.0,
+      0.0
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_4",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -8.0,
+      -0.0
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_3035",
+     "part": "lego_3035",
+     "pos": [
+      16.0,
+      -24.0,
+      3.2
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_2",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -16.0,
+      12.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_5",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -32.0,
+      12.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_6",
+     "part": "lego_3001",
+     "pos": [
+      8.0,
+      -24.0,
+      22.4
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_7",
+     "part": "lego_3001",
+     "pos": [
+      24.0,
+      -24.0,
+      22.4
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_8",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -16.0,
+      32.0
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_9",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -32.0,
+      32.0
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_10",
+     "part": "lego_3001",
+     "pos": [
+      8.0,
+      -24.0,
+      41.6
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_11",
+     "part": "lego_3001",
+     "pos": [
+      24.0,
+      -24.0,
+      41.6
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_12",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -16.0,
+      51.2
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_13",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -32.0,
+      51.2
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      180.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_3831",
+     "part": "lego_3831",
+     "pos": [
+      16.0,
+      -40.0,
+      60.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_3830",
+     "part": "lego_3830",
+     "pos": [
+      16.0,
+      -40.0,
+      60.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_14",
+     "part": "lego_3831",
+     "pos": [
+      16.0,
+      -8.0,
+      60.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      -180.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_15",
+     "part": "lego_3830",
+     "pos": [
+      16.0,
+      -8.0,
+      60.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      -180.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_16",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -32.0,
+      70.4
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      180.0
+     ]
+    },
+    {
+     "color": 7,
+     "name": "lego_3022",
+     "part": "lego_3022",
+     "pos": [
+      24.0,
+      -24.0,
+      54.4
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 7,
+     "name": "lego_17",
+     "part": "lego_3022",
+     "pos": [
+      8.0,
+      -24.0,
+      54.4
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 7,
+     "name": "lego_18",
+     "part": "lego_3022",
+     "pos": [
+      24.0,
+      -24.0,
+      57.6
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 7,
+     "name": "lego_19",
+     "part": "lego_3022",
+     "pos": [
+      8.0,
+      -24.0,
+      57.6
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_3069b",
+     "part": "lego_3069b",
+     "pos": [
+      4.0,
+      -24.0,
+      60.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_3069b_2",
+     "part": "lego_3069b",
+     "pos": [
+      28.0,
+      -24.0,
+      60.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 15,
+     "name": "lego_20",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -16.0,
+      70.4
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      180.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_21",
+     "part": "lego_3001",
+     "pos": [
+      8.0,
+      -24.0,
+      80.0
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      -90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_22",
+     "part": "lego_3001",
+     "pos": [
+      24.0,
+      -24.0,
+      80.0
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      -90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_23",
+     "part": "lego_3001",
+     "pos": [
+      0.0,
+      -32.0,
+      89.6
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      -90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_24",
+     "part": "lego_3001",
+     "pos": [
+      24.0,
+      -40.0,
+      89.6
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_25",
+     "part": "lego_3001",
+     "pos": [
+      8.0,
+      -8.0,
+      89.6
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_26",
+     "part": "lego_3001",
+     "pos": [
+      32.0,
+      -16.0,
+      89.6
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      -90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_27",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      -48.0,
+      99.2
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_28",
+     "part": "lego_3001",
+     "pos": [
+      16.0,
+      0.0,
+      99.2
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_29",
+     "part": "lego_3001",
+     "pos": [
+      -8.0,
+      -24.0,
+      99.2
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_30",
+     "part": "lego_3001",
+     "pos": [
+      40.0,
+      -24.0,
+      99.2
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_31",
+     "part": "lego_3001",
+     "pos": [
+      -0.0,
+      -32.0,
+      108.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      -90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_32",
+     "part": "lego_3001",
+     "pos": [
+      8.0,
+      -8.0,
+      108.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_33",
+     "part": "lego_3001",
+     "pos": [
+      32.0,
+      -16.0,
+      108.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      -90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_34",
+     "part": "lego_3001",
+     "pos": [
+      24.0,
+      -40.0,
+      108.8
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_35",
+     "part": "lego_3001",
+     "pos": [
+      24.0,
+      -24.0,
+      118.4
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    },
+    {
+     "color": 0,
+     "name": "lego_36",
+     "part": "lego_3001",
+     "pos": [
+      8.0,
+      -24.0,
+      118.4
+     ],
+     "rot": [
+      0.0,
+      0.0,
+      90.0
+     ]
+    }
+   ],
+   "note": ""
+  }
+ },
+ "format": "openbricks-assembly/1",
+ "parts": {
+  "lego_3001": {
+   "category": "lego",
+   "ldraw": "3001",
+   "mass_g": 2.32,
+   "name": "Brick  2 x  4",
+   "source": "vendor",
+   "source_note": "BrickLink 3001: 2.32 g (2 x 4 x 1)"
+  },
+  "lego_3022": {
+   "category": "lego",
+   "ldraw": "3022",
+   "mass_g": 0.64,
+   "name": "Plate  2 x  2",
+   "source": "vendor",
+   "source_note": "BrickLink 3022: 0.64 g (2 x 2)"
+  },
+  "lego_3035": {
+   "category": "lego",
+   "ldraw": "3035",
+   "mass_g": 4.7,
+   "name": "Plate  4 x  8",
+   "source": "vendor",
+   "source_note": "BrickLink 3035: 4.7 g (4 x 8)"
+  },
+  "lego_3069b": {
+   "category": "lego",
+   "ldraw": "3069b",
+   "mass_g": 0.32,
+   "name": "Tile  1 x  2 with Groove",
+   "source": "placeholder",
+   "source_note": "mass estimated from the LDraw volume at 1.05 g/cm3 (ABS); weigh it"
+  },
+  "lego_3830": {
+   "category": "lego",
+   "ldraw": "3830",
+   "mass_g": 1.02,
+   "name": "Hinge Brick  1 x  4 Top",
+   "source": "vendor",
+   "source_note": "BrickLink 3830: 1.02 g"
+  },
+  "lego_3831": {
+   "category": "lego",
+   "ldraw": "3831",
+   "mass_g": 0.83,
+   "name": "Hinge Brick  1 x  4 Base",
+   "source": "vendor",
+   "source_note": "BrickLink 3831: 0.83 g"
+  }
+ },
+ "robot": {
+  "measured_mass_g": null,
+  "name": "microphone",
+  "roles": {},
+  "root": "microphone",
+  "spawn": {
+   "pos_mm": [
+    0.0,
+    0.0
+   ],
+   "yaw_deg": 0.0
+  }
+ },
+ "units": {
+  "angle": "deg",
+  "length": "mm",
+  "mass": "g"
+ }
+}

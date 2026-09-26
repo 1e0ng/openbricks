@@ -246,6 +246,15 @@ colliding as their boxes with their catalogue masses. Nothing sits
 under the map: a prop a map file places so low that a brick of it
 would be below the floor is lifted onto the floor when the map loads.
 
+**No two props overlap.** A prop dragged or turned into another
+prop, or into the robot, is not taken there: it stays where it was
+last clear and the panel says what it would overlap (its exact
+bricks against theirs, as on the Workbench; faces that only touch are
+fine, so props stack and stand side by side). A prop added onto
+another — a copy lands a little to the side of its original, a build
+or brick at the origin — is moved along the map's x axis, a module at
+a time, until it is clear, and says whom it was placed beside.
+
 **Free or stuck.** A prop is free by default: it has a free joint, so
 the physics settles it and the robot can push it. Tick **stuck to the
 map** on the selected prop to weld it there — no joint, nothing but the

@@ -2129,7 +2129,7 @@ impl App {
             .resizable(true)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.simulate.map_ui(ui);
+                    self.simulate.map_ui(ui, &self.editor.bundle);
                     self.map_add_ui(ui);
                 });
             });
@@ -2311,6 +2311,8 @@ impl App {
         let draw = self
             .simulate
             .draw_items(&mut self.viewport, &gpu.device, &gpu.queue, &self.editor.bundle, dark);
+        // a prop just added is moved off whatever it landed on, once the frame shows it
+        self.simulate.settle_new_prop(&self.editor.bundle);
         let (items, lines, ghost) = (draw.items, draw.lines, draw.ghost);
         let editing = self.tab == Tab::Map;
         // over the map, whatever is drawn on it: the props' outlines when editing the map, else
@@ -2511,7 +2513,7 @@ impl App {
                     } else {
                         pose0
                     };
-                    self.simulate.drag_prop(i, pose);
+                    self.simulate.drag_prop(i, pose, &self.editor.bundle);
                 }
             }
             Drag::Chassis { px0, pose0 } if response.dragged() => {
@@ -2585,7 +2587,7 @@ impl App {
                 self.simulate.frame_map();
             }
             if turn {
-                self.simulate.turn_selected_prop(90.0);
+                self.simulate.turn_selected_prop(90.0, &self.editor.bundle);
             }
         }
         if !editing && !ui.ctx().egui_wants_keyboard_input() {

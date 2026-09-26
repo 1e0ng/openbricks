@@ -155,6 +155,7 @@ openbricks_sim = [
     # in 0.10.3-0.10.5 (PR #84), now caught by
     # ``test_wheel_bundles_worlds.test_wheel_contains_ldr_props``.
     "worlds/*/props/*.ldr",
+    "worlds/*/props/*.assembly.json",
     # 3D-printed scenery meshes (currently just the Senior mosaic
     # frame). MuJoCo loads them via ``<mesh file="..."/>`` at
     # ``mj_makeData`` time, same lifecycle as ``mat.png``.
