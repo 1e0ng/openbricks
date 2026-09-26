@@ -3531,7 +3531,12 @@ mod tests {
         h.key_press(Key::ArrowUp);
         h.step();
         let p = h.state().editor.selected_instances()[0].pos;
-        assert_eq!((p[0], p[1]), (start.pos[0] + 16.0, start.pos[1]), "{}", h.state().editor.status);
+        assert_eq!(
+            (p[0], p[1]),
+            (start.pos[0] + 8.0, start.pos[1]),
+            "two half-stud nudges: {}",
+            h.state().editor.status
+        );
         h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
         h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
         h.step();
@@ -3662,7 +3667,10 @@ mod tests {
         assert_eq!(h.state().editor.selection, vec![top.clone()]);
         let moved = h.state().editor.children().iter().find(|c| c.name == top).unwrap().pos;
         assert_ne!(moved, start);
-        assert!((moved[0] / 8.0).fract() == 0.0 && (moved[1] / 8.0).fract() == 0.0, "{moved:?}");
+        assert!(
+            (moved[0] / 4.0).fract() == 0.0 && (moved[1] / 4.0).fract() == 0.0,
+            "on the half-stud grid: {moved:?}"
+        );
         // shift lifts: pressed on the brick's body, away from its origin where the handles meet
         let body = {
             let leaf = h.state().editor.leaves.iter().find(|l| l.path == [top.clone()]).unwrap().clone();

@@ -973,10 +973,12 @@ pub struct WorldConnector {
 pub fn connectors_of_leaf(doc: &Document, bundle: &Bundle, leaf: &Leaf) -> Vec<WorldConnector> {
     let Some(part) = doc.parts.get(&leaf.part_id) else { return vec![] };
     let list: Vec<Connector> = match geometry_of(part, bundle) {
-        Geometry::Record(rec) => with_stud_sockets(&rec.connectors, &rec.bbox),
+        Geometry::Record(rec) => with_stud_sockets(&rec.connectors, &rec.bbox, &rec.name),
         // a fetched part's record travels without its sockets: derived here as for the library's
         // (nothing to derive for an STL import, which has no studs)
-        Geometry::Imported { connectors, bbox, .. } => with_stud_sockets(&connectors, &[bbox.min.to_array(), bbox.max.to_array()]),
+        Geometry::Imported { connectors, bbox, .. } => {
+            with_stud_sockets(&connectors, &[bbox.min.to_array(), bbox.max.to_array()], &part.name)
+        }
         _ => vec![],
     };
     list.into_iter()
@@ -994,9 +996,14 @@ pub fn connectors_of_leaf(doc: &Document, bundle: &Bundle, leaf: &Leaf) -> Vec<W
 /// deep in the underside as the stud is tall, so a stud below meets it
 /// where the part's own stud stands above — a brick or plate stacks on
 /// another with the two stud grids in step. Only studs along a bbox
-/// axis get one.
-pub fn with_stud_sockets(connectors: &[Connector], bbox: &[[f64; 3]; 2]) -> Vec<Connector> {
+/// axis get one. A tile has no studs and the same underside: it gets
+/// one under every place of its footprint's stud grid, a stud's height
+/// up its bottom face — see [`tile_sockets`].
+pub fn with_stud_sockets(connectors: &[Connector], bbox: &[[f64; 3]; 2], name: &str) -> Vec<Connector> {
     let mut out = connectors.to_vec();
+    if !connectors.iter().any(|c| c.kind == "stud") {
+        out.extend(tile_sockets(bbox, name));
+    }
     for c in connectors.iter().filter(|c| c.kind == "stud") {
         let a = c.axis;
         let k = (0..3)
@@ -1016,6 +1023,41 @@ pub fn with_stud_sockets(connectors: &[Connector], bbox: &[[f64; 3]; 2]) -> Vec<
             length: c.length,
             r: c.r,
         });
+    }
+    out
+}
+
+/// The sockets under a tile (a part named one, with no studs of its
+/// own): one per stud place of the 8 mm grid its footprint covers,
+/// when the footprint is whole studs — a stud's height up its bottom
+/// face, pointing down, as a stud below stands.
+pub fn tile_sockets(bbox: &[[f64; 3]; 2], name: &str) -> Vec<Connector> {
+    use crate::editor::MODULE_MM;
+    const STUD_MM: f64 = 1.6;
+    const STUD_R_MM: f64 = 2.4;
+    let is_tile = name.split_whitespace().any(|w| w.eq_ignore_ascii_case("tile"));
+    let dx = bbox[1][0] - bbox[0][0];
+    let dy = bbox[1][1] - bbox[0][1];
+    let (nx, ny) = ((dx / MODULE_MM).round(), (dy / MODULE_MM).round());
+    if !is_tile || nx < 1.0 || ny < 1.0 || (dx - nx * MODULE_MM).abs() > 0.6 || (dy - ny * MODULE_MM).abs() > 0.6 {
+        return vec![];
+    }
+    let z = round3(bbox[0][2] + STUD_MM / 2.0);
+    let mut out = Vec::new();
+    for i in 0..nx as usize {
+        for j in 0..ny as usize {
+            out.push(Connector {
+                kind: "stud_socket".into(),
+                centre: [
+                    round3(bbox[0][0] + MODULE_MM / 2.0 + i as f64 * MODULE_MM),
+                    round3(bbox[0][1] + MODULE_MM / 2.0 + j as f64 * MODULE_MM),
+                    z,
+                ],
+                axis: [0.0, 0.0, -1.0],
+                length: STUD_MM,
+                r: STUD_R_MM,
+            });
+        }
     }
     out
 }
@@ -1817,6 +1859,7 @@ mod tests {
                 hole.clone(),
             ],
             &bbox,
+            "Plate  2 x  2",
         );
         let sockets: Vec<&Connector> = out.iter().filter(|c| c.kind == "stud_socket").collect();
         assert_eq!(sockets.len(), 1, "a stud at an angle gets none");
@@ -1825,8 +1868,32 @@ mod tests {
         assert_eq!(out.len(), 4, "the rest is kept");
         assert_eq!(out[2].kind, "pin_hole");
         // studs pointing up a part (a SNOT face) get a socket at the far face along that axis
-        let out = with_stud_sockets(&[stud([0.0, 0.0, -2.4], [0.0, 0.0, 1.0])], &bbox);
+        let out = with_stud_sockets(&[stud([0.0, 0.0, -2.4], [0.0, 0.0, 1.0])], &bbox, "Brick  1 x  1 with Stud on Side");
         assert_eq!(out[1].centre, [0.0, 0.0, 0.8]);
+        // a tile: no studs, a socket under every stud place of its footprint; a part with studs,
+        // one that is not a tile, or an odd footprint gets none of those
+        let tile = [[-8.0, -4.0, -3.2], [8.0, 4.0, 0.0]];
+        let out = with_stud_sockets(&[], &tile, "Tile  1 x  2 with Groove");
+        assert_eq!(out.len(), 2);
+        assert_eq!((out[0].centre, out[1].centre), ([-4.0, 0.0, -2.4], [4.0, 0.0, -2.4]));
+        assert_eq!(
+            (out[0].kind.as_str(), out[0].axis, out[0].length, out[0].r),
+            ("stud_socket", [0.0, 0.0, -1.0], 1.6, 2.4)
+        );
+        assert_eq!(
+            tile_sockets(&[[-8.0, -8.0, -3.2], [8.0, 8.0, 0.0]], "Tile  2 x  2 with Groove").len(),
+            4
+        );
+        assert_eq!(tile_sockets(&tile, "Technic Tile  1 x  2 with Two Holes").len(), 2);
+        assert!(tile_sockets(&tile, "Technic Beam  1 x  2").is_empty(), "not a tile");
+        assert!(
+            tile_sockets(&[[-3.6, -11.6, 0.0], [3.6, 11.6, 8.0]], "Tile of no such size").is_empty(),
+            "not whole studs"
+        );
+        assert!(
+            with_stud_sockets(&[stud([4.0, 4.0, 0.8], [0.0, 0.0, -1.0])], &bbox, "Tile with a stud").len() == 2,
+            "its own stud rules"
+        );
         // the helpers
         let r = rotation_between(DVec3::X, DVec3::Y);
         assert!((r * DVec3::X - DVec3::Y).length() < 1e-9);

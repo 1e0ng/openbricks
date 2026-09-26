@@ -3,6 +3,23 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.29.1 — tiles seat, and the grid is half a stud
+
+A 1 x 2 tile could not be put on a 2 x 2 plate in line: a tile has
+no studs, the magnet only put stud sockets under a part's own studs,
+so a tile had nothing to seat on — and the drag grid was a whole
+stud, which can never bring a part an odd number of studs wide (its
+centre on a stud) over one an even number wide (its centre between
+studs). A tile now has a socket under every place of its footprint a
+stud fits, as deep as a stud stands, so it lands on a plate's studs
+like a plate would; and the drag grid is 4 mm, half a stud, the
+toolbar's **snap** still offering 8, 4, 1 mm or off.
+
+- Tests: a tile let go on and near a plate's stud row lands seated,
+  and a half-stud position of its own stays; a tile's sockets, a
+  Technic tile's, none for a beam, an odd footprint or a part with
+  studs of its own; the plane drag in half-stud steps.
+
 ## 4.29.0 — a curve is one arc, one command; a first curve sets the way the robot starts
 
 A curve placed on the map is now the one arc tangent to the way the
