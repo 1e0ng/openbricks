@@ -858,16 +858,17 @@ impl Editor {
     }
 
     pub fn snap_selection(&mut self, announce: bool) {
-        if self.selection.len() != 1 {
+        if self.selection.is_empty() {
             if announce {
-                self.status = "Select one item to snap".into();
+                self.status = "Select an item to snap".into();
             }
             return;
         }
-        let name = self.selection[0].clone();
-        if self.is_locked(&name) {
+        // several selected move as one: their features together, against the rest
+        let names = self.unlocked_selection();
+        if names.is_empty() {
             if announce {
-                self.status = format!("{name} is locked");
+                self.status = format!("{} is locked", self.selection.join(", "));
             }
             return;
         }
@@ -876,10 +877,10 @@ impl Editor {
         let own = self.pending.is_none();
         if own {
             self.push_undo();
-            self.note_before(std::slice::from_ref(&name));
+            self.note_before(&names);
         }
         let before = self.doc.clone();
-        match assembly::snap_instance(&mut self.doc, &self.bundle, &self.editing, &name) {
+        match assembly::snap_group_within(&mut self.doc, &self.bundle, &self.editing, &names, assembly::SNAP_MM) {
             Some(path) => {
                 if !own {
                     self.undo.push(before);
@@ -889,7 +890,7 @@ impl Editor {
                 if own && self.settle("stays") {
                     return;
                 }
-                self.status = format!("Snapped {name} into {}", path.join("/"));
+                self.status = format!("Snapped {} into {}", names.join(", "), path.join("/"));
             }
             None => {
                 if own {
@@ -1414,10 +1415,11 @@ impl Editor {
         starts
     }
 
-    /// The plane drag: every start moved by `dx, dy`, snapped; one item
-    /// dragged near a hole or a stud grid is pulled onto it, and lets go
-    /// again as the pointer moves on (the magnet works from the start
-    /// poses each frame, so nothing accumulates).
+    /// The plane drag: every start moved by `dx, dy`, snapped; what is
+    /// dragged near a hole or a stud grid is pulled onto it — several
+    /// items as one — and lets go again as the pointer moves on (the
+    /// magnet works from the start poses each frame, so nothing
+    /// accumulates).
     pub fn move_by(&mut self, starts: &[(String, [f64; 3])], dx: f32, dy: f32) {
         for (name, p0) in starts {
             let nx = self.snap(p0[0] as f32 + dx);
@@ -1428,9 +1430,9 @@ impl Editor {
             });
         }
         self.recompute();
-        if self.magnet && starts.len() == 1 {
-            let name = starts[0].0.clone();
-            if assembly::snap_instance_within(&mut self.doc, &self.bundle, &self.editing, &name, assembly::PULL_MM).is_some() {
+        if self.magnet && !starts.is_empty() {
+            let names: Vec<String> = starts.iter().map(|s| s.0.clone()).collect();
+            if assembly::snap_group_within(&mut self.doc, &self.bundle, &self.editing, &names, assembly::PULL_MM).is_some() {
                 self.recompute();
             }
         }
@@ -1694,14 +1696,22 @@ mod tests {
     }
 
     #[test]
-    fn snapping_needs_one_selected_item() {
+    fn snapping_needs_a_selection_and_takes_several_as_one() {
         let mut ed = editor();
         ed.snap_selection(true);
-        assert_eq!(ed.status, "Select one item to snap");
+        assert_eq!(ed.status, "Select an item to snap");
+        // two of the example's bricks, already seated: snapped together, they stay where they are
         let names: Vec<String> = ed.children().iter().take(2).map(|c| c.name.clone()).collect();
+        let before: Vec<[f64; 3]> = ed.children().iter().take(2).map(|c| c.pos).collect();
         ed.selection = names.clone();
         ed.snap_selection(true);
-        assert_eq!(ed.status, "Select one item to snap");
+        assert!(
+            ed.status.starts_with(&format!("Snapped {} into", names.join(", "))),
+            "{}",
+            ed.status
+        );
+        let after: Vec<[f64; 3]> = ed.children().iter().take(2).map(|c| c.pos).collect();
+        assert_eq!(after, before);
         // a brick far from everything finds no hole
         let id = ed.ensure_ldraw_part("32278").unwrap();
         ed.magnet = false;
@@ -2375,6 +2385,138 @@ mod tests {
         assert_eq!(ed.selected_instances()[0].pos, [0.0, -8.0, 4.0], "{}", ed.status);
         assert!(ed.status.starts_with("Snapped"));
         assert_eq!(ed.undo_depth(), depth + 1);
+    }
+
+    #[test]
+    fn the_hinge_bricks_assemble_side_by_side_pin_in_socket() {
+        // 3831 (swivel base) at the origin; 3830 (swivel top) let go near it, a touch off: the
+        // magnet seats its pin in the socket — both hinge axes on one line, the bricks end to
+        // end in one layer — and nothing overlaps (a pin may sit anywhere along its hole, so the
+        // height is the grid's; MATE_MM of slack still counts as seated)
+        let (mut ed, base) = solo("3831");
+        ed.magnet = true;
+        let top = ed.ensure_ldraw_part("3830").unwrap();
+        ed.add_instance(Some(top), None, [0.4, 0.3, 0.0]);
+        let name = ed.selection[0].clone();
+        ed.snap_selection(true);
+        assert_eq!(ed.selected_instances()[0].pos, [0.0, 0.0, 0.0], "{}", ed.status);
+        assert_eq!(ed.selected_instances()[0].rot, [0.0, 0.0, 0.0]);
+        assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+        let conns = |ed: &Editor, n: &str| -> Vec<assembly::WorldConnector> {
+            assembly::flatten(&ed.doc, &ed.editing)
+                .iter()
+                .filter(|l| l.path[0] == n)
+                .flat_map(|l| assembly::connectors_of_leaf(&ed.doc, &ed.bundle, l))
+                .collect()
+        };
+        assert!(
+            assembly::seated(&conns(&ed, &name), &conns(&ed, &base)),
+            "the pin sits in the socket"
+        );
+        // one brick higher, as a stud stack would put it, the pin hangs above the socket: no
+        // mate, no overlap either
+        ed.set_instance(&name, |i| i.pos = [0.0, 0.0, 9.6]);
+        ed.recompute();
+        assert_eq!(ed.overlap_count(), 0);
+        assert!(!assembly::seated(&conns(&ed, &name), &conns(&ed, &base)));
+    }
+
+    #[test]
+    fn an_assembled_hinge_moves_onto_a_base_brick_as_one() {
+        // a 2 x 4 at the origin; the hinge pair assembled beside it, on the ground; both
+        // selected and moved onto the 2 x 4's studs: they go, together, and nothing overlaps
+        let (mut ed, brick) = solo("3001");
+        let hb = ed.ensure_ldraw_part("3831").unwrap();
+        let ht = ed.ensure_ldraw_part("3830").unwrap();
+        ed.add_instance(Some(hb), None, [0.0, 48.0, 0.0]);
+        let base = ed.selection[0].clone();
+        ed.add_instance(Some(ht), None, [0.0, 48.0, 0.0]);
+        let top = ed.selection[0].clone();
+        ed.recompute();
+        assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+        let pos = |ed: &Editor, n: &str| ed.children().iter().find(|i| i.name == n).unwrap().pos;
+        assert_eq!(
+            (pos(&ed, &base), pos(&ed, &top)),
+            ([0.0, 48.0, 0.0], [0.0, 48.0, 0.0]),
+            "{}",
+            ed.status
+        );
+        ed.selection = vec![base.clone(), top.clone()];
+        ed.magnet = true;
+        // up a brick, then across onto the studs
+        ed.nudge_selection([0.0, 0.0, 9.6]);
+        assert_eq!(pos(&ed, &base), [0.0, 48.0, 9.6], "{}", ed.status);
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 0.0, -48.0);
+        assert!(ed.overlapping.is_empty(), "{:?}", ed.overlapping);
+        let seen = ed.overlapping.clone();
+        ed.end_move();
+        assert_eq!(
+            (pos(&ed, &base), pos(&ed, &top)),
+            ([0.0, 0.0, 9.6], [0.0, 0.0, 9.6]),
+            "onto {brick}: {} — during the move {seen:?}, now {:?}",
+            ed.status,
+            ed.overlapping
+        );
+        assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+        // and straight down onto the studs from above
+        ed.nudge_selection([0.0, 0.0, 9.6]);
+        ed.nudge_selection([0.0, 0.0, -9.6]);
+        assert_eq!(pos(&ed, &top), [0.0, 0.0, 9.6], "{}", ed.status);
+    }
+
+    #[test]
+    fn a_selection_moved_together_is_seated_as_one() {
+        // two 2 x 4s end to end on the ground beside a third; both selected and dragged onto it:
+        // the drop lands their height on the 8 mm grid, 1.6 mm into the brick below, and the
+        // magnet lifts the pair onto its studs as one — before 4.28.0 it did that for one item
+        // only, and a pair was refused as an overlap
+        let (mut ed, base) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id.clone()), None, [0.0, 48.0, 0.0]);
+        let a = ed.selection[0].clone();
+        ed.add_instance(Some(id), None, [32.0, 48.0, 0.0]);
+        let b = ed.selection[0].clone();
+        let pos = |ed: &Editor, n: &str| ed.children().iter().find(|i| i.name == n).unwrap().pos;
+        ed.selection = vec![a.clone(), b.clone()];
+        ed.magnet = true;
+        ed.nudge_selection([0.0, 0.0, 9.6]);
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 0.0, -48.0);
+        ed.end_move();
+        assert_eq!(pos(&ed, &a), [0.0, 0.0, 9.6], "onto {base}: {}", ed.status);
+        assert_eq!(pos(&ed, &b), [32.0, 0.0, 9.6], "and its partner with it, gap kept");
+        assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+        // a little off the grid, dragged as a pair: the pull seats both while the drag is on,
+        // and the S key on a selection of two snaps them together
+        ed.set_instance(&a, |i| i.pos = [1.0, 0.5, 9.6]);
+        ed.set_instance(&b, |i| i.pos = [33.0, 0.5, 9.6]);
+        ed.recompute();
+        ed.snap_selection(true);
+        assert_eq!((pos(&ed, &a), pos(&ed, &b)), ([0.0, 0.0, 9.6], [32.0, 0.0, 9.6]), "{}", ed.status);
+        assert!(ed.status.starts_with(&format!("Snapped {a}, {b} into")), "{}", ed.status);
+        ed.snap_mm = 0.0;
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 1.5, 0.7);
+        assert_eq!(
+            (pos(&ed, &a), pos(&ed, &b)),
+            ([0.0, 0.0, 9.6], [32.0, 0.0, 9.6]),
+            "pulled on during the drag"
+        );
+        ed.end_move();
+        // a locked member stays behind and the rest still snap; nothing selected is said so
+        ed.set_instance(&b, |i| i.locked = true);
+        ed.set_instance(&a, |i| i.pos = [1.0, 0.5, 9.6]);
+        ed.recompute();
+        ed.snap_selection(true);
+        assert_eq!((pos(&ed, &a), pos(&ed, &b)), ([0.0, 0.0, 9.6], [32.0, 0.0, 9.6]), "{}", ed.status);
+        assert_eq!(ed.status, format!("Snapped {a} into {base}"));
+        ed.set_instance(&a, |i| i.locked = true);
+        ed.snap_selection(true);
+        assert_eq!(ed.status, format!("{a}, {b} is locked"));
+        ed.selection.clear();
+        ed.snap_selection(true);
+        assert_eq!(ed.status, "Select an item to snap");
     }
 
     #[test]
