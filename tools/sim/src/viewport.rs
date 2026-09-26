@@ -1505,9 +1505,10 @@ struct LOut { @builtin(position) pos: vec4<f32>, @location(0) color: vec4<f32> }
 }
 @fragment fn fs_line(i: LOut) -> @location(0) vec4<f32> { return i.color; }
 
-// a brick's edge: the instance's colour darkened well below its darkest shading (lightened
-// on a near-black brick), pulled nearer than the faces it lies on by g.edge.x, at most
-// g.edge.y / w (see EDGE_PULL_MAX_MM)
+// a brick's edge: the instance's colour darkened well below its darkest shading — or, on a
+// dark brick (black is not black: its luma is 0.07, and darkening that leaves nothing to
+// see), lightened a third of the way to white — pulled nearer than the faces it lies on by
+// g.edge.x, at most g.edge.y / w (see EDGE_PULL_MAX_MM)
 @vertex fn vs_edge(@location(0) p: vec3<f32>, @builtin(instance_index) ii: u32) -> LOut {
   let inst = insts[ii];
   let wp = inst.model * vec4<f32>(p, 1.0);
@@ -1516,7 +1517,7 @@ struct LOut { @builtin(position) pos: vec4<f32>, @location(0) color: vec4<f32> }
   o.pos.z = o.pos.z - min(g.edge.x, g.edge.y / max(o.pos.w, 1e-6));
   let c = inst.color.rgb;
   let luma = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
-  let shade = select(c * 0.12, mix(c, vec3<f32>(1.0), 0.12), luma < 0.02);
+  let shade = select(c * 0.12, mix(c, vec3<f32>(1.0), 0.35), luma < 0.2);
   o.color = vec4<f32>(shade, inst.color.a);
   return o;
 }
@@ -1693,7 +1694,9 @@ mod tests {
                     let line = if lighter { rows.max().unwrap() } else { rows.min().unwrap() };
                     let (above, below) = (sum(&px, x, y - 5), sum(&px, x, y + 5));
                     assert!(above > 12 && (above - below).abs() <= 6, "faces alike at {x},{y}: {above} {below}");
-                    if (lighter && line > above + 30) || (!lighter && line < above - 40) {
+                    // a seam must show: on black, well over a third of the way to white, not the
+                    // hint of a shade it used to be (black's luma is 0.07; darkened, it was gone)
+                    if (lighter && line > above + 120) || (!lighter && line < above - 40) {
                         marked += 1;
                     } else if (line - above).abs() <= 8 {
                         same += 1;
