@@ -134,14 +134,16 @@ its start and its end (the start snaps to where the previous action
 ends, or to the chassis, so paths chain; an end clicked within 7.5°
 of the way the robot arrives lands exactly on that heading, so
 chained straights run on with no turn between them — shift keeps any
-angle); a curve takes its start,
-its end, and a point to face at the end — it enters the way the robot
-arrives at its start and is one arc when the end pose allows it, else
-two arcs meeting smoothly, which the program drives as one continuous
-move; a turn takes where it turns and a point to face; a stop or a
+angle); a curve takes its start and its end — it enters the way the
+robot arrives at its start and is the one arc from there through its
+end, one `curve` command, so the heading it ends facing follows from
+the geometry (an end dead ahead is a straight run; one straight
+behind cannot be reached by an arc and is not drawn); as the first
+action of a route, a curve also takes a point to face at its start
+between the two, the way the robot starts; a turn takes where it
+turns and a point to face; a stop or a
 custom call takes one point. Every click leaves a marker; after the first click the line (or
-the arc, or the turn's arrow) follows the pointer — after a curve's
-second click, its end swings to face the pointer — with its length,
+the arc, or the turn's arrow) follows the pointer with its length,
 radius and angle, or heading written beside it, and once placed each
 action keeps that label next to its path, and an arrowhead at the end
 of every path shows the way the robot faces there (a turn's arrow
@@ -154,7 +156,7 @@ base's default, shown in mm/s for your wheels), **continuous** for a
 move that flows into the next one without slowing (`then=Stop.NONE`)
 or otherwise the end state (coast, brake, hold) — a curve asks for
 nothing more: the popup shows the headings it enters and ends with
-and the radius of each arc, all set by the clicks — a
+and the arc's radius and angle, all set by the clicks — a
 turn's heading and rate, a
 stop's wait, a custom action's call (the picker lists what the
 **Definitions** box defines, such as `def line_follow(): …`) and
@@ -163,11 +165,12 @@ ends. Where an action does not start where the previous one ends, a
 dashed line shows the drive the program inserts to get there; the
 first action placed on an empty route starts it, so the chassis goes
 to where that action begins, facing its way (drag the chassis
-afterwards for another start). Every
+afterwards for another start; shift-drag turns it, and a first curve
+follows). Every
 action is an object on the map: click its path to select it and edit
 its parameters in the panel, drag its handles (a straight's ends; a
-curve's start, which carries its end along, its end, and the arrow at
-its end for the heading it ends facing; a turn's heading arrow) or
+curve's start, which carries its end along, and its end, which bends
+the arc; a turn's heading arrow) or
 the path itself to move it, ⌘C / ⌘V to copy and paste it (the copy
 lands a little to the side), ⌘L / ⌘⇧L to lock and unlock it (a locked
 action shows 🔒 and cannot be moved, edited or deleted), Delete to
