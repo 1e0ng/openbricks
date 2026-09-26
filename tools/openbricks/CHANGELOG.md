@@ -3,6 +3,34 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.30.0 — no two props overlap on the map; the elementary microphone is a real build
+
+The map editor let a prop be dragged or turned into another, or into
+the robot. It refuses now, as the Workbench refuses overlapping
+bricks: a pose where the prop's exact bricks (a build's from the
+library, a mesh prop's from its mesh, a box's box) would overlap
+another prop's, or the robot's, is not taken — the prop stays where it
+was last clear and the panel says what it would overlap. Faces that
+only touch are fine, so props stack and stand side by side. A prop
+added onto another is moved along x, a module at a time, until it is
+clear, and says whom it was placed beside.
+
+The WRO 2026 Elementary map's microphone is a Workbench build shipped
+with the map (`props/microphone.assembly.json`, 41 bricks with their
+catalogue masses) in place of the LDraw stand-in, placed where the
+rules put the instruments and the microphone — at the lower end of the
+field, in the truck — and standing on the mat.
+
+- Tests: the sim (what a prop would overlap at a pose — another brick
+  prop, a mesh prop, the robot, and nothing end to end; a drag into a
+  prop refused with the message, a clear one taken; a turn refused
+  where it stands and taken in the clear; the mesh prop bound too; a
+  copy landing on its original moved beside the props it would have
+  overlapped, once, and one landing clear left alone); the map (the
+  microphone body of 41 brick geoms at the mat's place, its mass the
+  bricks', its lowest brick on the floor, the stand-in gone, the file
+  shipped).
+
 ## 4.29.3 — a prop stands on the map, never under it
 
 A build placed on the map as a prop went at floor height with its

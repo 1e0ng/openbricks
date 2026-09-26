@@ -136,14 +136,16 @@
          stage.
          ========================================================= -->
 
-    <!-- F2.3: instruments + microphone as LDraw assemblies. Each
-         prop's brick layout lives in props/<name>.ldr; the
-         <lego_prop> placeholder gets expanded by world.py at load
-         time. -->
+    <!-- F2.3: instruments as LDraw assemblies (each prop's brick
+         layout lives in props/<name>.ldr; the <lego_prop> placeholder
+         gets expanded by world.py at load time), and the microphone
+         as a Workbench build (props/microphone.assembly.json, 41
+         bricks with their catalogue masses; the <assembly_prop>
+         placeholder expands the same way, standing on the mat). -->
     <lego_prop name="guitar"     ldr="props/guitar.ldr"     pos="0.85 -0.40 0.0" mass="0.100"/>
     <lego_prop name="keyboard"   ldr="props/keyboard.ldr"   pos="0.62 -0.42 0.0" mass="0.130"/>
     <lego_prop name="congas"     ldr="props/congas.ldr"     pos="0.40 -0.42 0.0" mass="0.120"/>
-    <lego_prop name="microphone" ldr="props/microphone.ldr" pos="-0.15 -0.42 0.0" mass="0.030"/>
+    <assembly_prop name="microphone" file="props/microphone.assembly.json" pos="-0.0422 -0.4743 0.0096"/>
 
     <!-- =========================================================
          MISSION 3.3 — 6 notes. Each is a coloured piece with a

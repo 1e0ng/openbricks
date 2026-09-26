@@ -200,6 +200,37 @@ class LegoPropExpansionTests(unittest.TestCase):
             "got %d — has the lego_prop expansion regressed to a "
             "single-box approximation?" % clef_geom_count)
 
+    def test_elementary_world_microphone_is_a_workbench_build_standing_on_the_mat(self):
+        # the microphone is a Workbench build shipped with the map (41 bricks with their
+        # catalogue masses), placed where the mission's mat has it, standing on the floor:
+        # a brick's origin is its top face, so the prop is lifted by the build's lowest point
+        world = _WORLDS / "wro_2026_elementary_robot_rockstars"
+        self.assertTrue((world / "props" / "microphone.assembly.json").is_file())
+        self.assertFalse((world / "props" / "microphone.ldr").exists(), "the LDraw stand-in is gone")
+        pyproject = Path(openbricks_sim.__file__).resolve().parents[1] / "pyproject.toml"
+        if pyproject.is_file():
+            self.assertIn('"worlds/*/props/*.assembly.json"', pyproject.read_text(), "shipped in the wheel")
+        m, d, _ = load_world(str(world / "world.xml"), chassis_spec=ChassisSpec())
+        mic = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "microphone")
+        self.assertGreaterEqual(mic, 0, "microphone body missing from model")
+        names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, i) for i in range(m.ngeom) if int(m.geom_bodyid[i]) == mic]
+        self.assertEqual(len(names), 41, names[:5])
+        self.assertTrue(all(n.startswith("microphone_brick:") for n in names), names[:5])
+        # the build's catalogue masses, each brick at least a gram so a free body has some
+        from openbricks_sim import assembly
+        import json
+        with open(world / "props" / "microphone.assembly.json") as fh:
+            out, total = assembly.prop_bricks(json.load(fh))
+        self.assertAlmostEqual(total, 81.2, places=1)
+        self.assertAlmostEqual(float(m.body_mass[mic]), sum(max(b["mass_g"], 1.0) for b in out) / 1000.0, places=4)
+        mujoco.mj_forward(m, d)
+        x, y, z = (float(v) for v in d.xpos[mic])
+        self.assertAlmostEqual(x, -0.0422, places=4)
+        self.assertAlmostEqual(y, -0.4743, places=4)
+        self.assertAlmostEqual(z, 0.0096, places=4, msg="its lowest brick on the floor")
+        lowest = min(float(d.geom_xpos[i][2]) - float(m.geom_size[i][2]) for i in range(m.ngeom) if int(m.geom_bodyid[i]) == mic)
+        self.assertGreaterEqual(lowest, -1e-6, "nothing under the mat")
+
 
 if __name__ == "__main__":
     unittest.main()
