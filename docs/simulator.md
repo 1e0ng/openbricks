@@ -71,7 +71,10 @@ thumbnail), the 3D view in the
 middle, the contents of the component you are editing and the
 inspector on the right. Drag in the view to orbit, right-drag to pan,
 scroll to zoom, `F` to fit; drag a brick to move it on the ground
-plane in 8 mm steps (shift lifts it). The selection carries handles:
+plane in 4 mm steps — half a stud, since a part an odd number of
+studs wide has its centre on a stud and an even one between two; the
+toolbar's **snap** offers 8, 4, 1 mm or off (shift lifts it). The
+selection carries handles:
 three arrows (**Move**, `W`) to slide it along one world axis in grid
 steps, or three rings (**Rotate**, `E`) to turn it about one axis in
 15° steps — hold shift for free movement or rotation; several
@@ -327,9 +330,10 @@ robot as a tree of components:
   mesh, imported STL files included. Let go of a part near a hole and
   it snaps: the pin axis aligns to the hole, a pin half centres in its
   module, an axle keeps its position along the hole. Bricks and plates
-  stack: under every stud a part has a socket, so a plate let go over
-  a brick lands on its stud grid, squared up, with every stud it
-  covers mated — the turn and shift that mate the most features win,
+  stack: under every stud a part has a socket, and a tile, which has
+  none, has one under every place of its footprint a stud fits, so a
+  plate or a tile let go over a brick lands on its stud grid, squared
+  up, with every stud it covers mated — the turn and shift that mate the most features win,
   which also seats a two-pin connector in both holes. Dragging a part
   near a hole or a grid pulls it on (it lets go again as the pointer
   moves away); a stud also seats in a Technic hole or, for the
@@ -339,8 +343,8 @@ robot as a tree of components:
   together against everything else, the first selected part taking
   the turn and shift and the rest riding along. A part let go lands
   with its height on the stud module (1.6 mm: a plate is two, a beam
-  five, a brick six) and its plan position on the 8 mm grid, and the
-  magnet takes it from there. The inspector lists what each part is
+  five, a brick six) and its plan position on the 4 mm half-stud
+  grid, and the magnet takes it from there. The inspector lists what each part is
   mated to. So that a stack stays legible, the sim draws every brick
   with its edges — the seams between stacked bricks, the rims of studs
   and holes — in a darker shade of its own colour (lighter on a black

@@ -17,6 +17,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 pub const MODULE_MM: f64 = 8.0;
+/// The drag grid: half a stud. Parts an odd number of studs wide have
+/// their centres on stud centres, even ones between studs, so a 1 x 2
+/// on a 2 x 2 needs a half-stud step; the toolbar offers 8, 4, 1 or off.
+pub const GRID_MM: f64 = 4.0;
 /// The height module: a stud's height, which every LEGO height stacks
 /// on — a plate is two, a beam five, a brick six. Heights let go land on
 /// it, not on the 8 mm plan grid (which would sink a plate into the one
@@ -135,7 +139,7 @@ impl Editor {
             selection: vec![],
             undo: vec![],
             dirty: false,
-            snap_mm: MODULE_MM,
+            snap_mm: GRID_MM,
             magnet: true,
             status: String::new(),
             errors: vec![],
@@ -1688,7 +1692,7 @@ mod tests {
         ed.nudge_selection([0.0, -1.0, 0.5]);
         let p = ed.selected_instances()[0].pos;
         assert_eq!(p, [pos0[0] + 8.0, pos0[1] - 1.0, pos0[2] + 0.5]);
-        assert_eq!(ed.nudge_step(false), 8.0);
+        assert_eq!(ed.nudge_step(false), 4.0, "half a stud");
         assert_eq!(ed.nudge_step(true), 1.0);
         ed.snap_mm = 0.0;
         assert_eq!(ed.nudge_step(false), 1.0);
@@ -2607,6 +2611,52 @@ mod tests {
     }
 
     #[test]
+    fn a_tile_lands_on_a_plates_studs() {
+        // a 1 x 2 tile has no studs of its own, so it had no sockets and nothing to seat on: let
+        // go over a 2 x 2 plate it stayed where it fell, half a stud off. It has a socket under
+        // every place a stud fits now, and the half-stud grid lets its centre reach the plate's
+        // stud row
+        let (mut ed, plate) = solo("3022");
+        let tile = ed.ensure_ldraw_part("3069b").unwrap();
+        ed.magnet = true;
+        for at in [[0.0, 4.0, 3.2], [0.8, 3.5, 3.2], [-1.0, 5.0, 4.0]] {
+            ed.add_instance(Some(tile.clone()), None, [200.0, 200.0, 3.2]);
+            let name = ed.selection[0].clone();
+            ed.set_instance(&name, |i| i.pos = at);
+            ed.recompute();
+            let starts = ed.begin_move();
+            ed.move_by(&starts, 0.0, 0.0);
+            ed.end_move();
+            let pos = ed.children().iter().find(|c| c.name == name).unwrap().pos;
+            assert_eq!(pos, [0.0, 4.0, 3.2], "a tile let go at {at:?} on {plate}: {}", ed.status);
+            assert_eq!(ed.overlap_count(), 0, "{:?}", ed.overlapping);
+            let leaves = assembly::flatten(&ed.doc, &ed.editing);
+            let mine: Vec<_> = leaves
+                .iter()
+                .filter(|l| l.path[0] == name)
+                .flat_map(|l| assembly::connectors_of_leaf(&ed.doc, &ed.bundle, l))
+                .collect();
+            let theirs: Vec<_> = leaves
+                .iter()
+                .filter(|l| l.path[0] == plate)
+                .flat_map(|l| assembly::connectors_of_leaf(&ed.doc, &ed.bundle, l))
+                .collect();
+            assert!(assembly::seated(&mine, &theirs), "on its studs");
+            ed.remove_selection();
+        }
+        // a half-stud position is a place of its own: the drag grid reaches it
+        ed.add_instance(Some(tile), None, [200.0, 200.0, 3.2]);
+        let name = ed.selection[0].clone();
+        ed.set_instance(&name, |i| i.pos = [40.0, 0.0, 3.2]);
+        ed.recompute();
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 5.0, -3.0);
+        assert_eq!(ed.selected_instances()[0].pos, [44.0, -4.0, 3.2]);
+        ed.end_move();
+        assert_eq!(ed.selected_instances()[0].pos, [44.0, -4.0, 3.2], "{}", ed.status);
+    }
+
+    #[test]
     fn a_file_that_redefines_a_part_refreshes_its_shape() {
         let (mut ed, a) = solo("3001");
         let mut part = Part {
@@ -2979,14 +3029,14 @@ mod tests {
         let starts = ed.begin_move();
         assert_eq!(starts.len(), 1);
         ed.move_by(&starts, 11.0, -3.0);
-        assert_eq!(ed.selected_instances()[0].pos, [8.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos, [12.0, -4.0, 0.0], "half-stud steps");
         ed.lift_by(&starts, 5.2);
         assert_eq!(ed.selected_instances()[0].pos[2], 5.2);
         ed.end_move();
         assert_eq!(
             ed.selected_instances()[0].pos,
-            [8.0, 0.0, 4.8],
-            "a stud's height, not the plan grid"
+            [12.0, -4.0, 4.8],
+            "a stud\'s height, not the plan grid"
         );
         ed.snap_mm = 0.0;
         ed.move_by(&starts, 1.2345, 0.0);
@@ -3008,8 +3058,8 @@ mod tests {
         assert_eq!(starts.len(), 2);
         ed.drag_handle(Handle::Axis(2), 13.0, DVec3::ZERO, &starts, false);
         let insts = ed.selected_instances();
-        assert_eq!(insts[0].pos, [0.0, 0.0, 16.0]);
-        assert_eq!(insts[1].pos, [16.0, 0.0, 16.0]);
+        assert_eq!(insts[0].pos, [0.0, 0.0, 12.0], "half-stud steps");
+        assert_eq!(insts[1].pos, [16.0, 0.0, 12.0]);
         ed.drag_handle(Handle::Axis(2), 13.0, DVec3::ZERO, &starts, true);
         assert_eq!(ed.selected_instances()[0].pos[2], 13.0);
         ed.drag_handle(Handle::Ring(2), 85.0, DVec3::ZERO, &starts, false);
