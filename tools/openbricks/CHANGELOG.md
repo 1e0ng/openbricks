@@ -3,6 +3,21 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.30.2 — a joint excuses the press fit at the joint, not the whole pair
+
+Two parts with any one feature seated in the other's (a stud in a
+socket, a pin in a hole) were excused from the overlap check
+altogether, so a 2 x 2 plate let go turned 30° over another sat down on
+the one stud a socket could take, its walls through the other three.
+The excuse is now the joint's room only: a cylinder about the seated
+feature's axis, 0.6 mm wider than the wider of the two features and
+reaching 0.6 mm past both along it. Inside it the two parts' faces may
+cross — that is the press fit ABS allows (a friction pin's lip is
+wider than its hole, a stud is its socket's radius): pushed in firmly,
+a feature holds. Anywhere else on the two parts a crossing counts, as
+between parts with no joint. The turned plate is refused, naming the
+plate below.
+
 ## 4.30.1 — the magnet never turns a part, and passes over a seat that would overlap
 
 Two 1 x 6 bricks side by side, dragged to sit centred under a 2 x 4

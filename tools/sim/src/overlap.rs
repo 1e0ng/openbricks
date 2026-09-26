@@ -46,6 +46,27 @@ impl Overlap {
     }
 }
 
+/// A joint's room, in world coordinates: the cylinder about a seated
+/// feature's axis within which two parts' faces may cross and are not
+/// counted — the press fit ABS allows (a friction pin's lip is wider
+/// than its hole, a stud is its socket's radius): pushed in firmly, a
+/// feature holds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Joint {
+    pub centre: DVec3,
+    pub axis: DVec3,
+    pub r: f64,
+    pub half: f64,
+}
+
+impl Joint {
+    pub fn holds(&self, p: DVec3) -> bool {
+        let d = p - self.centre;
+        let along = d.dot(self.axis);
+        along.abs() <= self.half && (d - self.axis * along).length() <= self.r
+    }
+}
+
 /// Where a part is: world = rot × local + pos.
 #[derive(Clone, Copy, Debug)]
 pub struct Pose {
@@ -233,6 +254,15 @@ fn build(tris: &[[DVec3; 3]], order: &mut [u32], from: usize, to: usize, nodes: 
 /// lies within the other's and its centre inside the other's material —
 /// wholly inside, else None (touching or apart).
 pub fn overlap(a: &Shape, pa: &Pose, b: &Shape, pb: &Pose) -> Option<Overlap> {
+    overlap_outside(a, pa, b, pb, &[])
+}
+
+/// [`overlap`], not counting what happens inside `joints`: a crossing
+/// whose whole segment, or a shared area whose whole polygon, lies in
+/// one joint is that joint's own. Anywhere else on the two parts a
+/// crossing counts — a plate let go turned on one stud has its walls
+/// through the others.
+pub fn overlap_outside(a: &Shape, pa: &Pose, b: &Shape, pb: &Pose, joints: &[Joint]) -> Option<Overlap> {
     let (alo, ahi) = a.world_bbox(pa);
     let (blo, bhi) = b.world_bbox(pb);
     let pad = DVec3::splat(TOL_MM);
@@ -245,6 +275,8 @@ pub fn overlap(a: &Shape, pa: &Pose, b: &Shape, pb: &Pose) -> Option<Overlap> {
     let mut deepest: Option<f64> = None;
     let mut widest: Option<f64> = None;
     let mut cands = Vec::new();
+    // a crossing in a's frame, back in the world for the joints
+    let excused = |pts: &[DVec3]| joints.iter().any(|j| pts.iter().all(|p| j.holds(pa.rot * *p + pa.pos)));
     for (tb, nb) in b.tris.iter().zip(&b.normals) {
         let t = [to_a(tb[0]), to_a(tb[1]), to_a(tb[2])];
         let n = inv * (pb.rot * *nb);
@@ -254,9 +286,13 @@ pub fn overlap(a: &Shape, pa: &Pose, b: &Shape, pb: &Pose) -> Option<Overlap> {
         a.candidates(lo, hi, &mut cands);
         for &i in &cands {
             let (ta, na) = (&a.tris[i as usize], a.normals[i as usize]);
-            if let Some(d) = crossing(ta, na, &t, n) {
-                deepest = Some(deepest.map_or(d, |x: f64| x.max(d)));
-            } else if let Some(area) = coplanar_same_way(ta, na, &t, n) {
+            if let Some((d, ends)) = crossing(ta, na, &t, n) {
+                if !excused(&ends) {
+                    deepest = Some(deepest.map_or(d, |x: f64| x.max(d)));
+                }
+            } else if let Some((area, poly)) = coplanar_same_way(ta, na, &t, n)
+                && !excused(&poly)
+            {
                 widest = Some(widest.map_or(area, |x: f64| x.max(area)));
             }
         }
@@ -328,8 +364,9 @@ fn least_apart(a: &[DVec3; 3], na: DVec3, b: &[DVec3; 3], nb: DVec3) -> f64 {
 /// (normal `nb`) cross into each other's material beyond `TOL_MM`: the
 /// least push that would part them, when each passes through the
 /// other's plane (a vertex clearly on either side — an edge lying in
-/// the plane is contact) and the two meet along their planes' line.
-fn crossing(a: &[DVec3; 3], na: DVec3, b: &[DVec3; 3], nb: DVec3) -> Option<f64> {
+/// the plane is contact) and the two meet along their planes' line;
+/// with the ends of the length they share on that line.
+fn crossing(a: &[DVec3; 3], na: DVec3, b: &[DVec3; 3], nb: DVec3) -> Option<(f64, [DVec3; 2])> {
     let da = [(a[0] - b[0]).dot(nb), (a[1] - b[0]).dot(nb), (a[2] - b[0]).dot(nb)];
     let inside_a = -da[0].min(da[1]).min(da[2]);
     if inside_a <= TOL_MM || da[0].max(da[1]).max(da[2]) <= PLANE_MM {
@@ -350,20 +387,29 @@ fn crossing(a: &[DVec3; 3], na: DVec3, b: &[DVec3; 3], nb: DVec3) -> Option<f64>
             (lo.min(t), hi.max(t))
         })
     };
-    let (alo, ahi) = span(&clip(a, da));
+    let cut = clip(a, da);
+    let (alo, ahi) = span(&cut);
     let (blo, bhi) = span(&clip(b, db));
     // the two cuts lie on that line: they must share a length, not just an end (an axle
     // arm's tip meeting a hole's countersink ring at one point is contact)
-    if ahi.min(bhi) - alo.max(blo) <= 1e-4 {
+    let (lo, hi) = (alo.max(blo), ahi.min(bhi));
+    if hi - lo <= 1e-4 {
         return None;
     }
     let depth = least_apart(a, na, b, nb);
-    (depth > TOL_MM).then_some(depth)
+    if depth <= TOL_MM {
+        return None;
+    }
+    // the shared length's ends: from a point of a's cut along the line
+    let unit = dir / dir.length_squared();
+    let base = cut[0] - dir * (cut[0].dot(dir) / dir.length_squared());
+    Some((depth, [base + unit * lo, base + unit * hi]))
 }
 
 /// The area two triangles share when they lie in one plane and face
-/// the same way, unless it is a sliver narrower than `TOL_MM`.
-fn coplanar_same_way(a: &[DVec3; 3], na: DVec3, b: &[DVec3; 3], nb: DVec3) -> Option<f64> {
+/// the same way, unless it is a sliver narrower than `TOL_MM`; with
+/// the shared polygon's corners.
+fn coplanar_same_way(a: &[DVec3; 3], na: DVec3, b: &[DVec3; 3], nb: DVec3) -> Option<(f64, Vec<DVec3>)> {
     if na.dot(nb) < 0.99939 {
         return None; // not the same way within 2°
     }
@@ -389,7 +435,7 @@ fn coplanar_same_way(a: &[DVec3; 3], na: DVec3, b: &[DVec3; 3], nb: DVec3) -> Op
     if perimeter <= 0.0 || 2.0 * area / perimeter <= TOL_MM {
         return None;
     }
-    Some(area)
+    Some((area, poly.iter().map(|q| a[0] + u * q.x + v * q.y).collect()))
 }
 
 fn signed_area(poly: &[DVec2]) -> f64 {
@@ -484,6 +530,56 @@ mod tests {
         ));
         assert_eq!(overlap(&b, &at(0.0, 0.0, 0.0), &s, &at(30.0, 0.0, 0.0)), None, "apart");
         assert_eq!(b.triangles(), 12);
+        // a joint's room: the sinking is not counted inside a cylinder holding the small box's
+        // walls where they cross the top face (its corners 2.83 mm out); a narrower one, or one
+        // elsewhere, leaves it counted; the pushed-in boxes' shared strip likewise
+        let joint = |x: f64, r: f64, half: f64| Joint {
+            centre: DVec3::new(x, 0.0, 5.0),
+            axis: DVec3::Z,
+            r,
+            half,
+        };
+        assert_eq!(
+            overlap_outside(&b, &at(0.0, 0.0, 0.0), &s, &at(0.0, 0.0, 6.0), &[joint(0.0, 3.0, 2.0)]),
+            None
+        );
+        assert!(overlap_outside(&b, &at(0.0, 0.0, 0.0), &s, &at(0.0, 0.0, 6.0), &[joint(0.0, 2.5, 2.0)]).is_some());
+        // the crossings lie on the top face (z = 5): a room ending below it leaves them out
+        let low = Joint {
+            centre: DVec3::new(0.0, 0.0, 3.5),
+            ..joint(0.0, 3.0, 1.0)
+        };
+        assert!(overlap_outside(&b, &at(0.0, 0.0, 0.0), &s, &at(0.0, 0.0, 6.0), &[low]).is_some());
+        assert!(overlap_outside(&b, &at(0.0, 0.0, 0.0), &s, &at(0.0, 0.0, 6.0), &[joint(20.0, 3.0, 2.0)]).is_some());
+        assert_eq!(
+            overlap_outside(
+                &b,
+                &at(0.0, 0.0, 0.0),
+                &s,
+                &at(0.0, 0.0, 6.0),
+                &[joint(20.0, 3.0, 2.0), joint(0.0, 3.0, 2.0)]
+            ),
+            None,
+            "any one joint"
+        );
+        // the pushed-in boxes share the slab x 4..5 on every face pair that lies in one plane
+        // (top, bottom, both sides): a room holding the whole slab owns it, a shorter one not
+        let slab = Joint {
+            centre: DVec3::new(4.5, 0.0, 0.0),
+            axis: DVec3::Z,
+            r: 5.5,
+            half: 5.0,
+        };
+        assert_eq!(
+            overlap_outside(&b, &at(0.0, 0.0, 0.0), &b, &at(9.0, 0.0, 0.0), &[slab]),
+            None,
+            "the slab is its own"
+        );
+        let short = Joint { half: 4.0, ..slab };
+        assert!(overlap_outside(&b, &at(0.0, 0.0, 0.0), &b, &at(9.0, 0.0, 0.0), &[short]).is_some());
+        assert!(joint(0.0, 3.0, 2.0).holds(DVec3::new(2.0, 2.0, 6.5)));
+        assert!(!joint(0.0, 3.0, 2.0).holds(DVec3::new(2.0, 2.5, 6.5)));
+        assert!(!joint(0.0, 3.0, 2.0).holds(DVec3::new(0.0, 0.0, 7.5)));
         // a wall pushed a little into a much taller neighbour is in by that little, not by
         // how far it reaches behind the neighbour's faces
         let tall = Shape::from_mesh(&geometry::box_mesh([10.0, 10.0, 40.0], [0.0; 3]));

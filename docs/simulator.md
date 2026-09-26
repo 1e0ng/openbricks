@@ -372,10 +372,13 @@ robot as a tree of components:
   where it was, and the status line names both, a brick inside a
   component by its path (`aa/lego_2`) — while it is dragged
   it flushes red wherever it would overlap, and Escape abandons the
-  drag. Touching is not overlapping, and two parts with a feature
-  seated in the other's (a pin all the way in its hole, a plate down on
-  its studs, an axle anywhere along a hole it runs through) are a joint
-  whatever LDraw's geometry does at the join. A new brick lands beside
+  drag. Touching is not overlapping, and at a joint — a feature seated
+  in the other part's (a pin all the way in its hole, a plate down on
+  its studs, an axle anywhere along a hole it runs through) — the two
+  may cross a little: that is the press fit ABS allows, a feature
+  pushed in firmly, and it is not counted. Only there, though: the
+  rest of the two parts' surfaces are checked as ever, so a plate let
+  go turned on one stud, its walls through the others, is refused. A new brick lands beside
   what is already at the origin; a duplicate or a paste goes as far
   along −y as it needs to be clear. A file that already holds overlaps
   opens and says how many, and stays editable: an old overlap may be
