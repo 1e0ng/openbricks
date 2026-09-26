@@ -3,6 +3,22 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.29.3 — a prop stands on the map, never under it
+
+A build placed on the map as a prop went at floor height with its
+own origin on the floor, and a brick's origin is its top face, so a
+single brick hung under the mat. A prop now stands with its lowest
+brick on the floor, whatever the build's own origin is (the whole
+robot lands on its wheels), and a map file that places a prop so low
+that a brick of it would be below the floor has it lifted onto the
+floor when the map loads — one standing higher stays where the file
+put it.
+
+- Tests: the lowest point of a brick, of one on its side, of one
+  raised above its origin, and of the example robot; the height a
+  placed model gets and what the map's text records; a sunk prop
+  lifted on load, one above the floor left alone.
+
 ## 4.29.2 — the edges of black bricks show
 
 A stack of black bricks was one black mass: an edge is drawn in the
