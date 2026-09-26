@@ -3,6 +3,43 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.29.0 — a curve is one arc, one command; a first curve sets the way the robot starts
+
+A curve placed on the map is now the one arc tangent to the way the
+robot arrives at its start, through its end — the single `curve`
+command that gets there — so the heading it ends facing follows from
+the geometry and is no longer asked for or dragged. Until now a
+curve took an end heading too and, when no single arc could reach
+that pose, was drawn and driven as two arcs; a curve path was
+sometimes two curve commands. That is gone: where one arc cannot
+reach (an end straight behind the start), nothing is drawn and the
+end is not taken; an end dead ahead is a straight run. A curve is
+placed by two clicks, its start and its end (an existing route file
+loads with its curves re-drawn as the one arc each; the end heading
+it stored is dropped).
+
+A curve as the first action of a route now asks for a point to face
+at its start, between the two clicks: the way the robot starts, which
+the chassis takes up on placement (it turns in place when the curve
+starts where it stands). Until now a first curve entered the way the
+chassis happened to face, with no way to choose. Shift-drag the
+chassis afterwards and an unlocked first curve follows.
+
+The Simulate tab's plan view cut off the right side of the practice
+line: it framed the mat about the origin, and that mat stands half a
+metre to the right of it. The view frames the mat where it is.
+
+- Tests: the one arc to points sideways, ahead-and-aside, behind-and-
+  aside, dead ahead (a run), straight behind and on the spot (nothing),
+  and all round; a curve's program is one command, none going nowhere,
+  a run dead ahead; the curve's two handles and the arc bending with
+  its end; the routes of every earlier format re-drawn as one arc
+  each; placing a curve by two clicks, and a first curve by three with
+  the arrow and heading shown while its facing is chosen, the chassis
+  turned to face its way, the program starting with the arc, and a
+  second curve taking two; the clicks each kind takes; a mat off the
+  origin framed where it stands, its ends on the view's edges.
+
 ## 4.28.1 — plates stack, and a brick lands on a hinge: heights on the stud module, tubes vote once
 
 A 2 x 2 plate could not be put on another: a part let go had its

@@ -28,6 +28,9 @@ pub struct Placing {
     pub kind: &'static str,
     pub points: Vec<Point>,
     pub for_end: Option<usize>,
+    /// The route's first action: a curve then asks for a point to face
+    /// at its start too, the way the robot starts.
+    pub first: bool,
 }
 
 impl Placing {
@@ -37,14 +40,14 @@ impl Placing {
             return "click where the call leaves the robot · Esc keeps it in place".into();
         }
         let ask = KINDS.iter().find(|k| k.0 == self.kind).map(|k| k.2).unwrap_or("");
-        let step = match (self.kind, self.points.len()) {
-            ("marker", _) => "click where it goes; a name follows",
-            ("straight" | "curve", 0) => "click where it starts",
-            ("straight", _) => "click where it ends (near ahead lands on the heading; shift: any angle)",
-            ("curve", 1) => "click where it ends",
-            ("curve", _) => "click a point to face at the end",
-            ("turn", 0) => "click where it turns",
-            ("turn", _) => "click a point to face",
+        let step = match (self.kind, self.points.len(), self.first) {
+            ("marker", ..) => "click where it goes; a name follows",
+            ("straight" | "curve", 0, _) => "click where it starts",
+            ("straight", ..) => "click where it ends (near ahead lands on the heading; shift: any angle)",
+            ("curve", 1, true) => "click a point to face at the start (the way the robot starts)",
+            ("curve", ..) => "click where it ends (the one arc from there)",
+            ("turn", 0, _) => "click where it turns",
+            ("turn", ..) => "click a point to face",
             _ => ask,
         };
         format!("{}: {step} · Esc cancels", self.kind)
@@ -746,6 +749,7 @@ impl SimulateTab {
             kind,
             points: vec![],
             for_end: None,
+            first: self.route.actions.is_empty(),
         });
     }
 
@@ -781,6 +785,16 @@ impl SimulateTab {
             }
             _ => next,
         }
+    }
+
+    /// What the next click would make, from the points so far and the one
+    /// to come: while a first curve's start heading is being chosen, the
+    /// arrow a turn would show there.
+    fn preview_of(&self, p: &Placing, pts: &[Point]) -> Action {
+        if p.kind == "curve" && p.first && pts.len() == 2 {
+            return Action::placed("turn", pts, 0.0, false);
+        }
+        Action::placed(p.kind, pts, self.heading_at(pts[0]), p.first)
     }
 
     /// The placement's points with `next` (the pointer, or a click) as the
@@ -907,9 +921,20 @@ impl SimulateTab {
             self.chain_snap(&placing, p)
         };
         placing.points.push(p);
-        if placing.points.len() >= route::clicks_needed(placing.kind) {
+        if placing.points.len() >= route::clicks_needed(placing.kind, placing.first) {
+            let action = Action::placed(placing.kind, &placing.points, self.heading_at(placing.points[0]), placing.first);
+            // a curve's end that no one arc reaches (straight behind its start) is not taken: the
+            // tool stays armed for another
+            let (s0, e0) = (action.start(), action.end());
+            let apart = ((s0[0] - e0[0]).powi(2) + (s0[1] - e0[1]).powi(2)).sqrt();
+            if placing.kind == "curve" && action.pieces().is_empty() && apart >= 0.5 {
+                placing.points.pop();
+                self.message = "no single arc reaches a point straight behind the start: click elsewhere".into();
+                self.placing = Some(placing);
+                return true;
+            }
             self.draft = Some(Draft {
-                action: Action::placed(placing.kind, &placing.points, self.heading_at(placing.points[0])),
+                action,
                 moves: false,
                 at: None,
                 color: None,
@@ -932,11 +957,12 @@ impl SimulateTab {
         self.selected = Some(i);
         if i == 0 {
             // the first action of a route starts it: the chassis goes to where it begins, facing
-            // its way — unless it begins where the chassis stands
+            // its way — unless it begins where the chassis stands, facing as it does
             let a = &self.route.actions[0].action;
             let (start, here) = (a.start(), self.route.start.point());
-            if ((start[0] - here[0]).powi(2) + (start[1] - here[1]).powi(2)).sqrt() >= 0.5 {
-                let yaw = a.start_heading().unwrap_or(self.route.start.yaw_deg);
+            let yaw = a.start_heading().unwrap_or(self.route.start.yaw_deg);
+            let moved = ((start[0] - here[0]).powi(2) + (start[1] - here[1]).powi(2)).sqrt() >= 0.5;
+            if moved || route::wrap_deg(yaw - self.route.start.yaw_deg).abs() >= 0.05 {
                 self.place_chassis(Pose2::at(start, yaw));
             }
         }
@@ -945,6 +971,7 @@ impl SimulateTab {
                 kind: "custom",
                 points: vec![],
                 for_end: Some(i),
+                first: false,
             });
         }
     }
@@ -1295,9 +1322,9 @@ impl SimulateTab {
                         out.push((mp + glam::Vec2::new(8.0, 16.0), format!("moves {} mm", d.round())));
                     }
                 }
-            } else if let Some(first) = p.points.first() {
+            } else if !p.points.is_empty() {
                 let pts = self.with_next(p, hover);
-                let preview = Action::placed(p.kind, &pts, self.heading_at(*first));
+                let preview = self.preview_of(p, &pts);
                 if let Some(mp) = on_screen(preview.label_point()) {
                     out.push((mp + glam::Vec2::new(8.0, 16.0), preview.brief()));
                 }
@@ -1467,10 +1494,10 @@ impl SimulateTab {
                         dashed(&mut out, item.action.start(), hover, mark);
                         circle(&mut out, hover, 6.0, mark);
                     }
-                } else if let Some(first) = p.points.first() {
+                } else if !p.points.is_empty() {
                     let pts = self.with_next(p, hover);
                     let next = *pts.last().unwrap();
-                    let preview = Action::placed(p.kind, &pts, self.heading_at(*first));
+                    let preview = self.preview_of(p, &pts);
                     let path = preview.path();
                     for w in path.windows(2) {
                         seg(&mut out, w[0], w[1], mark, z);
@@ -2246,9 +2273,11 @@ impl SimulateTab {
         let scene = self.scene.as_ref()?;
         let plane = scene.geoms.iter().find(|g| g.kind == "plane" && g.size[0] > 0.0);
         Some(match plane {
+            // the mat's half-sizes about where it stands: a mat need not be centred on the
+            // origin (the practice line's is not)
             Some(g) => (
-                Vec3::new(-g.size[0] as f32, -g.size[1] as f32, 0.0) * M_TO_MM,
-                Vec3::new(g.size[0] as f32, g.size[1] as f32, 0.2) * M_TO_MM,
+                Vec3::new((g.pos[0] - g.size[0]) as f32, (g.pos[1] - g.size[1]) as f32, 0.0) * M_TO_MM,
+                Vec3::new((g.pos[0] + g.size[0]) as f32, (g.pos[1] + g.size[1]) as f32, 0.2) * M_TO_MM,
             ),
             None => (Vec3::splat(-500.0), Vec3::new(500.0, 500.0, 200.0)),
         })
@@ -2453,22 +2482,19 @@ fn end_fields(ui: &mut egui::Ui, then: &mut End, scope: &str) {
 /// The editable parameters of an action: the popup's and the inspector's.
 fn action_fields(ui: &mut egui::Ui, action: &mut Action, functions: &[String], wheel_mm: f64, scope: &str) {
     let brief = action.brief();
+    let ends = action.end_heading(0.0);
     match action {
         Action::Straight { speed, then, .. } => {
             speed_field(ui, "speed", speed, wheel_mm);
             end_fields(ui, then, scope);
         }
         Action::Curve {
-            heading_deg,
-            end_heading_deg,
-            speed,
-            then,
-            ..
+            heading_deg, speed, then, ..
         } => {
             ui.weak(format!(
-                "enters facing {}°, ends facing {}° · {brief} · drag the arrow at its end to face elsewhere",
+                "enters facing {}°, ends facing {}° · {brief} · one arc: drag its end to bend it",
                 heading_deg.round(),
-                end_heading_deg.round()
+                ends.round()
             ));
             speed_field(ui, "speed", speed, wheel_mm);
             end_fields(ui, then, scope);
@@ -3384,28 +3410,23 @@ mod tests {
         t.commit_draft();
         assert_eq!(t.route.actions.len(), 1);
         assert_eq!(t.selected, Some(0));
-        // a curve from the straight's end (snapped) to a point out to the side, then a point to
-        // face there: entered the straight's way, facing +x at the end — one right quarter circle
+        // a curve from the straight's end (snapped) to a point out to the side: two clicks,
+        // entered the straight's way — the one arc there, a right quarter circle, ends facing +x
         t.arm("curve");
-        assert!(t.map_click(-544.0, 104.0, 20.0) && t.map_click(-447.0, 200.0, 20.0));
-        assert!(t.draft.is_none() && t.hint().contains("a point to face"), "{}", t.hint());
-        assert!(t.map_click(-347.0, 200.0, 20.0));
+        assert!(!t.placing.as_ref().unwrap().first, "not the first action");
+        assert!(t.map_click(-544.0, 104.0, 20.0));
+        assert!(t.draft.is_none() && t.hint().contains("click where it ends"), "{}", t.hint());
+        assert!(t.map_click(-447.0, 200.0, 20.0));
         let d = t.draft.clone().unwrap();
         let pieces = d.action.pieces();
+        let ends = d.action.end_heading(90.0);
         let Action::Curve {
-            start,
-            heading_deg,
-            end,
-            end_heading_deg,
-            ..
+            start, heading_deg, end, ..
         } = d.action
         else {
             panic!("{d:?}")
         };
-        assert_eq!(
-            (start, heading_deg, end, end_heading_deg),
-            ([-547.0, 100.0], 90.0, [-447.0, 200.0], 0.0)
-        );
+        assert_eq!((start, heading_deg, end, ends), ([-547.0, 100.0], 90.0, [-447.0, 200.0], 0.0));
         assert!(matches!(pieces[..], [route::Piece::Arc { right: true, .. }]), "{pieces:?}");
         assert_eq!(t.heading_at([-547.0, 100.0]), 90.0, "at the last end: its heading");
         assert_eq!(t.heading_at([-447.0, 200.0]), 45.0, "elsewhere: the way the drive there faces");
@@ -3649,7 +3670,7 @@ mod tests {
         // a path in a colour of the user's, and back to the kind's default
         t.route
             .actions
-            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0).into());
+            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0, false).into());
         assert!(
             t.route_lines(false)
                 .iter()
@@ -3679,7 +3700,7 @@ mod tests {
         // (200, 100) bending left ends heading +y, so the wings reach back to (∓8, 86)
         t.route
             .actions
-            .push(Action::placed("curve", &[[100.0, 0.0], [200.0, 100.0]], 0.0).into());
+            .push(Action::placed("curve", &[[100.0, 0.0], [200.0, 100.0]], 0.0, false).into());
         let lines = t.route_lines(false);
         let green = [26.0 / 255.0, 140.0 / 255.0, 64.0 / 255.0, 1.0];
         let end_heading = t.steps().last().unwrap().end.yaw_deg;
@@ -3695,7 +3716,7 @@ mod tests {
         let before = t.route_lines(false);
         t.route
             .actions
-            .push(Action::placed("turn", &[[200.0, 100.0], [200.0, 200.0]], 0.0).into());
+            .push(Action::placed("turn", &[[200.0, 100.0], [200.0, 200.0]], 0.0, false).into());
         let after = t.route_lines(false);
         let extra: Vec<_> = after.iter().filter(|l| !before.contains(l)).collect();
         assert_eq!(extra.len(), 8, "shaft + 3 head segments + 4 square sides: {extra:?}");
@@ -3716,8 +3737,8 @@ mod tests {
         t.cancel();
         // selection: the marker wins over an action at the same spot and clears the action
         // selection; an action away from any marker is selected and clears the marker's
-        t.route.actions.push(Action::placed("stop", &[[100.0, 100.0]], 0.0).into());
-        t.route.actions.push(Action::placed("stop", &[[-300.0, 200.0]], 0.0).into());
+        t.route.actions.push(Action::placed("stop", &[[100.0, 100.0]], 0.0, false).into());
+        t.route.actions.push(Action::placed("stop", &[[-300.0, 200.0]], 0.0, false).into());
         t.selected = Some(0);
         assert!(t.select_at([101.0, 100.0], 10.0));
         assert_eq!((t.selected_marker, t.selected), (Some(0), None));
@@ -3793,7 +3814,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         t.route
             .actions
-            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0).into());
+            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0, false).into());
         t.save_route(dir.join("a.route.json"));
         assert!(t.message.starts_with("saved the route"), "{}", t.message);
         let mut other = SimulateTab::new(None);
@@ -3958,7 +3979,7 @@ mod tests {
         // a route runs as a program the server receives
         t.route
             .actions
-            .push(Action::placed("straight", &[[250.0, -80.0], [250.0, 120.0]], 0.0).into());
+            .push(Action::placed("straight", &[[250.0, -80.0], [250.0, 120.0]], 0.0, false).into());
         t.run_route();
         assert!(pump_until(&mut t, 30, |t| t.status == "running"), "{} {}", t.status, t.message);
         assert!(
@@ -4490,13 +4511,12 @@ mod tests {
         // stop, and a custom call: placed on the map, chained end to start
         t.route
             .actions
-            .push(Action::placed("straight", &[[-400.0, -150.0], [-400.0, 100.0]], 0.0).into());
+            .push(Action::placed("straight", &[[-400.0, -150.0], [-400.0, 100.0]], 0.0, false).into());
         t.route.actions.push(
             Action::Curve {
                 start: [-400.0, 100.0],
                 heading_deg: 90.0,
                 end: [-300.0, 200.0],
-                end_heading_deg: 0.0,
                 speed: 350.0,
                 then: End::Continue,
             }
@@ -4504,7 +4524,7 @@ mod tests {
         );
         t.route
             .actions
-            .push(Action::placed("straight", &[[-300.0, 200.0], [-200.0, 200.0]], 0.0).into());
+            .push(Action::placed("straight", &[[-300.0, 200.0], [-200.0, 200.0]], 0.0, false).into());
         t.route.actions.push(
             Action::Stop {
                 at: [-200.0, 200.0],
@@ -4756,6 +4776,92 @@ mod tests {
     }
 
     #[test]
+    fn a_curve_as_the_first_action_sets_the_way_the_robot_starts() {
+        let mut t = SimulateTab::new(None);
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        assert_eq!(t.route.start, Pose2::at([-547.0, -150.0], 90.0));
+        // three clicks: where it starts (snapped to the chassis), a point to face there, its end
+        t.arm("curve");
+        assert!(t.placing.as_ref().unwrap().first);
+        assert!(t.hint().starts_with("curve: click where it starts"), "{}", t.hint());
+        assert!(t.map_click(-540.0, -146.0, 20.0));
+        assert_eq!(t.placing.as_ref().unwrap().points, vec![[-547.0, -150.0]]);
+        assert!(t.hint().contains("a point to face at the start"), "{}", t.hint());
+        // while the facing is chosen, the pointer swings an arrow at the start, with its heading
+        t.hover = Some([-447.0, -150.0]);
+        let cam = crate::viewport::Camera {
+            target: Vec3::new(-400.0, 0.0, 0.0),
+            distance: 1500.0,
+            ..crate::viewport::Camera::top_down()
+        };
+        let labels: Vec<String> = t.route_labels(&cam, 800.0, 600.0).into_iter().map(|l| l.1).collect();
+        assert_eq!(labels, vec!["face 0°".to_string()], "{labels:?}");
+        assert!(t.route_lines(false).len() > 8, "the arrow and the marks");
+        assert!(t.map_click(-447.0, -150.0, 20.0));
+        assert!(t.draft.is_none() && t.hint().contains("click where it ends"), "{}", t.hint());
+        t.hover = Some([-347.0, -50.0]);
+        let labels: Vec<String> = t.route_labels(&cam, 800.0, 600.0).into_iter().map(|l| l.1).collect();
+        assert!(
+            labels[0].starts_with("r ") && labels[0].contains('°'),
+            "the arc's radius and angle: {labels:?}"
+        );
+        assert!(t.map_click(-347.0, -50.0, 20.0));
+        let d = t.draft.clone().expect("the popup");
+        let Action::Curve {
+            start, heading_deg, end, ..
+        } = d.action
+        else {
+            panic!("{d:?}")
+        };
+        assert_eq!((start, heading_deg, end), ([-547.0, -150.0], 0.0, [-347.0, -50.0]));
+        let pieces = d.action.pieces();
+        assert!(
+            matches!(pieces[..], [route::Piece::Arc { right: false, .. }]),
+            "one arc, left: {pieces:?}"
+        );
+        assert!((d.action.end_heading(0.0) - 53.1).abs() < 0.2, "{}", d.action.end_heading(0.0));
+        // placed, the chassis turns in place to face the way the curve starts, and the curve
+        // keeps that heading as the route is worked out; the program starts with the arc
+        t.commit_draft();
+        assert_eq!(t.route.start, Pose2::at([-547.0, -150.0], 0.0));
+        t.sync_curves();
+        assert_eq!(t.route.actions[0].action.start_heading(), Some(0.0));
+        let program = t.route_program().unwrap();
+        let first = program.lines().find(|l| l.starts_with("robot.")).unwrap();
+        assert!(first.starts_with("robot.curve(250,"), "{first}");
+        // a second curve is not the first: two clicks, entered the way the first one ends
+        t.arm("curve");
+        assert!(!t.placing.as_ref().unwrap().first);
+        assert!(t.map_click(-347.0, -50.0, 20.0));
+        assert!(t.hint().contains("click where it ends"), "{}", t.hint());
+        assert!(t.map_click(-247.0, 100.0, 20.0));
+        let d = t.draft.clone().unwrap();
+        assert!((d.action.start_heading().unwrap() - 53.1).abs() < 0.2, "{:?}", d.action);
+        // a first curve whose end lies straight behind its facing is nothing to drive: no arc is
+        // drawn for it, and the end is not taken
+        let mut u = SimulateTab::new(None);
+        u.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        u.arm("curve");
+        assert!(u.map_click(-547.0, -150.0, 20.0) && u.map_click(-447.0, -150.0, 20.0));
+        u.hover = Some([-347.0, -50.0]);
+        let reachable = u.route_lines(false).len();
+        u.hover = Some([-647.0, -150.0]);
+        let labels: Vec<String> = u.route_labels(&cam, 800.0, 600.0).into_iter().map(|l| l.1).collect();
+        assert_eq!(labels, vec!["curve".to_string()], "{labels:?}");
+        assert!(
+            u.route_lines(false).len() + 8 < reachable,
+            "no arc drawn to a point straight behind"
+        );
+        assert!(u.map_click(-647.0, -150.0, 20.0));
+        assert!(
+            u.draft.is_none() && u.placing.as_ref().unwrap().points.len() == 2,
+            "the click is not taken"
+        );
+        assert!(u.message.starts_with("no single arc"), "{}", u.message);
+        assert!(u.map_click(-347.0, -50.0, 20.0) && u.draft.is_some(), "another end is");
+    }
+
+    #[test]
     fn frame_target_fits_the_mat_once() {
         let mut t = SimulateTab::new(None);
         assert!(t.frame_target().is_none());
@@ -4779,6 +4885,20 @@ mod tests {
         t.refit();
         let (lo, _) = t.frame_target().unwrap();
         assert_eq!(lo, Vec3::new(-1200.0, -900.0, 0.0));
+        // a mat that does not stand on the origin (the practice line's floor is at x = 0.5 m)
+        // is framed where it is, not about the origin, which cut its far side off
+        t.scene.as_mut().unwrap().geoms[0].pos = [0.5, 0.0, 0.0];
+        t.scene.as_mut().unwrap().geoms[0].size = [1.0, 0.5, 0.05];
+        t.refit();
+        let (lo, hi) = t.frame_target().unwrap();
+        assert_eq!((lo, hi.x, hi.y), (Vec3::new(-500.0, -500.0, 0.0), 1500.0, 500.0));
+        let mut cam = crate::viewport::Camera::top_down();
+        cam.fit_plan(lo, hi, 2.0);
+        assert_eq!(cam.target.x, 500.0, "the view looks at the mat's middle");
+        for (p, px) in [([-500.0, 0.0], 0.0), ([1500.0, 0.0], 1000.0), ([500.0, 500.0], 500.0)] {
+            let on = cam.project(Vec3::new(p[0], p[1], 0.0), 1000.0, 500.0).unwrap();
+            assert!((on.x - px).abs() < 1.0, "{p:?} lands at x {} px, not {px}", on.x);
+        }
     }
 
     #[test]
