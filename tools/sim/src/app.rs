@@ -1257,7 +1257,7 @@ impl App {
     fn library_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
         ui.heading("Library");
         ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("search bricks and components"));
-        let q = self.search.trim().to_lowercase();
+        let q = folded(&self.search);
         let dark = ui.visuals().dark_mode;
         self.prune_thumbs(gpu);
         let mut budget = THUMBS_PER_FRAME;
@@ -1331,12 +1331,12 @@ impl App {
                 let element_color = rec.colors.iter().find(|(_, els)| els.contains(&q)).map(|(c, _)| *c);
                 let hit = q.is_empty()
                     || num.contains(&q)
-                    || rec.name.to_lowercase().contains(&q)
+                    || name_has(&rec.name, &q)
                     || rec.aliases.iter().any(|a| a.contains(&q))
                     || rec
                         .sets
                         .keys()
-                        .any(|s| s.contains(&q) || self.editor.bundle.sets.get(s).is_some_and(|i| i.name.to_lowercase().contains(&q)))
+                        .any(|s| s.contains(&q) || self.editor.bundle.sets.get(s).is_some_and(|i| name_has(&i.name, &q)))
                     || element_color.is_some();
                 if !hit {
                     continue;
@@ -1446,7 +1446,7 @@ impl App {
                 .collect();
             for id in ids {
                 let p = self.editor.doc.parts[&id].clone();
-                if !(q.is_empty() || p.name.to_lowercase().contains(&q) || id.contains(&q)) {
+                if !(q.is_empty() || name_has(&p.name, &q) || id.contains(&q)) {
                     continue;
                 }
                 let thumb = self.other_thumb(gpu, &mut budget, &id, dark);
@@ -2235,14 +2235,14 @@ impl App {
         }
         ui.weak("or one brick from the library");
         ui.add(egui::TextEdit::singleline(&mut self.map_search).hint_text("search bricks by number or name"));
-        let q = self.map_search.trim().to_lowercase();
+        let q = folded(&self.map_search);
         if !q.is_empty() {
             let hits: Vec<(String, String)> = self
                 .editor
                 .bundle
                 .parts
                 .iter()
-                .filter(|(n, r)| n.contains(&q) || r.name.to_lowercase().contains(&q))
+                .filter(|(n, r)| n.contains(&q) || name_has(&r.name, &q))
                 .take(12)
                 .map(|(n, r)| (n.clone(), r.name.clone()))
                 .collect();
@@ -2851,6 +2851,19 @@ impl Drop for App {
     }
 }
 
+/// Text as the library search compares it: lower case, every run of
+/// white space one space, none at either end. LDraw pads the numbers in
+/// its part names ("Plate  4 x  8"), so a search typed as anyone writes
+/// it ("4 x 8") only finds them folded.
+fn folded(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Whether a name holds the search `q` (already [`folded`]).
+fn name_has(name: &str, q: &str) -> bool {
+    folded(name).contains(q)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3438,6 +3451,31 @@ mod tests {
         steps(&mut h, 3);
         assert_eq!(h.state().editor.children().len(), n + 1);
         assert_eq!(h.state().editor.selected_instances()[0].component.as_deref(), Some("sensor_mast"));
+    }
+
+    #[test]
+    fn a_search_finds_a_name_however_its_spaces_run() {
+        // LDraw's names pad their numbers: "Plate  4 x  8" was found by "4 x  8" only
+        assert_eq!(folded("  Plate  4 x\t 8 "), "plate 4 x 8");
+        for q in ["4 x 8", "4 x  8", " 4  X 8 ", "plate 4", "PLATE  4 X  8"] {
+            assert!(name_has("Plate  4 x  8", &folded(q)), "{q:?}");
+        }
+        assert!(!name_has("Plate  4 x  8", &folded("4 x 6")));
+        assert!(!name_has("Plate  4 x  8", &folded("4x8")), "the x stays a word");
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        let name = h.state().editor.bundle.parts["3035"].name.clone();
+        assert!(name.contains("  "), "the shipped record pads its numbers: {name:?}");
+        h.state_mut().search = "4 x 8".into();
+        steps(&mut h, 3);
+        assert!(h.query_by_label_contains("3035 · ").is_some(), "the library finds {name:?}");
+        assert!(h.query_by_label_contains("3001 · ").is_none(), "and only what matches");
+        // the map tab's brick search folds the same way
+        h.state_mut().map_search = "4 x 8".into();
+        h.get_by_label("Map").click();
+        steps(&mut h, 3);
+        assert!(h.query_by_label_contains("3035").is_some(), "the map's search finds it too");
     }
 
     #[test]

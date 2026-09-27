@@ -3,6 +3,14 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.30.4 — the library's search finds a name however its spaces run
+
+LDraw pads the numbers in its part names ("Plate  4 x  8"), and the
+Workbench library, its components and the map tab's brick search
+matched the text as typed: "4 x 8" found nothing, only "4 x  8" did.
+Every search now folds white space (runs of spaces, tabs, either end)
+and case on both sides before it compares.
+
 ## 4.30.3 — Save changes to your own map; saving a map over itself keeps its files
 
 The Map tab could only "Save as a new map". On a map of your own the
