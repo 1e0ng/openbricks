@@ -456,7 +456,16 @@ impl Editor {
             self.dirty = p.dirty;
             self.recompute();
             self.status = format!("{} put back", p.names.join(", "));
+            // abandoned, not refused: no banner over the view
+            self.refused = false;
         }
+    }
+
+    /// The status, when it says a change was refused (it stands until the
+    /// next change that is kept): shown over the view as well as on the
+    /// status line, which is easy to miss.
+    pub fn refusal(&self) -> Option<&str> {
+        self.refused.then_some(self.status.as_str())
     }
 
     /// What the change in progress would overlap, for the status line.
@@ -2544,6 +2553,91 @@ mod tests {
         let after: Vec<[f64; 3]> = ed.children().iter().map(|c| c.rot).collect();
         assert_ne!(before, after);
         assert!(after.iter().all(|r| r[2] == 90.0), "{after:?}");
+    }
+
+    #[test]
+    fn a_brick_on_a_pin_turns_45_degrees_about_the_pin_whichever_way_it_points() {
+        // the user: "it can not yaw 45 degree, only 0 or 90". A brick on a pin turns about the
+        // pin: with the pin level (along y, as the WRO picture has it) that is pitch — the green
+        // ring, or the pitch field — and yaw would twist it off the pin, refused and said so over
+        // the view; with the pin pointing up it is yaw, the blue ring or the yaw field
+        for (label, wall_rot, pin_pos, pin_rot, on, rest, about) in [
+            (
+                "level pin",
+                [0.0, 0.0, 0.0],
+                [-16.0, 4.0, -4.0],
+                [0.0, 0.0, 90.0],
+                [-16.0, 13.6, -4.0],
+                [-90.0, 0.0, 0.0],
+                1usize,
+            ),
+            (
+                "pin up",
+                [90.0, 0.0, 0.0],
+                [-16.0, 4.0, 4.0],
+                [0.0, -90.0, 0.0],
+                [-16.0, 4.0, 13.6],
+                [0.0; 3],
+                2usize,
+            ),
+        ] {
+            let (mut ed, wall) = solo("3894");
+            ed.set_pose(&wall, [0.0; 3], wall_rot);
+            let pin = ed.ensure_ldraw_part("3673").unwrap();
+            ed.add_instance(Some(pin), None, [0.0, 60.0, 0.0]);
+            let p = ed.selection[0].clone();
+            ed.set_pose(&p, pin_pos, pin_rot);
+            let brick = ed.ensure_ldraw_part("3003").unwrap();
+            ed.add_instance(Some(brick), None, [0.0, 120.0, 0.0]);
+            let red = ed.selection[0].clone();
+            ed.set_pose(&red, on, rest);
+            assert_eq!(ed.selected_instances()[0].pos, on, "{label}: {}", ed.status);
+            assert_eq!(
+                assembly::connections_of(&ed.doc, &ed.bundle, &ed.editing, &red).len(),
+                1,
+                "{label}: on the pin"
+            );
+            let about_pin = gizmo::rotated(on, rest, DVec3::from_array(on), about, 45.0).1;
+            // typed into the angle fields
+            ed.set_pose(&red, on, about_pin);
+            assert_eq!(ed.selected_instances()[0].rot, about_pin, "{label}: {}", ed.status);
+            assert!(ed.refusal().is_none());
+            // on the ring about the pin, the magnet on
+            ed.set_pose(&red, on, rest);
+            ed.magnet = true;
+            let starts = ed.begin_handle();
+            ed.drag_handle(Handle::Ring(about), 44.0, DVec3::from_array(on), &starts, false);
+            assert!(ed.overlapping.is_empty(), "{label}: {:?}", ed.overlapping);
+            ed.end_handle();
+            assert_eq!(
+                (ed.selected_instances()[0].pos, ed.selected_instances()[0].rot),
+                (on, about_pin),
+                "{label}: {}",
+                ed.status
+            );
+            ed.magnet = false;
+            ed.set_pose(&red, on, rest);
+            // about any other axis it would twist off the pin: refused, and the refusal stands
+            // (for the view's banner) until a change is kept
+            let off = gizmo::rotated(on, rest, DVec3::from_array(on), (about + 1) % 3, 45.0).1;
+            ed.set_pose(&red, on, off);
+            assert_eq!(ed.selected_instances()[0].rot, rest, "{label}");
+            assert_eq!(ed.refusal(), Some(format!("{red} stays: it would overlap {p}").as_str()), "{label}");
+            ed.set_pose(&red, on, about_pin);
+            assert!(ed.refusal().is_none(), "{label}: a kept change clears it");
+        }
+        // on a level pin, the yaw field in particular — what the user reached for
+        let (mut ed, _) = solo("3894");
+        let pin = ed.ensure_ldraw_part("3673").unwrap();
+        ed.add_instance(Some(pin), None, [0.0, 60.0, 0.0]);
+        let p = ed.selection[0].clone();
+        ed.set_pose(&p, [-16.0, 4.0, -4.0], [0.0, 0.0, 90.0]);
+        let brick = ed.ensure_ldraw_part("3003").unwrap();
+        ed.add_instance(Some(brick), None, [0.0, 120.0, 0.0]);
+        let red = ed.selection[0].clone();
+        ed.set_pose(&red, [-16.0, 13.6, -4.0], [-90.0, 0.0, 0.0]);
+        ed.set_pose(&red, [-16.0, 13.6, -4.0], [-90.0, 0.0, 45.0]);
+        assert_eq!(ed.refusal(), Some(format!("{red} stays: it would overlap {p}").as_str()));
     }
 
     #[test]
