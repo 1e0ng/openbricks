@@ -175,6 +175,15 @@ pub enum Event {
         alias: String,
         path: String,
     },
+    /// The map as it stands went out as one JSON file.
+    Exported {
+        path: String,
+    },
+    /// An exported map became one of the user's own.
+    Imported {
+        alias: String,
+        path: String,
+    },
     Bye,
     /// The child process ended (or its output closed).
     Exited(String),
@@ -224,6 +233,11 @@ pub fn parse_event(line: &str) -> Result<Event, String> {
         }),
         "error" => Ok(Event::Error(s("text"))),
         "saved" => Ok(Event::Saved {
+            alias: s("alias"),
+            path: s("path"),
+        }),
+        "exported" => Ok(Event::Exported { path: s("path") }),
+        "imported" => Ok(Event::Imported {
             alias: s("alias"),
             path: s("path"),
         }),
@@ -334,8 +348,8 @@ import sys, json
 def send(**kw):
     print(json.dumps(kw), flush=True)
 send(ev="hello", version="fake")
-W = [{"alias": "practice-line", "path": "/w/practice_line/world.xml", "dir": "/w/practice_line"},
-     {"alias": "wro-2026-senior", "path": "/w/senior/world.xml", "dir": "/w/senior"},
+W = [{"alias": "practice-line", "path": "/w/practice_line/map.json", "dir": "/w/practice_line"},
+     {"alias": "wro-2026-senior", "path": "/w/senior/map.json", "dir": "/w/senior"},
      {"alias": "empty", "path": "/w/empty.xml", "dir": "/w"}]
 def box(name, body, size, rgba):
     return {"name": name, "type": "box", "body": body, "size": size, "pos": [0, 0, 0], "quat": [1, 0, 0, 0],
@@ -446,9 +460,24 @@ for line in sys.stdin:
             frame()
         else:
             alias = "-".join(c["name"].lower().split())
-            W.append({"alias": alias, "path": "/me/worlds/%s/world.xml" % alias, "dir": "/me/worlds/" + alias, "user": True})
+            W.append({"alias": alias, "path": "/me/worlds/%s/map.json" % alias, "dir": "/me/worlds/" + alias, "user": True})
             send(ev="worlds", worlds=W)
-            send(ev="saved", alias=alias, path="/me/worlds/%s/world.xml" % alias)
+            send(ev="saved", alias=alias, path="/me/worlds/%s/map.json" % alias)
+    elif cmd == "export_world":
+        with open(c["path"], "w") as fh:
+            json.dump({"format": "openbricks-map/1", "name": "stand-in", "props": [], "files": {}}, fh)
+        send(ev="exported", path=c["path"])
+    elif cmd == "import_world":
+        try:
+            with open(c["path"]) as fh:
+                name = json.load(fh)["name"]
+        except (OSError, ValueError, KeyError) as e:
+            send(ev="error", text="could not read %s: %s" % (c["path"], e))
+            continue
+        alias = "-".join(name.lower().split())
+        W.append({"alias": alias, "path": "/me/worlds/%s/map.json" % alias, "dir": "/me/worlds/" + alias, "user": True})
+        send(ev="worlds", worlds=W)
+        send(ev="imported", alias=alias, path="/me/worlds/%s/map.json" % alias)
     elif cmd == "pause":
         status = "paused"
     elif cmd == "resume":
@@ -586,7 +615,15 @@ mod tests {
             Event::Hello { version } => assert_eq!(version, "4.3.0"),
             e => panic!("{e:?}"),
         }
-        match parse_event(r#"{"ev":"worlds","worlds":[{"alias":"empty","path":null,"dir":null},{"alias":"practice-line","path":"/w/world.xml","dir":"/w"}]}"#).unwrap() {
+        match parse_event(r#"{"ev":"exported","path":"/x/a.map.json"}"#).unwrap() {
+            Event::Exported { path } => assert_eq!(path, "/x/a.map.json"),
+            e => panic!("{e:?}"),
+        }
+        match parse_event(r#"{"ev":"imported","alias":"a","path":"/me/worlds/a/map.json"}"#).unwrap() {
+            Event::Imported { alias, path } => assert_eq!((alias.as_str(), path.as_str()), ("a", "/me/worlds/a/map.json")),
+            e => panic!("{e:?}"),
+        }
+        match parse_event(r#"{"ev":"worlds","worlds":[{"alias":"empty","path":null,"dir":null},{"alias":"practice-line","path":"/w/map.json","dir":"/w"}]}"#).unwrap() {
             Event::Worlds(w) => {
                 assert_eq!(w.len(), 2);
                 assert_eq!(w[1].dir.as_deref(), Some("/w"));

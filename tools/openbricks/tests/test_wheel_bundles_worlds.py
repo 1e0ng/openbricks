@@ -13,7 +13,7 @@ even though ``openbricks sim --help`` listed the alias.
 The 0.10.6 fix moves ``worlds/`` into the package and adds a
 ``package-data`` directive. This test runs ``python -m build
 --wheel``, opens the produced .whl as a zip, and asserts every
-shipped world has its ``world.xml`` inside ``openbricks_sim/worlds/``.
+shipped world has its ``map.json`` inside ``openbricks_sim/worlds/``.
 
 Skipped if ``build`` isn't installed (which would also block
 ``test_sdist_build.py`` — same gating).
@@ -118,7 +118,7 @@ class WheelBundlesWorldsTests(unittest.TestCase):
         self.assertFalse([n for n in names if "__pycache__" in n
                           and n.startswith("openbricks/")])
 
-    def test_wheel_contains_world_xml_for_each_alias(self):
+    def test_wheel_contains_the_map_json_for_each_alias(self):
         with tempfile.TemporaryDirectory() as tmp:
             wheel = _build_wheel_into(tmp)
             with zipfile.ZipFile(wheel) as zf:
@@ -126,12 +126,12 @@ class WheelBundlesWorldsTests(unittest.TestCase):
 
         missing = []
         for name in _REQUIRED_WORLDS:
-            wanted = "openbricks_sim/worlds/" + name + "/world.xml"
+            wanted = "openbricks_sim/worlds/" + name + "/map.json"
             if wanted not in names:
                 missing.append(name)
         self.assertEqual(
             missing, [],
-            "wheel is missing world.xml for: %s\n"
+            "wheel is missing map.json for: %s\n"
             "Check ``[tool.setuptools.package-data]`` in pyproject.toml — "
             "without it, ``packages.find`` only ships ``*.py`` files. "
             "Wheel contents under openbricks_sim/worlds/: %s" % (
@@ -141,12 +141,12 @@ class WheelBundlesWorldsTests(unittest.TestCase):
 
     def test_wheel_contains_ldr_props(self):
         # F2 (#98 onwards) replaced inline single-box approximations
-        # with ``<lego_prop ldr="props/*.ldr"/>`` placeholders that
+        # with LDraw props (``"ldr": "props/*.ldr"``) that
         # ``world.py`` expands at load time by reading the ``.ldr``
         # file off disk. Wheels 0.10.7-0.10.10 shipped without these
         # files (package-data only listed *.xml / *.png / *.md) so
         # ``pip install openbricks && openbricks sim --world wro-2026-*``
-        # raised ``WorldLoadError: lego_prop ... references missing
+        # raised ``WorldLoadError: ... references missing
         # .ldr file ...`` for every prop. Pin every WRO world has at
         # least one ``.ldr`` in the wheel.
         wro_worlds = [
@@ -168,7 +168,7 @@ class WheelBundlesWorldsTests(unittest.TestCase):
         self.assertEqual(
             empty, [],
             "wheel is missing ALL props/*.ldr for WRO worlds: %s — "
-            "without these, world.py's lego_prop expansion raises "
+            "without these, a map's LDraw props fail to load and raise "
             "WorldLoadError on every prop. Check "
             "``[tool.setuptools.package-data]`` includes "
             "``worlds/*/props/*.ldr``." % empty)

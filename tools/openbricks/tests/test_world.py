@@ -9,7 +9,8 @@ from pathlib import Path
 import mujoco
 
 from openbricks_sim.chassis import ChassisSpec
-from openbricks_sim.world import WorldLoadError, load_world, _expand_lego_props
+from openbricks_sim import mapfile
+from openbricks_sim.world import WorldLoadError, load_world
 
 
 # Shipped worlds live INSIDE the ``openbricks_sim`` package as of
@@ -33,11 +34,34 @@ class LoadWorldTests(unittest.TestCase):
 
     def test_missing_world_raises(self):
         with self.assertRaises(WorldLoadError):
-            load_world("/tmp/does-not-exist-world.xml")
+            load_world("/tmp/does-not-exist/map.json")
+
+    def test_an_mjcf_map_is_refused_by_name(self):
+        # maps are JSON: an old world.xml path is told where the map is now
+        with self.assertRaises(WorldLoadError) as cm:
+            load_world(str(_WORLDS / "practice_line" / "world.xml"))
+        self.assertIn("maps are JSON", str(cm.exception))
+        self.assertIn("map.json", str(cm.exception))
+        # a map.json that is no map, and one whose prop's model is gone, are refused too
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "map.json"
+            bad.write_text('{"format": "nope"}')
+            with self.assertRaises(WorldLoadError):
+                load_world(str(bad))
+            with self.assertRaises(WorldLoadError):
+                load_world(str(bad), world_map={"format": mapfile.FORMAT,
+                                                "props": [{"name": "x", "ldr": "no.ldr", "pos": [0, 0, 0], "mass": 0.01}]})
+
+    def test_no_shipped_map_is_xml(self):
+        # the user's rule: maps are JSON everywhere — no MJCF ships as a map
+        for name in _BUILTIN_WORLDS + ["practice_line"]:
+            with self.subTest(world=name):
+                self.assertTrue((_WORLDS / name / "map.json").is_file())
+                self.assertEqual(sorted(p.name for p in (_WORLDS / name).rglob("*.xml")), [])
 
     def test_each_shipped_world_loads_with_chassis(self):
         for name in _BUILTIN_WORLDS:
-            path = str(_WORLDS / name / "world.xml")
+            path = str(_WORLDS / name / "map.json")
             with self.subTest(world=name):
                 m, d, merged = load_world(path,
                                           chassis_spec=ChassisSpec(pos_x=1.0,
@@ -56,7 +80,7 @@ class LoadWorldTests(unittest.TestCase):
 
     def test_chassis_can_drive_in_world(self):
         """Stepping with ctrl ≠ 0 advances the chassis."""
-        path = str(_WORLDS / "wro_2026_elementary_robot_rockstars" / "world.xml")
+        path = str(_WORLDS / "wro_2026_elementary_robot_rockstars" / "map.json")
         m, d, _ = load_world(path,
                              chassis_spec=ChassisSpec(pos_x=1.0, pos_y=-0.42))
         cid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "chassis")
@@ -88,11 +112,12 @@ class LoadWorldTests(unittest.TestCase):
 
 
 class LegoPropExpansionTests(unittest.TestCase):
-    """The ``<lego_prop name="..." ldr="..." pos="..." mass="..."/>``
-    placeholder is the syntax world.xml uses to embed an LDraw-built
-    prop without inlining hundreds of generated MJCF lines.
-    ``_expand_lego_props`` reads the .ldr at load time and substitutes
-    a full ``<body>`` block. These tests pin that pipeline."""
+    """A map's LDraw prop (``{"name", "ldr", "pos", "mass"}``) is made
+    into a full ``<body>`` as the model is made (:func:`mapfile.to_mjcf`),
+    reading the .ldr at load time. These tests pin that pipeline."""
+
+    def _map(self, *props_):
+        return {"format": mapfile.FORMAT, "name": "t", "props": list(props_)}
 
     def test_placeholder_replaced_with_body_geoms(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,31 +126,36 @@ class LegoPropExpansionTests(unittest.TestCase):
             (tmp / "props" / "tiny.ldr").write_text(
                 "0 Tiny test prop\n"
                 "1 1 0 0 0 1 0 0 0 1 0 0 0 1 3003.dat\n")
-            world = ('<lego_prop name="tinyp" ldr="props/tiny.ldr" '
-                     'pos="0.0 0.0 0.0" mass="0.005"/>')
-            expanded = _expand_lego_props(world, tmp)
+            expanded = mapfile.to_mjcf(self._map({"name": "tinyp", "ldr": "props/tiny.ldr", "pos": [0, 0, 0], "mass": 0.005}), tmp)
             self.assertIn('<body name="tinyp"', expanded)
             self.assertIn('<freejoint/>', expanded)
             self.assertIn('material="lego_blue"', expanded)
             # 1 brick body + 4 stud cylinders (2x2 brick)
             self.assertEqual(expanded.count('<geom type="box"'), 1)
             self.assertEqual(expanded.count('<geom type="cylinder"'), 4)
+            # a colour keyword or an LDraw code overrides the bricks'; anything else is refused
+            red = mapfile.to_mjcf(self._map({"name": "r", "ldr": "props/tiny.ldr", "pos": [0, 0, 0], "mass": 0.005, "color": "red"}), tmp)
+            self.assertIn('material="lego_red"', red)
+            code = mapfile.to_mjcf(self._map({"name": "r", "ldr": "props/tiny.ldr", "pos": [0, 0, 0], "mass": 0.005, "color": "14"}), tmp)
+            self.assertIn('material="lego_yellow"', code)
+            with self.assertRaises(mapfile.MapError):
+                mapfile.to_mjcf(self._map({"name": "r", "ldr": "props/tiny.ldr", "pos": [0, 0, 0], "mass": 0.005, "color": "mauve"}), tmp)
+            # stuck: no free joint
+            stuck = mapfile.to_mjcf(self._map({"name": "s", "ldr": "props/tiny.ldr", "pos": [0, 0, 0], "mass": 0.005, "fixed": True}), tmp)
+            self.assertNotIn("<freejoint/>", stuck)
 
     def test_missing_ldr_raises_loadly(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            world = ('<lego_prop name="x" ldr="props/no_such.ldr" '
-                     'pos="0 0 0" mass="0.01"/>')
-            with self.assertRaises(WorldLoadError) as cm:
-                _expand_lego_props(world, tmp)
+            with self.assertRaises(mapfile.MapError) as cm:
+                mapfile.to_mjcf(self._map({"name": "x", "ldr": "props/no_such.ldr", "pos": [0, 0, 0], "mass": 0.01}), Path(tmp))
             self.assertIn("missing .ldr", str(cm.exception))
 
-    def test_world_with_no_lego_prop_passes_through(self):
-        # Non-prop XML must round-trip unchanged so we don't break
-        # the existing world.xml structure.
+    def test_a_map_with_no_props_has_no_bodies(self):
         with tempfile.TemporaryDirectory() as tmp:
-            world = '<worldbody><geom type="plane" size="1 1 0.1"/></worldbody>'
-            self.assertEqual(_expand_lego_props(world, Path(tmp)), world)
+            m = {"format": mapfile.FORMAT, "name": "bare", "geoms": [{"type": "plane", "size": [1, 1, 0.1]}]}
+            text = mapfile.to_mjcf(m, Path(tmp))
+            self.assertIn('<geom type="plane" size="1 1 0.1"/>', text)
+            self.assertNotIn("<body", text)
 
     def test_senior_barriers_have_dual_color_scheme(self):
         # F4.2 split the single ``senior_barrier.ldr`` (which used
@@ -136,7 +166,7 @@ class LegoPropExpansionTests(unittest.TestCase):
         # that the loaded model actually has multiple distinct
         # materials per barrier body — if a future refactor goes
         # back to a single colour override, this test catches it.
-        path = (_WORLDS / "wro_2026_senior_mosaic_masters" / "world.xml")
+        path = (_WORLDS / "wro_2026_senior_mosaic_masters" / "map.json")
         m, _, _ = load_world(str(path), chassis_spec=ChassisSpec())
 
         def _materials_under(body_name):
@@ -167,7 +197,7 @@ class LegoPropExpansionTests(unittest.TestCase):
         #   * exactly one mesh is declared in <asset>
         #   * a static geom named ``mosaic_frame`` references it
         #   * the geom is welded to the worldbody (body 0)
-        path = (_WORLDS / "wro_2026_senior_mosaic_masters" / "world.xml")
+        path = (_WORLDS / "wro_2026_senior_mosaic_masters" / "map.json")
         m, _, _ = load_world(str(path), chassis_spec=ChassisSpec())
         self.assertEqual(
             m.nmesh, 1,
@@ -188,7 +218,7 @@ class LegoPropExpansionTests(unittest.TestCase):
         # body with 31 brick boxes + 230+ stud cylinders. Pre-F2.1
         # the clef was a single-box approximation — pin the new
         # multi-geom shape so a regression to single-box is caught.
-        path = (_WORLDS / "wro_2026_elementary_robot_rockstars" / "world.xml")
+        path = (_WORLDS / "wro_2026_elementary_robot_rockstars" / "map.json")
         m, _, _ = load_world(str(path), chassis_spec=ChassisSpec())
         clef_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "clef")
         self.assertGreaterEqual(clef_id, 0, "clef body missing from model")
@@ -210,7 +240,7 @@ class LegoPropExpansionTests(unittest.TestCase):
         pyproject = Path(openbricks_sim.__file__).resolve().parents[1] / "pyproject.toml"
         if pyproject.is_file():
             self.assertIn('"worlds/*/props/*.assembly.json"', pyproject.read_text(), "shipped in the wheel")
-        m, d, _ = load_world(str(world / "world.xml"), chassis_spec=ChassisSpec())
+        m, d, _ = load_world(str(world / "map.json"), chassis_spec=ChassisSpec())
         mic = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "microphone")
         self.assertGreaterEqual(mic, 0, "microphone body missing from model")
         names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, i) for i in range(m.ngeom) if int(m.geom_bodyid[i]) == mic]

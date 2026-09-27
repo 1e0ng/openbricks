@@ -104,6 +104,8 @@ enum Drag {
 pub enum FileKind {
     Assembly,
     Stl,
+    /// An exported map: one JSON file with the files it needs inside.
+    Map,
 }
 
 impl FileKind {
@@ -111,6 +113,7 @@ impl FileKind {
         match self {
             FileKind::Assembly => ("assembly", &["json"]),
             FileKind::Stl => ("STL", &["stl"]),
+            FileKind::Map => ("map", &["json"]),
         }
     }
 }
@@ -2151,6 +2154,7 @@ impl App {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.simulate.map_ui(ui, &self.editor.bundle);
+                    self.map_share_ui(ui);
                     self.map_add_ui(ui);
                 });
             });
@@ -2192,6 +2196,33 @@ impl App {
     /// Props from elsewhere: a component of a build from the Workbench —
     /// the one open there, or any saved build opened here — or one brick
     /// from the library, placed at the map's origin.
+    /// A map in and out as one JSON file: the map as it stands, with its
+    /// artwork and its props' models inside.
+    fn map_share_ui(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.strong("Share a map");
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(self.simulate.scene_loaded(), egui::Button::new("Export map…"))
+                .on_hover_text("the map as it stands, with its artwork and its props' models, in one JSON file")
+                .clicked()
+                && let Some(p) = self
+                    .dialogs
+                    .save(FileKind::Map, &format!("{}.map.json", self.simulate.world()), None)
+            {
+                self.simulate.export_map(&p);
+            }
+            if ui
+                .button("Import map…")
+                .on_hover_text("a map exported from the sim, made one of your own and shown")
+                .clicked()
+                && let Some(p) = self.dialogs.pick(FileKind::Map)
+            {
+                self.simulate.import_map(&p);
+            }
+        });
+    }
+
     fn map_add_ui(&mut self, ui: &mut egui::Ui) {
         ui.separator();
         ui.strong("Add to the map");
@@ -4176,6 +4207,39 @@ mod tests {
         let last = h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "save_world").cloned().unwrap();
         assert_eq!(last["name"], "harness-map");
         assert_eq!(h.state().simulate.world(), "harness-map");
+        // Share a map: exported to the file the dialog names, and imported from it — the stand-in
+        // names its export "stand-in", which the tab then shows, one of the user's own
+        let shared = std::env::temp_dir().join(format!("ob-shared-{}.map.json", std::process::id()));
+        let _ = std::fs::remove_file(&shared);
+        h.state_mut().dialogs = Dialogs::answering(Some(shared.clone()));
+        steps(&mut h, 2);
+        h.get_by_label("Export map…").click();
+        wait_for(&mut h, &|a| a.simulate.message.starts_with("exported to"));
+        assert!(shared.is_file());
+        h.get_by_label("Import map…").click();
+        wait_for(&mut h, &|a| {
+            a.simulate.world() == "stand-in"
+                && a.simulate
+                    .log
+                    .iter()
+                    .any(|(s, t)| s == "server" && t.starts_with("loaded stand-in"))
+        });
+        assert!(h.state().simulate.worlds().iter().any(|w| w.alias == "stand-in" && w.user));
+        h.state_mut().dialogs = Dialogs::answering(None);
+        steps(&mut h, 2);
+        h.get_by_label("Export map…").click();
+        h.get_by_label("Import map…").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.world(), "stand-in", "declined dialogs change nothing");
+        let _ = std::fs::remove_file(&shared);
+        // back to the saved map for what follows
+        h.state_mut().simulate.select_world("harness-map");
+        wait_for(&mut h, &|a| {
+            a.simulate
+                .log
+                .iter()
+                .any(|(s, t)| s == "server" && t.starts_with("loaded harness-map"))
+        });
         // a brick from the library: found by number, put on the map as a document, drawn as its
         // mesh (the server sends the prop's bricks), selected once built
         let num = h.state().editor.bundle.parts.keys().next().unwrap().clone();

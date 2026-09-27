@@ -50,28 +50,29 @@ from openbricks_sim.world import load_world
 # call site doesn't need to know where it lives on disk.
 _BUILTIN_WORLDS = {
     "empty":               None,
-    "wro-2026-elementary": "worlds/wro_2026_elementary_robot_rockstars/world.xml",
-    "wro-2026-junior":     "worlds/wro_2026_junior_heritage_heroes/world.xml",
-    "wro-2026-senior":     "worlds/wro_2026_senior_mosaic_masters/world.xml",
+    "wro-2026-elementary": "worlds/wro_2026_elementary_robot_rockstars/map.json",
+    "wro-2026-junior":     "worlds/wro_2026_junior_heritage_heroes/map.json",
+    "wro-2026-senior":     "worlds/wro_2026_senior_mosaic_masters/map.json",
     # Small practice scenes for learning / iteration. See
     # ``worlds/<name>/README.md`` for the layout + suggested missions.
-    "practice-zones":      "worlds/practice_zones/world.xml",
-    "practice-walls":      "worlds/practice_walls/world.xml",
-    "practice-line":       "worlds/practice_line/world.xml",
+    "practice-zones":      "worlds/practice_zones/map.json",
+    "practice-walls":      "worlds/practice_walls/map.json",
+    "practice-line":       "worlds/practice_line/map.json",
 }
 
 
 def _resolve_world(world):
     """Aliases → on-disk path; ``None`` keeps the standalone preview.
     Shipped aliases first, then the user's own maps under the data
-    directory, then a path to a ``world.xml``."""
+    directory (listing them converts one saved before maps were JSON),
+    then a path to a ``map.json``."""
     if world is None or world == "empty":
         return None
     if world not in _BUILTIN_WORLDS:
         from openbricks_sim import props
-        mine = props.user_worlds_dir() / str(world) / "world.xml"
-        if mine.is_file():
-            return str(mine)
+        for w in props.list_user_worlds():
+            if w["alias"] == str(world):
+                return w["path"]
     if world in _BUILTIN_WORLDS:
         rel = _BUILTIN_WORLDS[world]
         if rel is None:
@@ -120,7 +121,7 @@ class SimRobot:
                  kp: float = 0.3,
                  kp_sum: Optional[float] = None,
                  kp_diff: Optional[float] = None,
-                 assembly=None, world_xml=None):
+                 assembly=None, world_map=None):
         # ``assembly``: a robot.assembly.json path or its parsed dict —
         # the chassis is then derived from the build (roles → spec,
         # rolled-up mass properties, one visual geom per brick).
@@ -148,7 +149,7 @@ class SimRobot:
         else:
             model, data, _ = load_world(path, chassis_spec=spec,
                                         inertial=inertial, extra_geoms=extra_geoms,
-                                        world_xml=world_xml)
+                                        world_map=world_map)
 
         self.model        = model
         self.data         = data

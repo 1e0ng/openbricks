@@ -1,12 +1,12 @@
 # WRO 2026 RoboMission Senior — "Mosaic Masters"
 
-A MuJoCo MJCF world for the [2026 WRO RoboMission Senior](https://wro-association.org/wp-content/uploads/WRO-2026-RoboMission-Senior-Game-Rules.pdf) competition. Robot acts as an apprentice mason: hands tools to colleagues, lays mosaic tiles in a frame, delivers cement of matching colour to four pour zones, and protects the barriers around the city construction site.
+A map (`map.json`, format `openbricks-map/1`) for the [2026 WRO RoboMission Senior](https://wro-association.org/wp-content/uploads/WRO-2026-RoboMission-Senior-Game-Rules.pdf) competition. Robot acts as an apprentice mason: hands tools to colleagues, lays mosaic tiles in a frame, delivers cement of matching colour to four pour zones, and protects the barriers around the city construction site.
 
 ## Files
 
 | | |
 |---|---|
-| `world.xml` | MJCF scene description |
+| `map.json` | the map: physics, mat, walls, props and camera (MuJoCo's own names and units, in JSON) |
 | `mat.png` | Printed mat texture, 6974×3375 px (75 dpi rasterization of the official Game Mat Printing File PDF, 256-colour palette-quantized — PyPI wheel-size budget; the TCS34725 sampling spot still spans ~9 px). Regenerable via `scripts/regen-wro-mat-textures.sh`. |
 
 ## What's in the scene
@@ -20,8 +20,7 @@ A MuJoCo MJCF world for the [2026 WRO RoboMission Senior](https://wro-associatio
 ## Loading the scene
 
 ```
-pip install mujoco
-python -m mujoco.viewer --mjcf=tools/openbricks-sim/worlds/wro_2026_senior_mosaic_masters/world.xml
+openbricks sim preview --world wro-2026-senior
 ```
 
 Maximum round score: **233**.

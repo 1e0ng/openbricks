@@ -14,7 +14,7 @@
 0   Step 109: 4× 1x6 white brick                   → 2 per cable
 0   Step 110: 2× 1x2 brick with pin + 2× 2x4 white → 1+1 per cable
 0   Step 111: 2× 1x2 brick with pin + 2× 2x4 white → 1+1 per cable
-0 Total: ~14 bricks per cable; world.xml instantiates 2 of these.
+0 Total: ~14 bricks per cable; the map places 2 of these.
 0
 0 Stud-grid positions visually estimated. Silhouette: yellow base
 0 plate, white body with 1x6 black technic brick running through

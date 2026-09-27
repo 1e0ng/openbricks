@@ -262,9 +262,10 @@ Phase F (WRO 2026 RoboMission, 0.10.8 → 0.10.12) is feature-complete:
   re-fetches and re-rasterises when WRO updates the source PDFs.
 - **F2** — every visible LEGO prop in all three age categories
   (Elementary, Junior, Senior) modelled as LDraw assemblies. Per-
-  prop ``.ldr`` files are the source of truth; ``world.py``
-  expands ``<lego_prop ldr=".../*.ldr"/>`` placeholders into MJCF
-  bodies at load time via ``openbricks_sim.lego_mjcf``. 13 LDraw
+  prop ``.ldr`` files are the source of truth; a map's LDraw props
+  (``{"ldr": ".../*.ldr"}`` in its ``map.json``) become MJCF bodies
+  at load time (``mapfile.to_mjcf`` via ``openbricks_sim.lego_mjcf``;
+  maps are JSON since 4.32.0, their MJCF made in memory). 13 LDraw
   part types in the registry today; new parts plug in by adding
   one ``_PartSpec`` entry. Senior also wires the WRO-published
   3D-printed "mosaic frame" STL as a static MuJoCo ``<mesh>``.

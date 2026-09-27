@@ -107,7 +107,7 @@ class ResolveWorldTests(unittest.TestCase):
     def test_wro_alias_points_to_shipped_file(self):
         path = cli._resolve_world("wro-2026-elementary")
         self.assertIsNotNone(path)
-        self.assertTrue(path.endswith("world.xml"))
+        self.assertTrue(path.endswith("map.json"))
 
     def test_unknown_arg_returned_as_path(self):
         # A non-alias argument is treated as a path for downstream

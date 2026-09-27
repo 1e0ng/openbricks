@@ -28,7 +28,7 @@ from openbricks_sim.world import load_world
 
 _ELEMENTARY_PATH = (Path(__file__).resolve().parent.parent
                     / "openbricks_sim" / "worlds"
-                    / "wro_2026_elementary_robot_rockstars" / "world.xml")
+                    / "wro_2026_elementary_robot_rockstars" / "map.json")
 
 
 def _make_elementary():
@@ -37,7 +37,7 @@ def _make_elementary():
     ``load_world`` returns ``MjData`` straight from ``MjModel`` —
     ``data.xpos`` etc. are still zeroed until the first
     ``mj_forward`` populates them from ``qpos``. Force that here so
-    test assertions read the world.xml's ``pos`` values (and any
+    test assertions read the map.json's ``pos`` values (and any
     pre-randomization checks see the actual starting layout)."""
     model, data, merged = load_world(
         str(_ELEMENTARY_PATH), chassis_spec=ChassisSpec())
@@ -137,7 +137,7 @@ class ElementaryRandomizationTests(unittest.TestCase):
     def test_resting_z_is_preserved_per_note(self):
         # The 4 notes have different shapes (sphere / box / cylinder
         # of varying heights) and so different resting Z heights
-        # in the world.xml. Randomization places each note at the
+        # in the map.json. Randomization places each note at the
         # slot's (x, y) but must keep its existing Z — otherwise
         # the sphere note sinks into the mat or the tall cylinder
         # floats. Capture each note's pre-randomization Z, then
@@ -165,7 +165,7 @@ class ElementaryRandomizationTests(unittest.TestCase):
 
 _JUNIOR_PATH = (Path(__file__).resolve().parent.parent
                 / "openbricks_sim" / "worlds"
-                / "wro_2026_junior_heritage_heroes" / "world.xml")
+                / "wro_2026_junior_heritage_heroes" / "map.json")
 
 
 def _make_junior():
@@ -265,7 +265,7 @@ class JuniorRandomizationTests(unittest.TestCase):
 
 _SENIOR_PATH = (Path(__file__).resolve().parent.parent
                 / "openbricks_sim" / "worlds"
-                / "wro_2026_senior_mosaic_masters" / "world.xml")
+                / "wro_2026_senior_mosaic_masters" / "map.json")
 
 
 def _make_senior():

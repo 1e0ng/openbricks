@@ -3,6 +3,48 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.32.0 — maps are JSON; export and import a map as one file
+
+The user: "for custom maps, allow user to export and import, also for
+component, or maps, all use json everywhere, no xml please."
+
+**Maps are JSON.** A map is a folder: `map.json` (format
+`openbricks-map/1`, `openbricks_sim.mapfile`) and the files it names.
+It holds the physics settings, textures, materials and meshes, lights,
+fixed geoms, props and cameras, with MuJoCo's own attribute names and
+units (vectors as arrays); any element may carry a `note`. A prop is
+`{"name", "ldr", "pos", "mass", "color"}` or `{"name", "file", "pos"}`,
+with `yaw`, `pitch`, `roll` and `fixed` when it has them. MuJoCo reads
+no JSON (its models are MJCF or URDF, both XML, or its own binary), so
+the loader makes the model from `map.json` in memory; nothing writes
+XML any more. The six shipped maps were converted, their comments kept
+as `about` and `note` text, and each was compiled against its old
+`world.xml`: every body, geom, mass, inertia, material, texture, light,
+camera and physics setting is identical. The `world.xml` files are gone
+from the package; a map of the user's own saved before this release is
+converted to `map.json` the first time the sim lists the user's maps
+(the old file is left where it was), and a `world.xml` path handed to
+the loader is refused, saying where the map is now. The map editor
+edits the JSON map directly — no more patching placeholders in XML
+text — and saves `map.json`. The CLI and the runtime share one alias
+table.
+
+**Export and import.** The Map tab has **Share a map**: **Export map…**
+writes the map as it stands, every prop where it is, to one JSON file
+with everything it needs inside — artwork and meshes as base64, LDraw
+models as text, builds as JSON — and **Import map…** makes such a file
+a map of your own under its name (the next free `-2`, `-3`… when that
+is a shipped map's or taken), listed and shown at once. An export
+naming a file outside its folder is refused. The run server's
+`export_world` and `import_world` commands answer with `exported` and
+`imported`. Components already travel as JSON: a component's **save**
+writes it as a build, and the Workbench's **Import…** brings a build's
+components in.
+
+A second model of one file name in a saved or exported map is now
+numbered before its extensions (`tower-2.assembly.json`), keeping the
+`.assembly.json` ending; it was `tower.assembly-2.json`.
+
 ## 4.31.1 — a brick goes onto a pin, and turns 45° about it
 
 A 2 x 2 brick pushed onto a pin by its tube (the WRO keyboard's step

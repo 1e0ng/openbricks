@@ -271,9 +271,16 @@ impl SimulateTab {
         &self.status
     }
 
-    #[cfg(test)]
+    /// Whether a map is loaded and shown.
     pub fn scene_loaded(&self) -> bool {
         self.scene.is_some()
+    }
+
+    /// Show another map, as its row in the map picker does.
+    #[cfg(test)]
+    pub fn select_world(&mut self, alias: &str) {
+        self.world = alias.to_string();
+        self.reload();
     }
 
     /// A barrier for tests: the server answers commands in order, so once
@@ -449,6 +456,15 @@ impl SimulateTab {
                     if new_map {
                         self.frame_pending = true;
                     }
+                }
+                Event::Exported { path } => {
+                    self.message = format!("exported to {path}");
+                }
+                Event::Imported { alias, path } => {
+                    // a map of the user's own now, listed with the rest: shown at once, markers fresh
+                    self.message = format!("imported as {alias}: {path}");
+                    self.world = alias;
+                    self.load();
                 }
                 Event::Saved { alias, path } => {
                     // the map is the user's own now: its markers come along, and it is the map shown
@@ -3258,6 +3274,30 @@ impl SimulateTab {
     /// Save the map as it stands — every prop where it is, the ones added
     /// included — as one of the user's own; once the server has written
     /// it, the tab shows that map.
+    /// Send the map as it stands — every prop where it is, with the files
+    /// it needs — to one JSON file at `path`.
+    pub fn export_map(&mut self, path: &std::path::Path) {
+        if self.scene.is_none() {
+            self.message = "load a map first".into();
+            return;
+        }
+        if self.busy() {
+            self.message = "stop the program before exporting the map".into();
+            return;
+        }
+        self.send(serde_json::json!({"cmd": "export_world", "path": path.to_string_lossy()}));
+    }
+
+    /// Make an exported map (one JSON file) a map of the user's own; the
+    /// tab shows it once the server has it.
+    pub fn import_map(&mut self, path: &std::path::Path) {
+        if !self.connected {
+            self.message = "the run server is not up yet".into();
+            return;
+        }
+        self.send(serde_json::json!({"cmd": "import_world", "path": path.to_string_lossy()}));
+    }
+
     pub fn save_map_as(&mut self, name: &str) {
         let name = name.trim();
         if name.is_empty() {
@@ -4739,7 +4779,7 @@ mod tests {
         );
         t.apply(Event::Saved {
             alias: "my-layout".into(),
-            path: "/me/worlds/my-layout/world.xml".into(),
+            path: "/me/worlds/my-layout/map.json".into(),
         });
         assert_eq!(t.world(), "my-layout");
         assert_eq!(t.markers.world, "my-layout");
@@ -4749,7 +4789,7 @@ mod tests {
         // the map being the user's own, a save in place goes under its alias
         t.worlds.push(WorldEntry {
             alias: "my-layout".into(),
-            path: Some("/me/worlds/my-layout/world.xml".into()),
+            path: Some("/me/worlds/my-layout/map.json".into()),
             dir: Some("/me/worlds/my-layout".into()),
             user: true,
         });
@@ -4758,6 +4798,47 @@ mod tests {
             t.sent.last().unwrap(),
             &serde_json::json!({"cmd": "save_world", "name": "my-layout"})
         );
+        // export: the map as it stands to one JSON file; import: an exported map becomes one of
+        // the user's own, shown once the server has it
+        let out = std::path::Path::new("/x/layout.map.json");
+        t.export_map(out);
+        assert_eq!(
+            t.sent.last().unwrap(),
+            &serde_json::json!({"cmd": "export_world", "path": "/x/layout.map.json"})
+        );
+        t.apply(Event::Exported {
+            path: "/x/layout.map.json".into(),
+        });
+        assert_eq!(t.message, "exported to /x/layout.map.json");
+        let n = t.sent.len();
+        t.import_map(out);
+        assert_eq!((t.sent.len(), t.message.as_str()), (n, "the run server is not up yet"));
+        t.connected = true;
+        t.import_map(out);
+        assert_eq!(
+            t.sent.last().unwrap(),
+            &serde_json::json!({"cmd": "import_world", "path": "/x/layout.map.json"})
+        );
+        t.connected = false;
+        t.apply(Event::Imported {
+            alias: "layout".into(),
+            path: "/me/worlds/layout/map.json".into(),
+        });
+        // the imported map is the one shown (loading it needs a server, which this test has not:
+        // the stand-in and the real runtime tests load it)
+        assert_eq!(t.world(), "layout");
+        assert!(t.message.contains("no Python interpreter"), "{}", t.message);
+        // nothing to export before a map is shown, nor while a program runs
+        let scene = t.scene.take();
+        let n = t.sent.len();
+        t.export_map(out);
+        assert_eq!((t.sent.len(), t.message.as_str()), (n, "load a map first"));
+        t.scene = scene;
+        t.status = "running".into();
+        t.export_map(out);
+        assert_eq!((t.sent.len(), t.message.as_str()), (n, "stop the program before exporting the map"));
+        t.status = "loaded".into();
+        t.world = "my-layout".into();
         // the panel draws: with the map the user's own, and with a shipped one
         let ctx = egui::Context::default();
         t.save_name = "x".into();
@@ -4867,7 +4948,7 @@ mod tests {
             t.world(),
             t.message
         );
-        assert!(dir.join("worlds").join("harness-elementary").join("world.xml").is_file());
+        assert!(dir.join("worlds").join("harness-elementary").join("map.json").is_file());
         assert!(
             dir.join("worlds").join("harness-elementary").join("mat.png").is_file(),
             "the artwork came along"
@@ -4887,6 +4968,34 @@ mod tests {
             t.prop_pose(clef)
         );
         assert_eq!(t.scene.as_ref().unwrap().props.len(), n + 1);
+        // exported as one JSON file and imported back: a map of the user's own under the next
+        // free name, shown, the moved clef where it was put
+        let out = dir.join("shared.map.json");
+        t.export_map(&out);
+        assert!(pump_until(&mut t, 30, |t| t.message.starts_with("exported to")), "{}", t.message);
+        let exported: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(exported["format"], "openbricks-map/1");
+        assert!(exported["files"]["mat.png"]["base64"].is_string(), "the artwork inside");
+        t.import_map(&out);
+        assert!(
+            pump_until(&mut t, 60, |t| t.message.is_empty()
+                && t.world() != "harness-elementary"
+                && t.scene.is_some()
+                && t.status == "loaded"),
+            "{} / {}",
+            t.world(),
+            t.message
+        );
+        assert!(t.worlds().iter().any(|w| w.alias == t.world() && w.user), "{}", t.world());
+        let clef = t.scene.as_ref().unwrap().props.iter().position(|p| p.name == "clef").unwrap();
+        assert!(
+            pump_until(&mut t, 30, |t| t
+                .prop_pose(clef)
+                .map(|p| (p.x_mm - 300.0).abs() < 0.5)
+                .unwrap_or(false)),
+            "{:?}",
+            t.prop_pose(clef)
+        );
         t.shutdown();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -5541,7 +5650,7 @@ mod tests {
         // leaves the view alone
         t.apply(Event::Saved {
             alias: "mine".into(),
-            path: "/w/mine/world.xml".into(),
+            path: "/w/mine/map.json".into(),
         });
         assert_eq!(t.world(), "mine");
         t.apply(Event::Scene(Box::new(scene())));

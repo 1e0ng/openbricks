@@ -75,6 +75,9 @@ class ProtocolTests(unittest.TestCase):
                 json.dumps({"cmd": "fix", "name": "clef", "fixed": True}),
                 json.dumps({"cmd": "add_model", "name": "x", "doc": {"format": "nope"}, "x_mm": 0, "y_mm": 0}),
                 json.dumps({"cmd": "save_world", "name": "wired"}),
+                json.dumps({"cmd": "export_world", "path": os.path.join(tmp, "out.map.json")}),
+                json.dumps({"cmd": "import_world", "path": os.path.join(tmp, "out.map.json")}),
+                json.dumps({"cmd": "import_world", "path": os.path.join(tmp, "missing.map.json")}),
                 json.dumps({"cmd": "remove", "name": "ghost"}),
                 json.dumps({"cmd": "quit"}),
             ]
@@ -85,11 +88,20 @@ class ProtocolTests(unittest.TestCase):
             self.assertTrue(any(e["ev"] == "error" and "assembly" in e["text"] for e in ev), [e for e in ev if e["ev"] == "error"])
             self.assertIn("saved", kinds)
             self.assertTrue(any(e["ev"] == "error" and "ghost" in e["text"] for e in ev), [e for e in ev if e["ev"] == "error"])
-            self.assertTrue(os.path.isfile(os.path.join(tmp, "worlds", "wired", "world.xml")))
-            from openbricks_sim import props
-            saved = open(os.path.join(tmp, "worlds", "wired", "world.xml")).read()
+            self.assertTrue(os.path.isfile(os.path.join(tmp, "worlds", "wired", "map.json")))
+            from openbricks_sim import mapfile, props
+            saved = mapfile.load(os.path.join(tmp, "worlds", "wired", "map.json"))
             clef = next(p for p in props.props_in(saved) if p["name"] == "clef")
             self.assertEqual((clef["yaw"], clef["pitch"], clef["roll"], clef["pos"][2]), (90.0, 90.0, 0.0, 0.03))
+            # exported as one JSON file, imported back as a map of the user's own (the map's name is
+            # the shipped model's, so the alias is its slug); a missing file is an error on the wire
+            exported = next(e for e in ev if e["ev"] == "exported")
+            self.assertEqual(exported["path"], os.path.join(tmp, "out.map.json"))
+            self.assertEqual(json.load(open(exported["path"]))["format"], mapfile.FORMAT)
+            imported = next(e for e in ev if e["ev"] == "imported")
+            self.assertTrue(os.path.isfile(imported["path"]))
+            self.assertIn(imported["alias"], [w["alias"] for w in props.list_user_worlds()])
+            self.assertTrue(any(e["ev"] == "error" and "missing.map.json" in e["text"] for e in ev), [e for e in ev if e["ev"] == "error"])
 
     def test_unknown_and_bad_commands_are_reported(self):
         out = io.StringIO()
@@ -177,7 +189,7 @@ class SessionTests(unittest.TestCase):
             s.place(0.0, 0.0, 0.0)
             frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
             self.assertAlmostEqual(frame["bodies"][clef["body"]][0], 0.3, places=4)
-            self.assertIn('yaw="45"', s.world_xml)
+            self.assertEqual(props.props_in(s.world_map)[[p["name"] for p in props.props_in(s.world_map)].index("clef")]["yaw"], 45.0)
             with self.assertRaises(props.PropError):
                 s.move_prop("no_such_prop", 0.0, 0.0)
             # tipped: pitch, roll and a height given are the body's at once and the text's
@@ -189,10 +201,11 @@ class SessionTests(unittest.TestCase):
             sign = 1.0 if got[3] * want[0] + got[4] * want[1] + got[5] * want[2] + got[6] * want[3] >= 0 else -1.0
             for a, b in zip(got[3:], want):
                 self.assertAlmostEqual(a * sign, b, places=5)
-            self.assertIn('yaw="45" pitch="90" roll="-30"', s.world_xml)
+            clef_of = lambda: next(p for p in s.world_map["props"] if p["name"] == "clef")  # noqa: E731
+            self.assertEqual((clef_of()["yaw"], clef_of()["pitch"], clef_of()["roll"]), (45.0, 90.0, -30.0))
             # a move that does not name them keeps them (and the height)
             s.move_prop("clef", 300.0, -200.0, 45.0)
-            self.assertIn('yaw="45" pitch="90" roll="-30"', s.world_xml)
+            self.assertEqual((clef_of()["yaw"], clef_of()["pitch"], clef_of()["roll"]), (45.0, 90.0, -30.0))
             frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
             self.assertAlmostEqual(frame["bodies"][clef["body"]][2], 0.025, places=5)
             s.move_prop("clef", 300.0, -200.0, 45.0, 0.0, 0.0)
@@ -229,8 +242,9 @@ class SessionTests(unittest.TestCase):
             stand = -assembly_mod.prop_lowest_m(assembly_mod.prop_bricks(doc)[0])
             self.assertGreater(stand, 0.0, "a brick's origin is its top face: it reaches below")
             self.assertAlmostEqual(frame["bodies"][one["body"]][2], stand, places=4, msg="its lowest brick on the floor")
-            self.assertIn('pos="0.25000 -0.10000 %.5f"' % stand, s.world_xml)
-            self.assertIn(os.path.join(self.tmp.name, "props"), s.world_xml, "kept under the data directory until saved")
+            one_brick = next(p for p in s.world_map["props"] if p["name"] == "one_brick")
+            self.assertEqual(one_brick["pos"], [0.25, -0.1, round(stand, 6)])
+            self.assertTrue(one_brick["file"].startswith(os.path.join(self.tmp.name, "props")), "kept under the data directory until saved")
             s.fix_prop("one_brick", True)
             scene_f = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]
             self.assertTrue(next(p for p in scene_f["props"] if p["name"] == "one_brick")["fixed"])
@@ -258,7 +272,7 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(alias, "clef-moved")
             ev = _events(out.getvalue())
             saved = [e for e in ev if e["ev"] == "saved"][-1]
-            self.assertTrue(saved["path"].endswith(os.path.join("worlds", "clef-moved", "world.xml")))
+            self.assertTrue(saved["path"].endswith(os.path.join("worlds", "clef-moved", "map.json")))
             worlds = [e for e in ev if e["ev"] == "worlds"][-1]["worlds"]
             mine = next(w for w in worlds if w["alias"] == "clef-moved")
             self.assertTrue(mine["user"] and os.path.isfile(mine["path"]))
@@ -276,7 +290,7 @@ class SessionTests(unittest.TestCase):
             alias2 = s.save_world("With a model")
             saved_dir = os.path.join(self.tmp.name, "worlds", alias2)
             self.assertTrue(any(f.endswith(".assembly.json") for f in os.listdir(os.path.join(saved_dir, "props"))))
-            self.assertNotIn(self.tmp.name + os.sep + "props", open(os.path.join(saved_dir, "world.xml")).read())
+            self.assertNotIn(self.tmp.name + os.sep + "props", open(os.path.join(saved_dir, "map.json")).read())
             s.load(world=alias2, assembly=_EXAMPLE)
             scene_s = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]
             self.assertTrue(any(p["name"] == "kept_brick" and p["bricks"] for p in scene_s["props"]))

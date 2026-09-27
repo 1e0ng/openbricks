@@ -144,11 +144,12 @@ openbricks_dev = [
     "_docs/offline-docs.zip",
 ]
 openbricks_sim = [
-    "worlds/*/world.xml",
+    # the maps themselves: JSON since 4.32.0 (``mapfile.py``)
+    "worlds/*/map.json",
     "worlds/*/mat.png",
     "worlds/*/README.md",
-    # LDraw prop sources read at world-load time by ``world.py``'s
-    # ``<lego_prop>`` expansion. F2 introduced these and they were
+    # LDraw prop sources read at world-load time when a map's LDraw
+    # props become bodies (``mapfile.to_mjcf``). F2 introduced these and they were
     # NOT in the original packaging — wheels 0.10.7-0.10.10 shipped
     # without them and silently broke every WRO world on
     # ``pip install``. Same shape of bug as the missing-worlds bug
