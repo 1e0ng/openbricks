@@ -390,7 +390,9 @@ robot as a tree of components:
   colours too.
 - **Connections.** Pins, axles and studs are real features of the
   LDraw parts, and 4.8 mm bores are recognised as pin holes on every
-  mesh, imported STL files included. Let go of a part near a hole and
+  mesh, imported STL files included; a pin LDraw draws from plain
+  cylinders (the WRO set's "Type 2" pins) is recognised on its mesh the
+  same way. Let go of a part near a hole and
   it snaps: the pin axis aligns to the hole, a pin half centres in its
   module, an axle keeps its position along the hole. Bricks and plates
   stack: under every stud a part has a socket, and a tile, which has

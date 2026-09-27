@@ -95,6 +95,13 @@ class ShippedBundleTests(unittest.TestCase):
         self.assertEqual([c["kind"] for c in p["3713"]["connectors"]], ["axle_hole"])
         joiner = [c for c in p["62462"]["connectors"] if c["kind"] == "pin_hole"]
         self.assertEqual(len(joiner), 2)
+        # the "Type 2" pins, drawn from plain cylinders: found on the mesh (they had none, and
+        # 61332 is the WRO set's commonest pin, 30 of them); one 8 mm segment per module, along x
+        for num, n in [("61332", 2), ("42924", 3), ("39888", 3)]:
+            pins = [c for c in p[num]["connectors"] if c["kind"] == "pin"]
+            self.assertEqual(len(pins), n, num)
+            self.assertTrue(all(c["length"] == 8.0 and abs(c["axis"][0]) == 1.0 for c in pins), (num, pins))
+            self.assertEqual(sorted(c["centre"][0] for c in pins), [-4.0, 4.0] if n == 2 else [-8.0, 0.0, 8.0], num)
 
     def test_vendor_weights_are_physically_plausible_for_beams(self):
         for num in ("32278", "32525", "32524", "32316", "64178", "64179", "43857", "32523"):

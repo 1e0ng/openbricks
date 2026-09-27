@@ -265,6 +265,32 @@ class ConverterEdgeCaseTests(unittest.TestCase):
         stray = wall[:4] + np.array([0, 0, 30.0])
         self.assertEqual(len(ldraw.detect_bores(np.concatenate([tris, stray]))), 1)
 
+    def test_detect_shafts_finds_a_round_pin_the_primitives_do_not_name(self):
+        # the bore of 7777 turned inside out (every face reversed) is a solid shaft: the male
+        tris, _ = self.builder.build(self.lib.resolve("7777.dat"))
+        bore = ldraw.to_ours(tris)
+        shaft = bore[:, ::-1, :]
+        self.assertEqual(ldraw.detect_shafts(bore), [], "a bore is no shaft")
+        self.assertEqual(ldraw.detect_bores(shaft), [], "and a shaft no bore")
+        (kind, a, b), = ldraw.detect_shafts(shaft)
+        self.assertEqual(kind, "pin")
+        full = float(np.linalg.norm(b - a))
+        self.assertGreaterEqual(full, 4.0)
+        self.assertAlmostEqual(float(a[0]), 0.0, places=6)
+        self.assertAlmostEqual(float(a[1]), 0.0, places=6)
+        # a stud's 1.6 mm is no pin
+        self.assertEqual(ldraw.detect_shafts(shaft * np.array([1, 1, 1.6 / full])), [])
+        self.assertEqual(ldraw.detect_shafts(np.zeros((0, 3, 3))), [])
+        # only when the primitives name no pin, and never along an axle's line
+        named = [("pin", np.zeros(3), np.array([0.0, -8.0, 0.0]))]
+        self.assertEqual(ldraw.unnamed_pins(named, shaft), [])
+        self.assertEqual(len(ldraw.unnamed_pins([], shaft)), 1)
+        # an axle along the shaft's line (ours z = LDraw -y), and one off to the side
+        along = [("axle", np.array([0.0, 0.0, 0.0]), np.array([0.0, -20.0, 0.0]))]
+        beside = [("axle", np.array([20.0, 0.0, 0.0]), np.array([20.0, -20.0, 0.0]))]
+        self.assertEqual(ldraw.unnamed_pins(along, shaft), [])
+        self.assertEqual(len(ldraw.unnamed_pins(beside, shaft)), 1)
+
     def test_merge_connectors_keeps_distinct_features_apart(self):
         a = np.array([0.0, 0.0, 0.0])
         down = np.array([0.0, -20.0, 0.0])
