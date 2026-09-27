@@ -14,6 +14,8 @@ Commands (one JSON object per line on stdin)::
     {"cmd": "run", "script": "main.py"}
     {"cmd": "place", "x_mm": -547, "y_mm": -150, "yaw_deg": 90}
     {"cmd": "move", "name": "clef", "x_mm": 300, "y_mm": -200, "yaw_deg": 45}   # a prop
+    {"cmd": "move", "name": "clef", "x_mm": 300, "y_mm": -200, "z_mm": 12,
+     "yaw_deg": 45, "pitch_deg": 90, "roll_deg": 0}   # tipped: a height and pitch/roll too
     {"cmd": "add", "from": "note_red", "x_mm": 0, "y_mm": 0, "yaw_deg": 0}     # another like it
     {"cmd": "add_model", "name": "tower", "doc": {...openbricks-assembly/1...}, "x_mm": 0, "y_mm": 0, "yaw_deg": 0}
     {"cmd": "fix", "name": "clef", "fixed": true}   # stuck to the map (false: free again)
@@ -293,31 +295,37 @@ class Session:
         if not self.world_xml:
             raise RuntimeError("the empty world has no props to %s" % what)
 
-    def move_prop(self, name, x_mm, y_mm, yaw_deg=0.0):
+    def move_prop(self, name, x_mm, y_mm, yaw_deg=0.0, pitch_deg=None, roll_deg=None, z_mm=None):
         """Put a prop at a pose on the map: the live body moves at once
-        (its height kept, and the pose a reset returns to updated), and
-        the map's text remembers it."""
+        (the pose a reset returns to updated), and the map's text
+        remembers it. Its height, pitch and roll are set when given, else
+        kept as they are."""
         self._editable("move")
-        import math
         import mujoco
         x, y, yaw = float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg)
-        self.world_xml = props.with_prop_moved(self.world_xml, name, x, y, yaw)
+        was = next((p for p in props.props_in(self.world_xml) if p["name"] == name), None)
+        if was is None:
+            raise props.PropError("no prop named %r on this map" % (name,))
+        pitch = was["pitch"] if pitch_deg is None else float(pitch_deg)
+        roll = was["roll"] if roll_deg is None else float(roll_deg)
+        z_m = None if z_mm is None else float(z_mm) / 1000.0
+        self.world_xml = props.with_prop_moved(self.world_xml, name, x, y, yaw, pitch, roll, z_m)
         model, data = self.robot.model, self.robot.data
         bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
         if bid < 0:
             raise RuntimeError("no body named %r in the loaded map" % (name,))
-        half = math.radians(yaw) / 2.0
-        quat = (math.cos(half), 0.0, 0.0, math.sin(half))
+        quat = props.euler_quat(yaw, pitch, roll)
         jnt = int(model.body_jntadr[bid]) if int(model.body_jntnum[bid]) > 0 else -1
         if jnt >= 0 and int(model.jnt_type[jnt]) == int(mujoco.mjtJoint.mjJNT_FREE):
             q, v = int(model.jnt_qposadr[jnt]), int(model.jnt_dofadr[jnt])
-            z = float(data.qpos[q + 2])
+            z = float(data.qpos[q + 2]) if z_m is None else z_m
             data.qpos[q:q + 3] = (x, y, z)
             data.qpos[q + 3:q + 7] = quat
             data.qvel[v:v + 6] = 0.0
             model.qpos0[q:q + 7] = data.qpos[q:q + 7]
         else:
-            model.body_pos[bid] = (x, y, float(model.body_pos[bid][2]))
+            z = float(model.body_pos[bid][2]) if z_m is None else z_m
+            model.body_pos[bid] = (x, y, z)
             model.body_quat[bid] = quat
         mujoco.mj_forward(model, data)
         self._send_frame()
@@ -537,7 +545,8 @@ def serve(stdin=None, stdout=None, frame_hz=60.0):
             elif name == "place":
                 session.place(cmd["x_mm"], cmd["y_mm"], cmd.get("yaw_deg", 0.0))
             elif name == "move":
-                session.move_prop(cmd["name"], cmd["x_mm"], cmd["y_mm"], cmd.get("yaw_deg", 0.0))
+                session.move_prop(cmd["name"], cmd["x_mm"], cmd["y_mm"], cmd.get("yaw_deg", 0.0),
+                                  cmd.get("pitch_deg"), cmd.get("roll_deg"), cmd.get("z_mm"))
             elif name == "add":
                 session.add_prop(cmd["from"], cmd["x_mm"], cmd["y_mm"], cmd.get("yaw_deg", 0.0))
             elif name == "add_model":

@@ -340,7 +340,9 @@ def emit_prop_body(name: str,
                    total_mass_kg: float = 0.05,
                    indent: str = "    ",
                    color_override: int = None,
-                   yaw_deg: float = 0.0) -> str:
+                   yaw_deg: float = 0.0,
+                   pitch_deg: float = 0.0,
+                   roll_deg: float = 0.0) -> str:
     """Convert an LDraw model into a complete MJCF ``<body>`` block.
 
     ``pos_world_m`` is the body's origin in the world frame; the
@@ -359,11 +361,9 @@ def emit_prop_body(name: str,
 
     inner = indent + "  "
     lines = []
-    quat = ""
-    if yaw_deg:
-        # turned about z: the map editor's yaw, as a w-x-y-z quaternion
-        half = math.radians(yaw_deg) / 2.0
-        quat = ' quat="{:.6f} 0 0 {:.6f}"'.format(math.cos(half), math.sin(half))
+    from openbricks_sim import props
+    # turned as the map editor turned it: roll, pitch, then yaw
+    quat = props.quat_attr(yaw_deg, pitch_deg, roll_deg)
     lines.append('{indent}<body name="{name}" '
                  'pos="{x:.5f} {y:.5f} {z:.5f}"{quat}>'
                  .format(indent=indent, name=name,

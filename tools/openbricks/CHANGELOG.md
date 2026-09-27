@@ -3,6 +3,41 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.31.0 — pitch and roll on the Workbench and the map; a whole component turns
+
+**The map.** A prop only turned about the map's up axis. It now
+pitches and rolls too: **Pitch 90°** and **Roll 90°** tip it a quarter
+about the map's y and x axes, and **pitch** and **roll** fields beside
+**heading** set the angles outright. Every turn — the heading's too —
+is in place: about the middle of the prop, then up or down so its
+lowest point stays where it was, so a prop standing on the mat stays
+standing on it however it is tipped (the height is measured on the
+prop's exact bricks and meshes). A turn that would overlap another
+prop or the robot is refused, as a drag is. The placeholders gained
+`pitch="deg"` and `roll="deg"` after `yaw` (roll about x, then pitch
+about y, then yaw about z, the Workbench's order), both body emitters
+write the whole quaternion, a map's load lifts a sunk build by what
+reaches down once it is tipped, and the run server's `move` takes
+`z_mm`, `pitch_deg` and `roll_deg` (each kept when not given).
+
+**The Workbench.** A multi-selection offered only **Turn 90°**; it has
+**Pitch 90°** and **Roll 90°** now, and all three buttons (and `R`)
+turn the selection as one piece about the first item's origin, about
+the world's axes — as the rotate rings always did. They used to turn
+each item about its own origin (a pair of bricks turned into each
+other) and to pitch or roll about the item's own tipped axis. With
+nothing selected in a component, **Turn the whole component** turns
+every part of it, locked ones too, in place: about the middle of what
+it fills, then back down so its lowest point is where it was. Every
+use of the component turns with it; the robot is not turned so.
+
+The map tab's harness test waited on a prop's shown pose before each
+turn, but a move shows at once, before the server has heard it, and
+an older frame can still arrive after; it failed one run in eight.
+It now waits for a world list asked for after the turn — the server
+answers in order — and the "Save changes" step (4.30.3) waits for its
+reload, whose late scene took the next step's new-prop selection.
+
 ## 4.30.4 — the library's search finds a name however its spaces run
 
 LDraw pads the numbers in its part names ("Plate  4 x  8"), and the

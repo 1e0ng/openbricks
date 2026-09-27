@@ -67,6 +67,18 @@ impl Joint {
     }
 }
 
+/// What placed parts fill and how low they reach: the box around them
+/// all and the lowest point any of them reaches, exact (see
+/// [`Shape::lowest_z`]). The Workbench and the map turn things in place
+/// by it.
+pub fn reach(parts: &[(std::rc::Rc<Shape>, Pose)]) -> (DVec3, DVec3, f64) {
+    let far = DVec3::splat(f64::INFINITY);
+    parts.iter().fold((far, -far, f64::INFINITY), |(lo, hi, low), (shape, pose)| {
+        let (a, b) = shape.world_bbox(pose);
+        (lo.min(a), hi.max(b), low.min(shape.lowest_z(pose)))
+    })
+}
+
 /// Where a part is: world = rot × local + pos.
 #[derive(Clone, Copy, Debug)]
 pub struct Pose {
@@ -147,6 +159,17 @@ impl Shape {
             whi = whi.max(w);
         }
         (wlo, whi)
+    }
+
+    /// The lowest height any corner of the part's surface reaches, placed
+    /// at `pose` — exact however it is turned, where the turned box only
+    /// bounds it.
+    pub fn lowest_z(&self, pose: &Pose) -> f64 {
+        self.tris
+            .iter()
+            .flatten()
+            .map(|v| (pose.rot * *v + pose.pos).z)
+            .fold(f64::INFINITY, f64::min)
     }
 
     /// Whether `p`, in the part's own frame, lies inside its material:
@@ -530,6 +553,17 @@ mod tests {
         ));
         assert_eq!(overlap(&b, &at(0.0, 0.0, 0.0), &s, &at(30.0, 0.0, 0.0)), None, "apart");
         assert_eq!(b.triangles(), 12);
+        // the lowest point: the box (10 mm, centred on its origin) reaches 5 mm below it, and
+        // turned 45° about x an edge reaches 5√2 mm below
+        assert!((b.lowest_z(&at(0.0, 0.0, 3.0)) + 2.0).abs() < 1e-9);
+        let tilt = DMat3::from_rotation_x(45f64.to_radians());
+        let low = b.lowest_z(&turned(0.0, 0.0, 0.0, tilt));
+        assert!((low + 5.0 * 2f64.sqrt()).abs() < 1e-9, "{low}");
+        // a mesh that is not a box: the turned bound reaches lower than any of its points
+        let beam = shape("32278");
+        let odd = DMat3::from_rotation_x(30f64.to_radians()) * DMat3::from_rotation_y(20f64.to_radians());
+        let exact = beam.lowest_z(&turned(0.0, 0.0, 0.0, odd));
+        assert!(beam.world_bbox(&turned(0.0, 0.0, 0.0, odd)).0.z < exact - 0.5, "{exact}");
         // a joint's room: the sinking is not counted inside a cylinder holding the small box's
         // walls where they cross the top face (its corners 2.83 mm out); a narrower one, or one
         // elsewhere, leaves it counted; the pushed-in boxes' shared strip likewise

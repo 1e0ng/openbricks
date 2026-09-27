@@ -79,7 +79,16 @@ three arrows (**Move**, `W`) to slide it along one world axis in grid
 steps, or three rings (**Rotate**, `E`) to turn it about one axis in
 15° steps — hold shift for free movement or rotation; several
 selected items move and turn together about the first one's origin.
-`R` turns the selection 90°, `S` snaps it — one item, or several as
+`R` turns the selection 90°, and the inspector's **Turn 90°**,
+**Pitch 90°** and **Roll 90°** turn it a quarter about the up (z), y
+and x axes — the world's axes, as the rings are, and the selection as
+one piece about the first item's origin, one item or several. With
+nothing selected inside a component, **Turn the whole component**
+turns every part of it (locked ones too: they keep their place among
+the rest) in place — about the middle of what it fills, and back down
+so its lowest point is where it was — and every use of the component
+turns with it; the robot itself is not turned so, since its frame is
+the way it drives. `S` snaps the selection — one item, or several as
 one — into the nearest hole,
 arrows nudge, `Delete` removes, `⌘Z` undoes. `⌘C` copies the selection
 and `⌘V` pastes it: back into the same component two modules over,
@@ -223,8 +232,17 @@ mission puts on the mat (each a `<lego_prop>` in the world's MJCF) and
 whatever you add: drag a prop to move it (its outline lights under the
 pointer, the selected one carries its name), shift-drag to turn it by
 hand, `R` or **Turn 90°** for a quarter turn, or set the **heading**
-field outright (degrees counter-clockwise from the map's x axis);
-click one, or its row in the panel, to select it; `⌘D` or
+field outright (degrees counter-clockwise from the map's x axis).
+**Pitch 90°** and **Roll 90°** tip it a quarter about the map's y and
+x axes, and the **pitch** and **roll** fields set those angles
+outright (the Workbench's order: roll about x, then pitch about y,
+then yaw about z). Every such turn is in place: about the middle of
+the prop, and up or down so its lowest point stays where it was — a
+prop standing on the mat stays standing on it, however it is tipped —
+and it is refused, as a drag is, when turned it would overlap another
+prop or the robot. The map's text keeps the angles as `yaw`, `pitch`
+and `roll` on the prop's placeholder. Click one, or its row in the
+panel, to select it; `⌘D` or
 **Duplicate** puts another like it a little to the side, `Del` or
 **Remove** takes it away, **Add…** lists the kinds of prop the map has
 and puts one of that kind at the map's origin.
