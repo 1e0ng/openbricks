@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.30.3 — Save changes to your own map; saving a map over itself keeps its files
+
+The Map tab could only "Save as a new map". On a map of your own the
+panel now offers **Save changes**, which writes the map in place under
+its own name; a shipped map says its layout is kept as shipped and
+that your changes go into a map of your own.
+
+Saving your own map over itself (typing its name into "Save as a new
+map", or the new button) emptied its folder before copying the source
+map's files into it — and the source was that folder, so the mat
+artwork and the props' models were lost and only the text survived.
+`props.save_as` now recognises its own directory as the source and
+rewrites the text alone.
+
 ## 4.30.2 — a joint excuses the press fit at the joint, not the whole pair
 
 Two parts with any one feature seated in the other's (a stud in a

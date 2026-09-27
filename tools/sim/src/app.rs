@@ -4028,6 +4028,16 @@ mod tests {
         assert_eq!(h.state().viewport.camera.target, panned, "a save keeps the view");
         assert!(h.query_by_label("map: harness-map").is_some(), "the toolbar names the map saved");
         assert!(h.state().simulate.worlds().iter().any(|w| w.alias == "harness-map" && w.user));
+        // the map being the user's own, "Save changes" writes it in place, under its own name
+        // (the reload that follows a save clears the message: the command sent is the witness)
+        let saves = h.state().simulate.sent.iter().filter(|c| c["cmd"] == "save_world").count();
+        h.get_by_label("Save changes").click();
+        wait_for(&mut h, &|a| {
+            a.simulate.sent.iter().filter(|c| c["cmd"] == "save_world").count() == saves + 1 && a.simulate.scene_loaded()
+        });
+        let last = h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "save_world").cloned().unwrap();
+        assert_eq!(last["name"], "harness-map");
+        assert_eq!(h.state().simulate.world(), "harness-map");
         // a brick from the library: found by number, put on the map as a document, drawn as its
         // mesh (the server sends the prop's bricks), selected once built
         let num = h.state().editor.bundle.parts.keys().next().unwrap().clone();

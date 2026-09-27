@@ -280,19 +280,22 @@ def save_as(src_dir, world_xml, name, reserved=(), env=None, home=None):
     since the map was loaded) copied into ``props/`` and referenced
     from there. A name that slugs to one of ``reserved`` (the shipped
     aliases) is refused, so a shipped map is never shadowed; saving over
-    the user's own map of that name replaces it. Returns ``(alias,
-    path)``."""
+    the user's own map of that name replaces it, and saving that map
+    over itself (its own directory the source) keeps its files and
+    writes the text. Returns ``(alias, path)``."""
     alias = slug(name)
     if alias in reserved:
         raise PropError("%r is a shipped map; choose another name" % (alias,))
     dest = user_worlds_dir(env, home) / alias
     src = Path(src_dir) if src_dir else None
-    if dest.exists():
-        shutil.rmtree(dest)
-    if src is not None and src.is_dir():
-        shutil.copytree(src, dest, ignore=shutil.ignore_patterns("world.xml", "__pycache__"))
-    else:
-        dest.mkdir(parents=True)
+    itself = src is not None and dest.is_dir() and src.resolve() == dest.resolve()
+    if not itself:
+        if dest.exists():
+            shutil.rmtree(dest)
+        if src is not None and src.is_dir():
+            shutil.copytree(src, dest, ignore=shutil.ignore_patterns("world.xml", "__pycache__"))
+        else:
+            dest.mkdir(parents=True)
     # models that live outside the map come along, and the text points at the copies
     for p in reversed(props_in(world_xml)):
         key = "ldr" if p["tag"] == "lego_prop" else "file"

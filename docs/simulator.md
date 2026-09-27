@@ -277,7 +277,11 @@ run server lists your maps beside the shipped ones (marked "yours"),
 the tab switches to the new map, and its markers come along; saving
 again under the same name replaces it, and a shipped map's name is
 refused so it is never shadowed. Routes remember the map they were
-planned on by that name.
+planned on by that name. On a map of your own the panel also offers
+**Save changes**, which writes the map in place under its own name —
+its artwork and models stay, only the text is rewritten. A shipped
+map has no such button: its layout is kept as shipped, and your
+changes go into a map of your own.
 
 ## The Assembly Workbench
 
