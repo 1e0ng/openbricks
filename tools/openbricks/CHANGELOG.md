@@ -3,6 +3,29 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.32.1 — R turns the whole component; a refused turn says why over the view
+
+On the Workbench, with nothing selected, R did nothing and said
+nothing — the user's "turn whole component 90 degree doesn't work,
+nothing moves". With nothing selected inside a component, R now turns
+the whole component in place, as the panel's **Turn the whole
+component** buttons do, and says so; at the robot's top level it says
+to select what to turn (the robot's frame is the way it drives).
+
+A refused change — a turn or a move that would put a part through a
+neighbour — was said only on the status line at the bottom right, which
+went unread twice ("it can not yaw 45 degree, only 0 or 90"). It is now
+a red banner across the top of the view as well (and red on the status
+line), until the next change is kept.
+
+Why a yaw of 45° was refused, measured: a brick on a pin turns about
+the pin. With the pin pointing up, that is yaw (the blue ring, the yaw
+field), and 45° is taken. With the pin level — as in the WRO picture,
+along y — it is pitch (the green ring, the pitch field), and 45° is
+taken; yaw would twist the brick off the pin and is refused. A brick
+on studs seats at 0° and 90° and is refused at 45°, its walls through
+the studs. All of it is pinned by tests, which stay.
+
 ## 4.32.0 — maps are JSON; export and import a map as one file
 
 The user: "for custom maps, allow user to export and import, also for
