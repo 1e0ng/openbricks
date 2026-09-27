@@ -455,7 +455,10 @@ fn coplanar_same_way(a: &[DVec3; 3], na: DVec3, b: &[DVec3; 3], nb: DVec3) -> Op
     }
     let area = signed_area(&poly).abs();
     let perimeter: f64 = (0..poly.len()).map(|i| (poly[(i + 1) % poly.len()] - poly[i]).length()).sum();
-    if perimeter <= 0.0 || 2.0 * area / perimeter <= TOL_MM {
+    // a share smaller than a TOL_MM square is contact, whatever its shape: two faces meeting at
+    // a point leave a polygon of rounding noise (1e-14 mm²), whose width, area over perimeter,
+    // is anything — it refused a whole component turned rigidly, touching faces and all
+    if area <= TOL_MM * TOL_MM || 2.0 * area / perimeter <= TOL_MM {
         return None;
     }
     Some((area, poly.iter().map(|q| a[0] + u * q.x + v * q.y).collect()))
@@ -553,6 +556,22 @@ mod tests {
         ));
         assert_eq!(overlap(&b, &at(0.0, 0.0, 0.0), &s, &at(30.0, 0.0, 0.0)), None, "apart");
         assert_eq!(b.triangles(), 12);
+        // a share of a TOL_MM square or less is contact, whatever its shape: faces meeting at a
+        // point leave a polygon of rounding noise whose computed area and perimeter need not agree
+        // (the user's congas, turned whole, had 1e-14 mm² pass the width test — that case is
+        // pinned by editor::tests::the_users_congas_turns_whole_about_every_axis)
+        let n = DVec3::Z;
+        let t1 = [DVec3::ZERO, DVec3::new(10.0, 0.0, 0.0), DVec3::new(0.0, 10.0, 0.0)];
+        let e = 1e-7;
+        let t2 = [
+            DVec3::new(10.0 - e, 0.0, 0.0),
+            DVec3::new(20.0, 0.0, 0.0),
+            DVec3::new(10.0 - e, e, 0.0),
+        ];
+        assert_eq!(coplanar_same_way(&t1, n, &t2, n), None);
+        let square = |x: f64, w: f64| [DVec3::new(x, 1.0, 0.0), DVec3::new(x + w, 1.0, 0.0), DVec3::new(x, 1.0 + w, 0.0)];
+        assert_eq!(coplanar_same_way(&t1, n, &square(1.0, 0.25), n), None, "0.03 mm²: contact");
+        assert!(coplanar_same_way(&t1, n, &square(1.0, 3.0), n).is_some(), "4.5 mm²: an overlap");
         // the lowest point: the box (10 mm, centred on its origin) reaches 5 mm below it, and
         // turned 45° about x an edge reaches 5√2 mm below
         assert!((b.lowest_z(&at(0.0, 0.0, 3.0)) + 2.0).abs() < 1e-9);

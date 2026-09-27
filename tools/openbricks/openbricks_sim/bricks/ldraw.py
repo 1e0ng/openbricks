@@ -316,15 +316,14 @@ def to_ours(pts_ldu):
 
 
 # ------------------------------------------------------------ pin holes
-def detect_bores(tris, radius=2.4, min_votes=12, min_len=2.0):
-    """Round bores of the pin radius on a finished mesh. Every wall face
-    of a 16-gon bore has its centroid one apothem from the axis along
-    its inward normal, so faces vote for axis positions; a real bore
-    collects votes from normals all the way round. Technic holes run
-    along one of the part's axes. A wall shorter than a module is a
-    chamfered ring: 5-8.5 mm means a thick beam's 8 mm hole, under 3 mm
-    a thin liftarm's 4 mm one; a plate's 3.2 mm wall is its whole hole.
-    Returns ``(kind, a, b)`` segments in the mesh's own frame."""
+def _round_runs(tris, radius, outward, min_votes=12):
+    """Round features of ``radius`` on a finished mesh, running along one
+    of the part's axes: ``(axis index, centre in the other two, lo, hi)``
+    per run. Every wall face of a 16-gon cylinder has its centroid one
+    apothem from the axis — inward along its normal in a bore, outward
+    in a shaft — so faces vote for axis positions, and a real one
+    collects votes from normals all the way round (10 of 16 sectors).
+    One run's faces lie within a module of each other."""
     if len(tris) == 0:
         return []
     p1, p2, p3 = tris[:, 0], tris[:, 1], tris[:, 2]
@@ -335,14 +334,14 @@ def detect_bores(tris, radius=2.4, min_votes=12, min_len=2.0):
     T = tris[ok]
     cent = T.mean(axis=1)
     apothem = radius * math.cos(math.pi / 16)
-    out = []
+    runs = []
     for ax in range(3):
         e = np.zeros(3)
         e[ax] = 1
         mask = np.abs(fn @ e) < 0.08
         if mask.sum() < min_votes:
             continue
-        pc = cent[mask] + apothem * fn[mask]
+        pc = cent[mask] + (-apothem if outward else apothem) * fn[mask]
         oth = [i for i in range(3) if i != ax]
         uv = pc[:, oth]
         nuv = fn[mask][:, oth]
@@ -363,7 +362,7 @@ def detect_bores(tris, radius=2.4, min_votes=12, min_len=2.0):
             aorder = np.argsort(mids)
             idx = idx[aorder]
             mids = mids[aorder]
-            gaps = np.flatnonzero(np.diff(mids) > 7.5)   # one bore's faces lie within a module
+            gaps = np.flatnonzero(np.diff(mids) > 7.5)   # one run's faces lie within a module
             for grp in np.split(np.arange(len(idx)), gaps + 1):
                 g = idx[grp]
                 if len(g) < min_votes:
@@ -371,24 +370,55 @@ def detect_bores(tris, radius=2.4, min_votes=12, min_len=2.0):
                 angles = np.arctan2(nuv[g][:, 1], nuv[g][:, 0])
                 covered = len(set((np.floor((angles + np.pi) / (2 * np.pi) * 16).astype(int) % 16).tolist()))
                 if covered < 10:
-                    continue                      # a wall or a fillet, not a bore
-                lo, hi = float(lo_a[g].min()), float(hi_a[g].max())
-                if hi - lo < min_len:
-                    continue
-                if 5.0 <= hi - lo <= 8.5:         # chamfered rings sit inside the module
-                    mid = (lo + hi) / 2
-                    lo, hi = mid - 4.0, mid + 4.0
-                elif hi - lo < 3.0:               # a thin liftarm's wall between chamfers: a 4 mm hole
-                    mid = (lo + hi) / 2
-                    lo, hi = mid - 2.0, mid + 2.0
-                a = np.zeros(3)
-                b = np.zeros(3)
-                a[oth] = centre_uv
-                b[oth] = centre_uv
-                a[ax] = lo
-                b[ax] = hi
-                out.append(("pin_hole", a, b))
+                    continue                      # a wall or a fillet, not a round feature
+                runs.append((ax, oth, centre_uv, float(lo_a[g].min()), float(hi_a[g].max())))
+    return runs
+
+
+def _segment(kind, ax, oth, centre_uv, lo, hi):
+    a = np.zeros(3)
+    b = np.zeros(3)
+    a[oth] = centre_uv
+    b[oth] = centre_uv
+    a[ax] = lo
+    b[ax] = hi
+    return (kind, a, b)
+
+
+def detect_bores(tris, radius=2.4, min_votes=12, min_len=2.0):
+    """Round bores of the pin radius on a finished mesh (the faces vote
+    inward, see :func:`_round_runs`). Technic holes run along one of the
+    part's axes. A wall shorter than a module is a chamfered ring: 5-8.5
+    mm means a thick beam's 8 mm hole, under 3 mm a thin liftarm's 4 mm
+    one; a plate's 3.2 mm wall is its whole hole. Returns ``(kind, a,
+    b)`` segments in the mesh's own frame."""
+    out = []
+    for ax, oth, centre_uv, lo, hi in _round_runs(tris, radius, outward=False, min_votes=min_votes):
+        if hi - lo < min_len:
+            continue
+        if 5.0 <= hi - lo <= 8.5:         # chamfered rings sit inside the module
+            mid = (lo + hi) / 2
+            lo, hi = mid - 4.0, mid + 4.0
+        elif hi - lo < 3.0:               # a thin liftarm's wall between chamfers: a 4 mm hole
+            mid = (lo + hi) / 2
+            lo, hi = mid - 2.0, mid + 2.0
+        out.append(_segment("pin_hole", ax, oth, centre_uv, lo, hi))
     return out
+
+
+def detect_shafts(tris, radius=2.4, min_votes=12, min_len=4.0):
+    """Round pin shafts of the pin radius on a finished mesh — the male
+    of :func:`detect_bores` (the faces vote outward). The pins LDraw
+    draws from plain cylinders and rib primitives — the "Type 2" pins
+    61332, 42924, 39888, the WRO set's commonest — name no connector
+    primitive :func:`classify` knows, and had no pins at all. A pin's
+    halves run through its collar as one shaft, cut into module segments
+    by :func:`merge_connectors`; a stud (1.6 mm) is shorter than
+    ``min_len``. Returns ``(kind, a, b)`` segments in the mesh's own
+    frame."""
+    return [_segment("pin", ax, oth, centre_uv, lo, hi)
+            for ax, oth, centre_uv, lo, hi in _round_runs(tris, radius, outward=True, min_votes=min_votes)
+            if hi - lo >= min_len]
 
 
 def merge_connectors(conns, extra_ours=()):
@@ -447,6 +477,30 @@ def merge_connectors(conns, extra_ours=()):
     return result
 
 
+def unnamed_pins(conns, tris):
+    """The pins a part has that its LDraw primitives do not name: none
+    when :func:`classify` found any pin (the mesh then only adds noise —
+    a collar, a stop bush, a stud end), else the part's round shafts
+    (:func:`detect_shafts`) except along an axle's line (a round axle end
+    is not a pin). ``conns`` are the named connectors, in LDraw
+    coordinates; the shafts come back in ours."""
+    if any(kind == "pin" for kind, _, _ in conns):
+        return []
+    axles = [(to_ours(a), to_ours(b)) for kind, a, b in conns if kind == "axle"]
+
+    def on_an_axle(seg):
+        _, a, b = seg
+        u = (b - a) / np.linalg.norm(b - a)
+        for p, q in axles:
+            v = (q - p) / np.linalg.norm(q - p)
+            d = a - p
+            if abs(abs(float(u @ v)) - 1) < 0.02 and np.linalg.norm(d - (d @ v) * v) < 0.5:
+                return True
+        return False
+
+    return [seg for seg in detect_shafts(tris) if not on_an_axle(seg)]
+
+
 # ------------------------------------------------------------- records
 def convert_part(lib, builder, number, weights=None):
     """One part number → a brick record, or ``None`` when the library
@@ -483,7 +537,7 @@ def convert_part(lib, builder, number, weights=None):
         "com": [round(float(v), 3) for v in (com if closed else (mn + mx) / 2)],
         "inertia_per_g": [[round(float(v), 4) for v in row] for row in (icom / vol if closed else box_i)],
         "mass_model": "mesh" if closed else "box",
-        "connectors": merge_connectors(conns, detect_bores(tris)),
+        "connectors": merge_connectors(conns, detect_bores(tris) + unnamed_pins(conns, tris)),
     }
     w = (weights or {}).get(number) or (weights or {}).get(part["ldraw"])
     if w:

@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.33.1 — the Type 2 pins are pins; touching faces never refuse a turn
+
+**The Type 2 pins.** The WRO set's commonest pin, 61332 "Technic Pin
+with Friction Type 2" (30 in 45819), and the long 42924 and 39888 had
+no pin connectors: LDraw draws them from plain cylinders and rib
+primitives, not the `connect`/`confric` primitives the library reads
+pins from. The magnet could not seat them in a hole and nothing counted
+them as a joint. The library now finds a part's round pin shafts on its
+mesh — the male of the bore detection that finds pin holes — for a
+part whose primitives name no pin, never along an axle's line (a round
+axle end is no pin). Only those three parts change in the rebuilt
+library; each now has its 8 mm segments, snaps into a Technic hole, and
+holds a brick on its end.
+
+**Touching faces never refuse a turn.** Pitching the user's congas (a
+WRO prop built on its side) 90° as a whole was refused: "aa stays: it
+would overlap lego_11". Faces that only touch, turned rigidly, shared a
+"coplanar" area of rounding noise (1e-14 mm²), whose computed area and
+perimeter need not agree and passed the width test. A shared area of a
+0.2 mm square or less is now contact, whatever its shape. The congas
+build is a test fixture: every axis turns whole.
+
 ## 4.33.0 — Select all on the Workbench
 
 The Workbench's contents list has a **Select all** button beside its

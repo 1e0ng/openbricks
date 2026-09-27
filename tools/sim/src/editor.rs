@@ -2686,6 +2686,80 @@ mod tests {
     }
 
     #[test]
+    fn the_type_2_pins_snap_into_holes_and_hold_a_brick() {
+        // the WRO set's commonest pins (61332, 30 of them; the long 42924 and 39888) are drawn
+        // from plain cylinders, and had no pin connectors: the magnet could not seat them and
+        // nothing counted them as a joint. Let go a touch off a Technic brick's end hole, each
+        // snaps in, mated; a 2 x 2 brick's tube then seats on 61332's outer half
+        for (num, len) in [("61332", 16.0), ("42924", 24.0), ("39888", 24.0)] {
+            let (mut ed, wall) = solo("3894");
+            let pin = ed.ensure_ldraw_part(num).unwrap();
+            let pins = ed.bundle.parts[num].connectors.iter().filter(|c| c.kind == "pin").count();
+            assert!(pins >= 2, "{num}: {pins} pin segments");
+            ed.add_instance(Some(pin), None, [0.0, 60.0, 0.0]);
+            let p = ed.selection[0].clone();
+            // one 8 mm segment in the hole (y -4..4), the rest out in front
+            let seated = [-16.0, len / 2.0 - 4.0, -4.0];
+            // (let go there: set directly, as a drag passes through it)
+            ed.set_instance(&p, |i| {
+                i.pos = [seated[0] + 0.6, seated[1] + 0.9, seated[2] - 0.5];
+                i.rot = [0.0, 0.0, 90.0];
+            });
+            ed.recompute();
+            ed.magnet = true;
+            ed.snap_selection(true);
+            assert!(ed.status.starts_with(&format!("Snapped {p} into {wall}")), "{num}: {}", ed.status);
+            let got = ed.selected_instances()[0].pos;
+            assert!((got[0] + 16.0).abs() < 0.05 && (got[2] + 4.0).abs() < 0.05, "{num}: {got:?}");
+            let cons = assembly::connections_of(&ed.doc, &ed.bundle, &ed.editing, &p);
+            assert!(cons.iter().any(|(m, o, _)| m == "pin" && o == "pin_hole"), "{num}: {cons:?}");
+            assert_eq!(ed.overlap_count(), 0, "{num}");
+            if num == "61332" {
+                ed.magnet = false;
+                ed.set_pose(&p, seated, [0.0, 0.0, 90.0]);
+                let brick = ed.ensure_ldraw_part("3003").unwrap();
+                ed.add_instance(Some(brick), None, [0.0, 120.0, 0.0]);
+                let red = ed.selection[0].clone();
+                ed.set_pose(&red, [-16.0, 13.6, -4.0], [-90.0, 0.0, 0.0]);
+                assert_eq!(ed.selected_instances()[0].pos, [-16.0, 13.6, -4.0], "{}", ed.status);
+                let cons = assembly::connections_of(&ed.doc, &ed.bundle, &ed.editing, &red);
+                assert!(
+                    cons.iter().any(|(m, o, path)| m == "pin_hole" && o == "pin" && path[0] == p),
+                    "{cons:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_users_congas_turns_whole_about_every_axis() {
+        // the user's congas (a WRO elementary prop built on its side: 34 items, a nested component,
+        // bricks turned every way), opened as a component: pitched 90° whole it was refused, "aa
+        // stays: it would overlap lego_11" — faces that only touch, turned rigidly, shared a
+        // "coplanar" area of rounding noise (1e-14 mm²). Every axis turns now, and undoes
+        let text = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/congas.assembly.json"));
+        let mut doc: Document = serde_json::from_str(text).unwrap();
+        doc.components.insert("robot".into(), Component::default());
+        doc.robot.root = "robot".into();
+        let mut ed = editor();
+        ed.doc = doc;
+        ed.recompute();
+        ed.open_component("congas", true);
+        assert_eq!(ed.children().len(), 34);
+        assert_eq!(ed.overlap_count(), 0);
+        let poses = |ed: &Editor| ed.children().iter().map(|i| (i.pos, i.rot)).collect::<Vec<_>>();
+        let before = poses(&ed);
+        for (axis, how) in [(1, "pitched"), (0, "rolled"), (2, "turned")] {
+            ed.rotate_component(axis, 90.0);
+            assert_eq!(ed.status, format!("congas {how} 90° in place"), "axis {axis}");
+            assert!(ed.refusal().is_none());
+            assert_ne!(poses(&ed), before);
+            ed.undo();
+            assert_eq!(poses(&ed), before);
+        }
+    }
+
+    #[test]
     fn a_whole_component_turns_in_place() {
         // a component of two 2 x 4s end to end, standing on the ground off its origin
         let (mut ed, a) = solo("3001");
