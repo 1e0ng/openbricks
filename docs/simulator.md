@@ -300,7 +300,9 @@ robot as a tree of components:
   every part of the two WRO sets, 45811 (the Brick Set: the mission
   bricks, tiles, hoses and balls) and 45819 (the Expansion Set). Type
   a set number, or "WRO", into the library's search to see a set's
-  bricks, each with how many the set holds. Type a part number the
+  bricks, each with how many the set holds. A name matches however
+  its spaces run and whatever its case: "plate 4 x 8" finds LDraw's
+  "Plate  4 x  8". Type a part number the
   library lacks — the LEGO design id printed on the part, `2458` —
   and the library says so and offers **Fetch 2458 from LDraw**: the
   part's own file and the few subparts and primitives it references
