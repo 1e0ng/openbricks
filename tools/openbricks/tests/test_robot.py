@@ -23,7 +23,7 @@ class WorldResolutionTests(unittest.TestCase):
     def test_wro_alias_resolves_to_shipped_path(self):
         p = _resolve_world("wro-2026-elementary")
         self.assertIsNotNone(p)
-        self.assertTrue(p.endswith("world.xml"))
+        self.assertTrue(p.endswith("map.json"))
 
     def test_unknown_returned_as_passthrough(self):
         self.assertEqual(_resolve_world("/abs/path.xml"), "/abs/path.xml")

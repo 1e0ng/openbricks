@@ -1,0 +1,370 @@
+{
+  "format": "openbricks-map/1",
+  "name": "wro_2026_junior_heritage_heroes",
+  "about": [
+    "WRO 2026 RoboMission Junior — \"Heritage Heroes\"",
+    "=================================================",
+    "",
+    "Theme: an old town's heritage. The robot helps tour visitors,",
+    "rebuilds towers, brings excavated artefacts to the museum, and",
+    "cleans the cobblestone area.",
+    "",
+    "Missions (from the official Game Rules PDF, 2026-01-15):",
+    "",
+    "  3.1  Show the visitors around",
+    "         4 visitors → corresponding-colour areas, upright.",
+    "         10 pts each (40 max), 5 partial.",
+    "  3.2  Rebuild the towers",
+    "         2 yellow towers (top + base, two pieces each) → yellow",
+    "           target areas with orange border.",
+    "           25 pts (full + base full upright), 15 partial-base, max 50.",
+    "         2 red towers (one piece each) → red target areas with",
+    "           orange border, upright.",
+    "           15 pts each (30 max), 10 partial.",
+    "  3.3  Bring the artefacts in the museum",
+    "         4 artefacts (red×?, yellow, green) → matching-colour",
+    "           exhibition spots in the museum, upright.",
+    "           15 pts each (60 max), 5 partial / wrong colour.",
+    "  3.4  Clear the cobblestone of dirt",
+    "         10 dirt particles must be moved out of the cobblestone",
+    "         area. 2 pts each (20 max).",
+    "  3.5  Bonus — don't damage / move:",
+    "         Barrier ........ 10 each (×2 = 20 max)",
+    "         Parrot ......... 10",
+    "",
+    "Max round score: 230.",
+    "",
+    "Mat: 2362 × 1143 mm — official printed artwork as MuJoCo texture",
+    "(mat.png in this directory). Origin at mat centre. +X = long",
+    "axis (towards start area), +Y = short axis, +Z = up. Metres."
+  ],
+  "physics": {
+    "timestep": 0.001,
+    "iterations": 20,
+    "solver": "Newton"
+  },
+  "textures": [
+    {
+      "name": "mat_tex",
+      "type": "2d",
+      "file": "mat.png"
+    }
+  ],
+  "materials": [
+    {
+      "name": "mat",
+      "texture": "mat_tex",
+      "texrepeat": [1, 1],
+      "specular": 0,
+      "shininess": 0,
+      "reflectance": 0
+    },
+    {
+      "name": "wall",
+      "rgba": [0.9, 0.9, 0.9, 1]
+    },
+    {
+      "name": "lego_red",
+      "rgba": [0.85, 0.1, 0.1, 1],
+      "note": "LEGO prop colours"
+    },
+    {
+      "name": "lego_yellow",
+      "rgba": [0.95, 0.8, 0.1, 1]
+    },
+    {
+      "name": "lego_green",
+      "rgba": [0.15, 0.7, 0.25, 1]
+    },
+    {
+      "name": "lego_blue",
+      "rgba": [0.1, 0.3, 0.8, 1]
+    },
+    {
+      "name": "lego_white",
+      "rgba": [0.95, 0.95, 0.95, 1]
+    },
+    {
+      "name": "lego_black",
+      "rgba": [0.08, 0.08, 0.08, 1]
+    },
+    {
+      "name": "lego_brown",
+      "rgba": [0.5, 0.3, 0.15, 1]
+    },
+    {
+      "name": "lego_gray",
+      "rgba": [0.55, 0.55, 0.58, 1]
+    }
+  ],
+  "lights": [
+    {
+      "pos": [0.6, 0, 1.6],
+      "dir": [0, 0, -1],
+      "diffuse": [0.95, 0.95, 0.95]
+    },
+    {
+      "pos": [-0.6, 0, 1.6],
+      "dir": [0, 0, -1],
+      "diffuse": [0.65, 0.65, 0.65]
+    }
+  ],
+  "geoms": [
+    {
+      "name": "mat",
+      "type": "plane",
+      "size": [1.181, 0.5715, 0.01],
+      "material": "mat",
+      "friction": [0.8, 0.02, 0.0001],
+      "note": "===== MAT (2.362 × 1.143 m, printed texture) ====="
+    },
+    {
+      "name": "wall_n",
+      "type": "box",
+      "pos": [0, 0.579, 0.02],
+      "size": [1.181, 0.0075, 0.02],
+      "material": "wall",
+      "note": "Border walls."
+    },
+    {
+      "name": "wall_s",
+      "type": "box",
+      "pos": [0, -0.579, 0.02],
+      "size": [1.181, 0.0075, 0.02],
+      "material": "wall"
+    },
+    {
+      "name": "wall_e",
+      "type": "box",
+      "pos": [1.188, 0, 0.02],
+      "size": [0.0075, 0.5715, 0.02],
+      "material": "wall"
+    },
+    {
+      "name": "wall_w",
+      "type": "box",
+      "pos": [-1.188, 0, 0.02],
+      "size": [0.0075, 0.5715, 0.02],
+      "material": "wall"
+    }
+  ],
+  "props": [
+    {
+      "name": "parrot",
+      "ldr": "props/parrot.ldr",
+      "pos": [-0.55, 0.35, 0.0],
+      "mass": 0.05,
+      "note": [
+        "=========================================================",
+        "F2.6: All Junior props as LDraw assemblies, expanded by",
+        "world.py's lego_prop placeholder. Shared geometry .ldr",
+        "files (visitor.ldr, artefact.ldr, barrier.ldr) use the",
+        "lego_prop ``color`` attribute to override the LDraw",
+        "colour at load time, so a single file does duty for all",
+        "instances differing only in colour. The fixed-position",
+        "layout below matches what 0.10.x had; the F3.J",
+        "randomization spec (a follow-up PR) permutes 4 of the 5",
+        "artefacts across 4 black target squares per round, and",
+        "randomises the 10 dirt-particle positions on the",
+        "cobblestone area.",
+        "=========================================================",
+        "",
+        "Mission 3.5 bonus: parrot + 2 barriers (don't damage)."
+      ]
+    },
+    {
+      "name": "barrier_a",
+      "ldr": "props/barrier.ldr",
+      "pos": [-0.3, 0.1, 0.0],
+      "mass": 0.1,
+      "color": "red"
+    },
+    {
+      "name": "barrier_b",
+      "ldr": "props/barrier.ldr",
+      "pos": [0.3, -0.05, 0.0],
+      "mass": 0.1,
+      "color": "white"
+    },
+    {
+      "name": "visitor_red",
+      "ldr": "props/visitor.ldr",
+      "pos": [0.65, -0.45, 0.0],
+      "mass": 0.04,
+      "color": "red",
+      "note": "Mission 3.1: 4 visitors (red / blue / green / black)."
+    },
+    {
+      "name": "visitor_blue",
+      "ldr": "props/visitor.ldr",
+      "pos": [0.75, -0.45, 0.0],
+      "mass": 0.04,
+      "color": "blue"
+    },
+    {
+      "name": "visitor_green",
+      "ldr": "props/visitor.ldr",
+      "pos": [0.85, -0.45, 0.0],
+      "mass": 0.04,
+      "color": "green"
+    },
+    {
+      "name": "visitor_black",
+      "ldr": "props/visitor.ldr",
+      "pos": [0.95, -0.45, 0.0],
+      "mass": 0.04,
+      "color": "black"
+    },
+    {
+      "name": "yellow_tower_a",
+      "ldr": "props/yellow_tower.ldr",
+      "pos": [-0.1, 0.3, 0.0],
+      "mass": 0.08,
+      "note": "Mission 3.2: 2 yellow towers + 2 red towers."
+    },
+    {
+      "name": "yellow_tower_b",
+      "ldr": "props/yellow_tower.ldr",
+      "pos": [0.1, 0.3, 0.0],
+      "mass": 0.08
+    },
+    {
+      "name": "red_tower_a",
+      "ldr": "props/red_tower.ldr",
+      "pos": [0.3, 0.3, 0.0],
+      "mass": 0.07
+    },
+    {
+      "name": "red_tower_b",
+      "ldr": "props/red_tower.ldr",
+      "pos": [0.5, 0.3, 0.0],
+      "mass": 0.07
+    },
+    {
+      "name": "artefact_red",
+      "ldr": "props/artefact.ldr",
+      "pos": [0.05, -0.05, 0.0],
+      "mass": 0.05,
+      "color": "red",
+      "note": [
+        "Mission 3.3: 4 of 5 artefacts on the field per round.",
+        "Per the rules, 5 colours exist (blue/red/green/black/yellow)",
+        "but only 4 are placed; the 5th is the round's \"unused\".",
+        "F3.J randomization (follow-up) selects which 4 each round.",
+        "For now we seed all 5 — randomization deletes the chosen",
+        "\"unused\" body's geoms each round by placing it off-mat."
+      ]
+    },
+    {
+      "name": "artefact_yellow",
+      "ldr": "props/artefact.ldr",
+      "pos": [0.15, -0.05, 0.0],
+      "mass": 0.05,
+      "color": "yellow"
+    },
+    {
+      "name": "artefact_green",
+      "ldr": "props/artefact.ldr",
+      "pos": [0.05, -0.18, 0.0],
+      "mass": 0.05,
+      "color": "green"
+    },
+    {
+      "name": "artefact_blue",
+      "ldr": "props/artefact.ldr",
+      "pos": [0.15, -0.18, 0.0],
+      "mass": 0.05,
+      "color": "blue"
+    },
+    {
+      "name": "artefact_black",
+      "ldr": "props/artefact.ldr",
+      "pos": [0.1, -0.3, 0.0],
+      "mass": 0.05,
+      "color": "black"
+    },
+    {
+      "name": "dirt_1",
+      "ldr": "props/dirt.ldr",
+      "pos": [0.85, 0.1, 0.0],
+      "mass": 0.003,
+      "color": "black",
+      "note": [
+        "Mission 3.4: 10 dirt particles. Same .ldr (a single 1x2",
+        "tile) instantiated 10 times. F3.J randomization permutes",
+        "their positions on the cobblestone area each round."
+      ]
+    },
+    {
+      "name": "dirt_2",
+      "ldr": "props/dirt.ldr",
+      "pos": [0.9, 0.05, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    },
+    {
+      "name": "dirt_3",
+      "ldr": "props/dirt.ldr",
+      "pos": [0.95, -0.02, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    },
+    {
+      "name": "dirt_4",
+      "ldr": "props/dirt.ldr",
+      "pos": [0.98, 0.08, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    },
+    {
+      "name": "dirt_5",
+      "ldr": "props/dirt.ldr",
+      "pos": [0.86, -0.05, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    },
+    {
+      "name": "dirt_6",
+      "ldr": "props/dirt.ldr",
+      "pos": [0.92, -0.15, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    },
+    {
+      "name": "dirt_7",
+      "ldr": "props/dirt.ldr",
+      "pos": [1.0, 0.12, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    },
+    {
+      "name": "dirt_8",
+      "ldr": "props/dirt.ldr",
+      "pos": [0.83, 0.18, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    },
+    {
+      "name": "dirt_9",
+      "ldr": "props/dirt.ldr",
+      "pos": [0.88, 0.22, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    },
+    {
+      "name": "dirt_10",
+      "ldr": "props/dirt.ldr",
+      "pos": [1.02, -0.1, 0.0],
+      "mass": 0.003,
+      "color": "black"
+    }
+  ],
+  "cameras": [
+    {
+      "name": "overhead",
+      "pos": [0, 0, 2.6],
+      "xyaxes": [1, 0, 0, 0, 1, 0],
+      "note": "Overhead camera for scene preview."
+    }
+  ]
+}

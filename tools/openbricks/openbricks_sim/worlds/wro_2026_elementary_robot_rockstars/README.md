@@ -1,12 +1,12 @@
 # WRO 2026 RoboMission Elementary — "Robot Rockstars"
 
-A MuJoCo MJCF world for the [2026 WRO RoboMission Elementary](https://wro-association.org/wp-content/uploads/WRO-2026-RoboMission-Elementary-Game-Rules.pdf) competition. Robot drives onto a music-festival stage and arranges instruments, microphone, cables, and notes. The mat artwork is the official printing-ready file; physical props sit on top.
+A map (`map.json`, format `openbricks-map/1`) for the [2026 WRO RoboMission Elementary](https://wro-association.org/wp-content/uploads/WRO-2026-RoboMission-Elementary-Game-Rules.pdf) competition. Robot drives onto a music-festival stage and arranges instruments, microphone, cables, and notes. The mat artwork is the official printing-ready file; physical props sit on top.
 
 ## Files
 
 | | |
 |---|---|
-| `world.xml` | MJCF scene description |
+| `map.json` | the map: physics, mat, walls, props and camera (MuJoCo's own names and units, in JSON) |
 | `mat.png` | Printed mat texture, 6974×3375 px (75 dpi rasterization of the official Game Mat Printing File PDF, 256-colour palette-quantized — PyPI wheel-size budget; the TCS34725 sampling spot still spans ~9 px). Regenerable via `scripts/regen-wro-mat-textures.sh`. |
 
 ## Mat — what's where
@@ -22,8 +22,7 @@ A MuJoCo MJCF world for the [2026 WRO RoboMission Elementary](https://wro-associ
 ## Loading the scene
 
 ```
-pip install mujoco
-python -m mujoco.viewer --mjcf=tools/openbricks-sim/worlds/wro_2026_elementary_robot_rockstars/world.xml
+openbricks sim preview --world wro-2026-elementary
 ```
 
 `openbricks-sim run` (when it ships) will spawn the user's robot inside this world programmatically.

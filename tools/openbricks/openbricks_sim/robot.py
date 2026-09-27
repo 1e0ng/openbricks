@@ -45,48 +45,10 @@ from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
 from openbricks_sim.world import load_world
 
 
-# Repo-relative aliases for the WRO worlds — same set ``cli.py``
-# resolves for ``preview``. Resolved against the package root, so the
-# call site doesn't need to know where it lives on disk.
-_BUILTIN_WORLDS = {
-    "empty":               None,
-    "wro-2026-elementary": "worlds/wro_2026_elementary_robot_rockstars/world.xml",
-    "wro-2026-junior":     "worlds/wro_2026_junior_heritage_heroes/world.xml",
-    "wro-2026-senior":     "worlds/wro_2026_senior_mosaic_masters/world.xml",
-    # Small practice scenes for learning / iteration. See
-    # ``worlds/<name>/README.md`` for the layout + suggested missions.
-    "practice-zones":      "worlds/practice_zones/world.xml",
-    "practice-walls":      "worlds/practice_walls/world.xml",
-    "practice-line":       "worlds/practice_line/world.xml",
-}
-
-
-def _resolve_world(world):
-    """Aliases → on-disk path; ``None`` keeps the standalone preview.
-    Shipped aliases first, then the user's own maps under the data
-    directory, then a path to a ``world.xml``."""
-    if world is None or world == "empty":
-        return None
-    if world not in _BUILTIN_WORLDS:
-        from openbricks_sim import props
-        mine = props.user_worlds_dir() / str(world) / "world.xml"
-        if mine.is_file():
-            return str(mine)
-    if world in _BUILTIN_WORLDS:
-        rel = _BUILTIN_WORLDS[world]
-        if rel is None:
-            return None
-        # Aliases are package-relative — the worlds directory ships
-        # inside ``openbricks_sim/`` so the wheel bundles them, and
-        # ``Path(__file__).parent`` resolves to the installed package
-        # root regardless of how the user installed (pip, pipx,
-        # editable, sdist-compile).
-        pkg_root = Path(__file__).resolve().parent
-        candidate = pkg_root / rel
-        if candidate.is_file():
-            return str(candidate)
-        return world
-    return world
+# The map aliases and their resolution live with the maps (``props``), light
+# enough for the CLI's parser (and the docs that render it) to import.
+from openbricks_sim.props import BUILTIN_WORLDS as _BUILTIN_WORLDS  # noqa: E402
+from openbricks_sim.props import resolve_world as _resolve_world  # noqa: E402,F401
 
 
 class SimRobotError(RuntimeError):
@@ -120,7 +82,7 @@ class SimRobot:
                  kp: float = 0.3,
                  kp_sum: Optional[float] = None,
                  kp_diff: Optional[float] = None,
-                 assembly=None, world_xml=None):
+                 assembly=None, world_map=None):
         # ``assembly``: a robot.assembly.json path or its parsed dict —
         # the chassis is then derived from the build (roles → spec,
         # rolled-up mass properties, one visual geom per brick).
@@ -148,7 +110,7 @@ class SimRobot:
         else:
             model, data, _ = load_world(path, chassis_spec=spec,
                                         inertial=inertial, extra_geoms=extra_geoms,
-                                        world_xml=world_xml)
+                                        world_map=world_map)
 
         self.model        = model
         self.data         = data

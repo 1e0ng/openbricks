@@ -51,40 +51,12 @@ def _chassis_spec(args):
     return ChassisSpec(**fields)
 
 
-_BUILTIN_WORLDS = {
-    # Shorthand aliases for the worlds shipped in the repo. The
-    # runtime can still take a full path to any MJCF.
-    "empty":     None,  # <- generated standalone chassis preview
-    "wro-2026-elementary": "worlds/wro_2026_elementary_robot_rockstars/world.xml",
-    "wro-2026-junior":     "worlds/wro_2026_junior_heritage_heroes/world.xml",
-    "wro-2026-senior":     "worlds/wro_2026_senior_mosaic_masters/world.xml",
-    # Small practice scenes for learning / iteration. See
-    # ``worlds/<name>/README.md`` for the layout + suggested missions.
-    "practice-zones":      "worlds/practice_zones/world.xml",
-    "practice-walls":      "worlds/practice_walls/world.xml",
-    "practice-line":       "worlds/practice_line/world.xml",
-}
-
-
-def _resolve_world(arg: str):
-    """Map an alias or path to an on-disk MJCF. None ⇒ standalone."""
-    if arg in _BUILTIN_WORLDS:
-        rel = _BUILTIN_WORLDS[arg]
-        if rel is None:
-            return None
-        # Aliases are package-relative — the worlds directory ships
-        # inside ``openbricks_sim/`` so the wheel bundles them, and
-        # ``Path(__file__).parent`` resolves to the installed package
-        # root regardless of how the user installed (pip, pipx,
-        # editable, sdist-compile).
-        from pathlib import Path
-        pkg_dir = Path(__file__).resolve().parent
-        candidate = pkg_dir / rel
-        if candidate.is_file():
-            return str(candidate)
-        # Fallback: treat the arg as a plain path, let load_world error.
-        return arg
-    return arg
+# The map aliases and their resolution are the runtime's: one table, so a
+# map the CLI loads is one SimRobot loads (``practice-line`` once failed
+# from one and not the other). They live in ``props``, which imports no
+# MuJoCo, so the parser (and the docs that render it) stays light.
+from openbricks_sim.props import BUILTIN_WORLDS as _BUILTIN_WORLDS  # noqa: E402
+from openbricks_sim.props import resolve_world as _resolve_world  # noqa: E402,F401
 
 
 def _maybe_randomize(model, data, args):

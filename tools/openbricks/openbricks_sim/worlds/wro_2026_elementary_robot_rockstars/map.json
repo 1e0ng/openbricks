@@ -1,0 +1,355 @@
+{
+  "format": "openbricks-map/1",
+  "name": "wro_2026_elementary_robot_rockstars",
+  "about": [
+    "WRO 2026 RoboMission Elementary — \"Robot Rockstars\"",
+    "=====================================================",
+    "",
+    "Theme: the robot sets up a music festival. Missions (from the",
+    "official Game Rules PDF, 2026-01-15):",
+    "",
+    "  3.1  Connect the amplifier with the speakers",
+    "         2 cables → grey target areas, upright.",
+    "         15 pts each (30 max), 5 partial. +30 bonus both completed.",
+    "  3.2  Prepare the show",
+    "         3 instruments (guitar, keyboard, congas) → backstage",
+    "           (pink) area. 15 pts each, 45 max.",
+    "         1 microphone → mic target area (light green), upright.",
+    "           20 pts full, 10 partial.",
+    "  3.3  Play the song",
+    "         6 notes (red/blue/green/yellow/white/black) → matching",
+    "           colour note target areas (grey border).",
+    "           20 pts each upright-in-correct-colour, 10 partial, 120 max.",
+    "  3.4  Bonus — don't damage/move:",
+    "         Clef ............. 10",
+    "         Speakers (×2) .... 20",
+    "         Amplifier ........ 10",
+    "",
+    "Max round score: 255.",
+    "",
+    "Mat: 2362 × 1143 mm — the printed artwork is used directly as a",
+    "MuJoCo texture on a plane geom (``mat.png`` in this",
+    "directory). Every zone visible in the artwork is therefore pixel-",
+    "accurate without any zone geoms of our own; only the physical",
+    "props + walls sit as 3-D objects on top.",
+    "",
+    "Prop dimensions use the LEGO reality: stud pitch 8 mm, brick",
+    "height 9.6 mm, plate height 3.2 mm. Counts are read from the",
+    "official Building Instructions PDF; fine geometry (angled",
+    "handles, knob arrays) collapses to axis-aligned boxes for the",
+    "physics. Good enough for pushing/catching behaviour; swap to",
+    "STL/mesh once someone hand-models the LEGO shapes in Blender.",
+    "",
+    "Origin at mat centre. +X = long axis (towards start area on the",
+    "right). +Y = short axis (towards stage on top). +Z = up. All",
+    "dimensions in metres.",
+    "",
+    "1 kHz physics to match the firmware control loop."
+  ],
+  "physics": {
+    "timestep": 0.001,
+    "iterations": 20,
+    "solver": "Newton"
+  },
+  "textures": [
+    {
+      "name": "mat_tex",
+      "type": "2d",
+      "file": "mat.png",
+      "note": [
+        "The actual printed mat as a texture. ``texrepeat=\"1 1\"``",
+        "stretches it exactly once over the 2.362 × 1.143 m plane."
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "mat",
+      "texture": "mat_tex",
+      "texrepeat": [1, 1],
+      "specular": 0,
+      "shininess": 0,
+      "reflectance": 0
+    },
+    {
+      "name": "wall",
+      "rgba": [0.9, 0.9, 0.9, 1],
+      "note": "Border walls."
+    },
+    {
+      "name": "lego_blue",
+      "rgba": [0.1, 0.3, 0.8, 1],
+      "note": [
+        "LEGO prop colours. Brick shades picked to match the build",
+        "instructions' standard parts palette."
+      ]
+    },
+    {
+      "name": "lego_red",
+      "rgba": [0.85, 0.1, 0.1, 1]
+    },
+    {
+      "name": "lego_yellow",
+      "rgba": [0.95, 0.8, 0.1, 1]
+    },
+    {
+      "name": "lego_green",
+      "rgba": [0.15, 0.7, 0.25, 1]
+    },
+    {
+      "name": "lego_white",
+      "rgba": [0.95, 0.95, 0.95, 1]
+    },
+    {
+      "name": "lego_black",
+      "rgba": [0.08, 0.08, 0.08, 1]
+    },
+    {
+      "name": "lego_gray",
+      "rgba": [0.55, 0.55, 0.58, 1]
+    }
+  ],
+  "lights": [
+    {
+      "pos": [0.6, 0, 1.6],
+      "dir": [0, 0, -1],
+      "diffuse": [0.95, 0.95, 0.95],
+      "note": ["Overhead lighting (two sources for even colour on the camera", "sensor reading the mat)."]
+    },
+    {
+      "pos": [-0.6, 0, 1.6],
+      "dir": [0, 0, -1],
+      "diffuse": [0.65, 0.65, 0.65]
+    }
+  ],
+  "geoms": [
+    {
+      "name": "mat",
+      "type": "plane",
+      "size": [1.181, 0.5715, 0.01],
+      "material": "mat",
+      "friction": [0.8, 0.02, 0.0001],
+      "note": "===== MAT (2.362 × 1.143 m, printed texture) ====="
+    },
+    {
+      "name": "wall_n",
+      "type": "box",
+      "pos": [0, 0.579, 0.02],
+      "size": [1.181, 0.0075, 0.02],
+      "material": "wall",
+      "note": "Border walls — 40 mm tall, 15 mm thick. Keep props on-mat."
+    },
+    {
+      "name": "wall_s",
+      "type": "box",
+      "pos": [0, -0.579, 0.02],
+      "size": [1.181, 0.0075, 0.02],
+      "material": "wall"
+    },
+    {
+      "name": "wall_e",
+      "type": "box",
+      "pos": [1.188, 0, 0.02],
+      "size": [0.0075, 0.5715, 0.02],
+      "material": "wall"
+    },
+    {
+      "name": "wall_w",
+      "type": "box",
+      "pos": [-1.188, 0, 0.02],
+      "size": [0.0075, 0.5715, 0.02],
+      "material": "wall"
+    }
+  ],
+  "props": [
+    {
+      "name": "clef",
+      "ldr": "props/clef.ldr",
+      "pos": [-0.08, 0.12, 0.0],
+      "mass": 0.048,
+      "note": [
+        "=========================================================",
+        "STATIC SCENERY / BONUS-PROTECTED OBJECTS (mission 3.4 —",
+        "10/20/10 pts if left where they started, upright).",
+        "",
+        "These are static in the physics sense but have ``<body>``",
+        "wrappers with a ``<freejoint/>`` so the sim can detect",
+        "\"moved or damaged\". Mass is high enough (~200 g) that a",
+        "well-driven openbricks robot won't nudge them; a bad line",
+        "will. Swap to ``geom`` (no joint) if you want them bolted",
+        "to the mat for the demo.",
+        "=========================================================",
+        "",
+        "Clef: F2.1 LDraw-built blue brick tower on a 4x6 white plate",
+        "base. The ``<lego_prop>`` placeholder is expanded by",
+        "``world.py`` at load time using ``props/clef.ldr`` (BI steps",
+        "1-14, 30 blue bricks + 1 plate, ≈48 g)."
+      ]
+    },
+    {
+      "name": "amplifier",
+      "ldr": "props/amplifier.ldr",
+      "pos": [-1.02, 0.3, 0.0],
+      "mass": 0.15,
+      "note": [
+        "F2.5: amplifier + 2 speakers as LDraw assemblies. Static",
+        "decorations the robot must NOT damage (mission 3.4 bonus",
+        "points). The two speakers share a single .ldr — same prop",
+        "geometry at different positions."
+      ]
+    },
+    {
+      "name": "speaker_upper",
+      "ldr": "props/speaker.ldr",
+      "pos": [-0.62, 0.32, 0.0],
+      "mass": 0.08
+    },
+    {
+      "name": "speaker_lower",
+      "ldr": "props/speaker.ldr",
+      "pos": [-0.62, -0.32, 0.0],
+      "mass": 0.08
+    },
+    {
+      "name": "cable_upper",
+      "ldr": "props/cable.ldr",
+      "pos": [-0.82, 0.3, 0.0],
+      "mass": 0.04,
+      "note": [
+        "=========================================================",
+        "MISSION 3.1 — cables (movable, score when upright in the",
+        "grey target areas printed on the mat between the amplifier",
+        "and each speaker).",
+        "=========================================================",
+        "",
+        "F2.2: each cable is ~22 LEGO bricks (yellow plate base + white",
+        "body + 1x6 black technic-brick \"cable wire\" running through the",
+        "middle + yellow caps), generated from props/cable.ldr at load",
+        "time. Two instances at the upper / lower target zones."
+      ]
+    },
+    {
+      "name": "cable_lower",
+      "ldr": "props/cable.ldr",
+      "pos": [-0.82, -0.3, 0.0],
+      "mass": 0.04
+    },
+    {
+      "name": "guitar",
+      "ldr": "props/guitar.ldr",
+      "pos": [0.85, -0.4, 0.0],
+      "mass": 0.1,
+      "note": [
+        "=========================================================",
+        "MISSION 3.2 — instruments start in the backstage-start",
+        "area (truck at the bottom-middle). Microphone starts there",
+        "too per the PDF. The robot delivers the 3 instruments to",
+        "the pink backstage-target area (bottom-left) and the",
+        "microphone to the light-green mic-target zone on the",
+        "stage.",
+        "=========================================================",
+        "",
+        "F2.3: instruments as LDraw assemblies (each prop's brick",
+        "layout lives in props/<name>.ldr; the <lego_prop> placeholder",
+        "gets expanded by world.py at load time), and the microphone",
+        "as a Workbench build (props/microphone.assembly.json, 41",
+        "bricks with their catalogue masses; the <assembly_prop>",
+        "placeholder expands the same way, standing on the mat)."
+      ]
+    },
+    {
+      "name": "keyboard",
+      "ldr": "props/keyboard.ldr",
+      "pos": [0.62, -0.42, 0.0],
+      "mass": 0.13
+    },
+    {
+      "name": "congas",
+      "ldr": "props/congas.ldr",
+      "pos": [0.4, -0.42, 0.0],
+      "mass": 0.12
+    },
+    {
+      "name": "microphone",
+      "file": "props/microphone.assembly.json",
+      "pos": [-0.0422, -0.4743, 0.0096]
+    },
+    {
+      "name": "note_red",
+      "ldr": "props/note_red.ldr",
+      "pos": [0.3137, 0.4881, 0.0],
+      "mass": 0.02,
+      "note": [
+        "=========================================================",
+        "MISSION 3.3 — 6 notes. Each is a coloured piece with a",
+        "distinct silhouette (different shapes ease both sensor",
+        "disambiguation and the rule's \"different shapes\"",
+        "requirement). Starting positions are on 4 light-green",
+        "squares at the upper-right of the mat; actual placement",
+        "is randomized each round — these six are a nominal seed.",
+        "",
+        "Exact shapes per the rules: one per colour. We approximate",
+        "with pillar/sphere/flat-brick/tall-brick/half-cyl/rod so a",
+        "downward camera sensor can tell them apart.",
+        "=========================================================",
+        "",
+        "F2.4: 6 notes as LDraw assemblies. Each note has a 2x2",
+        "plate base (common across all 6 — required by the rules)",
+        "and a distinct upper silhouette so the chassis colour",
+        "sensor + the per-note shape can disambiguate. Same",
+        "positions as the 0.10.x placeholders; the F3 randomization",
+        "in randomization.py permutes the 4 random notes (black /",
+        "white / yellow / blue) across slot_1..slot_4 each round.",
+        "",
+        "Red and green never move (rules p7): they stand on the 3rd",
+        "and 4th note-start squares, x = slot_1 + 2 and 3 pitches of",
+        "0.1319 m (the mat's six squares are evenly spaced; the other",
+        "four are randomization.py's slots)."
+      ]
+    },
+    {
+      "name": "note_blue",
+      "ldr": "props/note_blue.ldr",
+      "pos": [0.65, 0.4, 0.0],
+      "mass": 0.02
+    },
+    {
+      "name": "note_green",
+      "ldr": "props/note_green.ldr",
+      "pos": [0.4456, 0.4881, 0.0],
+      "mass": 0.02
+    },
+    {
+      "name": "note_yellow",
+      "ldr": "props/note_yellow.ldr",
+      "pos": [0.95, 0.4, 0.0],
+      "mass": 0.02
+    },
+    {
+      "name": "note_white",
+      "ldr": "props/note_white.ldr",
+      "pos": [0.5, 0.25, 0.0],
+      "mass": 0.02
+    },
+    {
+      "name": "note_black",
+      "ldr": "props/note_black.ldr",
+      "pos": [0.8, 0.25, 0.0],
+      "mass": 0.02
+    }
+  ],
+  "cameras": [
+    {
+      "name": "overhead",
+      "pos": [0, 0, 2.6],
+      "xyaxes": [1, 0, 0, 0, 1, 0],
+      "note": [
+        "=========================================================",
+        "OVERHEAD CAMERA for previewing the whole scene in MuJoCo's",
+        "viewer. openbricks-sim will attach its own chassis-mounted",
+        "downward camera for the TCS34725 colour sensor shim.",
+        "========================================================="
+      ]
+    }
+  ]
+}

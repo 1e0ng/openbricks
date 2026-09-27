@@ -1,12 +1,12 @@
 # WRO 2026 RoboMission Junior — "Heritage Heroes"
 
-A MuJoCo MJCF world for the [2026 WRO RoboMission Junior](https://wro-association.org/wp-content/uploads/WRO-2026-RoboMission-Junior-Game-Rules.pdf) competition. Robot guides visitors through an old town, rebuilds collapsed towers, brings excavated artefacts to a museum, and sweeps dirt off the cobblestones.
+A map (`map.json`, format `openbricks-map/1`) for the [2026 WRO RoboMission Junior](https://wro-association.org/wp-content/uploads/WRO-2026-RoboMission-Junior-Game-Rules.pdf) competition. Robot guides visitors through an old town, rebuilds collapsed towers, brings excavated artefacts to a museum, and sweeps dirt off the cobblestones.
 
 ## Files
 
 | | |
 |---|---|
-| `world.xml` | MJCF scene description |
+| `map.json` | the map: physics, mat, walls, props and camera (MuJoCo's own names and units, in JSON) |
 | `mat.png` | Printed mat texture, 6974×3375 px (75 dpi rasterization of the official Game Mat Printing File PDF, 256-colour palette-quantized — PyPI wheel-size budget; the TCS34725 sampling spot still spans ~9 px). Regenerable via `scripts/regen-wro-mat-textures.sh`. |
 
 ## What's in the scene
@@ -21,8 +21,7 @@ A MuJoCo MJCF world for the [2026 WRO RoboMission Junior](https://wro-associatio
 ## Loading the scene
 
 ```
-pip install mujoco
-python -m mujoco.viewer --mjcf=tools/openbricks-sim/worlds/wro_2026_junior_heritage_heroes/world.xml
+openbricks sim preview --world wro-2026-junior
 ```
 
 Maximum round score: **230**.

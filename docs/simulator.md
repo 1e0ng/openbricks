@@ -46,7 +46,7 @@ the native build.
 $ openbricks sim preview [--world WORLD] [--x X] [--y Y] [--headless] [--duration S] [--seed N]
 ```
 
-Loads the named world (an alias or a path to an MJCF file), splices in
+Loads the named world (an alias or a path to a map's `map.json`), splices in
 the default chassis, and opens the MuJoCo viewer so you can inspect the
 scene. `--headless` steps the physics for `--duration` seconds without
 opening a window — useful as a smoke test.
@@ -228,7 +228,7 @@ name of your own; only loading another map, or **Fit**, frames it
 again. The toolbar on this tab names the map shown — the assembly's
 Open / Save / Save as… buttons and its component path belong to the
 Workbench tab. The props on the map are the LEGO-built objects a
-mission puts on the mat (each a `<lego_prop>` in the world's MJCF) and
+mission puts on the mat (each an LDraw model among the map's `props`) and
 whatever you add: drag a prop to move it (its outline lights under the
 pointer, the selected one carries its name), shift-drag to turn it by
 hand, `R` or **Turn 90°** for a quarter turn, or set the **heading**
@@ -240,8 +240,8 @@ then yaw about z). Every such turn is in place: about the middle of
 the prop, and up or down so its lowest point stays where it was — a
 prop standing on the mat stays standing on it, however it is tipped —
 and it is refused, as a drag is, when turned it would overlap another
-prop or the robot. The map's text keeps the angles as `yaw`, `pitch`
-and `roll` on the prop's placeholder. Click one, or its row in the
+prop or the robot. The map keeps the angles as the prop's `yaw`,
+`pitch` and `roll`. Click one, or its row in the
 panel, to select it; `⌘D` or
 **Duplicate** puts another like it a little to the side, `Del` or
 **Remove** takes it away, **Add…** lists the kinds of prop the map has
@@ -257,8 +257,8 @@ named after its file). Or add one brick
 from the library (search it by number or name, then **+ to map**).
 Either lands at the origin, standing on the map — its lowest brick
 on the floor, whatever the build's own origin is (a brick's is its
-top face) — as a prop of its own: an `<assembly_prop>` whose model
-is an `openbricks-assembly/1` document, kept under the data
+top face) — as a prop of its own whose `file` is an
+`openbricks-assembly/1` document, kept under the data
 directory until the map is saved — drawn with the exact bricks and
 colliding as their boxes with their catalogue masses. Nothing sits
 under the map: a prop a map file places so low that a brick of it
@@ -280,12 +280,12 @@ editor moves it; a stuck prop wears a pin through its centre, and its
 row says so. Every move, add, remove, stick and unstick is sent to the
 run server, which moves the live body at once (a chassis place, which
 resets the physics, keeps the prop where it was put) and rewrites the
-prop's placeholder in the world text it holds, so the physics, the
-picture and the text agree; adding, removing, sticking and unsticking
+prop in the map it holds, so the physics, the picture and the map
+agree; adding, removing, sticking and unsticking
 rebuild the world with the chassis where it stands. Nothing moves
 while a program runs.
 
-**Save as a new map** writes the world text as it stands — every prop
+**Save as a new map** writes the map as it stands — every prop
 where it is, the ones added included, with the map's artwork and the
 props' models (documents added since the load copied into the map's
 `props/`) — to `worlds/<name>/` under the data directory
@@ -297,9 +297,33 @@ again under the same name replaces it, and a shipped map's name is
 refused so it is never shadowed. Routes remember the map they were
 planned on by that name. On a map of your own the panel also offers
 **Save changes**, which writes the map in place under its own name —
-its artwork and models stay, only the text is rewritten. A shipped
+its artwork and models stay, only `map.json` is rewritten. A shipped
 map has no such button: its layout is kept as shipped, and your
 changes go into a map of your own.
+
+**Share a map.** **Export map…** writes the map as it stands — every
+prop where it is, the ones added included — to one JSON file you name,
+with everything it needs inside: the mat's artwork and meshes (as
+base64), the props' LDraw models (as text) and builds (as JSON).
+**Import map…** takes such a file and makes it a map of your own under
+its name (the next free `-2`, `-3`… when that name is a shipped map's
+or taken), listed with the rest and shown at once. Components travel
+the same way on the Workbench: a component's **save** writes it as a
+build of its own, and **Import…** brings a build's components in.
+
+**Maps are JSON.** A map is a folder: `map.json` (format
+`openbricks-map/1`) and the files it names. `map.json` holds the
+physics settings, the textures, materials and meshes, the lights, the
+fixed geoms (the mat, the walls), the props and the cameras, each with
+MuJoCo's own attribute names and units — metres, vectors as arrays —
+and any of them may carry a `note`; a prop is
+`{"name", "ldr", "pos", "mass", "color"}` for an LDraw model or
+`{"name", "file", "pos"}` for a build, with `yaw`, `pitch`, `roll` and
+`fixed` when it has them. MuJoCo itself reads no JSON (its models are
+XML or its own binary), so the sim makes the model from `map.json` in
+memory as it loads the map; no XML is ever written. A map of your own
+saved before 4.32.0 (a `world.xml`) becomes `map.json` the first time
+the sim lists your maps; the old file is left where it was.
 
 ## The Assembly Workbench
 

@@ -81,7 +81,7 @@ class _RandomizationSpec:
         unused.
 
     Fixed-position elements aren't listed here — they stay where
-    the world.xml put them and are explicitly NOT randomized per
+    the map put them and are explicitly NOT randomized per
     the rules.
     """
     elements: Sequence[str]
@@ -174,7 +174,7 @@ _JUNIOR = _RandomizationSpec(
 # ``randomize()`` runs each spec in sequence with one shared RNG
 # so a fixed seed still yields a fixed 40-element layout.
 #
-# Slot positions match the world.xml's hardcoded 5×2 grid per
+# Slot positions match the map's 5×2 grid per
 # colour group (storage areas don't appear as colour-coded zones
 # on the printed mat, so we keep the existing grid as the
 # reference). Per-colour Y bands:
@@ -361,7 +361,7 @@ def _place_freejoint_body(model, data, body_name: str,
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
     if body_id < 0:
         raise ValueError("no body named " + repr(body_name) + " in model")
-    # The body's first joint is its freejoint (the world.xml convention
+    # The body's first joint is its freejoint (the map convention
     # for randomizable elements is one freejoint per body).
     joint_id = int(model.body_jntadr[body_id])
     if joint_id < 0:
@@ -372,7 +372,7 @@ def _place_freejoint_body(model, data, body_name: str,
         raise ValueError(
             "body " + repr(body_name) + "'s first joint is not a "
             "freejoint — randomization can only relocate freejointed bodies")
-    # Resting Z: the ``z_override`` if given, else the world.xml
+    # Resting Z: the ``z_override`` if given, else the map
     # ``<body pos="...">`` attribute (which MuJoCo stores in
     # ``body_pos``). Override is used to stash unselected elements
     # in select-N-of-M randomization off-mat.

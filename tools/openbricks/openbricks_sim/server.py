@@ -21,6 +21,8 @@ Commands (one JSON object per line on stdin)::
     {"cmd": "fix", "name": "clef", "fixed": true}   # stuck to the map (false: free again)
     {"cmd": "remove", "name": "note_red_2"}
     {"cmd": "save_world", "name": "My layout"}   # the map as it stands, as the user's own
+    {"cmd": "export_world", "path": "/somewhere/my-layout.map.json"}   # one JSON file, files inside
+    {"cmd": "import_world", "path": "/somewhere/my-layout.map.json"}   # made one of the user's own
     {"cmd": "pause"}   {"cmd": "resume"}   {"cmd": "stop"}
     {"cmd": "speed", "factor": 2.0}
     {"cmd": "quit"}
@@ -33,7 +35,9 @@ Events (one JSON object per line on stdout)::
                     "props": [{"name", "body", "kind", "color", "yaw_deg", "fixed", "bricks": [...]}, ...],
                     "chassis": {"wheel_diameter_mm", "axle_track_mm", "spawn": {"x_mm", "y_mm", "yaw_deg"}},
                     "timestep_ms": 1}
-    {"ev": "saved", "alias": "my-layout", "path": ".../worlds/my-layout/world.xml"}
+    {"ev": "saved", "alias": "my-layout", "path": ".../worlds/my-layout/map.json"}
+    {"ev": "exported", "path": "/somewhere/my-layout.map.json"}
+    {"ev": "imported", "alias": "my-layout", "path": ".../worlds/my-layout/map.json"}
     {"ev": "frame", "t_ms": 1234, "bodies": [[x, y, z, qw, qx, qy, qz], ...]}
     {"ev": "log", "text": "..."}            # the program's prints
     {"ev": "state", "status": "idle|loaded|running|paused|finished|stopped|error", ...}
@@ -45,7 +49,6 @@ of wall time, and the run is paced to wall time × ``speed``.
 import io
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -112,19 +115,13 @@ def list_worlds():
 
 
 def _texture_files(world_path):
-    """``{texture name: absolute file}`` from a world's ``<texture … file="…">``."""
+    """``{texture name: absolute file}`` from a map's ``textures``."""
     if not world_path:
         return {}
-    text = open(world_path).read()
+    from openbricks_sim import mapfile
+    m = mapfile.load(world_path)
     base = os.path.dirname(os.path.abspath(world_path))
-    out = {}
-    for m in re.finditer(r"<texture\b[^>]*>", text):
-        tag = m.group(0)
-        name = re.search(r'name="([^"]+)"', tag)
-        file = re.search(r'file="([^"]+)"', tag)
-        if name and file:
-            out[name.group(1)] = os.path.join(base, file.group(1))
-    return out
+    return {t["name"]: os.path.join(base, t["file"]) for t in m.get("textures", []) if "name" in t and "file" in t}
 
 
 def _packed_mesh(model, mid):
@@ -215,8 +212,8 @@ class Session:
         self.world_path = None
         self.assembly = None
         self.chassis_spec = None
-        # the map's text with every prop where the editor put it: what a save writes
-        self.world_xml = None
+        # the map with every prop where the editor put it: what a save or an export writes
+        self.world_map = None
         self.speed = 1.0
         self.paused = threading.Event()
         self.paused.set()                 # set = not paused
@@ -240,7 +237,8 @@ class Session:
         self.world_path = robot_mod._resolve_world(world)
         self.assembly = assembly
         self.chassis_spec = spec
-        self.world_xml = open(self.world_path).read() if self.world_path else None
+        from openbricks_sim import mapfile
+        self.world_map = mapfile.load(self.world_path) if self.world_path else None
         self.status = "loaded"
         self._send_scene()
         self._send_frame()
@@ -256,12 +254,12 @@ class Session:
         (an LDraw model's file stem, or a document's name), colour, yaw,
         whether it is stuck to the map, and a document's bricks so the
         viewer can draw them exactly."""
-        if not self.world_xml:
+        if not self.world_map:
             return []
         import mujoco
         out = []
         world_dir = os.path.dirname(self.world_path) if self.world_path else ""
-        for p in props.props_in(self.world_xml):
+        for p in props.props_in(self.world_map):
             bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, p["name"])
             entry = {"name": p["name"], "body": int(bid), "color": p.get("color"), "yaw_deg": p["yaw"], "fixed": bool(p["fixed"]), "bricks": []}
             if p["tag"] == "lego_prop":
@@ -292,7 +290,7 @@ class Session:
             raise RuntimeError("load a world first")
         if self.thread is not None and self.thread.is_alive():
             raise RuntimeError("a program is running; stop it first")
-        if not self.world_xml:
+        if not self.world_map:
             raise RuntimeError("the empty world has no props to %s" % what)
 
     def move_prop(self, name, x_mm, y_mm, yaw_deg=0.0, pitch_deg=None, roll_deg=None, z_mm=None):
@@ -303,13 +301,13 @@ class Session:
         self._editable("move")
         import mujoco
         x, y, yaw = float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg)
-        was = next((p for p in props.props_in(self.world_xml) if p["name"] == name), None)
+        was = next((p for p in props.props_in(self.world_map) if p["name"] == name), None)
         if was is None:
             raise props.PropError("no prop named %r on this map" % (name,))
         pitch = was["pitch"] if pitch_deg is None else float(pitch_deg)
         roll = was["roll"] if roll_deg is None else float(roll_deg)
         z_m = None if z_mm is None else float(z_mm) / 1000.0
-        self.world_xml = props.with_prop_moved(self.world_xml, name, x, y, yaw, pitch, roll, z_m)
+        self.world_map = props.with_prop_moved(self.world_map, name, x, y, yaw, pitch, roll, z_m)
         model, data = self.robot.model, self.robot.data
         bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
         if bid < 0:
@@ -336,8 +334,8 @@ class Session:
         it and the world reloads, the chassis staying where it stands.
         Returns the new prop's name."""
         self._editable("add to")
-        xml, name = props.with_prop_added(self.world_xml, from_name, float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg))
-        self._reload(xml)
+        m, name = props.with_prop_added(self.world_map, from_name, float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg))
+        self._reload(m)
         return name
 
     def add_model(self, name, doc, x_mm, y_mm, yaw_deg=0.0):
@@ -353,27 +351,27 @@ class Session:
         path = props.stage_file(json.dumps(doc, separators=(",", ":"), sort_keys=True), name, "assembly.json")
         # standing on the map: a build's origin is wherever its author put it (a brick's is its
         # top face), so its lowest brick goes on the floor
-        xml, prop_name = props.with_model_added(self.world_xml, props.slug(name).replace("-", "_"), path,
-                                                float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg),
-                                                z_m=-assembly_mod.prop_lowest_m(bricks_out))
-        self._reload(xml)
+        m, prop_name = props.with_model_added(self.world_map, props.slug(name).replace("-", "_"), path,
+                                              float(x_mm) / 1000.0, float(y_mm) / 1000.0, float(yaw_deg),
+                                              z_m=-assembly_mod.prop_lowest_m(bricks_out))
+        self._reload(m)
         return prop_name
 
     def fix_prop(self, name, fixed):
         """Stick a prop to the map (no free joint: nothing moves it but
         the editor), or free it again; the world reloads either way."""
         self._editable("edit")
-        self._reload(props.with_prop_fixed(self.world_xml, name, bool(fixed)))
+        self._reload(props.with_prop_fixed(self.world_map, name, bool(fixed)))
 
     def remove_prop(self, name):
         self._editable("edit")
-        self._reload(props.with_prop_removed(self.world_xml, name))
+        self._reload(props.with_prop_removed(self.world_map, name))
 
-    def _reload(self, xml):
+    def _reload(self, m):
         from openbricks_sim import robot as robot_mod
         pose = self._chassis_pose()
-        self.robot = robot_mod.SimRobot(world=self.world, chassis_spec=self.chassis_spec, assembly=self.assembly, world_xml=xml)
-        self.world_xml = xml
+        self.robot = robot_mod.SimRobot(world=self.world, chassis_spec=self.chassis_spec, assembly=self.assembly, world_map=m)
+        self.world_map = m
         if pose is not None:
             self.robot.set_pose(*pose)
         self._send_scene()
@@ -392,9 +390,26 @@ class Session:
         again. Returns its alias."""
         self._editable("save")
         from openbricks_sim import robot as robot_mod
-        alias, path = props.save_as(os.path.dirname(self.world_path), self.world_xml, name, reserved=robot_mod._BUILTIN_WORLDS)
+        alias, path = props.save_as(os.path.dirname(self.world_path), self.world_map, name, reserved=robot_mod._BUILTIN_WORLDS)
         self.protocol.send(ev="worlds", worlds=list_worlds())
         self.protocol.send(ev="saved", alias=alias, path=path)
+        return alias
+
+    def export_world(self, path):
+        """Write the map as it stands — every prop where it is, with the
+        files it needs — as one JSON file at ``path``."""
+        self._editable("export")
+        out = props.export_map(os.path.dirname(self.world_path), self.world_map, path)
+        self.protocol.send(ev="exported", path=out)
+        return out
+
+    def import_world(self, path):
+        """Make an exported map one of the user's own, then list the maps
+        again. Returns its alias."""
+        from openbricks_sim import robot as robot_mod
+        alias, where = props.import_map(path, reserved=robot_mod._BUILTIN_WORLDS)
+        self.protocol.send(ev="worlds", worlds=list_worlds())
+        self.protocol.send(ev="imported", alias=alias, path=where)
         return alias
 
     def place(self, x_mm, y_mm, yaw_deg=0.0):
@@ -557,6 +572,10 @@ def serve(stdin=None, stdout=None, frame_hz=60.0):
                 session.remove_prop(cmd["name"])
             elif name == "save_world":
                 session.save_world(cmd["name"])
+            elif name == "export_world":
+                session.export_world(cmd["path"])
+            elif name == "import_world":
+                session.import_world(cmd["path"])
             elif name == "pause":
                 session.pause()
             elif name == "resume":
