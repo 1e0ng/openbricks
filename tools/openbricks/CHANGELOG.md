@@ -3,6 +3,20 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.31.1 — a brick goes onto a pin, and turns 45° about it
+
+A 2 x 2 brick pushed onto a pin by its tube (the WRO keyboard's step
+150, turned 45°) was refused before it was ever turned: "lego_3003
+stays: it would overlap lego_3673". The pin's collar, 3.2 mm round,
+stands 0.8 mm proud of the Technic brick's face, where the brick's
+tube end presses on it — the press fit ABS allows — but a joint's room
+reached only 0.6 mm beyond the features (3.0 mm round). It reaches
+1.0 mm now: the brick seats on the pin, and the rotate rings (three
+15° steps) or the inspector's angle fields turn it 45° about the pin,
+clear of the next pin 16 mm along. The room is still the joint's
+alone: pushed into the wall, or onto an empty hole beside, the brick
+is refused.
+
 ## 4.31.0 — pitch and roll on the Workbench and the map; a whole component turns
 
 **The map.** A prop only turned about the map's up axis. It now

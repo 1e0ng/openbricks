@@ -2406,6 +2406,59 @@ mod tests {
     }
 
     #[test]
+    fn a_brick_on_a_pin_sits_on_its_collar_and_turns_45_degrees_about_it() {
+        // the WRO keyboard's step 150: pins in every other hole of a Technic brick, a 2 x 2 brick
+        // pushed onto the end one by its tube, turned 45° about the pin. The pin's collar (3.2 mm
+        // round) stands 0.8 mm proud of the brick's face, where the 2 x 2's tube end presses on
+        // it: the joint's room reached 3.0 mm round, and the brick was refused on the pin at all
+        let (mut ed, _wall) = solo("3894");
+        let pin = ed.ensure_ldraw_part("3673").unwrap();
+        let mut pins = vec![];
+        for (k, x) in [-16.0, 0.0, 16.0].into_iter().enumerate() {
+            ed.add_instance(Some(pin.clone()), None, [0.0, 60.0 + 20.0 * k as f64, 0.0]);
+            let p = ed.selection[0].clone();
+            ed.set_pose(&p, [x, 4.0, -4.0], [0.0, 0.0, 90.0]);
+            assert_eq!(ed.selected_instances()[0].pos, [x, 4.0, -4.0], "{}", ed.status);
+            pins.push(p);
+        }
+        let id = ed.ensure_ldraw_part("3003").unwrap();
+        ed.add_instance(Some(id), None, [0.0, 120.0, 0.0]);
+        let red = ed.selection[0].clone();
+        // on the end pin, its bottom against the Technic brick's face
+        let on = [-16.0, 13.6, -4.0];
+        ed.set_pose(&red, on, [-90.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos, on, "{}", ed.status);
+        let cons = assembly::connections_of(&ed.doc, &ed.bundle, &ed.editing, &red);
+        assert!(
+            cons.iter().any(|(m, o, path)| m == "pin_hole" && o == "pin" && path[0] == pins[0]),
+            "{cons:?}"
+        );
+        assert_eq!(ed.overlap_count(), 0);
+        // turned on the rotate ring about the pin (its axis, the world's y, runs through the
+        // brick's origin) three 15° steps, the magnet on: it stays on the pin at 45°, clear of
+        // the next pin 16 mm along
+        ed.magnet = true;
+        let starts = ed.begin_handle();
+        ed.drag_handle(Handle::Ring(1), 44.0, DVec3::from_array(on), &starts, false);
+        assert!(ed.overlapping.is_empty(), "{:?}", ed.overlapping);
+        ed.end_handle();
+        let i = ed.selected_instances()[0].clone();
+        assert_eq!(i.pos, on, "{}", ed.status);
+        let turned = assembly::rot_mat(i.rot);
+        let want = DMat3::from_axis_angle(DVec3::Y, 45f64.to_radians()) * assembly::rot_mat([-90.0, 0.0, 0.0]);
+        assert!((turned - want).to_cols_array().iter().all(|d| d.abs() < 1e-3), "{:?}", i.rot);
+        assert!(!ed.status.contains("stays"), "{}", ed.status);
+        assert_eq!(ed.overlap_count(), 0);
+        // the room is the joint's only: pushed 2 mm further onto the pin (into the wall) it is
+        // refused, as it is 8 mm along, on the neighbouring hole with no pin in it
+        ed.set_pose(&red, [-16.0, 11.6, -4.0], i.rot);
+        assert!(ed.status.contains("stays: it would overlap"), "{}", ed.status);
+        ed.set_pose(&red, [-8.0, 13.6, -4.0], i.rot);
+        assert!(ed.status.contains("stays: it would overlap"), "{}", ed.status);
+        assert_eq!(ed.selected_instances()[0].pos, on);
+    }
+
+    #[test]
     fn a_whole_component_turns_in_place() {
         // a component of two 2 x 4s end to end, standing on the ground off its origin
         let (mut ed, a) = solo("3001");

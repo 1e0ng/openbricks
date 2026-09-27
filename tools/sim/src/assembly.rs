@@ -1137,8 +1137,11 @@ pub fn seated(mine: &[WorldConnector], others: &[WorldConnector]) -> bool {
 
 /// How far beyond the two features a joint's room reaches, in mm: the
 /// friction pin's lip (2.55 mm in a 2.4 mm hole), a hinge knuckle in
-/// its socket, and the facets of a 16-sided cylinder.
-pub const JOINT_MM: f64 = 0.6;
+/// its socket, the facets of a 16-sided cylinder, and a pin's collar
+/// (3.2 mm round, 0.8 mm proud of a Technic brick's face) under the
+/// end of a brick's tube pushed onto the pin — 0.6 mm left it out, and
+/// a 2 x 2 brick could not go on a pin at all.
+pub const JOINT_MM: f64 = 1.0;
 
 /// The joints between `mine` and `others` — every seated mate (see
 /// [`seated`]) — as the room the overlap rule gives each: a cylinder
