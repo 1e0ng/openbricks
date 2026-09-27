@@ -4868,6 +4868,54 @@ mod tests {
     }
 
     #[test]
+    fn props_turn_in_place_on_the_real_runtime() {
+        // the elementary map's microphone (a Workbench build, its origin away from its middle)
+        // and clef (an LDraw model) turned a quarter on the real run server: each turns about its
+        // middle, keeps its height, and the server's next frame has it so
+        let Some(python) = std::env::var("OPENBRICKS_SIM_PYTHON").ok().filter(|p| !p.is_empty()) else {
+            eprintln!("OPENBRICKS_SIM_PYTHON is unset: skipping the prop turn test");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("ob-map-turn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut t = SimulateTab::new_with_env(
+            Some(python),
+            vec![("OPENBRICKS_DATA_DIR".into(), dir.to_string_lossy().to_string())],
+        );
+        t.markers_dir = dir.join("markers-of-the-tab");
+        t.world = "wro-2026-elementary".into();
+        t.ensure_loaded();
+        assert!(
+            pump_until(&mut t, 60, |t| t.scene.is_some() && t.status == "loaded"),
+            "{} / {}",
+            t.status,
+            t.message
+        );
+        let lib = shipped_bundle();
+        for name in ["microphone", "clef"] {
+            let i = t.scene.as_ref().unwrap().props.iter().position(|p| p.name == name).unwrap();
+            assert!(!t.prop_parts(i, &lib).is_empty(), "{name} has parts to measure");
+            let before = t.prop_full_pose(i).unwrap();
+            t.turn_prop(i, 90.0, &lib);
+            assert_eq!(t.message, "", "{name}");
+            // the server's own frame: asked for the world list after the move, it answers in order
+            t.ask_worlds();
+            assert!(pump_until(&mut t, 30, |t| !t.worlds().is_empty()), "{name}: the server answered");
+            let after = t.prop_full_pose(i).unwrap();
+            assert!(
+                (after.rpy[2] - crate::route::wrap_deg(before.rpy[2] + 90.0)).abs() < 0.05,
+                "{name}: {before:?} → {after:?}"
+            );
+            assert!(
+                (after.pos[2] - before.pos[2]).abs() < 0.01,
+                "{name} keeps its height: {before:?} → {after:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_map_editor_saves_a_map_of_the_users_own_on_the_real_runtime() {
         let Some(python) = std::env::var("OPENBRICKS_SIM_PYTHON").ok().filter(|p| !p.is_empty()) else {
             eprintln!("OPENBRICKS_SIM_PYTHON is unset: skipping the map editor test");

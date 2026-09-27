@@ -841,7 +841,20 @@ impl Editor {
     /// used to turn about its own origin, a pair of bricks turning apart
     /// into each other, and a pitch or roll about the item's own tipped
     /// axis rather than the world's.
+    ///
+    /// With nothing selected, `R` (which calls this) turns the whole
+    /// component being edited, in place, as its panel's buttons do — it
+    /// used to do nothing and say nothing; at the robot's top level it
+    /// says what to select instead.
     pub fn rotate_selection(&mut self, axis: usize, deg: f64) {
+        if self.selection.is_empty() {
+            if self.is_root() {
+                self.status = "Select what to turn: the robot's frame is the way it drives".into();
+            } else {
+                self.rotate_component(axis, deg);
+            }
+            return;
+        }
         let names = self.movable();
         if names.is_empty() {
             return;
@@ -2456,6 +2469,81 @@ mod tests {
         ed.set_pose(&red, [-8.0, 13.6, -4.0], i.rot);
         assert!(ed.status.contains("stays: it would overlap"), "{}", ed.status);
         assert_eq!(ed.selected_instances()[0].pos, on);
+    }
+
+    #[test]
+    fn a_whole_component_turns_whatever_it_holds() {
+        // what a build holds may make a whole turn misfire: an overlap it already had, a part at
+        // 45°, a component inside it. Each turn about each axis moves every part, says so, and
+        // is undone to the pose before
+        for (label, overlap_first, turn_45, nest) in [
+            ("plain", false, false, false),
+            ("with an old overlap", true, false, false),
+            ("with a 45° brick", false, true, false),
+            ("nested", false, false, true),
+            ("all at once", true, true, true),
+        ] {
+            let (mut ed, a) = solo("3001");
+            let id = ed.ensure_ldraw_part("3001").unwrap();
+            ed.add_instance(Some(id), None, [40.0, 0.0, 0.0]);
+            let b = ed.selection[0].clone();
+            ed.set_instance(&b, |i| i.pos = if overlap_first { [31.0, 0.0, 0.0] } else { [32.0, 0.0, 0.0] });
+            let brick = ed.ensure_ldraw_part("3003").unwrap();
+            ed.add_instance(Some(brick), None, [0.0, 40.0, 0.0]);
+            let c = ed.selection[0].clone();
+            if turn_45 {
+                ed.set_instance(&c, |i| i.rot = [0.0, 0.0, 45.0]);
+            }
+            ed.recompute();
+            let mut kids = vec![a, b, c.clone()];
+            if nest {
+                ed.selection = vec![c];
+                assert!(ed.group_selection("inner"), "{}", ed.status);
+                kids = ed.children().iter().map(|i| i.name.clone()).collect();
+            }
+            ed.selection = kids;
+            assert!(ed.group_selection("whole"), "{}", ed.status);
+            ed.open_component("whole", true);
+            assert!(ed.selection.is_empty());
+            assert_eq!(ed.overlap_count(), usize::from(overlap_first), "{label}");
+            let poses = |ed: &Editor| ed.children().iter().map(|i| (i.pos, i.rot)).collect::<Vec<_>>();
+            let before = poses(&ed);
+            for (axis, how) in [(2, "turned"), (1, "pitched"), (0, "rolled")] {
+                ed.rotate_component(axis, 90.0);
+                let after = poses(&ed);
+                assert!(
+                    before.iter().zip(&after).all(|(x, y)| x != y),
+                    "{label}, axis {axis}: every part moves — {before:?} → {after:?}"
+                );
+                assert_eq!(ed.status, format!("whole {how} 90° in place"), "{label}");
+                ed.undo();
+                assert_eq!(poses(&ed), before, "{label}: undone");
+            }
+        }
+    }
+
+    #[test]
+    fn with_nothing_selected_a_turn_turns_the_whole_component() {
+        // the user's report: on the Workbench, nothing selected, R — nothing moved and nothing
+        // was said. Inside a component it turns the whole component now; at the robot's top level
+        // it says what to do
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [40.0, 0.0, 0.0]);
+        let b = ed.selection[0].clone();
+        ed.selection.clear();
+        ed.rotate_selection(2, 90.0);
+        assert_eq!(ed.status, "Select what to turn: the robot's frame is the way it drives");
+        ed.selection = vec![a, b];
+        assert!(ed.group_selection("pair"), "{}", ed.status);
+        ed.open_component("pair", true);
+        assert!(ed.selection.is_empty());
+        let before: Vec<[f64; 3]> = ed.children().iter().map(|c| c.rot).collect();
+        ed.rotate_selection(2, 90.0);
+        assert_eq!(ed.status, "pair turned 90° in place");
+        let after: Vec<[f64; 3]> = ed.children().iter().map(|c| c.rot).collect();
+        assert_ne!(before, after);
+        assert!(after.iter().all(|r| r[2] == 90.0), "{after:?}");
     }
 
     #[test]

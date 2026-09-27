@@ -990,7 +990,7 @@ impl App {
         }
         self.keys(ui, shift);
         let hud = format!(
-            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° · S snaps · ⌘C/⌘V copy/paste · ⌘L locks, ⌘⇧L unlocks · Del · ⌘Z",
+            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° (nothing selected: the whole component) · S snaps · ⌘C/⌘V copy/paste · ⌘L locks, ⌘⇧L unlocks · Del · ⌘Z",
             self.editor.editing,
             if self.editor.selection.is_empty() {
                 String::new()
@@ -3677,6 +3677,34 @@ mod tests {
             h.state().editor.selected_instances()[0].rot[2],
             crate::editor::wrap_deg(start.rot[2] + 90.0)
         );
+        // nothing selected: R turns the whole component being edited, and says so; at the
+        // robot's top level it says what to select (it used to do nothing, silently)
+        h.state_mut().editor.selection.clear();
+        h.step();
+        h.key_press(Key::R);
+        h.step();
+        assert_eq!(
+            h.state().editor.status,
+            "Select what to turn: the robot's frame is the way it drives"
+        );
+        h.state_mut().editor.open_component("drive_unit", true);
+        h.step();
+        assert_eq!(h.state().editor.editing, "drive_unit");
+        let before: Vec<[f64; 3]> = h.state().editor.children().iter().map(|c| c.rot).collect();
+        h.key_press(Key::R);
+        h.step();
+        assert!(
+            h.state().editor.status.ends_with("turned 90° in place"),
+            "{}",
+            h.state().editor.status
+        );
+        let after: Vec<[f64; 3]> = h.state().editor.children().iter().map(|c| c.rot).collect();
+        assert_ne!(before, after);
+        h.state_mut().editor.undo();
+        let root = h.state().editor.doc.robot.root.clone();
+        h.state_mut().editor.open_component(&root, false);
+        h.state_mut().editor.selection = vec![brick.clone()];
+        h.step();
         // along the frame only: a step towards either rail would put the board into it
         h.key_press(Key::ArrowUp);
         h.key_press(Key::ArrowUp);

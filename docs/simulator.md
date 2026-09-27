@@ -83,8 +83,8 @@ selected items move and turn together about the first one's origin.
 **Pitch 90°** and **Roll 90°** turn it a quarter about the up (z), y
 and x axes — the world's axes, as the rings are, and the selection as
 one piece about the first item's origin, one item or several. With
-nothing selected inside a component, **Turn the whole component**
-turns every part of it (locked ones too: they keep their place among
+nothing selected inside a component, `R` or **Turn the whole
+component** turns every part of it (locked ones too: they keep their place among
 the rest) in place — about the middle of what it fills, and back down
 so its lowest point is where it was — and every use of the component
 turns with it; the robot itself is not turned so, since its frame is
