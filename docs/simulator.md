@@ -70,7 +70,9 @@ components, the LEGO Technic set, other bricks, each with a rendered
 thumbnail), the 3D view in the
 middle, the contents of the component you are editing and the
 inspector on the right. Drag in the view to orbit, right-drag to pan,
-scroll to zoom, `F` to fit; drag a brick to move it on the ground
+scroll or pinch to zoom toward the point under the pointer (the brick
+there, or empty space at the view's depth, stays under it), `F` to
+fit; drag a brick to move it on the ground
 plane in 4 mm steps — half a stud, since a part an odd number of
 studs wide has its centre on a stud and an even one between two; the
 toolbar's **snap** offers 8, 4, 1 mm or off (shift lifts it). The
@@ -131,8 +133,9 @@ Map tab) and it appears in the view at once, as does the chassis (a
 `robot.assembly.json`, or the build open in the Workbench tab once it
 is saved) when you choose it; pick the program (`main.py`), then Run.
 The view is a plan: the whole map seen straight from above, north up,
-with no perspective, fitted edge to edge and never panned or zoomed
-(the Workbench keeps its own 3D camera). Pause, Resume and Stop do
+with no perspective, fitted edge to edge and never panned or zoomed —
+whatever changed the map while you were on another tab (the Workbench
+keeps its own 3D camera). Pause, Resume and Stop do
 what they say; the speed slider runs the physics slower or faster
 than wall time;
 the program's prints and errors appear in the log panel below the
@@ -221,7 +224,8 @@ geom.
 ## The map editor
 
 **Map** edits the map itself in a 3D view of its own — drag to orbit,
-shift-drag (or right-drag) to pan, scroll or pinch to zoom, **Fit** or
+shift-drag (or right-drag) to pan, scroll or pinch to zoom toward the
+point of the map under the pointer, **Fit** or
 `F` to frame the map, Iso / Top / Side / Front as on the Workbench.
 Once a map is framed the view is yours: moving, adding, removing or
 sticking a prop rebuilds the map on the run server, but the camera

@@ -248,6 +248,13 @@ impl Camera {
     pub fn up(&self) -> Vec3 {
         self.right().cross(-self.direction()).normalize_or_zero()
     }
+    /// Zoom by `f` (the distance times `f`) about a world point: the eye
+    /// and the target close in on it together (or back off), so the point
+    /// stays on the pixel it was on.
+    pub fn zoom_about(&mut self, f: f32, anchor: Vec3) {
+        self.target = anchor + (self.target - anchor) * f;
+        self.distance *= f;
+    }
     /// Frame a bounding box: look at its centre from the current angles.
     pub fn fit(&mut self, min: Vec3, max: Vec3) {
         self.target = (min + max) * 0.5;
@@ -1443,6 +1450,30 @@ impl Viewport {
 
     /// The nearest item under a pixel, by oriented bounding box.
     pub fn pick(&self, items: &[DrawItem], px: f32, py: f32) -> Option<usize> {
+        self.nearest(items, px, py).map(|b| b.1)
+    }
+
+    /// Where the pointer is in the world: the nearest item's surface under
+    /// a pixel (by oriented bounding box), or, over nothing, the pixel's
+    /// point at the target's depth (on the plane through the target that
+    /// faces the camera). What a zoom there closes in on.
+    pub fn point_under(&self, items: &[DrawItem], px: f32, py: f32) -> Vec3 {
+        let (w, h) = (self.size.0 as f32, self.size.1 as f32);
+        let (o, d) = self.camera.ray(px, py, w, h);
+        let t = match self.nearest(items, px, py) {
+            Some((t, _)) => t,
+            // every ray of the view meets that plane: none is more than half the field of view
+            // off the view's axis
+            None => {
+                let n = self.camera.direction();
+                (self.camera.target - o).dot(n) / d.dot(n)
+            }
+        };
+        o + d * t
+    }
+
+    /// The nearest item under a pixel and how far along the pixel's ray.
+    fn nearest(&self, items: &[DrawItem], px: f32, py: f32) -> Option<(f32, usize)> {
         let (w, h) = (self.size.0 as f32, self.size.1 as f32);
         let (o, d) = self.camera.ray(px, py, w, h);
         let mut best: Option<(f32, usize)> = None;
@@ -1454,7 +1485,7 @@ impl Viewport {
                 best = Some((t, i));
             }
         }
-        best.map(|b| b.1)
+        best
     }
 }
 
@@ -1606,6 +1637,29 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_zoom_about_a_point_keeps_it_on_its_pixel() {
+        let (w, h) = (800.0, 500.0);
+        for ortho in [false, true] {
+            let mut cam = Camera {
+                target: Vec3::new(10.0, -20.0, 5.0),
+                ortho,
+                ..Camera::default()
+            };
+            let p = Vec3::new(60.0, 40.0, 12.0);
+            let px = cam.project(p, w, h).unwrap();
+            let d0 = cam.distance;
+            cam.zoom_about(0.5, p);
+            assert!((cam.distance - d0 * 0.5).abs() < 1e-3);
+            let now = cam.project(p, w, h).unwrap();
+            assert!((now - px).length() < 1e-2, "ortho {ortho}: {px:?} -> {now:?}");
+            cam.zoom_about(3.0, p);
+            let now = cam.project(p, w, h).unwrap();
+            assert!((now - px).length() < 1e-2, "ortho {ortho}: {px:?} -> {now:?}");
+            assert!((cam.distance - d0 * 1.5).abs() < 1e-3);
+        }
+    }
     use super::testing::*;
     use super::*;
     use crate::geometry;

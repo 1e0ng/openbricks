@@ -1316,8 +1316,10 @@ impl SimulateTab {
                 "action {}: drag its handles or the path · ⌘C copies · ⌘L locks · Delete removes · ⌘Z undoes",
                 i + 1
             ),
-            None => "pan: drag · zoom: wheel · F fits the map · click a path to select it · drag the chassis to place it (shift turns it)"
-                .into(),
+            None => {
+                "the plan shows the whole map (F fits it again) · click a path to select it · drag the chassis to place it (shift turns it)"
+                    .into()
+            }
         }
     }
 
@@ -2304,7 +2306,7 @@ impl SimulateTab {
 
     /// The map's extent: the mat's, or a metre about the origin when the
     /// world has none.
-    fn map_extent(&self) -> Option<(Vec3, Vec3)> {
+    pub fn map_extent(&self) -> Option<(Vec3, Vec3)> {
         let scene = self.scene.as_ref()?;
         let plane = scene.geoms.iter().find(|g| g.kind == "plane" && g.size[0] > 0.0);
         Some(match plane {
@@ -3378,7 +3380,7 @@ impl SimulateTab {
         match &self.selected_prop {
             Some(n) => format!("{n}: drag to move · shift-drag turns · R turns 90° · ⌘D duplicates · Del removes · Esc deselects"),
             None => {
-                "drag a prop to move it · shift-drag turns it · click one to select it · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch".into()
+                "drag a prop to move it · shift-drag turns it · click one to select it · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch, toward the pointer".into()
             }
         }
     }
@@ -3862,7 +3864,7 @@ mod tests {
         assert_eq!(t.route.world, "practice-line");
         assert_eq!(t.route_program().unwrap_err(), "add an action first");
         assert!(t.route_lines(true).len() >= 3, "the start's arrow");
-        assert!(t.hint().starts_with("pan: drag"));
+        assert!(t.hint().starts_with("the plan shows the whole map"), "{}", t.hint());
         // a straight: two clicks; the first snaps to the chassis's start; the popup opens; nothing is added until it says so
         t.arm("straight");
         assert!(

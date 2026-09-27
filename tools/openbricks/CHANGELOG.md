@@ -3,6 +3,28 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.35.0 — zoom toward the pointer; the Simulate tab always shows the whole map
+
+**The wheel zooms toward the pointer.** On the Workbench and the Map
+tab, the wheel or a pinch zoomed toward the middle of the view, so the
+brick you wanted a closer look at slid away and had to be panned back.
+The zoom now closes in on, or backs off from, the point under the
+pointer: the brick or prop there by its box, the mat, or over empty
+space the point at the view's depth. That point stays under the pointer
+while the view moves. The Workbench still stops at 20 mm and the Map
+tab at 50 mm, the point still under the pointer when it does.
+
+**The Simulate tab shows the whole map.** After editing the map on the
+Map tab, the Simulate tab showed a 0.5 m patch of the mat's middle
+instead of the map. Each tab keeps its own camera, and they were
+swapped before the toolbar ran. So on the frame you clicked Simulate,
+the fit the plan was waiting for (every map edit asks for one) went to
+the Map tab's camera. The next frame brought in the plan's unfitted
+camera. The swap now runs after the toolbar, so each view is drawn with
+its own camera in the very frame its tab is chosen. The Map tab's view
+also no longer jumps after a visit to Simulate. The Simulate tab's hint
+no longer offers the pan and zoom its plan view never had.
+
 ## 4.34.0 — the WRO 2026 Elementary props are the real builds
 
 **The Elementary map is the user's.** `wro-2026-elementary` now ships
