@@ -248,6 +248,12 @@
       "file": "props/yellow-note-7b61f2f1.assembly.json",
       "pos": [0.7017, 0.4879, 0.0096],
       "yaw": 90.0
+    },
+    {
+      "name": "amplifier",
+      "file": "props/amplifier-24062eda.assembly.json",
+      "pos": [-1.14, 0.1477, 0.0096],
+      "yaw": 90.0
     }
   ],
   "cameras": [

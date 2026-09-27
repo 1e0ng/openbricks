@@ -12,10 +12,12 @@ catalogue mass, standing on the printed outlines:
 - the microphone, keyboard, guitar and congas on the truck;
 - the six notes on their start squares;
 - the two cables on the pink arrows;
-- the clef, and two speakers on the tilted blue outlines by the stage.
+- the clef;
+- the amplifier on the black outline between the grey cable areas,
+  its knobs and light to the field;
+- two speakers on the tilted blue outlines by the stage.
 
-The thirteen LDraw stand-ins the builds replace are gone. So is the
-amplifier, which nothing on the mat marks and the user's map leaves out.
+The thirteen LDraw stand-ins the builds replace are gone.
 The notes are now named `black_note`, `white_note`, `yellow_note`,
 `blue_note`, `red_note` and `green_note`, as in the user's map; they
 were `note_black` and so on. The randomizer's layout log uses the new

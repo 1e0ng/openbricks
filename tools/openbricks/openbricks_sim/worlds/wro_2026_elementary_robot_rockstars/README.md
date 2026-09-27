@@ -17,7 +17,7 @@ A map (`map.json`, format `openbricks-map/1`) for the [2026 WRO RoboMission Elem
 - **Mission 3.2 mic target area** — light-green rectangle on the stage
 - **Mission 3.3 notes start area** — four light-green squares at the upper-right
 - **Mission 3.3 note targets** — six coloured (red/blue/green/yellow/white/black) squares each ringed in grey
-- **Static bonus props** — clef, two speakers (don't damage)
+- **Static bonus props** — clef, amplifier, two speakers (don't damage)
 - **Start area** — bottom-right, by the truck
 
 ## Props
@@ -29,7 +29,7 @@ Every prop is a brick-for-brick Workbench build, with each brick's catalogue mas
 | microphone, keyboard, guitar, congas | on the truck, backstage start (mission 3.2) |
 | six notes: black, blue, red, green, white, yellow | the note start squares along the top (mission 3.3) |
 | two cables | on the pink arrows (mission 3.1) |
-| clef, two speakers | static bonus props |
+| clef, amplifier, two speakers | static bonus props: the amplifier on the black outline between the grey cable areas, a speaker on each tilted blue outline |
 
 Each `openbricks sim run` or `preview` of this map shuffles the black, white, yellow and blue notes across their four start squares, like a round's randomization; `--seed N` repeats a layout. Each note keeps the heading the map gives it and lands with its footprint centred on its square. The red and green notes stay put, as the rules require.
 

@@ -282,7 +282,7 @@ class LegoPropExpansionTests(unittest.TestCase):
         self.assertEqual(sorted(names), sorted([
             "microphone", "keyboard", "guitar", "congas",
             "black_note", "blue_note", "red_note", "green_note", "white_note", "yellow_note",
-            "cable", "cable_2", "clef", "speaker", "speaker_2"]))
+            "cable", "cable_2", "clef", "speaker", "speaker_2", "amplifier"]))
         self.assertTrue(all("file" in p and "ldr" not in p for p in m_doc["props"]), m_doc["props"])
         on_disk = sorted("props/" + f.name for f in (world / "props").iterdir())
         self.assertEqual(on_disk, sorted({p["file"] for p in m_doc["props"]}), "the folder holds what the map names")
@@ -309,6 +309,14 @@ class LegoPropExpansionTests(unittest.TestCase):
                     if int(m.geom_bodyid[c.geom1]) in ids and int(m.geom_bodyid[c.geom2]) in ids
                     and int(m.geom_bodyid[c.geom1]) != int(m.geom_bodyid[c.geom2])]
         self.assertEqual(touching, [], "no prop starts in another")
+        # the amplifier's body (96 x 48 mm, its knobs and light out front) on the black
+        # outline the mat prints between the two grey cable areas, its front to the field
+        from openbricks_sim import randomization
+        amp = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "amplifier")
+        x, y = randomization.footprint_middle(m, d, "amplifier")
+        self.assertAlmostEqual(y, 0.1717, places=3)
+        self.assertAlmostEqual(x - 0.0056, -1.1200, places=3, msg="the body's middle, the front's 11 mm beyond it")
+        self.assertAlmostEqual(float(d.xquat[amp][0]), float(d.xquat[amp][3]), places=6, msg="a quarter turn")
         start = {n: d.xpos[b].copy() for b, n in ids.items()}
         for _ in range(int(2.0 / m.opt.timestep)):
             mujoco.mj_step(m, d)
