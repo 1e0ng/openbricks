@@ -276,6 +276,16 @@ impl SimulateTab {
         self.scene.is_some()
     }
 
+    /// A barrier for tests: the server answers commands in order, so once
+    /// the world list asked for here is back, every frame answering an
+    /// earlier command is in. (A prop's pose shows a move at once, before
+    /// the server has heard it; an older frame can still arrive after.)
+    #[cfg(test)]
+    pub fn ask_worlds(&mut self) {
+        self.worlds.clear();
+        self.send(serde_json::json!({"cmd": "worlds"}));
+    }
+
     #[cfg(test)]
     pub fn set_script(&mut self, path: PathBuf) {
         self.script = Some(path);
@@ -2634,14 +2644,22 @@ impl SimulateTab {
 
     /// A prop's pose on the map (mm, degrees) as the last frame has it.
     pub fn prop_pose(&self, i: usize) -> Option<Pose2> {
+        let p = self.prop_full_pose(i)?;
+        Some(Pose2 {
+            x_mm: p.pos[0],
+            y_mm: p.pos[1],
+            yaw_deg: route::wrap_deg(p.rpy[2]),
+        })
+    }
+
+    /// A prop's whole pose as the last frame has it: where its origin is
+    /// (mm) and its roll, pitch and yaw (degrees, to a hundredth).
+    pub fn prop_full_pose(&self, i: usize) -> Option<PropPose> {
         let scene = self.scene.as_ref()?;
         let p = self.poses.get(scene.props.get(i)?.body)?;
-        let [w, x, y, z] = p.quat;
-        let yaw = (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z)).to_degrees();
-        Some(Pose2 {
-            x_mm: p.pos[0] * 1000.0,
-            y_mm: p.pos[1] * 1000.0,
-            yaw_deg: route::wrap_deg(yaw),
+        Some(PropPose {
+            pos: [p.pos[0] * 1000.0, p.pos[1] * 1000.0, p.pos[2] * 1000.0],
+            rpy: crate::assembly::euler_from(&quat_mat(p.quat)),
         })
     }
 
@@ -2752,34 +2770,76 @@ impl SimulateTab {
         self.prop_sent = None;
     }
 
-    /// Turn a prop to a heading (degrees counter-clockwise from the map's
-    /// x axis) where it stands. Refused while a program runs, and when
-    /// turned it would overlap another prop or the robot.
-    pub fn turn_prop_to(&mut self, i: usize, yaw_deg: f64, bundle: &Bundle) {
-        if self.busy() {
-            self.message = "stop the program before turning a prop".into();
-            return;
-        }
-        let Some(pose) = self.prop_pose(i) else { return };
-        let pose = Pose2 { yaw_deg, ..pose };
-        if let Some(other) = self.prop_overlap(i, pose, bundle) {
-            self.message = format!("{} stays: turned, it would overlap {other}", self.prop_name(i).unwrap_or_default());
-            return;
-        }
-        self.move_prop(i, pose);
+    /// Set one of a prop's angles — 0 roll, 1 pitch, 2 yaw (heading) — the
+    /// others kept, in place (see [`Self::turn_prop_by`]).
+    pub fn set_prop_angle(&mut self, i: usize, k: usize, deg: f64, bundle: &Bundle) {
+        let Some(cur) = self.prop_full_pose(i) else { return };
+        let mut rpy = cur.rpy;
+        rpy[k] = deg;
+        let delta = crate::assembly::rot_mat(rpy) * crate::assembly::rot_mat(cur.rpy).transpose();
+        self.turn_prop_by(i, delta, bundle);
     }
 
-    /// Turn a prop by an angle from where it points.
+    /// Turn a prop by an angle about a world axis — 0 x (roll), 1 y
+    /// (pitch), 2 z (a turn on the map) — in place.
+    pub fn turn_prop_about(&mut self, i: usize, axis: usize, deg: f64, bundle: &Bundle) {
+        let a = [glam::DVec3::X, glam::DVec3::Y, glam::DVec3::Z][axis];
+        self.turn_prop_by(i, glam::DMat3::from_axis_angle(a, deg.to_radians()), bundle);
+    }
+
+    /// Turn a prop by an angle about the map's up axis, in place.
     pub fn turn_prop(&mut self, i: usize, by_deg: f64, bundle: &Bundle) {
-        if let Some(pose) = self.prop_pose(i) {
-            self.turn_prop_to(i, pose.yaw_deg + by_deg, bundle);
-        }
+        self.turn_prop_about(i, 2, by_deg, bundle);
     }
 
     pub fn turn_selected_prop(&mut self, by_deg: f64, bundle: &Bundle) {
         if let Some(i) = self.selected_prop_index() {
             self.turn_prop(i, by_deg, bundle);
         }
+    }
+
+    /// Turn a prop by `delta` (a rotation in the map's frame) in place:
+    /// about the middle of what its parts fill, then up or down so its
+    /// lowest point is where it was (on the map for one standing on it;
+    /// never under it) — it turns, pitches and rolls where it stands.
+    /// Refused while a program runs, when the sim has no shape for the
+    /// prop to measure it by, and when turned it would overlap another
+    /// prop or the robot.
+    pub fn turn_prop_by(&mut self, i: usize, delta: glam::DMat3, bundle: &Bundle) {
+        if self.busy() {
+            self.message = "stop the program before turning a prop".into();
+            return;
+        }
+        let Some(cur) = self.prop_full_pose(i) else { return };
+        let name = self.prop_name(i).unwrap_or_default();
+        let parts = self.prop_parts(i, bundle);
+        if parts.is_empty() {
+            self.message = format!("{name} cannot be turned here: the sim has no shape to measure it by");
+            return;
+        }
+        // what the prop's parts fill and how low they reach, the prop at a pose
+        let reach_at = |pose: &PropPose| {
+            let at = pose.placed();
+            let placed: Vec<_> = parts.iter().map(|(s, p)| (s.clone(), pose_compose(&at, p))).collect();
+            crate::overlap::reach(&placed)
+        };
+        let (lo, hi, low0) = reach_at(&cur);
+        let middle = (lo + hi) / 2.0;
+        let at = cur.placed();
+        let pos = middle + delta * (at.pos - middle);
+        let round2 = |v: f64| (v * 100.0).round() / 100.0;
+        let mut next = PropPose {
+            pos: [round2(pos.x), round2(pos.y), pos.z],
+            rpy: crate::assembly::euler_from(&(delta * at.rot)),
+        };
+        let (_, _, low1) = reach_at(&next);
+        next.pos[2] = crate::assembly::round3(next.pos[2] + low0.max(0.0) - low1);
+        if let Some(other) = self.prop_overlap_at(i, &next, bundle) {
+            self.message = format!("{name} stays: turned, it would overlap {other}");
+            return;
+        }
+        self.message.clear();
+        self.move_prop_to(i, next);
     }
 
     // ------------------------------------------------------ overlaps
@@ -2930,21 +2990,28 @@ impl SimulateTab {
         bricks.iter().filter_map(|b| self.brick_part(b, bundle)).collect()
     }
 
-    /// What prop `i`, put at `pose` (flat, at its present height), would
-    /// overlap: the name of the first other prop any part of it runs
-    /// into, or "the robot"; None when it is clear. Faces that only
-    /// touch are not overlaps, so props stack and stand side by side.
+    /// What prop `i`, put at `pose` on the map (its height, pitch and roll
+    /// as they are), would overlap. See [`Self::prop_overlap_at`].
     pub fn prop_overlap(&mut self, i: usize, pose: Pose2, bundle: &Bundle) -> Option<String> {
+        let cur = self.prop_full_pose(i)?;
+        let full = PropPose {
+            pos: [pose.x_mm, pose.y_mm, cur.pos[2]],
+            rpy: [cur.rpy[0], cur.rpy[1], pose.yaw_deg],
+        };
+        self.prop_overlap_at(i, &full, bundle)
+    }
+
+    /// What prop `i`, put at a whole pose, would overlap: the name of the
+    /// first other prop any part of it runs into, or "the robot"; None
+    /// when it is clear. Faces that only touch are not overlaps, so props
+    /// stack and stand side by side.
+    pub fn prop_overlap_at(&mut self, i: usize, pose: &PropPose, bundle: &Bundle) -> Option<String> {
         let mine = self.prop_parts(i, bundle);
         if mine.is_empty() {
             return None;
         }
-        let (root, n) = self.scene.as_ref().map(|s| (s.props[i].body, s.props.len()))?;
-        let z = self.poses.get(root).map(|p| p.pos[2] * 1000.0).unwrap_or(0.0);
-        let at = crate::overlap::Pose {
-            pos: glam::DVec3::new(pose.x_mm, pose.y_mm, z),
-            rot: glam::DMat3::from_rotation_z(pose.yaw_deg.to_radians()),
-        };
+        let n = self.scene.as_ref().map(|s| s.props.len())?;
+        let at = pose.placed();
         let placed: Vec<_> = mine.iter().map(|(s, p)| (s.clone(), pose_compose(&at, p))).collect();
         let mut others: Vec<(String, usize)> = (0..n)
             .filter(|&j| j != i)
@@ -3011,21 +3078,37 @@ impl SimulateTab {
         }
     }
 
-    /// Put a prop at a pose: the frame shows it there at once, the server
-    /// moves it and remembers it for the map's text.
+    /// Put a prop at a place and heading on the map, its height, pitch
+    /// and roll kept. See [`Self::move_prop_to`].
     pub fn move_prop(&mut self, i: usize, pose: Pose2) {
+        let Some(cur) = self.prop_full_pose(i) else { return };
+        let pose = round_pose(pose);
+        self.move_prop_to(
+            i,
+            PropPose {
+                pos: [pose.x_mm, pose.y_mm, cur.pos[2]],
+                rpy: [cur.rpy[0], cur.rpy[1], pose.yaw_deg],
+            },
+        );
+        self.prop_sent = Some(pose);
+    }
+
+    /// Put a prop at a whole pose: the frame shows it there at once, the
+    /// server moves it and remembers it for the map's text.
+    pub fn move_prop_to(&mut self, i: usize, pose: PropPose) {
         let Some((name, body)) = self.scene.as_ref().and_then(|s| s.props.get(i)).map(|p| (p.name.clone(), p.body)) else {
             return;
         };
-        let pose = round_pose(pose);
         if let Some(local) = self.poses.get_mut(body) {
-            local.pos[0] = pose.x_mm / 1000.0;
-            local.pos[1] = pose.y_mm / 1000.0;
-            let half = pose.yaw_deg.to_radians() / 2.0;
-            local.quat = [half.cos(), 0.0, 0.0, half.sin()];
+            local.pos = pose.pos.map(|v| v / 1000.0);
+            local.quat = pose.quat();
         }
-        self.prop_sent = Some(pose);
-        self.send(serde_json::json!({"cmd": "move", "name": name, "x_mm": pose.x_mm, "y_mm": pose.y_mm, "yaw_deg": pose.yaw_deg}));
+        let [roll, pitch, yaw] = pose.rpy;
+        self.send(serde_json::json!({
+            "cmd": "move", "name": name,
+            "x_mm": pose.pos[0], "y_mm": pose.pos[1], "z_mm": pose.pos[2],
+            "yaw_deg": route::wrap_deg(yaw), "pitch_deg": pitch, "roll_deg": roll,
+        }));
     }
 
     /// Another prop like this one, a little to the side, selected once the
@@ -3294,21 +3377,47 @@ impl SimulateTab {
                 self.selected_prop = if on { None } else { Some(name.clone()) };
             }
         }
-        if let Some(i) = self.selected_prop_index() {
-            ui.horizontal(|ui| {
-                ui.weak("heading");
-                let mut yaw = self.prop_pose(i).map(|p| p.yaw_deg).unwrap_or(0.0);
-                if ui
-                    .add(egui::DragValue::new(&mut yaw).speed(1.0).suffix("°"))
-                    .on_hover_text("degrees counter-clockwise from the map's x axis; shift-drag the prop to turn it by hand")
-                    .changed()
-                {
-                    self.turn_prop_to(i, yaw, bundle);
-                }
-                if ui.button("Turn 90°").on_hover_text("R").clicked() {
-                    self.turn_prop(i, 90.0, bundle);
-                }
-            });
+        if let Some(i) = self.selected_prop_index()
+            && let Some(cur) = self.prop_full_pose(i)
+        {
+            // heading, pitch and roll: each field sets its angle, each button turns a quarter
+            // about the map's axis; either way the prop turns in place and keeps standing
+            let rows = [
+                (
+                    2,
+                    "heading",
+                    "Turn 90°",
+                    "R · degrees counter-clockwise from the map's x axis; shift-drag the prop to turn it by hand",
+                ),
+                (
+                    1,
+                    "pitch",
+                    "Pitch 90°",
+                    "about the map's y axis, in place: it keeps standing where it stood",
+                ),
+                (
+                    0,
+                    "roll",
+                    "Roll 90°",
+                    "about the map's x axis, in place: it keeps standing where it stood",
+                ),
+            ];
+            for (k, label, button, hover) in rows {
+                ui.horizontal(|ui| {
+                    ui.weak(label);
+                    let mut deg = cur.rpy[k];
+                    if ui
+                        .add(egui::DragValue::new(&mut deg).speed(1.0).suffix("°"))
+                        .on_hover_text(hover)
+                        .changed()
+                    {
+                        self.set_prop_angle(i, k, deg, bundle);
+                    }
+                    if ui.button(button).on_hover_text(hover).clicked() {
+                        self.turn_prop_about(i, k, 90.0, bundle);
+                    }
+                });
+            }
             let mut fixed = self.prop_is_fixed(i);
             if ui
                 .checkbox(&mut fixed, "stuck to the map")
@@ -3394,6 +3503,30 @@ fn round1(v: f64) -> f64 {
 }
 
 /// A frame's quaternion (w, x, y, z) as a rotation matrix.
+/// A prop's whole pose on the map: its origin (mm) and how it is turned,
+/// `[roll, pitch, yaw]` in degrees in the Workbench's order (roll about
+/// x, then pitch about y, then yaw about z).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PropPose {
+    pub pos: [f64; 3],
+    pub rpy: [f64; 3],
+}
+
+impl PropPose {
+    fn placed(&self) -> crate::overlap::Pose {
+        crate::overlap::Pose {
+            pos: glam::DVec3::from_array(self.pos),
+            rot: crate::assembly::rot_mat(self.rpy),
+        }
+    }
+
+    /// The w-x-y-z quaternion of its turn.
+    fn quat(&self) -> [f64; 4] {
+        let q = glam::DQuat::from_mat3(&crate::assembly::rot_mat(self.rpy)).normalize();
+        [q.w, q.x, q.y, q.z]
+    }
+}
+
 fn quat_mat(q: [f64; 4]) -> glam::DMat3 {
     glam::DMat3::from_quat(glam::DQuat::from_xyzw(q[1], q[2], q[3], q[0]).normalize())
 }
@@ -4504,7 +4637,8 @@ mod tests {
         );
         assert_eq!(
             t.sent.last().unwrap(),
-            &serde_json::json!({"cmd": "move", "name": "clef", "x_mm": 350.0, "y_mm": 250.0, "yaw_deg": 90.0})
+            &serde_json::json!({"cmd": "move", "name": "clef", "x_mm": 350.0, "y_mm": 250.0, "z_mm": 10.0,
+                                "yaw_deg": 90.0, "pitch_deg": 0.0, "roll_deg": 0.0})
         );
         let p = t.prop_pose(0).unwrap();
         assert!(
@@ -5267,7 +5401,7 @@ mod tests {
         // turned where it stands into b's corner: refused; turned in the clear: taken
         t.move_prop(0, at(28.0, 20.0, 0.0));
         let n = t.sent.len();
-        t.turn_prop_to(0, 90.0, &lib);
+        t.set_prop_angle(0, 2, 90.0, &lib);
         assert_eq!(t.sent.len(), n);
         assert_eq!(t.message, "a stays: turned, it would overlap b");
         assert_eq!(t.prop_pose(0).unwrap().yaw_deg, 0.0);
@@ -5442,21 +5576,27 @@ mod tests {
             )
         };
         let lib = shipped_bundle();
-        // R: 90° counter-clockwise a press, where the prop stands, wrapping past 180
+        // R: 90° counter-clockwise a press, in place — about the middle of the clef's box, 10 mm
+        // along x from its origin, so the origin swings round it — wrapping past 180
         t.turn_prop(0, 90.0, &lib);
-        assert_eq!(sent(&t), ("move".into(), "clef".into(), 300.0, 90.0));
+        assert_eq!(sent(&t), ("move".into(), "clef".into(), 310.0, 90.0));
+        assert_eq!(t.sent.last().unwrap()["y_mm"], 190.0);
         assert!((t.prop_pose(0).unwrap().yaw_deg - 90.0).abs() < 1e-6);
         t.turn_prop(0, 90.0, &lib);
         t.turn_prop(0, 90.0, &lib);
         assert_eq!(sent(&t).3, -90.0);
         assert!((t.prop_pose(0).unwrap().yaw_deg + 90.0).abs() < 1e-6);
+        // a turn about the map's up axis keeps its height
+        assert_eq!(t.sent.last().unwrap()["z_mm"], 10.0);
         // the heading field
-        t.turn_prop_to(0, 45.0, &lib);
-        assert_eq!(sent(&t), ("move".into(), "clef".into(), 300.0, 45.0));
-        // the key turns the selected prop, and nothing when none is
+        t.set_prop_angle(0, 2, 45.0, &lib);
+        assert_eq!(sent(&t).3, 45.0);
+        // a prop the sim has no shape for (its mesh never came) is not turned, and says so
         t.selected_prop = Some("note".into());
+        let n = t.sent.len();
         t.turn_selected_prop(90.0, &lib);
-        assert_eq!((sent(&t).1.as_str(), sent(&t).3), ("note", 90.0));
+        assert_eq!(t.sent.len(), n);
+        assert_eq!(t.message, "note cannot be turned here: the sim has no shape to measure it by");
         t.selected_prop = None;
         let n = t.sent.len();
         t.turn_selected_prop(90.0, &lib);

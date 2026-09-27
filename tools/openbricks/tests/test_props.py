@@ -71,6 +71,58 @@ class PropTextTests(unittest.TestCase):
         self.assertIn("clef", names)
         self.assertGreater(len(names), 10)
 
+    def test_a_prop_is_pitched_and_rolled_as_a_workbench_part_is_turned(self):
+        text = _TWO.replace('pos="0.1 0.2 0.005" mass="0.05"/>', 'pos="0.1 0.2 0.005" mass="0.05" yaw="10" pitch="90" roll="-45"/>')
+        clef = props.props_in(text)[0]
+        self.assertEqual((clef["yaw"], clef["pitch"], clef["roll"]), (10.0, 90.0, -45.0))
+        self.assertEqual((props.props_in(_TWO)[0]["pitch"], props.props_in(_TWO)[0]["roll"]), (0.0, 0.0))
+        # written back in the fixed order, each only when it turns
+        moved = props.with_prop_moved(text, "clef", 0.5, -0.25, 0.0)
+        self.assertIn('pos="0.50000 -0.25000 0.00500" mass="0.05" pitch="90" roll="-45"/>', moved, "pitch and roll kept")
+        tipped = props.with_prop_moved(_TWO, "clef", 0.5, -0.25, 30.0, 90.0, 0.0, 0.024)
+        self.assertIn('pos="0.50000 -0.25000 0.02400" mass="0.05" yaw="30" pitch="90"/>', tipped)
+        upright = props.with_prop_moved(tipped, "clef", 0.5, -0.25, 30.0, 0.0, 0.0)
+        self.assertNotIn("pitch=", upright.split("note_red")[0])
+        self.assertIn("0.02400", upright.split("note_red")[0], "the height kept when not given")
+        # an assembly prop reads and writes them too
+        doc = '<worldbody><assembly_prop name="b" file="b.json" pos="0 0 0" yaw="5" pitch="-90" roll="180" fixed="true"/></worldbody>'
+        b = props.props_in(doc)[0]
+        self.assertEqual((b["yaw"], b["pitch"], b["roll"], b["fixed"]), (5.0, -90.0, 180.0, True))
+        self.assertIn('yaw="5" pitch="-90" roll="180" fixed="true"/>', props.with_prop_fixed(doc, "b", True))
+        # the quaternion: roll about x, then pitch about y, then yaw about z
+        import math
+        h = math.sqrt(0.5)
+        for (yaw, pitch, roll), want in [((90, 0, 0), (h, 0, 0, h)), ((0, 90, 0), (h, 0, h, 0)), ((0, 0, 90), (h, h, 0, 0))]:
+            got = props.euler_quat(yaw, pitch, roll)
+            for a, b2 in zip(got, want):
+                self.assertAlmostEqual(a, b2, places=9)
+        from openbricks_sim import assembly
+        for yaw, pitch, roll in [(30.0, 60.0, -20.0), (90.0, 90.0, 0.0), (-135.0, 10.0, 170.0)]:
+            w, x, y, z = props.euler_quat(yaw, pitch, roll)
+            q_mat = [[1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+                     [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+                     [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]]
+            e_mat = assembly.rot_mat([roll, pitch, yaw])
+            for r in range(3):
+                for c in range(3):
+                    self.assertAlmostEqual(q_mat[r][c], e_mat[r][c], places=9, msg=(yaw, pitch, roll))
+        self.assertEqual(props.quat_attr(0, 0, 0), "")
+        self.assertTrue(props.quat_attr(0, 0, 1).startswith(' quat="'))
+
+    def test_the_lowest_point_follows_the_turn(self):
+        from openbricks_sim import assembly
+        # one brick box 48 x 16 x 9.6 mm, its centre 4.8 mm below the origin
+        brick = [{"quat": [1.0, 0.0, 0.0, 0.0], "pos_m": [0.0, 0.0, -0.0048], "half_m": [0.024, 0.008, 0.0048]}]
+        self.assertAlmostEqual(assembly.prop_lowest_m(brick), -0.0096, places=6)
+        # pitched a quarter: its length points down, and its centre turns to the origin's height
+        self.assertAlmostEqual(assembly.prop_lowest_m(brick, props.euler_quat(0, 90, 0)), -0.024, places=6)
+        # rolled a quarter: its width points down
+        self.assertAlmostEqual(assembly.prop_lowest_m(brick, props.euler_quat(0, 0, 90)), -0.008, places=6)
+        # turned about z alone: nothing changes
+        self.assertAlmostEqual(assembly.prop_lowest_m(brick, props.euler_quat(37, 0, 0)), -0.0096, places=6)
+        # upside down: the centre is 4.8 mm above the origin now
+        self.assertAlmostEqual(assembly.prop_lowest_m(brick, props.euler_quat(0, 180, 0)), 0.0, places=6)
+
     def test_a_prop_moves_keeping_its_height_and_the_rest_of_the_text(self):
         moved = props.with_prop_moved(_TWO, "clef", 0.5, -0.25, 90.0)
         p = props.props_in(moved)[0]
@@ -227,7 +279,12 @@ class SaveTests(unittest.TestCase):
             assembly.prop_bricks(dict(doc, components={"pair": {"children": []}}), bundle)
         free = assembly.prop_body_xml("pair", (0.1, 0.2, 0.0), 90.0, False, out)
         self.assertIn("<freejoint/>", free)
-        self.assertIn('quat="0.707107 0 0 0.707107"', free)
+        self.assertIn('quat="0.707107 0.000000 0.000000 0.707107"', free)
+        # pitched a quarter about y, and rolled a quarter about x
+        self.assertIn('quat="0.707107 0.000000 0.707107 0.000000"',
+                      assembly.prop_body_xml("pair", (0.1, 0.2, 0.0), 0.0, False, out, pitch_deg=90.0).splitlines()[0])
+        self.assertIn('quat="0.707107 0.707107 0.000000 0.000000"',
+                      assembly.prop_body_xml("pair", (0.1, 0.2, 0.0), 0.0, False, out, roll_deg=90.0).splitlines()[0])
         self.assertEqual(free.count("<geom "), 2)
         stuck = assembly.prop_body_xml("pair", (0.1, 0.2, 0.0), 0.0, True, out)
         self.assertNotIn("<freejoint/>", stuck)
@@ -261,6 +318,25 @@ class SaveTests(unittest.TestCase):
             pair2 = mujoco.mj_name2id(m2, mujoco.mjtObj.mjOBJ_BODY, "pair")
             self.assertAlmostEqual(float(d2.xpos[pair2][2]), -assembly.prop_lowest_m(out), places=5)
             self.assertGreater(float(d2.xpos[pair2][2]), 0.0)
+            # tipped on its side, it is lifted by what reaches down turned: its 16 mm width
+            tipped = sunk.replace('<assembly_prop name="pair" file="props/pair.assembly.json" pos="0.1 0.2 0"/>',
+                                  '<assembly_prop name="pair" file="props/pair.assembly.json" pos="0.1 0.2 0" pitch="90"/>')
+            self.assertIn('pitch="90"', tipped)
+            (world / "world.xml").write_text(tipped)
+            m3, d3, _ = load_world(str(world / "world.xml"), chassis_spec=ChassisSpec())
+            mujoco.mj_forward(m3, d3)
+            pair3 = mujoco.mj_name2id(m3, mujoco.mjtObj.mjOBJ_BODY, "pair")
+            lift = -assembly.prop_lowest_m(out, props.euler_quat(0.0, 90.0, 0.0))
+            self.assertAlmostEqual(float(d3.xpos[pair3][2]), lift, places=5)
+            self.assertNotAlmostEqual(lift, -assembly.prop_lowest_m(out), places=3)
+            # the lowest point of every brick box, turned as MuJoCo turned it, is on the floor
+            lows = []
+            for g in range(m3.ngeom):
+                if int(m3.geom_bodyid[g]) != pair3:
+                    continue
+                r = d3.geom_xmat[g].reshape(3, 3)
+                lows.append(float(d3.geom_xpos[g][2]) - sum(abs(r[2][k]) * float(m3.geom_size[g][k]) for k in range(3)))
+            self.assertAlmostEqual(min(lows), 0.0, places=5)
             (world / "world.xml").write_text(xml.replace("props/pair.assembly.json", "props/gone.assembly.json"))
             with self.assertRaises(WorldLoadError):
                 load_world(str(world / "world.xml"), chassis_spec=ChassisSpec())

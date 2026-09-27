@@ -362,8 +362,10 @@ def frame(t_ms=0):
     import math
     bodies = [[0, 0, 0, 1, 0, 0, 0], list(CHASSIS)]
     for p in PROPS:
-        half = math.radians(p["yaw"]) / 2
-        bodies.append(p["pos"] + [math.cos(half), 0, 0, math.sin(half)])
+        # roll about x, then pitch about y, then yaw about z
+        hy, hp, hr = (math.radians(p.get(k, 0.0)) / 2 for k in ("yaw", "pitch", "roll"))
+        cy, sy, cp, sp, cr, sr = math.cos(hy), math.sin(hy), math.cos(hp), math.sin(hp), math.cos(hr), math.sin(hr)
+        bodies.append(p["pos"] + [cy * cp * cr + sy * sp * sr, cy * cp * sr - sy * sp * cr, cy * sp * cr + sy * cp * sr, sy * cp * cr - cy * sp * sr])
     send(ev="frame", t_ms=t_ms, bodies=bodies)
 status = "idle"
 for line in sys.stdin:
@@ -391,8 +393,11 @@ for line in sys.stdin:
             if p is None:
                 send(ev="error", text="no prop named %r on this map" % c["name"])
                 continue
-            p["pos"] = [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, p["pos"][2]]
+            z = p["pos"][2] if c.get("z_mm") is None else c["z_mm"] / 1000.0
+            p["pos"] = [c["x_mm"] / 1000.0, c["y_mm"] / 1000.0, z]
             p["yaw"] = float(c.get("yaw_deg") or 0.0)
+            p["pitch"] = float(c.get("pitch_deg", p.get("pitch", 0.0)))
+            p["roll"] = float(c.get("roll_deg", p.get("roll", 0.0)))
             frame()
         elif cmd == "add":
             src = next((p for p in PROPS if p["name"] == c["from"]), None)

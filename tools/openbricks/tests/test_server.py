@@ -68,6 +68,8 @@ class ProtocolTests(unittest.TestCase):
             lines = [
                 json.dumps({"cmd": "load", "world": "wro-2026-elementary", "assembly": _EXAMPLE}),
                 json.dumps({"cmd": "move", "name": "clef", "x_mm": 100, "y_mm": 100, "yaw_deg": 90}),
+                json.dumps({"cmd": "move", "name": "clef", "x_mm": 100, "y_mm": 100, "z_mm": 30, "yaw_deg": 90,
+                            "pitch_deg": 90, "roll_deg": 0}),
                 json.dumps({"cmd": "add", "from": "clef", "x_mm": -100, "y_mm": -100}),
                 json.dumps({"cmd": "remove", "name": "clef_2"}),
                 json.dumps({"cmd": "fix", "name": "clef", "fixed": True}),
@@ -84,6 +86,10 @@ class ProtocolTests(unittest.TestCase):
             self.assertIn("saved", kinds)
             self.assertTrue(any(e["ev"] == "error" and "ghost" in e["text"] for e in ev), [e for e in ev if e["ev"] == "error"])
             self.assertTrue(os.path.isfile(os.path.join(tmp, "worlds", "wired", "world.xml")))
+            from openbricks_sim import props
+            saved = open(os.path.join(tmp, "worlds", "wired", "world.xml")).read()
+            clef = next(p for p in props.props_in(saved) if p["name"] == "clef")
+            self.assertEqual((clef["yaw"], clef["pitch"], clef["roll"], clef["pos"][2]), (90.0, 90.0, 0.0, 0.03))
 
     def test_unknown_and_bad_commands_are_reported(self):
         out = io.StringIO()
@@ -174,6 +180,22 @@ class SessionTests(unittest.TestCase):
             self.assertIn('yaw="45"', s.world_xml)
             with self.assertRaises(props.PropError):
                 s.move_prop("no_such_prop", 0.0, 0.0)
+            # tipped: pitch, roll and a height given are the body's at once and the text's
+            s.move_prop("clef", 300.0, -200.0, 45.0, 90.0, -30.0, 25.0)
+            frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
+            got = frame["bodies"][clef["body"]]
+            self.assertAlmostEqual(got[2], 0.025, places=5)
+            want = props.euler_quat(45.0, 90.0, -30.0)
+            sign = 1.0 if got[3] * want[0] + got[4] * want[1] + got[5] * want[2] + got[6] * want[3] >= 0 else -1.0
+            for a, b in zip(got[3:], want):
+                self.assertAlmostEqual(a * sign, b, places=5)
+            self.assertIn('yaw="45" pitch="90" roll="-30"', s.world_xml)
+            # a move that does not name them keeps them (and the height)
+            s.move_prop("clef", 300.0, -200.0, 45.0)
+            self.assertIn('yaw="45" pitch="90" roll="-30"', s.world_xml)
+            frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
+            self.assertAlmostEqual(frame["bodies"][clef["body"]][2], 0.025, places=5)
+            s.move_prop("clef", 300.0, -200.0, 45.0, 0.0, 0.0)
             # add: the world reloads with one more prop, the chassis staying put
             s.place(-400.0, 100.0, 90.0)
             name = s.add_prop("note_red", 100.0, 50.0, 10.0)
@@ -217,6 +239,10 @@ class SessionTests(unittest.TestCase):
             s.move_prop("one_brick", 100.0, 100.0, 0.0)
             frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
             self.assertAlmostEqual(frame["bodies"][body][0], 0.1, places=4, msg="a stuck prop still moves by the editor")
+            s.move_prop("one_brick", 100.0, 100.0, 0.0, 0.0, 90.0, 12.0)
+            frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
+            self.assertAlmostEqual(frame["bodies"][body][2], 0.012, places=5, msg="and tips, at the height given")
+            self.assertAlmostEqual(abs(frame["bodies"][body][4]), 0.7071068, places=5)
             s.fix_prop("one_brick", False)
             body = mujoco.mj_name2id(s.robot.model, mujoco.mjtObj.mjOBJ_BODY, "one_brick")
             self.assertEqual(int(s.robot.model.body_jntnum[body]), 1, "free again")

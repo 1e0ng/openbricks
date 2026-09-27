@@ -1819,6 +1819,20 @@ impl App {
                 let pr = self.editor.edited_props();
                 Self::computed_block(ui, &pr, &format!("{} frame", self.editor.editing));
                 ui.weak(format!("used ×{}", assembly::usage_count(&self.editor.doc, &self.editor.editing)));
+                ui.add_space(6.0);
+                ui.strong("Turn the whole component");
+                ui.weak("every part of it, in place: it keeps standing where it stood");
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Turn 90°").on_hover_text("about the up (z) axis").clicked() {
+                        self.editor.rotate_component(2, 90.0);
+                    }
+                    if ui.button("Pitch 90°").on_hover_text("about the y axis").clicked() {
+                        self.editor.rotate_component(1, 90.0);
+                    }
+                    if ui.button("Roll 90°").on_hover_text("about the x axis").clicked() {
+                        self.editor.rotate_component(0, 90.0);
+                    }
+                });
                 if ui
                     .button("Save as build…")
                     .on_hover_text("this component as an assembly file of its own, to open or import elsewhere")
@@ -1860,9 +1874,16 @@ impl App {
                 ui.weak(format!("🔒 {locked} locked"));
             }
             self.group_form(ui, insts.len());
+            ui.weak("the buttons turn the selection as one piece, about the first selected item");
             ui.horizontal_wrapped(|ui| {
                 if ui.button("Turn 90°").clicked() {
                     self.editor.rotate_selection(2, 90.0);
+                }
+                if ui.button("Pitch 90°").clicked() {
+                    self.editor.rotate_selection(1, 90.0);
+                }
+                if ui.button("Roll 90°").clicked() {
+                    self.editor.rotate_selection(0, 90.0);
                 }
                 self.selection_actions(ui);
             });
@@ -3479,6 +3500,65 @@ mod tests {
     }
 
     #[test]
+    fn the_workbench_turns_a_whole_component_and_a_selection_as_one() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        // a component of two 2 x 4s end to end, opened, nothing selected
+        {
+            let ed = &mut h.state_mut().editor;
+            let root = ed.doc.robot.root.clone();
+            ed.doc.components.get_mut(&root).unwrap().children.clear();
+            ed.doc.robot.roles.clear();
+            ed.recompute();
+            ed.magnet = false;
+            let id = ed.ensure_ldraw_part("3001").unwrap();
+            ed.add_instance(Some(id.clone()), None, [0.0; 3]);
+            let a = ed.selection[0].clone();
+            ed.add_instance(Some(id), None, [32.0, 0.0, 0.0]);
+            let b = ed.selection[0].clone();
+            ed.selection = vec![a, b];
+            assert!(ed.group_selection("pair"), "{}", ed.status);
+            ed.open_component("pair", true);
+            ed.selection.clear();
+        }
+        steps(&mut h, 3);
+        assert!(h.query_by_label("Turn the whole component").is_some());
+        h.get_by_label("Pitch 90°").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.status, "pair pitched 90° in place");
+        assert!(h.state().editor.children().iter().all(|c| c.rot[1].abs() == 90.0));
+        h.get_by_label("Turn 90°").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.status, "pair turned 90° in place");
+        h.get_by_label("Roll 90°").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().editor.status, "pair rolled 90° in place");
+        // both selected: the multi-selection's buttons turn them as one, about the first
+        let names: Vec<String> = h.state().editor.children().iter().map(|c| c.name.clone()).collect();
+        h.state_mut().editor.selection = names.clone();
+        steps(&mut h, 3);
+        let before: Vec<[f64; 3]> = h.state().editor.children().iter().map(|c| c.pos).collect();
+        h.get_by_label("Roll 90°").click();
+        steps(&mut h, 2);
+        let after: Vec<[f64; 3]> = h.state().editor.children().iter().map(|c| c.pos).collect();
+        assert_eq!(after[0], before[0], "the first turns about its own origin");
+        let (d0, d1) = (
+            DVec3::from_array(before[1]) - DVec3::from_array(before[0]),
+            DVec3::from_array(after[1]) - DVec3::from_array(after[0]),
+        );
+        assert!(
+            (d1 - glam::DMat3::from_rotation_x(90f64.to_radians()) * d0).length() < 0.01,
+            "{d0} → {d1}"
+        );
+        h.get_by_label("Pitch 90°").click();
+        steps(&mut h, 2);
+        h.get_by_label("Turn 90°").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state_mut().editor.overlap_count(), 0);
+    }
+
+    #[test]
     fn the_inspector_edits_the_selection_and_makes_components() {
         let Some(gpu) = gpu() else { return };
         let mut h = harness(&gpu, None);
@@ -4024,12 +4104,22 @@ mod tests {
                     .unwrap_or(false)
             }
         };
-        wait_for(&mut h, &heard(y0));
+        // a turn works from the pose the server last reported, and a prop's pose shows a move
+        // at once, before the server has heard it — an older frame can still arrive after, so
+        // "shows the yaw" is no sync point: every step waits until the server has answered all
+        // that went before (a world list asked for after them), then checks the pose
+        let barrier = |h: &mut Harness<'_, App>| {
+            h.state_mut().simulate.ask_worlds();
+            wait_for(h, &|a: &App| !a.simulate.worlds().is_empty());
+        };
+        barrier(&mut h);
+        assert!(heard(y0)(h.state()));
         h.key_press(Key::R);
         steps(&mut h, 2);
         let y_r = last_yaw(&h);
         assert!(crate::route::wrap_deg(y_r - y0 - 90.0).abs() < 0.2, "R: {y_r} from {y0}");
-        wait_for(&mut h, &heard(y_r));
+        barrier(&mut h);
+        assert!(heard(y_r)(h.state()));
         h.get_by_label("Turn 90°").click();
         steps(&mut h, 2);
         let y_b = last_yaw(&h);
@@ -4066,12 +4156,22 @@ mod tests {
         assert_eq!(h.state().viewport.camera.target, panned, "a save keeps the view");
         assert!(h.query_by_label("map: harness-map").is_some(), "the toolbar names the map saved");
         assert!(h.state().simulate.worlds().iter().any(|w| w.alias == "harness-map" && w.user));
-        // the map being the user's own, "Save changes" writes it in place, under its own name
-        // (the reload that follows a save clears the message: the command sent is the witness)
-        let saves = h.state().simulate.sent.iter().filter(|c| c["cmd"] == "save_world").count();
+        // the map being the user's own, "Save changes" writes it in place, under its own name.
+        // The save is followed by a reload; the next step must not start before its scene is in,
+        // or that scene takes the "select the prop just added" meant for the next one's (4.30.3
+        // waited on the save alone, and the next step failed one run in three). The witness: a
+        // load sent after the save, and the server's word that it loaded (the log is cleared by
+        // the load, and the server speaks after sending the scene).
+        let count = |a: &App, cmd: &str| a.simulate.sent.iter().filter(|c| c["cmd"] == cmd).count();
+        let (saves, loads) = (count(h.state(), "save_world"), count(h.state(), "load"));
         h.get_by_label("Save changes").click();
         wait_for(&mut h, &|a| {
-            a.simulate.sent.iter().filter(|c| c["cmd"] == "save_world").count() == saves + 1 && a.simulate.scene_loaded()
+            count(a, "save_world") == saves + 1
+                && count(a, "load") == loads + 1
+                && a.simulate
+                    .log
+                    .iter()
+                    .any(|(s, t)| s == "server" && t.starts_with("loaded harness-map"))
         });
         let last = h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "save_world").cloned().unwrap();
         assert_eq!(last["name"], "harness-map");
@@ -4167,7 +4267,8 @@ mod tests {
         steps(&mut h, 2);
         assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef"));
         let y1 = last_yaw(&h);
-        let field = h.get_by_role(egui::accesskit::Role::SpinButton).rect().center();
+        // (the first of the heading, pitch and roll fields)
+        let field = h.get_all_by_role(egui::accesskit::Role::SpinButton).next().unwrap().rect().center();
         press(&mut h, field, PointerButton::Primary, Modifiers::NONE);
         drag_to(&mut h, field + egui::vec2(10.0, 0.0), Modifiers::NONE);
         drag_to(&mut h, field + egui::vec2(60.0, 0.0), Modifiers::NONE);
@@ -4175,6 +4276,28 @@ mod tests {
         steps(&mut h, 2);
         let y2 = last_yaw(&h);
         assert!((y2 - y1).abs() > 5.0, "the heading field turned it: {y2} from {y1}");
+        // Pitch 90° and Roll 90° tip it about the map's y and x axes, in place: squared up
+        // first, the clef's box (60 x 40 x 20 mm, its bottom on the map, its origin in its
+        // middle) stands on its 60 mm side — its origin lifted to 30 mm — then, rolled, on its
+        // 40 mm side at 20 mm
+        barrier(&mut h);
+        let lib = h.state().editor.bundle.clone();
+        h.state_mut().simulate.set_prop_angle(0, 2, 0.0, &lib);
+        barrier(&mut h);
+        assert!(heard(0.0)(h.state()), "squared up");
+        let last_move = |h: &Harness<'_, App>| h.state().simulate.sent.iter().rfind(|c| c["cmd"] == "move").cloned().unwrap();
+        h.get_by_label("Pitch 90°").click();
+        steps(&mut h, 2);
+        let m = last_move(&h);
+        assert!((m["pitch_deg"].as_f64().unwrap().abs() - 90.0).abs() < 0.01, "{m}");
+        assert!((m["z_mm"].as_f64().unwrap() - 30.0).abs() < 0.01, "{m}");
+        barrier(&mut h);
+        assert!(h.state().simulate.prop_full_pose(0).is_some_and(|p| (p.pos[2] - 30.0).abs() < 0.01));
+        h.get_by_label("Roll 90°").click();
+        steps(&mut h, 2);
+        let m = last_move(&h);
+        assert!((m["z_mm"].as_f64().unwrap() - 20.0).abs() < 0.01, "{m}");
+        barrier(&mut h);
         // the 3D view: a drag on the empty map orbits, a right drag pans, the wheel zooms, Fit
         // frames the map again
         h.key_press(Key::Escape);

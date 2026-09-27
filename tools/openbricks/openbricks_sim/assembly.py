@@ -390,31 +390,45 @@ def prop_bricks(doc, bundle=None):
     return out, total
 
 
-def prop_lowest_m(bricks_out):
-    """The lowest point of a prop's bricks in the prop's own frame, in
-    metres: each brick's box reaches below its centre by its half
-    extents turned by its quaternion. A prop placed with its origin at
-    ``-prop_lowest_m`` stands on the floor; lower, it is under the map."""
+def _qmul(a, b):
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return (aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw)
+
+
+def prop_lowest_m(bricks_out, quat=(1.0, 0.0, 0.0, 0.0)):
+    """The lowest point of a prop's bricks below its origin, in metres,
+    the prop turned by ``quat`` (w-x-y-z; its pitch and roll tip it):
+    each brick's box reaches below its centre by its half extents
+    turned by the brick's quaternion and the prop's. A prop placed with
+    its origin at ``-prop_lowest_m`` stands on the floor; lower, it is
+    under the map."""
+    qw, qx, qy, qz = quat
     lowest = None
     for b in bricks_out:
-        w, x, y, z = b["quat"]
+        w, x, y, z = _qmul(quat, b["quat"])
         # the third row of the rotation matrix: how much of each box axis points up
         r20, r21, r22 = 2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)
         reach = abs(r20) * b["half_m"][0] + abs(r21) * b["half_m"][1] + abs(r22) * b["half_m"][2]
-        low = b["pos_m"][2] - reach
+        # the brick's centre, turned with the prop: its height is the third row times it
+        px, py, pz = b["pos_m"]
+        up = (2.0 * (qx * qz - qw * qy) * px + 2.0 * (qy * qz + qw * qx) * py + (1.0 - 2.0 * (qx * qx + qy * qy)) * pz)
+        low = up - reach
         lowest = low if lowest is None else min(lowest, low)
     return round(lowest if lowest is not None else 0.0, 6)
 
 
-def prop_body_xml(name, pos_m, yaw_deg, fixed, bricks_out, indent="    "):
-    """The MJCF body of a document placed as a prop: one box per brick
-    that collides and carries the brick's mass (at least a gram, so a
-    free body has some), a free joint unless the prop is fixed to the
-    map, ``group="3"`` so a viewer draws the exact bricks instead."""
-    quat = ""
-    if yaw_deg:
-        half = math.radians(yaw_deg) / 2.0
-        quat = ' quat="%.6f 0 0 %.6f"' % (math.cos(half), math.sin(half))
+def prop_body_xml(name, pos_m, yaw_deg, fixed, bricks_out, indent="    ", pitch_deg=0.0, roll_deg=0.0):
+    """The MJCF body of a document placed as a prop, turned by its yaw,
+    pitch and roll: one box per brick that collides and carries the
+    brick's mass (at least a gram, so a free body has some), a free
+    joint unless the prop is fixed to the map, ``group="3"`` so a
+    viewer draws the exact bricks instead."""
+    from openbricks_sim import props
+    quat = props.quat_attr(yaw_deg, pitch_deg, roll_deg)
     inner = indent + "  "
     lines = ['%s<body name="%s" pos="%.5f %.5f %.5f"%s>' % (indent, name, pos_m[0], pos_m[1], pos_m[2], quat)]
     if not fixed:

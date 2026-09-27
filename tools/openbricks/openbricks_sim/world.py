@@ -103,7 +103,9 @@ def _expand_lego_props(world_xml: str, world_dir: Path) -> str:
             m.group("name"), pos, ldr_text,
             total_mass_kg=float(m.group("mass")),
             color_override=color_override,
-            yaw_deg=float(m.group("yaw")) if m.group("yaw") is not None else 0.0,
+            yaw_deg=props.angle(m, "yaw"),
+            pitch_deg=props.angle(m, "pitch"),
+            roll_deg=props.angle(m, "roll"),
             freejoint=not props._flag(m.group("fixed") or ""))
     return _LEGO_PROP_RE.sub(_expand, world_xml)
 
@@ -131,14 +133,14 @@ def _expand_assembly_props(world_xml: str, world_dir: Path) -> str:
         pos = tuple(float(t) for t in m.group("pos").split())
         if len(pos) != 3:
             raise WorldLoadError("assembly_prop {!r} pos must be 3 floats; got {!r}".format(name, m.group("pos")))
-        # never under the map: a prop whose lowest brick would sink below the floor is lifted
-        # onto it (one standing higher is left where the map put it)
-        lowest = assembly_mod.prop_lowest_m(bricks_out)
+        # never under the map: a prop whose lowest brick would sink below the floor, turned as
+        # the map turns it, is lifted onto it (one standing higher is left where the map put it)
+        yaw, pitch, roll = props.angle(m, "yaw"), props.angle(m, "pitch"), props.angle(m, "roll")
+        lowest = assembly_mod.prop_lowest_m(bricks_out, props.euler_quat(yaw, pitch, roll))
         if pos[2] + lowest < -1e-6:
             pos = (pos[0], pos[1], -lowest)
         return assembly_mod.prop_body_xml(
-            name, pos, float(m.group("yaw")) if m.group("yaw") is not None else 0.0,
-            props._flag(m.group("fixed") or ""), bricks_out)
+            name, pos, yaw, props._flag(m.group("fixed") or ""), bricks_out, pitch_deg=pitch, roll_deg=roll)
     return props.MODEL_RE.sub(_expand, world_xml)
 
 

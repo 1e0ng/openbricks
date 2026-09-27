@@ -835,18 +835,90 @@ impl Editor {
         names
     }
 
+    /// Turn the selection `deg` about world axis `axis` (0 = x: roll,
+    /// 1 = y: pitch, 2 = z: turn) as one piece, through the first
+    /// selected item's origin — as the rotate handles turn it. Each item
+    /// used to turn about its own origin, a pair of bricks turning apart
+    /// into each other, and a pitch or roll about the item's own tipped
+    /// axis rather than the world's.
     pub fn rotate_selection(&mut self, axis: usize, deg: f64) {
         let names = self.movable();
         if names.is_empty() {
             return;
         }
+        // (something movable is selected, so the selection has a first item)
+        let pivot = DVec3::from_array(self.selected_instances()[0].pos);
         self.push_undo();
         self.note_before(&names);
         for name in &names {
-            self.set_instance(name, |i| i.rot[axis] = wrap_deg(i.rot[axis] + deg));
+            self.set_instance(name, |i| {
+                let (p, r) = gizmo::rotated(i.pos, i.rot, pivot, axis, deg);
+                i.pos = p;
+                i.rot = r;
+            });
         }
         self.recompute();
         self.settle("stays");
+    }
+
+    /// Where the edited component's bricks reach: the box they fill and
+    /// the lowest point they reach, exact ([`overlap::reach`]); None when
+    /// none has a shape.
+    fn extent(&mut self) -> Option<(DVec3, DVec3, f64)> {
+        let leaves = self.leaves.clone();
+        let placed: Vec<(Rc<Shape>, Pose)> = leaves
+            .iter()
+            .filter_map(|leaf| {
+                let pose = Pose {
+                    pos: leaf.pos,
+                    rot: leaf.rot,
+                };
+                Some((self.shape_of(&leaf.part_id)?, pose))
+            })
+            .collect();
+        (!placed.is_empty()).then(|| overlap::reach(&placed))
+    }
+
+    /// Turn the whole component being edited `deg` about world axis
+    /// `axis`, in place: every part of it, locked ones too (they keep
+    /// their place among the rest), about the middle of what it fills,
+    /// then up or down so its lowest point is where it was — it stands
+    /// where it stood. Every use of the component turns with it. The
+    /// robot is not turned so: its frame is the way it drives.
+    pub fn rotate_component(&mut self, axis: usize, deg: f64) {
+        if self.is_root() {
+            self.status = "The robot's frame is the way it drives: turn its parts instead".into();
+            return;
+        }
+        let editing = self.editing.clone();
+        let names: Vec<String> = self.children().iter().map(|c| c.name.clone()).collect();
+        let Some((lo, hi, low0)) = self.extent() else {
+            self.status = format!("{editing} has no bricks to turn");
+            return;
+        };
+        let pivot = (lo + hi) / 2.0;
+        self.push_undo();
+        self.note_before(&names);
+        for name in &names {
+            self.set_instance(name, |i| {
+                let (p, r) = gizmo::rotated(i.pos, i.rot, pivot, axis, deg);
+                i.pos = p;
+                i.rot = r;
+            });
+        }
+        self.recompute();
+        let (_, _, low1) = self
+            .extent()
+            .expect("the bricks measured before the turn have their shapes after it");
+        let dz = low0 - low1;
+        for name in &names {
+            self.set_instance(name, |i| i.pos[2] = assembly::round3(i.pos[2] + dz));
+        }
+        self.recompute();
+        if !self.settle("stays") {
+            let how = ["rolled", "pitched", "turned"][axis];
+            self.status = format!("{editing} {how} {deg}° in place");
+        }
     }
 
     pub fn nudge_selection(&mut self, d: [f64; 3]) {
@@ -2233,8 +2305,13 @@ mod tests {
         assert_eq!(ed.selected_instances()[0].pos, [0.0, 0.0, 9.6], "{}", ed.status);
         ed.rotate_selection(2, 90.0);
         assert_eq!(ed.selected_instances()[0].rot, [0.0, 0.0, 90.0], "{}", ed.status);
+        // pitch turns about the world's y axis — its length, as it lies now — laying it on its
+        // side on the studs (it used to turn about its own tipped axis)
         ed.rotate_selection(1, 90.0);
-        assert_eq!(ed.selected_instances()[0].rot, [0.0, 0.0, 90.0]);
+        assert_eq!(ed.selected_instances()[0].rot, [90.0, 0.0, 90.0], "{}", ed.status);
+        // rolled about the world's x axis it would stand on end, half through the brick below
+        ed.rotate_selection(0, 90.0);
+        assert_eq!(ed.selected_instances()[0].rot, [90.0, 0.0, 90.0]);
         assert_eq!(ed.status, format!("{b} stays: it would overlap {a}"));
     }
 
@@ -2301,17 +2378,87 @@ mod tests {
     }
 
     #[test]
-    fn instances_turned_together_may_not_turn_into_each_other() {
+    fn instances_turned_together_turn_as_one_piece() {
         let (mut ed, a) = solo("32278");
         let id = ed.ensure_ldraw_part("32278").unwrap();
         ed.add_instance(Some(id), None, [16.0, 0.0, 0.0]);
         let b = ed.selection[0].clone();
         ed.selection = vec![a.clone(), b.clone()];
-        // side by side; each turned about its own origin they would lie across each other
+        let pose = |ed: &Editor, n: &str| {
+            let i = ed.children().iter().find(|i| i.name == n).unwrap().clone();
+            (i.pos, i.rot)
+        };
+        // two beams side by side: each turned about its own origin they used to lie across each
+        // other, and were refused; as one piece, about the first's origin, they stay side by side
         ed.rotate_selection(2, 90.0);
-        assert!(ed.selected_instances().iter().all(|i| i.rot == [0.0; 3]), "{}", ed.status);
-        assert!(ed.status.contains("stays: it would overlap"), "{}", ed.status);
+        assert_eq!(pose(&ed, &a), ([0.0; 3], [0.0, 0.0, 90.0]), "{}", ed.status);
+        assert_eq!(pose(&ed, &b), ([0.0, 16.0, 0.0], [0.0, 0.0, 90.0]));
+        assert!(!ed.status.contains("stays"), "{}", ed.status);
         assert_eq!(ed.overlap_count(), 0);
+        // roll and pitch too, about the world's x and y through the same origin: the pair ends
+        // up stacked, then standing side by side
+        ed.rotate_selection(0, 90.0);
+        assert_eq!(pose(&ed, &b).0, [0.0, 0.0, 16.0], "{}", ed.status);
+        ed.rotate_selection(1, 90.0);
+        assert_eq!(pose(&ed, &b).0, [16.0, 0.0, 0.0], "{}", ed.status);
+        assert_eq!(pose(&ed, &a).0, [0.0; 3]);
+        assert_eq!(ed.overlap_count(), 0);
+    }
+
+    #[test]
+    fn a_whole_component_turns_in_place() {
+        // a component of two 2 x 4s end to end, standing on the ground off its origin
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [72.0, 40.0, 0.0]);
+        let b = ed.selection[0].clone();
+        ed.set_instance(&a, |i| i.pos = [40.0, 40.0, 0.0]);
+        ed.recompute();
+        ed.selection = vec![a.clone(), b.clone()];
+        assert!(ed.group_selection("pair"), "{}", ed.status);
+        ed.open_component("pair", true);
+        let extent = |ed: &mut Editor| ed.extent().unwrap();
+        let (lo0, hi0, low0) = extent(&mut ed);
+        // pitched a quarter about y: it stands on end, in place — its middle where it was, its
+        // lowest point where it was — every part turned, a locked one too
+        ed.selection.clear();
+        let first = ed.children()[0].name.clone();
+        ed.set_instance(&first, |i| i.locked = true);
+        let depth = ed.undo_depth();
+        ed.rotate_component(1, 90.0);
+        assert_eq!(ed.undo_depth(), depth + 1);
+        assert_eq!(ed.status, "pair pitched 90° in place");
+        let (lo1, hi1, low1) = extent(&mut ed);
+        assert!((low1 - low0).abs() < 1e-6, "{low1} vs {low0}");
+        let (m0, m1) = ((lo0 + hi0) / 2.0, (lo1 + hi1) / 2.0);
+        assert!((m1.x - m0.x).abs() < 1e-6 && (m1.y - m0.y).abs() < 1e-6, "{m0} → {m1}");
+        assert!(hi1.z - lo1.z > 60.0, "on end: {lo1} {hi1}");
+        assert!(ed.children().iter().all(|c| c.rot[1].abs() == 90.0), "{:?}", ed.children());
+        assert_eq!(ed.overlap_count(), 0);
+        // turned and rolled back down, and undone
+        ed.rotate_component(2, 90.0);
+        assert_eq!(ed.status, "pair turned 90° in place");
+        ed.rotate_component(0, 90.0);
+        assert_eq!(ed.status, "pair rolled 90° in place");
+        let (_, _, low2) = extent(&mut ed);
+        assert!((low2 - low0).abs() < 1e-6);
+        ed.undo();
+        ed.undo();
+        ed.undo();
+        let (lo3, hi3, _) = extent(&mut ed);
+        assert!((lo3 - lo0).length() < 1e-6 && (hi3 - hi0).length() < 1e-6);
+        // the robot is not turned so, and a component with nothing measurable says so
+        let root = ed.doc.robot.root.clone();
+        ed.open_component(&root, false);
+        ed.rotate_component(1, 90.0);
+        assert!(ed.status.starts_with("The robot's frame is the way it drives"), "{}", ed.status);
+        ed.open_component("pair", true);
+        for c in ed.children().iter().map(|c| c.name.clone()).collect::<Vec<_>>() {
+            ed.set_instance(&c, |i| i.part = Some("no-such-part".into()));
+        }
+        ed.recompute();
+        ed.rotate_component(1, 90.0);
+        assert_eq!(ed.status, "pair has no bricks to turn");
     }
 
     #[test]
