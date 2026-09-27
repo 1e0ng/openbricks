@@ -399,8 +399,12 @@ robot as a tree of components:
   drag. Touching is not overlapping, and at a joint — a feature seated
   in the other part's (a pin all the way in its hole, a plate down on
   its studs, an axle anywhere along a hole it runs through) — the two
-  may cross a little: that is the press fit ABS allows, a feature
-  pushed in firmly, and it is not counted. Only there, though: the
+  may cross a little — within a millimetre of the seated feature, as
+  a brick's tube pushed onto a pin presses on the pin's collar: that
+  is the press fit ABS allows, a feature pushed in firmly, and it is
+  not counted. A brick on a pin turns about it at any angle: the
+  rotate rings step 15° (45° is three steps) and the inspector's
+  **roll**, **pitch** and **yaw** take any angle. Only there, though: the
   rest of the two parts' surfaces are checked as ever, so a plate let
   go turned on one stud, its walls through the others, is refused. A new brick lands beside
   what is already at the origin; a duplicate or a paste goes as far
