@@ -78,7 +78,9 @@ selection carries handles:
 three arrows (**Move**, `W`) to slide it along one world axis in grid
 steps, or three rings (**Rotate**, `E`) to turn it about one axis in
 15° steps — hold shift for free movement or rotation; several
-selected items move and turn together about the first one's origin.
+selected items move and turn together about the first one's origin;
+**Select all**, beside the contents list's heading, selects everything
+the component holds (locked items too, which stay put).
 `R` turns the selection 90°, and the inspector's **Turn 90°**,
 **Pitch 90°** and **Roll 90°** turn it a quarter about the up (z), y
 and x axes — the world's axes, as the rings are, and the selection as

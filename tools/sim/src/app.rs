@@ -1614,7 +1614,16 @@ impl App {
     }
 
     fn tree_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading(format!("Contents of {}", self.editor.editing));
+        ui.horizontal(|ui| {
+            ui.heading(format!("Contents of {}", self.editor.editing));
+            if ui
+                .add_enabled(!self.editor.children().is_empty(), egui::Button::new("Select all"))
+                .on_hover_text("every item here, to move, turn, group or copy together")
+                .clicked()
+            {
+                self.editor.select_all();
+            }
+        });
         let children: Vec<Instance> = self.editor.children().to_vec();
         let mut open: Option<String> = None;
         for ch in &children {
@@ -3583,10 +3592,13 @@ mod tests {
         h.get_by_label("Roll 90°").click();
         steps(&mut h, 2);
         assert_eq!(h.state().editor.status, "pair rolled 90° in place");
-        // both selected: the multi-selection's buttons turn them as one, about the first
+        // both selected, by Select all: the multi-selection's buttons turn them as one, about the
+        // first
         let names: Vec<String> = h.state().editor.children().iter().map(|c| c.name.clone()).collect();
-        h.state_mut().editor.selection = names.clone();
+        h.get_by_label("Select all").click();
         steps(&mut h, 3);
+        assert_eq!(h.state().editor.selection, names);
+        assert_eq!(h.state().editor.status, "Selected all 2 items");
         let before: Vec<[f64; 3]> = h.state().editor.children().iter().map(|c| c.pos).collect();
         h.get_by_label("Roll 90°").click();
         steps(&mut h, 2);
