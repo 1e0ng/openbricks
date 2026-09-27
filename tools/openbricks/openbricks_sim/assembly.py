@@ -421,12 +421,32 @@ def prop_lowest_m(bricks_out, quat=(1.0, 0.0, 0.0, 0.0)):
     return round(lowest if lowest is not None else 0.0, 6)
 
 
+# A brick with no colour chosen is drawn in the Workbench's LEGO
+# colour (#5B7A9C, the light theme's), so a sensor sees it so too.
+UNCOLOURED_RGB = (0.357, 0.478, 0.612)
+
+
+def brick_rgb(color):
+    """The ``(r, g, b)`` in 0..1 a brick of LDraw colour ``color`` shows:
+    the library palette's colour, as the viewer draws it, or
+    ``UNCOLOURED_RGB`` for a brick with none. Raises ``AssemblyError``
+    for a colour the palette does not have."""
+    if color is None:
+        return UNCOLOURED_RGB
+    entry = bricks.palette().get(str(color))
+    if entry is None:
+        raise AssemblyError("colour %r is not in the library's palette" % (color,))
+    hexrgb = entry["rgb"]
+    return tuple(round(int(hexrgb[i:i + 2], 16) / 255.0, 4) for i in (0, 2, 4))
+
+
 def prop_body_xml(name, pos_m, yaw_deg, fixed, bricks_out, indent="    ", pitch_deg=0.0, roll_deg=0.0):
     """The MJCF body of a document placed as a prop, turned by its yaw,
     pitch and roll: one box per brick that collides and carries the
-    brick's mass (at least a gram, so a free body has some), a free
-    joint unless the prop is fixed to the map, ``group="3"`` so a
-    viewer draws the exact bricks instead."""
+    brick's mass (at least a gram, so a free body has some) and colour
+    (what a colour sensor reads off it), a free joint unless the prop
+    is fixed to the map, ``group="3"`` so a viewer draws the exact
+    bricks instead."""
     from openbricks_sim import props
     quat = props.quat_attr(yaw_deg, pitch_deg, roll_deg)
     inner = indent + "  "
@@ -434,12 +454,17 @@ def prop_body_xml(name, pos_m, yaw_deg, fixed, bricks_out, indent="    ", pitch_
     if not fixed:
         lines.append(inner + "<freejoint/>")
     for b in bricks_out:
+        try:
+            rgb = brick_rgb(b.get("color"))
+        except AssemblyError as e:
+            raise AssemblyError("brick %r: %s" % (b["path"], e)) from e
         lines.append(
             '%s<geom name="%s_brick:%s" type="box" pos="%.5f %.5f %.5f" quat="%.6f %.6f %.6f %.6f" '
-            'size="%.5f %.5f %.5f" mass="%.6f" group="3" rgba="0.36 0.48 0.61 1"/>'
+            'size="%.5f %.5f %.5f" mass="%.6f" group="3" rgba="%g %g %g 1"/>'
             % (inner, name, b["path"], b["pos_m"][0], b["pos_m"][1], b["pos_m"][2],
                b["quat"][0], b["quat"][1], b["quat"][2], b["quat"][3],
-               b["half_m"][0], b["half_m"][1], b["half_m"][2], max(float(b.get("mass_g", 0.0)), 1.0) / 1000.0))
+               b["half_m"][0], b["half_m"][1], b["half_m"][2], max(float(b.get("mass_g", 0.0)), 1.0) / 1000.0,
+               rgb[0], rgb[1], rgb[2]))
     lines.append(indent + "</body>")
     return "\n".join(lines)
 

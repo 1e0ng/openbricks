@@ -212,23 +212,117 @@ class LegoPropExpansionTests(unittest.TestCase):
             "mosaic_frame should be welded to the worldbody (static "
             "scenery), not parented to a movable body")
 
-    def test_elementary_world_clef_has_many_geoms(self):
-        # Integration test: the shipped Elementary world's clef is a
-        # ``<lego_prop>`` placeholder that, when expanded, becomes a
-        # body with 31 brick boxes + 230+ stud cylinders. Pre-F2.1
-        # the clef was a single-box approximation — pin the new
-        # multi-geom shape so a regression to single-box is caught.
-        path = (_WORLDS / "wro_2026_elementary_robot_rockstars" / "map.json")
+    def test_junior_world_ldraw_prop_has_many_geoms(self):
+        # Integration test: a shipped LDraw prop (the Junior yellow
+        # tower, ``"ldr": "props/yellow_tower.ldr"``) expands into a
+        # body of brick boxes and stud cylinders. Pre-F2.1 props were
+        # single-box approximations — pin the multi-geom shape so a
+        # regression to single-box is caught.
+        path = (_WORLDS / "wro_2026_junior_heritage_heroes" / "map.json")
         m, _, _ = load_world(str(path), chassis_spec=ChassisSpec())
-        clef_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "clef")
-        self.assertGreaterEqual(clef_id, 0, "clef body missing from model")
-        clef_geom_count = sum(
-            1 for i in range(m.ngeom) if int(m.geom_bodyid[i]) == clef_id)
+        tower = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "yellow_tower_a")
+        self.assertGreaterEqual(tower, 0, "yellow_tower_a body missing from model")
+        count = sum(1 for i in range(m.ngeom) if int(m.geom_bodyid[i]) == tower)
         self.assertGreater(
-            clef_geom_count, 100,
-            "clef should have >100 geoms (~31 bricks + ~230 studs); "
-            "got %d — has the lego_prop expansion regressed to a "
-            "single-box approximation?" % clef_geom_count)
+            count, 40,
+            "the yellow tower should have >40 geoms (bricks + studs); "
+            "got %d — has the LDraw expansion regressed to a "
+            "single-box approximation?" % count)
+
+    def test_a_builds_bricks_carry_their_colour_for_the_sensors(self):
+        # a Workbench build placed as a prop: each brick's box carries
+        # the palette colour the viewer draws it in (what a colour
+        # sensor reads off it), a brick with none the Workbench's
+        # default LEGO colour; a colour the palette lacks is refused,
+        # naming the prop and the brick
+        import json
+        from openbricks_sim import assembly, bricks
+        num = sorted(bricks.load_bundle()["parts"])[0]
+        red = bricks.palette()["4"]["rgb"]
+        self.assertEqual(red, "C91A09")
+
+        def doc(*colours):
+            children = []
+            for i, c in enumerate(colours):
+                child = {"name": "b%d" % i, "part": "p", "pos": [0, 40.0 * i, 0], "rot": [0, 0, 0]}
+                if c is not None:
+                    child["color"] = c
+                children.append(child)
+            return {"format": "openbricks-assembly/1",
+                    "parts": {"p": {"name": "brick", "category": "lego", "mass_g": 2.0, "ldraw": num}},
+                    "components": {"one": {"children": children}}, "robot": {"name": "One", "root": "one"}}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "props").mkdir()
+            (tmp / "props" / "two.assembly.json").write_text(json.dumps(doc(4, None)))
+            mjcf = mapfile.to_mjcf(self._map({"name": "two", "file": "props/two.assembly.json", "pos": [0, 0, 0]}), tmp)
+            self.assertIn('name="two_brick:b0"', mjcf)
+            b0 = mjcf[mjcf.index('name="two_brick:b0"'):].split("/>")[0]
+            b1 = mjcf[mjcf.index('name="two_brick:b1"'):].split("/>")[0]
+            self.assertIn('rgba="0.7882 0.102 0.0353 1"', b0)
+            self.assertIn('rgba="0.357 0.478 0.612 1"', b1)
+            self.assertEqual(assembly.brick_rgb(None), assembly.UNCOLOURED_RGB)
+            (tmp / "props" / "odd.assembly.json").write_text(json.dumps(doc(4, 987654)))
+            with self.assertRaises(mapfile.MapError) as cm:
+                mapfile.to_mjcf(self._map({"name": "odd", "file": "props/odd.assembly.json", "pos": [0, 0, 0]}), tmp)
+            self.assertIn("odd", str(cm.exception))
+            self.assertIn("b1", str(cm.exception))
+            self.assertIn("987654", str(cm.exception))
+
+    def test_elementary_world_props_are_workbench_builds_standing_apart_on_the_mat(self):
+        # every prop of the Elementary map is a Workbench build of the
+        # building instructions, shipped with the map: each stands on
+        # the mat, none overlaps another, and a few seconds of physics
+        # leave them where the map put them
+        import numpy as np
+        world = _WORLDS / "wro_2026_elementary_robot_rockstars"
+        m_doc = mapfile.load(world / "map.json")
+        names = [p["name"] for p in m_doc["props"]]
+        self.assertEqual(sorted(names), sorted([
+            "microphone", "keyboard", "guitar", "congas",
+            "black_note", "blue_note", "red_note", "green_note", "white_note", "yellow_note",
+            "cable", "cable_2", "clef", "speaker", "speaker_2", "amplifier"]))
+        self.assertTrue(all("file" in p and "ldr" not in p for p in m_doc["props"]), m_doc["props"])
+        on_disk = sorted("props/" + f.name for f in (world / "props").iterdir())
+        self.assertEqual(on_disk, sorted({p["file"] for p in m_doc["props"]}), "the folder holds what the map names")
+        m, d, _ = load_world(str(world / "map.json"), chassis_spec=ChassisSpec())
+        mujoco.mj_forward(m, d)
+        ids = {mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, n): n for n in names}
+        self.assertNotIn(-1, ids)
+        for b, n in ids.items():
+            low = min(float(d.geom_xpos[g][2] + (d.geom_xmat[g].reshape(3, 3) @ (m.geom_aabb[g, :3] + m.geom_aabb[g, 3:] * s))[2])
+                      for g in range(m.ngeom) if int(m.geom_bodyid[g]) == b
+                      for s in np.array(np.meshgrid([-1, 1], [-1, 1], [-1, 1])).T.reshape(-1, 3))
+            self.assertAlmostEqual(low, 0.0, places=4, msg="%s stands on the mat" % n)
+        # each note is mostly its own colour, as a colour sensor reads it
+        from collections import Counter
+        from openbricks_sim import assembly
+        for colour, code in (("black", 0), ("blue", 1), ("green", 2), ("red", 4), ("yellow", 14), ("white", 15)):
+            b = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, colour + "_note")
+            most = Counter(tuple(round(float(v), 3) for v in m.geom_rgba[g][:3])
+                           for g in range(m.ngeom) if int(m.geom_bodyid[g]) == b).most_common(1)[0][0]
+            want = assembly.brick_rgb(code)
+            self.assertLess(max(abs(a - b) for a, b in zip(most, want)), 0.002, (colour, most, want))
+        touching = [(ids[int(m.geom_bodyid[c.geom1])], ids[int(m.geom_bodyid[c.geom2])])
+                    for c in d.contact[:d.ncon]
+                    if int(m.geom_bodyid[c.geom1]) in ids and int(m.geom_bodyid[c.geom2]) in ids
+                    and int(m.geom_bodyid[c.geom1]) != int(m.geom_bodyid[c.geom2])]
+        self.assertEqual(touching, [], "no prop starts in another")
+        # the amplifier's body (96 x 48 mm, its knobs and light out front) on the black
+        # outline the mat prints between the two grey cable areas, its front to the field
+        from openbricks_sim import randomization
+        amp = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "amplifier")
+        x, y = randomization.footprint_middle(m, d, "amplifier")
+        self.assertAlmostEqual(y, 0.1717, places=3)
+        self.assertAlmostEqual(x - 0.0056, -1.1200, places=3, msg="the body's middle, the front's 11 mm beyond it")
+        self.assertAlmostEqual(float(d.xquat[amp][0]), float(d.xquat[amp][3]), places=6, msg="a quarter turn")
+        start = {n: d.xpos[b].copy() for b, n in ids.items()}
+        for _ in range(int(2.0 / m.opt.timestep)):
+            mujoco.mj_step(m, d)
+        for b, n in ids.items():
+            moved = float(np.linalg.norm(d.xpos[b] - start[n]))
+            self.assertLess(moved, 0.0005, "%s moved %.2f mm" % (n, moved * 1000))
 
     def test_elementary_world_microphone_is_a_workbench_build_standing_on_the_mat(self):
         # the microphone is a Workbench build shipped with the map (41 bricks with their
@@ -255,9 +349,11 @@ class LegoPropExpansionTests(unittest.TestCase):
         self.assertAlmostEqual(float(m.body_mass[mic]), sum(max(b["mass_g"], 1.0) for b in out) / 1000.0, places=4)
         mujoco.mj_forward(m, d)
         x, y, z = (float(v) for v in d.xpos[mic])
-        self.assertAlmostEqual(x, -0.0422, places=4)
-        self.assertAlmostEqual(y, -0.4743, places=4)
+        self.assertAlmostEqual(x, -0.0644, places=4)
+        self.assertAlmostEqual(y, -0.4936, places=4)
         self.assertAlmostEqual(z, 0.0096, places=4, msg="its lowest brick on the floor")
+        w, _, _, qz = (float(v) for v in d.xquat[mic])
+        self.assertAlmostEqual(abs(w), abs(qz), places=6, msg="turned a quarter, as it stands on the truck")
         lowest = min(float(d.geom_xpos[i][2]) - float(m.geom_size[i][2]) for i in range(m.ngeom) if int(m.geom_bodyid[i]) == mic)
         self.assertGreaterEqual(lowest, -1e-6, "nothing under the mat")
 

@@ -18,6 +18,7 @@ does not sponsor or endorse this tool. This module has no third-party
 dependencies; the converter needs numpy (``pip install openbricks[sim]``).
 """
 import base64
+import functools
 import json
 import os
 import pathlib
@@ -70,6 +71,13 @@ def load_colors():
     id → name, rgb, trans) and ``parts`` (LDraw number → colour id → the
     LEGO element numbers of the part in that colour)."""
     return json.loads(data_path(COLORS_NAME).read_text())
+
+
+@functools.lru_cache(maxsize=1)
+def palette():
+    """The library's colour palette, read once: colour id (a string) →
+    ``name``, ``rgb`` (hex) and ``trans``."""
+    return load_colors()["palette"]
 
 
 def load_sets():

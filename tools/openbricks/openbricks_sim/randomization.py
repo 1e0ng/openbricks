@@ -45,11 +45,13 @@ class _Slot:
     Coordinates are world frame in metres (mat origin at world
     origin, +X right toward start area, +Y "up" toward stage).
 
-    Z is intentionally absent — each randomizable body has its own
-    natural resting height stored in ``model.body_pos`` from the
-    world XML (notes are different shapes / heights), and we
-    preserve that during placement so a note doesn't sink into or
-    float above the mat after randomization.
+    The slot is where the element's footprint is centred: the middle
+    of the box, along the mat, that holds all of its geoms. A build's
+    origin is wherever its first brick sits, often a stud or more
+    away from its middle, so it is the middle that lands on the
+    square. Z and heading are absent — each element keeps the map's
+    own (the notes are different heights, and the map turns them to
+    face the way they stand on the real field).
 
     ``label`` is a human-readable id used in returned layouts and
     test assertions; pick something stable across PRs since tests
@@ -116,7 +118,7 @@ class _RandomizationSpec:
 # updates: scripts/extract-wro-slot-coords.py (TODO — committed
 # in this PR).
 _ELEMENTARY = _RandomizationSpec(
-    elements=("note_black", "note_white", "note_yellow", "note_blue"),
+    elements=("black_note", "white_note", "yellow_note", "blue_note"),
     slots=(
         _Slot(x=0.0499, y=0.4881, label="slot_1"),
         _Slot(x=0.1818, y=0.4881, label="slot_2"),
@@ -309,10 +311,13 @@ def randomize(model, data, world: str,
         rng.shuffle(perm)
         selected = perm[:len(spec.slots)]
         unselected = perm[len(spec.slots):]
-        # Place selected elements at slots.
+        # Place selected elements at slots, each footprint centred on
+        # its slot as the map turns it.
+        offsets = _footprint_offsets(model, selected)
         for element_name, slot in zip(selected, spec.slots):
+            dx, dy = offsets[element_name]
             _place_freejoint_body(model, data, element_name,
-                                  slot.x, slot.y)
+                                  slot.x - dx, slot.y - dy)
             layout[element_name] = slot.label
         # Stash unselected elements off-mat so they don't interfere
         # with the chassis or the camera. Z is forced to off_mat_pos.z.
@@ -343,17 +348,18 @@ def _place_freejoint_body(model, data, body_name: str,
                           x: float, y: float,
                           *, z_override: float = None) -> None:
     """Move a body that's attached via a freejoint to ``(x, y)``,
-    preserving its world-XML resting height and identity orientation.
+    keeping the map's resting height and heading for it.
 
     ``z_override`` (optional) bypasses the body_pos Z and uses the
     given value instead. Used to stash "unselected" elements
     off-mat in select-N-of-M randomization.
 
     The Z preservation matters: each randomizable note in the
-    Elementary world has a different shape (sphere / box / cylinder
-    of varying heights) and so a different resting Z. Forcing all
-    notes to the same Z would either sink the tall ones into the mat
-    or float the short ones above it.
+    Elementary world is a different build and so has a different
+    resting Z. Forcing all notes to the same Z would either sink the
+    tall ones into the mat or float the short ones above it. The
+    heading matters the same way: the map stands each note as it
+    faces on the real field.
 
     Raises ``ValueError`` if the named body is missing or doesn't
     have a freejoint. Internal — exposed only to this module's
@@ -372,26 +378,79 @@ def _place_freejoint_body(model, data, body_name: str,
         raise ValueError(
             "body " + repr(body_name) + "'s first joint is not a "
             "freejoint — randomization can only relocate freejointed bodies")
-    # Resting Z: the ``z_override`` if given, else the map
-    # ``<body pos="...">`` attribute (which MuJoCo stores in
-    # ``body_pos``). Override is used to stash unselected elements
-    # in select-N-of-M randomization off-mat.
+    qpos_addr = int(model.jnt_qposadr[joint_id])
+    # Resting Z: the ``z_override`` if given, else the map's own
+    # (MuJoCo keeps a freejoint's map pose in ``qpos0``). Override is
+    # used to stash unselected elements in select-N-of-M
+    # randomization off-mat.
     if z_override is not None:
         z = float(z_override)
     else:
-        z = float(model.body_pos[body_id, 2])
-    qpos_addr = int(model.jnt_qposadr[joint_id])
-    # Freejoint qpos layout: [x, y, z, qw, qx, qy, qz].
+        z = float(model.qpos0[qpos_addr + 2])
+    # Freejoint qpos layout: [x, y, z, qw, qx, qy, qz]; the heading
+    # is the map's.
     data.qpos[qpos_addr]     = x
     data.qpos[qpos_addr + 1] = y
     data.qpos[qpos_addr + 2] = z
-    data.qpos[qpos_addr + 3] = 1.0   # identity quaternion
-    data.qpos[qpos_addr + 4] = 0.0
-    data.qpos[qpos_addr + 5] = 0.0
-    data.qpos[qpos_addr + 6] = 0.0
+    data.qpos[qpos_addr + 3:qpos_addr + 7] = model.qpos0[qpos_addr + 3:qpos_addr + 7]
     # Reset velocity for this freejoint too — otherwise a body that was
     # mid-motion at the time of randomization would keep its old
     # velocity, which is surprising for a "set up the scene" action.
     qvel_addr = int(model.jnt_dofadr[joint_id])
     for i in range(6):  # freejoint has 6 DOFs
         data.qvel[qvel_addr + i] = 0.0
+
+
+def footprint_middle(model, data, body_name: str) -> Tuple[float, float]:
+    """The ``(x, y)`` in metres, world frame, of the middle of a body's
+    footprint as ``data`` has it: the centre of the box, along the
+    mat, that holds all of its geoms and its descendants' geoms.
+
+    This is where an element stands on the mat, whatever its origin:
+    a Workbench build's origin is its first brick's, often a stud or
+    more away from its middle. Needs ``data``'s geom poses current
+    (``mj_forward`` or ``mj_kinematics`` after a qpos change).
+
+    Raises ``ValueError`` if the body is missing or has no geoms."""
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+    if body_id < 0:
+        raise ValueError("no body named " + repr(body_name) + " in model")
+    lo = [float("inf")] * 2
+    hi = [float("-inf")] * 2
+    found = False
+    for g in range(model.ngeom):
+        b = int(model.geom_bodyid[g])
+        while b != body_id and b != 0:
+            b = int(model.body_parentid[b])
+        if b != body_id:
+            continue
+        found = True
+        centre = model.geom_aabb[g, :3]
+        half = model.geom_aabb[g, 3:]
+        rot = data.geom_xmat[g].reshape(3, 3)
+        for sx in (-1.0, 1.0):
+            for sy in (-1.0, 1.0):
+                for sz in (-1.0, 1.0):
+                    corner = data.geom_xpos[g] + rot @ (centre + half * (sx, sy, sz))
+                    for axis in (0, 1):
+                        lo[axis] = min(lo[axis], float(corner[axis]))
+                        hi[axis] = max(hi[axis], float(corner[axis]))
+    if not found:
+        raise ValueError("body " + repr(body_name) + " has no geoms to stand on")
+    return (lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0
+
+
+def _footprint_offsets(model, names: Sequence[str]) -> Dict[str, Tuple[float, float]]:
+    """Each named body's footprint middle less its origin, along the
+    mat, at the map's pose (``qpos0``, whatever ``data`` holds now).
+    A shuffle keeps each element's heading, so the offset stays true
+    wherever the element is put."""
+    at_map = mujoco.MjData(model)
+    mujoco.mj_kinematics(model, at_map)
+    out = {}
+    for name in names:
+        x, y = footprint_middle(model, at_map, name)
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+        out[name] = (x - float(at_map.xpos[body_id, 0]),
+                     y - float(at_map.xpos[body_id, 1]))
+    return out

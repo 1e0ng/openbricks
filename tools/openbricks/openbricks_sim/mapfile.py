@@ -177,7 +177,10 @@ def _prop_body(p, map_dir):
     lowest = assembly_mod.prop_lowest_m(bricks_out, props.euler_quat(yaw, pitch, roll))
     if pos[2] + lowest < -1e-6:
         pos = (pos[0], pos[1], -lowest)
-    return assembly_mod.prop_body_xml(name, pos, yaw, fixed, bricks_out, pitch_deg=pitch, roll_deg=roll)
+    try:
+        return assembly_mod.prop_body_xml(name, pos, yaw, fixed, bricks_out, pitch_deg=pitch, roll_deg=roll)
+    except assembly_mod.AssemblyError as e:
+        raise MapError("prop %r: %s" % (name, e)) from e
 
 
 def to_mjcf(m, map_dir):

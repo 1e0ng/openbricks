@@ -3,6 +3,51 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.34.0 — the WRO 2026 Elementary props are the real builds
+
+**The Elementary map is the user's.** `wro-2026-elementary` now ships
+the user's own map of "Robot Rockstars". Every prop is a brick-for-brick
+Workbench build of the building instructions, each brick at its
+catalogue mass, standing on the printed outlines:
+- the microphone, keyboard, guitar and congas on the truck;
+- the six notes on their start squares;
+- the two cables on the pink arrows;
+- the clef;
+- the amplifier on the black outline between the grey cable areas,
+  its knobs and light to the field;
+- two speakers on the tilted blue outlines by the stage.
+
+The thirteen LDraw stand-ins the builds replace are gone.
+The notes are now named `black_note`, `white_note`, `yellow_note`,
+`blue_note`, `red_note` and `green_note`, as in the user's map; they
+were `note_black` and so on. The randomizer's layout log uses the new
+names.
+
+**A shuffled note stays facing the way the map stands it, centred on its
+square.** The per-round randomization put each element's origin on its
+slot and reset its heading to zero. The old stand-ins were centred and
+unturned, so that worked. A build's origin is its first brick's,
+though: the notes' origins sit a stud off their middles, and the map
+turns them a quarter. A shuffled note would have turned and landed
+8 mm off its square. Each shuffled element now keeps the map's heading
+and lands with its footprint's middle on the slot. The map as drawn is
+one of the 24 layouts. The Junior and Senior elements are centred and
+unturned, so their shuffles are unchanged. `randomization.footprint_middle`
+gives where an element stands, and the walkthrough example reads each
+note's position with it.
+
+**A colour sensor reads a build's bricks in their own colours.** A
+Workbench build placed on a map collided as one box per brick, all in
+the Workbench's default blue-grey. The sim window drew the real colours,
+but a colour sensor read the grey off every brick, so the red note and
+the green note looked alike. Each brick's box now carries its palette
+colour, as the view draws it; a brick with no colour keeps the default.
+A colour the palette lacks refuses the map, naming the prop and the
+brick. The side-sensor tests now read the red note as the palette's Red
+(217, 27, 9) and the green note as its Green (40, 140, 74). They aim at
+each note's stem, since the new notes show two 16 mm columns at the
+sensor's height.
+
 ## 4.33.1 — the Type 2 pins are pins; touching faces never refuse a turn
 
 **The Type 2 pins.** The WRO set's commonest pin, 61332 "Technic Pin

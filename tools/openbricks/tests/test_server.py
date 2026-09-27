@@ -177,7 +177,7 @@ class SessionTests(unittest.TestCase):
             names = [p["name"] for p in scene["props"]]
             self.assertIn("clef", names)
             clef = next(p for p in scene["props"] if p["name"] == "clef")
-            self.assertEqual((scene["bodies"][clef["body"]], clef["kind"], clef["yaw_deg"]), ("clef", "clef", 0.0))
+            self.assertEqual((scene["bodies"][clef["body"]], clef["kind"], clef["yaw_deg"]), ("clef", "clef", 180.0))
             self.assertEqual(scene["parents"][clef["body"]], 0, "a prop is a body of the world's own")
             # move: the live body is there at once, turned, and a chassis place (a reset) keeps it there
             s.move_prop("clef", 300.0, -200.0, 45.0)
@@ -211,12 +211,12 @@ class SessionTests(unittest.TestCase):
             s.move_prop("clef", 300.0, -200.0, 45.0, 0.0, 0.0)
             # add: the world reloads with one more prop, the chassis staying put
             s.place(-400.0, 100.0, 90.0)
-            name = s.add_prop("note_red", 100.0, 50.0, 10.0)
-            self.assertEqual(name, "note_red_2")
+            name = s.add_prop("red_note", 100.0, 50.0, 10.0)
+            self.assertEqual(name, "red_note_2")
             scene2 = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]
             self.assertEqual(len(scene2["props"]), len(scene["props"]) + 1)
-            new = next(p for p in scene2["props"] if p["name"] == "note_red_2")
-            self.assertEqual((new["kind"], new["yaw_deg"]), ("note_red", 10.0))
+            new = next(p for p in scene2["props"] if p["name"] == "red_note_2")
+            self.assertEqual((new["kind"], new["yaw_deg"]), ("red_note", 10.0))
             frame = [e for e in _events(out.getvalue()) if e["ev"] == "frame"][-1]
             self.assertAlmostEqual(frame["bodies"][new["body"]][0], 0.1, places=4)
             cid = scene2["bodies"].index("chassis")
@@ -264,7 +264,7 @@ class SessionTests(unittest.TestCase):
                 s.add_model("bad", {"format": "nope"}, 0, 0)
             s.remove_prop("one_brick")
             # remove: back to the original count
-            s.remove_prop("note_red_2")
+            s.remove_prop("red_note_2")
             scene3 = [e for e in _events(out.getvalue()) if e["ev"] == "scene"][-1]
             self.assertEqual([p["name"] for p in scene3["props"]], names)
             # save: a map of the user's own, listed with the shipped ones and loadable by alias

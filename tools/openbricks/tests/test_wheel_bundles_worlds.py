@@ -139,16 +139,18 @@ class WheelBundlesWorldsTests(unittest.TestCase):
                 sorted(n for n in names
                        if n.startswith("openbricks_sim/worlds/"))))
 
-    def test_wheel_contains_ldr_props(self):
+    def test_wheel_contains_every_prop_model_a_wro_map_names(self):
         # F2 (#98 onwards) replaced inline single-box approximations
-        # with LDraw props (``"ldr": "props/*.ldr"``) that
-        # ``world.py`` expands at load time by reading the ``.ldr``
-        # file off disk. Wheels 0.10.7-0.10.10 shipped without these
+        # with LDraw props (``"ldr": "props/*.ldr"``), and since 4.14
+        # a map's props can be Workbench builds (``"file":
+        # "props/*.assembly.json"``); the map reads each off disk at
+        # load time. Wheels 0.10.7-0.10.10 shipped without the .ldr
         # files (package-data only listed *.xml / *.png / *.md) so
         # ``pip install openbricks && openbricks sim --world wro-2026-*``
-        # raised ``WorldLoadError: ... references missing
-        # .ldr file ...`` for every prop. Pin every WRO world has at
-        # least one ``.ldr`` in the wheel.
+        # raised ``WorldLoadError: ... references missing .ldr file
+        # ...`` for every prop. Pin every model each WRO map names is
+        # in the wheel.
+        import json
         wro_worlds = [
             "wro_2026_elementary_robot_rockstars",
             "wro_2026_junior_heritage_heroes",
@@ -157,21 +159,24 @@ class WheelBundlesWorldsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             wheel = _build_wheel_into(tmp)
             with zipfile.ZipFile(wheel) as zf:
-                names = zf.namelist()
-        empty = []
+                names = set(zf.namelist())
+        missing = []
         for name in wro_worlds:
-            prefix = "openbricks_sim/worlds/" + name + "/props/"
-            ldrs = [n for n in names
-                    if n.startswith(prefix) and n.endswith(".ldr")]
-            if not ldrs:
-                empty.append(name)
+            with open(_PKG_ROOT / "openbricks_sim" / "worlds" / name / "map.json") as fh:
+                props = json.load(fh)["props"]
+            self.assertTrue(props, "%s has props" % name)
+            for p in props:
+                ref = p["ldr"] if "ldr" in p else p["file"]
+                wanted = "openbricks_sim/worlds/" + name + "/" + ref
+                if wanted not in names:
+                    missing.append(wanted)
         self.assertEqual(
-            empty, [],
-            "wheel is missing ALL props/*.ldr for WRO worlds: %s — "
-            "without these, a map's LDraw props fail to load and raise "
-            "WorldLoadError on every prop. Check "
+            missing, [],
+            "wheel is missing prop models the WRO maps name — without "
+            "these, the map fails to load with WorldLoadError. Check "
             "``[tool.setuptools.package-data]`` includes "
-            "``worlds/*/props/*.ldr``." % empty)
+            "``worlds/*/props/*.ldr`` and "
+            "``worlds/*/props/*.assembly.json``.")
 
     def test_wheel_contains_senior_mosaic_frame_stl(self):
         # The Senior world references ``mosaic_frame.stl`` via a
