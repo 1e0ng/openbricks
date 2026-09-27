@@ -1,0 +1,27 @@
+# openbricks
+
+> openbricks is a Pybricks-style MicroPython firmware for open
+> hardware — commodity MCUs, commodity motors, commodity sensors.
+
+## Docs
+
+- [openbricks documentation](https://docs.openbricks.dev/_sources/index.md.txt)
+- [Installation](https://docs.openbricks.dev/_sources/install.md.txt)
+- [Hardware guide](https://docs.openbricks.dev/_sources/hardware.md.txt)
+- [Command-line tool](https://docs.openbricks.dev/_sources/cli.md.txt)
+- [Simulator](https://docs.openbricks.dev/_sources/simulator.md.txt)
+- [Examples](https://docs.openbricks.dev/_sources/examples.md.txt)
+- [Measuring wheel diameter & axle track](https://docs.openbricks.dev/_sources/measuring.md.txt)
+- [Servo health & characterisation](https://docs.openbricks.dev/_sources/servo-health.md.txt)
+- [API reference](https://docs.openbricks.dev/_sources/api/index.rst.txt)
+- [robotics — DriveBase](https://docs.openbricks.dev/_sources/api/robotics.rst.txt)
+- [Parameters](https://docs.openbricks.dev/_sources/api/parameters.rst.txt)
+- [Motor drivers](https://docs.openbricks.dev/_sources/api/drivers_motors.rst.txt)
+- [Sensor drivers](https://docs.openbricks.dev/_sources/api/drivers_sensors.rst.txt)
+- [Display & bus drivers](https://docs.openbricks.dev/_sources/api/drivers_misc.rst.txt)
+- [Interfaces](https://docs.openbricks.dev/_sources/api/interfaces.rst.txt)
+- [Hubs](https://docs.openbricks.dev/_sources/api/hub.rst.txt)
+- [Tools](https://docs.openbricks.dev/_sources/api/tools.rst.txt)
+- [Runtime services](https://docs.openbricks.dev/_sources/api/runtime.rst.txt)
+- [Architecture](https://docs.openbricks.dev/_sources/architecture.md.txt)
+- [Building the firmware](https://docs.openbricks.dev/_sources/build.md.txt)
