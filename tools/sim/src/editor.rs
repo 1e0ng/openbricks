@@ -639,6 +639,18 @@ impl Editor {
         }
     }
 
+    /// Select everything the component being edited holds, in its order
+    /// (locked items too: they are selected, and stay put when the rest
+    /// moves or turns), and say how many.
+    pub fn select_all(&mut self) {
+        self.selection = self.children().iter().map(|c| c.name.clone()).collect();
+        self.status = match self.selection.len() {
+            0 => format!("{} holds nothing to select", self.editing),
+            1 => "Selected 1 item".into(),
+            n => format!("Selected all {n} items"),
+        };
+    }
+
     pub fn open_component(&mut self, id: &str, push: bool) {
         if !self.doc.components.contains_key(id) {
             return;
@@ -1743,6 +1755,39 @@ mod tests {
         assert_eq!(ed.crumbs, vec![root]);
         ed.open_component("no-such-component", true);
         assert!(ed.is_root());
+    }
+
+    #[test]
+    fn select_all_selects_everything_the_component_holds() {
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id.clone()), None, [40.0, 0.0, 0.0]);
+        let b = ed.selection[0].clone();
+        ed.add_instance(Some(id), None, [80.0, 0.0, 0.0]);
+        let c = ed.selection[0].clone();
+        ed.set_instance(&c, |i| i.locked = true);
+        ed.selection.clear();
+        ed.select_all();
+        assert_eq!(ed.selection, vec![a.clone(), b.clone(), c.clone()], "in order, the locked one too");
+        assert_eq!(ed.status, "Selected all 3 items");
+        // the locked one stays put when the rest moves
+        ed.nudge_selection([0.0, 8.0, 0.0]);
+        let pos = |ed: &Editor, n: &str| ed.children().iter().find(|i| i.name == n).unwrap().pos;
+        assert_eq!((pos(&ed, &a)[1], pos(&ed, &b)[1], pos(&ed, &c)[1]), (8.0, 8.0, 0.0));
+        // one item, and none
+        ed.selection = vec![a.clone()];
+        ed.selection.clear();
+        ed.set_instance(&b, |i| i.locked = false);
+        let root = ed.doc.robot.root.clone();
+        ed.doc.components.get_mut(&root).unwrap().children.retain(|i| i.name == a);
+        ed.recompute();
+        ed.select_all();
+        assert_eq!((ed.selection.clone(), ed.status.as_str()), (vec![a], "Selected 1 item"));
+        ed.doc.components.get_mut(&root).unwrap().children.clear();
+        ed.recompute();
+        ed.select_all();
+        assert!(ed.selection.is_empty());
+        assert_eq!(ed.status, format!("{root} holds nothing to select"));
     }
 
     #[test]

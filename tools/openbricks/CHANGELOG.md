@@ -3,6 +3,14 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.33.0 — Select all on the Workbench
+
+The Workbench's contents list has a **Select all** button beside its
+heading: it selects everything the component being edited holds, in
+order — locked items too, which stay put when the rest moves or turns —
+and says how many; with nothing there it says so. The selection then
+moves, turns, groups and copies as one, as any multi-selection does.
+
 ## 4.32.1 — R turns the whole component; a refused turn says why over the view
 
 On the Workbench, with nothing selected, R did nothing and said
