@@ -1,0 +1,6 @@
+# docs.openbricks.dev — everything is public; the sitemap helps
+# crawlers find all pages of a young site with few inbound links.
+User-agent: *
+Allow: /
+
+Sitemap: https://docs.openbricks.dev/sitemap.xml
