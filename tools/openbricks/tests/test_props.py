@@ -162,6 +162,16 @@ class SaveTests(unittest.TestCase):
             self.assertEqual((alias2, path2), (alias, path))
             self.assertIn('pos="0.1 0.2 0.005"', Path(path).read_text(), "the original text, as given")
             self.assertEqual(len(props.list_user_worlds(env)), 1)
+            # the map opened and saved over itself (its own directory the source) keeps its files
+            # — it used to be emptied before the copy, losing the artwork and the models
+            own = Path(path).parent
+            alias5, path5 = props.save_as(own, props.with_prop_moved(_TWO, "clef", 2.0, 2.0, 0.0), "my layout", env=env)
+            self.assertEqual((alias5, path5), (alias, path))
+            self.assertEqual(sorted(p.name for p in own.iterdir()), ["README.md", "mat.png", "props", "world.xml"])
+            self.assertEqual((own / "props" / "clef.ldr").read_text(), "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat")
+            self.assertEqual((own / "mat.png").read_bytes(), b"png")
+            self.assertIn('pos="2.00000 2.00000 0.00500"', Path(path).read_text())
+            self.assertEqual(len(props.list_user_worlds(env)), 1)
             # a shipped alias is never shadowed; a nameless map is refused
             with self.assertRaises(props.PropError):
                 props.save_as(src, _TWO, "practice line", reserved=("practice-line",), env=env)

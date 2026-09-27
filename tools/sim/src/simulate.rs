@@ -3348,6 +3348,24 @@ impl SimulateTab {
             }
         });
         ui.separator();
+        // the user's own map saves in place; a shipped one only as a new map
+        match self.worlds.iter().find(|w| w.alias == self.world).map(|w| w.user) {
+            Some(true) => {
+                ui.strong(format!("Your map: {}", self.world));
+                ui.horizontal(|ui| {
+                    let can = self.scene.is_some() && !self.busy();
+                    if ui.add_enabled(can, egui::Button::new("Save changes")).clicked() {
+                        let alias = self.world.clone();
+                        self.save_map_as(&alias);
+                    }
+                    ui.weak("the props as they stand, written to this map");
+                });
+            }
+            Some(false) => {
+                ui.weak("a shipped map keeps its layout: save your changes as a map of your own");
+            }
+            None => {}
+        }
         ui.strong("Save as a new map");
         ui.horizontal(|ui| {
             ui.add(
@@ -4594,11 +4612,32 @@ mod tests {
         assert!(Markers::file(&mdir, "my-layout").exists(), "the markers come along");
         // (with a server there, the map is loaded again: the stand-in and the real runtime tests)
         assert_eq!(t.sent.last().unwrap()["cmd"], "save_world", "no server to load from here");
-        // the panel draws
+        // the map being the user's own, a save in place goes under its alias
+        t.worlds.push(WorldEntry {
+            alias: "my-layout".into(),
+            path: Some("/me/worlds/my-layout/world.xml".into()),
+            dir: Some("/me/worlds/my-layout".into()),
+            user: true,
+        });
+        t.save_map_as("my-layout");
+        assert_eq!(
+            t.sent.last().unwrap(),
+            &serde_json::json!({"cmd": "save_world", "name": "my-layout"})
+        );
+        // the panel draws: with the map the user's own, and with a shipped one
         let ctx = egui::Context::default();
         t.save_name = "x".into();
         let lib = shipped_bundle();
         let _ = ctx.run_ui(Default::default(), |ui| t.map_ui(ui, &lib));
+        t.worlds.push(WorldEntry {
+            alias: "shipped".into(),
+            path: None,
+            dir: None,
+            user: false,
+        });
+        t.world = "shipped".into();
+        let _ = ctx.run_ui(Default::default(), |ui| t.map_ui(ui, &lib));
+        t.world = "my-layout".into();
         // nothing moves while a program runs
         t.status = "running".into();
         assert!(t.begin_prop_drag(0).is_none());
