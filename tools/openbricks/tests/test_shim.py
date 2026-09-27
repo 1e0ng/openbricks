@@ -1577,7 +1577,10 @@ class SideColourSensorOnTheMatTests(unittest.TestCase):
                 color_sensor_x=0.06, color_sensor_y=0.07, color_sensor_z=-0.013,
                 color_sensor_yaw=90.0, color_sensor_pitch=0.0,
                 color_sensor_range=0.30)
-    RED_X, GREEN_X = 313.7, 445.6      # fixed notes' squares (mm)
+    # The fixed red and green notes' right-hand stems at the sensor's
+    # height (mm): each note shows two 16 mm columns there, a gap
+    # between them over its square's middle.
+    RED_X, GREEN_X = 321.7, 453.7
     LINE_Y = 304.4                     # chassis y on the right-edge follow
 
     def setUp(self):
@@ -1604,12 +1607,14 @@ class SideColourSensorOnTheMatTests(unittest.TestCase):
     def test_single_ray_reads_the_brick_ratio_normalised(self):
         s = self._sensor(fov=0.0)
         self._at(self.RED_X)
-        # lego_red rgba (0.85, 0.10, 0.10): r/(r+g+b) = 0.81 -> 207.
-        self.assertEqual(s.rgb(), (207, 23, 23))
+        # the palette's Red, #C91A09 (201, 26, 9), as the build's bricks
+        # carry it: r/(r+g+b) = 0.85 -> 217.
+        self.assertEqual(s.rgb(), (217, 27, 9))
         self.assertTrue(30 <= s.ambient() <= 40, s.ambient())
         self._at(self.GREEN_X)
-        r, g, b = s.rgb()
-        self.assertGreater(g, 3 * r); self.assertGreater(g, 2 * b)
+        # the palette's Green, #237841 (35, 120, 65): green leads, blue
+        # a strong second.
+        self.assertEqual(s.rgb(), (40, 140, 74))
 
     def test_between_notes_the_ray_meets_only_the_wall(self):
         s = self._sensor(fov=0.0)

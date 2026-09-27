@@ -8,11 +8,12 @@ pins:
   * Determinism — same seed → same layout.
   * 24 distinct layouts across all seeds (4! permutations of 4
     notes across 4 slots).
-  * Each randomizable note ends up at one of the spec's slot
-    coordinates; no two notes share a slot.
+  * Each randomizable note's footprint ends up centred on one of the
+    spec's slot coordinates; no two notes share a slot.
+  * Each note keeps the map's heading, and they stand after a shuffle.
   * Fixed-position notes (red, green) don't move.
-  * Per-note resting Z is preserved (so a sphere-shaped note
-    doesn't sink into the mat after randomization).
+  * Per-note resting Z is preserved (so a tall note doesn't sink into
+    the mat after randomization).
 """
 
 import unittest
@@ -29,6 +30,9 @@ from openbricks_sim.world import load_world
 _ELEMENTARY_PATH = (Path(__file__).resolve().parent.parent
                     / "openbricks_sim" / "worlds"
                     / "wro_2026_elementary_robot_rockstars" / "map.json")
+
+
+_SHUFFLED = ("black_note", "white_note", "yellow_note", "blue_note")
 
 
 def _make_elementary():
@@ -88,29 +92,95 @@ class ElementaryRandomizationTests(unittest.TestCase):
             "got %d — randomization may not be a true permutation"
             % len(seen))
 
-    def test_each_note_lands_on_a_spec_slot(self):
+    def test_each_note_lands_centred_on_a_spec_slot(self):
+        # The notes are Workbench builds whose origin is a stud off
+        # their middle; it is the middle that lands on the square.
         m, d, _ = _make_elementary()
         randomization.randomize(
             m, d, world="wro-2026-elementary", seed=7)
         # The 4 slot positions from the spec
         spec_xys = {(0.0499, 0.4881), (0.1818, 0.4881),
                     (0.5775, 0.4881), (0.7094, 0.4881)}
-        for note in ("note_black", "note_white", "note_yellow", "note_blue"):
-            x, y = _xy_of(m, d, note)
+        for note in _SHUFFLED:
+            x, y = randomization.footprint_middle(m, d, note)
             # Allow tiny numerical wiggle from mj_forward
             matched = any(abs(x - sx) < 1e-3 and abs(y - sy) < 1e-3
                           for sx, sy in spec_xys)
             self.assertTrue(
                 matched,
-                "%s landed at (%.4f, %.4f) which isn't a spec slot"
-                % (note, x, y))
+                "%s's middle landed at (%.4f, %.4f) which isn't a "
+                "spec slot" % (note, x, y))
+            ox, oy = _xy_of(m, d, note)
+            self.assertGreater(
+                max(abs(ox - x), abs(oy - y)), 0.005,
+                "%s's origin is off its middle, so placing the origin "
+                "would miss the square" % note)
+
+    def test_the_map_already_stands_each_note_on_its_square(self):
+        # the map as drawn is one of the 24 layouts: each shuffled
+        # note's middle on a slot before any randomize()
+        m, d, _ = _make_elementary()
+        spec_xys = [(s.x, s.y) for s in
+                    randomization._SPECS["wro-2026-elementary"][0].slots]
+        for note in _SHUFFLED:
+            x, y = randomization.footprint_middle(m, d, note)
+            self.assertTrue(
+                any(abs(x - sx) < 1e-3 and abs(y - sy) < 1e-3
+                    for sx, sy in spec_xys),
+                "%s's middle is at (%.4f, %.4f)" % (note, x, y))
+
+    def test_each_note_keeps_the_maps_heading(self):
+        m, d, _ = _make_elementary()
+        before = {n: d.xquat[mujoco.mj_name2id(
+            m, mujoco.mjtObj.mjOBJ_BODY, n)].copy() for n in _SHUFFLED}
+        for seed in range(6):
+            randomization.randomize(
+                m, d, world="wro-2026-elementary", seed=seed)
+            for note, q in before.items():
+                now = d.xquat[mujoco.mj_name2id(
+                    m, mujoco.mjtObj.mjOBJ_BODY, note)]
+                self.assertAlmostEqual(
+                    abs(float(sum(now * q))), 1.0, places=6,
+                    msg="%s turned: %s → %s" % (note, q, now))
+        self.assertAlmostEqual(
+            abs(float(before["black_note"][0])), 0.7071068, places=5,
+            msg="the map stands the notes a quarter turn round")
+
+    def test_shuffled_notes_stand_where_they_land(self):
+        # nothing sunk into the mat or into another note: a second of
+        # physics leaves every note where the shuffle put it
+        m, d, _ = _make_elementary()
+        randomization.randomize(
+            m, d, world="wro-2026-elementary", seed=3)
+        placed = {n: _xy_of(m, d, n) + (_z_of(m, d, n),)
+                  for n in _SHUFFLED}
+        for _ in range(int(1.0 / m.opt.timestep)):
+            mujoco.mj_step(m, d)
+        for note, (x, y, z) in placed.items():
+            nx, ny = _xy_of(m, d, note)
+            nz = _z_of(m, d, note)
+            self.assertLess(
+                max(abs(nx - x), abs(ny - y), abs(nz - z)), 0.001,
+                "%s moved from (%.4f, %.4f, %.4f) to (%.4f, %.4f, %.4f)"
+                % (note, x, y, z, nx, ny, nz))
+
+    def test_a_footprint_needs_a_body_with_geoms(self):
+        m, d, _ = _make_elementary()
+        with self.assertRaises(ValueError):
+            randomization.footprint_middle(m, d, "no_such_body")
+        bare = mujoco.MjModel.from_xml_string(
+            '<mujoco><worldbody><body name="bare"><freejoint/>'
+            '<inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>'
+            '</body></worldbody></mujoco>')
+        with self.assertRaises(ValueError):
+            randomization.footprint_middle(bare, mujoco.MjData(bare), "bare")
 
     def test_no_two_notes_share_a_slot(self):
         m, d, _ = _make_elementary()
         randomization.randomize(
             m, d, world="wro-2026-elementary", seed=12345)
         positions = []
-        for note in ("note_black", "note_white", "note_yellow", "note_blue"):
+        for note in _SHUFFLED:
             positions.append(_xy_of(m, d, note))
         # Every (x, y) should appear exactly once.
         counts = Counter(
@@ -125,27 +195,25 @@ class ElementaryRandomizationTests(unittest.TestCase):
         # their positions before randomization, randomize, verify
         # nothing moved.
         m, d, _ = _make_elementary()
-        before_red = _xy_of(m, d, "note_red")
-        before_green = _xy_of(m, d, "note_green")
+        before_red = _xy_of(m, d, "red_note")
+        before_green = _xy_of(m, d, "green_note")
         randomization.randomize(
             m, d, world="wro-2026-elementary", seed=99)
-        after_red = _xy_of(m, d, "note_red")
-        after_green = _xy_of(m, d, "note_green")
+        after_red = _xy_of(m, d, "red_note")
+        after_green = _xy_of(m, d, "green_note")
         self.assertEqual(before_red, after_red)
         self.assertEqual(before_green, after_green)
 
     def test_resting_z_is_preserved_per_note(self):
-        # The 4 notes have different shapes (sphere / box / cylinder
-        # of varying heights) and so different resting Z heights
-        # in the map.json. Randomization places each note at the
-        # slot's (x, y) but must keep its existing Z — otherwise
-        # the sphere note sinks into the mat or the tall cylinder
+        # The 4 notes are different builds and so have different
+        # resting Z heights in the map.json. Randomization places each
+        # note at the slot's (x, y) but must keep its existing Z —
+        # otherwise the short note sinks into the mat or the tall one
         # floats. Capture each note's pre-randomization Z, then
         # check post-randomization that Z is unchanged.
         m, d, _ = _make_elementary()
         before = {n: _z_of(m, d, n)
-                  for n in ("note_black", "note_white",
-                            "note_yellow", "note_blue")}
+                  for n in _SHUFFLED}
         randomization.randomize(
             m, d, world="wro-2026-elementary", seed=2026)
         for note, z_before in before.items():

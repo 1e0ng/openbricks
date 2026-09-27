@@ -4869,9 +4869,10 @@ mod tests {
 
     #[test]
     fn props_turn_in_place_on_the_real_runtime() {
-        // the elementary map's microphone (a Workbench build, its origin away from its middle)
-        // and clef (an LDraw model) turned a quarter on the real run server: each turns about its
-        // middle, keeps its height, and the server's next frame has it so
+        // the elementary map's microphone and clef (Workbench builds, their origins away from
+        // their middles) and the junior map's yellow tower (an LDraw model) turned a quarter on
+        // the real run server: each turns about its middle, keeps its height, and the server's
+        // next frame has it so
         let Some(python) = std::env::var("OPENBRICKS_SIM_PYTHON").ok().filter(|p| !p.is_empty()) else {
             eprintln!("OPENBRICKS_SIM_PYTHON is unset: skipping the prop turn test");
             return;
@@ -4893,7 +4894,23 @@ mod tests {
             t.message
         );
         let lib = shipped_bundle();
-        for name in ["microphone", "clef"] {
+        for (world, name) in [
+            ("wro-2026-elementary", "microphone"),
+            ("wro-2026-elementary", "clef"),
+            ("wro-2026-junior", "yellow_tower_a"),
+        ] {
+            if t.world() != world {
+                let before_gen = t.scene_gen;
+                t.select_world(world);
+                assert!(
+                    pump_until(&mut t, 60, |t| t.scene_gen > before_gen
+                        && t.status == "loaded"
+                        && t.scene.as_ref().is_some_and(|s| s.props.iter().any(|p| p.name == name))),
+                    "{world}: {} / {}",
+                    t.status,
+                    t.message
+                );
+            }
             let i = t.scene.as_ref().unwrap().props.iter().position(|p| p.name == name).unwrap();
             assert!(!t.prop_parts(i, &lib).is_empty(), "{name} has parts to measure");
             let before = t.prop_full_pose(i).unwrap();

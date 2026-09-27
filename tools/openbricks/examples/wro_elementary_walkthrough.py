@@ -21,11 +21,11 @@ What it demonstrates
    green slots at the upper end of the mat — black, white,
    yellow, blue — while red and green stay fixed). The CLI
    prints the chosen layout to stderr in the same form a WRO
-   judge announces it: ``note_black -> slot_2``.
+   judge announces it: ``black_note -> slot_2``.
 
 2. The script then sees the same layout from the *robot's*
-   side, reading the note bodies' actual world positions out of
-   the MuJoCo model. The slot coordinates come from the
+   side, reading where each note stands (the middle of its
+   footprint) out of the MuJoCo model. The slot coordinates come from the
    randomization spec (which itself was extracted from the
    high-res mat artwork in 0.10.10), so a slot label and a
    sensed (x, y) cross-reference unambiguously.
@@ -42,13 +42,11 @@ unmodified) and ``scored_mission.py`` (mission-scoring helpers).
 
 # noqa: F821 — ``robot`` is provided by openbricks-sim's ``run`` cmd.
 
-import mujoco
-
 from openbricks_sim import randomization
 
 
 # The 4 randomizable notes per the Elementary Game Rules p7.
-_RANDOMIZED_NOTES = ("note_black", "note_white", "note_yellow", "note_blue")
+_RANDOMIZED_NOTES = ("black_note", "white_note", "yellow_note", "blue_note")
 
 # Pull the slot positions straight from the spec so this script
 # tracks any future re-extraction.
@@ -56,9 +54,9 @@ _SLOTS = randomization._SPECS["wro-2026-elementary"][0].slots
 
 
 def _note_xy(model, data, body_name):
-    """Read a body's world (x, y) in millimetres."""
-    bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
-    return float(data.xpos[bid, 0]) * 1000.0, float(data.xpos[bid, 1]) * 1000.0
+    """Read where a note stands, its footprint's middle, in millimetres."""
+    x, y = randomization.footprint_middle(model, data, body_name)
+    return x * 1000.0, y * 1000.0
 
 
 def _slot_for_xy(x_mm, y_mm, tolerance_mm=10.0):

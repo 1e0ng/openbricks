@@ -16,10 +16,10 @@ Commands (one JSON object per line on stdin)::
     {"cmd": "move", "name": "clef", "x_mm": 300, "y_mm": -200, "yaw_deg": 45}   # a prop
     {"cmd": "move", "name": "clef", "x_mm": 300, "y_mm": -200, "z_mm": 12,
      "yaw_deg": 45, "pitch_deg": 90, "roll_deg": 0}   # tipped: a height and pitch/roll too
-    {"cmd": "add", "from": "note_red", "x_mm": 0, "y_mm": 0, "yaw_deg": 0}     # another like it
+    {"cmd": "add", "from": "red_note", "x_mm": 0, "y_mm": 0, "yaw_deg": 0}     # another like it
     {"cmd": "add_model", "name": "tower", "doc": {...openbricks-assembly/1...}, "x_mm": 0, "y_mm": 0, "yaw_deg": 0}
     {"cmd": "fix", "name": "clef", "fixed": true}   # stuck to the map (false: free again)
-    {"cmd": "remove", "name": "note_red_2"}
+    {"cmd": "remove", "name": "red_note_2"}
     {"cmd": "save_world", "name": "My layout"}   # the map as it stands, as the user's own
     {"cmd": "export_world", "path": "/somewhere/my-layout.map.json"}   # one JSON file, files inside
     {"cmd": "import_world", "path": "/somewhere/my-layout.map.json"}   # made one of the user's own

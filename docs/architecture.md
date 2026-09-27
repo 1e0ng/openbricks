@@ -269,11 +269,17 @@ Phase F (WRO 2026 RoboMission, 0.10.8 → 0.10.12) is feature-complete:
   part types in the registry today; new parts plug in by adding
   one ``_PartSpec`` entry. Senior also wires the WRO-published
   3D-printed "mosaic frame" STL as a static MuJoCo ``<mesh>``.
+  Elementary's props are Workbench builds since 4.34.0
+  (``{"file": "props/*.assembly.json"}``), brick for brick from the
+  building instructions.
 - **F3** — per-round randomization (WRO General Rules glossary
   "Robot Round" definition). Same seed → same layout. Specs are
   per-world tuples of ``_RandomizationSpec`` driven by one
   shared seeded RNG, so a Senior round shuffles all four cement
-  colour groups deterministically from a single ``seed=N``.
+  colour groups deterministically from a single ``seed=N``. A
+  shuffled element keeps the map's heading and lands with its
+  footprint centred on its slot (a build's origin is its first
+  brick's, often off its middle).
 - **F4 + F5** — closed the F2 deferreds (mosaic frame mesh, dual-
   colour Senior barriers) and lifted Junior + Senior randomization
   slot coordinates from estimates to mat-extracted positions

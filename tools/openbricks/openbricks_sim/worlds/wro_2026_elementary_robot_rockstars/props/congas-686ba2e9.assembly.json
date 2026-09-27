@@ -1,0 +1,735 @@
+{
+  "components": {
+    "aa": {
+      "children": [
+        {
+          "color": 14,
+          "name": "lego_3",
+          "part": "lego_3001",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rot": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "color": 14,
+          "name": "lego_4",
+          "part": "lego_3001",
+          "pos": [
+            0.0,
+            -16.0,
+            0.0
+          ],
+          "rot": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_6",
+          "part": "lego_3001",
+          "pos": [
+            -16.0,
+            -8.0,
+            9.6
+          ],
+          "rot": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "note": ""
+    },
+    "congas": {
+      "children": [
+        {
+          "color": 14,
+          "name": "lego_3001",
+          "part": "lego_3001",
+          "pos": [
+            -2.4,
+            -80.0,
+            -3.2
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 14,
+          "name": "lego_2",
+          "part": "lego_3001",
+          "pos": [
+            -2.4,
+            -64.0,
+            -3.2
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "component": "aa",
+          "name": "aa",
+          "pos": [
+            -2.4,
+            -16.0,
+            -3.2
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_5",
+          "part": "lego_3001",
+          "pos": [
+            -12.0,
+            -72.0,
+            12.8
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 0,
+          "name": "lego_3894",
+          "part": "lego_3894",
+          "pos": [
+            -12.0,
+            -40.0,
+            0.8
+          ],
+          "rot": [
+            -90.0,
+            0.0,
+            90.0
+          ]
+        },
+        {
+          "color": 0,
+          "name": "lego_3",
+          "part": "lego_3894",
+          "pos": [
+            -12.0,
+            -40.0,
+            8.8
+          ],
+          "rot": [
+            -90.0,
+            0.0,
+            90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_3009",
+          "part": "lego_3009",
+          "pos": [
+            -2.4,
+            -72.0,
+            16.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_4",
+          "part": "lego_3009",
+          "pos": [
+            -2.4,
+            -72.0,
+            24.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_6",
+          "part": "lego_3009",
+          "pos": [
+            -2.4,
+            -8.0,
+            24.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_7",
+          "part": "lego_3009",
+          "pos": [
+            -2.4,
+            -8.0,
+            16.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 0,
+          "name": "lego_3003",
+          "part": "lego_3003",
+          "pos": [
+            -12.0,
+            -88.0,
+            4.8
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 0,
+          "name": "lego_8",
+          "part": "lego_3003",
+          "pos": [
+            -12.0,
+            8.0,
+            4.8
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_9",
+          "part": "lego_3003",
+          "pos": [
+            -12.0,
+            -88.0,
+            20.8
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_10",
+          "part": "lego_3003",
+          "pos": [
+            -12.0,
+            -56.0,
+            20.8
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_11",
+          "part": "lego_3003",
+          "pos": [
+            -12.0,
+            -24.0,
+            20.8
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_12",
+          "part": "lego_3003",
+          "pos": [
+            -12.0,
+            8.0,
+            20.8
+          ],
+          "rot": [
+            0.0,
+            90.0,
+            180.0
+          ]
+        },
+        {
+          "color": 14,
+          "name": "lego_13",
+          "part": "lego_3001",
+          "pos": [
+            -12.0,
+            -72.0,
+            -11.2
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 14,
+          "name": "lego_14",
+          "part": "lego_3001",
+          "pos": [
+            -12.0,
+            -8.0,
+            -11.2
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 14,
+          "name": "lego_15",
+          "part": "lego_3001",
+          "pos": [
+            -21.6,
+            -64.0,
+            -3.2
+          ],
+          "rot": [
+            0.0,
+            -90.0,
+            0.0
+          ]
+        },
+        {
+          "color": 14,
+          "name": "lego_16",
+          "part": "lego_3001",
+          "pos": [
+            -21.6,
+            -80.0,
+            -3.2
+          ],
+          "rot": [
+            0.0,
+            -90.0,
+            0.0
+          ]
+        },
+        {
+          "color": 14,
+          "name": "lego_17",
+          "part": "lego_3001",
+          "pos": [
+            -21.6,
+            -16.0,
+            -3.2
+          ],
+          "rot": [
+            0.0,
+            -90.0,
+            0.0
+          ]
+        },
+        {
+          "color": 14,
+          "name": "lego_18",
+          "part": "lego_3001",
+          "pos": [
+            -21.6,
+            0.0,
+            -3.2
+          ],
+          "rot": [
+            0.0,
+            -90.0,
+            0.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_19",
+          "part": "lego_3009",
+          "pos": [
+            -21.6,
+            -8.0,
+            24.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_20",
+          "part": "lego_3009",
+          "pos": [
+            -21.6,
+            -8.0,
+            16.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_21",
+          "part": "lego_3009",
+          "pos": [
+            -21.6,
+            -72.0,
+            24.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_22",
+          "part": "lego_3009",
+          "pos": [
+            -21.6,
+            -72.0,
+            16.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_23",
+          "part": "lego_3001",
+          "pos": [
+            -31.2,
+            -72.0,
+            20.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_24",
+          "part": "lego_3001",
+          "pos": [
+            -31.2,
+            -8.0,
+            20.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 0,
+          "name": "lego_2458",
+          "part": "lego_2458",
+          "pos": [
+            -31.2,
+            -72.0,
+            8.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 0,
+          "name": "lego_25",
+          "part": "lego_2458",
+          "pos": [
+            -31.2,
+            -8.0,
+            8.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_26",
+          "part": "lego_3001",
+          "pos": [
+            7.2,
+            -72.0,
+            20.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 0,
+          "name": "lego_27",
+          "part": "lego_2458",
+          "pos": [
+            7.2,
+            -72.0,
+            8.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 0,
+          "name": "lego_28",
+          "part": "lego_2458",
+          "pos": [
+            7.2,
+            -8.0,
+            8.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        },
+        {
+          "color": 15,
+          "name": "lego_29",
+          "part": "lego_3001",
+          "pos": [
+            7.2,
+            -8.0,
+            20.8
+          ],
+          "rot": [
+            90.0,
+            0.0,
+            -90.0
+          ]
+        }
+      ],
+      "note": ""
+    }
+  },
+  "format": "openbricks-assembly/1",
+  "parts": {
+    "lego_2458": {
+      "bbox": [
+        [
+          -8.0,
+          -12.0,
+          -9.6
+        ],
+        [
+          8.0,
+          4.0,
+          1.6
+        ]
+      ],
+      "category": "lego",
+      "com": [
+        -0.0,
+        -0.767,
+        -3.983
+      ],
+      "connectors": [
+        {
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "centre": [
+            0.0,
+            0.0,
+            -5.6
+          ],
+          "kind": "stud_hole",
+          "length": 8.0,
+          "r": 2.4
+        },
+        {
+          "axis": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "centre": [
+            4.0,
+            0.0,
+            0.8
+          ],
+          "kind": "stud",
+          "length": 1.6,
+          "r": 2.4
+        },
+        {
+          "axis": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "centre": [
+            -4.0,
+            0.0,
+            0.8
+          ],
+          "kind": "stud",
+          "length": 1.6,
+          "r": 2.4
+        },
+        {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "centre": [
+            0.0,
+            -8.0,
+            -4.0
+          ],
+          "kind": "pin",
+          "length": 8.0,
+          "r": 2.4
+        }
+      ],
+      "inertia_per_g": [
+        [
+          19.8357,
+          -0.0,
+          -0.0
+        ],
+        [
+          -0.0,
+          29.898,
+          0.0635
+        ],
+        [
+          -0.0,
+          0.0635,
+          32.4066
+        ]
+      ],
+      "ldraw": "2458",
+      "mass_g": 1.03,
+      "mesh": {
+        "idx": "vQHEATIBqQG9ATIBfwGpATIBNAF/ATIB2wA0ATIBsQDbADIBnQCxADIBjACdADIBmgCMADIBrgCaADIB2ACuADIBLwHYADIBfAEvATIBpgF8ATIBugGmATIBxAG6ATIBxQG+Ab8BxQG/AcYBvgGqAasBvgGrAb8BqgGAAYEBqgGBAasBgAEzATUBgAE1AYEBMwHaANwAMwHcADUB2gCwALIA2gCyANwAsACcAJ4AsACeALIAnACLAI0AnACNAJ4AiwCZAJsAiwCbAI0AmQCtAK8AmQCvAJsArQDXANkArQDZAK8A1wAwATEB1wAxAdkAMAF9AX4BMAF+ATEBfQGnAagBfQGoAX4BpwG7AbwBpwG8AagBuwHFAcYBuwHGAbwBGQBEAjoCGQA6Ag8AGAAVAEACGABAAkMCEQAOABcAEQAXABoAOwI4Ag0AOwINABAAQgI/AjYCQgI2AjkCSwJBAhYASwIWAAcABwAWAAwABwAMAAIAAgAMADcCAgA3AkYCRgI3AkECRgJBAksCCgAFAEkCCgBJAk4CTAIIAAsATAILAE8CBgAAAAMABgADAAkARwJNAlACRwJQAkoCPAIzAjUCPAI1Aj4CMwItAi8CMwIvAjUCLQInAikCLQIpAi8CJwIhAiMCJwIjAikCIQIXAhgCIQIYAiMCFwL5AfoBFwL6ARgC+QHZAdoB+QHaAfoB2QHHAcgB2QHIAdoBxwHWAdcBxwHXAcgB1gH2AfcB1gH3AdcB9gEUAhUC9gEVAvcBFAIdAh4CFAIeAhUCHQIkAiYCHQImAh4CJAIqAiwCJAIsAiYCKgIwAjICKgIyAiwCMAI8Aj4CMAI+AjICIAI9AjQCIAI0Ai4CIAIuAigCIAIoAiICIAIiAhkCIAIZAvsBIAL7AdsBIALbAckBIALJAdgBIALYAfgBIAL4ARYCIAIWAh8CIAIfAiUCIAIlAisCIAIrAjECIAIxAj0CjgB4AHoAjgB6AJAAeABYAFoAeABaAHoAWAA6ADwAWAA8AFoAOgAxADMAOgAzADwAMQAqACsAMQArADMAKgAkACUAKgAlACsAJAAeAB8AJAAfACUAHgASABMAHgATAB8AEgAbABwAEgAcABMAGwAhACIAGwAiABwAIQAnACgAIQAoACIAJwAtAC4AJwAuACgALQA3ADkALQA5AC4ANwBVAFcANwBXADkAVQB1AHcAVQB3AFcAdQCOAJAAdQCQAHcAMACPAHkAMAB5AFkAMABZADsAMAA7ADIAMAAyACwAMAAsACYAMAAmACAAMAAgABQAMAAUAB0AMAAdACMAMAAjACkAMAApAC8AMAAvADgAMAA4AFYAMABWAHYAMAB2AI8AAQBFAkgCAQBIAgQAcAGIAYUBcAGFAV8BiQFzAWQBiQFkAYcBAgHKAMcAAgHHAPEAyQD/AOwAyQDsAMUAXgGEAZoBXgGaAVsBhgFjAWYBhgFmAZwB8gDIALoA8gC6APUAxgDtAOoAxgDqALgAXAGbAZcBXAGXAVABnQFnAVkBnQFZAZkB9AC5ALUA9AC1AOYAtwDpAN0AtwDdALMAaAFdAWABaAFgAWoBYAFaAU4BYAFOAVEBTwGWAXUBTwF1AVMBmAFYAVYBmAFWAXcBVAFXAWUBVAFlAWEBYQFiAW4BYQFuAWwB/gDzAPAA/gDwAPwA9gDoAOUA9gDlAPAA5wC2ANEA5wDRAOMAtADeAOAAtADgAM8A3wDrAO8A3wDvAOIA7wDuAPgA7wD4APoAUgF0AXgBUgF4AXEBdgFVAXIBdgFyAXkB5ADSANQA5ADUAAEB0ADhAAAB0AAAAdMAJgGLAYgBJgGIARwBiwHTAdABiwHQAYgB0wHtAeoB0wHqAdAB7QEJAgcC7QEHAuoBCQLvAesBCQLrAQcC7wHVAdEB7wHRAesB1QGNAYkB1QGJAdEBjQEnASEBjQEhAYkBJwHNAMoAJwHKACEBzQCFAIIAzQCCAMoAhQBrAGgAhQBoAIIAawBTAFIAawBSAGgAUwBpAGcAUwBnAFIAaQCDAIEAaQCBAGcAgwDLAMkAgwDJAIEAywAmARwBywAcAckAggB/AMcAggDHAMoAaABlAH8AaAB/AIIAUgBOAGUAUgBlAGgAZwBjAE4AZwBOAFIAgQB9AGMAgQBjAGcAyQDFAH0AyQB9AIEA0AHNAYUB0AGFAYgB6gHnAc0B6gHNAdABBwIEAucBBwLnAeoB6wHpAQQC6wEEAgcC0QHPAekB0QHpAesBiQGHAc8BiQHPAdEB4QHdAY8B4QGPAZMBAgL9Ad0BAgLdAeEBDQILAv0BDQL9AQICBgIAAgsCBgILAg0C4wHfAQAC4wEAAgYClQGRAd8BlQHfAeMBcwBvAL0AcwC9AMEAUABKAG8AUABvAHMARQBDAEoARQBKAFAATABHAEMATABDAEUAcQBtAEcAcQBHAEwAvwC7AG0AvwBtAHEAKwGwAa0BKwGtASMBsAH0AfEBsAHxAa0B9AESAg8C9AEPAvEBEgIcAhsCEgIbAg8CHAITAhECHAIRAhsCEwL1AfMBEwLzAREC9QGxAa8B9QGvAfMBsQEuASoBsQEqAa8BLgGkAKEALgGhACoBpABgAF0ApABdAKEAYABCAD8AYAA/AF0AQgA2ADQAQgA0AD8ANgBBAD0ANgA9ADQAQQBfAFsAQQBbAD0AXwCjAJ8AXwCfAFsAowArASMBowAjAZ8AHQF4AXoBHQF6ASwBeAGiAaQBeAGkAXoBogG2AbgBogG4AaQBtgHCAcMBtgHDAbgBwgG3AbkBwgG5AcMBtwGjAaUBtwGlAbkBowF5AXsBowF7AaUBeQEgAS0BeQEtAXsBIAHUANYAIAHWAC0B1ACqAKwA1ACsANYAqgCWAJgAqgCYAKwAlgCJAIoAlgCKAJgAiQCVAJcAiQCXAIoAlQCpAKsAlQCrAJcAqQDTANUAqQDVAKsA0wAdASwB0wAsAdUAeAF0AZ4BeAGeAaIBogGeAbIBogGyAbYBtgGyAcABtgHAAcIBwgHAAbQBwgG0AbcBtwG0AaABtwGgAaMBowGgAXYBowF2AXkB1ADSAKgA1ACoAKoAqgCoAJQAqgCUAJYAlgCUAIgAlgCIAIkAiQCIAJIAiQCSAJUAlQCSAKYAlQCmAKkAqQCmANAAqQDQANMAEALuAQgCEAIIAhoC8gHUAe4B8gHuARACrgGMAdQBrgHUAfIBKQEoAYwBKQGMAa4BogDOACgBogAoASkBXgCGAM4AXgDOAKIAQABsAIYAQACGAF4ANQBUAGwANQBsAEAAPgBqAFQAPgBUADUAXACEAGoAXABqAD4AoADMAIQAoACEAFwAJAElAcwAJAHMAKAArAGKASUBrAElASQB8AHSAYoB8AGKAawBDgLsAdIBDgLSAfABGgIIAuwBGgLsAQ4CggHKAZ8BggGfAXUBygHkAbMBygGzAZ8B5AH+AcEB5AHBAbMB/gHlAbUB/gG1AcEB5QHLAaEB5QGhAbUBywGDAXcBywF3AaEBxAB8AKcAxACnANEAfABiAJMAfACTAKcAYgBJAIcAYgCHAJMASQBhAJEASQCRAIcAYQB7AKUAYQClAJEAewDDAM8AewDPAKUAhAHMAeABhAHgAZIBzAHmAQECzAEBAuAB5gEDAgwC5gEMAgECAwLoAQUCAwIFAgwC6AHOAeIB6AHiAQUCzgGGAZQBzgGUAeIByACAAHQAyAB0AMIAgABmAFEAgABRAHQAZgBPAEYAZgBGAFEATwBkAE0ATwBNAEYAZAB+AHIAZAByAE0AfgDGAMAAfgDAAHIAjgHcAcoBjgHKAYIB3AH8AeQB3AHkAcoB/AEKAv4B/AH+AeQBCgL/AeUBCgLlAf4B/wHeAcsB/wHLAeUB3gGQAYMB3gGDAcsBvgBwAHwAvgB8AMQAcABLAGIAcABiAHwASwBEAEkASwBJAGIARABIAGEARABhAEkASABuAHsASAB7AGEAbgC8AMMAbgDDAHsAcwEhAT0BcwE9AUUBcwFFAU0BcwFNAW8BGQEhAQIBEQEZAQIBCQERAQIB/QAJAQIB/wAcARMB/wATAQsB/wALAQMB/wADAfcANwEcAXABPwE3AXABRwE/AXABaQFHAXABOwEgAXIBQwE7AXIBSwFDAXIBbQFLAXIBAQEgARcBAQEXAQ8BAQEPAQcBAQEHAfsAFQEdAQABDQEVAQABBQENAQAB+QAFAQABcQEdATkBcQE5AUEBcQFBAUkBcQFJAWsBHwE6ATwBHwE8ASIBOgFCAUQBOgFEATwBQgFKAUwBQgFMAUQBSgFsAW4BSgFuAUwBIgEaARgBIgEYAR8BGgESARABGgEQARgBEgEKAQgBEgEIARABCgH+APwACgH8AAgBHgEWARQBHgEUARsBFgEOAQwBFgEMARQBDgEGAQQBDgEEAQwBBgH6APgABgH4AAQBGwE2ATgBGwE4AR4BNgE+AUABNgFAATgBPgFGAUgBPgFIAUABRgFoAWoBRgFqAUgB",
+        "idx32": false,
+        "nrm": "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",
+        "pos": "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",
+        "scale": 0.01,
+        "tris": 564,
+        "verts": 593
+      },
+      "name": "Brick  1 x  2 with Pin",
+      "source": "placeholder",
+      "source_note": "mass estimated from the LDraw volume at 1.05 g/cm3 (ABS); weigh it",
+      "volume_mm3": 979.25
+    },
+    "lego_3001": {
+      "category": "lego",
+      "ldraw": "3001",
+      "mass_g": 2.32,
+      "name": "Brick  2 x  4",
+      "source": "vendor",
+      "source_note": "BrickLink 3001: 2.32 g (2 x 4 x 1)"
+    },
+    "lego_3003": {
+      "category": "lego",
+      "ldraw": "3003",
+      "mass_g": 1.35,
+      "name": "Brick  2 x  2",
+      "source": "vendor",
+      "source_note": "BrickLink 3003: 1.35 g (2 x 2 x 1)"
+    },
+    "lego_3009": {
+      "category": "lego",
+      "ldraw": "3009",
+      "mass_g": 2.42,
+      "name": "Brick  1 x  6",
+      "source": "vendor",
+      "source_note": "BrickLink 3009: 2.42 g (1 x 6 x 1)"
+    },
+    "lego_3894": {
+      "category": "lego",
+      "ldraw": "3894",
+      "mass_g": 2.2,
+      "name": "Technic Brick  1 x  6 with Holes",
+      "source": "vendor",
+      "source_note": "BrickLink 3894: 2.2 g (1 x 6 x 1)"
+    }
+  },
+  "robot": {
+    "measured_mass_g": null,
+    "name": "congas",
+    "roles": {},
+    "root": "congas",
+    "spawn": {
+      "pos_mm": [
+        0.0,
+        0.0
+      ],
+      "yaw_deg": 0.0
+    }
+  },
+  "units": {
+    "angle": "deg",
+    "length": "mm",
+    "mass": "g"
+  }
+}
