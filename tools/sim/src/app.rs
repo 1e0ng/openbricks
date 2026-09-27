@@ -836,13 +836,9 @@ impl App {
         let handle_under = |x: f32, y: f32| gizmo.as_ref().and_then(|g| g.handle_at(&cam, x, y, w, h));
         let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
 
-        // zoom: the wheel, or a pinch (a trackpad's)
-        if response.hovered() {
-            let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
-            let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0) / pinch.clamp(0.5, 2.0);
-            if f != 1.0 {
-                self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(20.0, 20000.0);
-            }
+        // zoom: the wheel, or a pinch (a trackpad's), about the point under the pointer
+        if let Some(at) = response.hover_pos() {
+            zoom_at_pointer(ui, &mut self.viewport, &self.items, local(at), 20.0, 20000.0);
         }
         // press: a handle first, then a brick — both judged where the button went down,
         // since a drag is only recognised once the pointer has moved a few points
@@ -990,7 +986,7 @@ impl App {
         }
         self.keys(ui, shift);
         let hud = format!(
-            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° (nothing selected: the whole component) · S snaps · ⌘C/⌘V copy/paste · ⌘L locks, ⌘⇧L unlocks · Del · ⌘Z",
+            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch, toward the pointer · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° (nothing selected: the whole component) · S snaps · ⌘C/⌘V copy/paste · ⌘L locks, ⌘⇧L unlocks · Del · ⌘Z",
             self.editor.editing,
             if self.editor.selection.is_empty() {
                 String::new()
@@ -2430,15 +2426,18 @@ impl App {
         };
         let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
         self.view_rect = response.rect;
-        if editing && response.hovered() {
-            // the wheel zooms, and so does a pinch (a trackpad's)
-            let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
-            let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0) / pinch.clamp(0.5, 2.0);
-            if f != 1.0 {
-                self.viewport.camera.distance = (self.viewport.camera.distance * f).clamp(50.0, 50000.0);
-            }
-        }
         let rect = response.rect;
+        if editing && let Some(at) = response.hover_pos() {
+            // the wheel zooms, and so does a pinch (a trackpad's), about the point under the pointer
+            zoom_at_pointer(
+                ui,
+                &mut self.viewport,
+                &items,
+                (at.x - rect.min.x, at.y - rect.min.y),
+                50.0,
+                50000.0,
+            );
+        }
         let (w, h) = (size.0 as f32, size.1 as f32);
         let local = |p: egui::Pos2| (p.x - rect.min.x, p.y - rect.min.y);
         let cam = self.viewport.camera.clone();
@@ -2858,6 +2857,21 @@ fn file_name(p: &std::path::Path) -> String {
     p.file_name().unwrap_or(p.as_os_str()).to_string_lossy().to_string()
 }
 
+/// This frame's wheel or pinch zoom, about the point under the pointer
+/// (`at`, in view pixels): the surface there, or over nothing the point
+/// at the target's depth, stays under the pointer while the distance
+/// changes, within `lo..hi`.
+fn zoom_at_pointer(ui: &egui::Ui, viewport: &mut Viewport, items: &[DrawItem], at: (f32, f32), lo: f32, hi: f32) {
+    let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+    let f = (1.0 - scroll * 0.002).clamp(0.5, 2.0) / pinch.clamp(0.5, 2.0);
+    let d = viewport.camera.distance;
+    let f = (d * f).clamp(lo, hi) / d;
+    if f != 1.0 {
+        let anchor = viewport.point_under(items, at.0, at.1);
+        viewport.camera.zoom_about(f, anchor);
+    }
+}
+
 /// A build's name from its file name: what precedes the first dot
 /// (`gate.assembly.json` is `gate`).
 fn build_stem(name: &str) -> String {
@@ -2868,13 +2882,15 @@ impl App {
     /// One frame of the whole window, drawn with `gpu` (None shows a
     /// notice where the 3D views would be).
     pub fn frame_ui(&mut self, ui: &mut egui::Ui, gpu: Option<&Gpu>) {
+        egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
+        // each tab keeps its camera: stow the shown one, take out the new tab's — after the
+        // toolbar, whose tab buttons change the tab, so the view drawn below has its own camera
+        // in the very frame the tab changes (a fit waiting for the plan went to the tab left)
         if self.tab != self.camera_tab {
-            // each tab keeps its camera: stow the shown one, take out the new tab's
             let shown = std::mem::replace(&mut self.viewport.camera, self.cameras[self.tab.index()].clone());
             self.cameras[self.camera_tab.index()] = shown;
             self.camera_tab = self.tab;
         }
-        egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         match self.tab {
             Tab::Simulate => {
@@ -4476,14 +4492,158 @@ mod tests {
             "{:?}",
             h.state().viewport.camera.target
         );
-        // the Simulate tab keeps its own, fixed plan camera
+        // the wheel closes in on the point of the map under the pointer, not on the view's middle:
+        // a spot of bare mat aside stays under the pointer, the view's centre moving toward it
+        let spot = Vec3::new(-300.0, -200.0, 0.0);
+        let at = on_screen(h.state(), spot);
+        assert!(rect.contains(at) && (at - rect.center()).length() > 50.0, "{at:?} in {rect:?}");
+        let before = h.state().viewport.camera.clone();
+        h.input_mut().events.push(Event::PointerMoved(at));
+        h.input_mut().events.push(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, 60.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        steps(&mut h, 12);
+        let after = h.state().viewport.camera.clone();
+        assert!(
+            after.distance < before.distance * 0.95,
+            "zoomed in: {} -> {}",
+            before.distance,
+            after.distance
+        );
+        assert!(
+            (after.target - spot).length() < (before.target - spot).length() - 1.0,
+            "{before:?} -> {after:?}"
+        );
+        let now = on_screen(h.state(), spot);
+        assert!((now - at).length() < 1.0, "the spot stays under the pointer: {at:?} -> {now:?}");
+        // the Simulate tab keeps its own, fixed plan camera, and it shows the whole mat though
+        // the map was rebuilt (by every edit above) while it was away: the fit waiting for it is
+        // spent on its own camera, in the frame its tab button is clicked
+        assert!(h.state().simulate.fit_is_pending(), "the map changed while the plan was away");
+        let map_cam = h.state().viewport.camera.clone();
         h.get_by_label("Simulate").click();
         steps(&mut h, 2);
         assert!(h.state().viewport.camera.ortho);
+        let (lo, hi) = h.state().simulate.map_extent().unwrap();
+        let rect = h.state().view_rect;
+        let corners: Vec<Pos2> = [(lo.x, lo.y), (hi.x, lo.y), (lo.x, hi.y), (hi.x, hi.y)]
+            .iter()
+            .map(|&(x, y)| on_screen(h.state(), Vec3::new(x, y, 0.0)))
+            .collect();
+        for c in &corners {
+            assert!(rect.expand(1.0).contains(*c), "the mat's corner {c:?} in the view {rect:?}");
+        }
+        let (wide, tall) = (corners[1].x - corners[0].x, corners[0].y - corners[2].y);
+        assert!(
+            (wide - rect.width()).abs() < 2.0 || (tall - rect.height()).abs() < 2.0,
+            "the mat spans the view on its tighter axis: {wide} x {tall} in {rect:?}"
+        );
         h.get_by_label("Map").click();
         steps(&mut h, 2);
-        assert!(!h.state().viewport.camera.ortho);
+        let back = h.state().viewport.camera.clone();
+        assert!(!back.ortho);
+        assert_eq!(
+            (back.target, back.distance, back.yaw, back.pitch),
+            (map_cam.target, map_cam.distance, map_cam.yaw, map_cam.pitch),
+            "the map editor's view is as it was left"
+        );
         let _ = std::fs::remove_dir_all(&mdir);
+    }
+
+    #[test]
+    fn the_wheel_zooms_about_the_point_under_the_pointer() {
+        let Some(gpu) = gpu() else { return };
+        let mut h = harness(&gpu, None);
+        steps(&mut h, 2);
+        {
+            let app = h.state_mut();
+            let root = app.editor.doc.robot.root.clone();
+            app.editor.doc.components.get_mut(&root).unwrap().children.clear();
+            app.editor.doc.robot.roles.clear();
+            app.editor.recompute();
+            let id = app.editor.ensure_ldraw_part("3001").unwrap();
+            app.editor.add_instance(Some(id.clone()), None, [0.0; 3]);
+            app.editor.add_instance(Some(id), None, [64.0, 0.0, 0.0]);
+            app.editor.selection.clear();
+            app.editor.fit_pending = true;
+        }
+        steps(&mut h, 3);
+        // stood back, so both bricks show in the harness's narrow view
+        h.state_mut().viewport.camera.distance *= 2.5;
+        steps(&mut h, 2);
+        let rect = h.state().view_rect;
+        let wheel = |h: &mut Harness<'_, App>, at: Pos2, dy: f32| {
+            h.input_mut().events.push(Event::PointerMoved(at));
+            h.input_mut().events.push(Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, dy),
+                phase: egui::TouchPhase::Move,
+                modifiers: Modifiers::NONE,
+            });
+            steps(h, 12);
+        };
+        let local = |p: Pos2| (p.x - rect.min.x, p.y - rect.min.y);
+        // over a brick, off the view's middle: the brick's surface there stays under the pointer
+        // as the view closes in on it
+        let leaf = h.state().editor.leaves.iter().find(|l| l.pos.x > 32.0).unwrap().clone();
+        let at = on_screen(h.state(), leaf.pos.as_vec3());
+        assert!(rect.contains(at) && (at - rect.center()).length() > 20.0, "{at:?} in {rect:?}");
+        let (x, y) = local(at);
+        assert!(
+            h.state().viewport.pick(&h.state().items, x, y).is_some(),
+            "the pointer is over a brick"
+        );
+        let hit = h.state().viewport.point_under(&h.state().items, x, y);
+        let before = h.state().viewport.camera.clone();
+        wheel(&mut h, at, 60.0);
+        let after = h.state().viewport.camera.clone();
+        assert!(
+            after.distance < before.distance * 0.95,
+            "zoomed in: {} -> {}",
+            before.distance,
+            after.distance
+        );
+        let now = on_screen(h.state(), hit);
+        assert!(
+            (now - at).length() < 1.0,
+            "the brick's point stays under the pointer: {at:?} -> {now:?}"
+        );
+        assert!(
+            (after.target - hit).length() < (before.target - hit).length() - 1.0,
+            "the view's centre nears it"
+        );
+        // over nothing: the point at the target's depth under the pointer stays there, backing off
+        let corner = rect.left_top() + egui::vec2(24.0, 24.0);
+        let (x, y) = local(corner);
+        assert!(
+            h.state().viewport.pick(&h.state().items, x, y).is_none(),
+            "nothing under the corner"
+        );
+        let far = h.state().viewport.point_under(&h.state().items, x, y);
+        let cam = h.state().viewport.camera.clone();
+        assert!((far - cam.target).dot(cam.direction()).abs() < 0.01, "at the target's depth");
+        wheel(&mut h, corner, -60.0);
+        assert!(h.state().viewport.camera.distance > cam.distance * 1.05, "zoomed out");
+        let now = on_screen(h.state(), far);
+        assert!(
+            (now - corner).length() < 1.0,
+            "the point stays under the pointer: {corner:?} -> {now:?}"
+        );
+        // pinched in on the brick's point, where it shows now, far past the nearest the view
+        // goes: it stops there, the point still under the pointer
+        let at = on_screen(h.state(), hit);
+        assert!(rect.contains(at), "{at:?} in {rect:?}");
+        for _ in 0..12 {
+            h.input_mut().events.push(Event::PointerMoved(at));
+            h.input_mut().events.push(Event::Zoom(2.0));
+            steps(&mut h, 2);
+        }
+        assert_eq!(h.state().viewport.camera.distance, 20.0);
+        let now = on_screen(h.state(), hit);
+        assert!((now - at).length() < 1.0, "{at:?} -> {now:?}");
     }
 
     #[test]
