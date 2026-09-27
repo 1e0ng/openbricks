@@ -53,8 +53,10 @@ def _chassis_spec(args):
 
 # The map aliases and their resolution are the runtime's: one table, so a
 # map the CLI loads is one SimRobot loads (``practice-line`` once failed
-# from one and not the other).
-from openbricks_sim.robot import _BUILTIN_WORLDS, _resolve_world  # noqa: E402,F401
+# from one and not the other). They live in ``props``, which imports no
+# MuJoCo, so the parser (and the docs that render it) stays light.
+from openbricks_sim.props import BUILTIN_WORLDS as _BUILTIN_WORLDS  # noqa: E402
+from openbricks_sim.props import resolve_world as _resolve_world  # noqa: E402,F401
 
 
 def _maybe_randomize(model, data, args):

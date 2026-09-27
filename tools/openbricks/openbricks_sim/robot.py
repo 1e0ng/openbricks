@@ -45,49 +45,10 @@ from openbricks_sim.runtime import (SimRuntime, SimMotor, SimDriveBase,
 from openbricks_sim.world import load_world
 
 
-# Repo-relative aliases for the WRO worlds — same set ``cli.py``
-# resolves for ``preview``. Resolved against the package root, so the
-# call site doesn't need to know where it lives on disk.
-_BUILTIN_WORLDS = {
-    "empty":               None,
-    "wro-2026-elementary": "worlds/wro_2026_elementary_robot_rockstars/map.json",
-    "wro-2026-junior":     "worlds/wro_2026_junior_heritage_heroes/map.json",
-    "wro-2026-senior":     "worlds/wro_2026_senior_mosaic_masters/map.json",
-    # Small practice scenes for learning / iteration. See
-    # ``worlds/<name>/README.md`` for the layout + suggested missions.
-    "practice-zones":      "worlds/practice_zones/map.json",
-    "practice-walls":      "worlds/practice_walls/map.json",
-    "practice-line":       "worlds/practice_line/map.json",
-}
-
-
-def _resolve_world(world):
-    """Aliases → on-disk path; ``None`` keeps the standalone preview.
-    Shipped aliases first, then the user's own maps under the data
-    directory (listing them converts one saved before maps were JSON),
-    then a path to a ``map.json``."""
-    if world is None or world == "empty":
-        return None
-    if world not in _BUILTIN_WORLDS:
-        from openbricks_sim import props
-        for w in props.list_user_worlds():
-            if w["alias"] == str(world):
-                return w["path"]
-    if world in _BUILTIN_WORLDS:
-        rel = _BUILTIN_WORLDS[world]
-        if rel is None:
-            return None
-        # Aliases are package-relative — the worlds directory ships
-        # inside ``openbricks_sim/`` so the wheel bundles them, and
-        # ``Path(__file__).parent`` resolves to the installed package
-        # root regardless of how the user installed (pip, pipx,
-        # editable, sdist-compile).
-        pkg_root = Path(__file__).resolve().parent
-        candidate = pkg_root / rel
-        if candidate.is_file():
-            return str(candidate)
-        return world
-    return world
+# The map aliases and their resolution live with the maps (``props``), light
+# enough for the CLI's parser (and the docs that render it) to import.
+from openbricks_sim.props import BUILTIN_WORLDS as _BUILTIN_WORLDS  # noqa: E402
+from openbricks_sim.props import resolve_world as _resolve_world  # noqa: E402,F401
 
 
 class SimRobotError(RuntimeError):

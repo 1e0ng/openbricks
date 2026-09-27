@@ -99,6 +99,50 @@ def user_worlds_dir(env=None, home=None):
     return data_dir(env, home) / "worlds"
 
 
+# The shipped maps by alias, package-relative — one table for the runtime
+# (``robot``) and the CLI. Resolved against the package root, so the
+# call site doesn't need to know where it lives on disk.
+BUILTIN_WORLDS = {
+    "empty":               None,
+    "wro-2026-elementary": "worlds/wro_2026_elementary_robot_rockstars/map.json",
+    "wro-2026-junior":     "worlds/wro_2026_junior_heritage_heroes/map.json",
+    "wro-2026-senior":     "worlds/wro_2026_senior_mosaic_masters/map.json",
+    # Small practice scenes for learning / iteration. See
+    # ``worlds/<name>/README.md`` for the layout + suggested missions.
+    "practice-zones":      "worlds/practice_zones/map.json",
+    "practice-walls":      "worlds/practice_walls/map.json",
+    "practice-line":       "worlds/practice_line/map.json",
+}
+
+
+def resolve_world(world):
+    """Aliases → on-disk path; ``None`` keeps the standalone preview.
+    Shipped aliases first, then the user's own maps under the data
+    directory (listing them converts one saved before maps were JSON),
+    then a path to a ``map.json``."""
+    if world is None or world == "empty":
+        return None
+    if world not in BUILTIN_WORLDS:
+        for w in list_user_worlds():
+            if w["alias"] == str(world):
+                return w["path"]
+    if world in BUILTIN_WORLDS:
+        rel = BUILTIN_WORLDS[world]
+        if rel is None:
+            return None
+        # Aliases are package-relative — the worlds directory ships
+        # inside ``openbricks_sim/`` so the wheel bundles them, and
+        # ``Path(__file__).parent`` resolves to the installed package
+        # root regardless of how the user installed (pip, pipx,
+        # editable, sdist-compile).
+        pkg_root = Path(__file__).resolve().parent
+        candidate = pkg_root / rel
+        if candidate.is_file():
+            return str(candidate)
+        return world
+    return world
+
+
 def list_user_worlds(env=None, home=None):
     """The user's maps: ``{"alias", "path", "dir", "user": True}`` per
     ``worlds/<alias>/map.json`` under the data directory, by alias. A
