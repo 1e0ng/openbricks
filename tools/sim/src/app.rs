@@ -990,7 +990,7 @@ impl App {
         }
         self.keys(ui, shift);
         let hud = format!(
-            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° · S snaps · ⌘C/⌘V copy/paste · ⌘L locks, ⌘⇧L unlocks · Del · ⌘Z",
+            "editing {}{} · 1 module = 8 mm · snap {} · orbit: drag · pan: shift-drag or right-drag · zoom: wheel or pinch · drag a brick to move it, shift lifts · W/E move/rotate handles (shift: free) · R turns 90° (nothing selected: the whole component) · S snaps · ⌘C/⌘V copy/paste · ⌘L locks, ⌘⇧L unlocks · Del · ⌘Z",
             self.editor.editing,
             if self.editor.selection.is_empty() {
                 String::new()
@@ -1010,6 +1010,16 @@ impl App {
             egui::FontId::monospace(11.0),
             ui.visuals().weak_text_color(),
         );
+        // a refused change says why over the view, where the eye is — the status line at the
+        // bottom right went unread (a turn "did nothing", twice)
+        if let Some(why) = self.editor.refusal() {
+            let text = egui::RichText::new(format!("⚠ {why}"))
+                .size(14.0)
+                .color(egui::Color32::WHITE)
+                .background_color(egui::Color32::from_rgb(190, 45, 35));
+            let at = egui::Rect::from_center_size(rect.center_top() + egui::vec2(0.0, 20.0), egui::vec2(rect.width() - 24.0, 24.0));
+            ui.put(at, egui::Label::new(text));
+        }
     }
 
     /// The keys, and the copy / cut / paste events the platform turns
@@ -2132,7 +2142,11 @@ impl App {
                 ui.weak(p.display().to_string());
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(&self.editor.status);
+                if self.editor.refusal().is_some() {
+                    ui.colored_label(egui::Color32::from_rgb(214, 62, 48), &self.editor.status);
+                } else {
+                    ui.label(&self.editor.status);
+                }
                 let note = self.editor.overlap_note();
                 if !note.is_empty() {
                     ui.colored_label(egui::Color32::from_rgb(214, 62, 48), note);
@@ -3075,6 +3089,9 @@ mod tests {
             h.state().editor.status
         );
         assert!(h.state().editor.overlapping.is_empty());
+        // the refusal is said over the view too, where the eye is
+        let why = h.state().editor.status.clone();
+        assert!(h.query_by_label(&format!("⚠ {why}")).is_some(), "the banner: {why}");
         // Escape in the middle of such a drag abandons it: the brick goes back at once and the
         // release that follows does nothing
         let depth = h.state().editor.undo_depth();
@@ -3104,6 +3121,7 @@ mod tests {
         steps(&mut h, 2);
         assert_eq!(h.state().editor.selected_instances()[0].pos, [40.0, 0.0, 0.0]);
         assert_eq!(h.state().editor.undo_depth(), depth + 1);
+        assert!(h.query_by_label_contains("⚠").is_none(), "a kept change takes the banner away");
     }
 
     /// Steps frames until `done` holds, a little while at most.
@@ -3677,6 +3695,34 @@ mod tests {
             h.state().editor.selected_instances()[0].rot[2],
             crate::editor::wrap_deg(start.rot[2] + 90.0)
         );
+        // nothing selected: R turns the whole component being edited, and says so; at the
+        // robot's top level it says what to select (it used to do nothing, silently)
+        h.state_mut().editor.selection.clear();
+        h.step();
+        h.key_press(Key::R);
+        h.step();
+        assert_eq!(
+            h.state().editor.status,
+            "Select what to turn: the robot's frame is the way it drives"
+        );
+        h.state_mut().editor.open_component("drive_unit", true);
+        h.step();
+        assert_eq!(h.state().editor.editing, "drive_unit");
+        let before: Vec<[f64; 3]> = h.state().editor.children().iter().map(|c| c.rot).collect();
+        h.key_press(Key::R);
+        h.step();
+        assert!(
+            h.state().editor.status.ends_with("turned 90° in place"),
+            "{}",
+            h.state().editor.status
+        );
+        let after: Vec<[f64; 3]> = h.state().editor.children().iter().map(|c| c.rot).collect();
+        assert_ne!(before, after);
+        h.state_mut().editor.undo();
+        let root = h.state().editor.doc.robot.root.clone();
+        h.state_mut().editor.open_component(&root, false);
+        h.state_mut().editor.selection = vec![brick.clone()];
+        h.step();
         // along the frame only: a step towards either rail would put the board into it
         h.key_press(Key::ArrowUp);
         h.key_press(Key::ArrowUp);
@@ -4107,9 +4153,25 @@ mod tests {
         let far = (dx * dx + dy * dy).sqrt();
         assert!(far > 20.0 && far < 1000.0, "moved ({dx}, {dy}) mm for 60 px");
         assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef"));
-        wait_for(&mut h, &|a| {
-            a.simulate.prop_pose(0).map(|p| (p.x_mm - 300.0 - dx).abs() < 1.0).unwrap_or(false)
-        });
+        // a turn works from the pose the server last reported, and a prop's pose shows a move
+        // at once, before the server has heard it — an older frame can still arrive after (and
+        // put the prop back under a press meant for it, which then pans the view), so "shows the
+        // pose" is no sync point: every step waits until the server has answered all that went
+        // before (a world list asked for after them), then checks the pose
+        let barrier = |h: &mut Harness<'_, App>| {
+            h.state_mut().simulate.ask_worlds();
+            wait_for(h, &|a: &App| !a.simulate.worlds().is_empty());
+        };
+        barrier(&mut h);
+        assert!(
+            h.state()
+                .simulate
+                .prop_pose(0)
+                .map(|p| (p.x_mm - 300.0 - dx).abs() < 1.0)
+                .unwrap_or(false),
+            "{:?}",
+            h.state().simulate.prop_pose(0)
+        );
         // shift-drag turns it
         let at = top(&h, 300.0 + dx, 200.0 + dy);
         press(&mut h, at, PointerButton::Primary, Modifiers::SHIFT);
@@ -4134,14 +4196,6 @@ mod tests {
                     .map(|p| crate::route::wrap_deg(p.yaw_deg - yaw).abs() < 0.2)
                     .unwrap_or(false)
             }
-        };
-        // a turn works from the pose the server last reported, and a prop's pose shows a move
-        // at once, before the server has heard it — an older frame can still arrive after, so
-        // "shows the yaw" is no sync point: every step waits until the server has answered all
-        // that went before (a world list asked for after them), then checks the pose
-        let barrier = |h: &mut Harness<'_, App>| {
-            h.state_mut().simulate.ask_worlds();
-            wait_for(h, &|a: &App| !a.simulate.worlds().is_empty());
         };
         barrier(&mut h);
         assert!(heard(y0)(h.state()));

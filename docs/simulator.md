@@ -83,8 +83,8 @@ selected items move and turn together about the first one's origin.
 **Pitch 90°** and **Roll 90°** turn it a quarter about the up (z), y
 and x axes — the world's axes, as the rings are, and the selection as
 one piece about the first item's origin, one item or several. With
-nothing selected inside a component, **Turn the whole component**
-turns every part of it (locked ones too: they keep their place among
+nothing selected inside a component, `R` or **Turn the whole
+component** turns every part of it (locked ones too: they keep their place among
 the rest) in place — about the middle of what it fills, and back down
 so its lowest point is where it was — and every use of the component
 turns with it; the robot itself is not turned so, since its frame is
@@ -417,8 +417,9 @@ robot as a tree of components:
   brick); **edges** in the toolbar turns them off.
 - **No two bricks overlap.** A brick let go, nudged, turned or given a
   pose where its material would pass through a neighbour's is put back
-  where it was, and the status line names both, a brick inside a
-  component by its path (`aa/lego_2`) — while it is dragged
+  where it was, and a red banner across the top of the view names both
+  (the status line too), a brick inside a component by its path
+  (`aa/lego_2`), until the next change is kept — while it is dragged
   it flushes red wherever it would overlap, and Escape abandons the
   drag. Touching is not overlapping, and at a joint — a feature seated
   in the other part's (a pin all the way in its hole, a plate down on
@@ -428,7 +429,11 @@ robot as a tree of components:
   is the press fit ABS allows, a feature pushed in firmly, and it is
   not counted. A brick on a pin turns about it at any angle: the
   rotate rings step 15° (45° is three steps) and the inspector's
-  **roll**, **pitch** and **yaw** take any angle. Only there, though: the
+  **roll**, **pitch** and **yaw** take any angle. Turn it about the
+  pin's own axis — the ring of the pin's colour (red x, green y, blue
+  z): a pin standing up turns the brick in **yaw**, a level pin along
+  y in **pitch**; about any other axis the brick would twist off the
+  pin, and the banner says so. Only there, though: the
   rest of the two parts' surfaces are checked as ever, so a plate let
   go turned on one stud, its walls through the others, is refused. A new brick lands beside
   what is already at the origin; a duplicate or a paste goes as far

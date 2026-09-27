@@ -456,7 +456,16 @@ impl Editor {
             self.dirty = p.dirty;
             self.recompute();
             self.status = format!("{} put back", p.names.join(", "));
+            // abandoned, not refused: no banner over the view
+            self.refused = false;
         }
+    }
+
+    /// The status, when it says a change was refused (it stands until the
+    /// next change that is kept): shown over the view as well as on the
+    /// status line, which is easy to miss.
+    pub fn refusal(&self) -> Option<&str> {
+        self.refused.then_some(self.status.as_str())
     }
 
     /// What the change in progress would overlap, for the status line.
@@ -841,7 +850,20 @@ impl Editor {
     /// used to turn about its own origin, a pair of bricks turning apart
     /// into each other, and a pitch or roll about the item's own tipped
     /// axis rather than the world's.
+    ///
+    /// With nothing selected, `R` (which calls this) turns the whole
+    /// component being edited, in place, as its panel's buttons do — it
+    /// used to do nothing and say nothing; at the robot's top level it
+    /// says what to select instead.
     pub fn rotate_selection(&mut self, axis: usize, deg: f64) {
+        if self.selection.is_empty() {
+            if self.is_root() {
+                self.status = "Select what to turn: the robot's frame is the way it drives".into();
+            } else {
+                self.rotate_component(axis, deg);
+            }
+            return;
+        }
         let names = self.movable();
         if names.is_empty() {
             return;
@@ -2456,6 +2478,166 @@ mod tests {
         ed.set_pose(&red, [-8.0, 13.6, -4.0], i.rot);
         assert!(ed.status.contains("stays: it would overlap"), "{}", ed.status);
         assert_eq!(ed.selected_instances()[0].pos, on);
+    }
+
+    #[test]
+    fn a_whole_component_turns_whatever_it_holds() {
+        // what a build holds may make a whole turn misfire: an overlap it already had, a part at
+        // 45°, a component inside it. Each turn about each axis moves every part, says so, and
+        // is undone to the pose before
+        for (label, overlap_first, turn_45, nest) in [
+            ("plain", false, false, false),
+            ("with an old overlap", true, false, false),
+            ("with a 45° brick", false, true, false),
+            ("nested", false, false, true),
+            ("all at once", true, true, true),
+        ] {
+            let (mut ed, a) = solo("3001");
+            let id = ed.ensure_ldraw_part("3001").unwrap();
+            ed.add_instance(Some(id), None, [40.0, 0.0, 0.0]);
+            let b = ed.selection[0].clone();
+            ed.set_instance(&b, |i| i.pos = if overlap_first { [31.0, 0.0, 0.0] } else { [32.0, 0.0, 0.0] });
+            let brick = ed.ensure_ldraw_part("3003").unwrap();
+            ed.add_instance(Some(brick), None, [0.0, 40.0, 0.0]);
+            let c = ed.selection[0].clone();
+            if turn_45 {
+                ed.set_instance(&c, |i| i.rot = [0.0, 0.0, 45.0]);
+            }
+            ed.recompute();
+            let mut kids = vec![a, b, c.clone()];
+            if nest {
+                ed.selection = vec![c];
+                assert!(ed.group_selection("inner"), "{}", ed.status);
+                kids = ed.children().iter().map(|i| i.name.clone()).collect();
+            }
+            ed.selection = kids;
+            assert!(ed.group_selection("whole"), "{}", ed.status);
+            ed.open_component("whole", true);
+            assert!(ed.selection.is_empty());
+            assert_eq!(ed.overlap_count(), usize::from(overlap_first), "{label}");
+            let poses = |ed: &Editor| ed.children().iter().map(|i| (i.pos, i.rot)).collect::<Vec<_>>();
+            let before = poses(&ed);
+            for (axis, how) in [(2, "turned"), (1, "pitched"), (0, "rolled")] {
+                ed.rotate_component(axis, 90.0);
+                let after = poses(&ed);
+                assert!(
+                    before.iter().zip(&after).all(|(x, y)| x != y),
+                    "{label}, axis {axis}: every part moves — {before:?} → {after:?}"
+                );
+                assert_eq!(ed.status, format!("whole {how} 90° in place"), "{label}");
+                ed.undo();
+                assert_eq!(poses(&ed), before, "{label}: undone");
+            }
+        }
+    }
+
+    #[test]
+    fn with_nothing_selected_a_turn_turns_the_whole_component() {
+        // the user's report: on the Workbench, nothing selected, R — nothing moved and nothing
+        // was said. Inside a component it turns the whole component now; at the robot's top level
+        // it says what to do
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [40.0, 0.0, 0.0]);
+        let b = ed.selection[0].clone();
+        ed.selection.clear();
+        ed.rotate_selection(2, 90.0);
+        assert_eq!(ed.status, "Select what to turn: the robot's frame is the way it drives");
+        ed.selection = vec![a, b];
+        assert!(ed.group_selection("pair"), "{}", ed.status);
+        ed.open_component("pair", true);
+        assert!(ed.selection.is_empty());
+        let before: Vec<[f64; 3]> = ed.children().iter().map(|c| c.rot).collect();
+        ed.rotate_selection(2, 90.0);
+        assert_eq!(ed.status, "pair turned 90° in place");
+        let after: Vec<[f64; 3]> = ed.children().iter().map(|c| c.rot).collect();
+        assert_ne!(before, after);
+        assert!(after.iter().all(|r| r[2] == 90.0), "{after:?}");
+    }
+
+    #[test]
+    fn a_brick_on_a_pin_turns_45_degrees_about_the_pin_whichever_way_it_points() {
+        // the user: "it can not yaw 45 degree, only 0 or 90". A brick on a pin turns about the
+        // pin: with the pin level (along y, as the WRO picture has it) that is pitch — the green
+        // ring, or the pitch field — and yaw would twist it off the pin, refused and said so over
+        // the view; with the pin pointing up it is yaw, the blue ring or the yaw field
+        for (label, wall_rot, pin_pos, pin_rot, on, rest, about) in [
+            (
+                "level pin",
+                [0.0, 0.0, 0.0],
+                [-16.0, 4.0, -4.0],
+                [0.0, 0.0, 90.0],
+                [-16.0, 13.6, -4.0],
+                [-90.0, 0.0, 0.0],
+                1usize,
+            ),
+            (
+                "pin up",
+                [90.0, 0.0, 0.0],
+                [-16.0, 4.0, 4.0],
+                [0.0, -90.0, 0.0],
+                [-16.0, 4.0, 13.6],
+                [0.0; 3],
+                2usize,
+            ),
+        ] {
+            let (mut ed, wall) = solo("3894");
+            ed.set_pose(&wall, [0.0; 3], wall_rot);
+            let pin = ed.ensure_ldraw_part("3673").unwrap();
+            ed.add_instance(Some(pin), None, [0.0, 60.0, 0.0]);
+            let p = ed.selection[0].clone();
+            ed.set_pose(&p, pin_pos, pin_rot);
+            let brick = ed.ensure_ldraw_part("3003").unwrap();
+            ed.add_instance(Some(brick), None, [0.0, 120.0, 0.0]);
+            let red = ed.selection[0].clone();
+            ed.set_pose(&red, on, rest);
+            assert_eq!(ed.selected_instances()[0].pos, on, "{label}: {}", ed.status);
+            assert_eq!(
+                assembly::connections_of(&ed.doc, &ed.bundle, &ed.editing, &red).len(),
+                1,
+                "{label}: on the pin"
+            );
+            let about_pin = gizmo::rotated(on, rest, DVec3::from_array(on), about, 45.0).1;
+            // typed into the angle fields
+            ed.set_pose(&red, on, about_pin);
+            assert_eq!(ed.selected_instances()[0].rot, about_pin, "{label}: {}", ed.status);
+            assert!(ed.refusal().is_none());
+            // on the ring about the pin, the magnet on
+            ed.set_pose(&red, on, rest);
+            ed.magnet = true;
+            let starts = ed.begin_handle();
+            ed.drag_handle(Handle::Ring(about), 44.0, DVec3::from_array(on), &starts, false);
+            assert!(ed.overlapping.is_empty(), "{label}: {:?}", ed.overlapping);
+            ed.end_handle();
+            assert_eq!(
+                (ed.selected_instances()[0].pos, ed.selected_instances()[0].rot),
+                (on, about_pin),
+                "{label}: {}",
+                ed.status
+            );
+            ed.magnet = false;
+            ed.set_pose(&red, on, rest);
+            // about any other axis it would twist off the pin: refused, and the refusal stands
+            // (for the view's banner) until a change is kept
+            let off = gizmo::rotated(on, rest, DVec3::from_array(on), (about + 1) % 3, 45.0).1;
+            ed.set_pose(&red, on, off);
+            assert_eq!(ed.selected_instances()[0].rot, rest, "{label}");
+            assert_eq!(ed.refusal(), Some(format!("{red} stays: it would overlap {p}").as_str()), "{label}");
+            ed.set_pose(&red, on, about_pin);
+            assert!(ed.refusal().is_none(), "{label}: a kept change clears it");
+        }
+        // on a level pin, the yaw field in particular — what the user reached for
+        let (mut ed, _) = solo("3894");
+        let pin = ed.ensure_ldraw_part("3673").unwrap();
+        ed.add_instance(Some(pin), None, [0.0, 60.0, 0.0]);
+        let p = ed.selection[0].clone();
+        ed.set_pose(&p, [-16.0, 4.0, -4.0], [0.0, 0.0, 90.0]);
+        let brick = ed.ensure_ldraw_part("3003").unwrap();
+        ed.add_instance(Some(brick), None, [0.0, 120.0, 0.0]);
+        let red = ed.selection[0].clone();
+        ed.set_pose(&red, [-16.0, 13.6, -4.0], [-90.0, 0.0, 0.0]);
+        ed.set_pose(&red, [-16.0, 13.6, -4.0], [-90.0, 0.0, 45.0]);
+        assert_eq!(ed.refusal(), Some(format!("{red} stays: it would overlap {p}").as_str()));
     }
 
     #[test]
