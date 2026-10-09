@@ -4,6 +4,10 @@
 // with both axes closed-loop through the ramp.
 
 #include <math.h>
+// -std=c11 hides M_PI on GCC (drivebase_core.c carries the same guard).
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #include "harness.h"
 #include "drivebase_core.h"
