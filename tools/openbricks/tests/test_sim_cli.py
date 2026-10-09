@@ -82,10 +82,14 @@ class ParserTests(unittest.TestCase):
 
     def test_bare_invocation_is_the_sim(self):
         # Since 4.2.0 bare ``openbricks sim`` launches the sim (the
-        # native app): the parser accepts no subcommand and ``main``
-        # re-parses as ``app`` (tests/test_native.py).
+        # native app): the parser accepts no subcommand, and ``main``
+        # prepends ``app`` BEFORE parsing whenever the first token is
+        # not a subcommand or a top-level flag, so ``openbricks sim
+        # robot.assembly.json`` / ``--bricks FILE`` reach the app
+        # too (tests/test_native.py::SimCliTests).
         self.assertIsNone(self.parser.parse_args([]).command)
         self.assertEqual(self.parser.parse_args(["app"]).command, "app")
+        self.assertEqual(set(cli._COMMANDS), set(self.parser._subparsers._group_actions[0].choices))
 
     def test_version_flag_prints_and_exits(self):
         # ``openbricks-sim --version`` exits 0 and writes the version

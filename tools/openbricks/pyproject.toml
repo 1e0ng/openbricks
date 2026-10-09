@@ -100,7 +100,7 @@ sim = [
     "mujoco >= 3.2, < 3.13",
     "numpy >= 1.24",
 ]
-dev = ["pytest", "coverage", "build"]
+dev = ["pytest", "coverage", "build", "pyyaml"]  # pyyaml: tests/test_release_tags.py parses the CI workflow
 
 [project.urls]
 Homepage      = "https://openbricks.dev"

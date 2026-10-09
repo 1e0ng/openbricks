@@ -29,7 +29,8 @@ Commands (one JSON object per line on stdin)::
 
 Events (one JSON object per line on stdout)::
 
-    {"ev": "worlds", "worlds": [{"alias", "path", "dir", "user"}, ...]}
+    {"ev": "worlds", "worlds": [{"alias", "path", "dir", "user"}, ...]}   # a map of the user's own that
+                      # could not be converted from world.xml: "path": null and an "error" naming it
     {"ev": "scene", "bodies": [...], "parents": [...], "geoms": [...], "materials": {...},
                     "textures": {...}, "meshes": {...}, "bricks": [...],
                     "props": [{"name", "body", "kind", "color", "yaw_deg", "fixed", "bricks": [...]}, ...],
@@ -104,7 +105,9 @@ class _LogWriter(io.TextIOBase):
 
 
 def list_worlds():
-    """The shipped maps, then the user's own from the data directory."""
+    """The shipped maps, then the user's own from the data directory (one
+    whose old ``world.xml`` could not be converted listed with no path
+    and an ``error``, see :func:`props.list_user_worlds`)."""
     from openbricks_sim import robot as robot_mod
     out = []
     for alias in robot_mod._BUILTIN_WORLDS:
@@ -391,6 +394,8 @@ class Session:
         self._editable("save")
         from openbricks_sim import robot as robot_mod
         alias, path = props.save_as(os.path.dirname(self.world_path), self.world_map, name, reserved=robot_mod._BUILTIN_WORLDS)
+        # the map as it stands is the user's now, so an export before the reload carries its name
+        self.world_map = dict(self.world_map, name=alias)
         self.protocol.send(ev="worlds", worlds=list_worlds())
         self.protocol.send(ev="saved", alias=alias, path=path)
         return alias
@@ -451,6 +456,7 @@ class Session:
         last_frame = [0.0]
         wall0 = [_real_monotonic()]
         sim0 = [runtime.now_ms]
+        seen_speed = [self.speed]
         frame_period = 1.0 / self.frame_hz
 
         def tick(now_ms):
@@ -461,8 +467,15 @@ class Session:
                 self.paused.wait()
                 wall0[0] = _real_monotonic()
                 sim0[0] = now_ms
-            # pace to wall time × speed
-            target_wall = wall0[0] + (now_ms - sim0[0]) / 1000.0 / max(self.speed, 1e-3)
+            # pace to wall time × speed, from the instant the speed last changed: the lead a
+            # faster speed built up is not a debt a slower one pays off (read once per tick, the
+            # serve thread sets it)
+            speed = self.speed
+            if speed != seen_speed[0]:
+                seen_speed[0] = speed
+                wall0[0] = _real_monotonic()
+                sim0[0] = now_ms
+            target_wall = wall0[0] + (now_ms - sim0[0]) / 1000.0 / max(speed, 1e-3)
             lag = target_wall - _real_monotonic()
             if lag > 0.0005:
                 _real_sleep(min(lag, 0.05))
@@ -548,6 +561,9 @@ def serve(stdin=None, stdout=None, frame_hz=60.0):
             cmd = json.loads(line)
         except ValueError as exc:
             protocol.send(ev="error", text="bad command line: %s" % exc)
+            continue
+        if not isinstance(cmd, dict):
+            protocol.send(ev="error", text="bad command line: not an object")
             continue
         name = cmd.get("cmd")
         try:

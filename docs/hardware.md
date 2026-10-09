@@ -199,7 +199,9 @@ height and mat, so each one is swept over the line with
 `calibrate()` and keeps its own file — `"/qtr_front.cal"` and
 `"/qtr_rear.cal"`, say — loaded with `load_calibration()` at the top
 of every program. Two arrays with disjoint pins coexist; a pin
-claimed twice is refused at construction by the pin registry.
+claimed twice is refused at construction by the pin registry. The
+claims last for one program: the next run may wire those pins
+differently without a power cycle.
 
 The ten-channel skip pattern is a palindrome, so if the board is
 mounted the other way round, only the channel labels swap — GPIO

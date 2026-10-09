@@ -22,6 +22,7 @@ import functools
 import json
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 import urllib.request
@@ -63,6 +64,19 @@ def bundle_b64():
 def load_bundle():
     """The shipped bundle as a dict (``parts`` keyed by LDraw number)."""
     return json.loads(zlib.decompress(bundle_bytes()).decode())
+
+
+def shipped_numbers(bundle):
+    """Every number ``bundle`` (the shipped one) answers to, mapped to
+    its record's number: each record's own, and the inventory numbers it
+    goes by where LDraw names it differently (``aliases``: 41250 is the
+    library's 22119)."""
+    out = {}
+    for num, rec in bundle["parts"].items():
+        out[num] = num
+        for alias in rec.get("aliases", []):
+            out[alias] = num
+    return out
 
 
 def load_colors():
@@ -142,6 +156,9 @@ def load_user_bricks(directory=None):
                 bundle = json.load(fh)
             if not isinstance(bundle, dict) or not isinstance(bundle.get("parts"), dict):
                 raise ValueError("not a brick bundle (no \"parts\" object)")
+            for num, rec in bundle["parts"].items():
+                if not isinstance(rec, dict):
+                    raise ValueError("part %s is not an object" % num)
             for rec in bundle["parts"].values():
                 rec["fetched"] = True         # it came from the user's directory: it travels with a build
             out.append((path, bundle))
@@ -152,19 +169,24 @@ def load_user_bricks(directory=None):
 
 def library_bundle(directory=None):
     """The library as the sim loads it: the shipped bundle plus the
-    user's fetched parts, the shipped record winning on the same number
-    (a fetched copy of a shipped part is left out and said so). Returns
-    the bundle and the notes: files left out or unreadable."""
+    user's fetched parts, the shipped record winning on the same part (a
+    fetched copy of a shipped part is left out and said so): the same
+    number, or an inventory number the shipped record goes by (its
+    ``aliases``). Returns the bundle and the notes: files left out or
+    unreadable."""
     bundle = load_bundle()
+    shipped = shipped_numbers(bundle)
     notes = []
     for path, extra in load_user_bricks(directory):
         if isinstance(extra, str):
             notes.append("fetched part file %s: %s" % (path, extra))
             continue
         for num, rec in extra["parts"].items():
-            if num in bundle["parts"]:
+            same = shipped.get(num)
+            if same is not None:
+                said = num if same == num else "%s as %s" % (num, same)
                 notes.append("%s: the library ships %s (%s); the fetched copy is ignored, remove the file"
-                             % (path, num, bundle["parts"][num].get("name", "")))
+                             % (path, said, bundle["parts"][same].get("name", "")))
                 continue
             bundle["parts"][num] = rec
         colors = extra.get("colors")
@@ -188,12 +210,30 @@ def library_complete(root):
     return library_present(root) and (root / "LDConfig.ldr").is_file()
 
 
+def _member_target(staging, member, url):
+    """Where an archive member ``ldraw/...`` unpacks under ``staging``;
+    a member whose path would land outside it (``..``, an absolute path,
+    a Windows separator or drive) is refused with a RuntimeError naming
+    it, before anything is written."""
+    rel = member[len("ldraw/"):]
+    if "\\" in rel or rel.startswith("/") or re.match(r"^[A-Za-z]:", rel) or ".." in rel.split("/"):
+        raise RuntimeError("the archive at %s has a member outside its ldraw/ directory: %r" % (url, member))
+    inside = os.path.realpath(str(staging))
+    target = os.path.realpath(os.path.join(inside, os.path.normpath(rel)))
+    if os.path.commonpath([inside, target]) != inside or target == inside:
+        raise RuntimeError("the archive at %s has a member outside its ldraw/ directory: %r" % (url, member))
+    return pathlib.Path(target)
+
+
 def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=urllib.request.urlopen,
                   progress_every=10 * 1024 * 1024):
     """Download ``complete.zip`` and unpack ``parts/`` and ``p/`` into
     ``dest`` (default :func:`ldraw_dir`). Returns the library root.
     Skips the download when the library is already there unless
-    ``force``. ``progress`` receives short status lines."""
+    ``force``. ``progress`` receives short status lines. A download or
+    an unpack that fails, or an archive member that would land outside
+    ``dest``, raises and leaves neither the partial ``complete.zip.part``
+    nor a partial library behind."""
     say = progress or (lambda s: None)
     root = pathlib.Path(dest) if dest else ldraw_dir()
     if library_complete(root) and not force:
@@ -201,28 +241,28 @@ def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=u
         return root
     root.mkdir(parents=True, exist_ok=True)
     tmp_zip = root / "complete.zip.part"
-    say("downloading %s" % url)
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with opener(request) as resp, open(tmp_zip, "wb") as out:
-        total = 0
-        next_mark = progress_every
-        while True:
-            chunk = resp.read(1024 * 1024)
-            if not chunk:
-                break
-            out.write(chunk)
-            total += len(chunk)
-            if total >= next_mark:
-                say("  %.1f MB" % (total / (1024 * 1024)))
-                next_mark += progress_every
-    say("unpacking into %s" % root)
-    staging = pathlib.Path(tempfile.mkdtemp(prefix="ldraw-", dir=str(root)))
-    try:
+    staging = None
+    try:                                # whatever stops the download or the unpack, nothing half-done stays
+        say("downloading %s" % url)
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with opener(request) as resp, open(tmp_zip, "wb") as out:
+            total = 0
+            next_mark = progress_every
+            while True:
+                chunk = resp.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                total += len(chunk)
+                if total >= next_mark:
+                    say("  %.1f MB" % (total / (1024 * 1024)))
+                    next_mark += progress_every
+        say("unpacking into %s" % root)
+        staging = pathlib.Path(tempfile.mkdtemp(prefix="ldraw-", dir=str(root)))
         with zipfile.ZipFile(tmp_zip) as zf:
             members = [m for m in zf.namelist() if m.startswith("ldraw/") and not m.endswith("/")]
             for m in members:
-                rel = m[len("ldraw/"):]
-                target = staging / rel
+                target = _member_target(staging, m, url)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(m) as src, open(target, "wb") as dst:
                     shutil.copyfileobj(src, dst)
@@ -242,7 +282,8 @@ def fetch_library(dest=None, url=LDRAW_URL, force=False, progress=None, opener=u
                     final.unlink()
             shutil.move(str(extra), str(final))
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
         if tmp_zip.exists():
             tmp_zip.unlink()
     n_parts = sum(1 for p in (root / "parts").iterdir() if p.suffix.lower() == ".dat")

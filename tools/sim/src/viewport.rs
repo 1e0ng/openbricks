@@ -248,6 +248,14 @@ impl Camera {
     pub fn up(&self) -> Vec3 {
         self.right().cross(-self.direction()).normalize_or_zero()
     }
+    /// Turn about the target for a pointer drag of `dx`, `dy` points,
+    /// half a degree a point: the scene follows the pointer (a drag to
+    /// the right brings the eye round to the left), and the pitch stops
+    /// short of straight up or down. The one orbit every 3D view has.
+    pub fn orbit(&mut self, dx: f32, dy: f32) {
+        self.yaw -= dx * 0.5;
+        self.pitch = (self.pitch + dy * 0.5).clamp(-89.0, 89.0);
+    }
     /// Zoom by `f` (the distance times `f`) about a world point: the eye
     /// and the target close in on it together (or back off), so the point
     /// stays on the pixel it was on.
@@ -2237,6 +2245,38 @@ mod tests {
         assert!(cam.project(cam.eye() + cam.direction() * 10.0, 640.0, 480.0).is_none());
         assert_eq!(srgb(0xFFFFFF), [1.0, 1.0, 1.0, 1.0]);
         assert_eq!(srgb(0x000000), [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_drag_orbits_the_same_way_in_every_view() {
+        // a drag to the right turns the yaw down, a drag down raises the pitch, short of the pole
+        let mut cam = Camera {
+            yaw: 10.0,
+            pitch: 20.0,
+            ..Default::default()
+        };
+        cam.orbit(60.0, 0.0);
+        assert_eq!((cam.yaw, cam.pitch), (-20.0, 20.0));
+        cam.orbit(0.0, 40.0);
+        assert_eq!((cam.yaw, cam.pitch), (-20.0, 40.0));
+        cam.orbit(0.0, 1000.0);
+        assert_eq!(cam.pitch, 89.0);
+        cam.orbit(0.0, -1000.0);
+        assert_eq!(cam.pitch, -89.0);
+        let map = Camera {
+            yaw: -128.0,
+            pitch: 28.0,
+            ..Default::default()
+        };
+        let mut a = map.clone();
+        let mut b = map;
+        a.orbit(60.0, 0.0);
+        b.orbit(60.0, 0.0);
+        assert!(
+            a.yaw < -128.0 && a.yaw == b.yaw,
+            "one orbit for the Workbench and the map: {}",
+            a.yaw
+        );
     }
 
     #[test]

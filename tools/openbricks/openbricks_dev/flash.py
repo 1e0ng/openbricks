@@ -636,6 +636,19 @@ def run(args):
         if question is not None and not _confirm(question, args.yes):
             print("aborted — nothing was flashed.")
             return 0
+    elif current_version:
+        # The target's version comes from its file name only (the
+        # image carries none we can read), so a name without X.Y.Z —
+        # the firmware.bin a local build produces — cannot be checked
+        # for a same-version or downgrade flash. Ask rather than skip
+        # the check in silence.
+        question = ("target version unknown (file name %s carries no "
+                    "X.Y.Z) — cannot check for a same-version or "
+                    "downgrade flash over the current %s; flash anyway?"
+                    % (os.path.basename(args.firmware), current_version))
+        if not _confirm(question, args.yes):
+            print("aborted — nothing was flashed.")
+            return 0
 
     # Resolve the write offset from the image before touching the chip,
     # so an unrecognizable image fails the flash *before* the erase.

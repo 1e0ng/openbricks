@@ -16,7 +16,9 @@ Drivers that take raw GPIO numbers call :func:`check` before touching
   :func:`claim` when the hub / launcher wire them at boot. A driver
   constructed on one of those pins gets an error naming the owner
   ("in use as the program button") plus the constructor argument that
-  moves the owner elsewhere.
+  moves the owner elsewhere. A driver's own claims (a QTR array's
+  pins) last for the program that made them: the launcher releases
+  them at the next program boundary.
 
 Chip detection reads ``os.uname().machine`` and recognizes the two
 supported targets (ESP32, ESP32-S3). Off-chip — CPython tests, the
@@ -113,21 +115,47 @@ def _detect_chip():
 # lifecycle, this dict just mirrors it for error messages.
 _claims = {}
 
+# The pins in _claims that a driver claimed for one program (a QTR
+# array's ADC pins). The launcher releases them at the program
+# boundary; the boot-time claims above them survive.
+_program_claims = set()
 
-def claim(pin, role, hint=""):
-    """Record that the firmware runtime owns ``pin`` (e.g. a button)."""
-    _claims[int(pin)] = (role, hint)
+
+def claim(pin, role, hint="", program=False):
+    """Record that the firmware runtime owns ``pin`` (e.g. a button).
+
+    ``program=True`` marks a claim a driver makes for the running
+    program only: :func:`release_program_claims` hands it back when
+    the program ends, so the next program may wire that pin anew.
+    """
+    pin = int(pin)
+    _claims[pin] = (role, hint)
+    if program:
+        _program_claims.add(pin)
+    else:
+        _program_claims.discard(pin)
 
 
 def release(pin):
     """Forget a claim — for callers that hand a pin back (e.g. after
     ``hub.bluetooth_toggle.stop()``). Unknown pins are a no-op."""
-    _claims.pop(int(pin), None)
+    pin = int(pin)
+    _claims.pop(pin, None)
+    _program_claims.discard(pin)
+
+
+def release_program_claims():
+    """Forget every claim made with ``program=True`` — the launcher
+    calls this at the program boundary. Boot-time claims stay."""
+    for pin in _program_claims:
+        _claims.pop(pin, None)
+    _program_claims.clear()
 
 
 def _claims_reset():
     """Test helper: drop every claim."""
     _claims.clear()
+    _program_claims.clear()
 
 
 # ---- validation --------------------------------------------------------

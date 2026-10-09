@@ -186,6 +186,8 @@ class UploadFlowTests(unittest.TestCase):
         # ready-line names the path that was ACTUALLY staged.
         self.assertIn("uploaded", out.getvalue())
         self.assertNotIn("fwv=", out.getvalue(), "the version line is not the user's")
+        # exactly the confirmation: no "openbricks: idle. " fragment
+        self.assertEqual(out.getvalue(), "uploaded 59 bytes to '/program.mpy'\n")
         self.assertIn("/program.mpy", err.getvalue())
         self.assertIn("staged in ", err.getvalue())
         # the hub is remembered: the next upload skips the probe
@@ -248,6 +250,32 @@ class UploadFlowTests(unittest.TestCase):
         self.assertIn("uploaded 15 bytes", out.getvalue())
         self.assertEqual(_hubcache.firmware_version("RobotA"), (1, 91, 1))
 
+    def test_a_remembered_old_hub_upgraded_since_is_probed_and_gets_mpy(self):
+        # The cache says 1.91.1 but the hub runs 4.35.0 now: the old
+        # remembered version is probed again, not trusted.
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.91.1")
+        fake = _ScriptedLink(self._standard_responses(
+            b"uploaded 59 bytes to '/program.mpy'\r\n",
+            fw_version=b"fwv=4.35.0\r\n", probe=True))
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO) as out, \
+             patch("sys.stderr", new_callable=io.StringIO) as err:
+            rc = ul.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"\x05A\x01"), 2, "probe + ONE staged program")
+        self.assertIn(b"'/program.mpy'", joined)
+        self.assertIn(b"fwneedsrc", joined)
+        self.assertIn(b"os.remove('/program.py')", joined)
+        self.assertNotIn("predates precompiled", err.getvalue())
+        self.assertIn("uploaded 59 bytes", out.getvalue())
+        self.assertEqual(_hubcache.firmware_version("RobotA"), (4, 35, 0))
+
     def test_a_hub_error_before_the_idle_loop_is_an_upload_error(self):
         from openbricks_dev import _hubcache
         _hubcache.remember_firmware("RobotA", "1.92.0")
@@ -307,10 +335,16 @@ class UploadFlowTests(unittest.TestCase):
             return fake
 
         with patch.object(ul.NUSLink, "connect", side_effect=_fake_connect), \
-             patch("sys.stdout", new_callable=io.StringIO):
+             patch("sys.stdout", new_callable=io.StringIO) as out:
             rc = ul.run(_args(script=self.tmp.name, path="/main.py"))
 
         self.assertEqual(rc, 0)
+        # The user sees the confirmation only: neither the staged
+        # program's fwv= protocol line nor the idle banner's prefix.
+        self.assertEqual(out.getvalue(), "uploaded 15 bytes to '/main.py'\n")
+        # the version line was read, so the hub is remembered too
+        from openbricks_dev import _hubcache
+        self.assertEqual(_hubcache.firmware_version("RobotA"), (4, 10, 0))
         joined = b"".join(fake.writes)
         self.assertIn(b"'/main.py'", joined)
         # Custom boot flows get the file AS-IS: source bytes, no
@@ -453,6 +487,35 @@ class UploadRestoreFailureTests(UploadFlowTests):
             with self.assertRaises(ul.run_mod.RunError) as ctx:
                 asyncio.run(ul._upload_async("RobotA", self.tmp.name, None, 5.0))
         self.assertIn("did not report the firmware version", str(ctx.exception))
+
+
+class UploadLockErrorTests(unittest.TestCase):
+    def test_an_unopenable_lock_file_is_an_upload_error(self):
+        from openbricks_dev import _uplock
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
+        tmp.write("print('hello')\n")
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        missing = os.path.join(tempfile.mkdtemp(), "no-such-dir")
+        with patch.object(_uplock, "LOCK_DIR", missing), \
+             patch.object(ul.NUSLink, "connect") as connect:
+            with self.assertRaises(ul.UploadError) as cm:
+                asyncio.run(ul._upload_async("RobotA", tmp.name, None, 5.0))
+        connect.assert_not_called()
+        self.assertIn(os.path.join(missing, "openbricks-upload-RobotA.lock"),
+                      str(cm.exception))
+
+
+class AwaitConfirmationTests(unittest.TestCase):
+    def test_text_ends_before_the_idle_banners_line(self):
+        from openbricks_dev import run as run_mod
+        blink = run_mod._BufferedLink(_ScriptedLink([]))
+        blink._buf = bytearray(
+            b"uploaded 1 bytes to '/x'\r\n"
+            b"openbricks: idle. Press button to run /x\r\n")
+        text, idle_seen = asyncio.run(ul._await_confirmation(blink, None))
+        self.assertTrue(idle_seen)
+        self.assertEqual(text, "uploaded 1 bytes to '/x'\r\n")
 
 
 class UploadInterruptTests(unittest.TestCase):

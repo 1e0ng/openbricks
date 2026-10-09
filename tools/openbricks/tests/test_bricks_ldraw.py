@@ -316,3 +316,179 @@ class ConverterEdgeCaseTests(unittest.TestCase):
         self.assertEqual(ldraw.main([self.root, lst, out, "--weights", weights]), 0)
         with open(out) as fh:
             self.assertEqual(json.load(fh)["parts"]["9999"]["source"], "vendor")
+
+
+def _tri_quad(c, n, t, half_t, ax, half_ax):
+    """Two triangles of a rectangle centred at ``c`` (ours), facing
+    ``n``, ``half_t`` either way along ``t`` and ``half_ax`` along the
+    unit vector ``ax``."""
+    c, n, t, ax = (np.array(v, dtype=float) for v in (c, n, t, ax))
+    p = [c - t * half_t - ax * half_ax, c + t * half_t - ax * half_ax, c + t * half_t + ax * half_ax,
+         c - t * half_t + ax * half_ax]
+    tris = [[p[0], p[1], p[2]], [p[0], p[2], p[3]]]
+    if np.cross(p[1] - p[0], p[2] - p[0]) @ n < 0:
+        tris = [[q[0], q[2], q[1]] for q in tris]
+    return tris
+
+
+def _cross_hole(centre=(0.0, 0.0), half_len=4.0, inward=True, ends=4):
+    """An axle hole along z drawn from flat walls, the way 3648 draws one:
+    each arm's two side walls 0.8 mm off its centre line from 0.8 to 2.4
+    mm out, and a flat end at 2.4 mm facing back at the centre; turned
+    outward, the same walls are a male axle."""
+    tris = []
+    cx, cy = centre
+    z = (0.0, 0.0, 1.0)
+    arms = [((1, 0), (0, 1)), ((-1, 0), (0, 1)), ((0, 1), (1, 0)), ((0, -1), (1, 0))]
+    for i, (d, side) in enumerate(arms):
+        for s in (1, -1):
+            c = (cx + d[0] * 1.6 + side[0] * 0.8 * s, cy + d[1] * 1.6 + side[1] * 0.8 * s, 0.0)
+            n = (-side[0] * s, -side[1] * s, 0.0) if inward else (side[0] * s, side[1] * s, 0.0)
+            tris += _tri_quad(c, n, (d[0], d[1], 0.0), 0.8, z, half_len)
+        if i < ends:
+            c = (cx + d[0] * 2.4, cy + d[1] * 2.4, 0.0)
+            n = (-d[0], -d[1], 0.0) if inward else (d[0], d[1], 0.0)
+            tris += _tri_quad(c, n, (side[0], side[1], 0.0), 0.8, z, half_len)
+    return np.array(tris)
+
+
+@unittest.skipIf(np is None, "numpy (the [sim] extra) is required")
+class ConnectorFixTests(unittest.TestCase):
+    """Tubes that run into a part, the arms of an axle hole, an axle hole
+    drawn from flat walls, a part longer than 0.01 mm steps hold."""
+
+    @classmethod
+    def setUpClass(cls):
+        from tests import ldraw_fixture as fx
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = write_mini_library(cls.tmp.name)
+        prims = os.path.join(root, "p")
+        parts = os.path.join(root, "parts")
+        # an open stud (to -Y), the tubes that run +Y from their origin, and an unnamed one that does too
+        fx._write(os.path.join(prims, "stud2a.dat"), "Stud Open without Base Edges (test stand-in)", fx.cylinder_lines(6, -4, 0))
+        fx._write(os.path.join(prims, "stud2s.dat"), "Stud Tube Open Sliced (test stand-in)", fx.ring_lines(6, 4, 0, 2))
+        fx._write(os.path.join(prims, "stud23.dat"), "Stud Tube Open Square (test stand-in)", fx.cylinder_lines(6, 0, 4, inward=True))
+        fx._write(os.path.join(prims, "stud99.dat"), "Stud Tube of no known name (test stand-in)", fx.cylinder_lines(6, 0, 4, inward=True))
+        # 3665a's top stud and its sliced tube: the stud doubled in height, the tube six times deep
+        fx._write(os.path.join(parts, "4665.dat"), "Test Inverted Slope with Studs over Tubes", box_lines_tall() + [
+            "1 16 0 4 -20 1 0 0 0 2 0 0 0 1 stud2a.dat",
+            "1 16 0 4 -20 0 0 1 0 6 0 -1 0 0 stud2s.dat",
+            "1 16 0 0 20 1 0 0 0 1 0 0 0 1 stud2a.dat",
+        ])
+        # a bar's square tube, placed turned over at its bottom face (as 35366 places stud23)
+        fx._write(os.path.join(parts, "4366.dat"), "Test Bar with a Tube Turned Over", fx.box_lines(20, 5, 10) + [
+            "1 16 0 5 0 1 0 0 0 -1 0 0 0 1 stud23.dat",
+            "1 16 10 5 0 1 0 0 0 -1 0 0 0 1 stud99.dat",
+        ])
+        # a box 1000 LDU (400 mm) off the origin: past what int16 holds at 0.01 mm
+        fx._write(os.path.join(parts, "4999.dat"), "Test Box Far Away", ["1 16 0 0 1000 1 0 0 0 1 0 0 0 1 9999.dat"])
+        cls.lib = ldraw.Library(root)
+        cls.builder = ldraw.Builder(cls.lib)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def convert(self, number):
+        part = ldraw.convert_part(self.lib, self.builder, number)
+        self.assertIsNotNone(part, number)
+        return part
+
+    def assertInsideBbox(self, part, c):
+        lo, hi = part["bbox"]
+        u = np.array(c["axis"])
+        for end in (np.array(c["centre"]) - u * c["length"] / 2, np.array(c["centre"]) + u * c["length"] / 2):
+            self.assertTrue(all(lo[i] - 1e-6 <= end[i] <= hi[i] + 1e-6 for i in range(3)), (c, part["bbox"]))
+
+    def test_tubes_that_run_into_a_part_are_stud_holes_and_a_stud_is_1_6_mm(self):
+        self.assertEqual(ldraw.classify("stud2s.dat"), "stud_hole")
+        self.assertEqual(ldraw.classify("stud23.dat"), "stud_hole")
+        self.assertEqual(ldraw.classify("stud23d.dat"), "stud_hole")
+        self.assertEqual(ldraw.classify("stud2a.dat"), "stud")
+        slope = self.convert("4665")
+        studs = [c for c in slope["connectors"] if c["kind"] == "stud"]
+        tubes = [c for c in slope["connectors"] if c["kind"] == "stud_hole"]
+        self.assertEqual(len(studs), 2, slope["connectors"])
+        self.assertTrue(all(s["length"] == 1.6 for s in studs), studs)       # the doubled stud too
+        self.assertEqual([round(s["centre"][2], 3) for s in studs], [0.8, 0.8])  # both tips at the top, 1.6 mm up
+        self.assertEqual(len(tubes), 1, slope["connectors"])
+        self.assertEqual(tubes[0]["length"], 4.8)                            # the tube's real depth
+        for c in studs + tubes:
+            self.assertInsideBbox(slope, c)
+        bar = self.convert("4366")
+        self.assertEqual(sorted(c["kind"] for c in bar["connectors"]), ["stud_hole", "stud_hole"], bar["connectors"])
+        for c in bar["connectors"]:
+            self.assertInsideBbox(bar, c)
+            self.assertEqual(c["axis"], [0.0, 0.0, 1.0])     # from the mouth at the bottom face into the part
+
+    def test_the_arms_of_an_axle_hole_are_no_pin_hole(self):
+        from tests import ldraw_fixture as fx
+        ring = [l for l in fx.cylinder_lines(6, -10, 10, inward=True, caps=False)]
+        def bore(skip):
+            lines = [l for i, l in enumerate(ring) if i not in skip]
+            tris = []
+            for l in lines:
+                v = [float(x) for x in l.split()[2:]]
+                q = np.array(v).reshape(4, 3)
+                tris += [q[[0, 1, 2]], q[[0, 2, 3]]]
+            return ldraw.to_ours(np.array(tris))
+        arms = bore({0, 4, 8, 12})                    # the four arms' round ends: 12 of 16 sectors
+        round_ = bore(set())
+        along = [(np.array([0.0, 0.0, -4.0]), np.array([0.0, 0.0, 4.0]))]
+        across = [(np.array([-4.0, 0.0, 0.0]), np.array([4.0, 0.0, 0.0]))]
+        elsewhere = [(np.array([0.0, 0.0, 20.0]), np.array([0.0, 0.0, 28.0]))]
+        self.assertEqual(len(ldraw.detect_bores(arms)), 1, "with no axle hole named, a round enough bore")
+        self.assertEqual(ldraw.detect_bores(arms, axle_holes=along), [])
+        self.assertEqual(len(ldraw.detect_bores(arms, axle_holes=across)), 1, "an axle hole across it is another hole")
+        self.assertEqual(len(ldraw.detect_bores(arms, axle_holes=elsewhere)), 1, "further along the line is another hole")
+        self.assertEqual(len(ldraw.detect_bores(round_, axle_holes=along)), 1, "round all the way is a pin hole")
+        zero = [(np.zeros(3), np.zeros(3))]
+        self.assertEqual(len(ldraw.detect_bores(arms, axle_holes=zero)), 1, "a primitive with no extent names no line")
+
+    def test_an_axle_hole_drawn_from_flat_walls_is_found(self):
+        hole = _cross_hole(centre=(8.0, -4.0))
+        (kind, a, b), = ldraw.detect_axle_holes(hole)
+        self.assertEqual(kind, "axle_hole")
+        self.assertEqual([round(v, 3) for v in a], [8.0, -4.0, -4.0])
+        self.assertEqual([round(v, 3) for v in b], [8.0, -4.0, 4.0])
+        self.assertEqual(len(ldraw.detect_axle_holes(_cross_hole(ends=2))), 1, "two arm ends are enough (3648)")
+        self.assertEqual(ldraw.detect_axle_holes(_cross_hole(ends=1)), [], "one end is a slot, not a hole")
+        self.assertEqual(ldraw.detect_axle_holes(_cross_hole(inward=False)), [], "a male axle is no hole")
+        self.assertEqual(ldraw.detect_axle_holes(np.zeros((0, 3, 3))), [])
+        # two stretches a module apart are two holes; a named axle hole along the line is not doubled
+        two = np.concatenate([_cross_hole(), _cross_hole(half_len=2.0) + np.array([0.0, 0.0, 20.0])])
+        self.assertEqual(len(ldraw.detect_axle_holes(two)), 2)
+        named = [("axle_hole", np.array([0.0, 0.0, 0.0]), np.array([0.0, -20.0, 0.0]))]   # LDraw -Y = ours +z
+        self.assertEqual(len(ldraw.unnamed_axle_holes(named, two)), 1)
+        self.assertEqual(len(ldraw.unnamed_axle_holes([], two)), 2)
+
+    def test_a_part_longer_than_0_01_mm_steps_hold_packs_coarser_and_says_so(self):
+        part = self.convert("4999")
+        self.assertEqual(part["mesh"]["scale"], 0.1)
+        self.assertEqual(part["bbox"], [[-8.0, 398.0, -4.0], [8.0, 402.0, 4.0]])
+        pos, _, idx = ldraw.unpack_mesh(part["mesh"])
+        self.assertTrue(np.allclose(pos.max(axis=0), [8.0, 402.0, 4.0]))
+        self.assertAlmostEqual(ldraw.mass_properties(pos[idx])[0], 512, delta=1.0)
+        said = []
+        bundle = ldraw.convert_parts(self.lib, ["4999", "9999"], log=said.append)
+        self.assertEqual(sorted(bundle["parts"]), ["4999", "9999"])
+        self.assertIn("packed at 0.1 mm steps", said[0])
+        self.assertNotIn("packed", said[1])
+        self.assertEqual(bundle["parts"]["9999"]["mesh"]["scale"], 0.01)
+
+
+def box_lines_tall():
+    """3665's body, roughly: a block 20 LDU wide, 24 deep, 60 long, its
+    top at y = 4 (where the doubled stud's base sits)."""
+    from tests import ldraw_fixture as fx
+    return [_shift(l, (0, 14, 0)) for l in fx.box_lines(10, 10, 30)]
+
+
+def _shift(line, d):
+    v = line.split()
+    pts = [float(x) for x in v[2:]]
+    for i in range(0, len(pts), 3):
+        pts[i] += d[0]
+        pts[i + 1] += d[1]
+        pts[i + 2] += d[2]
+    return " ".join(v[:2] + ["%g" % x for x in pts])

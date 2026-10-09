@@ -182,6 +182,72 @@ class SimCliTests(unittest.TestCase):
         self.assertEqual(calls[0], ("/my/sim", [calls[0][1][0], "more.json"], "robot.assembly.json"))
         self.assertTrue(calls[0][1][0].endswith("technic_bundle.json.zlib"))
 
+    def _app_calls(self):
+        # Patches both native steps; returns (ensure mock, launch calls).
+        calls = []
+        return calls, mock.patch("openbricks_sim.native.ensure_binary", return_value="/cache/openbricks-sim"), \
+            mock.patch("openbricks_sim.native.launch", side_effect=lambda b, bundles, file=None, **kw: calls.append((b, [str(x) for x in bundles], file)) or 0)
+
+    def test_bare_forms_reach_the_app(self):
+        # docs/simulator.md: ``openbricks sim [robot.assembly.json]
+        # [--bricks more.json] [--bin PATH] [--no-download]``. These
+        # exited 2 with argparse's "invalid choice" / "unrecognized
+        # arguments" because the ``app`` fallback ran only after a
+        # parse that had already rejected the token.
+        calls, ensure_p, launch_p = self._app_calls()
+        with ensure_p as ensure, launch_p:
+            self.assertEqual(sim_cli.main(["robot.assembly.json"]), 0)
+            self.assertEqual(sim_cli.main(["--bricks", "more.json"]), 0)
+            self.assertEqual(sim_cli.main(["--bin", "/my/sim", "--no-download"]), 0)
+            self.assertEqual(sim_cli.main(["robot.assembly.json", "--no-download", "--bin", "/my/sim", "--bricks", "a.json", "--bricks", "b.json"]), 0)
+        self.assertEqual(ensure.call_count, 2)          # the two forms without --bin
+        self.assertEqual(calls[0][0], "/cache/openbricks-sim")
+        self.assertEqual(calls[0][2], "robot.assembly.json")
+        self.assertEqual(calls[1][1][1:], ["more.json"])
+        self.assertIsNone(calls[1][2])
+        self.assertEqual(calls[2], ("/my/sim", [calls[2][1][0]], None))
+        self.assertEqual(calls[3], ("/my/sim", [calls[3][1][0], "a.json", "b.json"], "robot.assembly.json"))
+        for c in calls:
+            self.assertTrue(c[1][0].endswith("technic_bundle.json.zlib"))
+
+    def test_host_cli_forwards_the_bare_form(self):
+        from openbricks_dev import cli as dev_cli
+        calls, ensure_p, launch_p = self._app_calls()
+        with ensure_p, launch_p:
+            self.assertEqual(dev_cli.main(["sim", "robot.assembly.json"]), 0)
+            self.assertEqual(dev_cli.main(["sim", "--bricks", "more.json"]), 0)
+        self.assertEqual(calls[0][2], "robot.assembly.json")
+        self.assertEqual(calls[1][1][1:], ["more.json"])
+
+    def test_subcommands_are_still_commands_not_files(self):
+        calls, ensure_p, launch_p = self._app_calls()
+        with ensure_p, launch_p, \
+                mock.patch("openbricks_sim.cli.cmd_workbench", return_value=0) as wb, \
+                mock.patch("openbricks_sim.cli.cmd_run", return_value=0) as run, \
+                mock.patch("openbricks_sim.cli.cmd_preview", return_value=0) as preview:
+            self.assertEqual(sim_cli.main(["workbench"]), 0)
+            self.assertEqual(sim_cli.main(["run", "main.py"]), 0)
+            self.assertEqual(sim_cli.main(["preview", "--headless"]), 0)
+        self.assertEqual(wb.call_args[0][0].command, "workbench")
+        self.assertEqual(run.call_args[0][0].script, "main.py")
+        self.assertTrue(preview.call_args[0][0].headless)
+        self.assertEqual(calls, [])
+
+    def test_top_level_help_and_version_stay_at_the_top(self):
+        import contextlib
+        for argv in (["--help"], ["-h"]):
+            out = io.StringIO()
+            with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stdout(out):
+                sim_cli.main(argv)
+            self.assertEqual(ctx.exception.code, 0)
+            self.assertIn("COMMAND", out.getvalue())       # the sim's own usage, not app's
+            self.assertIn("workbench", out.getvalue())
+        out = io.StringIO()
+        with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stdout(out):
+            sim_cli.main(["--version"])
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn(__version__, out.getvalue())
+
     def test_download_failure_is_a_clean_error(self):
         import contextlib
         err = io.StringIO()

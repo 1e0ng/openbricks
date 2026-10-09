@@ -930,7 +930,9 @@ static PyObject *RawDriveBase_set_accel(RawDriveBaseObject *self, PyObject *arg)
 
 static PyMethodDef RawDriveBase_methods[] = {
     {"settle_stats", (PyCFunction)RawDriveBase_settle_stats, METH_NOARGS,
-     "(expiry_residual_wheel_deg, landings) for the last move."},
+     "(res_sum_wheel_deg, res_diff_wheel_deg, landings, integ_sum_dps, "
+     "integ_diff_dps) for the last move, captured at profile expiry — "
+     "the firmware's st_bus.db_settle_stats tuple."},
     {"tick",                 (PyCFunction)RawDriveBase_tick,                 METH_VARARGS,
      "tick(now_ms, left_pos_deg, right_pos_deg) -> (left_dps, right_dps)."},
     {"sync",                 (PyCFunction)RawDriveBase_sync,                 METH_VARARGS,

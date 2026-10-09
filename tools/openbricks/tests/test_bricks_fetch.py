@@ -149,8 +149,12 @@ class UserBricksTests(unittest.TestCase):
                 fh.write("[1]")
             with open(os.path.join(d, "notes.txt"), "w") as fh:
                 fh.write("not a bundle")
+            with open(os.path.join(d, "str.json"), "w") as fh:
+                json.dump({"parts": {"1234": "oops"}}, fh)
             loaded = bricks.load_user_bricks(d)
-            self.assertEqual([os.path.basename(str(p)) for p, _ in loaded], ["2458.json", "3001.json", "broken.json", "list.json"])
+            self.assertEqual([os.path.basename(str(p)) for p, _ in loaded],
+                             ["2458.json", "3001.json", "broken.json", "list.json", "str.json"])
+            self.assertEqual(loaded[4][1], "part 1234 is not an object")
             self.assertTrue(loaded[0][1]["parts"]["2458"]["fetched"], "a file in the directory travels with a build")
             self.assertIn("Expecting", loaded[2][1])
             self.assertIn("parts", loaded[3][1])
@@ -158,7 +162,8 @@ class UserBricksTests(unittest.TestCase):
             self.assertEqual(bundle["parts"]["2458"]["name"], "P")
             self.assertNotEqual(bundle["parts"]["3001"]["name"], "P", "the shipped record wins")
             self.assertEqual(bundle["colors"]["4"]["name"], "Red")
-            self.assertEqual(len(notes), 3, notes)
+            self.assertEqual(len(notes), 4, notes)
+            self.assertIn("fetched part file %s: part 1234 is not an object" % os.path.join(d, "str.json"), notes)
             self.assertTrue(any("ships 3001" in n and "3001.json" in n for n in notes), notes)
             self.assertTrue(any("broken.json" in n for n in notes) and any("list.json" in n for n in notes), notes)
             # the default directory is the data directory's
@@ -166,6 +171,23 @@ class UserBricksTests(unittest.TestCase):
                 self.assertEqual(bricks.library_bundle()[0]["parts"]["2458"]["name"], "P")
                 shipped = bricks.load_bundle()
                 self.assertNotIn("2458", shipped["parts"], "the shipped bundle itself is untouched")
+
+
+class UserBricksAliasTests(unittest.TestCase):
+    def test_a_fetched_copy_of_a_shipped_part_by_another_number_is_left_out(self):
+        shipped = bricks.load_bundle()["parts"]
+        self.assertIn("41250", shipped["22119"]["aliases"], "the WRO inventory's number for the 52 mm ball")
+        with tempfile.TemporaryDirectory() as d:
+            rec = {"name": "Ball 52mm Diameter Red (Obsolete)", "mesh": {"verts": 0, "tris": 0}, "mass_g": 76.54}
+            with open(os.path.join(d, "41250.json"), "w") as fh:
+                json.dump({"parts": {"41250": dict(rec, ldraw="41250")}}, fh)
+            with open(os.path.join(d, "2458.json"), "w") as fh:
+                json.dump({"parts": {"2458": dict(rec, name="P", ldraw="2458")}}, fh)
+            bundle, notes = bricks.library_bundle(d)
+            self.assertNotIn("41250", bundle["parts"])
+            self.assertEqual(bundle["parts"]["2458"]["name"], "P")
+            self.assertEqual(len(notes), 1, notes)
+            self.assertIn("41250.json: the library ships 41250 as 22119 (Ball 52mm", notes[0])
 
 
 @unittest.skipIf(not HAVE_NUMPY, "numpy (the [sim] extra) is required")
@@ -301,6 +323,51 @@ class FetchingLibraryTests(unittest.TestCase):
         lib = fetch.FetchingLibrary(self.cache, opener=teapot, sleep=lambda s: None)
         with self.assertRaises(fetch.FetchError):
             lib.resolve("1234.dat")
+
+    def test_a_reference_outside_the_library_layout_is_refused_before_any_request(self):
+        site = _Site(self.site_root)
+        lib = fetch.FetchingLibrary(self.cache, opener=site, sleep=lambda s: None)
+        lib.asked = "trojan"
+        keys = set(lib.lib.index)
+        for name in ("..\\..\\..\\evil\\pwned.dat", "../x.dat", "s/../../x.dat", "evil.dat#..\\..\\x",
+                     "evil.dat?..", "/etc/passwd", "parts/s/x.dat", "48\\..", "C:\\x.dat", "a b.dat", ".."):
+            with self.assertRaises(fetch.BadReference) as cm:
+                lib.resolve(name)
+            self.assertIsInstance(cm.exception, fetch.FetchError)
+            self.assertEqual((cm.exception.asked, cm.exception.name), ("trojan", name), name)
+            self.assertTrue(str(cm.exception).startswith("trojan refers to "), str(cm.exception))
+        self.assertEqual(site.requests, [], "nothing was asked for")
+        self.assertEqual(set(lib.lib.index), keys, "nothing was indexed")
+        written = [os.path.join(d, f) for d, _, fs in os.walk(self.tmp.name) for f in fs
+                   if not os.path.join(d, f).startswith(self.site_root)]
+        self.assertEqual(written, [])
+        # a typed number is held to the same rule: ``bricks fetch ../x`` asks for nothing
+        lib.asked = None
+        with self.assertRaises(fetch.BadReference) as cm:
+            lib.resolve("../x.dat")
+        self.assertEqual(cm.exception.asked, "../x.dat")
+        # the names LDraw does use still pass
+        for name in ("s\\3001s01.dat", "48\\4-4CYLI.DAT", "8\\stud.dat", "confric5.dat", "3648b.dat", "u9156c02.dat"):
+            fetch.check_reference(name, "x")
+
+    def test_a_write_that_would_land_outside_the_cache_is_refused(self):
+        # the rule above keeps every name inside; were the layout rule ever loosened, the write
+        # site still checks where the file lands, through a symlinked root too
+        site = _Site(self.site_root)
+        real = os.path.join(self.tmp.name, "real-cache")
+        os.makedirs(real)
+        link = os.path.join(self.tmp.name, "linked-cache")
+        os.symlink(real, link)
+        lib = fetch.FetchingLibrary(link, opener=site, sleep=lambda s: None)
+        lib.asked = "6666"
+        self.assertTrue(lib.resolve("6666.dat").endswith(os.path.join("parts", "6666.dat")), "a symlinked root is fine")
+        outside = os.path.join(self.tmp.name, "outside")
+        lib.opener = lambda req, timeout=None: _Response(b"0 Anything at all\n")
+        with mock.patch.object(fetch, "relative_paths", lambda name: ["parts/../../outside/9999.dat"]):
+            with self.assertRaises(fetch.BadReference) as cm:
+                lib.resolve("9999.dat")
+        self.assertIn("would land outside", str(cm.exception))
+        self.assertFalse(os.path.exists(outside))
 
     def test_a_connection_that_dies_mid_body_or_stalls_is_an_error_naming_the_url(self):
         class Cut(_Response):
@@ -503,6 +570,23 @@ class FetchPartTests(unittest.TestCase):
             self.assertEqual(fetch.main(["9999"]), 2)
             self.assertEqual(fetch.main(["9999", "--bogus"]), 2)
         self.assertIn("usage", err.getvalue())
+
+    def test_a_part_longer_than_0_01_mm_steps_hold_is_fetched_coarser_and_says_so(self):
+        with open(os.path.join(self.site_root, "parts", "4999.dat"), "w") as fh:
+            fh.write("0 Test Box Far Away\n0 BFC CERTIFY CCW\n1 16 0 0 1000 1 0 0 0 1 0 0 0 1 9999.dat\n")
+        out_file = os.path.join(self.tmp.name, "bricks", "4999.json")
+        with mock.patch.object(fetch.urllib.request, "urlopen", self.opener):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = fetch.main(["4999", "--out", out_file, "--ldraw", self.cache, "--no-colors"])
+        self.assertEqual(rc, 0, out.getvalue())
+        lines = [json.loads(l) for l in out.getvalue().splitlines()]
+        self.assertEqual(lines[-1]["ev"], "fetched")
+        self.assertTrue(any(l["ev"] == "log" and "packed at 0.1 mm steps" in l["text"] for l in lines), lines)
+        with open(out_file) as fh:
+            rec = json.load(fh)["parts"]["4999"]
+        self.assertEqual(rec["mesh"]["scale"], 0.1)
+        self.assertEqual(rec["bbox"], [[-8.0, 398.0, -4.0], [8.0, 402.0, 4.0]])
 
     def test_the_real_converter_through_main(self):
         out_file = os.path.join(self.tmp.name, "bricks", "7777.json")

@@ -492,16 +492,22 @@
   // state
   // ================================================================
   // The LEGO Technic library: exact LDraw geometry, mass properties for a uniform solid, connection features.
+  // What the page could not do on its own (the library, the file it was given, the draft): said in the
+  // file status on every render, apart from the document's own errors, which recompute() starts afresh.
+  const pageNotes = { bundle: "", initial: "", draft: "", saving: "" };
   let BUNDLE = { parts: {} };
   try {
     const b64 = document.getElementById("brick-bundle").textContent.trim();
-    if (b64 && typeof pako !== "undefined") {
+    if (!b64) pageNotes.bundle = "The page carries no brick library, so LEGO bricks have no geometry or mass";
+    else if (typeof pako === "undefined") pageNotes.bundle = "The brick library did not load: the pako script from cdnjs did not load (offline?), so LEGO bricks have no geometry or mass";
+    else {
       const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
       BUNDLE = JSON.parse(pako.inflate(bin, { to: "string" }));
     }
-  } catch (err) { console.error("brick bundle failed to load", err); BUNDLE = { parts: {} }; }
+  } catch (err) { console.error("brick bundle failed to load", err); BUNDLE = { parts: {} }; pageNotes.bundle = "The brick library did not load (" + err.message + "), so LEGO bricks have no geometry or mass"; }
   const ldrawOf = part => (part && part.ldraw && BUNDLE.parts[part.ldraw]) || null;
-  const geomOf = part => part ? (part.ldraw ? ldrawOf(part) : (part.mesh ? part : null)) : null;   // same fields either way: mesh, bbox, com, inertia_per_g, volume_mm3, connectors
+  // a part fetched by number carries its record in the build, for a library without it (as the sim reads it)
+  const geomOf = part => part ? (part.ldraw ? (ldrawOf(part) || (part.mesh ? part : null)) : (part.mesh ? part : null)) : null;   // same fields either way: mesh, bbox, com, inertia_per_g, volume_mm3, connectors
   const geomKey = (partId, part) => part.ldraw ? "ld:" + part.ldraw : "part:" + partId;
   function b64bytes(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
   let magnet = true;
@@ -519,11 +525,16 @@
   // ================================================================
   // computation
   // ================================================================
-  function computePart(part) {
+  function computePart(part, id) {
     const ld = geomOf(part);
     if (ld) {
       const m = part.mass_g;
       return { mass: m, com: ld.com.slice(), I: ld.inertia_per_g.map(r => r.map(v => v * m)), bbox: { min: ld.bbox[0].slice(), max: ld.bbox[1].slice() }, count: 1 };
+    }
+    if (part.ldraw) {       // no record to weigh it by: counted as nothing, and said, never a point mass at the origin
+      const msg = "brick " + (id || part.name) + " needs LDraw part " + part.ldraw + ", which this library does not carry";
+      if (!errors.includes(msg)) errors.push(msg);
+      return { mass: 0, com: [0, 0, 0], I: matZero(), bbox: null, count: 0 };
     }
     const shapes = part.shapes || [];
     const vols = shapes.map(shapeVolume);
@@ -547,7 +558,7 @@
     const placed = [];
     (comp.children || []).forEach(ch => {
       let props;
-      if (ch.part) { const part = doc.parts[ch.part]; if (!part) { errors.push("'" + ch.name + "' refers to a brick '" + ch.part + "' that is not in the library"); return; } props = computePart(part); }
+      if (ch.part) { const part = doc.parts[ch.part]; if (!part) { errors.push("'" + ch.name + "' refers to a brick '" + ch.part + "' that is not in the library"); return; } props = computePart(part, ch.part); }
       else props = computeComponent(ch.component, stack.concat(id));
       const R = rotMat(ch.rot), p = ch.pos || [0, 0, 0];
       const c = vAdd(p, matVec(R, props.com));
@@ -634,8 +645,8 @@
     let bodyBox = null, bodyMass = 0;
     rootFlat.filter(n => n.kind === "part" && !excluded.has(n.path.join("/"))).forEach(n => {
       const part = doc.parts[n.partId]; if (!part) return;
-      const pp = computePart(part);
-      bodyBox = bboxUnion(bodyBox, bboxTransform(pp.bbox, n.world.p, n.world.R)); bodyMass += pp.mass;
+      const pp = computePart(part, n.partId);
+      if (pp.bbox) bodyBox = bboxUnion(bodyBox, bboxTransform(pp.bbox, n.world.p, n.world.R)); bodyMass += pp.mass;
     });
     if (bodyBox) {
       spec.body_length = (bodyBox.max[0] - bodyBox.min[0]) / 1000; spec.body_width = (bodyBox.max[1] - bodyBox.min[1]) / 1000; spec.body_height = (bodyBox.max[2] - bodyBox.min[2]) / 1000; spec.body_mass = bodyMass / 1000;
@@ -715,7 +726,8 @@
     const ib = b64bytes(ld.mesh.idx).buffer;
     const idx = ld.mesh.idx32 ? new Uint32Array(ib) : new Uint16Array(ib);
     const pos = new Float32Array(pos16.length), nrm = new Float32Array(nrm8.length);
-    for (let i = 0; i < pos16.length; i++) { pos[i] = pos16[i] / 100; nrm[i] = nrm8[i] / 127; }
+    const step = ld.mesh.scale === undefined ? 0.01 : ld.mesh.scale;   // older records predate the field: 0.01 mm, as every reader takes it
+    for (let i = 0; i < pos16.length; i++) { pos[i] = pos16[i] * step; nrm[i] = nrm8[i] / 127; }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
@@ -766,7 +778,7 @@
   const labelsHost = document.getElementById("labels");
   function init3D() {
     if (!HAS3D) {
-      const d = document.createElement("div"); d.className = "no3d"; d.textContent = "The 3D library did not load, so the view is empty. Everything else on the page still works.";
+      const d = document.createElement("div"); d.className = "no3d"; d.textContent = "The 3D library did not load, so the view is empty." + (pageNotes.bundle ? " " + pageNotes.bundle + "." : " Everything else on the page still works.");
       wrap.appendChild(d); return;
     }
     try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
@@ -999,6 +1011,7 @@
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSelection(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;      // every other chord is the browser's: reload, find, save
     if (e.key === "Escape") { selection = []; renderContents(); renderInspector(); refresh3D(); return; }
     if (e.key.toLowerCase() === "w") { setGizmoMode("translate"); return; }
     if (e.key.toLowerCase() === "e") { setGizmoMode("rotate"); return; }
@@ -1463,7 +1476,7 @@
       d.innerHTML = '<canvas width="76" height="56"></canvas><div><div class="t">' + esc(p.name) + '</div><div class="d"><b>' + fmt(p.mass_g, 2) + ' g</b> · ' + esc(dims) + ' <span class="chip ' + esc(p.source) + '">' + esc(p.source) + '</span></div>' +
         '<div class="acts"><button type="button" class="tiny" data-add="' + esc(id) + '">+ add</button><button type="button" class="tiny" data-edit="' + esc(id) + '">edit</button></div></div>';
       host.appendChild(d);
-      const pp = computePart(p);
+      const pp = computePart(p, id);
       thumb(d.querySelector("canvas"), [{ kind: "part", path: [id], name: id, partId: id, world: { p: [0, 0, 0], R: I3 } }], pp.bbox);
       d.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", JSON.stringify({ part: id })); e.dataTransfer.effectAllowed = "copy"; });
     });
@@ -1627,7 +1640,7 @@
           h += '<h2>Connections <small>mated features</small></h2>' + (cons.length ? '<div class="kv">' + cons.map(c => '<span class="k">' + esc(c.m.kind.replace("_", " ")) + '</span><span class="v">' + esc(c.o.kind.replace("_", " ")) + ' of ' + esc(c.o.leaf.path.join("/")) + '</span>').join("") + '</div>' : '<p class="note">none: drag it next to a hole and let go, or press S</p>');
         }
         if (node && part.frames && part.frames.look) { const l = lookOf(node); h += '<p class="note">looks along ' + fmtV(l) + ' (yaw ' + fmt(Math.atan2(l[1], l[0]) / D2R, 0) + '°, pitch ' + fmt(Math.asin(Math.max(-1, Math.min(1, l[2]))) / D2R, 0) + '°)</p>'; }
-        h += computedBlock(computePart(part), "brick frame");
+        h += computedBlock(computePart(part, inst.part), "brick frame");
       } else h += '<p class="note bad">brick ' + esc(inst.part) + ' is missing from the library</p>';
     } else {
       h += computedBlock(computeComponent(inst.component, []), inst.component + " frame");
@@ -1723,7 +1736,7 @@
     const line = (depth, name, kind, mass, com, cls, src) => '<tr class="' + cls + '"><td class="item" style="padding-left:' + (8 + depth * 18) + 'px">' + esc(name) + '</td><td>' + esc(kind) + '</td><td class="n">' + fmt(mass, 2) + '</td><td class="n">' + fmt(100 * mass / total, 1) + ' %</td><td class="n">' + fmt(com[0], 1) + '</td><td class="n">' + fmt(com[1], 1) + '</td><td class="n">' + fmt(com[2], 1) + '</td><td>' + src + '</td></tr>';
     h += line(0, doc.robot.name || doc.robot.root, "robot Σ", rootProps.mass, rootProps.com, "comp", "computed");
     rootFlat.forEach(n => {
-      if (n.kind === "part") { const p = doc.parts[n.partId]; if (!p) return; const pr = computePart(p); h += line(n.depth + 1, n.name, p.name, p.mass_g, vAdd(n.world.p, matVec(n.world.R, pr.com)), "", '<span class="chip ' + esc(p.source) + '">' + esc(p.source) + '</span>'); }
+      if (n.kind === "part") { const p = doc.parts[n.partId]; if (!p) return; const pr = computePart(p, n.partId); h += line(n.depth + 1, n.name, p.name, p.mass_g, vAdd(n.world.p, matVec(n.world.R, pr.com)), "", '<span class="chip ' + esc(p.source) + '">' + esc(p.source) + '</span>'); }
       else { const pr = computeComponent(n.compId, []); h += line(n.depth + 1, n.name, n.compId + " Σ", pr.mass, vAdd(n.world.p, matVec(n.world.R, pr.com)), "comp", "computed"); }
     });
     h += '<tr class="total"><td>total</td><td>' + rootProps.count + ' bricks</td><td class="n">' + fmt(rootProps.mass, 2) + '</td><td class="n">100 %</td><td class="n">' + fmt(rootProps.com[0], 1) + '</td><td class="n">' + fmt(rootProps.com[1], 1) + '</td><td class="n">' + fmt(rootProps.com[2], 1) + '</td><td>COM in the assembly frame, mm</td></tr></tbody>';
@@ -1743,8 +1756,9 @@
       out.value = JSON.stringify(o, null, 2);
       hint.textContent = "chassis_spec is what today's `openbricks sim run --chassis` accepts, derived from the roles: the axle midpoint is the origin, sensor positions are relative to it, the colour sensor's yaw and pitch come from how its brick is turned. mass_properties is what the assembly loader would use directly.";
     }
-    document.getElementById("file-st").textContent = errors.length ? errors.join("; ") : (tab === "assembly" ? Object.keys(doc.parts).length + " bricks, " + Object.keys(doc.components).length + " components" : "");
-    document.getElementById("file-st").className = "st" + (errors.length ? " bad" : "");
+    const problems = [pageNotes.bundle, pageNotes.initial, pageNotes.draft, pageNotes.saving].filter(Boolean).concat(errors);
+    document.getElementById("file-st").textContent = problems.length ? problems.join("; ") : (tab === "assembly" ? Object.keys(doc.parts).length + " bricks, " + Object.keys(doc.components).length + " components" : "");
+    document.getElementById("file-st").className = "st" + (problems.length ? " bad" : "");
   }
   document.getElementById("copy").addEventListener("click", async () => { const ta = document.getElementById("out"); try { await navigator.clipboard.writeText(ta.value); toast("Copied"); } catch (e) { ta.focus(); ta.select(); toast("Select and copy from the box"); } });
   document.getElementById("apply").addEventListener("click", () => {
@@ -1754,9 +1768,10 @@
     const err = validateDoc(o);
     if (err) { st.textContent = err; st.className = "st bad"; return; }
     pushUndo();
+    pageNotes.initial = ""; pageNotes.draft = "";
     doc = o; editing = doc.robot.root; crumbs = [editing]; selection = []; changed(); st.textContent = "loaded"; st.className = "st"; toast("File loaded");
   });
-  document.getElementById("reset-example").addEventListener("click", () => { pushUndo(); doc = exampleDocument(); editing = doc.robot.root; crumbs = [editing]; selection = []; changed(); toast("Example loaded"); });
+  document.getElementById("reset-example").addEventListener("click", () => { pushUndo(); pageNotes.initial = ""; pageNotes.draft = ""; doc = exampleDocument(); editing = doc.robot.root; crumbs = [editing]; selection = []; changed(); toast("Example loaded"); });
   function validateDoc(o) {
     if (!o || typeof o !== "object") return "Expected a JSON object.";
     if (o.format !== "openbricks-assembly/1") return "format must be \"openbricks-assembly/1\".";
@@ -1766,7 +1781,8 @@
     for (const id of Object.keys(o.parts)) {
       const p = o.parts[id];
       if (!(p.mass_g > 0)) return "brick " + id + " needs mass_g > 0.";
-      if (p.ldraw) { if (!BUNDLE.parts[p.ldraw]) return "brick " + id + " needs LDraw part " + p.ldraw + ", which this library does not carry."; continue; }
+      if (p.ldraw && BUNDLE.parts[p.ldraw]) continue;
+      if (p.ldraw && !p.mesh) return "brick " + id + " needs LDraw part " + p.ldraw + ", which this library does not carry" + (pageNotes.bundle ? " (the library did not load)." : ".");
       if (p.mesh) { if (!(p.mesh.pos && p.mesh.nrm && p.mesh.idx && Array.isArray(p.bbox) && Array.isArray(p.com) && Array.isArray(p.inertia_per_g))) return "brick " + id + ": the imported mesh record is incomplete."; continue; }
       if (!Array.isArray(p.shapes) || !p.shapes.length) return "brick " + id + " needs at least one shape.";
       for (const s of p.shapes) {
@@ -1814,7 +1830,11 @@
   // lifecycle
   // ================================================================
   function changed(quiet) {
-    try { localStorage.setItem("openbricks-assembly-draft", JSON.stringify(doc)); } catch (e) {}
+    try { localStorage.setItem("openbricks-assembly-draft", JSON.stringify(doc)); pageNotes.saving = ""; }
+    catch (e) {           // never thrown at the edit: said in the file status until a later save succeeds
+      if (!pageNotes.saving) toast("Could not keep a draft: " + e.name);
+      pageNotes.saving = "Could not keep a draft (" + e.name + ": " + e.message + "): this browser will not reopen these edits, save the JSON from the box below";
+    }
     if (quiet === false) return;      // caller re-renders what it needs
     if (quiet === true) { recompute(); return; }
     recompute(); renderAll();
@@ -1827,11 +1847,26 @@
     document.getElementById("robot-title").textContent = (doc.robot.name ? doc.robot.name + " · " : "") + "Openbricks Assembly Workbench";
   }
   let draft = null, initial = null;
-  try { draft = JSON.parse(localStorage.getItem("openbricks-assembly-draft") || "null"); } catch (e) { draft = null; }
-  try { initial = JSON.parse(document.getElementById("initial-doc").textContent || "null"); } catch (e) { initial = null; }
-  doc = (initial && !validateDoc(initial)) ? initial : ((draft && !validateDoc(draft)) ? draft : exampleDocument());
+  try { initial = JSON.parse(document.getElementById("initial-doc").textContent || "null"); }
+  catch (e) { pageNotes.initial = "The file given to openbricks sim workbench could not be read (" + e.message + "); the example is open instead"; }
+  if (initial) {
+    // a file named at launch opens or is refused with its reason: never swapped for the draft
+    const why = validateDoc(initial);
+    if (why) { pageNotes.initial = "The file given to openbricks sim workbench was not opened: " + why + " The example is open instead"; initial = null; }
+    doc = initial || exampleDocument();
+  } else if (!pageNotes.initial) {
+    let kept = null;
+    try { kept = localStorage.getItem("openbricks-assembly-draft"); } catch (e) { pageNotes.draft = "The draft this browser kept could not be read (" + e.name + "); the example is open instead"; }
+    if (kept) {
+      try { draft = JSON.parse(kept); } catch (e) { pageNotes.draft = "The draft this browser kept is not valid JSON (" + e.message + "); the example is open instead"; }
+      const why = draft ? validateDoc(draft) : "";
+      if (why) { pageNotes.draft = "The draft this browser kept was not opened: " + why + " The example is open instead"; draft = null; }
+    }
+    doc = draft || exampleDocument();
+  } else doc = exampleDocument();
   editing = doc.robot.root; crumbs = [editing];
   recompute(); init3D(); renderAll(); fitView();
+  if (pageNotes.initial || pageNotes.draft) toast(pageNotes.initial || pageNotes.draft);
   const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   if (mq && mq.addEventListener) mq.addEventListener("change", renderAll);
   new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });

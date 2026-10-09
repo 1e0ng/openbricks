@@ -21,6 +21,11 @@ pub struct WorldEntry {
     /// One of the user's own maps, saved from the map editor.
     #[serde(default)]
     pub user: bool,
+    /// Why the map cannot be loaded: one of the user's own whose old
+    /// `world.xml` could not be converted (the server lists it with no
+    /// path, and refuses it with this text when it is chosen).
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// A prop on the map: a body of the world's own that the map editor
@@ -206,19 +211,22 @@ pub fn parse_event(line: &str) -> Result<Event, String> {
             let t_ms = v.get("t_ms").and_then(Value::as_u64).unwrap_or(0);
             let bodies: Vec<Vec<f64>> =
                 serde_json::from_value(v.get("bodies").cloned().unwrap_or(Value::Array(vec![]))).map_err(|e| format!("frame: {e}"))?;
+            // a body is its position and its quaternion, seven numbers; anything else is a
+            // frame the viewer cannot place, not a body at the origin
             let poses = bodies
                 .into_iter()
-                .map(|b| {
+                .enumerate()
+                .map(|(i, b)| {
                     if b.len() == 7 {
-                        Pose {
+                        Ok(Pose {
                             pos: [b[0], b[1], b[2]],
                             quat: [b[3], b[4], b[5], b[6]],
-                        }
+                        })
                     } else {
-                        Pose::default()
+                        Err(format!("frame: body {i} has {} values, not 7", b.len()))
                     }
                 })
-                .collect();
+                .collect::<Result<Vec<Pose>, String>>()?;
             Ok(Event::Frame { t_ms, poses })
         }
         "log" => Ok(Event::Log {
@@ -246,6 +254,89 @@ pub fn parse_event(line: &str) -> Result<Event, String> {
     }
 }
 
+/// How much of a line the viewer cannot parse is echoed in its error.
+const ECHO_CHARS: usize = 200;
+
+/// The error for a line that is not a protocol event: why, and the
+/// line's head (whole characters: a cut inside a multi-byte one would
+/// be no string at all).
+fn error_event(line: &str, why: &str) -> Event {
+    Event::Error(format!("{why}: {}", line.chars().take(ECHO_CHARS).collect::<String>()))
+}
+
+/// The stdout reader's word that the stream is over, sent when it is
+/// dropped: at the end of the output, on a read error, and should the
+/// thread panic, so the tab never waits on a reader that is gone.
+struct ExitNotice {
+    tx: mpsc::Sender<Event>,
+}
+
+impl Drop for ExitNotice {
+    fn drop(&mut self) {
+        let why = if thread::panicking() {
+            "the run server's output could not be read"
+        } else {
+            "the run server closed its output"
+        };
+        let _ = self.tx.send(Event::Exited(why.into()));
+    }
+}
+
+/// A line of the server's output, as [`read_lines`] hands it on.
+enum Line<'a> {
+    Text(&'a str),
+    /// Not UTF-8: the line made readable (a bad byte becomes U+FFFD).
+    NotUtf8(String),
+    /// The read failed, why; the stream ends with it.
+    Failed(String),
+}
+
+/// Each line of a stream to `each` until the stream ends or `each` says
+/// stop (false). A stray byte is one bad line, not the end of the
+/// stream: the lines after it still come.
+fn read_lines(mut reader: impl BufRead, mut each: impl FnMut(Line) -> bool) {
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) => return,
+            Ok(_) => {
+                let more = match std::str::from_utf8(&buf) {
+                    Ok(l) => each(Line::Text(l.trim_end_matches(['\n', '\r']))),
+                    Err(_) => each(Line::NotUtf8(
+                        String::from_utf8_lossy(&buf).trim_end_matches(['\n', '\r']).to_string(),
+                    )),
+                };
+                if !more {
+                    return;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => {
+                each(Line::Failed(e.to_string()));
+                return;
+            }
+        }
+    }
+}
+
+/// The stdout reader: every line as an event, an unparsable one (or
+/// one that is not UTF-8) as an error naming it, and one `Exited` when
+/// the stream is over, however that happens.
+fn read_events(reader: impl BufRead, tx: mpsc::Sender<Event>) {
+    // the notice goes out when this is dropped, whichever way the loop ends
+    let notice = ExitNotice { tx };
+    read_lines(reader, |line| {
+        let ev = match line {
+            Line::Text(l) if l.trim().is_empty() => return true,
+            Line::Text(l) => parse_event(l).unwrap_or_else(|e| error_event(l, &e)),
+            Line::NotUtf8(l) => error_event(&l, "not UTF-8 text"),
+            Line::Failed(e) => Event::Error(format!("the run server's output could not be read: {e}")),
+        };
+        notice.tx.send(ev).is_ok()
+    });
+}
+
 /// The server as a child process with a reader thread.
 pub struct SimProcess {
     child: Child,
@@ -270,37 +361,21 @@ impl SimProcess {
         let stderr = child.stderr.take().ok_or("no stderr")?;
         let (tx, events) = mpsc::channel();
         let tx_err = tx.clone();
+        thread::spawn(move || read_events(BufReader::new(stdout), tx));
         thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                match line {
-                    Ok(l) => {
-                        if l.trim().is_empty() {
-                            continue;
-                        }
-                        let ev = parse_event(&l).unwrap_or_else(|e| Event::Error(format!("{e}: {}", &l[..l.len().min(200)])));
-                        if tx.send(ev).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-            let _ = tx.send(Event::Exited("the run server closed its output".into()));
-        });
-        thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines().map_while(Result::ok) {
-                if tx_err
+            read_lines(BufReader::new(stderr), |line| {
+                let text = match line {
+                    Line::Text(l) => l.to_string(),
+                    Line::NotUtf8(l) => l,
+                    Line::Failed(e) => format!("the run server's error output could not be read: {e}"),
+                };
+                tx_err
                     .send(Event::Log {
                         stream: "server".into(),
-                        text: line,
+                        text,
                     })
-                    .is_err()
-                {
-                    break;
-                }
-            }
+                    .is_ok()
+            });
         });
         Ok(SimProcess { child, stdin, events })
     }
@@ -350,7 +425,10 @@ def send(**kw):
 send(ev="hello", version="fake")
 W = [{"alias": "practice-line", "path": "/w/practice_line/map.json", "dir": "/w/practice_line"},
      {"alias": "wro-2026-senior", "path": "/w/senior/map.json", "dir": "/w/senior"},
-     {"alias": "empty", "path": "/w/empty.xml", "dir": "/w"}]
+     {"alias": "empty", "path": "/w/empty.xml", "dir": "/w"},
+     # one of the user's own whose old world.xml could not be converted: listed, refused by name
+     {"alias": "torn", "path": None, "dir": "/me/worlds/torn", "user": True,
+      "error": "/me/worlds/torn/world.xml: not a map's MJCF (no <mujoco> root)"}]
 def box(name, body, size, rgba):
     return {"name": name, "type": "box", "body": body, "size": size, "pos": [0, 0, 0], "quat": [1, 0, 0, 0],
             "rgba": rgba, "material": None, "group": 0, "mesh": None}
@@ -389,6 +467,10 @@ for line in sys.stdin:
         send(ev="worlds", worlds=W)
         continue
     if cmd == "load":
+        torn = next((w for w in W if w["alias"] == c.get("world") and w.get("error")), None)
+        if torn is not None:
+            send(ev="error", text="PropError: " + torn["error"])
+            continue
         status = "loaded"
         send(**scene())
         frame()
@@ -663,6 +745,162 @@ mod tests {
         assert!(matches!(parse_event(r#"{"ev":"bye"}"#).unwrap(), Event::Bye));
         assert!(parse_event(r#"{"ev":"what"}"#).is_err());
         assert!(parse_event("not json").is_err());
+    }
+
+    #[test]
+    fn a_frame_body_that_is_not_seven_numbers_is_an_error_not_a_pose_at_the_origin() {
+        // three values (a position alone) and eight (one too many): the frame is refused by body
+        // and count, never drawn as a body standing upright at the origin
+        let short = parse_event(r#"{"ev":"frame","t_ms":1,"bodies":[[0,0,0,1,0,0,0],[1,2,3]]}"#);
+        assert_eq!(short.unwrap_err(), "frame: body 1 has 3 values, not 7");
+        let long = parse_event(r#"{"ev":"frame","t_ms":1,"bodies":[[1,2,3,0.7,0,0.7,0,9]]}"#);
+        assert_eq!(long.unwrap_err(), "frame: body 0 has 8 values, not 7");
+        // a frame of zeros is still a frame: standing it upright is the tab's job
+        let Event::Frame { poses, .. } = parse_event(r#"{"ev":"frame","t_ms":1,"bodies":[[0,0,0,0,0,0,0]]}"#).unwrap() else {
+            panic!()
+        };
+        assert_eq!(poses[0].quat, [0.0; 4]);
+    }
+
+    #[test]
+    fn an_unloadable_map_is_listed_with_its_error() {
+        let line = r#"{"ev":"worlds","worlds":[{"alias":"torn","path":null,"dir":"/me/worlds/torn","user":true,"error":"/me/worlds/torn/world.xml: not a map's MJCF"},{"alias":"mine","path":"/me/worlds/mine/map.json","dir":"/me/worlds/mine","user":true}]}"#;
+        let Event::Worlds(w) = parse_event(line).unwrap() else { panic!() };
+        assert_eq!(w[0].error.as_deref(), Some("/me/worlds/torn/world.xml: not a map's MJCF"));
+        assert!(w[0].path.is_none() && w[0].user);
+        assert!(w[1].error.is_none() && w[1].path.is_some());
+    }
+
+    #[test]
+    fn an_unparsable_line_is_echoed_whole_characters_at_a_time() {
+        // 300 three-byte characters: byte 200 falls inside the 67th, where a byte-indexed cut
+        // panics (and took the reader thread with it); the echo is the first 200 characters
+        let line = "漢".repeat(300);
+        assert!(
+            !line.is_char_boundary(ECHO_CHARS),
+            "the cut must fall inside a character to prove anything"
+        );
+        let Event::Error(text) = error_event(&line, "expected value at line 1 column 1") else {
+            panic!()
+        };
+        assert_eq!(text, format!("expected value at line 1 column 1: {}", "漢".repeat(ECHO_CHARS)));
+        // a short line is echoed whole
+        let Event::Error(text) = error_event("nope", "unknown event") else {
+            panic!()
+        };
+        assert_eq!(text, "unknown event: nope");
+    }
+
+    #[test]
+    fn a_line_that_is_not_utf8_is_reported_and_reading_goes_on() {
+        // a raw 0xff byte in a line: once the end of the stream for the reader (the server lived
+        // on unheard); now that line is an error naming it, the events after it still arrive,
+        // and the stream's end is reported once, at its end
+        let mut out = b"{\"ev\":\"hello\",\"version\":\"9\"}\n".to_vec();
+        out.extend_from_slice(b"bad \xff byte\n");
+        out.extend_from_slice(b"{\"ev\":\"log\",\"stream\":\"stdout\",\"text\":\"after\"}\r\n");
+        let (tx, rx) = mpsc::channel();
+        read_events(std::io::Cursor::new(out), tx);
+        let evs: Vec<Event> = rx.try_iter().collect();
+        assert_eq!(evs.len(), 4, "{evs:?}");
+        assert!(matches!(&evs[0], Event::Hello { version } if version == "9"), "{evs:?}");
+        assert!(
+            matches!(&evs[1], Event::Error(e) if e == "not UTF-8 text: bad \u{fffd} byte"),
+            "{evs:?}"
+        );
+        assert!(matches!(&evs[2], Event::Log { text, .. } if text == "after"), "{evs:?}");
+        assert!(
+            matches!(&evs[3], Event::Exited(why) if why == "the run server closed its output"),
+            "{evs:?}"
+        );
+        // a read that fails is said, then the stream's end
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("pipe gone"))
+            }
+        }
+        let (tx, rx) = mpsc::channel();
+        read_events(BufReader::new(Broken), tx);
+        let evs: Vec<Event> = rx.try_iter().collect();
+        assert!(
+            matches!(&evs[..], [Event::Error(e), Event::Exited(_)] if e == "the run server's output could not be read: pipe gone"),
+            "{evs:?}"
+        );
+    }
+
+    #[test]
+    fn a_reader_that_dies_still_reports_the_stream_over() {
+        let (tx, rx) = mpsc::channel();
+        let notice = ExitNotice { tx: tx.clone() };
+        let died = thread::spawn(move || {
+            let _notice = notice;
+            panic!("a line the reader could not take");
+        })
+        .join();
+        assert!(died.is_err());
+        assert!(
+            matches!(rx.try_recv(), Ok(Event::Exited(why)) if why == "the run server's output could not be read"),
+            "the panic reaches the tab as the stream's end"
+        );
+        drop(ExitNotice { tx });
+        assert!(matches!(rx.try_recv(), Ok(Event::Exited(why)) if why == "the run server closed its output"));
+        assert!(rx.try_recv().is_err(), "one notice per reader");
+    }
+
+    #[test]
+    fn a_long_line_in_another_alphabet_does_not_kill_the_reader() {
+        // the real reader thread, on a server that writes 300 bytes of CJK outside the protocol
+        // before behaving: the line is reported, the events after it still arrive, and the end
+        // of the output is reported once
+        let python = ["python3", "python"]
+            .into_iter()
+            .find(|p| Command::new(p).arg("--version").output().is_ok());
+        let Some(python) = python else { return };
+        let dir = std::env::temp_dir().join(format!("ob-sim-cjk-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("openbricks_sim")).unwrap();
+        std::fs::write(dir.join("openbricks_sim/__init__.py"), "").unwrap();
+        std::fs::write(
+            dir.join("openbricks_sim/server.py"),
+            "import sys, json\nprint(json.dumps({'ev':'hello','version':'t'}), flush=True)\nsys.stdout.buffer.write((u'\\u6f22' * 100 + '\\n').encode('utf-8')); sys.stdout.flush()\nfor line in sys.stdin:\n    c = json.loads(line)\n    if c['cmd'] == 'quit':\n        print(json.dumps({'ev':'bye'}), flush=True); break\n    print(json.dumps({'ev':'log','stream':'stdout','text':'got ' + c['cmd']}), flush=True)\n",
+        )
+        .unwrap();
+        let env = vec![("PYTHONPATH".to_string(), dir.to_string_lossy().to_string())];
+        let mut p = SimProcess::spawn_with_env(python, &env).unwrap();
+        p.send(&serde_json::json!({"cmd": "worlds"})).unwrap();
+        p.send(&serde_json::json!({"cmd": "quit"})).unwrap();
+        let mut got = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
+            if let Some(ev) = p.try_recv() {
+                let done = matches!(ev, Event::Exited(_));
+                got.push(ev);
+                if done {
+                    break;
+                }
+            } else {
+                thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        assert!(matches!(got.first(), Some(Event::Hello { .. })), "{got:?}");
+        assert!(
+            got.iter()
+                .any(|e| matches!(e, Event::Error(t) if t.contains("漢") && t.chars().count() < 260)),
+            "the line is reported, cut at whole characters: {got:?}"
+        );
+        assert!(
+            got.iter().any(|e| matches!(e, Event::Log { text, .. } if text == "got worlds")),
+            "the stream goes on after it: {got:?}"
+        );
+        assert!(got.iter().any(|e| matches!(e, Event::Bye)), "{got:?}");
+        assert_eq!(
+            got.iter().filter(|e| matches!(e, Event::Exited(_))).count(),
+            1,
+            "the end of the output is reported once: {got:?}"
+        );
+        assert!(matches!(got.last(), Some(Event::Exited(why)) if why == "the run server closed its output"));
+        p.kill();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -1170,6 +1170,82 @@ class DowngradeConfirmFlowTests(unittest.TestCase):
         confirm.assert_not_called()
 
 
+class UnversionedTargetConfirmTests(unittest.TestCase):
+    """A --firmware file name with no X.Y.Z (a local build's
+    firmware.bin) cannot be compared with the running version: run()
+    must ask instead of skipping the same/older check in silence."""
+
+    def setUp(self):
+        self._which = patch("shutil.which",
+                            side_effect=lambda name: "/usr/local/bin/" + name)
+        self._which.start()
+        self.addCleanup(self._which.stop)
+        self._sleep = patch("openbricks_dev.flash.time.sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+        self._probe = patch("openbricks_dev.flash._detect_chip",
+                            return_value=None)
+        self._probe.start()
+        self.addCleanup(self._probe.stop)
+        src = _fake_image(0x0)
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(os.rmdir, self.dir)
+        self.firmware = os.path.join(self.dir, "firmware.bin")
+        os.rename(src, self.firmware)
+        self.addCleanup(os.unlink, self.firmware)
+
+    def test_declined_unknown_target_flashes_nothing(self):
+        calls = []
+        with patch.object(flash, "_read_current_firmware",
+                          return_value=("9.9.9", "official")), \
+             patch.object(flash, "_confirm",
+                          return_value=False) as confirm, \
+             patch("subprocess.call",
+                   side_effect=lambda cmd: calls.append(cmd) or 0), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")):
+            rc = flash.run(_args(firmware=self.firmware, port="/dev/x"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [])
+        confirm.assert_called_once()
+        question = confirm.call_args[0][0]
+        self.assertIn("target version unknown", question)
+        self.assertIn("firmware.bin", question)
+        self.assertIn("9.9.9", question)
+
+    def test_yes_flashes_an_unknown_target(self):
+        calls = []
+        with patch.object(flash, "_read_current_firmware",
+                          return_value=("9.9.9", "official")), \
+             patch.object(flash, "_wait_for_repl",
+                          side_effect=flash.FlashError("no repl")), \
+             patch("subprocess.call",
+                   side_effect=lambda cmd: calls.append(cmd) or 0), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")), \
+             patch("sys.stdout", new_callable=io.StringIO) as out:
+            with self.assertRaises(flash.FlashError):
+                flash.run(_args(firmware=self.firmware, port="/dev/x",
+                                yes=True))
+        self.assertIn("target version unknown", out.getvalue())
+        self.assertIn("proceeding (--yes)", out.getvalue())
+        self.assertEqual(len(calls), 2)
+
+    def test_unknown_current_does_not_prompt(self):
+        with patch.object(flash, "_read_current_firmware",
+                          return_value=(None, None)), \
+             patch.object(flash, "_confirm") as confirm, \
+             patch("subprocess.call", return_value=1), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="",
+                                          stderr="")):
+            with self.assertRaises(flash.FlashError):
+                flash.run(_args(firmware=self.firmware, port="/dev/x"))
+        confirm.assert_not_called()
+
+
 class MainStandaloneTests(unittest.TestCase):
     def test_flash_error_maps_to_rc_1(self):
         import io, sys

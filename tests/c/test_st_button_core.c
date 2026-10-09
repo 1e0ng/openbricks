@@ -273,6 +273,32 @@ TEST(release_recontact_after_arm_is_not_a_stop) {
     CHECK_EQ_INT(classify_n(50), 1);  // deliberate stop still works
 }
 
+TEST(late_confirmed_start_press_held_long_still_guards_its_release) {
+    // A start press that confirms AFTER the arm (flash stall) and is
+    // then held longer than the chatter cooldown: the cooldown must
+    // start at its RELEASE, not at the late confirmation — otherwise
+    // the release re-contact hard-stops the newborn run.
+    ob_button_init(&b, rd, NULL);
+    level = 0;
+    tick_n(50);
+    level = 1;
+    tick_n(5);                        // mid-debounce at the arm
+    ob_button_arm_transition(&b);
+    CHECK_EQ_INT(classify_n(OB_BUTTON_CHATTER_TICKS + 200), 0);
+    CHECK_EQ_INT(b.n_stale, 1);       // the late edge, consumed
+    CHECK_EQ_INT(b.stale_press, 1);   // marker held until the release
+    level = 0;
+    classify_n(OB_BUTTON_WINDOW + 5); // release: cooldown starts now
+    CHECK_EQ_INT(b.stale_press, 0);
+    level = 1;                        // 30 ms re-contact bounce...
+    CHECK_EQ_INT(classify_n(30), 0);  // ...swallowed, run survives
+    CHECK_EQ_INT(b.n_stale >= 2, 1);
+    level = 0;
+    classify_n(OB_BUTTON_WINDOW + OB_BUTTON_CHATTER_TICKS);
+    level = 1;
+    CHECK_EQ_INT(classify_n(50), 1);  // deliberate stop still works
+}
+
 TEST(disarm_clears_the_chatter_cooldown) {
     // The cooldown must not outlive the run and eat the NEXT run's
     // start press (post-stop start suppression is the Python
@@ -383,6 +409,7 @@ int main(void) {
     RUN(arm_with_idle_button_suppresses_nothing);
     RUN(clear_stale_on_disarm);
     RUN(release_recontact_after_arm_is_not_a_stop);
+    RUN(late_confirmed_start_press_held_long_still_guards_its_release);
     RUN(disarm_clears_the_chatter_cooldown);
     RUN(worn_contact_sixty_percent_duty_press_is_accepted);
     RUN(violent_bounce_train_cannot_double_fire);

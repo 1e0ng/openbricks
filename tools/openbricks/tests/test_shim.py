@@ -15,6 +15,7 @@ shim. That's the full "run firmware code unchanged in the sim"
 scenario.
 """
 
+import math
 import sys
 import time
 import unittest
@@ -104,6 +105,132 @@ class InstallLifecycleTests(unittest.TestCase):
         shim.uninstall()
         self.assertFalse(shim.is_installed())
 
+    def _serial_pair(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics.drivebase import DriveBase
+        left = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
+        db = DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=136)
+        return db, left, right
+
+    def test_uninstall_detaches_the_run_s_ticks_and_zeroes_its_commands(self):
+        # The server keeps one runtime across runs: a program stopped
+        # mid-move used to leave its bus + wheel ticks registered and
+        # its torque on the actuators, and the next program's chassis
+        # drove off by itself (534 mm in 2 s with no command).
+        robot = SimRobot()
+        rt = robot.runtime
+        before = list(rt._ticks)
+        shim.install(rt)
+        try:
+            db, left, right = self._serial_pair()
+            db.straight(1000, wait=False)
+            time.sleep_ms(500)
+            self.assertNotEqual(list(rt._ticks), before)
+        finally:
+            shim.uninstall()
+        self.assertEqual(list(rt._ticks), before)
+        self.assertEqual([float(c) for c in rt.data.ctrl[:2]], [0.0, 0.0])
+        self.assertFalse(left._attached)
+        self.assertFalse(right._attached)
+        self.assertEqual(shim._sim_st_buses, [])
+        shim.install(rt)
+        try:
+            self._serial_pair()            # constructed, never commanded
+            x0, y0, _ = robot.chassis_pose()
+            time.sleep_ms(2000)
+            x1, y1, _ = robot.chassis_pose()
+            self.assertLess(math.hypot(x1 - x0, y1 - y0), 1.0)
+        finally:
+            shim.uninstall()
+
+    def test_uninstall_coasts_the_encoder_path_too(self):
+        # ShimServo / ShimDriveBase (the ``_openbricks_native`` path):
+        # the adapters are recorded at construction and coasted by
+        # name, because an adapter whose tick is gone but whose
+        # actuator is live (what an open-loop ``Servo.run`` leaves)
+        # has nothing on the tick list to be found by.
+        robot = SimRobot()
+        rt = robot.runtime
+        before = list(rt._ticks)
+        shim.install(rt)
+        try:
+            from _openbricks_native import Servo, DriveBase
+            l = Servo(in1=12, in2=14, pwm=27, encoder=None)
+            r = Servo(in1=13, in2=15, pwm=26, encoder=None)
+            db = DriveBase(left=l, right=r,
+                           wheel_diameter_mm=60.0, axle_track_mm=150.0)
+            db.straight(1000, 200)
+            time.sleep_ms(300)
+            self.assertNotEqual(float(rt.data.ctrl[0]), 0.0)
+            l._adapter._detach()           # tick gone, actuator still driven
+        finally:
+            shim.uninstall()
+        self.assertEqual(list(rt._ticks), before)
+        self.assertEqual([float(c) for c in rt.data.ctrl[:2]], [0.0, 0.0])
+        self.assertFalse(db._db._attached)
+        self.assertFalse(l._adapter._attached)
+        self.assertFalse(r._adapter._attached)
+
+    def test_uninstall_stops_the_robot_s_own_drivebase_and_it_drives_again(self):
+        # The script globals the server hands out (``drivebase``,
+        # ``left``, ``right``) are the SimRobot's own objects: a run
+        # that drove them stops them at the boundary through their
+        # owners, so they re-attach on the next run instead of
+        # stranding ``_attached`` True.
+        robot = SimRobot()
+        rt = robot.runtime
+        before = list(rt._ticks)
+        shim.install(rt)
+        try:
+            robot.drivebase.straight(1000, 200)
+            time.sleep_ms(300)
+        finally:
+            shim.uninstall()
+        self.assertEqual(list(rt._ticks), before)
+        self.assertEqual([float(c) for c in rt.data.ctrl[:2]], [0.0, 0.0])
+        self.assertFalse(robot.drivebase._attached)
+        self.assertFalse(robot.left._attached)
+        x0 = robot.chassis_pose()[0]
+        robot.drivebase.straight(100, 100)
+        self.assertTrue(robot.run_until(robot.drivebase.is_done, 5.0))
+        self.assertGreater(robot.chassis_pose()[0] - x0, 50.0)
+
+    def test_uninstall_turns_the_gyro_off_with_its_feed(self):
+        # The server hands the robot's own drive base to every run.
+        # Uninstall used to detach only the IMU tick, leaving the
+        # core steering by the gyro on a heading frozen at the last
+        # sample: the next run's turn(90) never finished (118 deg
+        # after 5 s and still turning).
+        robot = SimRobot()
+        db = robot.drivebase
+        shim.install(robot.runtime)
+        try:
+            db.attach_imu(robot.imu)
+            db.set_use_gyro(True)
+            db.straight(200, 100)
+            self.assertTrue(robot.run_until(db.is_done, 5.0))
+        finally:
+            shim.uninstall()
+        self.assertFalse(db._imu_tick_active)
+        self.assertNotIn(db._imu_tick, robot.runtime._ticks)
+        shim.install(robot.runtime)
+        try:
+            h0 = robot.imu.heading()
+            db.turn(90, 90)
+            self.assertTrue(robot.run_until(db.is_done, 5.0))
+            turned = (robot.imu.heading() - h0 + 180.0) % 360.0 - 180.0
+            self.assertAlmostEqual(abs(turned), 90.0, delta=5.0)
+            # And a gyro re-enable on this run steers on a live feed.
+            db.set_use_gyro(True)
+            self.assertIn(db._imu_tick, robot.runtime._ticks)
+            db.turn(-90, 90)
+            self.assertTrue(robot.run_until(db.is_done, 5.0))
+            back = (robot.imu.heading() - h0 + 180.0) % 360.0 - 180.0
+            self.assertLess(abs(back), 5.0)
+        finally:
+            shim.uninstall()
+
     def test_install_patches_time_sleep_ms_to_advance_sim(self):
         robot = SimRobot()
         shim.install(robot.runtime)
@@ -187,6 +314,72 @@ class ShimServoBehaviourTests(_ShimTestBase):
         self.assertTrue(s._adapter._attached)
         s.brake()
         self.assertFalse(s._adapter._attached)
+
+    def test_run_drives_open_loop_at_a_raw_power(self):
+        # Firmware Servo.run(power) = the driver's dc(): raw power in
+        # percent, clamped to +/-100, sign = direction. It used to
+        # raise AttributeError on a ``_ctrl_scale`` SimMotor lost in
+        # 1.13.0, so no open-loop run worked under the shim.
+        from _openbricks_native import Servo
+        s = Servo(in1=12, in2=14, pwm=27, encoder=None)
+        aid = s._adapter._actuator_id
+        s.run(50)
+        time.sleep_ms(300)
+        self.assertGreater(s.measured_dps(), 20.0)
+        self.assertNotEqual(float(self.robot.data.ctrl[aid]), 0.0)
+        s.run(-50)
+        time.sleep_ms(500)
+        self.assertLess(s.measured_dps(), -20.0)
+        s.run(250)                             # clamped like servo_run
+        self.assertEqual(s._adapter._dc_duty, 100.0)
+        s.run(-250)
+        self.assertEqual(s._adapter._dc_duty, -100.0)
+        s.brake()
+        self.assertFalse(s._adapter._attached)
+        self.assertEqual(float(self.robot.data.ctrl[aid]), 0.0)
+
+    def test_run_honours_invert_like_the_firmware_core(self):
+        from _openbricks_native import Servo
+        s = Servo(in1=12, in2=14, pwm=27, encoder=None, invert=True)
+        s.run(50)
+        time.sleep_ms(300)
+        # The physics wheel turns the other way; the sign-corrected
+        # measurement reads forward, as the firmware observer does.
+        self.assertLess(float(self.robot.data.qvel[s._adapter._dof_adr]), 0.0)
+        self.assertGreater(s.measured_dps(), 20.0)
+        s.coast()
+
+    def test_firmware_dc_runs_open_loop_under_the_shim(self):
+        # The real driver's dc() is ``self._servo.run(float(duty))``.
+        from openbricks.drivers.jgb37_520 import JGB37Motor
+        m = JGB37Motor(in1=12, in2=14, pwm=27, encoder_a=18, encoder_b=19)
+        m.dc(40)
+        time.sleep_ms(300)
+        self.assertGreater(m.speed(), 10.0)
+        m.coast()
+        time.sleep_ms(300)
+        self.assertLess(abs(m.speed()), 5.0)
+
+
+    def test_a_drivebase_move_takes_a_wheel_back_from_open_loop(self):
+        # Servo.run() leaves a sustained duty that wins every motor
+        # tick; arming a move (firmware drivebase_register attaches
+        # both servos) must clear it, or the wheel kept its old power
+        # and the move never finished.
+        from _openbricks_native import Servo, DriveBase
+        l = Servo(in1=12, in2=14, pwm=27, encoder=None)
+        r = Servo(in1=13, in2=15, pwm=26, encoder=None)
+        db = DriveBase(left=l, right=r,
+                       wheel_diameter_mm=60.0, axle_track_mm=150.0)
+        l.run(40)
+        time.sleep_ms(300)
+        x0 = self.robot.chassis_pose()[0]
+        db.straight(100, 100)
+        self.assertIsNone(l._adapter._dc_duty)
+        self.assertIsNone(r._adapter._dc_duty)
+        self.assertTrue(self.robot.run_until(db.is_done, 4.0))
+        self.assertAlmostEqual(self.robot.chassis_pose()[0] - x0, 100.0,
+                               delta=15.0)
 
 
 class ShimDriveBaseTests(_ShimTestBase):
@@ -405,6 +598,50 @@ class BenchShapeTests(_ShimTestBase):
         front.run_angle(200, 90)
         self.assertTrue(80 < front.angle() < 100, front.angle())
 
+    def test_set_pose_after_adoption_keeps_the_wheels_on_the_floor(self):
+        # Adoption resizes the wheels and lifts the live chassis; the
+        # model's reset pose used to stay at the old height, so a
+        # set_pose() (the Simulate tab's place) after building the
+        # DriveBase put the 88 mm wheels 14 mm into the floor.
+        import mujoco
+        self._bench()
+        m, d = self.robot.model, self.robot.runtime.data
+        bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "chassis_wheel_l")
+        gid = next(g for g in range(m.ngeom) if int(m.geom_bodyid[g]) == bid)
+        self.robot.set_pose(100.0, 0.0, 0.0)
+        bottom = float(d.xpos[bid, 2]) - float(m.geom_size[gid, 0])
+        self.assertAlmostEqual(bottom, 0.0, delta=0.001)
+        cid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "chassis")
+        time.sleep_ms(200)                     # no recovery jump either
+        self.assertAlmostEqual(float(d.xpos[cid, 2]), 0.049, delta=0.002)
+
+    def test_a_task_motor_built_first_leaves_no_torque_on_the_wheel_it_held(self):
+        # The bench main.py builds and homes its task motors before
+        # the DriveBase. The task motor held the left wheel slot until
+        # adoption moved it to a kinematic shaft — and left its last
+        # torque on the wheel's actuator, so the chassis drove itself
+        # (128 mm, 37 degrees in 2 s) with no drive command.
+        from openbricks.drivers.st3032 import ST3032Motor
+        from openbricks.robotics.drivebase import DriveBase
+        grip = ST3032Motor(servo_id=3, uart_id=1, tx=14, rx=6)
+        self.assertIsNotNone(grip._plumb)      # holds the left wheel
+        grip.run_speed(200)
+        time.sleep_ms(300)
+        left = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        right = ST3032Motor(servo_id=2, uart_id=1, tx=14, rx=6)
+        db = DriveBase(left, right, wheel_diameter_mm=88, axle_track_mm=136)
+        ctrl = self.robot.runtime.data.ctrl
+        self.assertEqual([float(c) for c in ctrl[:2]], [0.0, 0.0])
+        x0, y0, yaw0 = self.robot.chassis_pose()
+        a0 = grip.angle()
+        time.sleep_ms(2000)
+        x1, y1, yaw1 = self.robot.chassis_pose()
+        self.assertLess(math.hypot(x1 - x0, y1 - y0), 1.0)
+        self.assertLess(abs(yaw1 - yaw0), 1.0)
+        self.assertGreater(grip.angle() - a0, 300.0)   # still running
+        db.straight(40)
+        self.assertGreater(abs(self.robot.chassis_pose()[0] - x1), 5.0)
+
     def test_same_servo_id_is_the_same_motor(self):
         # One servo, one slot: the bus keys by id, so re-constructing
         # a motor for an id yields the SAME motor (the bench main.py
@@ -561,6 +798,45 @@ class ShimSerialMotorTests(_ShimTestBase):
         from openbricks.drivers.st3032 import ST3032Motor
         m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
         self.assertTrue(m.ping())
+
+    def test_run_angle_rejects_a_string_then_like_the_firmware(self):
+        # The firmware driver raises on the pre-3.0.0 string form;
+        # the shim used to accept it and coast the shaft, so a script
+        # ran green here and died on the hub.
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        with self.assertRaises(TypeError) as ctx:
+            m.run_angle(200, 90, then="hold")
+        msg = str(ctx.exception)
+        self.assertIn("then must be one of Stop.COAST, Stop.BRAKE, Stop.HOLD",
+                      msg)
+        self.assertIn("not the string 'hold'", msg)
+        self.assertIn("import Stop from openbricks.parameters", msg)
+        # Nothing half-registered: no move, idle, not ticking.
+        self.assertTrue(m.done())
+        self.assertEqual(m._mode, "idle")
+        self.assertIsNone(m._move)
+        self.assertFalse(m._attached)
+
+    def test_run_angle_rejects_stop_none_like_the_firmware(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        with self.assertRaises(TypeError) as ctx:
+            m.run_angle(200, 90, then=Stop.NONE)
+        self.assertIn("got Stop.NONE", str(ctx.exception))
+        self.assertEqual(m._mode, "idle")
+        self.assertIsNone(m._move)
+
+    def test_run_angle_then_dispatches_the_end_state(self):
+        from openbricks.drivers.st3032 import ST3032Motor
+        m = ST3032Motor(servo_id=1, uart_id=1, tx=14, rx=6)
+        self.assertTrue(m.run_angle(200, 45, then=Stop.HOLD))
+        self.assertEqual(m._mode, "speed")
+        self.assertEqual(m._target_dps, 0.0)
+        self.assertTrue(m.run_angle(200, 45, then=Stop.BRAKE))
+        self.assertEqual(m._mode, "speed")
+        self.assertTrue(m.run_angle(200, 45, then=Stop.COAST))
+        self.assertEqual(m._mode, "idle")
 
     def test_blocked_run_angle_reports_and_continues(self):
         # A physically blocked wheel defeats the crawl floor; the
@@ -1265,6 +1541,31 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class SettleStatsContractTests(unittest.TestCase):
+    """The sim binding returns the firmware's five-value settle tuple
+    (st_bus.c sb_db_settle_stats: residual sum / diff in wheel deg,
+    landings, integrator sum / diff in dps); its doc used to promise
+    a 2-tuple, and code written from it failed to unpack."""
+
+    def test_settle_stats_is_the_firmware_five_tuple(self):
+        from openbricks_sim._native import RawDriveBase
+        stats = RawDriveBase(60.0, 150.0).settle_stats()
+        self.assertEqual(len(stats), 5)
+        self.assertIsInstance(stats[2], int)
+        for i in (0, 1, 3, 4):
+            self.assertIsInstance(stats[i], float)
+
+    def test_settle_stats_doc_names_the_five_fields(self):
+        # The doc lives in the C extension: this needs the rebuilt
+        # .so (CI builds it; a stale local build fails here).
+        from openbricks_sim._native import RawDriveBase
+        doc = RawDriveBase.settle_stats.__doc__
+        for field in ("res_sum_wheel_deg", "res_diff_wheel_deg",
+                      "landings", "integ_sum_dps", "integ_diff_dps"):
+            self.assertIn(field, doc)
+        self.assertNotIn("expiry_residual_wheel_deg", doc)
+
+
 class WorldAliasTableTests(unittest.TestCase):
     """``cli.py`` and ``robot.py`` each carry a world-alias table.
 
@@ -1735,6 +2036,60 @@ class SimIcm45686Tests(_ShimTestBase):
         self.assertEqual(sb.db_stop_pending(), 0)
         self.assertTrue(sb.db_done())
         db.straight(50)                        # and drives on normally
+
+    def test_coast_after_a_brake_drops_the_pending_stop(self):
+        # Firmware parity (st_db_ws_clear_locked runs on EVERY
+        # sb_db_stop): a coast after a brake still on its ramp used
+        # to leave db_stop_pending at 1, so reset() waited its 1.5 s
+        # bound and then landed the stop onto wheels the program had
+        # just coasted.
+        imu = self._icm()
+        db, left, right = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        sb = db._serial_engine._sb
+        db.straight(300, wait=False)
+        time.sleep_ms(300)
+        db.stop(then=Stop.BRAKE)
+        self.assertEqual(sb.db_stop_pending(), 1)
+        db.stop(then=Stop.COAST)
+        self.assertEqual(sb.db_stop_pending(), 0)
+        t0 = time.ticks_ms()
+        db.reset()
+        self.assertLess(time.ticks_diff(time.ticks_ms(), t0), 100)
+        for w in (left, right):
+            self.assertEqual(w._mode, "idle")
+            self.assertFalse(w._attached)
+
+    def test_coast_after_a_hold_arms_no_position_hold(self):
+        imu = self._icm()
+        db, left, right = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        sb = db._serial_engine._sb
+        db.straight(300, wait=False)
+        time.sleep_ms(300)
+        db.stop(then=Stop.HOLD)
+        self.assertEqual(sb.db_stop_pending(), 2)
+        db.stop(then=Stop.COAST)
+        self.assertEqual(sb.db_stop_pending(), 0)
+        db.reset()
+        self.assertFalse(any(m.is_active() for m in sb._moves.values()))
+        for w in (left, right):
+            self.assertEqual(w._mode, "idle")
+
+    def test_yield_only_stop_after_a_brake_drops_the_pending_stop(self):
+        # The engine's abort paths call the bare db_stop(); the
+        # firmware clears the pending stop there too.
+        imu = self._icm()
+        db, _, _ = self._serial_db(imu=imu)
+        db.use_gyro(True)
+        sb = db._serial_engine._sb
+        db.straight(300, wait=False)
+        time.sleep_ms(300)
+        self.assertTrue(sb.db_stop(1))
+        self.assertEqual(sb.db_stop_pending(), 1)
+        sb.db_stop()
+        self.assertEqual(sb.db_stop_pending(), 0)
+        self.assertFalse(sb._ws_active)
 
     def test_brake_wait_true_then_reset_never_raises(self):
         imu = self._icm()

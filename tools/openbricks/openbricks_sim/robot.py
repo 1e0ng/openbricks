@@ -213,10 +213,10 @@ class SimRobot:
         current MuJoCo data, so they need no explicit reset.
         """
         # 1. Cancel any active drivebase move and detach motors so
-        #    they stop writing actuator ctrl. ``stop`` puts both
-        #    motors into brake mode; we additionally clear the
-        #    runtime tick list so a stale closure can't fire after
-        #    a reset.
+        #    they stop writing actuator ctrl: ``stop`` detaches the
+        #    drivebase tick and each ``brake`` detaches that motor's
+        #    tick and zeroes its actuator. Ticks other owners
+        #    registered on the runtime are theirs to remove.
         self.drivebase.stop()
         self.left.brake()
         self.right.brake()

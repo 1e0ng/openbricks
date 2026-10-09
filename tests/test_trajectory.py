@@ -120,6 +120,32 @@ class TestTrapezoidalProfile(unittest.TestCase):
         self.assertAlmostEqual(end_pos, 500.0, places=3)
         self.assertAlmostEqual(end_vel, 0.0, places=3)
 
+    def test_reverse_fast_entry_lands_on_target(self):
+        # Entering the WRONG way faster than cruise (a straight()
+        # armed against an opposite drive()): the entry ramp's net
+        # displacement (cruise^2 - v0^2)/2a = -40 is negative, and
+        # the profile must still integrate to exactly the target —
+        # pre-fix it stopped 80 short and snapped at expiry.
+        try:
+            t = TrapezoidalProfile(start=0, target=500, cruise_dps=200,
+                                   accel_dps2=1500, v0_dps=-400)
+        except TypeError:
+            raise unittest.SkipTest("fake profile has no v0 support")
+        self.assertFalse(t.is_triangular())
+        self.assertAlmostEqual(t.duration(), 3.1666667, places=5)
+        pos, _vel = t.sample(t.duration() - 1e-9)
+        self.assertAlmostEqual(pos, 500.0, places=4)
+        # Short move: a trapezoid at cruise, never a peak above it.
+        t = TrapezoidalProfile(start=0, target=20, cruise_dps=200,
+                               accel_dps2=1500, v0_dps=-400)
+        self.assertFalse(t.is_triangular())
+        total = t.duration()
+        for k in range(401):
+            _pos, vel = t.sample(k * total / 400.0)
+            self.assertTrue(vel <= 200.0 + 1e-6, "peak above cruise")
+        pos, _vel = t.sample(total - 1e-9)
+        self.assertAlmostEqual(pos, 20.0, places=4)
+
     def test_position_monotonically_approaches_target(self):
         t = TrapezoidalProfile(start=0, target=200, cruise_dps=100, accel_dps2=200)
         prev = -1.0

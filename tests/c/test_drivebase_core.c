@@ -4,6 +4,10 @@
 // with both axes closed-loop through the ramp.
 
 #include <math.h>
+// -std=c11 hides M_PI on GCC (drivebase_core.c carries the same guard).
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #include "harness.h"
 #include "drivebase_core.h"
@@ -509,11 +513,230 @@ TEST(stopping_is_cleared_by_the_yield_by_arms_and_by_a_stop_at_rest) {
     CHECK(db.stopping);
     ob_drivebase_straight(&db, 10, 100.0, 150.0, false);
     CHECK(!db.stopping);
+    l.target_dps = r.target_dps = 150.0;
+    CHECK(ob_drivebase_stop_decel(&db, 12, 400.0));
+    CHECK(db.stopping);
+    ob_drivebase_curve(&db, 14, 0.0, 90.0, 100.0, false);   // radius 0
+    CHECK(!db.stopping);
+    CHECK(ob_drivebase_stop_decel(&db, 16, 400.0));
+    ob_drivebase_curve(&db, 18, 150.0, 90.0, 100.0, false);
+    CHECK(!db.stopping);
+    CHECK(ob_drivebase_stop_decel(&db, 19, 400.0));
+    ob_drivebase_turn(&db, 19, 90.0, 60.0);
+    CHECK(!db.stopping);
     l.target_dps = r.target_dps = 0.0;
     db.integ_sum = db.integ_diff = 0.0;
     CHECK(!ob_drivebase_stop_decel(&db, 20, 400.0));   // at rest: nothing armed
     CHECK(!db.stopping);
     CHECK(ob_drivebase_is_done(&db));
+}
+
+
+// ---- reference profile arithmetic (trajectory_core) -------------------
+
+// Largest |velocity| and largest one-step position jump over a dense
+// scan of the profile (4000 samples up to t_total).
+static void scan_profile(const ob_trajectory_t *t, ob_float_t *max_vel,
+                         ob_float_t *max_jump) {
+    ob_float_t prev_pos, v;
+    ob_trajectory_sample(t, 0.0, &prev_pos, &v);
+    *max_vel = 0.0;
+    *max_jump = 0.0;
+    for (int k = 1; k <= 4000; k++) {
+        ob_float_t p;
+        ob_trajectory_sample(t, t->t_total * k / 4000.0, &p, &v);
+        if (fabs((double)v) > *max_vel) {
+            *max_vel = fabs((double)v);
+        }
+        if (fabs((double)(p - prev_pos)) > *max_jump) {
+            *max_jump = fabs((double)(p - prev_pos));
+        }
+        prev_pos = p;
+    }
+}
+
+TEST(reverse_entry_faster_than_cruise_lands_on_target) {
+    // Entry moving the WRONG way faster than cruise (a straight()
+    // armed against an opposite drive()): the entry ramp v0 -> vc at
+    // +a covers (vc² - v0²)/2a, which is NEGATIVE here. v0 = -400,
+    // cruise 200, accel 1500, D = 500:
+    //   d_entry  = (200² - 400²) / 3000   = -40
+    //   d_exit   =  200² / 3000           = 13.333
+    //   t_entry  = (200 + 400) / 1500     = 0.4
+    //   t_cruise = (500 + 40 - 13.333)/200 = 2.633333
+    //   t_total  = 0.4 + 2.633333 + 0.133333 = 3.166667
+    // The sign-flipped d_entry (+40) gave t_cruise 2.233333 and a
+    // reference 80 short at t_total⁻ that snapped to 500 at expiry.
+    ob_trajectory_t t;
+    ob_float_t p, v, max_vel, max_jump;
+    ob_trajectory_init_v0(&t, 0.0, 500.0, 200.0, 1500.0, -400.0);
+    CHECK(!t.triangular);
+    CHECK(fabs((double)(t.d_entry + 40.0)) < 1e-9);
+    CHECK(fabs((double)(t.t_cruise - 2.633333333)) < 1e-6);
+    CHECK(fabs((double)(t.t_total - 3.166666667)) < 1e-6);
+    ob_trajectory_sample(&t, t.t_total - 1e-9, &p, &v);
+    CHECK(fabs((double)(p - 500.0)) < 1e-6);
+    CHECK(fabs((double)v) < 1e-5);
+    scan_profile(&t, &max_vel, &max_jump);
+    CHECK(max_vel <= 400.0 + 1e-9);
+    CHECK(max_jump < 400.0 * t.t_total / 4000.0 + 1e-6);
+
+    // Short move, D = 20 < v0²/2a = 53.3: the signed ramps fit
+    // (-40 + 13.333 <= 20), so it is a trapezoid at cruise with
+    // t_cruise = (20 + 40 - 13.333)/200 = 0.233333. The flipped sum
+    // (53.3 > 20) sent it triangular with v_peak sqrt(110000) =
+    // 331.7 — 166% of the commanded cruise.
+    ob_trajectory_init_v0(&t, 0.0, 20.0, 200.0, 1500.0, -400.0);
+    CHECK(!t.triangular);
+    CHECK(t.v_peak == 200.0);
+    CHECK(fabs((double)(t.t_cruise - 0.233333333)) < 1e-6);
+    ob_trajectory_sample(&t, t.t_total - 1e-9, &p, &v);
+    CHECK(fabs((double)(p - 20.0)) < 1e-6);
+    scan_profile(&t, &max_vel, &max_jump);
+    CHECK(max_vel <= 400.0 + 1e-9);
+
+    // Shorter still and triangular for real: v0 = -250, D = 5,
+    // aD + v0²/2 = 38750 < vc² = 40000, so vp = sqrt(38750) =
+    // 196.85 <= cruise, d_entry = (38750 - 62500)/3000 = -7.9167,
+    // d_ramp = 38750/3000 = 12.9167, summing to exactly 5.
+    ob_trajectory_init_v0(&t, 0.0, 5.0, 200.0, 1500.0, -250.0);
+    CHECK(t.triangular);
+    CHECK(fabs((double)(t.v_peak - sqrt(38750.0))) < 1e-9);
+    CHECK(t.v_peak <= 200.0);
+    CHECK(fabs((double)(t.d_entry + 7.916666667)) < 1e-6);
+    ob_trajectory_sample(&t, t.t_total - 1e-9, &p, &v);
+    CHECK(fabs((double)(p - 5.0)) < 1e-6);
+
+    // Same-direction fast entry is untouched (2.7.3): v0 = 350,
+    // cruise 200, accel 800, D = 500 -> d_entry = +51.5625.
+    ob_trajectory_init_v0(&t, 0.0, 500.0, 200.0, 800.0, 350.0);
+    CHECK(!t.triangular);
+    CHECK(fabs((double)(t.d_entry - 51.5625)) < 1e-9);
+    ob_trajectory_sample(&t, t.t_total - 1e-9, &p, &v);
+    CHECK(fabs((double)(p - 500.0)) < 1e-6);
+}
+
+TEST(straight_against_an_opposite_drive_has_no_step_at_expiry) {
+    // drive(200, 0) leaves both wheels at +260 wheel-dps; straight
+    // (-300 mm at 150 mm/s = cruise 195.3) at accel 400 enters at
+    // v0 = -260. Pre-fix the reference sat 74.2 wheel-deg (57 mm)
+    // behind the whole move and snapped forward at expiry.
+    ob_drivebase_t db; ob_servo_t l, r;
+    setup(&db, &l, &r);
+    ob_drivebase_tick(&db, 999);
+    l.target_dps = r.target_dps = 260.0;
+    ob_drivebase_straight(&db, 1000, -300.0, 150.0, false);
+    ob_float_t p0, p1, v;
+    ob_trajectory_sample(&db.fwd, db.fwd.t_total - 1e-9, &p0, &v);
+    ob_trajectory_sample(&db.fwd, db.fwd.t_total, &p1, &v);
+    CHECK(fabs((double)(p1 - p0)) < 1e-6);
+    CHECK(db.fwd.v_peak <= db.fwd.cruise);
+    ob_float_t max_step = 0.0;
+    run_plant(&db, 1000, 6000, &max_step);
+    CHECK(ob_drivebase_is_done(&db));
+    CHECK(max_step < 2.0);                     // no one-tick cliff
+    CHECK_EQ_INT(db.landings, 0);              // a perfect plant needs none
+    // The spin twin: turn() against an opposing rotation.
+    setup(&db, &l, &r);
+    ob_drivebase_tick(&db, 999);
+    l.target_dps = -260.0;
+    r.target_dps = 260.0;
+    ob_drivebase_turn(&db, 1000, 60.0, 60.0);
+    ob_trajectory_sample(&db.turn, db.turn.t_total - 1e-9, &p0, &v);
+    ob_trajectory_sample(&db.turn, db.turn.t_total, &p1, &v);
+    CHECK(fabs((double)(p1 - p0)) < 1e-6);
+    max_step = 0.0;
+    run_plant(&db, 1000, 6000, &max_step);
+    CHECK(ob_drivebase_is_done(&db));
+    CHECK(max_step < 2.0);
+}
+
+TEST(carry_shorter_than_its_ramp_ends_at_the_reachable_speed) {
+    // then=Stop.NONE over a distance too short to reach the carried
+    // speed: speeding up from v0 to v3 covers (v3² - v0²)/2a, so the
+    // end speed is clamped to v3 = sqrt(v0² + 2aD) and the profile is
+    // one pure acceleration ending on target at v3. From rest, D = 1,
+    // cruise/carry 200, accel 1500: v3 = sqrt(3000) = 54.772,
+    // t_total = 54.772/1500 = 0.036515. Pre-fix: v_peak 146.6,
+    // t_ramp -0.0356, reference 2.90 at t_total⁻ (93.3 dps) snapping
+    // back to 1.0 and the FF stepping up to 200.
+    ob_trajectory_t t;
+    ob_float_t p, v;
+    ob_trajectory_init_v0v3(&t, 0.0, 1.0, 200.0, 1500.0, 0.0, 200.0);
+    CHECK(fabs((double)(t.v3 - sqrt(3000.0))) < 1e-9);
+    CHECK(t.t_ramp >= 0.0);
+    CHECK(t.t_ramp < 1e-9);
+    CHECK(fabs((double)(t.t_total - sqrt(3000.0) / 1500.0)) < 1e-9);
+    ob_trajectory_sample(&t, t.t_total - 1e-9, &p, &v);
+    CHECK(fabs((double)(p - 1.0)) < 1e-6);
+    CHECK(fabs((double)(v - t.v3)) < 1e-5);
+    ob_trajectory_sample(&t, t.t_total, &p, &v);
+    CHECK(p == 1.0);
+    CHECK(v == t.v3);
+    // Moving entry: v0 = 100, carry 350, D = 10 -> reach 37.5 > 10,
+    // v3 = sqrt(100² + 2·1500·10) = 200, t_total = 100/1500 = 0.066667.
+    ob_trajectory_init_v0v3(&t, 0.0, 10.0, 350.0, 1500.0, 100.0, 350.0);
+    CHECK(fabs((double)(t.v3 - 200.0)) < 1e-9);
+    CHECK(t.t_ramp >= 0.0);
+    CHECK(fabs((double)(t.t_total - 0.0666666667)) < 1e-9);
+    ob_trajectory_sample(&t, t.t_total - 1e-9, &p, &v);
+    CHECK(fabs((double)(p - 10.0)) < 1e-6);
+    CHECK(fabs((double)(v - 200.0)) < 1e-5);
+    // A carry long enough for its ramp keeps the requested end speed.
+    ob_trajectory_init_v0v3(&t, 0.0, 20.0, 200.0, 1500.0, 0.0, 200.0);
+    CHECK(t.v3 == 200.0);
+}
+
+TEST(short_carry_straight_and_curve_hand_over_without_a_step) {
+    // 1 mm carry straight from rest = 1.302 wheel-deg at accel 400:
+    // v3 = sqrt(2·400·1.302) = 32.3 wheel-dps, carried on continuously.
+    ob_drivebase_t db; ob_servo_t l, r;
+    setup(&db, &l, &r);
+    ob_drivebase_tick(&db, 999);
+    ob_drivebase_straight(&db, 1000, 1.0, 150.0, true);
+    CHECK(db.fwd.t_ramp >= 0.0);
+    CHECK(fabs((double)(db.fwd.v3
+                        - sqrt(2.0 * 400.0 * 360.0 / (88.0 * M_PI)))) < 1e-6);
+    ob_float_t max_step = 0.0;
+    run_plant(&db, 1000, 400, &max_step);
+    CHECK(max_step < 2.0);
+    CHECK(db.fwd_active);
+    CHECK(fabs((double)(l.target_dps - db.fwd.v3)) < 2.0);
+    // Short carry arc: both axes clamp proportionally.
+    setup(&db, &l, &r);
+    ob_drivebase_tick(&db, 999);
+    ob_drivebase_curve(&db, 1000, 20.0, 5.0, 150.0, true);
+    CHECK(db.fwd.t_ramp >= 0.0 && db.turn.t_ramp >= 0.0);
+    CHECK(fabs((double)(db.fwd.t_total - db.turn.t_total)) < 1e-9);
+    max_step = 0.0;
+    run_plant(&db, 1000, 400, &max_step);
+    CHECK(max_step < 2.0);
+}
+
+TEST(turn_in_place_after_a_brake_is_a_move_not_a_stop) {
+    // curve(radius=0) after a ramped brake must clear the stop flag
+    // like every other arm: blocked 20 wheel-deg short (past the
+    // forgive limit) it stays not done and tries its landing,
+    // exactly like turn().
+    ob_drivebase_t db; ob_servo_t l, r;
+    setup(&db, &l, &r);
+    ob_drivebase_tick(&db, 0);
+    l.target_dps = r.target_dps = 300.0;
+    CHECK(ob_drivebase_stop_decel(&db, 1, 400.0));
+    run_plant_track(&db, 1, 2000, 1.0);
+    CHECK(ob_drivebase_is_done(&db));
+    CHECK(db.stopping);                        // a landed stop keeps it
+    ob_drivebase_curve(&db, 2001, 0.0, 90.0, 100.0, false);
+    CHECK(!db.stopping);
+    for (int t = 2001; t < 8000; t++) {
+        ob_drivebase_tick(&db, t);
+        ob_float_t track = (diff_pos(&db) < TURN90_WHEEL_DEG - 20.0)
+                           ? 1.0 : 0.0;
+        l.observer.pos_hat += l.target_dps * track * 0.001;
+        r.observer.pos_hat += r.target_dps * track * 0.001;
+    }
+    CHECK(!ob_drivebase_is_done(&db));
+    CHECK(db.landings > 0);
 }
 
 int main(void) {
@@ -543,5 +766,10 @@ int main(void) {
     RUN(gyro_counter_steers_through_the_ramp);
     RUN(rotation_decelerates_on_the_turn_accel_and_moves_the_hold);
     RUN(stop_decel_keeps_the_move_diagnostics_but_restarts_the_integral);
+    RUN(reverse_entry_faster_than_cruise_lands_on_target);
+    RUN(straight_against_an_opposite_drive_has_no_step_at_expiry);
+    RUN(carry_shorter_than_its_ramp_ends_at_the_reachable_speed);
+    RUN(short_carry_straight_and_curve_hand_over_without_a_step);
+    RUN(turn_in_place_after_a_brake_is_a_move_not_a_stop);
     return harness_exit("drivebase_core");
 }

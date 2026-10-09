@@ -78,7 +78,10 @@ openbricks flash \
 pass it explicitly with several devices attached. (`--firmware` is
 optional too — omitted, the newest **released** image for the
 detected chip is downloaded — but when flashing a local build like
-here, point it at your build output.)
+here, point it at your build output.) A build's `firmware.bin` carries
+no version in its name, so when the hub already runs openbricks the
+flash asks for confirmation before overwriting it; pass `--yes` in
+scripts.
 
 The command erases flash, writes `firmware.bin` at the offset the image was built for — `0x0` on the S3, `0x1000` on the classic ESP32, detected from the partition-table position inside the image itself — waits for the device to boot, then pokes the name into `esp32.NVS("openbricks").hub_name` via `mpremote` and reads it back to verify. Cross-platform — works on macOS, Linux, Windows (use `COM5` etc. for `--port`).
 
@@ -151,7 +154,8 @@ GitHub Actions runs several job groups on every push / PR (see `.github/workflow
 - **`coverage`** — the firmware suite again on the gcov-instrumented unix MP build; uploads C-core coverage.
 - **`firmware`** — a matrix job (targets: `esp32`, `esp32s3`) that builds each image inside the `espressif/idf:v5.5.4` container and uploads `firmware.bin` + bootloader + partition-table per target as a workflow artifact.
 - **`qemu-smoke`** — boots the just-built ESP32-S3 image in Espressif's QEMU and asserts the bootloader reaches app entry with no panic markers.
-- **`release`** / **`build-openbricks-sdist`** / **`build-openbricks-wheels`** / **`publish-openbricks`** — firmware GitHub Releases (rolling `latest` on main pushes, versioned on `v*` tags) and the PyPI sdist + cibuildwheel wheels published on `cli/v*` tags (releases up to 0.10.24 used `openbricks/v*`).
+- **`sim-rs`** — the native sim app (`tools/sim`): fmt + clippy + tests under coverage on Linux for PRs and tags, and a release build + archive on all four platforms.
+- **`release`** / **`build-openbricks-sdist`** / **`build-openbricks-wheels`** / **`publish-openbricks`** — firmware GitHub Releases (rolling `latest` on main pushes, versioned on `v*` tags) and the PyPI sdist + cibuildwheel wheels published on `cli/v*` tags (releases up to 0.10.24 used `openbricks/v*`). A main push re-runs no test job (each was proven on the PR that produced the commit) and only builds `firmware` + `sim-rs` for the rolling release. On a tag the whole suite runs and gates the publish: a failed `test`, `c-unit`, `cpython-tests`, `openbricks-py`, `openbricks-host`, `firmware` or `sim-rs` stops a `v*` release, and a failed `test`, `c-unit`, `cpython-tests`, `openbricks-py`, `openbricks-host` or sdist/wheel build stops a `cli/v*` PyPI upload. `qemu-smoke` is `continue-on-error` and reports without gating. `tools/openbricks/tests/test_release_tags.py` plays this graph out per event.
 
 Successful PRs produce a flashable image downloadable from the Actions run.
 

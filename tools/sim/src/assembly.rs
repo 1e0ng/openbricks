@@ -7,7 +7,7 @@
 //! pose is a position plus `[roll, pitch, yaw]` in degrees with
 //! `R = Rz(yaw) · Ry(pitch) · Rx(roll)`.
 
-use crate::bundle::{Bundle, Connector, PartRecord};
+use crate::bundle::{Bundle, Connector, MeshRecord, PartRecord};
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -310,28 +310,61 @@ pub fn geometry_of<'a>(part: &'a Part, bundle: &'a Bundle) -> Geometry<'a> {
             return Geometry::None;
         }
     }
-    if part.extra.contains_key("mesh") {
-        let v = |k: &str| part.extra.get(k).cloned().unwrap_or(serde_json::Value::Null);
-        let bbox: Option<[[f64; 3]; 2]> = serde_json::from_value(v("bbox")).ok();
-        let com: Option<[f64; 3]> = serde_json::from_value(v("com")).ok();
-        let ipg: Option<[[f64; 3]; 3]> = serde_json::from_value(v("inertia_per_g")).ok();
-        if let (Some(bb), Some(c), Some(i)) = (bbox, com, ipg) {
-            let connectors: Vec<Connector> = serde_json::from_value(v("connectors")).unwrap_or_default();
-            let tris = v("mesh").get("tris").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
-            return Geometry::Imported {
-                bbox: Bbox {
-                    min: DVec3::from_array(bb[0]),
-                    max: DVec3::from_array(bb[1]),
-                },
-                com: DVec3::from_array(c),
-                inertia_per_g: mat_from_rows(&i),
-                connectors,
-                volume_mm3: v("volume_mm3").as_f64().unwrap_or(0.0),
-                tris,
-            };
-        }
+    // a record left short is no geometry: `validate` names the field
+    if part.extra.contains_key("mesh")
+        && let Ok(r) = imported_record(part)
+    {
+        return Geometry::Imported {
+            bbox: Bbox {
+                min: DVec3::from_array(r.bbox[0]),
+                max: DVec3::from_array(r.bbox[1]),
+            },
+            com: DVec3::from_array(r.com),
+            inertia_per_g: mat_from_rows(&r.inertia_per_g),
+            connectors: r.connectors,
+            volume_mm3: r.volume_mm3,
+            tris: r.mesh.tris,
+        };
     }
     if part.shapes.is_empty() { Geometry::None } else { Geometry::Shapes }
+}
+
+/// The record a part carries in the build when the library has none for
+/// it: a part fetched by number, or imported from a mesh.
+pub struct ImportedRecord {
+    pub mesh: MeshRecord,
+    pub bbox: [[f64; 3]; 2],
+    pub com: [f64; 3],
+    pub inertia_per_g: [[f64; 3]; 3],
+    pub connectors: Vec<Connector>,
+    pub volume_mm3: f64,
+}
+
+/// A part's own record, parsed whole, or the first field another writer
+/// or a hand edit left out or malformed, named. `validate` and
+/// `geometry_of` both go through here, so a record one refuses the other
+/// never draws (a record short of its box passed as geometry and drew as
+/// nothing). The connectors and the volume are optional; the rest is not.
+pub fn imported_record(part: &Part) -> Result<ImportedRecord, String> {
+    fn need<T: serde::de::DeserializeOwned>(part: &Part, key: &str) -> Result<T, String> {
+        let v = part.extra.get(key).ok_or_else(|| format!("mesh record lacks {key}"))?;
+        T::deserialize(v).map_err(|e| format!("mesh record's {key} is malformed: {e}"))
+    }
+    fn maybe<T: serde::de::DeserializeOwned + Default>(part: &Part, key: &str) -> Result<T, String> {
+        if part.extra.contains_key(key) {
+            need(part, key)
+        } else {
+            Ok(T::default())
+        }
+    }
+    Ok(ImportedRecord {
+        mesh: need(part, "mesh")?,
+        bbox: need(part, "bbox")?,
+        com: need(part, "com")?,
+        inertia_per_g: need(part, "inertia_per_g")?,
+        connectors: maybe(part, "connectors")?,
+        volume_mm3: maybe(part, "volume_mm3")?,
+    })
 }
 
 pub fn mat_from_rows(rows: &[[f64; 3]; 3]) -> DMat3 {
@@ -425,11 +458,12 @@ pub fn component_props(
         return p.clone();
     }
     let Some(comp) = doc.components.get(id) else {
-        errors.push(format!("component '{id}' does not exist"));
+        errors.push(format!("component {id} does not exist"));
         return Props::empty();
     };
-    if stack.iter().any(|s| s == id) {
-        errors.push(format!("component '{id}' contains itself"));
+    // (named as `validate` names it, so the editor lists each problem once)
+    if let Some(k) = stack.iter().position(|s| s == id) {
+        errors.push(cycle_message(&stack[k..]));
         return Props::empty();
     }
     stack.push(id.to_string());
@@ -443,11 +477,15 @@ pub fn component_props(
             match doc.parts.get(pid) {
                 Some(part) => part_props(part, bundle),
                 None => {
-                    errors.push(format!("'{}' refers to a brick '{pid}' that is not in the library", ch.name));
+                    errors.push(format!("component {id}: brick {pid} is not in the library"));
                     continue;
                 }
             }
         } else if let Some(cid) = &ch.component {
+            if !doc.components.contains_key(cid) {
+                errors.push(format!("component {id}: component {cid} does not exist"));
+                continue;
+            }
             component_props(doc, bundle, cid, memo, stack, errors)
         } else {
             continue;
@@ -921,30 +959,35 @@ pub fn ungroup(doc: &mut Document, editing: &str, name: &str) -> Result<Vec<Stri
         siblings.push(c.clone());
         made.push(c);
     }
-    let dropped = name.to_string();
-    remap_roles(doc, editing, &|seg| if seg == dropped { Some(vec![]) } else { None });
+    // a child renamed for a clash is renamed only where a role reached it through the instance
+    // (a sibling that merely shares the name was renamed too, and its role then pointed at the
+    // brick that came out of the group), before the instance's own segment goes
     if !rename.is_empty() {
-        let editing_owned = editing.to_string();
         let root = doc.robot.root.clone();
         let comps = doc.components.clone();
         for value in doc.robot.roles.values_mut() {
             let mut segs: Vec<String> = value.split('/').map(String::from).collect();
             let mut comp_id = Some(root.clone());
-            for seg in segs.iter_mut() {
-                if comp_id.as_deref() == Some(editing_owned.as_str())
-                    && let Some(nn) = rename.get(seg)
-                {
-                    *seg = nn.clone();
+            let mut k = 0;
+            while k < segs.len() {
+                if comp_id.as_deref() == Some(editing) && segs[k] == name {
+                    if let Some(nn) = segs.get(k + 1).and_then(|child| rename.get(child)) {
+                        segs[k + 1] = nn.clone();
+                    }
+                    break;
                 }
-                let child = comp_id
+                comp_id = comp_id
                     .as_deref()
                     .and_then(|c| comps.get(c))
-                    .and_then(|c| c.children.iter().find(|ch| &ch.name == seg));
-                comp_id = child.and_then(|ch| ch.component.clone());
+                    .and_then(|c| c.children.iter().find(|ch| ch.name == segs[k]))
+                    .and_then(|ch| ch.component.clone());
+                k += 1;
             }
             *value = segs.join("/");
         }
     }
+    let dropped = name.to_string();
+    remap_roles(doc, editing, &|seg| if seg == dropped { Some(vec![]) } else { None });
     let comp = doc.components.get_mut(editing).unwrap();
     let idx = comp.children.iter().position(|c| c.name == name).unwrap();
     comp.children.remove(idx);
@@ -1362,6 +1405,53 @@ pub fn example() -> Document {
     serde_json::from_str(EXAMPLE).expect("the built-in example is valid")
 }
 
+/// Whether a file's problems make it no assembly at all (the format, or
+/// a root that names no component): refused at every door, where other
+/// problems are listed and the build opens.
+pub fn not_an_assembly(errs: &[String]) -> bool {
+    errs.iter().any(|e| e.starts_with("format") || e.starts_with("robot.root"))
+}
+
+/// A cycle of components (`members` in the order they contain each
+/// other), named once however it was entered: by its first member in id
+/// order, through the rest.
+fn cycle_message(members: &[String]) -> String {
+    let k = members.iter().enumerate().min_by_key(|(_, m)| *m).map(|(k, _)| k).unwrap_or(0);
+    let through: Vec<&str> = members[k + 1..].iter().chain(&members[..k]).map(String::as_str).collect();
+    if through.is_empty() {
+        format!("component {} contains itself", members[k])
+    } else {
+        format!("component {} contains itself through {}", members[k], through.join("/"))
+    }
+}
+
+/// The components that contain themselves, through whatever others, each
+/// cycle once. Rolled up, the inner use counts for nothing and the view
+/// skips it, so a file holding one is a broken build, not a light one.
+pub fn component_cycles(doc: &Document) -> Vec<String> {
+    fn visit(doc: &Document, id: &str, stack: &mut Vec<String>, done: &mut HashSet<String>, out: &mut Vec<String>) {
+        if done.contains(id) {
+            return;
+        }
+        let Some(comp) = doc.components.get(id) else { return };
+        stack.push(id.to_string());
+        for cid in comp.children.iter().filter_map(|ch| ch.component.as_deref()) {
+            match stack.iter().position(|s| s == cid) {
+                Some(k) => out.push(cycle_message(&stack[k..])),
+                None => visit(doc, cid, stack, done, out),
+            }
+        }
+        stack.pop();
+        done.insert(id.to_string());
+    }
+    let mut out = Vec::new();
+    let mut done = HashSet::new();
+    for id in doc.components.keys() {
+        visit(doc, id, &mut Vec::new(), &mut done, &mut out);
+    }
+    out
+}
+
 /// Problems a file has before it can be edited.
 pub fn validate(doc: &Document, bundle: &Bundle) -> Vec<String> {
     let mut errs = Vec::new();
@@ -1375,12 +1465,34 @@ pub fn validate(doc: &Document, bundle: &Bundle) -> Vec<String> {
         if p.mass_g <= 0.0 {
             errs.push(format!("brick {id} needs mass_g > 0"));
         }
+        // a part the library has no record for carries its own (fetched by number, imported
+        // from a mesh): checked whole, so a record left short is named here, not drawn as nothing
+        let own_record = p.extra.contains_key("mesh");
         if let Some(num) = &p.ldraw {
-            if !bundle.parts.contains_key(num) && !p.extra.contains_key("mesh") {
-                errs.push(format!("brick {id} needs LDraw part {num}, which this library does not carry"));
+            if !bundle.parts.contains_key(num) {
+                if own_record {
+                    if let Err(e) = imported_record(p) {
+                        errs.push(format!("brick {id}'s {e}"));
+                    }
+                } else {
+                    errs.push(format!("brick {id} needs LDraw part {num}, which this library does not carry"));
+                }
             }
-        } else if p.shapes.is_empty() && !p.extra.contains_key("mesh") {
+        } else if own_record {
+            if let Err(e) = imported_record(p) {
+                errs.push(format!("brick {id}'s {e}"));
+            }
+        } else if p.shapes.is_empty() {
             errs.push(format!("brick {id} needs a shape, an LDraw number or a mesh"));
+        }
+        // a cylinder runs along x, y or z (z when the file leaves it out): anything else drew,
+        // measured and weighed as z with nothing said
+        for s in &p.shapes {
+            if let Shape::Cylinder { axis, .. } = s
+                && !matches!(axis.as_str(), "x" | "y" | "z")
+            {
+                errs.push(format!("brick {id}: cylinder axis must be x, y or z, got {axis:?}"));
+            }
         }
     }
     for (id, c) in &doc.components {
@@ -1397,6 +1509,7 @@ pub fn validate(doc: &Document, bundle: &Bundle) -> Vec<String> {
             }
         }
     }
+    errs.extend(component_cycles(doc));
     errs
 }
 
@@ -1603,6 +1716,173 @@ mod tests {
         assert!(doc.components.contains_key("unit"));
         assert!(group(&mut doc, "robot", &["a".into()], "unit").is_err());
         assert!(group(&mut doc, "robot", &[], "x").is_err());
+    }
+
+    #[test]
+    fn ungroup_renames_a_clashing_child_only_on_the_roles_that_reached_it_through_the_group() {
+        // a top-level x and a unit holding an x: ungrouped, the inner x comes out as x_2, and
+        // the role that pointed at the top-level x used to follow it there
+        let comp_inst = |name: &str, cid: &str| Instance {
+            name: name.into(),
+            part: None,
+            component: Some(cid.into()),
+            pos: [0.0; 3],
+            rot: [0.0; 3],
+            locked: false,
+            color: None,
+        };
+        let full = part(
+            8.0,
+            Shape::Box {
+                size: [40.0, 20.0, 10.0],
+                pos: [0.0; 3],
+            },
+        );
+        let mut doc = doc_with(
+            vec![("full", full)],
+            vec![
+                (
+                    "robot",
+                    vec![
+                        inst("x", "full", [0.0; 3], [0.0; 3]),
+                        comp_inst("unit", "unit"),
+                        comp_inst("inner", "inner"),
+                    ],
+                ),
+                (
+                    "unit",
+                    vec![inst("x", "full", [50.0, 0.0, 0.0], [0.0; 3]), comp_inst("inner", "inner")],
+                ),
+                ("inner", vec![inst("y", "full", [0.0, 50.0, 0.0], [0.0; 3])]),
+            ],
+        );
+        doc.robot.roles.insert("imu".into(), "x".into());
+        doc.robot.roles.insert("caster".into(), "unit/x".into());
+        doc.robot.roles.insert("gyro".into(), "unit/inner/y".into());
+        doc.robot.roles.insert("light".into(), "inner/y".into());
+        let made = ungroup(&mut doc, "robot", "unit").unwrap();
+        assert_eq!(made, vec!["x_2".to_string(), "inner_2".to_string()]);
+        assert_eq!(doc.robot.roles["imu"], "x", "the sibling that merely shares the name");
+        assert_eq!(doc.robot.roles["caster"], "x_2");
+        assert_eq!(doc.robot.roles["gyro"], "inner_2/y", "a deeper path keeps its tail");
+        assert_eq!(doc.robot.roles["light"], "inner/y");
+    }
+
+    #[test]
+    fn a_short_mesh_record_is_named_not_drawn_as_nothing() {
+        // a part that carries its own record (fetched by number, imported from a mesh) with a
+        // field another writer or a hand edit left out passed as geometry and drew as nothing
+        let mesh = serde_json::json!({"verts": 0, "tris": 0, "pos": "", "nrm": "", "idx": ""});
+        let mut p = part(
+            1.0,
+            Shape::Box {
+                size: [1.0; 3],
+                pos: [0.0; 3],
+            },
+        );
+        p.shapes.clear();
+        p.ldraw = Some("9999".into());
+        p.extra.insert("mesh".into(), mesh);
+        let check = |p: &Part| -> (Vec<String>, bool) {
+            let doc = doc_with(vec![("x", p.clone())], vec![("robot", vec![inst("x", "x", [0.0; 3], [0.0; 3])])]);
+            let imported = matches!(geometry_of(&doc.parts["x"], &bundle()), Geometry::Imported { .. });
+            (validate(&doc, &bundle()), imported)
+        };
+        assert_eq!(check(&p), (vec!["brick x's mesh record lacks bbox".to_string()], false));
+        p.extra.insert("bbox".into(), serde_json::json!([[0, 0, 0], [1, 1, 1]]));
+        p.extra.insert("com".into(), serde_json::json!([0, 0, 0]));
+        p.extra.insert("inertia_per_g".into(), serde_json::json!([]));
+        let (errs, imported) = check(&p);
+        assert!(
+            errs.len() == 1 && errs[0].starts_with("brick x's mesh record's inertia_per_g is malformed: "),
+            "{errs:?}"
+        );
+        assert!(!imported);
+        p.extra
+            .insert("inertia_per_g".into(), serde_json::json!([[1, 0, 0], [0, 1, 0], [0, 0, 1]]));
+        assert_eq!(check(&p), (vec![], true), "whole: geometry, nothing to say");
+        // a part with no number relies on the record just the same
+        p.ldraw = None;
+        assert_eq!(check(&p), (vec![], true));
+        p.extra.remove("com");
+        assert_eq!(check(&p), (vec!["brick x's mesh record lacks com".to_string()], false));
+        // the rest is optional, but not malformed
+        p.extra.insert("com".into(), serde_json::json!([0, 0, 0]));
+        p.extra.insert("connectors".into(), serde_json::json!("none"));
+        let (errs, imported) = check(&p);
+        assert!(
+            errs.len() == 1 && errs[0].starts_with("brick x's mesh record's connectors is malformed: "),
+            "{errs:?}"
+        );
+        assert!(!imported);
+    }
+
+    #[test]
+    fn a_cylinder_axis_outside_x_y_z_is_refused_by_name() {
+        // a wheel whose axis a hand edit wrote as "Y" drew, measured and weighed as if along z
+        // with nothing said; the file's error list names the brick and the value
+        let cyl = |axis: &str| Shape::Cylinder {
+            radius: 30.0,
+            length: 10.0,
+            axis: axis.into(),
+            pos: [0.0; 3],
+        };
+        let check = |p: Part| {
+            let doc = doc_with(vec![("wheel", p)], vec![("robot", vec![inst("w", "wheel", [0.0; 3], [0.0; 3])])]);
+            validate(&doc, &bundle())
+        };
+        for ok in ["x", "y", "z"] {
+            assert!(check(part(20.0, cyl(ok))).is_empty(), "{ok}");
+        }
+        for bad in ["Y", "up", "y ", ""] {
+            assert_eq!(
+                check(part(20.0, cyl(bad))),
+                vec![format!("brick wheel: cylinder axis must be x, y or z, got {bad:?}")]
+            );
+        }
+        // left out of the file, the axis is z, as every reader takes it
+        let p: Part = serde_json::from_value(serde_json::json!({
+            "name": "w", "category": "wheel", "mass_g": 20.0,
+            "shapes": [{"type": "cylinder", "radius": 30.0, "length": 10.0}]
+        }))
+        .unwrap();
+        assert_eq!(p.shapes, vec![cyl("z")]);
+        assert!(check(p).is_empty());
+    }
+
+    #[test]
+    fn a_component_inside_itself_is_named_on_the_way_in() {
+        // a file with a -> b -> a passed validation, opened, and rolled the inner use up as
+        // nothing
+        let comp_inst = |name: &str, cid: &str| Instance {
+            name: name.into(),
+            part: None,
+            component: Some(cid.into()),
+            pos: [0.0; 3],
+            rot: [0.0; 3],
+            locked: false,
+            color: None,
+        };
+        let mut doc = doc_with(
+            vec![],
+            vec![
+                ("robot", vec![comp_inst("b0", "b")]),
+                ("a", vec![comp_inst("b1", "b")]),
+                ("b", vec![comp_inst("a2", "a")]),
+            ],
+        );
+        let cycle = "component a contains itself through b".to_string();
+        assert_eq!(validate(&doc, &bundle()), vec![cycle.clone()], "once, however it is entered");
+        assert_eq!(component_cycles(&doc), vec![cycle.clone()]);
+        // the roll-up names it the same way, and ends
+        let mut errs = vec![];
+        let props = component_props(&doc, &bundle(), "robot", &mut HashMap::new(), &mut vec![], &mut errs);
+        assert_eq!((props.count, errs), (0, vec![cycle]));
+        doc.components.get_mut("b").unwrap().children = vec![comp_inst("b2", "b")];
+        assert_eq!(validate(&doc, &bundle()), vec!["component b contains itself".to_string()]);
+        doc.components.get_mut("b").unwrap().children.clear();
+        assert!(validate(&doc, &bundle()).is_empty());
+        assert!(component_cycles(&example()).is_empty());
     }
 
     #[test]

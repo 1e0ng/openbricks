@@ -315,7 +315,8 @@ def _build_parser():
     )
     p_wb.add_argument("file", nargs="?", default=None,
                       help="A robot.assembly.json to open (otherwise the "
-                           "browser's last draft, else the example).")
+                           "browser's last draft, kept while it fits the "
+                           "browser's storage, else the example).")
     p_wb.add_argument("--bricks", action="append", default=[], metavar="FILE",
                       help="An extra brick bundle from ``openbricks bricks "
                            "convert`` to add to the library (repeatable).")
@@ -396,11 +397,26 @@ def _build_parser():
     return parser
 
 
+# The sim's subcommands. Anything else at the front of the line is an
+# argument to ``app``: bare ``openbricks sim`` is the sim (4.2.0), and
+# so are ``openbricks sim robot.assembly.json`` and ``openbricks sim
+# --bricks more.json`` — the forms docs/simulator.md documents.
+_COMMANDS = ("app", "workbench", "preview", "run")
+# The options that belong to the top-level parser, not to ``app``.
+_TOP_LEVEL_FLAGS = ("-h", "--help", "--version")
+
+
 def main(argv=None):
     parser = _build_parser()
+    argv = list(argv if argv is not None else sys.argv[1:])
+    # Decided BEFORE parsing: argparse rejects an unknown first token
+    # (exit 2, "invalid choice") before a parse-then-retry could see
+    # that no subcommand was given, so the documented bare forms
+    # with a file or an option never reached ``app``.
+    if not argv or (argv[0] not in _COMMANDS
+                    and argv[0] not in _TOP_LEVEL_FLAGS):
+        argv = ["app"] + argv
     args = parser.parse_args(argv)
-    if args.command is None:
-        args = parser.parse_args(["app"] + list(argv if argv is not None else sys.argv[1:]))
     if args.command == "app":
         return cmd_app(args)
     if args.command == "workbench":

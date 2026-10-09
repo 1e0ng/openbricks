@@ -93,6 +93,16 @@ class ShippedBundleTests(unittest.TestCase):
         self.assertEqual(len(axle), 1)
         self.assertAlmostEqual(axle[0]["length"], 30.0, places=1)
         self.assertEqual([c["kind"] for c in p["3713"]["connectors"]], ["axle_hole"])
+        # an axle hole's four rounded arms are no pin hole as well
+        for num in ("32270", "32269", "32123"):
+            self.assertEqual([c["kind"] for c in p[num]["connectors"]], ["axle_hole"], num)
+        # the 24-tooth gear draws its axle hole from plain rectangles: found on the mesh
+        gear = p["3648"]["connectors"]
+        self.assertEqual(sorted(c["kind"] for c in gear), ["axle_hole"] + ["pin_hole"] * 4, gear)
+        (hole,) = [c for c in gear if c["kind"] == "axle_hole"]
+        self.assertEqual(hole["centre"], [0.0, 0.0, 0.0])
+        self.assertEqual(abs(hole["axis"][1]), 1.0)
+        self.assertAlmostEqual(hole["length"], 7.7, places=3)
         joiner = [c for c in p["62462"]["connectors"] if c["kind"] == "pin_hole"]
         self.assertEqual(len(joiner), 2)
         # the "Type 2" pins, drawn from plain cylinders: found on the mesh (they had none, and
@@ -351,6 +361,45 @@ class FetchLibraryTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             bricks.fetch_library(dest=dest, opener=opener)
         self.assertFalse(bricks.library_present(dest))
+
+
+    def test_a_member_outside_the_library_is_refused_and_nothing_lands(self):
+        good = {"ldraw/parts/1.dat": "0 One\n", "ldraw/p/x.dat": "0 X\n", "ldraw/LDConfig.ldr": "0 Configuration\n"}
+        top = os.path.join(self.tmp.name, "a", "b")
+        dest = os.path.join(top, "lib")
+        for bad in ("ldraw/../../escaped.txt", "ldraw//abs.txt", "ldraw/parts/../../../escaped.txt",
+                    "ldraw/parts\\..\\..\\escaped.txt", "ldraw/C:/escaped.txt"):
+            opener = self.opener_for(dict(good, **{bad: "pwned\n"}))
+            with self.assertRaises(RuntimeError) as cm:
+                bricks.fetch_library(dest=dest, opener=opener, force=True)
+            self.assertIn(repr(bad), str(cm.exception))
+            written = [os.path.relpath(os.path.join(d, f), self.tmp.name) for d, _, fs in os.walk(self.tmp.name) for f in fs]
+            self.assertEqual(written, [], (bad, written))         # nothing outside dest, nor inside it
+            self.assertFalse(bricks.library_present(dest))
+            self.assertFalse(os.path.exists(os.path.join(top, "escaped.txt")))
+            self.assertEqual([n for n in os.listdir(dest) if n.startswith("ldraw-")], [], "no staging left")
+
+    def test_a_download_that_dies_leaves_no_partial_archive(self):
+        import http.client
+
+        class Dying(_FakeResponse):
+            def read(self, n=-1):
+                if self.tell() == 0:
+                    return super().read(1024)
+                raise http.client.IncompleteRead(b"", 1000)
+        dest = os.path.join(self.tmp.name, "lib")
+        payload = _zip_bytes({"ldraw/parts/1.dat": "0 One\n" * 2000, "ldraw/p/x.dat": "0 X\n"})
+        with self.assertRaises(http.client.IncompleteRead):
+            bricks.fetch_library(dest=dest, opener=lambda url: Dying(payload))
+        self.assertFalse(os.path.exists(os.path.join(dest, "complete.zip.part")))
+        self.assertEqual(os.listdir(dest), [])
+
+        class Interrupted(_FakeResponse):
+            def read(self, n=-1):
+                raise KeyboardInterrupt
+        with self.assertRaises(KeyboardInterrupt):
+            bricks.fetch_library(dest=dest, opener=lambda url: Interrupted(payload))
+        self.assertEqual(os.listdir(dest), [])
 
 
 class FetchProgressTests(unittest.TestCase):

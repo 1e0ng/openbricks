@@ -223,6 +223,8 @@ pub struct App {
     fetch_note: Option<(String, String)>,
     /// Where the 3D view was drawn last frame, in screen points.
     view_rect: egui::Rect,
+    /// The window title last sent, so it is sent again only when it changes.
+    last_title: String,
     items: Vec<DrawItem>,
     item_tops: Vec<String>,
     simulate: SimulateTab,
@@ -328,8 +330,9 @@ impl App {
         self.fetch_note.as_ref().map(|n| n.1.clone()).unwrap_or_default()
     }
 
-    /// The drafts an earlier session kept come back: the build (unless a
-    /// file was named on the command line) and the route.
+    /// The drafts an earlier session kept come back, the build and the
+    /// route: called when the sim was started without a file (a file
+    /// named on the command line opens, or stops the launch).
     pub fn restore_drafts(&mut self, now_ms: i64) {
         self.editor.restore_draft(now_ms);
         self.simulate.restore_draft(now_ms);
@@ -479,6 +482,7 @@ impl App {
             fetch: None,
             fetch_note: None,
             view_rect: egui::Rect::ZERO,
+            last_title: String::new(),
             items: vec![],
             item_tops: vec![],
             simulate: SimulateTab::new(python),
@@ -916,8 +920,7 @@ impl App {
         let delta = response.drag_delta();
         match &self.drag {
             Drag::Orbit if response.dragged() => {
-                self.viewport.camera.yaw -= delta.x * 0.5;
-                self.viewport.camera.pitch = (self.viewport.camera.pitch + delta.y * 0.5).clamp(-89.0, 89.0);
+                self.viewport.camera.orbit(delta.x, delta.y);
             }
             Drag::Pan if response.dragged() => {
                 let c = &mut self.viewport.camera;
@@ -1085,10 +1088,10 @@ impl App {
             self.editor.snap_selection(true);
         }
         if lock {
-            self.editor.lock_selection(true);
+            self.lock_selection(true);
         }
         if unlock {
-            self.editor.lock_selection(false);
+            self.lock_selection(false);
         }
         if copy {
             self.copy(ui.ctx());
@@ -1710,10 +1713,10 @@ impl App {
             self.copy(ui.ctx());
         }
         if locked < total && ui.button("Lock").on_hover_text("⌘L: locked items stay where they are").clicked() {
-            self.editor.lock_selection(true);
+            self.lock_selection(true);
         }
         if locked > 0 && ui.button("Unlock").on_hover_text("⌘⇧L").clicked() {
-            self.editor.lock_selection(false);
+            self.lock_selection(false);
         }
         if ui.button("Duplicate").on_hover_text("⌘D").clicked() {
             self.editor.duplicate_selection();
@@ -1749,12 +1752,29 @@ impl App {
         });
     }
 
+    /// A change to the robot's own fields (its name, spawn pose or
+    /// weighed mass) is an edit like a brick's: the build is unsaved,
+    /// and it is a new revision for the draft keeper to see — the dirty
+    /// flag alone is not, so a draft would never carry it.
+    fn robot_changed(&mut self) {
+        self.editor.dirty = true;
+        self.editor.recompute();
+    }
+
+    /// Lock or unlock the selection: an edit the draft keeper sees, like
+    /// the robot's fields (the editor's own call takes the undo point and
+    /// marks the build unsaved, but is no new revision).
+    fn lock_selection(&mut self, locked: bool) {
+        self.editor.lock_selection(locked);
+        self.editor.recompute();
+    }
+
     fn robot_ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("Robot");
         let mut name = self.editor.doc.robot.name.clone();
         if ui.text_edit_singleline(&mut name).changed() {
             self.editor.doc.robot.name = name;
-            self.editor.dirty = true;
+            self.robot_changed();
         }
         let pr = self.editor.root_props.clone();
         Self::computed_block(ui, &pr, "assembly frame");
@@ -1783,36 +1803,44 @@ impl App {
         });
         if let Some((role, v)) = changed {
             self.editor.set_role(&role, v);
+            // a role is a change of the same kind: unsaved, and a revision for the draft
+            self.editor.recompute();
         }
         ui.add_space(6.0);
         ui.strong("Spawn on the mat");
-        ui.horizontal(|ui| {
-            let spawn = &mut self.editor.doc.robot.spawn;
-            let mut changed = false;
-            ui.weak("x");
-            changed |= ui
-                .add(egui::DragValue::new(&mut spawn.pos_mm[0]).speed(1.0).suffix(" mm"))
-                .changed();
-            ui.weak("y");
-            changed |= ui
-                .add(egui::DragValue::new(&mut spawn.pos_mm[1]).speed(1.0).suffix(" mm"))
-                .changed();
-            ui.weak("yaw");
-            changed |= ui.add(egui::DragValue::new(&mut spawn.yaw_deg).speed(1.0).suffix("°")).changed();
-            if changed {
-                self.editor.dirty = true;
-            }
-        });
+        let spawn_changed = ui
+            .horizontal(|ui| {
+                let spawn = &mut self.editor.doc.robot.spawn;
+                let mut changed = false;
+                ui.weak("x");
+                changed |= ui
+                    .add(egui::DragValue::new(&mut spawn.pos_mm[0]).speed(1.0).suffix(" mm"))
+                    .changed();
+                ui.weak("y");
+                changed |= ui
+                    .add(egui::DragValue::new(&mut spawn.pos_mm[1]).speed(1.0).suffix(" mm"))
+                    .changed();
+                ui.weak("yaw");
+                changed |= ui.add(egui::DragValue::new(&mut spawn.yaw_deg).speed(1.0).suffix("°")).changed();
+                changed
+            })
+            .inner;
+        if spawn_changed {
+            self.robot_changed();
+        }
         ui.add_space(6.0);
         ui.strong("Check against the scale");
         let mut weighed = self.editor.doc.robot.measured_mass_g.unwrap_or(0.0);
-        ui.horizontal(|ui| {
-            ui.weak("weighed");
-            if ui.add(egui::DragValue::new(&mut weighed).speed(1.0).suffix(" g")).changed() {
-                self.editor.doc.robot.measured_mass_g = if weighed > 0.0 { Some(weighed) } else { None };
-                self.editor.dirty = true;
-            }
-        });
+        let weighed_changed = ui
+            .horizontal(|ui| {
+                ui.weak("weighed");
+                ui.add(egui::DragValue::new(&mut weighed).speed(1.0).suffix(" g")).changed()
+            })
+            .inner;
+        if weighed_changed {
+            self.editor.doc.robot.measured_mass_g = if weighed > 0.0 { Some(weighed) } else { None };
+            self.robot_changed();
+        }
         if let Some(w) = self.editor.doc.robot.measured_mass_g {
             let d = pr.mass - w;
             ui.label(format!(
@@ -2342,13 +2370,12 @@ impl App {
         egui::Panel::top("sim-controls").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let can_use = self.editor.path.is_some() && !self.editor.dirty;
+                // a disabled button shows the disabled hint alone (egui opens the hover text on
+                // an enabled widget only), so the reason it is greyed goes there
                 if ui
                     .add_enabled(can_use, egui::Button::new("Use the workbench's build"))
-                    .on_hover_text(if self.editor.dirty {
-                        "save the assembly first"
-                    } else {
-                        "the assembly open in the Workbench tab"
-                    })
+                    .on_hover_text("the assembly open in the Workbench tab")
+                    .on_disabled_hover_text(use_build_hint(self.editor.path.is_some(), self.editor.dirty))
                     .clicked()
                     && let Some(p) = self.editor.path.clone()
                 {
@@ -2427,19 +2454,10 @@ impl App {
         let response = ui.add(egui::Image::new((tex, egui::vec2(size.0 as f32, size.1 as f32))).sense(egui::Sense::click_and_drag()));
         self.view_rect = response.rect;
         let rect = response.rect;
-        if editing && let Some(at) = response.hover_pos() {
-            // the wheel zooms, and so does a pinch (a trackpad's), about the point under the pointer
-            zoom_at_pointer(
-                ui,
-                &mut self.viewport,
-                &items,
-                (at.x - rect.min.x, at.y - rect.min.y),
-                50.0,
-                50000.0,
-            );
-        }
         let (w, h) = (size.0 as f32, size.1 as f32);
         let local = |p: egui::Pos2| (p.x - rect.min.x, p.y - rect.min.y);
+        // the camera the image above was drawn with: what the pointer is judged against, and the
+        // labels placed by, this frame — the zoom below moves the camera for the next one
         let cam = self.viewport.camera.clone();
         let ground = |x: f32, y: f32| {
             let (o, d) = cam.ray(x, y, w, h);
@@ -2559,8 +2577,7 @@ impl App {
         let delta = response.drag_delta();
         match &self.drag {
             Drag::Orbit if response.dragged() => {
-                self.viewport.camera.yaw += delta.x * 0.5;
-                self.viewport.camera.pitch = (self.viewport.camera.pitch + delta.y * 0.5).clamp(-89.0, 89.0);
+                self.viewport.camera.orbit(delta.x, delta.y);
             }
             Drag::Pan if response.dragged() => {
                 let c = &mut self.viewport.camera;
@@ -2637,6 +2654,12 @@ impl App {
                 _ => {}
             }
             self.drag = Drag::None;
+        }
+        if editing && let Some(at) = response.hover_pos() {
+            // the wheel zooms, and so does a pinch (a trackpad's), about the point under the
+            // pointer — after every pick and drag of this frame, as the orbit and pan above, so
+            // nothing is judged against a camera the image has not shown yet
+            zoom_at_pointer(ui, &mut self.viewport, &items, local(at), 50.0, 50000.0);
         }
         if editing && !ui.ctx().egui_wants_keyboard_input() {
             let (esc, del, dup, fit, turn) = ui.input(|i| {
@@ -2872,6 +2895,24 @@ fn zoom_at_pointer(ui: &egui::Ui, viewport: &mut Viewport, items: &[DrawItem], a
     }
 }
 
+/// The window's title: the build's file name (or `example`), starred
+/// while it is unsaved.
+fn window_title(name: &str, dirty: bool) -> String {
+    format!("Openbricks Sim — {name}{}", if dirty { "*" } else { "" })
+}
+
+/// Why the Simulate tab's "Use the workbench's build" is greyed: the
+/// build has no file yet, or has changed since it was saved.
+fn use_build_hint(has_file: bool, dirty: bool) -> &'static str {
+    if !has_file {
+        "save the assembly to a file first"
+    } else if dirty {
+        "save the assembly first"
+    } else {
+        "the assembly open in the Workbench tab"
+    }
+}
+
 /// A build's name from its file name: what precedes the first dot
 /// (`gate.assembly.json` is `gate`).
 fn build_stem(name: &str) -> String {
@@ -2920,9 +2961,12 @@ impl App {
                 egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui, gpu));
             }
         }
-        if self.editor.dirty {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Title(format!("Openbricks Sim — {}*", self.title_name())));
+        // the window's title names the build, starred while unsaved: sent when it changes (an
+        // edit, a Save, Save as… or Open), not every frame
+        let title = window_title(&self.title_name(), self.editor.dirty);
+        if title != self.last_title {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.last_title = title;
         }
         self.poll_fetch(ui, gpu);
         self.autosave(std::time::Instant::now(), crate::drafts::now_ms());
@@ -3064,6 +3108,32 @@ mod tests {
         });
         h.step();
         h.step();
+    }
+
+    /// Where `text` was painted in the last frame (its origin and size),
+    /// for what the views draw with the painter rather than as widgets.
+    fn painted(h: &Harness<'_, App>, text: &str) -> Option<(Pos2, egui::Vec2)> {
+        fn find(shape: &egui::Shape, text: &str) -> Option<(Pos2, egui::Vec2)> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == text => Some((t.pos, t.galley.size())),
+                egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, text)),
+                _ => None,
+            }
+        }
+        h.output().shapes.iter().find_map(|c| find(&c.shape, text))
+    }
+
+    /// The window titles the last frame sent.
+    fn titles_sent(h: &Harness<'_, App>) -> Vec<String> {
+        h.output()
+            .viewport_output
+            .values()
+            .flat_map(|v| v.commands.iter())
+            .filter_map(|c| match c {
+                egui::ViewportCommand::Title(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
@@ -3823,7 +3893,8 @@ mod tests {
         drag_to(&mut h, corner + egui::vec2(10.0, 0.0), Modifiers::NONE);
         drag_to(&mut h, corner + egui::vec2(60.0, 0.0), Modifiers::NONE);
         release(&mut h, corner + egui::vec2(60.0, 0.0), PointerButton::Primary);
-        assert_ne!(h.state().viewport.camera.yaw, yaw0);
+        let yaw = h.state().viewport.camera.yaw;
+        assert!(yaw0 - yaw > 20.0, "a drag to the right turns the yaw down: {yaw} from {yaw0}");
         assert!(h.state().editor.selection.is_empty());
         // pan: the right button moves the target
         let target0 = h.state().viewport.camera.target;
@@ -4457,7 +4528,12 @@ mod tests {
         assert!(matches!(h.state().drag, Drag::Orbit), "the empty map orbits");
         drag_to(&mut h, empty + egui::vec2(60.0, 0.0), Modifiers::NONE);
         release(&mut h, empty + egui::vec2(60.0, 0.0), PointerButton::Primary);
-        assert!((h.state().viewport.camera.yaw - cam0.yaw).abs() > 5.0);
+        let yaw = h.state().viewport.camera.yaw;
+        assert!(
+            cam0.yaw - yaw > 5.0,
+            "the map orbits as the Workbench does: {yaw} from {}",
+            cam0.yaw
+        );
         press(&mut h, empty, PointerButton::Secondary, Modifiers::NONE);
         drag_to(&mut h, empty + egui::vec2(20.0, 20.0), Modifiers::NONE);
         drag_to(&mut h, empty + egui::vec2(60.0, 60.0), Modifiers::NONE);
@@ -5099,8 +5175,269 @@ mod tests {
         let mut h = harness(&gpu, None);
         h.get_by_label("Simulate").click();
         steps(&mut h, 2);
-        assert!(h.query_by_label("The map appears here once the run server has built it").is_some() || !h.state().simulate.scene_loaded());
-        assert!(h.state().simulate.status().contains("no run server") || !h.state().simulate.is_live());
+        // no Python: no run server, nothing built, and the view says so where the map would be —
+        // in its own words, then the status line with what holds it up
+        let tab = &h.state().simulate;
+        assert!(!tab.scene_loaded() && !tab.is_live());
+        assert_eq!(tab.status(), "no run server");
+        let line = "no run server — no Python interpreter: start the sim with `openbricks sim` (or pass --python)";
+        assert_eq!(tab.status_line(), line);
+        let (placeholder, _) = painted(&h, "The map appears here once the run server has built it").expect("the placeholder");
+        let (status, _) = painted(&h, line).expect("the status line under it");
+        assert!(status.y > placeholder.y, "{status:?} under {placeholder:?}");
+    }
+
+    #[test]
+    fn the_greyed_use_build_button_says_why() {
+        assert_eq!(use_build_hint(false, false), "save the assembly to a file first");
+        assert_eq!(use_build_hint(false, true), "save the assembly to a file first");
+        assert_eq!(use_build_hint(true, true), "save the assembly first");
+        assert_eq!(use_build_hint(true, false), "the assembly open in the Workbench tab");
+        let Some(gpu) = gpu() else { return };
+        let dir = std::env::temp_dir().join(format!("ob-app-use-build-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut h = harness(&gpu, None);
+        h.get_by_label("Simulate").click();
+        steps(&mut h, 2);
+        // the pointer rests on the button for egui's half second, and the hint for its state shows
+        let rest = |h: &mut Harness<'_, App>| {
+            h.get_by_label("Use the workbench's build").hover();
+            steps(h, 45);
+        };
+        assert!(h.get_by_label("Use the workbench's build").accesskit_node().is_disabled());
+        rest(&mut h);
+        assert!(h.query_by_label("save the assembly to a file first").is_some(), "no file yet");
+        let file = dir.join("robot.assembly.json");
+        h.state_mut().editor.save_to(&file);
+        rest(&mut h);
+        assert!(!h.get_by_label("Use the workbench's build").accesskit_node().is_disabled());
+        assert!(
+            h.query_by_label("the assembly open in the Workbench tab").is_some(),
+            "saved: offered"
+        );
+        assert!(h.query_by_label("save the assembly to a file first").is_none());
+        h.state_mut().editor.selection = vec!["imu".into()];
+        h.state_mut().editor.nudge_selection([8.0, 0.0, 0.0]);
+        rest(&mut h);
+        assert!(h.get_by_label("Use the workbench's build").accesskit_node().is_disabled());
+        assert!(h.query_by_label("save the assembly first").is_some(), "changed since: save first");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_window_title_names_the_build_and_stars_it_while_unsaved() {
+        assert_eq!(window_title("example", false), "Openbricks Sim — example");
+        assert_eq!(window_title("robot.assembly.json", true), "Openbricks Sim — robot.assembly.json*");
+        let Some(gpu) = gpu() else { return };
+        let dir = std::env::temp_dir().join(format!("ob-app-title-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // the first frame (the harness draws several as it is built) named the example; nothing
+        // is sent again while it stays as it is
+        let mut h = harness(&gpu, None);
+        assert_eq!(h.state().last_title, "Openbricks Sim — example");
+        h.step();
+        assert!(titles_sent(&h).is_empty(), "unchanged: not sent again");
+        // an edit stars it
+        h.state_mut().editor.selection = vec!["imu".into()];
+        h.state_mut().editor.nudge_selection([8.0, 0.0, 0.0]);
+        h.step();
+        assert_eq!(titles_sent(&h), ["Openbricks Sim — example*"]);
+        // Save (as) names the file and takes the star off; Open names the other file
+        let file = dir.join("robot.assembly.json");
+        h.state_mut().editor.save_to(&file);
+        h.step();
+        assert_eq!(titles_sent(&h), ["Openbricks Sim — robot.assembly.json"]);
+        let other = dir.join("gate.assembly.json");
+        std::fs::copy(&file, &other).unwrap();
+        h.state_mut().editor.load_path(other);
+        h.step();
+        assert_eq!(titles_sent(&h), ["Openbricks Sim — gate.assembly.json"]);
+        // (the open dropped the selection)
+        h.state_mut().editor.selection = vec!["imu".into()];
+        h.state_mut().editor.nudge_selection([8.0, 0.0, 0.0]);
+        h.step();
+        assert_eq!(titles_sent(&h), ["Openbricks Sim — gate.assembly.json*"]);
+        h.state_mut().editor.undo();
+        h.step();
+        assert_eq!(
+            titles_sent(&h),
+            ["Openbricks Sim — gate.assembly.json"],
+            "undone to the saved state"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_robots_own_fields_are_drafted_too() {
+        use std::time::{Duration, Instant};
+        let Some(gpu) = gpu() else { return };
+        let dir = std::env::temp_dir().join(format!("ob-app-robot-drafts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut h = harness(&gpu, None);
+        h.state_mut().drafts_in(dir.clone());
+        steps(&mut h, 2);
+        // saved: the build belongs to a file, and nothing is unsaved
+        let file = dir.join("robot.assembly.json");
+        h.state_mut().editor.save_to(&file);
+        steps(&mut h, 2);
+        assert!(!h.state().editor.dirty);
+        // the robot's name, typed into its field: unsaved, and the draft carries it once settled
+        let name0 = h.state().editor.doc.robot.name.clone();
+        {
+            let field = h
+                .get_all_by_role(egui::accesskit::Role::TextInput)
+                .find(|n| n.value().as_deref() == Some(name0.as_str()))
+                .expect("the robot's name field");
+            field.click();
+        }
+        h.step();
+        {
+            let field = h
+                .get_all_by_role(egui::accesskit::Role::TextInput)
+                .find(|n| n.value().as_deref() == Some(name0.as_str()))
+                .expect("the robot's name field");
+            assert!(field.is_focused());
+            field.type_text("x");
+        }
+        h.step();
+        let name = format!("{name0}x");
+        assert_eq!(h.state().editor.doc.robot.name, name);
+        assert!(h.state().editor.dirty);
+        let settled = Instant::now() + Duration::from_secs(3);
+        h.state_mut().autosave(settled, 3_000);
+        let (text, note) = crate::drafts::take(&dir, crate::drafts::BUILD).expect("the renamed build is drafted");
+        assert!(text.contains(&format!("\"name\": \"{name}\"")), "{text}");
+        assert_eq!(note.path.as_deref(), Some(file.as_path()));
+        // saved again, the spawn pose dragged (the first of the x, y, yaw and weighed fields)
+        h.state_mut().editor.save_to(&file);
+        steps(&mut h, 2);
+        assert!(crate::drafts::take(&dir, crate::drafts::BUILD).is_none(), "saved: the draft goes");
+        let x0 = h.state().editor.doc.robot.spawn.pos_mm[0];
+        let field = h.get_all_by_role(egui::accesskit::Role::SpinButton).next().unwrap().rect().center();
+        press(&mut h, field, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, field + egui::vec2(10.0, 0.0), Modifiers::NONE);
+        drag_to(&mut h, field + egui::vec2(60.0, 0.0), Modifiers::NONE);
+        release(&mut h, field + egui::vec2(60.0, 0.0), PointerButton::Primary);
+        let x = h.state().editor.doc.robot.spawn.pos_mm[0];
+        assert!(x > x0, "the drag moved the spawn: {x} from {x0}");
+        assert!(h.state().editor.dirty);
+        h.state_mut().autosave(Instant::now() + Duration::from_secs(3), 6_000);
+        let (text, _) = crate::drafts::take(&dir, crate::drafts::BUILD).expect("the moved spawn is drafted");
+        let drafted: assembly::Document = serde_json::from_str(&text).unwrap();
+        assert_eq!(drafted.robot.spawn.pos_mm[0], x);
+        // and the weighed mass (the last field)
+        h.state_mut().editor.save_to(&file);
+        steps(&mut h, 2);
+        let field = h.get_all_by_role(egui::accesskit::Role::SpinButton).last().unwrap().rect().center();
+        press(&mut h, field, PointerButton::Primary, Modifiers::NONE);
+        drag_to(&mut h, field + egui::vec2(10.0, 0.0), Modifiers::NONE);
+        drag_to(&mut h, field + egui::vec2(60.0, 0.0), Modifiers::NONE);
+        release(&mut h, field + egui::vec2(60.0, 0.0), PointerButton::Primary);
+        let weighed = h.state().editor.doc.robot.measured_mass_g.expect("weighed");
+        assert!(weighed > 0.0);
+        h.state_mut().autosave(Instant::now() + Duration::from_secs(3), 9_000);
+        let (text, _) = crate::drafts::take(&dir, crate::drafts::BUILD).expect("the weighed mass is drafted");
+        let drafted: assembly::Document = serde_json::from_str(&text).unwrap();
+        assert_eq!(drafted.robot.measured_mass_g, Some(weighed));
+        // a role, and a lock, the same
+        h.state_mut().editor.save_to(&file);
+        steps(&mut h, 2);
+        h.state_mut().editor.selection = vec!["imu".into()];
+        steps(&mut h, 2);
+        h.get_by_label("Lock").click();
+        h.step();
+        assert!(h.state().editor.is_locked("imu") && h.state().editor.dirty);
+        h.state_mut().autosave(Instant::now() + Duration::from_secs(3), 12_000);
+        let (text, _) = crate::drafts::take(&dir, crate::drafts::BUILD).expect("the lock is drafted");
+        let drafted: assembly::Document = serde_json::from_str(&text).unwrap();
+        let root = drafted.robot.root.clone();
+        assert!(drafted.components[&root].children.iter().any(|c| c.name == "imu" && c.locked));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_run_of_edits_is_drafted_after_the_last_one_settles() {
+        use std::time::{Duration, Instant};
+        let Some(gpu) = gpu() else { return };
+        let dir = std::env::temp_dir().join(format!("ob-app-run-drafts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = App::with_gpu(&gpu, real_bundle(), None, None);
+        app.drafts_in(dir.clone());
+        app.editor.selection = vec!["imu".into()];
+        let t0 = Instant::now();
+        // a nudge every 100 ms for 3 s (a drag's frames bump the revision the same way): nothing
+        // is kept while the run goes on, not even once the first change is 2 s old
+        for i in 0..=30 {
+            let d = if i % 2 == 0 { 8.0 } else { -8.0 };
+            app.editor.nudge_selection([d, 0.0, 0.0]);
+            app.autosave(t0 + Duration::from_millis(100 * i), 100 * i as i64);
+            assert!(crate::drafts::take(&dir, crate::drafts::BUILD).is_none(), "still changing at {i}");
+        }
+        let x = app.editor.selected_instances()[0].pos[0];
+        let last = t0 + Duration::from_secs(3);
+        app.autosave(last + Duration::from_millis(1999), 4_999);
+        assert!(crate::drafts::take(&dir, crate::drafts::BUILD).is_none(), "not settled yet");
+        app.autosave(last + Duration::from_secs(2), 5_000);
+        let (text, note) = crate::drafts::take(&dir, crate::drafts::BUILD).expect("kept once the run settled");
+        let drafted: assembly::Document = serde_json::from_str(&text).unwrap();
+        let root = drafted.robot.root.clone();
+        let imu = drafted.components[&root].children.iter().find(|c| c.name == "imu").unwrap();
+        assert_eq!((imu.pos[0], note.kept_ms), (x, 5_000), "the draft is the build as the run left it");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_zoom_frame_on_the_map_places_labels_by_the_camera_the_image_was_drawn_with() {
+        let Some(gpu) = gpu() else { return };
+        let Some(fake) = fake_server("zoom") else { return };
+        let mut h = harness(&gpu, None);
+        h.state_mut().simulate = SimulateTab::new_with_env(Some(fake.python.clone()), fake.env.clone());
+        h.get_by_label("Map").click();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !h.state().simulate.scene_loaded() && std::time::Instant::now() < deadline {
+            h.step();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(h.state().simulate.scene_loaded(), "{}", h.state().simulate.status_line());
+        steps(&mut h, 3);
+        // the prop selected, its name is drawn over it
+        h.get_by_label("clef · clef").click();
+        steps(&mut h, 2);
+        assert_eq!(h.state().simulate.selected_prop.as_deref(), Some("clef"));
+        let rect = h.state().view_rect;
+        let (w, hh) = (rect.width(), rect.height());
+        // the pointer rests on the map, away from the prop
+        let at = rect.center() + egui::vec2(-200.0, 180.0);
+        h.input_mut().events.push(Event::PointerMoved(at));
+        steps(&mut h, 2);
+        let cam0 = h.state().viewport.camera.clone();
+        let want = h.state().simulate.prop_labels(&cam0, w, hh);
+        assert_eq!(want.len(), 1);
+        // one pinch, one frame: the image is drawn with the camera as it was, the camera closes
+        // in for the next frame, and the label is placed by the image shown
+        h.input_mut().events.push(Event::Zoom(1.5));
+        h.step();
+        let cam1 = h.state().viewport.camera.clone();
+        assert!(cam1.distance < cam0.distance, "zoomed: {} from {}", cam1.distance, cam0.distance);
+        let ahead = h.state().simulate.prop_labels(&cam1, w, hh);
+        assert!(
+            (ahead[0].0.x - want[0].0.x).abs() > 2.0,
+            "the zoom moves the label: {:?} vs {:?}",
+            ahead[0].0,
+            want[0].0
+        );
+        let (pos, size) = painted(&h, "clef").expect("the label");
+        assert!(
+            (pos.x - (rect.min.x + want[0].0.x)).abs() < 0.5 && (pos.y + size.y - (rect.min.y + want[0].0.y)).abs() < 0.5,
+            "painted at {pos:?} (size {size:?}) for {:?} in {rect:?}; a frame ahead would be {:?}",
+            want[0].0,
+            ahead[0].0
+        );
+        h.state_mut().simulate.shutdown();
+        let _ = std::fs::remove_dir_all(&fake.dir);
     }
 
     #[test]

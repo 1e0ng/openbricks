@@ -194,7 +194,9 @@ class QTRArray:
 
     Each array owns its pins for the run: a second array (or
     :class:`QTRChannel`) naming a pin this one already holds is
-    refused at construction, by GPIO number and both arrays. Two
+    refused at construction, by GPIO number and both arrays. The
+    claims end with the program, so the next run may wire those pins
+    differently. Two
     arrays on disjoint pins coexist — the front window on GPIO 1..8
     and a rear pair on GPIO 9/10 — and each calibrates and stores its
     own file (:meth:`save_calibration` records the wiring, so the
@@ -219,7 +221,7 @@ class QTRArray:
             _pins.check(p, role, output=False)
             self._check_adc_capable(p)
         for p in pins:
-            _pins.claim(p, role)
+            _pins.claim(p, role, program=True)
         self._pins = tuple(int(p) for p in pins)
         self._threshold = int(dark_threshold)
         self._adcs = [self._make_adc(p) for p in pins]

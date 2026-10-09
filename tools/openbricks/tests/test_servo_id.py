@@ -368,6 +368,54 @@ class HubPathTests(unittest.TestCase):
                 old_id=None, baudrate=1_000_000, timeout=0.02,
                 tx=14, rx=41, scan_timeout=5.0))
 
+    def test_hub_program_runs_through_the_launchers_program_boundary(self):
+        # The hub program must reach the servo bus only after the
+        # launcher's program-boundary wipe: a previous program's
+        # serial-wheel slots keep the native bus pump transacting on
+        # UART1 until run_program clears them. So it is staged to a
+        # scratch file and run through launcher.run_program — never
+        # pasted straight into the raw REPL — and the scratch file is
+        # deleted afterwards.
+        import ast
+        seen = {}
+        orig = sid_mod._hub_async
+
+        async def _capture(name, program, scan_timeout):
+            seen["program"] = program
+            return sid_mod._HUB_OK_SENTINEL
+        sid_mod._hub_async = _capture
+        self.addCleanup(setattr, sid_mod, "_hub_async", orig)
+        self.assertEqual(sid_mod.run(self._hub_args()), 0)
+        prog = seen["program"].decode()
+        ast.parse(prog)
+        write = prog.index("open('/servo_id.py', 'wb')")
+        run_at = prog.index("launcher.run_program('/servo_id.py')")
+        remove = prog.index("os.remove('/servo_id.py')")
+        self.assertLess(write, run_at)
+        self.assertLess(run_at, remove)
+        # the bus is never opened by the pasted program itself, and the
+        # button's program slot is left alone
+        self.assertNotIn("_SCServoBus", prog)
+        self.assertNotIn("/program.", prog)
+
+    def test_hub_exec_stages_the_composed_program(self):
+        # Small payloads stage in plain repr framing: the staged bytes
+        # are exactly the hub program.
+        exec_prog = sid_mod._compose_hub_exec(b"print('x')\n", "ls")
+        self.assertIn(repr(b"print('x')\n").encode(), exec_prog)
+
+    def test_baudrate_with_name_is_refused(self):
+        # The hub's bus runs at the driver's 1 Mbaud: an adapter-only
+        # flag passed with -n must be refused, not silently dropped.
+        with self.assertRaises(ServoIdError) as ctx:
+            sid_mod.run(self._hub_args(baudrate=500_000))
+        self.assertIn("--baudrate", str(ctx.exception))
+
+    def test_timeout_with_name_is_refused(self):
+        with self.assertRaises(ServoIdError) as ctx:
+            sid_mod.run(self._hub_args(timeout=0.05))
+        self.assertIn("--timeout", str(ctx.exception))
+
     def _hub_args(self, **kw):
         d = dict(new_id=3, port=None, name="ls", scan=False,
                  old_id=None, baudrate=1_000_000, timeout=0.02,
@@ -425,6 +473,8 @@ class HubSessionTests(unittest.TestCase):
                 return False
 
         calls = {"upload": None, "restore": 0}
+        # kept on the test so a session that raises stays observable
+        self.last_calls = calls
 
         async def _fake_connect(name, scan_timeout=5.0):
             return _FakeLink()
@@ -478,15 +528,10 @@ class HubSessionTests(unittest.TestCase):
             raise RuntimeError("link dropped")
         with self.assertRaises(RuntimeError):
             self._session(_stream)
-        # calls dict is rebuilt per _session; verify via a fresh run
-        # that the restore leg is in the finally path.
-        async def _ok(blink, link, out):
-            out.write("x")
-        import io
-        from unittest.mock import patch
-        with patch("sys.stdout", io.StringIO()):
-            _, calls = self._session(_ok)
-        self.assertEqual(calls["restore"], 1)
+        # the dying session itself restored the idle loop, after the
+        # program went up
+        self.assertEqual(self.last_calls["upload"], b"PROGRAM")
+        self.assertEqual(self.last_calls["restore"], 1)
 
     def test_connect_failure_is_a_servo_id_error(self):
         import asyncio
@@ -614,6 +659,15 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(args.tx, 14)
         self.assertEqual(args.rx, 41)
         self.assertEqual(args.scan_timeout, 5.0)
+
+    def test_help_names_both_transports(self):
+        sub = self.parser._subparsers._group_actions[0]
+        # argparse wraps to the terminal width: compare words, not lines
+        text = " ".join(sub.choices["servo-id"].format_help().split())
+        self.assertNotIn("no hub involved", text)
+        self.assertIn("USB half-duplex adapter", text)
+        self.assertIn("through the hub over BLE", text)
+        self.assertIn("Adapter path only", text)
 
     def test_old_id_flag(self):
         args = self.parser.parse_args(

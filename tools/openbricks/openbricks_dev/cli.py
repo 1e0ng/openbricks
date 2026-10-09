@@ -92,7 +92,9 @@ def _build_parser():
     p_flash.add_argument(
         "--yes", action="store_true",
         help="Skip the confirmation prompt when the target firmware "
-             "is the same version as (or older than) the current one.",
+             "is the same version as (or older than) the current one, "
+             "or when a --firmware file name carries no version to "
+             "compare (e.g. a local build's firmware.bin).",
     )
     p_flash.add_argument(
         "--verbose", "-v", action="store_true",
@@ -260,18 +262,22 @@ def _build_parser():
     )
 
     # ---- servo-id ----
+    from openbricks_dev.servo_id import DEFAULT_BAUDRATE, DEFAULT_TIMEOUT
     p_servo = sub.add_parser(
         "servo-id",
-        help="Assign a Feetech SCS/STS servo's bus ID over a USB "
-             "serial adapter.",
+        help="Assign a Feetech SCS/STS servo's bus ID, over a USB "
+             "serial adapter or through the hub.",
         description="Scans the bus (IDs 0..253), rewrites the servo's "
                     "EEPROM ID register, and verifies the result. "
                     "With several servos attached, --old-id is "
                     "required so the tool never guesses which one to "
-                    "re-ID. Wire the servo to a USB half-duplex "
-                    "adapter (e.g. the URT-2 board) — this talks "
-                    "directly to the adapter's serial port, no hub "
-                    "involved.",
+                    "re-ID. Two transports: by default (or with -p) "
+                    "it talks directly to a USB half-duplex adapter's "
+                    "serial port (e.g. the URT-2 board), so a fresh "
+                    "servo can be given its ID before it meets the "
+                    "hub; with -n NAME it runs the scan/re-ID through "
+                    "the hub over BLE, with the servo still wired to "
+                    "the robot.",
     )
     p_servo.add_argument(
         "new_id", type=int, nargs="?", default=None,
@@ -279,7 +285,7 @@ def _build_parser():
     )
     p_servo.add_argument(
         "-p", "--port", default=None,
-        help="Serial port of the USB adapter, e.g. "
+        help="Adapter path only: serial port of the USB adapter, e.g. "
              "/dev/cu.usbmodem123. Omitted (and no -n): "
              "auto-detected when exactly one USB serial device is "
              "connected.",
@@ -313,13 +319,16 @@ def _build_parser():
              "than one servo is attached; otherwise auto-detected.",
     )
     p_servo.add_argument(
-        "--baudrate", type=int, default=1_000_000,
-        help="Bus baudrate. Default: 1000000 (Feetech factory).",
+        "--baudrate", type=int, default=DEFAULT_BAUDRATE,
+        help="Adapter path only (refused with -n; the hub's bus runs "
+             "at 1000000): bus baudrate. Default: 1000000 (Feetech "
+             "factory).",
     )
     p_servo.add_argument(
-        "--timeout", type=float, default=0.02,
-        help="Per-ping serial read timeout in seconds. Default: 0.02 "
-             "(a full 254-ID scan takes ~5 s).",
+        "--timeout", type=float, default=DEFAULT_TIMEOUT,
+        help="Adapter path only (refused with -n): per-ping serial "
+             "read timeout in seconds. Default: 0.02 (a full 254-ID "
+             "scan takes ~5 s).",
     )
 
     # ---- paste-probe (measure the hub's raw-paste burst limit) ----

@@ -408,6 +408,34 @@ class RunFlowTests(unittest.TestCase):
         self.assertIn(b"fwneedsrc", joined)
         self.assertIn("hi", out.getvalue())
 
+    def test_a_remembered_old_hub_upgraded_since_is_probed_and_gets_mpy(self):
+        # The cache says 1.91.1 (too old for .mpy) but the hub was
+        # flashed to 4.35.0 since: an old remembered version is probed
+        # again rather than trusted, so no stale "predates" notice and
+        # the compiled program is staged at once.
+        from openbricks_dev import _hubcache
+        _hubcache.remember_firmware("RobotA", "1.91.1")
+        fake = _ScriptedLink(self._standard_responses(
+            b"hi\r\n", fw_version=b"fwv=4.35.0\r\n", probe=True))
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            return fake
+
+        err = io.StringIO()
+        with patch.object(run_mod.NUSLink, "connect", side_effect=_fake_connect), \
+             patch("sys.stdout", new_callable=io.StringIO) as out, \
+             patch("sys.stderr", err):
+            rc = run_mod.run(_args(script=self.tmp.name))
+        self.assertEqual(rc, 0)
+        joined = b"".join(fake.writes)
+        self.assertEqual(joined.count(b"\x05A\x01"), 2, "probe + ONE staged program")
+        self.assertIn(b"'/program.mpy'", joined)
+        self.assertIn(b"fwneedsrc", joined)
+        self.assertIn(b"os.remove('/program.py')", joined)
+        self.assertNotIn("predates precompiled", err.getvalue())
+        self.assertIn("hi", out.getvalue())
+        self.assertEqual(_hubcache.firmware_version("RobotA"), (4, 35, 0))
+
     def test_happy_path_streams_stdout(self):
         fake = _ScriptedLink(self._standard_responses(
             b"hello from hub\r\n"))
@@ -1441,6 +1469,22 @@ class UploadGuardTests(unittest.TestCase):
                         cm.exception)
         self.assertIn("'RobotA'", str(cm.exception))
         self.assertEqual(connects, [])
+
+    def test_an_unopenable_lock_file_is_a_run_error_before_any_scan(self):
+        from openbricks_dev import _uplock
+        missing = os.path.join(self.dir, "no-such-dir")
+
+        async def _fake_connect(name, scan_timeout=5.0, debug=False):
+            raise AssertionError("must not scan without the lock")
+
+        with patch.object(_uplock, "LOCK_DIR", missing), \
+             patch.object(run_mod.NUSLink, "connect",
+                          side_effect=_fake_connect), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(run_mod.RunError) as cm:
+                run_mod.run(_args(script=self.tmp.name))
+        self.assertIn(os.path.join(missing, "openbricks-upload-RobotA.lock"),
+                      str(cm.exception))
 
     def test_run_holds_the_lock_through_staging_and_frees_it_to_stream(self):
         from openbricks_dev import _uplock

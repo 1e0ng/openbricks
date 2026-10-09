@@ -933,9 +933,18 @@ class SimDriveBase:
         self.runtime.add_tick(self._tick)
         self.runtime.add_tick(self.left._tick)
         self.runtime.add_tick(self.right._tick)
-        self.left._attached  = True
-        self.right._attached = True
+        self._claim_wheels()
         self._attached = True
+
+    def _claim_wheels(self) -> None:
+        # Arming takes both wheels back to closed-loop control
+        # (firmware drivebase_register attaches both servos): a
+        # sustained duty left by an open-loop ``run()``/``dc()``
+        # would otherwise win every motor tick, so the wheel kept
+        # its old power and the move never finished.
+        for motor in (self.left, self.right):
+            motor._dc_duty = None
+            motor._attached = True
 
     def _detach(self) -> None:
         if not self._attached:
@@ -1016,8 +1025,7 @@ class SimDriveBase:
         rt.add_tick(self.left._tick)
         rt.add_tick(self.right._tick)
         self._attached = True
-        self.left._attached = True
-        self.right._attached = True
+        self._claim_wheels()
         self._imu_tick_active = True
 
     def _detach_imu_tick(self) -> None:
