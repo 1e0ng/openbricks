@@ -55,7 +55,10 @@ Moves take a ``then=`` end state — a
 ``Stop.BRAKE`` / ``Stop.HOLD`` end actively. ``then=Stop.NONE`` on
 ``straight`` and ``curve`` does NOT decelerate at the end: the move
 finishes at cruise speed and the wheels keep it until the next
-command, so chained segments flow through their seams::
+command, so chained segments flow through their seams. A segment
+too short to reach cruise under ``settings.acceleration`` hands over
+at the speed it does reach on its target (the acceleration is never
+raised to make it)::
 
     from openbricks.parameters import Stop
 
@@ -130,10 +133,13 @@ nothing, and the error names the motor:
     and that it really has that bus id — `openbricks servo-id --scan`
     lists the ids actually answering on the bus.
 
-(``openbricks servo-id`` talks through the URT-2's USB port. With
-the servo already wired to the hub,
-``openbricks run -n NAME examples/servo_set_id.py`` scans and
-re-IDs through the hub instead — same safety contract.)
+(``openbricks servo-id`` talks through the URT-2's USB port, or,
+with the servo already wired to the hub, through the hub:
+``openbricks servo-id -n NAME --scan`` lists the ids answering on
+the hub's bus and ``openbricks servo-id -n NAME 3`` re-IDs the one
+servo wired to it — the same safety contract either way. The hub
+route runs as a program, so it gets the launcher's program-boundary
+reset, a run log and the stop button.)
 
 Both wheels are verified when the DriveBase is constructed, and on
 every move afterwards. If one goes silent mid-move the controller
@@ -176,7 +182,9 @@ that hand-off).
 To re-zero the heading frame mid-mission (say, after squaring up on
 a line), call ``db.reset()`` between moves — afterwards the robot's
 CURRENT pose is heading zero for both the drive base and
-``imu.heading()``, atomically:
+``imu.heading()``, atomically. ``imu.heading()`` re-zeroes on an IMU
+that can reset its heading (the ICM-45686); a BNO055 keeps reporting
+its absolute fused heading, and the drive base re-bases against it:
 
 .. code-block:: python
 

@@ -36,6 +36,7 @@ An exported map is one JSON file: the map with a ``files`` table
 holding every file of its folder (:func:`pack`, :func:`unpack`).
 """
 import base64
+import binascii
 import copy
 import json
 import os
@@ -160,9 +161,14 @@ def _prop_body(p, map_dir):
             else:
                 raise MapError("prop %r color=%r unrecognised — use a numeric LDraw code or one of %s"
                                % (name, color, sorted(COLOR_KEYWORDS)))
-        return lego_mjcf.emit_prop_body(name, pos, path.read_text(), total_mass_kg=float(p["mass"]),
-                                        color_override=code, yaw_deg=yaw, pitch_deg=pitch,
-                                        roll_deg=roll, freejoint=not fixed)
+        # the LDraw reader and emitter raise plain ValueError / KeyError (no part instances, a
+        # malformed 1-line, a part the registry lacks): named for the prop, like a build's faults
+        try:
+            return lego_mjcf.emit_prop_body(name, pos, path.read_text(), total_mass_kg=float(p["mass"]),
+                                            color_override=code, yaw_deg=yaw, pitch_deg=pitch,
+                                            roll_deg=roll, freejoint=not fixed)
+        except (ValueError, KeyError) as e:
+            raise MapError("prop %r (%s): %s" % (name, path, e.args[0] if e.args else e)) from e
     path = _resolve(p["file"], map_dir)
     if not path.is_file():
         raise MapError("prop %r references missing file %r" % (name, str(path)))
@@ -346,6 +352,9 @@ def _prop_from_placeholder(w):
     a = w.attrib
     if "name" not in a or "pos" not in a:
         raise MapError("a <%s> needs a name and a pos" % w.tag)
+    for key in (("ldr", "mass") if w.tag == "lego_prop" else ("file",)):
+        if key not in a:
+            raise MapError("prop %r: a <%s> needs a %s" % (a["name"], w.tag, key))
     p = {"name": a["name"]}
     if w.tag == "lego_prop":
         p["ldr"] = a["ldr"]
@@ -379,12 +388,32 @@ def numbered(name, n):
     return "%s-%d%s%s" % (stem, n, dot, ext)
 
 
+def _file_refs(m):
+    """Every file the map names, as ``(kind, name, noun, ref)``: a
+    prop's ``ldr`` or ``file`` (``("prop", "clef", "model", ref)``), a
+    texture's or a mesh's ``file`` (``("texture", "mat_tex", "file", ref)``)."""
+    out = [("prop", p["name"], "model", p["ldr" if "ldr" in p else "file"]) for p in m.get("props", [])]
+    for section, kind in (("textures", "texture"), ("meshes", "mesh")):
+        out += [(kind, a.get("name", "?"), "file", a["file"]) for a in m.get(section, []) if a.get("file")]
+    return out
+
+
+def _inside(root, ref):
+    """Whether a relative ``ref`` stays inside ``root`` once resolved
+    (``../shared/x.ldr`` does not)."""
+    return (root / ref).resolve().is_relative_to(root.resolve())
+
+
 def pack(m, map_dir):
     """The map as one JSON object to export: the map, and a ``files``
     table holding every file of its folder (the artwork, meshes, props'
     models, notes) — a model it names by absolute path (added since the
     map was loaded) is taken in under ``props/`` and named from there.
-    A JSON file stays JSON, a text file text, anything else base64."""
+    A file it names by a relative path must be in the folder (one that
+    leads outside it, ``../shared/x.ldr``, is refused: the export would
+    not carry it), and an asset (artwork, a mesh) named by an absolute
+    path is refused too: only a prop's model is taken in. A JSON file
+    stays JSON, a text file text, anything else base64."""
     check(m)
     m = copy.deepcopy(m)
     files = {}
@@ -393,12 +422,21 @@ def pack(m, map_dir):
         for path in sorted(root.rglob("*")):
             if path.is_file() and path.name != FILE and "__pycache__" not in path.parts:
                 files[path.relative_to(root).as_posix()] = path
+    for kind, name, noun, ref in _file_refs(m):
+        ref = Path(ref)
+        if ref.is_absolute():
+            if kind != "prop":
+                raise MapError("%s %r: its %s %s is named by an absolute path; an export names files by their "
+                               "place in the map's folder" % (kind, name, noun, ref))
+            continue
+        if root is None or not (root / ref).is_file():
+            raise MapError("%s %r: its %s %s is not in the map's folder" % (kind, name, noun, ref))
+        if not _inside(root, ref):
+            raise MapError("%s %r: its %s %s lies outside the map's folder" % (kind, name, noun, ref))
     for p in m.get("props", []):
         key = "ldr" if "ldr" in p else "file"
         ref = Path(p[key])
         if not ref.is_absolute():
-            if root is None or not (root / ref).is_file():
-                raise MapError("prop %r: its model %s is not in the map's folder" % (p["name"], ref))
             continue
         if not ref.is_file():
             raise MapError("prop %r: its model %s is gone" % (p["name"], ref))
@@ -431,8 +469,14 @@ def _encode(path):
 
 def unpack(obj, dest_dir):
     """Write an exported map into ``dest_dir``: its files, then its
-    ``map.json``. Returns the map. A file named outside the folder is
-    refused."""
+    ``map.json``. Returns the map. Refused before anything is written: a
+    file named outside the folder, a model or an asset the map names by
+    a relative path that the export does not carry (a bare ``map.json``
+    is no export), a model named by an absolute path or one leading
+    outside (an export never carries those); and, as it is written, a
+    body that is not a string, base64 that does not decode (strict: the
+    export's own has no padding faults or stray characters) or a file
+    that cannot be written (a path both a file and a folder)."""
     check(obj, "the export")
     files = obj.get("files", {})
     if not isinstance(files, dict):
@@ -445,26 +489,58 @@ def unpack(obj, dest_dir):
         if not isinstance(body, dict) or len(body) != 1:
             raise MapError("the export's file %r must hold json, text or base64" % rel)
         (kind, value), = body.items()
-        target = dest / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if kind == "json":
-            target.write_text(json.dumps(value, indent=2) + "\n")
-        elif kind == "text":
-            target.write_text(value)
-        elif kind == "base64":
-            target.write_bytes(base64.b64decode(value))
-        else:
+        if kind not in ("json", "text", "base64"):
             raise MapError("the export's file %r must hold json, text or base64, not %r" % (rel, kind))
+        if kind != "json" and not isinstance(value, str):
+            raise MapError("the export's file %r must hold json, text or base64; its %s is not text" % (rel, kind))
+    for kind, name, noun, ref in _file_refs(obj):
+        parts = Path(ref).parts
+        if Path(ref).is_absolute() or ".." in parts:
+            raise MapError("the export's %s %r names its %s outside the folder: %s" % (kind, name, noun, ref))
+        if Path(ref).as_posix() not in files:
+            raise MapError("the export lacks the %s of %s %r: %s" % (noun, kind, name, ref))
+    for rel, body in files.items():
+        (kind, value), = body.items()
+        target = dest / rel
+        if kind == "base64":
+            try:
+                value = base64.b64decode(value, validate=True)
+            except binascii.Error as e:
+                raise MapError("the export's file %r is not base64: %s" % (rel, e)) from e
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if kind == "json":
+                target.write_text(json.dumps(value, indent=2) + "\n")
+            elif kind == "text":
+                target.write_text(value)
+            else:
+                target.write_bytes(value)
+        except OSError as e:
+            raise MapError("the export's file %r could not be written: %s" % (rel, e)) from e
     m = {k: v for k, v in obj.items() if k != "files"}
     save(m, dest / FILE)
     return m
 
 
 def export_to(m, map_dir, path):
-    """Write the map, packed, to ``path``."""
-    with open(path, "w") as fh:
-        json.dump(pack(m, map_dir), fh, indent=1)
-        fh.write("\n")
+    """Write the map, packed, to ``path`` — packed first, then written
+    beside ``path`` and moved onto it, so a refused pack or a write that
+    fails half way leaves the export already there as it was and
+    nothing beside it."""
+    obj = pack(m, map_dir)
+    target = Path(path)
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        with open(tmp, "w") as fh:
+            json.dump(obj, fh, indent=1)
+            fh.write("\n")
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def read_export(path):

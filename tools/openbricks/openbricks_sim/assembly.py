@@ -99,13 +99,23 @@ def quat_from_mat(m):
 
 
 # ---------------------------------------------------------- part geometry
+CYLINDER_AXES = ("x", "y", "z")
+
+
+def _cylinder_axis(shape):
+    """The axis a cylinder shape runs along: ``x``, ``y`` or ``z``, z
+    when the file leaves it out. :func:`part_props` has refused any
+    other value by the brick's name before the geometry is read."""
+    return shape.get("axis", "z")
+
+
 def _shape_half(shape):
     t = shape.get("type")
     if t == "box":
         return [s / 2.0 for s in shape["size"]]
     if t == "cylinder":
         r, h = shape["radius"], shape["length"] / 2.0
-        return {"x": [h, r, r], "y": [r, h, r]}.get(shape.get("axis", "z"), [r, r, h])
+        return {"x": [h, r, r], "y": [r, h, r], "z": [r, r, h]}[_cylinder_axis(shape)]
     return [shape["radius"]] * 3
 
 
@@ -126,7 +136,7 @@ def _shape_inertia(shape, m):
     if t == "cylinder":
         ax = m * shape["radius"] ** 2 / 2
         tr = m / 12 * (3 * shape["radius"] ** 2 + shape["length"] ** 2)
-        d = {"x": [ax, tr, tr], "y": [tr, ax, tr]}.get(shape.get("axis", "z"), [tr, tr, ax])
+        d = {"x": [ax, tr, tr], "y": [tr, ax, tr], "z": [tr, tr, ax]}[_cylinder_axis(shape)]
         return [[d[0], 0, 0], [0, d[1], 0], [0, 0, d[2]]]
     k = 0.4 * m * shape["radius"] ** 2
     return [[k, 0, 0], [0, k, 0], [0, 0, k]]
@@ -144,6 +154,12 @@ def part_props(part, bundle):
     shapes = part.get("shapes") or []
     if not shapes:
         raise AssemblyError("brick %r has no geometry (no LDraw number, mesh or shapes)" % part.get("name", "?"))
+    for s in shapes:
+        # a cylinder runs along x, y or z (z when the file leaves it out): anything else was
+        # measured and weighed as z with nothing said, so the runtime agreed with a wrong picture
+        if s.get("type") == "cylinder" and _cylinder_axis(s) not in CYLINDER_AXES:
+            raise AssemblyError("brick %r: cylinder axis must be x, y or z, got %r"
+                                % (part.get("name", "?"), _cylinder_axis(s)))
     vols = [_shape_volume(s) for s in shapes]
     vt = sum(vols)
     masses = [mass * v / vt if vt > 0 else mass / len(shapes) for v in vols]

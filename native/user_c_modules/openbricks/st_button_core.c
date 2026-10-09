@@ -85,12 +85,15 @@ int ob_button_event_is_stale(ob_button_t *b, ob_button_event_t e) {
         return 0;
     }
     if (e == OB_BUTTON_PRESSED) {
-        // The hysteresis machine cannot emit a second PRESSED edge
-        // without a RELEASED in between, so consuming this one edge
-        // retires the marker: whatever presses next is new input —
-        // after the release-chatter cooldown.
-        b->stale_press = 0;
-        b->chatter_ticks = OB_BUTTON_CHATTER_TICKS;
+        // The start press confirming late: consume the edge but KEEP
+        // the marker until that press ends, so the release-chatter
+        // cooldown is anchored at its release (below), exactly as for
+        // a press already stable at arm time. Arming the cooldown
+        // here ran it from the confirmation instead: a start press
+        // held past the cooldown released unprotected and its
+        // re-contact hard-stopped the run. The hysteresis machine
+        // cannot emit a second PRESSED edge without a RELEASED in
+        // between, so the kept marker can never eat a real stop.
         b->n_stale++;
         return 1;
     }

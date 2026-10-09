@@ -93,25 +93,34 @@ class ProtocolTests(unittest.TestCase):
             saved = mapfile.load(os.path.join(tmp, "worlds", "wired", "map.json"))
             clef = next(p for p in props.props_in(saved) if p["name"] == "clef")
             self.assertEqual((clef["yaw"], clef["pitch"], clef["roll"], clef["pos"][2]), (90.0, 90.0, 0.0, 0.03))
-            # exported as one JSON file, imported back as a map of the user's own (the map's name is
-            # the shipped model's, so the alias is its slug); a missing file is an error on the wire
+            # exported as one JSON file under the user's name (the map is theirs since it was saved,
+            # with no reload between), imported back as a map of the user's own: the next free
+            # alias after their own, not the shipped map's name; a missing file is an error on the wire
             exported = next(e for e in ev if e["ev"] == "exported")
             self.assertEqual(exported["path"], os.path.join(tmp, "out.map.json"))
-            self.assertEqual(json.load(open(exported["path"]))["format"], mapfile.FORMAT)
+            with open(exported["path"]) as fh:
+                obj = json.load(fh)
+            self.assertEqual((obj["format"], obj["name"]), (mapfile.FORMAT, "wired"))
             imported = next(e for e in ev if e["ev"] == "imported")
             self.assertTrue(os.path.isfile(imported["path"]))
-            self.assertIn(imported["alias"], [w["alias"] for w in props.list_user_worlds()])
+            self.assertEqual(imported["alias"], "wired-2")
+            self.assertEqual([w["alias"] for w in props.list_user_worlds()], ["wired", "wired-2"])
             self.assertTrue(any(e["ev"] == "error" and "missing.map.json" in e["text"] for e in ev), [e for e in ev if e["ev"] == "error"])
 
     def test_unknown_and_bad_commands_are_reported(self):
         out = io.StringIO()
-        rc = server.serve(stdin=io.StringIO('{"cmd": "nope"}\nnot json\n{"cmd": "run", "script": "x.py"}\n{"cmd": "quit"}\n'), stdout=out)
+        rc = server.serve(stdin=io.StringIO('{"cmd": "nope"}\nnot json\nnull\n[1, 2]\n{"other": 1}\n'
+                                            '{"cmd": "run", "script": "x.py"}\n{"cmd": "quit"}\n'), stdout=out)
         self.assertEqual(rc, 0)
         ev = _events(out.getvalue())
         self.assertEqual(ev[0]["ev"], "hello")
         texts = [e["text"] for e in ev if e["ev"] == "error"]
-        self.assertTrue(any("unknown command" in t for t in texts))
-        self.assertTrue(any("bad command line" in t for t in texts))
+        self.assertTrue(any("unknown command 'nope'" in t for t in texts))
+        self.assertTrue(any(t.startswith("bad command line: ") and "not an object" not in t for t in texts), texts)
+        # JSON that is no object (null, a list) is reported like a line that is no JSON, and the
+        # server goes on
+        self.assertEqual([t for t in texts if t == "bad command line: not an object"], ["bad command line: not an object"] * 2, texts)
+        self.assertTrue(any("unknown command None" in t for t in texts))
         self.assertTrue(any("load a world first" in t for t in texts))
         self.assertEqual(ev[-1]["ev"], "bye")
 
@@ -391,6 +400,25 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(s.status, "stopped")
         states = [e["status"] for e in _events(out.getvalue()) if e["ev"] == "state"]
         self.assertEqual(states[-3:], ["paused", "running", "stopped"])
+
+    def test_lowering_the_speed_mid_run_paces_from_that_instant(self):
+        # the lead a faster speed built up is not a debt the slower one pays off: after 20x, 1x
+        # advances the sim by about the wall time, not by a few ms while the old lead is consumed
+        out = io.StringIO()
+        s = self.session(out, frame_hz=100.0)
+        s.load(world="empty", assembly=_EXAMPLE)
+        s.set_speed(20.0)
+        s.run(self.script("for i in range(4000):\n    robot.run_for(0.05)\n"))
+        server._real_sleep(0.3)
+        self.assertGreater(s.robot.runtime.now_ms, 300, "ran ahead of wall time at 20x")
+        s.set_speed(1.0)
+        t0 = s.robot.runtime.now_ms
+        server._real_sleep(0.5)
+        advanced = s.robot.runtime.now_ms - t0
+        self.assertGreaterEqual(advanced, 150, advanced)
+        self.assertLessEqual(advanced, 1000, advanced)
+        s.stop()
+        self.assertEqual(s.status, "stopped")
 
     def test_program_errors_are_reported(self):
         out = io.StringIO()

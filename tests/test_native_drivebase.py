@@ -531,14 +531,26 @@ class AdoptionTests(_Base):
         arm = [c for c in self.bus.calls if c[0] == "db_straight"][0]
         self.assertEqual(arm[3], 1)
 
-    def test_then_stop_alias_dispatches_coast(self):
-        # "stop" is the plain-named alias of the coast default.
+    def test_then_coast_dispatches_one_stop_and_no_carry(self):
+        # The coast default arms a decelerating move (carry 0) and
+        # dispatches exactly one stop when it lands.
         db, _, _ = self._drivebase()
         db.straight(100, then=Stop.COAST)
         stops = [c for c in self.bus.calls if c[0] == "db_stop"]
         self.assertEqual(len(stops), 1)
         arm = [c for c in self.bus.calls if c[0] == "db_straight"][0]
         self.assertEqual(arm[3], 0)
+
+    def test_then_stop_string_is_refused(self):
+        # The 2.x "stop" alias went with every string then= in 3.0.0.
+        db, _, _ = self._drivebase()
+        try:
+            db.straight(100, then="stop")
+            self.fail("expected TypeError")
+        except TypeError as e:
+            self.assertTrue("Stop.COAST" in str(e), e)
+        self.assertEqual(
+            [c for c in self.bus.calls if c[0] == "db_straight"], [])
 
     def test_curve_then_continue_carries_too(self):
         db, _, _ = self._drivebase()

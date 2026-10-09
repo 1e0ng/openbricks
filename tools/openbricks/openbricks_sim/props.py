@@ -118,13 +118,16 @@ BUILTIN_WORLDS = {
 def resolve_world(world):
     """Aliases → on-disk path; ``None`` keeps the standalone preview.
     Shipped aliases first, then the user's own maps under the data
-    directory (listing them converts one saved before maps were JSON),
+    directory (listing them converts one saved before maps were JSON;
+    one whose conversion failed is refused by name, with the reason),
     then a path to a ``map.json``."""
     if world is None or world == "empty":
         return None
     if world not in BUILTIN_WORLDS:
         for w in list_user_worlds():
             if w["alias"] == str(world):
+                if w["path"] is None:
+                    raise PropError(w["error"])
                 return w["path"]
     if world in BUILTIN_WORLDS:
         rel = BUILTIN_WORLDS[world]
@@ -148,7 +151,11 @@ def list_user_worlds(env=None, home=None):
     ``worlds/<alias>/map.json`` under the data directory, by alias. A
     map of the user's own saved before maps were JSON (a ``world.xml``
     alone in its folder) is converted to ``map.json`` the first time it
-    is listed; the old file is left where it was."""
+    is listed; the old file is left where it was. One that cannot be
+    converted (truncated, not a map's MJCF, a placeholder short of an
+    attribute) is listed all the same, with ``"path": None`` and an
+    ``"error"`` naming the file and the reason, so one bad folder never
+    hides the others."""
     root = user_worlds_dir(env, home)
     if not root.is_dir():
         return []
@@ -159,7 +166,13 @@ def list_user_worlds(env=None, home=None):
         path = d / mapfile.FILE
         legacy = d / "world.xml"
         if not path.is_file() and legacy.is_file():
-            mapfile.save(mapfile.from_mjcf(legacy.read_text()), path)
+            # MapError is a ValueError; so are a non-numeric attribute's and a bad encoding's
+            try:
+                mapfile.save(mapfile.from_mjcf(legacy.read_text()), path)
+            except (ValueError, OSError) as e:
+                out.append({"alias": d.name, "path": None, "dir": str(d), "user": True,
+                            "error": "%s: %s" % (legacy, e)})
+                continue
         if path.is_file():
             out.append({"alias": d.name, "path": str(path), "dir": str(d), "user": True})
     return out
@@ -322,9 +335,11 @@ def _free_alias(alias, reserved=(), env=None, home=None):
 def save_as(src_dir, m, name, reserved=(), env=None, home=None):
     """Write a map: ``worlds/<slug>/`` under the data directory with the
     source map's files (its artwork, its props' models, its notes) and
-    ``map.json`` as given — models referenced by absolute path (added
-    since the map was loaded) copied into ``props/`` and referenced from
-    there. A name that slugs to one of ``reserved`` (the shipped aliases)
+    ``map.json`` as given but named for the user (its ``name`` the
+    alias, so an export of it imports under the user's name, not the
+    shipped map's it was made from) — models referenced by absolute
+    path (added since the map was loaded) copied into ``props/`` and
+    referenced from there. A name that slugs to one of ``reserved`` (the shipped aliases)
     is refused, so a shipped map is never shadowed; saving over the
     user's own map of that name replaces it, and saving that map over
     itself (its own directory the source) keeps its files and writes the
@@ -343,6 +358,8 @@ def save_as(src_dir, m, name, reserved=(), env=None, home=None):
         else:
             dest.mkdir(parents=True)
     m = copy.deepcopy(m)
+    # the map is the user's now: named for them (the alias, a plain word for the model's name too)
+    m["name"] = alias
     # models that live outside the map come along, and the map points at the copies
     for p in m.get("props", []):
         key = "ldr" if "ldr" in p else "file"
@@ -378,8 +395,10 @@ def export_map(src_dir, m, path):
 def import_map(path, reserved=(), env=None, home=None):
     """An exported map made a map of the user's own: unpacked into
     ``worlds/<alias>/``, the alias its name (a shipped map's name, or a
-    map already there, gets the next free ``-2``, ``-3``…). Returns
-    ``(alias, path)``."""
+    map already there, gets the next free ``-2``, ``-3``…). One that is
+    no export, lacks a file the map names or cannot be written is
+    refused by name, and nothing is left behind. Returns ``(alias,
+    path)``."""
     try:
         obj = mapfile.read_export(path)
     except mapfile.MapError as e:
@@ -388,9 +407,13 @@ def import_map(path, reserved=(), env=None, home=None):
     alias = _free_alias(slug(str(base).replace("_", " ")), reserved, env, home)
     dest = user_worlds_dir(env, home) / alias
     dest.mkdir(parents=True)
+    # the folder is fresh (mkdir without exist_ok), so whatever stops the unpack, it goes: a
+    # half-written map would be invisible in the list yet hold the alias
     try:
         mapfile.unpack(obj, dest)
-    except mapfile.MapError as e:
-        shutil.rmtree(dest)
-        raise PropError(str(e)) from e
+    except BaseException as e:
+        shutil.rmtree(dest, ignore_errors=True)
+        if isinstance(e, mapfile.MapError):
+            raise PropError(str(e)) from e
+        raise
     return alias, str(dest / mapfile.FILE)

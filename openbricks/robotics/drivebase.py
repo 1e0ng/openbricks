@@ -262,7 +262,11 @@ class DriveBase:
         CURRENT pose is heading zero — for the drive base's
         controller and ``imu.heading()`` together (Pybricks
         ``DriveBase.reset()``). Call it between moves; it raises
-        while a move is active.
+        ``RuntimeError`` while a move is active, with or without the
+        gyro. ``imu.heading()`` re-zeroes on an IMU that can reset
+        its heading (the ICM-45686); a BNO055 keeps reporting its
+        absolute fused heading, and the controller re-bases against
+        it.
 
         This is the supported way to re-zero mid-mission.
         ``imu.reset_heading()`` refuses while a drive base steers by
@@ -274,10 +278,22 @@ class DriveBase:
         if self._serial_engine is not None:
             self._serial_engine.reset()
         elif self._native is not None:
+            # A stop clears _pending at once (the encoder-servo stop
+            # is instant), so only a real move in flight is refused.
+            if self._pending is not None and not self._native.is_done():
+                raise RuntimeError(
+                    "can't reset while a move is active - wait for "
+                    "done() or stop first")
             if self._gyro_enabled:
                 # Fresh frame via the enable transition — the same
-                # "here, now is zero" the first enable performs.
+                # "here, now is zero" the first enable performs. The
+                # IMU is zeroed while the gyro is off, so the new
+                # baseline reads zero and imu.heading() agrees with
+                # the controller.
                 self._native.use_gyro(False)
+                reset_heading = getattr(self._imu, "reset_heading", None)
+                if reset_heading is not None:
+                    reset_heading()
                 self._native.use_gyro(True)
         # Open-loop / encoder mode: the frame is re-derived at every
         # arm; nothing to re-base.
@@ -588,8 +604,10 @@ class DriveBase:
         decelerate at the end: the move finishes AT cruise speed and
         the wheels keep it until the next command — chain
         ``straight``/``curve`` segments without stopping between
-        them. ``"stop"`` is accepted as an alias of the default
-        coast end state.
+        them. A segment too short to reach cruise under
+        ``settings.acceleration`` hands over at the speed it does
+        reach on its target (the acceleration is never raised to
+        make it).
 
         Raises ``RuntimeError`` for open-loop motor pairs — moves by
         distance need feedback; use ``drive()``/``stop()``."""

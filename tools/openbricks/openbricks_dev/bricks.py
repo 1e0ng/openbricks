@@ -88,12 +88,17 @@ def _fetch_parts(args):
         return 1
     from openbricks_sim import bricks
     out_dir = fetch.bricks_dir()
-    shipped = bricks.load_bundle()["parts"]
+    library = bricks.load_bundle()
+    shipped = bricks.shipped_numbers(library)
     failed = 0
     for number in args.numbers:
         if number in shipped:
-            # the shipped record (weighed, in its sets) wins over a fetched one: nothing to fetch
-            print("error: %s is in the library already (%s)" % (number, shipped[number].get("name", "")), file=sys.stderr)
+            # the shipped record (weighed, in its sets) wins over a fetched one: nothing to fetch, by its
+            # own number or by an inventory number it goes by
+            same = shipped[number]
+            print("error: %s is in the library already%s (%s)" % (
+                number, "" if same == number else " as " + same, library["parts"][same].get("name", "")),
+                file=sys.stderr)
             failed += 1
             continue
         try:

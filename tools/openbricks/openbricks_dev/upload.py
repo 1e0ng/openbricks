@@ -35,7 +35,8 @@ import sys
 import time
 
 from openbricks_dev._nus import NUSLink, NUSError
-from openbricks_dev._uplock import UploadLock, UploadInProgress
+from openbricks_dev._uplock import (
+    UploadLock, UploadInProgress, UploadLockError)
 from openbricks_dev import mpycompile
 from openbricks_dev import run as run_mod
 
@@ -108,8 +109,12 @@ async def _await_confirmation(blink, link):
     deadline = time.monotonic() + _CONFIRM_WAIT_S
     while True:
         if _IDLE_BANNER in blink._buf:
+            # Cut at the start of the banner's LINE: the launcher
+            # prints "openbricks: idle. Press button to run ...", and
+            # its prefix is not part of the confirmation.
             idx = blink._buf.index(_IDLE_BANNER)
-            text = bytes(blink._buf[:idx]).decode("utf-8", "replace")
+            start = blink._buf.rfind(b"\n", 0, idx) + 1
+            text = bytes(blink._buf[:start]).decode("utf-8", "replace")
             blink._buf = bytearray()
             return text, True
         if run_mod._CTRL_D in blink._buf:
@@ -178,7 +183,7 @@ async def _upload_async(name, script_path, target_path, scan_timeout,
     try:
         upload_lock = UploadLock(name)
         upload_lock.acquire()
-    except UploadInProgress as e:
+    except (UploadInProgress, UploadLockError) as e:
         raise UploadError(str(e))
 
     phases = []
@@ -216,16 +221,17 @@ async def _upload_async(name, script_path, target_path, scan_timeout,
                     await run_mod._raw_paste_upload(blink, link, program)
                     phases.append(("paste", time.monotonic() - t0))
                     t0 = time.monotonic()
-                    if default_flow:
-                        fw = await run_mod._read_version_line(blink, name)
-                        if use_mpy and fw < run_mod._MIN_MPY_FIRMWARE:
-                            # the cache was stale (a re-flashed hub): the
-                            # guard refused the compiled program
-                            await run_mod._consume_refused_exec(blink)
-                            run_mod._announce_source(fw)
-                            target_path, use_mpy, remove_stale = (
-                                run_mod._plan_for(fw))
-                            continue
+                    # Every staged program prints its version first,
+                    # --path included; it is protocol, not the user's.
+                    fw = await run_mod._read_version_line(blink, name)
+                    if use_mpy and fw < run_mod._MIN_MPY_FIRMWARE:
+                        # the cache was stale (a re-flashed hub): the
+                        # guard refused the compiled program
+                        await run_mod._consume_refused_exec(blink)
+                        run_mod._announce_source(fw)
+                        target_path, use_mpy, remove_stale = (
+                            run_mod._plan_for(fw))
+                        continue
                     text, idle_seen = await _await_confirmation(blink, link)
                     phases.append(("confirm", time.monotonic() - t0))
                     for line in text.splitlines():

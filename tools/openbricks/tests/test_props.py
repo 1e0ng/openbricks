@@ -215,12 +215,13 @@ class SaveTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in Path(path).parent.iterdir()), ["README.md", "map.json", "mat.png", "props"])
             self.assertEqual((Path(path).parent / "props" / "clef.ldr").read_text(), "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat")
             self.assertEqual(mapfile.load(path)["props"][0]["pos"], [1.0, 1.0, 0.005])
+            self.assertEqual(mapfile.load(path)["name"], "my-layout", "named for the user, not for the map it was made from")
             listed = props.list_user_worlds(env)
             self.assertEqual(listed, [{"alias": "my-layout", "path": path, "dir": str(Path(path).parent), "user": True}])
             # saving again under the same name replaces the map
             alias2, path2 = props.save_as(src, _TWO, "my layout", env=env)
             self.assertEqual((alias2, path2), (alias, path))
-            self.assertEqual(mapfile.load(path), _TWO, "the map as given")
+            self.assertEqual(mapfile.load(path), dict(_TWO, name="my-layout"), "the map as given, under the user's name")
             self.assertEqual(len(props.list_user_worlds(env)), 1)
             # the map opened and saved over itself (its own directory the source) keeps its files
             own = Path(path).parent
@@ -229,6 +230,7 @@ class SaveTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in own.iterdir()), ["README.md", "map.json", "mat.png", "props"])
             self.assertEqual((own / "mat.png").read_bytes(), b"png")
             self.assertEqual(mapfile.load(path)["props"][0]["pos"], [2.0, 2.0, 0.005])
+            self.assertEqual(mapfile.load(path)["name"], "my-layout")
             # a shipped alias is never shadowed; a nameless map is refused
             with self.assertRaises(props.PropError):
                 props.save_as(src, _TWO, "practice line", reserved=("practice-line",), env=env)
@@ -299,6 +301,44 @@ class SaveTests(unittest.TestCase):
             (Path(tmp) / "worlds" / ".DS_Store").write_text("")
             self.assertEqual(len(props.list_user_worlds(env)), 1)
 
+    def test_one_map_that_cannot_be_converted_never_hides_the_others(self):
+        # a folder whose world.xml cannot become a map (truncated, not a map's MJCF, a placeholder
+        # short of an attribute) is listed with no path and the reason, by file; the maps beside
+        # it are listed, resolve and load as before, and choosing the bad one is refused by name
+        from openbricks_sim import server
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"OPENBRICKS_DATA_DIR": tmp}
+            worlds = Path(tmp) / "worlds"
+            good = worlds / "good"
+            good.mkdir(parents=True)
+            mapfile.save(_TWO, good / "map.json")
+            for alias, xml in [
+                ("stale", '<mujoco model="s">\n  <worldbody>\n    <geom type="plane" size="1 1 0.01"/>'),
+                ("foreign", '<mujoco model="f"><worldbody><body name="b"/></worldbody></mujoco>'),
+                ("short", '<mujoco model="h"><worldbody><lego_prop name="clef" ldr="props/clef.ldr" pos="0 0 0"/></worldbody></mujoco>'),
+            ]:
+                (worlds / alias).mkdir()
+                (worlds / alias / "world.xml").write_text(xml)
+            listed = props.list_user_worlds(env)
+            self.assertEqual([w["alias"] for w in listed], ["foreign", "good", "short", "stale"])
+            by_alias = {w["alias"]: w for w in listed}
+            self.assertEqual(by_alias["good"], {"alias": "good", "path": str(good / "map.json"), "dir": str(good), "user": True})
+            for alias, reason in [("stale", "not an MJCF map"), ("foreign", "unsupported <worldbody><body>"),
+                                  ("short", "prop 'clef': a <lego_prop> needs a mass")]:
+                with self.subTest(alias=alias):
+                    self.assertEqual(by_alias[alias]["path"], None)
+                    self.assertTrue(by_alias[alias]["error"].startswith(str(worlds / alias / "world.xml") + ": "), by_alias[alias]["error"])
+                    self.assertIn(reason, by_alias[alias]["error"])
+                    self.assertFalse((worlds / alias / "map.json").exists(), "nothing half-converted")
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual(props.resolve_world("good"), str(good / "map.json"))
+                self.assertEqual(props.resolve_world(str(good / "map.json")), str(good / "map.json"))
+                with self.assertRaises(props.PropError) as cm:
+                    props.resolve_world("stale")
+                self.assertIn(str(worlds / "stale" / "world.xml"), str(cm.exception))
+                aliases = [w["alias"] for w in server.list_worlds()]
+                self.assertEqual(aliases, list(props.BUILTIN_WORLDS) + ["foreign", "good", "short", "stale"], "the shipped maps first")
+
 
 class ExportImportTests(unittest.TestCase):
     def test_a_map_goes_out_as_one_json_file_and_comes_back_as_a_map_of_ones_own(self):
@@ -344,6 +384,77 @@ class ExportImportTests(unittest.TestCase):
             with self.assertRaises(props.PropError):
                 props.export_map(src, props.with_model_added(_TWO, "lost", "/no/such.assembly.json", 0, 0, 0)[0], out)
 
+
+    def test_a_map_of_ones_own_exports_and_imports_under_its_own_name(self):
+        # saved as the user's, the map carries their name: shared, it imports under it (the next
+        # free -2 while their own is there), not under the shipped map's it was made from
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"OPENBRICKS_DATA_DIR": str(Path(tmp) / "data")}
+            src = SaveTests._src(self, tmp)
+            (src / "props" / "note.ldr").write_text("1 4 0 0 0 1 0 0 0 1 0 0 0 1 3003.dat")
+            alias, path = props.save_as(src, _TWO, "My Layout", env=env)
+            self.assertEqual(alias, "my-layout")
+            out = Path(tmp) / "shared.map.json"
+            props.export_map(Path(path).parent, mapfile.load(path), out)
+            self.assertEqual(json.loads(out.read_text())["name"], "my-layout")
+            self.assertEqual(props.import_map(out, env=env)[0], "my-layout-2")
+            alias3, path3 = props.import_map(out, env=env)
+            self.assertEqual(alias3, "my-layout-3")
+            self.assertEqual(mapfile.load(path3)["name"], "my-layout")
+
+    def test_a_failed_export_leaves_the_export_there_as_it_was(self):
+        # a model gone (absolute) or missing from the folder (relative) refuses the export by
+        # name; the file already at the path is as it was, and nothing is left beside it
+        with tempfile.TemporaryDirectory() as tmp:
+            src = SaveTests._src(self, tmp)
+            (src / "props" / "note.ldr").write_text("1 4 0 0 0 1 0 0 0 1 0 0 0 1 3003.dat")
+            out = Path(tmp) / "layout.map.json"
+            props.export_map(src, _TWO, out)
+            before = out.read_bytes()
+            self.assertEqual(json.loads(before)["name"], "two")
+            for m in [props.with_model_added(_TWO, "lost", "/no/such.assembly.json", 0, 0, 0)[0],
+                      dict(_TWO, props=_TWO["props"] + [{"name": "lost", "ldr": "props/gone.ldr", "pos": [0, 0, 0], "mass": 0.01}])]:
+                with self.subTest(model=m["props"][-1].get("file") or m["props"][-1]["ldr"]):
+                    with self.assertRaises(props.PropError) as cm:
+                        props.export_map(src, m, out)
+                    self.assertIn("'lost'", str(cm.exception))
+                    self.assertEqual(out.read_bytes(), before, "the export there is as it was")
+                    self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["layout.map.json", "src"], "nothing left beside it")
+
+    def test_a_bare_map_json_is_no_export(self):
+        # a shipped map's own map.json names its props' models by relative path and carries no
+        # files table: refused by name, and no map of the user's own is left behind
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"OPENBRICKS_DATA_DIR": tmp}
+            with self.assertRaises(props.PropError) as cm:
+                props.import_map(_ELEMENTARY, env=env)
+            self.assertIn("the export lacks", str(cm.exception))
+            self.assertEqual(props.list_user_worlds(env), [])
+            self.assertEqual(sorted(p.name for p in (Path(tmp) / "worlds").iterdir()), [], "nothing left behind")
+
+    def test_a_malformed_export_is_refused_by_file_and_leaves_nothing_behind(self):
+        # a body that is not text, base64 that does not decode, a path both a file and a folder:
+        # each refused naming the file, the half-written folder gone, so a good export of the
+        # same name then takes the bare alias
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"OPENBRICKS_DATA_DIR": tmp}
+            good = {"format": mapfile.FORMAT, "name": "broken",
+                    "props": [{"name": "p", "ldr": "props/a.ldr", "pos": [0, 0, 0], "mass": 0.01}],
+                    "files": {"props/a.ldr": {"text": "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat"}}}
+            path = Path(tmp) / "broken.map.json"
+            for extra, named in [
+                ({"a.png": {"base64": "not base64!!"}}, "'a.png' is not base64"),
+                ({"a.txt": {"text": 123}}, "'a.txt' must hold json, text or base64"),
+                ({"props": {"text": "x"}}, "'props/a.ldr' could not be written"),
+            ]:
+                with self.subTest(named=named):
+                    path.write_text(json.dumps(dict(good, files=dict(extra, **good["files"]))))
+                    with self.assertRaises(props.PropError) as cm:
+                        props.import_map(path, env=env)
+                    self.assertIn(named, str(cm.exception))
+                    self.assertFalse((Path(tmp) / "worlds" / "broken").exists(), "nothing left behind")
+            path.write_text(json.dumps(good))
+            self.assertEqual(props.import_map(path, env=env)[0], "broken")
 
     def test_a_document_becomes_a_prop_body_free_or_stuck(self):
         from openbricks_sim import assembly, bricks

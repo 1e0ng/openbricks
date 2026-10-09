@@ -84,6 +84,34 @@ class MissingReference(FetchError):
         self.urls = urls
 
 
+class BadReference(FetchError):
+    """A file name that names no place in the library's layout (``..``,
+    an absolute path, a directory LDraw has not, a character no LDraw
+    file name uses): refused before anything is asked for or written,
+    since the name comes from a downloaded file."""
+
+    def __init__(self, asked, name, why):
+        Exception.__init__(self, "%s refers to %r, which %s; nothing was fetched for it" % (asked, name, why))
+        self.url = None
+        self.reason = why
+        self.asked = asked
+        self.name = name
+
+
+# what a referenced file's name may be, once lower-cased with ``/`` for ``\``: a part, a
+# subpart (``s/``), a primitive (bare, ``48/``, ``8/``)
+_REFERENCE = re.compile(r"^((s|48|8)/)?[a-z0-9_.-]+$")
+
+
+def check_reference(name, asked):
+    """Raise :class:`BadReference` unless ``name`` (as a part file
+    references it, or a typed number with ``.dat``) names a file in the
+    library's layout."""
+    key = name.strip().replace("\\", "/").lower()
+    if not _REFERENCE.match(key) or key.split("/")[-1] in (".", ".."):
+        raise BadReference(asked, name.strip(), "is not a file in the LDraw library's layout")
+
+
 def relative_paths(name):
     """Where a referenced file may live in the library, in the order to
     try: ``s\\x`` is a subpart, ``48\\x`` and ``8\\x`` are hi- and lo-res
@@ -211,6 +239,8 @@ class FetchingLibrary(object):
         """The file for ``name`` from ldraw.org, saved under the library's
         layout and indexed; :class:`NotInLibrary` when neither the
         official library nor the tracker has it."""
+        asking = self.asked if self.asked is not None else name.strip()
+        check_reference(name, asking)
         tried = []
         for rel in relative_paths(name):
             for base in (OFFICIAL, UNOFFICIAL):
@@ -223,6 +253,9 @@ class FetchingLibrary(object):
                 if not is_ldraw_file(data):
                     raise FetchError(url, "not an LDraw file")
                 target = self.root / pathlib.Path(rel)
+                inside = os.path.realpath(str(self.root))
+                if os.path.commonpath([inside, os.path.realpath(str(target))]) != inside:
+                    raise BadReference(asking, name.strip(), "would land outside %s" % inside)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 tmp = target.with_name(target.name + ".part")
                 tmp.write_bytes(data)
@@ -302,8 +335,9 @@ def fetch_part(number, root=None, opener=None, say=None, colors=True, sleep=time
             names = number if record["ldraw"] == number else "%s or %s" % (number, record["ldraw"])
             bundle["note"] = "Rebrickable lists no colours for %s" % names
             say(bundle["note"])
-    say("%s: %s, %d triangles, %d files fetched, %d colours" % (
-        number, record["name"], record["mesh"]["tris"], len(lib.fetched), len(record.get("colors", {}))))
+    say("%s: %s, %d triangles, %d files fetched, %d colours%s" % (
+        number, record["name"], record["mesh"]["tris"], len(lib.fetched), len(record.get("colors", {})),
+        ldraw.coarse_note(record)))
     return bundle
 
 

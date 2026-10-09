@@ -200,6 +200,55 @@ class ResizeTests(unittest.TestCase):
         # Ride height follows the radius: 44 mm wheel + 5 mm clearance.
         self.assertAlmostEqual(float(d.xpos[cid, 2]), 0.049, delta=0.004)
 
+    def _wheel_bottom(self, m, d):
+        bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "chassis_wheel_l")
+        gid = next(g for g in range(m.ngeom) if int(m.geom_bodyid[g]) == bid)
+        return float(d.xpos[bid, 2]) - float(m.geom_size[gid, 0])
+
+    def test_reset_pose_follows_the_resize(self):
+        # The free joint's reset pose (qpos0 — what mj_resetData, a
+        # fresh MjData, SimRobot.reset()/set_pose() and the server's
+        # place restore) kept the OLD ride height, so any reset after
+        # an adoption put the grown wheel 14 mm back into the floor,
+        # and a second adoption with the same dims had nothing left
+        # to lift.
+        from openbricks_sim.chassis import apply_drivebase_dims_to_model
+        m, d = self._resized(88.0, 136.0)
+        jid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "chassis_free")
+        q = int(m.jnt_qposadr[jid])
+        self.assertAlmostEqual(float(m.qpos0[q + 2]), 0.044 + 0.005, delta=1e-9)
+        mujoco.mj_resetData(m, d)
+        mujoco.mj_forward(m, d)
+        self.assertAlmostEqual(self._wheel_bottom(m, d), 0.0, delta=0.001)
+        # A second adoption with the same dims leaves it there.
+        apply_drivebase_dims_to_model(m, wheel_diameter_mm=88.0,
+                                      axle_track_mm=136.0, data=d)
+        self.assertAlmostEqual(float(m.qpos0[q + 2]), 0.049, delta=1e-9)
+        self.assertAlmostEqual(self._wheel_bottom(m, d), 0.0, delta=0.001)
+        # A fresh MjData starts on the floor too.
+        d2 = mujoco.MjData(m)
+        mujoco.mj_forward(m, d2)
+        self.assertAlmostEqual(self._wheel_bottom(m, d2), 0.0, delta=0.001)
+        # Shrinking back lowers the reset pose again.
+        apply_drivebase_dims_to_model(m, wheel_diameter_mm=60.0,
+                                      axle_track_mm=150.0, data=d)
+        self.assertAlmostEqual(float(m.qpos0[q + 2]), 0.035, delta=1e-9)
+        mujoco.mj_resetData(m, d)
+        mujoco.mj_forward(m, d)
+        self.assertAlmostEqual(self._wheel_bottom(m, d), 0.0, delta=0.001)
+
+    def test_reset_pose_is_lifted_without_live_data_too(self):
+        from openbricks_sim.chassis import apply_drivebase_dims_to_model
+        m = mujoco.MjModel.from_xml_string(standalone_mjcf())
+        apply_drivebase_dims_to_model(m, wheel_diameter_mm=88.0,
+                                      axle_track_mm=136.0)
+        jid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "chassis_free")
+        q = int(m.jnt_qposadr[jid])
+        self.assertAlmostEqual(float(m.qpos0[q + 2]), 0.049, delta=1e-9)
+        d = mujoco.MjData(m)
+        mujoco.mj_forward(m, d)
+        self.assertAlmostEqual(self._wheel_bottom(m, d), 0.0, delta=0.001)
+
     def test_bounds_follow_the_radius(self):
         m, _ = self._resized(88.0, 136.0)
         bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "chassis_wheel_l")

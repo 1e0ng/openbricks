@@ -18,6 +18,7 @@ from machine import Timer
 from openbricks._native import DriveBase as NativeDB, motor_process
 from openbricks.drivers.jgb37_520 import JGB37Motor
 from openbricks.drivers.l298n import L298NMotor
+from openbricks.parameters import Stop
 from openbricks.robotics.drivebase import DriveBase
 
 
@@ -36,6 +37,18 @@ class _FakeIMU:
 
     def heading(self):
         return self.heading_value
+
+
+class _ResettableIMU(_FakeIMU):
+    """An IMU with ``reset_heading()``, like the ICM-45686."""
+
+    def __init__(self, heading=0.0):
+        _FakeIMU.__init__(self, heading)
+        self.resets = 0
+
+    def reset_heading(self):
+        self.resets += 1
+        self.heading_value = 0.0
 
 
 def _make_motor(in1, in2, pwm, ea, eb):
@@ -296,6 +309,9 @@ class _NativeSpy:
         self.calls.append(enable)
         return self.real.use_gyro(enable)
 
+    def is_done(self):
+        return self.real.is_done()
+
 
 class TestDriveBaseReset(unittest.TestCase):
     """``DriveBase.reset()`` — Pybricks parity for re-zeroing the
@@ -333,6 +349,61 @@ class TestDriveBaseReset(unittest.TestCase):
         db._native = spy
         db.reset()
         self.assertEqual(spy.calls, [])
+
+    def _encoder_db(self, imu=None):
+        left  = _make_motor(1, 2, 17, 7, 8)
+        right = _make_motor(9, 10, 11, 12, 13)
+        return DriveBase(left, right, wheel_diameter_mm=56,
+                         axle_track_mm=114, imu=imu)
+
+    def _assert_reset_refused(self, db):
+        spy = _NativeSpy(db._native)
+        db._native = spy
+        try:
+            db.reset()
+            self.fail("expected RuntimeError")
+        except RuntimeError as e:
+            self.assertTrue("move is active" in str(e), e)
+        # Refused before touching the frame; the move stays armed.
+        self.assertEqual(spy.calls, [])
+        self.assertFalse(db.done())
+
+    def test_reset_during_a_straight_raises_with_gyro_on(self):
+        db = self._encoder_db(imu=_FakeIMU())
+        db.use_gyro(True)
+        db.straight(500, wait=False)
+        self._assert_reset_refused(db)
+
+    def test_reset_during_a_straight_raises_with_gyro_off(self):
+        db = self._encoder_db()
+        db.straight(500, wait=False)
+        self._assert_reset_refused(db)
+
+    def test_reset_during_a_turn_raises(self):
+        db = self._encoder_db(imu=_FakeIMU())
+        db.use_gyro(True)
+        db.turn(90, wait=False)
+        self._assert_reset_refused(db)
+
+    def test_reset_after_a_brake_stop_never_raises(self):
+        db = self._encoder_db(imu=_FakeIMU())
+        db.use_gyro(True)
+        db.straight(500, wait=False)
+        db.stop(then=Stop.BRAKE)
+        spy = _NativeSpy(db._native)
+        db._native = spy
+        db.reset()
+        self.assertEqual(spy.calls, [False, True])
+
+    def test_reset_re_zeroes_a_resettable_imu(self):
+        imu = _ResettableIMU(heading=30.0)
+        db = self._encoder_db(imu=imu)
+        db.use_gyro(True)
+        imu.heading_value = 75.0   # rotated since enable
+        db.reset()
+        self.assertEqual(imu.heading(), 0.0)
+        self.assertEqual(imu.resets, 1)
+        self.assertTrue(db._gyro_enabled)
 
     def test_reset_on_open_loop_pair_is_a_noop(self):
         left  = L298NMotor(in1=1, in2=2, pwm=17)

@@ -30,7 +30,11 @@ $ openbricks docs hardware           # open this manual offline in your browser
 version plus an `(official)` / `(customized)` suffix — before it
 looks up the newest release. Flashing the **same version** again, or
 an **older** one, asks for confirmation first; pass `--yes` to skip
-the prompt in scripts.
+the prompt in scripts. A `--firmware` image's version is read from
+its file name, so a name without one — the `firmware.bin` a local
+build produces — cannot be compared with the running version: that
+flash asks for confirmation too (and a non-interactive flash of it
+needs `--yes`).
 
 The default output is step-level (probe, download, erase, write,
 hub name, marker, reboot); pass `--verbose` / `-v` to also echo
@@ -103,10 +107,13 @@ handshake, plus a fixed settle wait, on every upload.
 
 The CLI remembers each hub's firmware version (in
 `~/.cache/openbricks/hubs.json`, or `$OPENBRICKS_CACHE_DIR`), so a hub
-it has met before is not probed again. The staged program still
-prints its version first and refuses to write compiled code on
-firmware that cannot run it, so a hub re-flashed to something older
-is caught in-session: the CLI says so and stages source instead.
+it has met before on firmware 1.92.0 or newer is not probed again.
+Both directions of a re-flash are caught. A hub remembered on older
+firmware is probed again rather than trusted, so one upgraded since
+gets compiled code at once. The staged program still prints its
+version first and refuses to write compiled code on firmware that
+cannot run it, so a hub re-flashed to something older is caught
+in-session: the CLI says so and stages source instead.
 
 On the hub side, firmware 4.10.0 asks for a 512-byte BLE packet size
 (the stack's default of 256 capped every write at 253 bytes) and
@@ -146,6 +153,13 @@ is only streaming output supersedes it the way a button press would.
 A CLI that crashes or is killed mid-transfer leaves nothing behind —
 the kernel releases the lock with the process. Other hubs are
 unaffected, and so is `openbricks stop`.
+
+The lock is per machine, not per account, because the BLE link is:
+its file (`openbricks-upload-NAME.lock` in the temp directory, the
+shared `/tmp` on Linux) is created writable by every account, and a
+read-only one left by another account still locks. A lock file that
+cannot be opened at all is an error naming its path — remove that
+file and retry.
 
 ## Reference
 

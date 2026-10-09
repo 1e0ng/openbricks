@@ -101,19 +101,47 @@ void ob_trajectory_init_v0v3(ob_trajectory_t *t,
         }
     }
 
-    // Net displacement of a monotonic ramp v0 -> v at ±a is
-    // (v² - v0²) / (2a) — the algebra holds for signed v0.
-    ob_float_t d_entry_trap = ((vc * vc) - (v0 * v0)) / (2.0 * a);
-    if (d_entry_trap < 0.0) {
-        d_entry_trap = -d_entry_trap;   // v0 > vc: entry is a decel
+    // End speed the distance cannot reach: speeding up from v0 to v3
+    // covers (v3²-v0²)/2a, so beyond that the configured accel cannot
+    // reach v3 inside D (a carry move shorter than its own ramp).
+    // Clamp the carried end speed to the speed this distance does
+    // reach, v3 = sqrt(v0² + 2aD) (pbio's bind-w3 rule) — the accel
+    // is the user's ceiling for speeding up, so it is never raised
+    // here. The segment math below then degenerates to a pure
+    // acceleration: v_peak = v3, no cruise, no exit ramp, landing
+    // exactly on target at v3, and the next command enters at that
+    // speed. Without the clamp the exit ramp came out negative: the
+    // reference overshot the target, snapped back at expiry and the
+    // feed-forward stepped up to v3 in one tick.
+    if (v3 > v0) {
+        ob_float_t reach = (v3 * v3 - v0 * v0) / (2.0 * a);
+        if (reach > D) {
+            v3    = ob_sqrt(v0 * v0 + 2.0 * a * D);
+            t->v3 = v3;
+        }
     }
-    ob_float_t d_exit = ((vc * vc) - (v3 * v3)) / (2.0 * a);
 
-    if (d_entry_trap + d_exit <= D) {
+    // Entry ramp v0 -> vc at the SIGNED acceleration a_entry (+a when
+    // speeding up, -a for a faster-than-cruise entry): its net
+    // displacement is (vc² - v0²) / (2·a_entry). That is positive for
+    // a slower entry and for a faster entry in the move's direction
+    // (a decel ramp), but NEGATIVE for an entry moving the wrong way
+    // faster than cruise (v0 < -vc: the ramp runs backward longer
+    // than it runs forward). The fit test and the cruise time both
+    // use this signed value — flipping it positive made a reverse
+    // fast entry (a straight() armed against an opposite drive())
+    // integrate to D - (v0²-vc²)/a, so the reference ran that far
+    // behind for the whole move and snapped forward at expiry, and
+    // short moves went triangular with a peak above cruise.
+    ob_float_t a_entry = (v0 <= vc) ? a : -a;
+    ob_float_t d_entry = ((vc * vc) - (v0 * v0)) / (2.0 * a_entry);
+    ob_float_t d_exit  = ((vc * vc) - (v3 * v3)) / (2.0 * a);
+
+    if (d_entry + d_exit <= D) {
         // Full trapezoid at cruise.
         t->triangular = false;
         t->v_peak     = vc;
-        t->a_entry    = (v0 <= vc) ? a : -a;
+        t->a_entry    = a_entry;
         t->t_entry    = ((v0 <= vc) ? (vc - v0) : (v0 - vc)) / a;
         // Net entry displacement (vc^2 - v0^2) / (2 * a_entry) — the
         // SIGNED acceleration, so a faster-than-cruise entry (decel
@@ -125,8 +153,8 @@ void ob_trajectory_init_v0v3(ob_trajectory_t *t,
         // a reference 150 wheel-deg short, then the endpoint snapped
         // forward 150.0 at expiry and the settle walked the robot in:
         // THE end-of-run twitch, misdiagnosed twice as plant lag.
-        t->d_entry    = ((vc * vc) - (v0 * v0)) / (2.0 * t->a_entry);
-        t->t_cruise   = (D - d_entry_trap - d_exit) / vc;
+        t->d_entry    = d_entry;
+        t->t_cruise   = (D - d_entry - d_exit) / vc;
         t->t_ramp     = (vc - v3) / a;           // exit ramp
         t->d_ramp     = d_exit;
         t->t_total    = t->t_entry + t->t_cruise + t->t_ramp;
@@ -138,11 +166,17 @@ void ob_trajectory_init_v0v3(ob_trajectory_t *t,
     //   =>  vp = sqrt((2aD + v0² + v3²) / 2)
     ob_float_t vp2 = (2.0 * a * D + v0 * v0 + v3 * v3) / 2.0;
     ob_float_t vp  = ob_sqrt(vp2 > 0.0 ? vp2 : 0.0);
+    if (vp < v3) {
+        vp = v3;    // rounding only: a clamped v3 equals vp exactly
+    }
 
-    // The decel raise above guarantees vp >= v0 AND vp >= v3 here:
-    // vp² - v0² = (2aD + v3² - v0²)/2 >= 0 once (v0²-v3²) <= 2aD,
-    // and vp² - v3² = (2aD + v0² - v3²)/2 >= 0 whenever v0 >= v3
-    // (for v0 < v3 the entry ramp supplies the difference).
+    // The decel raise and the end-speed clamp above guarantee
+    // vp >= v0 AND vp >= v3 here: vp² - v0² = (2aD + v3² - v0²)/2
+    // >= 0 once (v0²-v3²) <= 2aD, and vp² - v3² = (2aD + v0² - v3²)/2
+    // >= 0 once (v3²-v0²) <= 2aD. This branch is only reached when
+    // the signed ramps above do not fit, i.e. vp < vc, so the peak
+    // never exceeds cruise — also for a reverse entry, whose d_entry
+    // here is negative (the sampler integrates it as signed).
     t->triangular = true;
     t->v_peak     = vp;
     t->a_entry    = a;

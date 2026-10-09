@@ -5,11 +5,14 @@ Bump THE version — firmware and host tooling share one number.
 
 Since 1.15.0 the firmware and the host tooling (the unified
 ``openbricks`` package shipping the CLI and the MuJoCo sim) are
-versioned in LOCKSTEP: one number, one bump, two tags. The wheel
-doesn't bundle the firmware package, so the sharing happens here —
-this script writes the same version literal into both packages'
-``__init__.py`` (each remains its artifact's single source of truth;
-``pyproject.toml`` reads it back via ``attr = "<pkg>.__version__"``).
+versioned in LOCKSTEP: one number, one bump, two tags. Each package's
+``__init__.py`` is its artifact's single source of truth — the
+firmware reports ``openbricks.__version__``; ``pyproject.toml`` reads
+``openbricks_dev.__version__`` via ``attr`` — so this script writes the
+same version literal into both. Since 3.6.0 the wheel also carries a
+mirror of the firmware package (``setup.py::_sync_firmware``), so one
+wheel holds BOTH literals; tests/test_version_lockstep.py and
+tools/openbricks/tests/test_release_tags.py pin them equal.
 
 Usage:
 

@@ -26,6 +26,11 @@ pub const PASTE_OFFSET_MM: f64 = 40.0;
 /// How far off straight ahead a straight's end may be clicked and still
 /// land on the heading the robot arrives with.
 pub const CHAIN_SNAP_DEG: f64 = 7.5;
+/// How far off straight behind a clicked or dragged curve end still counts
+/// as behind it: the one arc there would sweep nearly the whole circle on a
+/// radius of metres, which no click means, so none is offered. A loaded
+/// curve is not held to it — a 358° loop written in a file is a loop.
+pub const BEHIND_DEG: f64 = 2.0;
 const EPS_MM: f64 = 0.5;
 
 pub type Point = [f64; 2];
@@ -195,7 +200,7 @@ pub const KINDS: [(&str, &str, &str); 5] = [
     (
         "curve",
         "⌒ Curve",
-        "click where it starts, where it ends, then a point to face there",
+        "click where it starts, then where it ends (a route's first curve: a point to face at the start between them)",
     ),
     ("turn", "↻ Turn", "click where it turns, then a point to face"),
     ("stop", "■ Stop", "click where it stops"),
@@ -381,8 +386,9 @@ fn arc_or_line(from: Point, heading_deg: f64, to: Point, fit: Option<(f64, f64, 
 /// The piece a curve drives from a pose to a point: the one arc tangent
 /// to the pose through the point — one `curve` command — or the straight
 /// run when the point lies dead ahead. Nothing when the point is the
-/// pose's own or lies straight behind it, where no arc reaches: such a
-/// curve is not drawn, and the end is not taken.
+/// pose's own or lies exactly straight behind it, where no arc reaches:
+/// such a curve is not drawn, and the end is not taken (a click or a drag
+/// is also refused within `BEHIND_DEG` of behind: see [`nearly_behind`]).
 pub fn single_arc(start: Point, heading_deg: f64, end: Point) -> Vec<Piece> {
     let v = [end[0] - start[0], end[1] - start[1]];
     if (v[0] * v[0] + v[1] * v[1]).sqrt() < EPS_MM {
@@ -490,6 +496,27 @@ impl Action {
                 start, heading_deg, end, ..
             } => single_arc(*start, *heading_deg, *end),
             _ => vec![],
+        }
+    }
+
+    /// A curve whose end, away from its start, no arc reaches: it lies
+    /// exactly straight behind the start. Such a curve drives nothing.
+    pub fn end_unreachable(&self) -> bool {
+        match self {
+            Action::Curve { start, end, .. } => dist(*start, *end) >= EPS_MM && self.pieces().is_empty(),
+            _ => false,
+        }
+    }
+
+    /// A curve whose end a click or a handle drag may not take: one no arc
+    /// reaches, or one within `BEHIND_DEG` of straight behind the start
+    /// (see [`nearly_behind`]).
+    pub fn end_refused(&self) -> bool {
+        match self {
+            Action::Curve {
+                start, heading_deg, end, ..
+            } => self.end_unreachable() || nearly_behind(Pose2::at(*start, *heading_deg), *end),
+            _ => false,
         }
     }
 
@@ -1022,7 +1049,7 @@ pub fn program(route: &Route, wheel_diameter_mm: f64, axle_track_mm: f64) -> Str
 
 /// The arc tangent to a pose through a point: its radius, the angle it
 /// sweeps and its side; None when the point is on the spot, dead ahead
-/// or behind (a line, not an arc).
+/// or straight behind (a line, not an arc).
 pub fn tangent_arc(from: Pose2, to: Point) -> Option<(f64, f64, bool)> {
     let (dx, dy) = (to[0] - from.x_mm, to[1] - from.y_mm);
     let d = (dx * dx + dy * dy).sqrt();
@@ -1037,6 +1064,24 @@ pub fn tangent_arc(from: Pose2, to: Point) -> Option<(f64, f64, bool)> {
     }
     let alpha = cross.abs().atan2(dot);
     Some((round1(d / (2.0 * alpha.sin())), round1(2.0 * alpha.to_degrees()), cross < 0.0))
+}
+
+/// Whether a point lies behind a pose within `BEHIND_DEG` of straight
+/// behind it. Map clicks are rounded to 0.1 mm, so an end meant to be
+/// straight behind rarely is exactly, and the fit there is a near-full
+/// circle of a huge radius — from (0, 0) facing +x to (-300, 0.1) a 360°
+/// arc of r 450 000 mm — which no click means: a clicked or dragged curve
+/// end there is refused. Only clicks and drags ask this; a loaded curve
+/// keeps the arc its file describes.
+pub fn nearly_behind(from: Pose2, to: Point) -> bool {
+    let (dx, dy) = (to[0] - from.x_mm, to[1] - from.y_mm);
+    let d = (dx * dx + dy * dy).sqrt();
+    if d < EPS_MM {
+        return false;
+    }
+    let (hx, hy) = from.heading();
+    let (cross, dot) = (hx * dy - hy * dx, hx * dx + hy * dy);
+    dot < 0.0 && cross.abs() < d * BEHIND_DEG.to_radians().sin()
 }
 
 impl Route {
@@ -1057,13 +1102,22 @@ impl Route {
     pub fn load(path: &Path) -> Result<Route, String> {
         let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-        match v.get("format").and_then(|f| f.as_str()) {
+        let route: Route = match v.get("format").and_then(|f| f.as_str()) {
             Some(FORMAT) => serde_json::from_value(v).map_err(|e| e.to_string()),
             Some(FORMAT_V3) => from_v3(v),
             Some(FORMAT_V2) => from_v2(v),
             Some(FORMAT_V1) => from_v1(v),
             other => Err(format!("not a route file (format {other:?}, expected {FORMAT})")),
+        }?;
+        // a curve whose end lies exactly straight behind its start drives nothing: refused by its
+        // number rather than loaded as a move Run route would skip
+        if let Some(i) = route.actions.iter().position(|a| a.action.end_unreachable()) {
+            return Err(format!(
+                "action {}: a curve whose end lies straight behind its start, where no single arc reaches",
+                i + 1
+            ));
         }
+        Ok(route)
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -1076,7 +1130,11 @@ impl Route {
 /// the arc keeps its shape here: its ends and the headings at them.
 fn from_v3(mut v: serde_json::Value) -> Result<Route, String> {
     if let Some(actions) = v.get_mut("actions").and_then(|a| a.as_array_mut()) {
-        for a in actions.iter_mut().filter_map(|a| a.as_object_mut()) {
+        for (i, a) in actions
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, a)| a.as_object_mut().map(|a| (i, a)))
+        {
             if a.get("kind").and_then(|k| k.as_str()) != Some("curve") {
                 continue;
             }
@@ -1087,7 +1145,10 @@ fn from_v3(mut v: serde_json::Value) -> Result<Route, String> {
             let (Some(start), Some(end)) = (point("start"), point("end")) else {
                 return Err("a curve without its two ends".into());
             };
-            let radius = a.get("radius_mm").and_then(|r| r.as_f64()).unwrap_or(0.0);
+            // that format required the radius; one missing or not a number is refused as it was
+            let Some(radius) = a.get("radius_mm").and_then(|r| r.as_f64()) else {
+                return Err(format!("action {}: a curve without a numeric radius_mm", i + 1));
+            };
             let right = a.get("right").and_then(|r| r.as_bool()).unwrap_or(false);
             let heading = arc_of(start, end, radius, right).map_or(0.0, |arc| arc.start_heading);
             a.remove("radius_mm");
@@ -1189,10 +1250,23 @@ fn from_v2(v: serde_json::Value) -> Result<Route, String> {
         prelude: old.prelude,
         ..Default::default()
     };
+    // That format's moves were relative, with the drive base's signs: a negative `mm` backed
+    // up and a negative radius drove the arc backward. Neither has a place here, where a
+    // straight faces the way it drives and a curve is the forward arc from its start. On
+    // paper, from (0, 0) facing +x: straight(-200) backed up to (-200, 0) still facing +x,
+    // but a Straight from (0, 0) to (-200, 0) faces -x, and every move chained after it would
+    // be laid out turned round; curve(-100, 90) backed round a centre on the left, (0, 100),
+    // a quarter circle of 157 mm to (-100, 100) facing -y, where the one forward arc through
+    // that point is the three-quarter circle of 471 mm. So a backward move is refused by its
+    // number rather than placed as a different one.
     let mut pose = old.start;
-    for a in old.actions {
+    for (i, a) in old.actions.into_iter().enumerate() {
+        let n = i + 1;
         let (hx, hy) = pose.heading();
         let action = match a {
+            Old::Straight { mm, .. } if mm < 0.0 => {
+                return Err(format!("action {n}: a backward straight ({mm} mm) cannot be placed on the map"));
+            }
             Old::Straight { mm, then } => Action::Straight {
                 start: pose.point(),
                 end: [round1(pose.x_mm + hx * mm), round1(pose.y_mm + hy * mm)],
@@ -1204,17 +1278,29 @@ fn from_v2(v: serde_json::Value) -> Result<Route, String> {
                 heading_deg: round1(wrap_deg(pose.yaw_deg - deg)),
                 speed: DEFAULT_TURN_DPS,
             },
-            Old::Curve { radius_mm, deg, then } if radius_mm.abs() >= EPS_MM && deg.abs() >= 1e-6 => {
-                // a positive angle was a forward right turn; driving backward it bent the other way
-                let right = (deg > 0.0) == (radius_mm > 0.0);
-                let arc = arc_from(pose.point(), pose.yaw_deg, radius_mm.abs(), deg.abs(), right).expect("a radius and an angle");
-                Action::Curve {
+            Old::Curve { radius_mm, deg, .. } if radius_mm <= -EPS_MM && deg.abs() >= 1e-6 => {
+                return Err(format!(
+                    "action {n}: a backward curve (radius {radius_mm} mm) cannot be placed on the map"
+                ));
+            }
+            Old::Curve { radius_mm, deg, then } if radius_mm >= EPS_MM && deg.abs() >= 1e-6 => {
+                // a positive angle was a right turn
+                let right = deg > 0.0;
+                let arc = arc_from(pose.point(), pose.yaw_deg, radius_mm, deg.abs(), right).expect("a radius and an angle");
+                let curve = Action::Curve {
                     start: pose.point(),
                     heading_deg: round1(pose.yaw_deg),
                     end: arc.end,
                     speed: DEFAULT_STRAIGHT_DPS,
                     then,
+                };
+                // a full circle ends where it starts, and a curve placed by its ends drives nothing there
+                if curve.pieces().is_empty() {
+                    return Err(format!(
+                        "action {n}: a curve of {deg}° ends where it starts and cannot be placed on the map"
+                    ));
                 }
+                curve
             }
             Old::Curve { deg, .. } => Action::Turn {
                 at: pose.point(),
@@ -1921,5 +2007,239 @@ mod tests {
         assert_eq!(p.point(), [3.0, 4.0]);
         assert!(near(p.heading().1, 1.0));
         assert!(!Item::from(Action::placed("stop", &[[0.0, 0.0]], 0.0, false)).locked);
+    }
+
+    #[test]
+    fn the_curve_tool_asks_for_the_clicks_it_takes() {
+        // a curve is placed by its start and its end — as a route's first action with a point to
+        // face at the start between them — so the tool's hover text must not promise a third
+        // click that chooses the end heading: there is none, the one arc decides it
+        let ask = KINDS.iter().find(|k| k.0 == "curve").map(|k| k.2).unwrap();
+        assert!(ask.contains("where it starts") && ask.contains("then where it ends"), "{ask}");
+        assert!(!ask.contains("then a point to face") && !ask.contains("face there"), "{ask}");
+        assert!(ask.contains("first curve") && ask.contains("a point to face at the start"), "{ask}");
+        assert_eq!((clicks_needed("curve", false), clicks_needed("curve", true)), (2, 3));
+    }
+
+    #[test]
+    fn an_end_nearly_straight_behind_is_no_arc_either() {
+        // map clicks are rounded to 0.1 mm, so an end a hair off the line behind the start is not
+        // exactly behind it; the fit there is a near-full circle on a radius of metres — from
+        // (0, 0) facing +x to (-300, 0.1) a 360° arc of r 450 000 mm, 2.8 km of driving — which
+        // no click means. Within 2° of straight behind a click or a drag is refused, as for the
+        // exact case (the click-level pins are in simulate.rs).
+        let from = Pose2::at([0.0, 0.0], 0.0);
+        // 10.4 mm sideways at 300 mm back is 1.99°, the edge of the band
+        for end in [[-300.0, 0.1], [-300.0, -0.1], [-300.0, 2.0], [-300.0, 3.0], [-300.0, 10.4]] {
+            assert!(nearly_behind(from, end), "{end:?}");
+            let c = Action::placed("curve", &[[0.0, 0.0], end], 0.0, false);
+            assert!(c.end_refused() && !c.end_unreachable(), "{c:?}");
+        }
+        // exactly behind no arc reaches at all
+        let exact = Action::placed("curve", &[[0.0, 0.0], [-300.0, 0.0]], 0.0, false);
+        assert!(exact.end_refused() && exact.end_unreachable() && exact.pieces().is_empty());
+        assert_eq!(tangent_arc(from, [-300.0, 0.0]), None);
+        // from a turned pose: 1 mm off the line 300 mm behind (10, -5) facing 37°
+        let (c37, s37) = (37f64.to_radians().cos(), 37f64.to_radians().sin());
+        let behind = [round1(10.0 - 300.0 * c37 - s37), round1(-5.0 - 300.0 * s37 + c37)];
+        assert!(nearly_behind(Pose2::at([10.0, -5.0], 37.0), behind), "{behind:?}");
+        // just outside the band an arc is offered: 2.5° off the line, 355° on r 3.4 m
+        assert!(!nearly_behind(from, [-300.0, 13.1]));
+        let Some((r, sweep, right)) = tangent_arc(from, [-300.0, 13.1]) else {
+            panic!()
+        };
+        assert!(!right && (sweep - 355.0).abs() < 0.1 && r > 3000.0, "{r} {sweep}");
+        // a big sweep well off the line is wanted and kept: 300° on r 200 to a point 30° off
+        assert!(!nearly_behind(from, [-173.2, 100.0]));
+        let Some((r, sweep, _)) = tangent_arc(from, [-173.2, 100.0]) else {
+            panic!()
+        };
+        assert!((sweep - 300.0).abs() < 0.1 && (r - 200.0).abs() < 0.2, "{r} {sweep}");
+        // ahead, aside and on the spot are never behind
+        for end in [[300.0, 0.1], [0.0, 300.0], [0.0, 0.0]] {
+            assert!(!nearly_behind(from, end), "{end:?}");
+        }
+        assert!(!Action::placed("straight", &[[0.0, 0.0], [-300.0, 0.0]], 0.0, false).end_refused());
+    }
+
+    #[test]
+    fn a_loaded_near_full_loop_keeps_its_arc_and_one_exactly_behind_is_refused_by_number() {
+        // the 2° band is for clicks and drags only: a loop written in a file sweeping more than
+        // 356° ends within 2° of straight behind its start, and is still the loop it says
+        let dir = std::env::temp_dir().join(format!("ob-route-loop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, text: String| {
+            let p = dir.join(name);
+            std::fs::write(&p, text).unwrap();
+            p
+        };
+        let one_arc = |r: &Route, radius: f64, sweep: f64, tol_mm: f64| {
+            let a = &r.actions[0].action;
+            let pieces = a.pieces();
+            let [Piece::Arc { arc, .. }] = pieces.as_slice() else {
+                panic!("{a:?} {pieces:?}")
+            };
+            assert!(
+                (arc.radius_mm - radius).abs() < tol_mm && (arc.sweep_deg - sweep).abs() < 1.0,
+                "{arc:?}"
+            );
+            let code = a.code(r.start).join("\n");
+            assert!(code.starts_with("robot.curve("), "{code:?}");
+            assert!(!a.text().contains("nowhere to go"), "{}", a.text());
+        };
+        // the second format's 358° curve on r 150
+        let v2 = write(
+            "v2.route.json",
+            r#"{"format":"openbricks-route/2","start":{"x_mm":0,"y_mm":0,"yaw_deg":0},"actions":[{"kind":"curve","radius_mm":150,"deg":358}]}"#.into(),
+        );
+        let r = Route::load(&v2).unwrap();
+        assert!(r.actions[0].action.end_refused(), "the band would refuse it as a click");
+        // (its end rounded to 0.1 mm 5 mm from its start, the refit radius is 135 mm, not 150)
+        one_arc(&r, 150.0, 358.0, 16.0);
+        // this format's 357° loop on r 200, its end ~10 mm from its start
+        let arc = arc_from([0.0, 0.0], 0.0, 200.0, 357.0, false).unwrap();
+        let loop_ = Route {
+            actions: vec![
+                Action::Curve {
+                    start: [0.0, 0.0],
+                    heading_deg: 0.0,
+                    end: [round1(arc.end[0]), round1(arc.end[1])],
+                    speed: 350.0,
+                    then: End::Coast,
+                }
+                .into(),
+            ],
+            ..Default::default()
+        };
+        let v4 = dir.join("v4.route.json");
+        loop_.save(&v4).unwrap();
+        let r = Route::load(&v4).unwrap();
+        assert!(dist(r.actions[0].action.start(), r.actions[0].action.end()) < 11.0);
+        // (rounded likewise, 184 mm)
+        one_arc(&r, 200.0, 357.0, 20.0);
+        assert!(
+            program(&r, 56.0, 120.0).contains("robot.curve(183.9, -356.7)"),
+            "{}",
+            program(&r, 56.0, 120.0)
+        );
+        // the first format's curve segment a hair off behind is that arc too; exactly behind it
+        // is laid out as a straight run, as it always was
+        let v1 = |to: &str| {
+            write(
+                "v1.route.json",
+                format!(
+                    r#"{{"format":"openbricks-route/1","start":{{"x_mm":0,"y_mm":0,"yaw_deg":0}},"segments":[{{"kind":"curve","to":{to}}}]}}"#
+                ),
+            )
+        };
+        let r = Route::load(&v1("[-300,0.1]")).unwrap();
+        assert!(matches!(r.actions[0].action, Action::Curve { .. }) && !r.actions[0].action.pieces().is_empty());
+        let r = Route::load(&v1("[-300,0]")).unwrap();
+        assert!(
+            matches!(r.actions[0].action, Action::Straight { end: [-300.0, 0.0], .. }),
+            "{:?}",
+            r.actions[0]
+        );
+        // a curve exactly behind its start drives nothing: refused by its number at load, not
+        // loaded as a curve Run route would skip
+        let behind = write(
+            "behind.route.json",
+            r#"{"format":"openbricks-route/4","start":{"x_mm":0,"y_mm":0,"yaw_deg":0},"actions":[{"kind":"straight","start":[0,0],"end":[100,0]},{"kind":"curve","start":[100,0],"heading_deg":0,"end":[-200,0]}]}"#.into(),
+        );
+        let e = Route::load(&behind).unwrap_err();
+        assert!(e.contains("action 2") && e.contains("straight behind"), "{e}");
+        // so is the second format's full circle, which ends where it starts
+        let full = write(
+            "full.route.json",
+            r#"{"format":"openbricks-route/2","start":{"x_mm":0,"y_mm":0,"yaw_deg":0},"actions":[{"kind":"curve","radius_mm":150,"deg":360}]}"#.into(),
+        );
+        let e = Route::load(&full).unwrap_err();
+        assert!(e.contains("action 1") && e.contains("360"), "{e}");
+        // a curve with nowhere to go — its end on its start, as one is placed — still loads
+        let here = write(
+            "here.route.json",
+            r#"{"format":"openbricks-route/4","start":{"x_mm":0,"y_mm":0,"yaw_deg":0},"actions":[{"kind":"curve","start":[0,0],"heading_deg":0,"end":[0,0]}]}"#.into(),
+        );
+        assert!(Route::load(&here).unwrap().actions[0].action.pieces().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_second_formats_backward_moves_are_refused() {
+        let dir = std::env::temp_dir().join(format!("ob-route-v2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let load = |name: &str, actions: &str| {
+            let p = dir.join(name);
+            std::fs::write(
+                &p,
+                format!(r#"{{"format":"openbricks-route/2","start":{{"x_mm":0,"y_mm":0,"yaw_deg":0}},"actions":{actions}}}"#),
+            )
+            .unwrap();
+            Route::load(&p)
+        };
+        // on paper, from (0, 0) facing +x: straight(-200) backed up to (-200, 0) still facing +x,
+        // where a Straight from (0, 0) to (-200, 0) faces -x — the wrong way for all that follows
+        assert_eq!(straight([0.0, 0.0], [-200.0, 0.0]).start_heading(), Some(180.0));
+        let e = load("s.json", r#"[{"kind":"straight","mm":-200}]"#).unwrap_err();
+        assert!(
+            e.contains("action 1") && e.contains("backward straight") && e.contains("-200"),
+            "{e}"
+        );
+        // and curve(-100, 90) backed round a centre on the left, (0, 100), a quarter circle of
+        // 157 mm to (-100, 100) facing -y; the one forward arc from (0, 0) to that point is the
+        // three-quarter circle, three times the drive. Neither is a move this format can place.
+        let pieces = single_arc([0.0, 0.0], 0.0, [-100.0, 100.0]);
+        assert!(near(pieces[0].length_mm(), 3.0 * 100.0 * std::f64::consts::FRAC_PI_2), "{pieces:?}");
+        let e = load(
+            "c.json",
+            r#"[{"kind":"straight","mm":50},{"kind":"curve","radius_mm":-100,"deg":90}]"#,
+        )
+        .unwrap_err();
+        assert!(e.contains("action 2") && e.contains("backward curve") && e.contains("-100"), "{e}");
+        // a negative radius too short to be an arc was a turn in place, and still converts to one
+        let r = load("t.json", r#"[{"kind":"curve","radius_mm":-0.2,"deg":30}]"#).unwrap();
+        assert_eq!(
+            r.actions[0].action,
+            Action::Turn {
+                at: [0.0, 0.0],
+                heading_deg: -30.0,
+                speed: 300.0
+            }
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_third_format_curve_without_a_numeric_radius_is_refused() {
+        let dir = std::env::temp_dir().join(format!("ob-route-v3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let load = |name: &str, actions: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, format!(r#"{{"format":"openbricks-route/3","actions":{actions}}}"#)).unwrap();
+            Route::load(&p)
+        };
+        // the third format's radius_mm was required: a curve without one, or with text for it,
+        // is refused by its number and the field, not placed as a semicircle
+        let e = load(
+            "none.json",
+            r#"[{"kind":"straight","start":[0,0],"end":[0,100]},{"kind":"curve","start":[0,0],"end":[300,0]}]"#,
+        )
+        .unwrap_err();
+        assert!(e.contains("action 2") && e.contains("radius_mm"), "{e}");
+        let e = load("text.json", r#"[{"kind":"curve","start":[0,0],"end":[300,0],"radius_mm":"150"}]"#).unwrap_err();
+        assert!(e.contains("action 1") && e.contains("radius_mm"), "{e}");
+        // a numeric radius of any size still places that format's arc: 0 is lengthened to half the
+        // chord, the right semicircle from (0, 0) to (300, 0) entered facing +y
+        let r = load(
+            "zero.json",
+            r#"[{"kind":"curve","start":[0,0],"end":[300,0],"radius_mm":0,"right":true}]"#,
+        )
+        .unwrap();
+        let Action::Curve { heading_deg, .. } = &r.actions[0].action else {
+            panic!("{:?}", r.actions[0])
+        };
+        assert_eq!((*heading_deg, r.actions[0].action.end_heading(90.0)), (90.0, -90.0));
+        assert!(near(r.actions[0].action.length_mm(), 150.0 * std::f64::consts::PI));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

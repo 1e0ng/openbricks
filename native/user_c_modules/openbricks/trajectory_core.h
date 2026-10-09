@@ -78,8 +78,9 @@ void ob_trajectory_init_v0(ob_trajectory_t *t,
                            ob_float_t v0_world);
 
 // Full form: additionally end the profile at speed ``v3_end``
-// (magnitude, clamped to [0, cruise]) instead of rest — Pybricks
-// Stop.NONE. Sampling at/after ``t_total`` reports velocity v3 with
+// (magnitude, clamped to [0, cruise] and to the speed the distance
+// can reach from ``v0`` at ``accel``, sqrt(v0² + 2·accel·D)) instead
+// of rest — Pybricks Stop.NONE. Sampling at/after ``t_total`` reports velocity v3 with
 // position at the target; integrating the carried reference beyond
 // the target is the caller's job. A distance too short to slow from
 // ``v0`` to ``v3`` raises this move's deceleration to land exactly

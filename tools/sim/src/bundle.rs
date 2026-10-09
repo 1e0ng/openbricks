@@ -193,15 +193,26 @@ impl MeshRecord {
 /// The parts the user fetched by number, one bundle file each under
 /// `dir` (`<data dir>/bricks/<number>.json`), in name order; a file
 /// that cannot be read comes back with its reason. Nothing when the
-/// directory is not there. Every record found there is marked
-/// `fetched`: it came from the user's directory, so a build that uses
-/// it carries it along, whatever the file says.
+/// directory is not there; a directory that is there but cannot be
+/// listed (a plain file in its place, a permission lost) comes back as
+/// one entry keyed on the directory with the reason, so every part the
+/// user fetched never vanishes unsaid. Every record found there is
+/// marked `fetched`: it came from the user's directory, so a build that
+/// uses it carries it along, whatever the file says.
 pub fn user_bricks(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Result<Bundle, String>)> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
-    let mut files: Vec<std::path::PathBuf> = entries
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "json"))
-        .collect();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return vec![],
+        Err(e) => return vec![(dir.to_path_buf(), Err(e.to_string()))],
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        match entry {
+            Ok(e) => files.push(e.path()),
+            Err(e) => return vec![(dir.to_path_buf(), Err(e.to_string()))],
+        }
+    }
+    files.retain(|p| p.extension().is_some_and(|x| x == "json"));
     files.sort();
     files
         .into_iter()
@@ -216,21 +227,36 @@ pub fn user_bricks(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Result<Bun
 }
 
 /// The user's fetched parts join `bundle`. A number the library already
-/// carries keeps the library's record (weighed, in its sets) and the
-/// file is noted; so is a file that will not read. The notes come back
-/// for the inspector.
+/// carries — a record's own, or an inventory number the record goes by
+/// where LDraw names it differently (`aliases`: 41250 is the library's
+/// 22119) — keeps the library's record (weighed, in its sets) and the
+/// file is noted, naming both numbers; so is a file that will not read,
+/// and a directory that cannot be listed. The notes come back for the
+/// inspector.
 pub fn merge_user_bricks(bundle: &mut Bundle, dir: &std::path::Path) -> Vec<String> {
+    let shipped: BTreeMap<String, String> = bundle
+        .parts
+        .iter()
+        .flat_map(|(num, rec)| {
+            std::iter::once(num.clone())
+                .chain(rec.aliases.iter().cloned())
+                .map(move |n| (n, num.clone()))
+        })
+        .collect();
     let mut notes = vec![];
     for (p, r) in user_bricks(dir) {
         match r {
             Ok(b) => {
                 for (num, rec) in b.parts {
-                    match bundle.parts.get(&num) {
-                        Some(have) => notes.push(format!(
-                            "{}: the library ships {num} ({}); the fetched copy is ignored, remove the file",
-                            p.display(),
-                            have.name
-                        )),
+                    match shipped.get(&num) {
+                        Some(same) => {
+                            let said = if *same == num { num.clone() } else { format!("{num} as {same}") };
+                            notes.push(format!(
+                                "{}: the library ships {said} ({}); the fetched copy is ignored, remove the file",
+                                p.display(),
+                                bundle.parts[same].name
+                            ));
+                        }
                         None => {
                             bundle.parts.insert(num, rec);
                         }
@@ -238,6 +264,7 @@ pub fn merge_user_bricks(bundle: &mut Bundle, dir: &std::path::Path) -> Vec<Stri
                 }
                 bundle.colors.extend(b.colors);
             }
+            Err(e) if p == dir => notes.push(format!("fetched parts directory {}: {e}", p.display())),
             Err(e) => notes.push(format!("fetched part file {}: {e}", p.display())),
         }
     }
@@ -353,6 +380,64 @@ mod user_bricks_tests {
         );
         assert!(notes[1].contains("broken.json") && notes[1].contains("bundle JSON"), "{}", notes[1]);
         assert!(merge_user_bricks(&mut lib, &dir.join("nowhere")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bricks_path_that_cannot_be_listed_is_named_not_taken_for_nothing_fetched() {
+        // a plain file in the directory's place (a stray `> bricks`) read as "the user fetched
+        // nothing": every fetched part vanished from the library without a word
+        let dir = std::env::temp_dir().join(format!("ob-user-bricks-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&dir);
+        std::fs::write(&dir, "not a directory").unwrap();
+        let got = user_bricks(&dir);
+        assert_eq!(got.len(), 1, "{:?}", got.iter().map(|(p, _)| p).collect::<Vec<_>>());
+        assert_eq!(got[0].0, dir);
+        let reason = got[0].1.as_ref().unwrap_err().clone();
+        assert!(!reason.is_empty());
+        let mut lib: Bundle = serde_json::from_str("{}").unwrap();
+        let notes = merge_user_bricks(&mut lib, &dir);
+        assert_eq!(
+            notes,
+            vec![format!("fetched parts directory {}: {reason}", dir.display())],
+            "named, with the OS's reason"
+        );
+        assert!(lib.parts.is_empty());
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn a_fetched_part_keyed_by_a_shipped_alias_is_left_out_and_both_numbers_are_named() {
+        // the WRO inventory calls the 52 mm ball 41250; LDraw, and the library, 22119: a
+        // fetched 41250 is the shipped part under another number, and the shipped record wins,
+        // as the Python library_bundle rules
+        let dir = std::env::temp_dir().join(format!("ob-user-bricks-alias-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let one = |num: &str, name: &str| {
+            format!(
+                r#"{{"format":"openbricks-brick-bundle/1","parts":{{"{num}":{{"name":"{name}","ldraw":"{num}","mesh":{{"verts":0,"tris":0,"pos":"","nrm":"","idx":""}},"bbox":[[0,0,0],[1,1,1]],"com":[0,0,0],"inertia_per_g":[[1,0,0],[0,1,0],[0,0,1]]}}}}}}"#
+            )
+        };
+        std::fs::write(dir.join("41250.json"), one("41250", "Ball 52mm Diameter Red (Obsolete)")).unwrap();
+        std::fs::write(dir.join("2458.json"), one("2458", "P2458")).unwrap();
+        let mut lib: Bundle = serde_json::from_str(
+            r#"{"parts":{"22119":{"name":"Ball 52mm Diameter","aliases":["41250"],"mesh":{"verts":0,"tris":0,"pos":"","nrm":"","idx":""},"bbox":[[0,0,0],[1,1,1]],"com":[0,0,0],"inertia_per_g":[[1,0,0],[0,1,0],[0,0,1]]}}}"#,
+        )
+        .unwrap();
+        let notes = merge_user_bricks(&mut lib, &dir);
+        assert!(!lib.parts.contains_key("41250"), "{:?}", lib.parts.keys());
+        assert_eq!(lib.parts["22119"].name, "Ball 52mm Diameter");
+        assert_eq!(lib.parts["2458"].name, "P2458");
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].ends_with(
+                "41250.json: the library ships 41250 as 22119 (Ball 52mm Diameter); the fetched copy is ignored, remove the file"
+            ) && notes[0].starts_with(&dir.display().to_string()),
+            "{}",
+            notes[0]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

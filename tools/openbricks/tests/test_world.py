@@ -150,6 +150,26 @@ class LegoPropExpansionTests(unittest.TestCase):
                 mapfile.to_mjcf(self._map({"name": "x", "ldr": "props/no_such.ldr", "pos": [0, 0, 0], "mass": 0.01}), Path(tmp))
             self.assertIn("missing .ldr", str(cm.exception))
 
+    def test_a_malformed_ldr_is_refused_for_its_prop(self):
+        # the LDraw reader's faults (no part instances, a malformed 1-line) are named for the prop
+        # and its file, and the loader turns them into a WorldLoadError like any other map fault
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "props").mkdir()
+            (tmp / "props" / "empty.ldr").write_text("0 only a comment\n")
+            (tmp / "props" / "cut.ldr").write_text("1 4 0 0 0 1 0 0\n")
+            for ldr, words in [("props/empty.ldr", "no part instances"), ("props/cut.ldr", "malformed LDraw 1-line")]:
+                with self.subTest(ldr=ldr):
+                    m = self._map({"name": "clef", "ldr": ldr, "pos": [0, 0, 0], "mass": 0.01})
+                    with self.assertRaises(mapfile.MapError) as cm:
+                        mapfile.to_mjcf(m, tmp)
+                    self.assertIn("prop 'clef' (%s)" % (tmp / ldr), str(cm.exception))
+                    self.assertIn(words, str(cm.exception))
+                    mapfile.save(m, tmp / "map.json")
+                    with self.assertRaises(WorldLoadError) as cm:
+                        load_world(str(tmp / "map.json"), chassis_spec=ChassisSpec())
+                    self.assertIn("prop 'clef'", str(cm.exception))
+
     def test_a_map_with_no_props_has_no_bodies(self):
         with tempfile.TemporaryDirectory() as tmp:
             m = {"format": mapfile.FORMAT, "name": "bare", "geoms": [{"type": "plane", "size": [1, 1, 0.1]}]}

@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 """Firmware and host tooling share ONE version (lockstep since
-1.15.0). The wheel doesn't bundle the firmware package, so the value
-is duplicated into both ``__init__.py`` files by
-``scripts/bump-version.py`` — this test pins the duplicates equal so
-a manual edit of one can't silently desynchronise the release pair.
+1.15.0). The wheel bundles the firmware package (since 3.6.0), but the
+firmware reports ``openbricks.__version__`` while ``pyproject.toml``
+reads ``openbricks_dev.__version__``, so ``scripts/bump-version.py``
+writes the value into both ``__init__.py`` files — this test pins the
+two equal so a manual edit of one can't silently desynchronise the
+release pair.
 
 Runs under CPython and unix MicroPython; plain string scanning."""
 

@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from openbricks_sim import mapfile
 
@@ -243,6 +244,9 @@ class PackTests(unittest.TestCase):
                 ({"a.txt": "text"}, "must hold json, text or base64"),
                 ({"a.txt": {"text": "", "json": 1}}, "must hold json, text or base64"),
                 ({"a.txt": {"zip": ""}}, "not 'zip'"),
+                ({"a.txt": {"text": 123}}, "'a.txt' must hold json, text or base64; its text is not text"),
+                ({"a.png": {"base64": "not base64!!"}}, "'a.png' is not base64"),
+                ({"props": {"text": "x"}, "props/a.ldr": {"text": "y"}}, "'props/a.ldr' could not be written"),
             ]:
                 with self.subTest(words=words):
                     with self.assertRaises(mapfile.MapError) as cm:
@@ -255,6 +259,78 @@ class PackTests(unittest.TestCase):
                 mapfile.pack(dict(base, props=[{"name": "p", "file": "props/gone.json", "pos": [0, 0, 0]}]), tmp)
             with self.assertRaises(mapfile.MapError):
                 mapfile.pack(dict(base, props=[{"name": "p", "file": "props/gone.json", "pos": [0, 0, 0]}]), None)
+
+    def test_a_failed_export_leaves_the_file_as_it_was(self):
+        # packed first, written beside the path and moved onto it: a refused pack (a model gone)
+        # or a write that fails half way neither truncates the export already there nor leaves
+        # a .tmp beside it
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "src"
+            (src / "props").mkdir(parents=True)
+            (src / "props" / "a.ldr").write_text("1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat")
+            m = {"format": mapfile.FORMAT, "name": "kept",
+                 "props": [{"name": "p", "ldr": "props/a.ldr", "pos": [0, 0, 0], "mass": 0.01}]}
+            out = Path(tmp) / "x.map.json"
+            mapfile.export_to(m, src, str(out))
+            before = out.read_bytes()
+            self.assertEqual(json.loads(before)["name"], "kept")
+            gone = dict(m, props=m["props"] + [{"name": "lost", "file": str(Path(tmp) / "no.assembly.json"), "pos": [0, 0, 0]}])
+            with self.assertRaises(mapfile.MapError) as cm:
+                mapfile.export_to(gone, src, out)
+            self.assertIn("'lost'", str(cm.exception))
+            self.assertEqual(out.read_bytes(), before, "the export there is as it was")
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["src", "x.map.json"], "nothing beside it")
+            with mock.patch.object(mapfile.json, "dump", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    mapfile.export_to(m, src, out)
+            self.assertEqual(out.read_bytes(), before, "a write that fails half way changes nothing")
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["src", "x.map.json"])
+
+    def test_an_export_carries_every_file_the_map_names(self):
+        # a relative ref must lead to a file inside the folder (one outside would not be packed),
+        # and an export must hold every file its map names (a bare map.json is no export): the
+        # fault is named for the prop or the asset, before anything is written
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "src"
+            (src / "props").mkdir(parents=True)
+            (src / "props" / "a.ldr").write_text("1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat")
+            shared = Path(tmp) / "shared"
+            shared.mkdir()
+            (shared / "x.ldr").write_text("1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat")
+            base = {"format": mapfile.FORMAT, "name": "x"}
+            prop = {"name": "p", "ldr": "../shared/x.ldr", "pos": [0, 0, 0], "mass": 0.01}
+            with self.assertRaises(mapfile.MapError) as cm:
+                mapfile.pack(dict(base, props=[prop]), src)
+            self.assertIn("prop 'p'", str(cm.exception))
+            self.assertIn("outside the map's folder", str(cm.exception))
+            with self.assertRaises(mapfile.MapError) as cm:
+                mapfile.pack(dict(base, textures=[{"name": "mat_tex", "type": "2d", "file": "mat.png"}]), src)
+            self.assertIn("texture 'mat_tex'", str(cm.exception))
+            self.assertIn("not in the map's folder", str(cm.exception))
+            # an asset named by an absolute path is refused too: pack takes in a prop's model
+            # alone, and unpack refuses an absolute ref, so such an export would not import
+            with self.assertRaises(mapfile.MapError) as cm:
+                mapfile.pack(dict(base, meshes=[{"name": "frame", "file": str(shared / "x.ldr")}]), src)
+            self.assertIn("mesh 'frame'", str(cm.exception))
+            self.assertIn("absolute path", str(cm.exception))
+            ok = mapfile.pack(dict(base, props=[dict(prop, ldr="props/a.ldr")]), src)
+            self.assertEqual(sorted(ok["files"]), ["props/a.ldr"])
+            dest = Path(tmp) / "dest"
+            dest.mkdir()
+            for obj, words in [
+                (dict(base, props=[dict(prop, ldr="props/x.ldr")], files={}), "lacks the model of prop 'p': props/x.ldr"),
+                (dict(base, meshes=[{"name": "frame", "file": "frame.stl"}], files={}), "lacks the file of mesh 'frame': frame.stl"),
+                (dict(base, props=[prop], files={}), "prop 'p' names its model outside the folder"),
+                (dict(base, props=[dict(prop, ldr=str(shared / "x.ldr"))], files={}), "prop 'p' names its model outside the folder"),
+            ]:
+                with self.subTest(words=words):
+                    with self.assertRaises(mapfile.MapError) as cm:
+                        mapfile.unpack(obj, dest)
+                    self.assertIn(words, str(cm.exception))
+                    self.assertEqual(list(dest.iterdir()), [], "nothing written")
+            got = mapfile.unpack(ok, dest)
+            self.assertEqual(got["props"][0]["ldr"], "props/a.ldr")
+            self.assertEqual((dest / "props" / "a.ldr").read_text(), "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat")
 
 
 if __name__ == "__main__":

@@ -1178,6 +1178,25 @@ class StartPressLifecycleTests(unittest.TestCase):
             "button press latched by hardware counter -> stop [edges")]
         self.assertEqual(len(latch), 1, notes)
         self.assertIn("ms into the run; held=0 consume=0", latch[0])
+        # The note names the transition: the start press's one edge,
+        # then the stop's one.
+        self.assertIn("[edges 1->2,", latch[0])
+
+    def test_latch_stop_note_tells_a_chatter_cluster_from_one_edge(self):
+        notes = self._capture_notes()
+        self._counter_press_down()
+        self._tick()
+        self._program_comes_up()
+        self.btn._value = 1
+        self._tick(3)
+        advance_ms(launcher.Launcher.RUN_START_GRACE_MS
+                   + launcher.Launcher.RELEASE_CHATTER_MS + 100)
+        self.pcnt.count += 3                        # a bouncing stop press
+        self._tick()
+        latch = [n for n in notes if n.startswith(
+            "button press latched by hardware counter -> stop [edges")]
+        self.assertEqual(len(latch), 1, notes)
+        self.assertIn("[edges 1->4,", latch[0])
 
     def test_press_down_stop_note_carries_the_state(self):
         notes = self._capture_notes()
@@ -2441,6 +2460,118 @@ class LogPumpWiringTests(unittest.TestCase):
         self.addCleanup(setattr, self._log, "flush", orig)
         self.launch._fire_stop()     # must not raise
         self.assertIsNotNone(self.launch._last_stop_ms)
+
+
+_TICKS_PERIOD = 1 << 30
+
+
+class _WrappingTime:
+    """MicroPython's ``time`` as the ESP32 build has it: ``ticks_ms``
+    wraps at 2^30 ms (~12.4 days of uptime) and ``ticks_diff`` folds
+    the difference back into a signed range. Swapped in as
+    ``launcher.time``; the clock starts just below the wrap. Runs out
+    after ``budget_ms`` of sleeps, so a wait that never ends fails the
+    test instead of hanging it."""
+
+    def __init__(self, start_ms, budget_ms=60000):
+        self._now = [start_ms]
+        self._budget = [budget_ms]
+
+    def ticks_ms(self):
+        return self._now[0] & (_TICKS_PERIOD - 1)
+
+    def ticks_diff(self, a, b):
+        d = (a - b) & (_TICKS_PERIOD - 1)
+        if d >= _TICKS_PERIOD // 2:
+            d -= _TICKS_PERIOD
+        return d
+
+    def sleep_ms(self, ms):
+        self._budget[0] -= ms
+        if self._budget[0] < 0:
+            raise AssertionError("waited past the test's clock budget")
+        self._now[0] += ms
+
+    def time(self):
+        return self._now[0] // 1000
+
+
+def _use_wrapping_time(test, start_ms):
+    fake = _WrappingTime(start_ms)
+    prev = launcher.time
+    launcher.time = fake
+
+    def _restore():
+        launcher.time = prev
+    test.addCleanup(_restore)
+    return fake
+
+
+class TicksWrapTests(unittest.TestCase):
+    """Elapsed times in the launcher go through ``ticks_diff``: on the
+    hub ``ticks_ms`` wraps after ~12.4 days of uptime, and a plain
+    subtraction across the wrap is a huge negative number."""
+
+    def setUp(self):
+        from openbricks import estop
+        estop.clear()
+
+    def test_brake_budget_trips_across_the_ticks_wrap(self):
+        import sys as _sys
+
+        class _SB:
+            @staticmethod
+            def db_stop(mode=None):
+                return True
+
+            @staticmethod
+            def db_done():
+                return False                  # a blocked wheel
+
+        class _Mod:
+            pass
+
+        mod = _Mod()
+        mod.st_bus = _SB()
+        prev = _sys.modules.get("_openbricks_native")
+        _sys.modules["_openbricks_native"] = mod
+
+        def _restore():
+            if prev is None:
+                _sys.modules.pop("_openbricks_native", None)
+            else:
+                _sys.modules["_openbricks_native"] = prev
+        self.addCleanup(_restore)
+        _use_wrapping_time(self, _TICKS_PERIOD - 500)
+        note = launcher._brake_to_rest()
+        self.assertEqual(
+            note, "brake: wheels not at rest after %d ms - torque-off"
+            % launcher._BRAKE_TO_REST_MS)
+
+    def test_clean_exit_marker_counts_across_the_ticks_wrap(self):
+        import tests.test_log as tlog
+        from openbricks import log as log_mod
+        tlog._wipe(tlog._TEST_LOG_DIR)
+        prev_dir = log_mod.LOG_DIR
+        log_mod.LOG_DIR = tlog._TEST_LOG_DIR
+        prog = tlog._TEST_LOG_DIR + "_wrap_prog.py"
+        _use_wrapping_time(self, _TICKS_PERIOD - 10)
+        try:
+            with open(prog, "w") as f:
+                f.write("from openbricks import launcher\n"
+                        "launcher.time.sleep_ms(50)\n")
+            launcher._exec_program_raw(prog, origin="test")
+            runs = log_mod.list_runs()
+            self.assertEqual(len(runs), 1)
+            data = log_mod.read_run(runs[0][0])
+        finally:
+            log_mod.LOG_DIR = prev_dir
+            tlog._wipe(tlog._TEST_LOG_DIR)
+            try:
+                os.remove(prog)
+            except OSError:
+                pass
+        self.assertIn("finished: clean exit after 50 ms", data)
 
 
 class BrakeToRestTests(unittest.TestCase):

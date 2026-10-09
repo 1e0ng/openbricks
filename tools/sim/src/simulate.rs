@@ -87,6 +87,9 @@ pub fn default_color(kind: &str, dark: bool) -> [u8; 3] {
 const HISTORY: usize = 60;
 /// How long a click's marker stays on the map.
 const CLICK_MARKER_FOR: std::time::Duration = std::time::Duration::from_millis(600);
+/// Said when a curve's end is clicked or dragged where no single arc
+/// reaches, or where the one arc would loop nearly the whole circle.
+const BEHIND_REFUSAL: &str = "no single arc reaches a point straight behind the start, or within 2° of it: click elsewhere";
 
 /// What one frame of the Simulate view draws.
 #[derive(Default)]
@@ -125,8 +128,18 @@ pub struct SimulateTab {
     /// The map the scene shown belongs to, by alias: a scene for another
     /// map is a new map to frame.
     scene_world: Option<String>,
-    pending_load: bool,
+    /// A load waiting for the server (a run to stop, the map list), with
+    /// whether it keeps the message (see [`Self::load_keeping_message`]).
+    pending_load: Option<bool>,
     scene_gen: u32,
+    /// The scene generation whose geom meshes the viewport holds, and how
+    /// many: the next generation drawn frees them first.
+    drawn_gen: u32,
+    drawn_geoms: usize,
+    /// A map named (by a route, a draft, or the default) that the server
+    /// does not list: the map shown stands in for it, and the route keeps
+    /// its own map's name until the user chooses one.
+    stand_in_for: Option<String>,
     /// The default map is loaded once, when the tab first shows.
     auto_loaded: bool,
     /// The route being planned on this map.
@@ -167,6 +180,10 @@ pub struct SimulateTab {
     pub selected: Option<usize>,
     /// Route snapshots for undo, oldest first.
     history: Vec<Route>,
+    /// A run of Definitions typing is under way: its undo point is taken,
+    /// and the next keystroke joins it. Anything else recorded, an undo,
+    /// a restored draft or a route loaded ends the run.
+    prelude_run: bool,
     show_program: bool,
     show_definitions: bool,
     /// Indices in the last `draw_items` result that draw the chassis.
@@ -225,8 +242,11 @@ impl SimulateTab {
             fit_pending: false,
             frame_pending: false,
             scene_world: None,
-            pending_load: false,
+            pending_load: None,
             scene_gen: 0,
+            drawn_gen: 0,
+            drawn_geoms: 0,
+            stand_in_for: None,
             auto_loaded: false,
             route: Route::default(),
             route_path: None,
@@ -248,6 +268,7 @@ impl SimulateTab {
             dragging: None,
             selected: None,
             history: vec![],
+            prelude_run: false,
             show_program: false,
             show_definitions: false,
             chassis_items: vec![],
@@ -280,6 +301,7 @@ impl SimulateTab {
     #[cfg(test)]
     pub fn select_world(&mut self, alias: &str) {
         self.world = alias.to_string();
+        self.stand_in_for = None;
         self.reload();
     }
 
@@ -325,11 +347,17 @@ impl SimulateTab {
     /// A different map or chassis was chosen: show it. A run in
     /// progress is stopped first; the load follows its `stopped` state.
     pub fn reload(&mut self) {
-        if matches!(self.status.as_str(), "running" | "paused") {
-            self.pending_load = true;
+        self.reload_keeping_message(false);
+    }
+
+    /// `reload`, with `keep_message` as [`Self::load_keeping_message`]
+    /// takes it.
+    fn reload_keeping_message(&mut self, keep_message: bool) {
+        if self.busy() {
+            self.pending_load = Some(keep_message);
             self.send(serde_json::json!({"cmd": "stop"}));
         } else {
-            self.load();
+            self.load_keeping_message(keep_message);
         }
     }
 
@@ -388,15 +416,21 @@ impl SimulateTab {
                     self.status = format!("run server {version} ready");
                 }
                 Event::Worlds(w) => {
+                    // a map named that the server has not: the first shipped one stands in for
+                    // it, and says so (after the load, which clears the message)
+                    let mut missing = None;
                     if !w.iter().any(|e| e.alias == self.world)
                         && let Some(first) = w.iter().find(|e| e.alias != "empty")
                     {
-                        self.world = first.alias.clone();
+                        missing = Some(std::mem::replace(&mut self.world, first.alias.clone()));
+                        self.stand_in_for = missing.clone();
                     }
                     self.worlds = w;
-                    if self.pending_load {
-                        self.pending_load = false;
-                        self.load();
+                    if let Some(keep) = self.pending_load.take() {
+                        self.load_keeping_message(keep);
+                    }
+                    if let Some(gone) = missing {
+                        self.message = format!("map {gone} is not on this machine: showing {}", self.world);
                     }
                 }
                 Event::Scene(s) => {
@@ -410,7 +444,11 @@ impl SimulateTab {
                         };
                         s.bodies.len()
                     ];
-                    self.route.world = self.world.clone();
+                    // the route belongs to the map shown, unless that map only stands in for the
+                    // one the route names
+                    if self.stand_in_for.is_none() {
+                        self.route.world = self.world.clone();
+                    }
                     if self.markers.world != self.world {
                         // the markers kept for this map on this machine come back with it
                         self.markers = match Markers::load(&self.markers_dir, &self.world) {
@@ -461,20 +499,25 @@ impl SimulateTab {
                     self.message = format!("exported to {path}");
                 }
                 Event::Imported { alias, path } => {
-                    // a map of the user's own now, listed with the rest: shown at once, markers fresh
+                    // a map of the user's own now, listed with the rest: shown at once, markers
+                    // fresh, the confirmation kept through the load; a run that slipped in since
+                    // the import was sent is stopped first, as for any map chosen
                     self.message = format!("imported as {alias}: {path}");
                     self.world = alias;
-                    self.load();
+                    self.stand_in_for = None;
+                    self.reload_keeping_message(true);
                 }
                 Event::Saved { alias, path } => {
-                    // the map is the user's own now: its markers come along, and it is the map shown
+                    // the map is the user's own now: its markers come along (a failure to carry
+                    // them outlives the load, as the confirmation does), and it is the map shown
                     self.message = format!("saved as {alias}: {path}");
                     self.markers.world = alias.clone();
                     self.save_markers();
                     // the same map under its new name: the view stays where it is
                     self.scene_world = Some(alias.clone());
                     self.world = alias;
-                    self.load();
+                    self.stand_in_for = None;
+                    self.load_keeping_message(true);
                 }
                 Event::Frame { t_ms, poses } => {
                     self.t_ms = t_ms;
@@ -500,14 +543,18 @@ impl SimulateTab {
                     self.t_ms = t_ms;
                     self.speed_sent = speed;
                     self.error = error;
-                    if self.pending_load && !matches!(self.status.as_str(), "running" | "paused") {
-                        self.pending_load = false;
-                        self.load();
+                    if self.pending_load.is_some() && !matches!(self.status.as_str(), "running" | "paused") {
+                        let keep = self.pending_load.take().unwrap_or_default();
+                        self.load_keeping_message(keep);
                     }
                 }
                 Event::Error(text) => {
                     self.message = text.clone();
                     self.log.push(("server".into(), text));
+                    // an add the server refused has no scene coming: the next scene (another
+                    // map's, say) must not select or settle a prop for it
+                    self.select_new_prop = false;
+                    self.clear_pending = false;
                 }
                 Event::Bye => self.server_gone(None),
                 Event::Exited(why) => self.server_gone(Some(why)),
@@ -522,6 +569,8 @@ impl SimulateTab {
         self.process = None;
         self.connected = false;
         self.status = "run server stopped".into();
+        self.select_new_prop = false;
+        self.clear_pending = false;
     }
 
     pub fn is_live(&self) -> bool {
@@ -532,19 +581,33 @@ impl SimulateTab {
             )
     }
 
+    /// Load the map (and chassis) chosen; a stale message goes with the
+    /// old scene's error and log.
     fn load(&mut self) {
+        self.load_keeping_message(false);
+    }
+
+    /// The load itself. `keep_message` leaves the message as it is: the
+    /// confirmation of a save or an import (or a markers error it ran
+    /// into) must outlive the reload that shows the map.
+    fn load_keeping_message(&mut self, keep_message: bool) {
+        // no scene of the map loading answers an add sent before it
+        self.select_new_prop = false;
+        self.clear_pending = false;
         if !self.ensure_process() {
             return;
         }
         if !self.connected || self.worlds.is_empty() {
-            self.pending_load = true;
+            self.pending_load = Some(keep_message);
             return;
         }
         let mut cmd = serde_json::json!({"cmd": "load", "world": self.world});
         if let Some(c) = &self.chassis {
             cmd["assembly"] = serde_json::Value::String(c.to_string_lossy().to_string());
         }
-        self.message.clear();
+        if !keep_message {
+            self.message.clear();
+        }
         self.error = None;
         self.log.clear();
         self.send(cmd);
@@ -682,6 +745,7 @@ impl SimulateTab {
 
     /// Keep the route as it is, for undo.
     fn record(&mut self) {
+        self.prelude_run = false;
         self.route_rev += 1;
         if self.history.last() != Some(&self.route) {
             self.history.push(self.route.clone());
@@ -689,6 +753,23 @@ impl SimulateTab {
                 self.history.remove(0);
             }
         }
+    }
+
+    /// The Definitions box's text changed. A run of typing with nothing
+    /// else edited between is one undo point (the route before it, as the
+    /// Workbench keeps a run of colour changes), and every change reaches
+    /// the draft keeper.
+    pub fn edit_prelude(&mut self, prelude: String) {
+        if prelude == self.route.prelude {
+            return;
+        }
+        if self.prelude_run {
+            self.route_rev += 1;
+        } else {
+            self.record();
+            self.prelude_run = true;
+        }
+        self.route.prelude = prelude;
     }
 
     // ---------------------------------------------------------- drafts
@@ -726,7 +807,7 @@ impl SimulateTab {
     /// A route draft an earlier session kept comes back, its map to
     /// load when the tab shows and the chassis at its start.
     pub fn restore_draft(&mut self, now_ms: i64) -> bool {
-        let Some((_, note)) = crate::drafts::take(&self.draft_dir, crate::drafts::ROUTE) else {
+        let Some((_, note)) = crate::drafts::kept(&self.draft_dir, crate::drafts::ROUTE) else {
             return false;
         };
         match Route::load(&self.draft_dir.join(crate::drafts::ROUTE)) {
@@ -735,22 +816,36 @@ impl SimulateTab {
                 self.draft = None;
                 self.selected = None;
                 self.history.clear();
+                self.prelude_run = false;
                 self.placed = Some(r.start);
                 if !r.world.is_empty() {
                     self.world = r.world.clone();
+                    self.stand_in_for = None;
                 }
                 self.route = r;
-                self.route_path = note.path.clone();
                 self.route_rev += 1;
                 self.keeper.kept(self.route_rev);
-                self.message = format!(
-                    "restored the unsaved route draft kept {}{}",
-                    crate::drafts::ago(note.kept_ms, now_ms),
-                    match &note.path {
-                        Some(p) => format!(" of {}", p.display()),
-                        None => String::new(),
+                match note {
+                    Ok(note) => {
+                        self.route_path = note.path.clone();
+                        self.message = format!(
+                            "restored the unsaved route draft kept {}{}",
+                            crate::drafts::ago(note.kept_ms, now_ms),
+                            match &note.path {
+                                Some(p) => format!(" of {}", p.display()),
+                                None => String::new(),
+                            }
+                        );
                     }
-                );
+                    Err(why) => {
+                        // the draft is the work; without its note, when it was kept and the file
+                        // it belongs to are unknown, which is said rather than guessed
+                        self.route_path = None;
+                        self.message = format!(
+                            "restored the unsaved route draft; its note could not be read ({why}), so when it was kept and the file it belongs to are unknown"
+                        );
+                    }
+                }
                 true
             }
             Err(e) => {
@@ -767,6 +862,9 @@ impl SimulateTab {
             return false;
         };
         self.route = r;
+        // a change like any other: the draft keeper rewrites the draft without the undone change
+        self.route_rev += 1;
+        self.prelude_run = false;
         self.placing = None;
         self.draft = None;
         self.dragging = None;
@@ -829,7 +927,14 @@ impl SimulateTab {
         if p.kind == "curve" && p.first && pts.len() == 2 {
             return Action::placed("turn", pts, 0.0, false);
         }
-        Action::placed(p.kind, pts, self.heading_at(pts[0]), p.first)
+        let mut a = Action::placed(p.kind, pts, self.heading_at(pts[0]), p.first);
+        // an end the click would refuse previews as no curve: nothing drawn, no radius named
+        if a.end_refused()
+            && let Action::Curve { start, end, .. } = &mut a
+        {
+            *end = *start;
+        }
+        a
     }
 
     /// The placement's points with `next` (the pointer, or a click) as the
@@ -958,13 +1063,11 @@ impl SimulateTab {
         placing.points.push(p);
         if placing.points.len() >= route::clicks_needed(placing.kind, placing.first) {
             let action = Action::placed(placing.kind, &placing.points, self.heading_at(placing.points[0]), placing.first);
-            // a curve's end that no one arc reaches (straight behind its start) is not taken: the
-            // tool stays armed for another
-            let (s0, e0) = (action.start(), action.end());
-            let apart = ((s0[0] - e0[0]).powi(2) + (s0[1] - e0[1]).powi(2)).sqrt();
-            if placing.kind == "curve" && action.pieces().is_empty() && apart >= 0.5 {
+            // a curve's end that no one arc reaches (straight behind its start, or within 2° of
+            // it) is not taken: the tool stays armed for another
+            if action.end_refused() {
                 placing.points.pop();
-                self.message = "no single arc reaches a point straight behind the start: click elsewhere".into();
+                self.message = BEHIND_REFUSAL.into();
                 self.placing = Some(placing);
                 return true;
             }
@@ -1210,11 +1313,23 @@ impl SimulateTab {
         let Some((i, handle, last)) = self.dragging else { return };
         let Some(item) = self.route.actions.get_mut(i) else { return };
         let p = [x_mm, y_mm];
+        let before = item.action.clone();
         if handle == Handle::Body {
             item.action.translate(p[0] - last[0], p[1] - last[1]);
             self.dragging = Some((i, handle, p));
         } else {
             item.action.drag(handle, p);
+            // a curve's end dragged straight behind its start, or within 2° of it, is not taken:
+            // the curve stays as it was
+            if handle == Handle::End && item.action.end_refused() && item.action != before {
+                item.action = before.clone();
+                self.message = BEHIND_REFUSAL.into();
+            }
+        }
+        // every move reaches the draft keeper, so the drag is kept where it ends, not where its
+        // first moment found it
+        if item.action != before {
+            self.route_rev += 1;
         }
         self.ghost = self.steps().get(i).map(|s| s.end);
     }
@@ -1278,6 +1393,7 @@ impl SimulateTab {
                 self.draft = None;
                 self.selected = None;
                 self.history.clear();
+                self.prelude_run = false;
                 self.placed = Some(r.start);
                 let other_map = !r.world.is_empty() && r.world != self.world;
                 self.route = r;
@@ -1286,6 +1402,7 @@ impl SimulateTab {
                 self.drop_draft();
                 if other_map {
                     self.world = self.route.world.clone();
+                    self.stand_in_for = None;
                     self.reload();
                 } else if self.scene.is_some() {
                     let p = self.route.start;
@@ -1939,13 +2056,19 @@ impl SimulateTab {
         }
         ui.checkbox(&mut self.show_definitions, "Definitions (what custom actions call)");
         if self.show_definitions {
-            ui.add(
-                egui::TextEdit::multiline(&mut self.route.prelude)
-                    .code_editor()
-                    .desired_rows(6)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("def line_follow():\n    ...\n\ndef run_until_all_black():\n    ..."),
-            );
+            let mut prelude = self.route.prelude.clone();
+            if ui
+                .add(
+                    egui::TextEdit::multiline(&mut prelude)
+                        .code_editor()
+                        .desired_rows(6)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("def line_follow():\n    ...\n\ndef run_until_all_black():\n    ..."),
+                )
+                .changed()
+            {
+                self.edit_prelude(prelude);
+            }
         }
         ui.checkbox(&mut self.show_program, "show the program");
         if self.show_program {
@@ -1981,6 +2104,15 @@ impl SimulateTab {
         let Some(scene) = self.scene.as_ref() else {
             return SimDraw::default();
         };
+        // the previous generation's geom meshes go before this one's are built: a rebuilt map
+        // (an edit, a save, a chassis change) is not one more copy of every mesh on the GPU
+        if self.scene_gen != self.drawn_gen {
+            for i in 0..self.drawn_geoms {
+                viewport.remove_mesh(&format!("geom:{}:{i}", self.drawn_gen));
+            }
+            self.drawn_gen = self.scene_gen;
+        }
+        self.drawn_geoms = scene.geoms.len();
         let mut items = Vec::new();
         let mut item_bodies = Vec::new();
         let mut chassis_items = Vec::new();
@@ -2579,8 +2711,54 @@ impl SimulateTab {
     /// The map to load: the shipped ones and the user's own (marked), a
     /// change loading it at once.
     pub fn world_picker(&mut self, ui: &mut egui::Ui) {
-        let choices: Vec<(String, String)> = if self.worlds.is_empty() {
-            [
+        let choices = self.world_choices();
+        let mut chosen = None;
+        egui::ComboBox::from_id_salt("world")
+            .selected_text(self.world.clone())
+            .show_ui(ui, |ui| {
+                for (alias, label, error) in choices {
+                    match error {
+                        // a map the server could not read cannot be chosen: its row says so, and
+                        // names the file and the reason when hovered
+                        Some(error) => {
+                            ui.add_enabled(false, egui::Button::selectable(false, label))
+                                .on_disabled_hover_text(error);
+                        }
+                        None => {
+                            if ui.selectable_label(self.world == alias, label).clicked() {
+                                chosen = Some(alias);
+                            }
+                        }
+                    }
+                }
+            });
+        if let Some(alias) = chosen {
+            self.choose_world(alias);
+        }
+    }
+
+    /// A map picked: the route's map from now on — even the one already
+    /// shown, when it only stood in for a map not on this machine — and
+    /// loaded unless it is shown already.
+    fn choose_world(&mut self, alias: String) {
+        self.stand_in_for = None;
+        if self.route.world != alias {
+            // the route's own change, which its draft keeps
+            self.route.world = alias.clone();
+            self.route_rev += 1;
+        }
+        if alias != self.world {
+            self.world = alias;
+            self.reload();
+        }
+    }
+
+    /// The picker's rows: each map's alias and label, and for one of the
+    /// user's own the server could not read (an old `world.xml` it could
+    /// not convert), why — such a row cannot be chosen.
+    fn world_choices(&self) -> Vec<(String, String, Option<String>)> {
+        if self.worlds.is_empty() {
+            return [
                 "practice-line",
                 "practice-zones",
                 "practice-walls",
@@ -2590,30 +2768,29 @@ impl SimulateTab {
                 "empty",
             ]
             .iter()
-            .map(|a| (a.to_string(), a.to_string()))
-            .collect()
-        } else {
-            self.worlds
-                .iter()
-                .map(|w| {
-                    (
-                        w.alias.clone(),
-                        if w.user { format!("{} (yours)", w.alias) } else { w.alias.clone() },
-                    )
-                })
-                .collect()
-        };
-        let before = self.world.clone();
-        egui::ComboBox::from_id_salt("world")
-            .selected_text(self.world.clone())
-            .show_ui(ui, |ui| {
-                for (alias, label) in choices {
-                    ui.selectable_value(&mut self.world, alias, label);
-                }
-            });
-        if self.world != before {
-            self.reload();
+            .map(|a| (a.to_string(), a.to_string(), None))
+            .collect();
         }
+        self.worlds
+            .iter()
+            .map(|w| {
+                let label = match (&w.error, w.user) {
+                    (Some(_), _) => format!("{} (yours · cannot be read)", w.alias),
+                    (None, true) => format!("{} (yours)", w.alias),
+                    (None, false) => w.alias.clone(),
+                };
+                (w.alias.clone(), label, w.error.clone())
+            })
+            .collect()
+    }
+
+    /// The map the shown scene belongs to, as the server lists it: what
+    /// "Save changes" writes. The picker's choice is not it until that
+    /// map's scene has arrived (a load refused mid-run, a map whose
+    /// model is gone), and a save must never go under another map's name.
+    fn shown_map(&self) -> Option<&WorldEntry> {
+        let shown = self.scene_world.as_deref()?;
+        self.worlds.iter().find(|w| w.alias == shown)
     }
 
     /// The map shown, by alias.
@@ -3297,6 +3474,10 @@ impl SimulateTab {
             self.message = "the run server is not up yet".into();
             return;
         }
+        if self.busy() {
+            self.message = "stop the program before importing a map".into();
+            return;
+        }
         self.send(serde_json::json!({"cmd": "import_world", "path": path.to_string_lossy()}));
     }
 
@@ -3499,20 +3680,20 @@ impl SimulateTab {
             }
         });
         ui.separator();
-        // the user's own map saves in place; a shipped one only as a new map
-        match self.worlds.iter().find(|w| w.alias == self.world).map(|w| w.user) {
-            Some(true) => {
-                ui.strong(format!("Your map: {}", self.world));
+        // the user's own map saves in place; a shipped one only as a new map — the map shown,
+        // which is the one the server would write
+        match self.shown_map().map(|w| (w.alias.clone(), w.user)) {
+            Some((alias, true)) => {
+                ui.strong(format!("Your map: {alias}"));
                 ui.horizontal(|ui| {
                     let can = self.scene.is_some() && !self.busy();
                     if ui.add_enabled(can, egui::Button::new("Save changes")).clicked() {
-                        let alias = self.world.clone();
                         self.save_map_as(&alias);
                     }
                     ui.weak("the props as they stand, written to this map");
                 });
             }
-            Some(false) => {
+            Some((_, false)) => {
                 ui.weak("a shipped map keeps its layout: save your changes as a map of your own");
             }
             None => {}
@@ -3703,6 +3884,10 @@ mod tests {
             },
         ]));
         assert_eq!(t.world, "practice-line");
+        assert_eq!(
+            t.message, "map nope is not on this machine: showing practice-line",
+            "a map the server has not is never swapped in silence"
+        );
         t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE).unwrap())));
         assert_eq!(t.poses.len(), 2);
         assert_eq!(t.scene_gen, 1);
@@ -4326,7 +4511,7 @@ mod tests {
         assert_eq!(other.route.actions.len(), 1);
         assert_eq!(other.world, "practice-line", "the route's map is chosen");
         assert!(
-            other.pending_load || other.message.contains("no Python interpreter"),
+            other.pending_load.is_some() || other.message.contains("no Python interpreter"),
             "{}",
             other.message
         );
@@ -4374,10 +4559,10 @@ mod tests {
         let mut t = SimulateTab::new(None);
         t.status = "running".into();
         t.reload();
-        assert!(t.pending_load);
+        assert!(t.pending_load.is_some());
         assert_eq!(t.sent.last().unwrap()["cmd"], "stop");
         t.apply(state("stopped"));
-        assert!(!t.pending_load);
+        assert!(t.pending_load.is_none());
         assert!(t.message.contains("no Python interpreter"), "{}", t.message);
         // the tab showing loads the default map once
         t.message.clear();
@@ -4427,9 +4612,9 @@ mod tests {
         // a map chosen mid-run: stopped first, then loaded
         t.world = "practice-line".into();
         t.reload();
-        assert!(t.pending_load);
+        assert!(t.pending_load.is_some());
         assert!(
-            pump_until(&mut t, 30, |t| !t.pending_load
+            pump_until(&mut t, 30, |t| t.pending_load.is_none()
                 && t.status == "loaded"
                 && t.log.iter().any(|(_, x)| x == "loaded practice-line with None")),
             "{} {:?}",
@@ -4794,6 +4979,7 @@ mod tests {
             path: Some("/me/worlds/my-layout/map.json".into()),
             dir: Some("/me/worlds/my-layout".into()),
             user: true,
+            error: None,
         });
         t.save_map_as("my-layout");
         assert_eq!(
@@ -4851,6 +5037,7 @@ mod tests {
             path: None,
             dir: None,
             user: false,
+            error: None,
         });
         t.world = "shipped".into();
         let _ = ctx.run_ui(Default::default(), |ui| t.map_ui(ui, &lib));
@@ -5017,6 +5204,11 @@ mod tests {
         );
         assert!(dir.join("worlds").join("harness-elementary").join("map.json").is_file());
         assert!(
+            t.message.starts_with("saved as harness-elementary: "),
+            "the confirmation outlives the reload: {}",
+            t.message
+        );
+        assert!(
             dir.join("worlds").join("harness-elementary").join("mat.png").is_file(),
             "the artwork came along"
         );
@@ -5045,7 +5237,7 @@ mod tests {
         assert!(exported["files"]["mat.png"]["base64"].is_string(), "the artwork inside");
         t.import_map(&out);
         assert!(
-            pump_until(&mut t, 60, |t| t.message.is_empty()
+            pump_until(&mut t, 60, |t| t.message.starts_with("imported as")
                 && t.world() != "harness-elementary"
                 && t.scene.is_some()
                 && t.status == "loaded"),
@@ -5522,6 +5714,52 @@ mod tests {
         assert!(u.map_click(-347.0, -50.0, 20.0) && u.draft.is_some(), "another end is");
     }
 
+    #[test]
+    fn a_curve_end_clicked_or_dragged_within_2_degrees_of_behind_is_refused() {
+        // a first curve from the chassis facing +x; an end 300 mm back and 10 mm aside is 1.9°
+        // off straight behind, where the one arc is a 356° loop on a radius of metres: the click
+        // is refused with the 2° named, nothing is drawn or labelled for it, the tool stays armed
+        let cam = crate::viewport::Camera {
+            target: Vec3::new(-400.0, 0.0, 0.0),
+            distance: 1500.0,
+            ..Default::default()
+        };
+        let mut u = SimulateTab::new(None);
+        u.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        u.arm("curve");
+        assert!(u.map_click(-547.0, -150.0, 20.0) && u.map_click(-447.0, -150.0, 20.0));
+        u.hover = Some([-347.0, -50.0]);
+        let reachable = u.route_lines(false).len();
+        u.hover = Some([-847.0, -140.0]);
+        let labels: Vec<String> = u.route_labels(&cam, 800.0, 600.0).into_iter().map(|l| l.1).collect();
+        assert_eq!(labels, vec!["curve".to_string()], "{labels:?}");
+        assert!(u.route_lines(false).len() + 8 < reachable, "no loop drawn");
+        assert!(u.map_click(-847.0, -140.0, 20.0));
+        assert!(
+            u.draft.is_none() && u.placing.as_ref().unwrap().points.len() == 2,
+            "the click is not taken"
+        );
+        assert_eq!(
+            u.message,
+            "no single arc reaches a point straight behind the start, or within 2° of it: click elsewhere"
+        );
+        // further off the line the arc is offered
+        assert!(u.map_click(-547.0, 50.0, 20.0) && u.draft.is_some(), "another end is");
+        u.commit_draft();
+        u.sync_curves();
+        let before = u.route.actions[0].action.clone();
+        // dragging that curve's end into the band is refused the same way: the curve stays
+        assert!(u.begin_handle_drag(0, route::Handle::End, [-547.0, 50.0]));
+        u.message.clear();
+        u.drag_handle(-847.0, -140.0);
+        assert_eq!(u.route.actions[0].action, before);
+        assert!(u.message.contains("within 2°"), "{}", u.message);
+        // and out of it, it bends
+        u.drag_handle(-647.0, 50.0);
+        u.end_handle_drag();
+        assert_eq!(u.route.actions[0].action.end(), [-647.0, 50.0]);
+    }
+
     /// A map with three props — two 2 x 4 bricks, `a` at the origin and `b` 50 mm along x, and
     /// `m`, an LDraw mesh prop shaped like a 2 x 4, 200 mm along — and the robot, one 2 x 4
     /// standing 40 mm to the -x side; all on the floor.
@@ -5782,6 +6020,479 @@ mod tests {
         t.turn_prop(0, 90.0, &lib);
         assert_eq!(t.sent.len(), n);
         assert!(t.message.contains("stop the program"), "{}", t.message);
+    }
+
+    #[test]
+    fn an_import_mid_run_is_refused_and_a_save_in_place_names_the_map_shown() {
+        use egui_kittest::kittest::Queryable;
+        let mut t = SimulateTab::new(None);
+        t.connected = true;
+        t.status = "running".into();
+        let out = std::path::Path::new("/x/layout.map.json");
+        let n = t.sent.len();
+        t.import_map(out);
+        assert_eq!((t.sent.len(), t.message.as_str()), (n, "stop the program before importing a map"));
+        // an import that landed as a run began (sent before the run's state was in) stops the run
+        // first and loads once it has stopped, as any map chosen mid-run does: the imported map
+        // is shown, never named by the picker over another map's scene
+        t.apply(Event::Imported {
+            alias: "layout".into(),
+            path: "/me/worlds/layout/map.json".into(),
+        });
+        assert_eq!(t.world(), "layout");
+        assert!(t.pending_load.is_some());
+        assert_eq!(t.sent.last().unwrap()["cmd"], "stop");
+        assert_eq!(t.message, "imported as layout: /me/worlds/layout/map.json");
+        // "Save changes" writes the map shown, not the picker's choice: here practice-line's
+        // scene is still up while the picker says layout (its load refused, say)
+        t.status = "loaded".into();
+        t.pending_load = None;
+        t.worlds = vec![
+            WorldEntry {
+                alias: "practice-line".into(),
+                ..Default::default()
+            },
+            WorldEntry {
+                alias: "layout".into(),
+                user: true,
+                ..Default::default()
+            },
+        ];
+        t.world = "practice-line".into();
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        t.world = "layout".into();
+        assert_eq!(t.shown_map().map(|w| (w.alias.as_str(), w.user)), Some(("practice-line", false)));
+        let lib = shipped_bundle();
+        {
+            let mut h = egui_kittest::Harness::new_ui(|ui| t.map_ui(ui, &lib));
+            h.run();
+            assert!(
+                h.query_by_label("Save changes").is_none(),
+                "no save in place while the map shown is a shipped one"
+            );
+            assert!(h.query_by_label_contains("a shipped map keeps its layout").is_some());
+        }
+        // once layout's own scene is in, the save goes under its name
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        assert_eq!(t.shown_map().map(|w| w.alias.as_str()), Some("layout"));
+        {
+            let mut h = egui_kittest::Harness::new_ui(|ui| t.map_ui(ui, &lib));
+            h.run();
+            assert!(h.query_by_label("Your map: layout").is_some());
+            h.get_by_label("Save changes").click();
+            h.run();
+        }
+        assert_eq!(t.sent.last().unwrap(), &serde_json::json!({"cmd": "save_world", "name": "layout"}));
+    }
+
+    #[test]
+    fn an_undo_between_two_runs_of_definitions_typing_keeps_them_apart() {
+        // type, place an action, undo it, type again: the second run is its own undo point, so
+        // each state comes back in turn — the first run's text is not lost with the second
+        let mut t = SimulateTab::new(None);
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        t.edit_prelude("x".into());
+        t.record();
+        t.route
+            .actions
+            .push(Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0, false).into());
+        assert!(t.undo());
+        assert_eq!((t.route.prelude.as_str(), t.route.actions.len()), ("x", 0));
+        t.edit_prelude("xy".into());
+        t.edit_prelude("xyz".into());
+        assert!(t.undo());
+        assert_eq!(t.route.prelude, "x", "the second run undone whole, the first kept");
+        assert!(t.undo());
+        assert_eq!(t.route.prelude, "", "and then the first");
+        assert!(!t.undo());
+        // a restored or loaded route starts no run either: the first keystroke is an undo point
+        let dir = std::env::temp_dir().join(format!("ob-prelude-run-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        t.edit_prelude("a".into());
+        t.save_route(dir.join("r.route.json"));
+        t.load_route(dir.join("r.route.json"));
+        t.edit_prelude("ab".into());
+        assert!(t.undo() && t.route.prelude == "a" && !t.undo());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn definitions_undo_and_handle_drags_reach_the_draft_and_undo_one_change_at_a_time() {
+        use crate::drafts::{ROUTE, SETTLE, take};
+        let dir = std::env::temp_dir().join(format!("ob-route-draft-edits-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut t = SimulateTab::new(None);
+        t.draft_dir = dir.clone();
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        let straight = || -> route::Item { Action::placed("straight", &[[0.0, 0.0], [100.0, 0.0]], 0.0, false).into() };
+        let t0 = Instant::now();
+        t.autosave(t0, 0);
+        assert!(take(&dir, ROUTE).is_none(), "nothing changed, nothing kept");
+        // an action placed: kept once it settles
+        t.record();
+        t.route.actions.push(straight());
+        t.autosave(t0 + Duration::from_secs(1), 1_000);
+        t.autosave(t0 + Duration::from_secs(1) + SETTLE, 3_000);
+        assert_eq!(Route::load(&dir.join(ROUTE)).unwrap().actions.len(), 1);
+        // definitions typed: one undo point for the run, every keystroke reaching the keeper
+        let rev = t.route_rev;
+        t.edit_prelude("def a".into());
+        t.edit_prelude("def a():".into());
+        t.edit_prelude("def a(): pass".into());
+        assert_eq!(t.history.len(), 2, "the run of typing is one undo point");
+        assert_eq!(t.route_rev, rev + 3);
+        t.edit_prelude("def a(): pass".into());
+        assert_eq!(t.route_rev, rev + 3, "the same text again is no change");
+        t.autosave(t0 + Duration::from_secs(4), 4_000);
+        t.autosave(t0 + Duration::from_secs(4) + SETTLE, 6_000);
+        assert_eq!(
+            Route::load(&dir.join(ROUTE)).unwrap().prelude,
+            "def a(): pass",
+            "the definitions are drafted"
+        );
+        // ⌘Z takes the typing back (the action stays), and the draft follows
+        assert!(t.undo());
+        assert_eq!((t.route.prelude.as_str(), t.route.actions.len()), ("", 1));
+        t.autosave(t0 + Duration::from_secs(7), 7_000);
+        t.autosave(t0 + Duration::from_secs(7) + SETTLE, 9_000);
+        assert_eq!(Route::load(&dir.join(ROUTE)).unwrap().prelude, "", "the undo reached the draft");
+        // the next ⌘Z takes the action back, and the draft is rewritten without it
+        assert!(t.undo());
+        assert!(t.route.actions.is_empty());
+        t.autosave(t0 + Duration::from_secs(10), 10_000);
+        t.autosave(t0 + Duration::from_secs(10) + SETTLE, 12_000);
+        assert!(Route::load(&dir.join(ROUTE)).unwrap().actions.is_empty());
+        // typing after another edit is a new undo point
+        t.record();
+        t.route.actions.push(straight());
+        t.edit_prelude("x".into());
+        t.edit_prelude("xy".into());
+        assert_eq!(t.history.len(), 2);
+        assert!(t.undo() && t.route.prelude.is_empty() && t.route.actions.len() == 1);
+        // a handle drag outlasting the settle time: the draft waits for the drag to end, and
+        // holds where the handle was let go, not where its first moment found it
+        assert!(t.begin_handle_drag(0, Handle::End, [100.0, 0.0]));
+        let t1 = t0 + Duration::from_secs(20);
+        t.autosave(t1, 20_000);
+        t.drag_handle(150.0, 0.0);
+        t.autosave(t1 + Duration::from_secs(1), 21_000);
+        t.autosave(t1 + SETTLE, 22_000);
+        t.drag_handle(200.0, 0.0);
+        t.end_handle_drag();
+        t.autosave(t1 + Duration::from_secs(2), 22_000);
+        t.autosave(t1 + Duration::from_secs(2) + SETTLE, 24_000);
+        assert_eq!(
+            Route::load(&dir.join(ROUTE)).unwrap().actions[0].action.end(),
+            [200.0, 0.0],
+            "the draft has the drag's end"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_route_map_the_server_has_not_is_said_and_the_route_keeps_its_name() {
+        use crate::drafts::{Note, ROUTE, keep};
+        let dir = std::env::temp_dir().join(format!("ob-route-draft-map-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let r = Route {
+            world: "my-layout".into(),
+            start: Pose2::at([1.0, 2.0], 0.0),
+            ..Default::default()
+        };
+        keep(
+            &dir,
+            ROUTE,
+            &serde_json::to_string(&r).unwrap(),
+            &Note {
+                path: None,
+                kept_ms: 1_000,
+            },
+        )
+        .unwrap();
+        let mut t = SimulateTab::new(None);
+        t.draft_dir = dir.clone();
+        assert!(t.restore_draft(2_000));
+        assert_eq!(t.world(), "my-layout");
+        t.apply(Event::Hello { version: "9".into() });
+        t.apply(Event::Worlds(vec![
+            WorldEntry {
+                alias: "empty".into(),
+                ..Default::default()
+            },
+            WorldEntry {
+                alias: "wro-2026-elementary".into(),
+                ..Default::default()
+            },
+        ]));
+        assert_eq!(t.world(), "wro-2026-elementary", "the first shipped map stands in");
+        assert_eq!(t.message, "map my-layout is not on this machine: showing wro-2026-elementary");
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        assert_eq!(t.route.world, "my-layout", "the route keeps the map it was planned on");
+        assert_eq!(t.markers.world, "wro-2026-elementary", "the markers are the map shown's");
+        t.save_route(dir.join("r.route.json"));
+        assert_eq!(
+            Route::load(&dir.join("r.route.json")).unwrap().world,
+            "my-layout",
+            "and so does its file"
+        );
+        // the stand-in itself picked in the map picker is the route's map from then on: nothing
+        // to load, it is shown already
+        let sent = t.sent.len();
+        {
+            use egui_kittest::kittest::Queryable;
+            let mut h = egui_kittest::Harness::new_ui(|ui| t.world_picker(ui));
+            h.run();
+            h.get_by_role(egui::accesskit::Role::ComboBox).click();
+            h.run();
+            h.get_by_label("wro-2026-elementary").click();
+            h.run();
+        }
+        assert_eq!(t.stand_in_for, None);
+        assert_eq!(t.route.world, "wro-2026-elementary");
+        assert_eq!(t.sent.len(), sent, "nothing reloaded");
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_CHASSIS).unwrap())));
+        assert_eq!(t.route.world, "wro-2026-elementary");
+        t.save_route(dir.join("r.route.json"));
+        assert_eq!(Route::load(&dir.join("r.route.json")).unwrap().world, "wro-2026-elementary");
+        // the list coming again with the map present (a save, an import) says nothing
+        t.message.clear();
+        t.apply(Event::Worlds(vec![WorldEntry {
+            alias: "wro-2026-elementary".into(),
+            ..Default::default()
+        }]));
+        assert!(t.message.is_empty(), "{}", t.message);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_route_draft_whose_note_cannot_be_read_is_restored_and_said_so() {
+        use crate::drafts::{Note, ROUTE, keep};
+        let dir = std::env::temp_dir().join(format!("ob-route-draft-note-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let r = Route {
+            start: Pose2::at([7.0, 8.0], 0.0),
+            ..Default::default()
+        };
+        keep(
+            &dir,
+            ROUTE,
+            &serde_json::to_string(&r).unwrap(),
+            &Note {
+                path: Some("/r/a.route.json".into()),
+                kept_ms: 1_000,
+            },
+        )
+        .unwrap();
+        let note_file = dir.join("route.json.note.json");
+        std::fs::remove_file(&note_file).unwrap();
+        let mut t = SimulateTab::new(None);
+        t.draft_dir = dir.clone();
+        assert!(t.restore_draft(2_000_000_000));
+        assert_eq!(t.route.start, Pose2::at([7.0, 8.0], 0.0), "the work comes back");
+        assert!(t.route_path.is_none(), "where it belongs is unknown, not the note's default");
+        assert!(
+            t.message
+                .starts_with("restored the unsaved route draft; its note could not be read (")
+                && t.message.contains(&note_file.display().to_string())
+                && t.message.ends_with("so when it was kept and the file it belongs to are unknown")
+                && !t.message.contains("days ago"),
+            "{}",
+            t.message
+        );
+        std::fs::write(&note_file, "nope").unwrap();
+        assert!(t.restore_draft(2_000_000_000));
+        assert!(
+            t.message.contains(&note_file.display().to_string()) && t.message.contains("expected"),
+            "{}",
+            t.message
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_add_the_server_refused_selects_and_settles_nothing_on_the_next_scene() {
+        let lib = shipped_bundle();
+        let mut t = three_props(&lib);
+        t.duplicate_prop(0);
+        assert!(t.select_new_prop && t.clear_pending);
+        t.apply(Event::Error("PropError: a map needs a name".into()));
+        assert!(!t.select_new_prop && !t.clear_pending, "no scene answers a refused add");
+        // another map's scene: nothing is selected for it, nothing shoved beside anything
+        t.selected_prop = None;
+        t.world = "other".into();
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        assert!(t.selected_prop.is_none());
+        let n = t.sent.len();
+        t.settle_new_prop(&lib);
+        assert_eq!(t.sent.len(), n);
+        // the server going away drops the expectation too, and so does a load
+        t.add_prop_like("clef");
+        assert!(t.select_new_prop && t.clear_pending);
+        t.apply(Event::Bye);
+        assert!(!t.select_new_prop && !t.clear_pending);
+        t.status = "loaded".into();
+        t.add_prop_like("clef");
+        assert!(t.select_new_prop && t.clear_pending);
+        t.load();
+        assert!(!t.select_new_prop && !t.clear_pending);
+    }
+
+    #[test]
+    fn an_import_that_lands_mid_run_keeps_its_word_through_the_deferred_load() {
+        // the import's confirmation outlives the load that waits for the run to stop (or for the
+        // map list), as it does an immediate one
+        let Some(fake) = fake_server("import-mid-run") else {
+            return;
+        };
+        let (dir, mut t) = (fake.dir, SimulateTab::new_with_env(Some(fake.python), fake.env));
+        t.ensure_loaded();
+        assert!(
+            pump_until(&mut t, 30, |t| t.scene.is_some() && t.status == "loaded"),
+            "{} / {}",
+            t.status,
+            t.message
+        );
+        let mut listed = t.worlds.clone();
+        listed.push(WorldEntry {
+            alias: "layout".into(),
+            user: true,
+            ..Default::default()
+        });
+        for deferred in [state("stopped"), Event::Worlds(listed)] {
+            t.status = "running".into();
+            t.apply(Event::Imported {
+                alias: "layout".into(),
+                path: "/me/worlds/layout/map.json".into(),
+            });
+            assert_eq!(t.pending_load, Some(true));
+            assert_eq!(t.sent.last().unwrap()["cmd"], "stop");
+            t.status = "stopped".into();
+            t.apply(deferred);
+            assert_eq!(t.pending_load, None);
+            assert_eq!(t.sent.last().unwrap()["cmd"], "load", "the deferred load went");
+            assert!(t.message.starts_with("imported as layout"), "{}", t.message);
+        }
+        // a map chosen mid-run still clears the old word when its load goes
+        t.status = "running".into();
+        t.reload();
+        assert_eq!(t.pending_load, Some(false));
+        t.apply(state("stopped"));
+        assert!(t.message.is_empty(), "{}", t.message);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_save_and_an_import_keep_their_word_through_the_reload_that_shows_the_map() {
+        let Some(fake) = fake_server("simulate-confirm") else {
+            return;
+        };
+        let mdir = std::env::temp_dir().join(format!("ob-confirm-markers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&mdir);
+        let (dir, mut t) = (fake.dir, SimulateTab::new_with_env(Some(fake.python), fake.env));
+        t.markers_dir = mdir.clone();
+        t.ensure_loaded();
+        assert!(
+            pump_until(&mut t, 30, |t| t.scene.is_some() && t.status == "loaded"),
+            "{} / {}",
+            t.status,
+            t.message
+        );
+        // saved as the user's own: shown, and said
+        t.save_map_as("Mine");
+        assert!(
+            pump_until(&mut t, 30, |t| t.world() == "mine"
+                && t.log.iter().any(|(_, x)| x == "loaded mine with None")),
+            "{} / {:?}",
+            t.message,
+            t.log
+        );
+        assert_eq!(t.message, "saved as mine: /me/worlds/mine/map.json");
+        assert_eq!(t.shown_map().map(|w| (w.alias.as_str(), w.user)), Some(("mine", true)));
+        // exported and imported: shown, and said
+        let out = dir.join("shared.map.json");
+        t.export_map(&out);
+        assert!(pump_until(&mut t, 30, |t| t.message.starts_with("exported to")), "{}", t.message);
+        t.import_map(&out);
+        assert!(
+            pump_until(&mut t, 30, |t| t.world() == "stand-in"
+                && t.log.iter().any(|(_, x)| x == "loaded stand-in with None")),
+            "{} / {:?}",
+            t.message,
+            t.log
+        );
+        assert_eq!(t.message, "imported as stand-in: /me/worlds/stand-in/map.json");
+        // the markers not carried to a saved map is said, and outlives the reload too
+        let _ = std::fs::remove_dir_all(mdir.join("markers"));
+        std::fs::write(mdir.join("markers"), "").unwrap();
+        t.markers.markers.push(crate::markers::Marker {
+            name: "gate".into(),
+            at: [1.0, 2.0],
+        });
+        t.save_map_as("Again");
+        assert!(
+            pump_until(&mut t, 30, |t| t.world() == "again"
+                && t.log.iter().any(|(_, x)| x == "loaded again with None")),
+            "{} / {:?}",
+            t.message,
+            t.log
+        );
+        assert!(
+            t.message.starts_with("could not create") || t.message.starts_with("could not write"),
+            "{}",
+            t.message
+        );
+        // a map of the user's own the server could not read: listed with its reason, its row in
+        // the picker not to be chosen; named all the same (a draft's, say) it is refused with that
+        // reason, and the map shown stays the one a save in place would write
+        let torn = t.worlds().iter().find(|w| w.alias == "torn").expect("listed").clone();
+        assert!(torn.user && torn.path.is_none());
+        assert_eq!(
+            torn.error.as_deref(),
+            Some("/me/worlds/torn/world.xml: not a map's MJCF (no <mujoco> root)")
+        );
+        let row = t.world_choices().into_iter().find(|c| c.0 == "torn").unwrap();
+        assert_eq!(
+            (row.1.as_str(), row.2.as_deref()),
+            ("torn (yours · cannot be read)", torn.error.as_deref())
+        );
+        assert!(t.world_choices().into_iter().filter(|c| c.0 != "torn").all(|c| c.2.is_none()));
+        t.select_world("torn");
+        assert!(
+            pump_until(&mut t, 30, |t| t.message.starts_with("PropError: /me/worlds/torn/world.xml")),
+            "{}",
+            t.message
+        );
+        assert_eq!(t.shown_map().map(|w| w.alias.as_str()), Some("again"));
+        t.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&mdir);
+    }
+
+    #[test]
+    fn a_rebuilt_map_frees_the_geom_meshes_of_the_generation_before() {
+        let Some((device, queue)) = test_device() else { return };
+        let mut vp = Viewport::new(&device, &queue);
+        let lib = shipped_bundle();
+        let mut t = SimulateTab::new(None);
+        // the mat and the clef's box are built; a brick's mesh of the Workbench's is there too
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        vp.add_mesh(&device, "ld:3001", &geometry::box_mesh([10.0; 3], [0.0; 3]));
+        let first = t.draw_items(&mut vp, &device, &queue, &lib, false);
+        assert!(vp.has_mesh("geom:1:0") && vp.has_mesh("geom:1:1"));
+        // an edit's reload builds the map again: the generation before is freed, nothing else
+        t.apply(Event::Scene(Box::new(serde_json::from_str(SCENE_WITH_PROPS).unwrap())));
+        assert_eq!(t.scene_gen, 2);
+        let second = t.draw_items(&mut vp, &device, &queue, &lib, false);
+        assert_eq!(second.items.len(), first.items.len());
+        assert!(
+            !vp.has_mesh("geom:1:0") && !vp.has_mesh("geom:1:1"),
+            "the generation before is freed"
+        );
+        assert!(vp.has_mesh("geom:2:0") && vp.has_mesh("geom:2:1"));
+        assert!(vp.has_mesh("ld:3001"), "a brick's mesh, keyed by content, stays");
+        // drawn again with no new scene: the meshes stay as they are
+        t.draw_items(&mut vp, &device, &queue, &lib, false);
+        assert!(vp.has_mesh("geom:2:0") && vp.has_mesh("geom:2:1") && vp.has_mesh("ld:3001"));
     }
 
     #[test]

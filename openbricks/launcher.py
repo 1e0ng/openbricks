@@ -513,12 +513,13 @@ class Launcher:
                                n - self._press_count_seen)
                         self._press_count_seen = n
                     else:
+                        before = self._press_count_seen
                         self._press_count_seen = n
                         self._press_stopped = True  # consume the release
                         _event("latch-stop")
                         _note("button press latched by hardware counter "
                               "-> stop [edges %d->%d, %d ms into the run; %s]"
-                              % (self._press_count_seen, n,
+                              % (before, n,
                                  _ticks_diff(_now_ms(),
                                              self._run_started_ms)
                                  if self._run_started_ms is not None
@@ -907,11 +908,12 @@ def _brake_to_rest():
         if st_bus.db_done():
             return None              # nothing was moving
         while not st_bus.db_done():
-            if _now_ms() - t0 >= _BRAKE_TO_REST_MS:
+            if _ticks_diff(_now_ms(), t0) >= _BRAKE_TO_REST_MS:
                 return ("brake: wheels not at rest after %d ms - "
                         "torque-off" % _BRAKE_TO_REST_MS)
             time.sleep_ms(10)
-        return "brake: wheels to rest in %d ms" % (_now_ms() - t0)
+        return ("brake: wheels to rest in %d ms"
+                % _ticks_diff(_now_ms(), t0))
     except Exception as e:
         return "brake: skipped (%r)" % (e,)
 
@@ -1315,6 +1317,12 @@ def _exec_program_raw(program_path, origin=None):
     # (stale gyro-in-use refused imu.reset_heading(); a contaminated
     # callback list blocked DriveBase.straight() forever).
     _reset_motor_process()
+    # Pin claims a driver made for the previous program (a QTR array's
+    # ADC pins) die with that program, so this one may rewire them.
+    # The boot-time claims (program button, status LED, Bluetooth-
+    # toggle button) stay.
+    from openbricks import pins as _pins
+    _pins.release_program_claims()
     if program_path.endswith(".mpy"):
         # Host-cross-compiled program (CLI >= 1.92.0), executed by the
         # native persistent-code loader. Probe existence here so a
@@ -1352,7 +1360,7 @@ def _exec_program_raw(program_path, origin=None):
                 # surfaced. Every way out now leaves a tail marker
                 # (finished / stopped / traceback).
                 sess.write_text("finished: clean exit after %d ms\n"
-                                % (_now_ms() - started_ms))
+                                % _ticks_diff(_now_ms(), started_ms))
                 # A program that returned mid-move: brake to rest
                 # under the controller before the finally's torque-
                 # off freewheels the robot (3.4.0).

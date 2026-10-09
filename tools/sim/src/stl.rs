@@ -13,7 +13,7 @@ use std::path::Path;
 
 /// One triangle: three corners, in the file's units.
 pub type Tri = [[f32; 3]; 3];
-/// A quantised position (0.01 mm) and normal (1/127): one packed vertex.
+/// A quantised position (in the mesh's step, 0.01 mm unless it is long) and normal (1/127): one packed vertex.
 type VertexKey = ((i32, i32, i32), [i8; 3]);
 /// A face's vote for a bore axis: face index, u, v, and its midpoint along the axis.
 type Vote = (usize, f64, f64, f64);
@@ -159,17 +159,33 @@ pub fn props(tris: &[Tri]) -> Props {
     }
 }
 
-/// The bundle's mesh encoding: int16 positions (0.01 mm), int8 normals
-/// smoothed across edges below a 30° crease, 16- or 32-bit indices.
+/// The steps per millimetre a mesh packs at: 100 (0.01 mm, the
+/// library's step) when every corner fits int16 at it, else ten times
+/// fewer for every ten it is over, as the Python packer's
+/// `mesh_quantum` chooses for the few LDraw parts longer than int16
+/// holds at 0.01 mm. The step travels in the record (`scale`) and is
+/// said in the import summary, never applied quietly.
+fn mesh_quantum(tris: &[Tri]) -> f32 {
+    let reach = tris.iter().flatten().flatten().fold(0.0f32, |m, v| m.max(v.abs()));
+    let mut q = 100.0f32;
+    if reach.is_finite() {
+        while reach * q > 32767.0 {
+            q /= 10.0;
+        }
+    }
+    q
+}
+
+/// The bundle's mesh encoding: int16 positions (0.01 mm, or the
+/// coarser step of a mesh that reaches beyond what int16 holds at it,
+/// see `mesh_quantum`), int8 normals smoothed across edges below a 30°
+/// crease, 16- or 32-bit indices. Every corner is finite (`Import::new`
+/// refuses the rest), so at the step chosen each quantised coordinate
+/// is in int16 and nothing is clamped.
 pub fn pack(tris: &[Tri]) -> MeshRecord {
     let faces: Vec<(Tri, DVec3)> = tris.iter().filter_map(|t| normal(t).map(|n| (*t, n))).collect();
-    let key = |p: [f32; 3]| {
-        (
-            (p[0] * 100.0).round() as i32,
-            (p[1] * 100.0).round() as i32,
-            (p[2] * 100.0).round() as i32,
-        )
-    };
+    let q = mesh_quantum(tris);
+    let key = |p: [f32; 3]| ((p[0] * q).round() as i32, (p[1] * q).round() as i32, (p[2] * q).round() as i32);
     let mut groups: HashMap<(i32, i32, i32), Vec<usize>> = HashMap::new();
     for (f, (t, _)) in faces.iter().enumerate() {
         for c in t {
@@ -192,15 +208,15 @@ pub fn pack(tris: &[Tri]) -> MeshRecord {
                 }
             }
             let nn = acc.normalize_or_zero();
-            let q = [
+            let qn = [
                 (nn.x * 127.0).round() as i8,
                 (nn.y * 127.0).round() as i8,
                 (nn.z * 127.0).round() as i8,
             ];
             let next = (pos.len() / 3) as u32;
-            let vi = *uniq.entry((k, q)).or_insert_with(|| {
-                pos.extend([k.0, k.1, k.2].map(|v| v.clamp(-32767, 32767) as i16));
-                nrm.extend(q);
+            let vi = *uniq.entry((k, qn)).or_insert_with(|| {
+                pos.extend([k.0, k.1, k.2].map(|v| v as i16));
+                nrm.extend(qn);
                 next
             });
             idx.push(vi);
@@ -221,7 +237,7 @@ pub fn pack(tris: &[Tri]) -> MeshRecord {
         nrm: b64.encode(nrm.iter().map(|v| *v as u8).collect::<Vec<u8>>()),
         idx: b64.encode(idx_bytes),
         idx32,
-        scale: Some(0.01),
+        scale: Some(1.0 / q as f64),
     }
 }
 
@@ -471,6 +487,9 @@ impl Import {
         if raw.len() > MAX_TRIS {
             return Err(format!("that is {} triangles; decimate it below {MAX_TRIS} first", raw.len()));
         }
+        if raw.iter().flatten().flatten().any(|v| !v.is_finite()) {
+            return Err("a corner of the mesh is not a finite number".into());
+        }
         let name = Path::new(file)
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
@@ -526,9 +545,13 @@ impl Import {
         let size: Vec<String> = (0..3).map(|k| assembly::fmt(record.bbox[1][k] - record.bbox[0][k])).collect();
         let holes = record.connectors.len();
         let summary = format!(
-            "{} triangles · {} mm · {} · {}{}",
+            "{} triangles · {} mm{} · {} · {}{}",
             record.mesh.tris,
             size.join(" × "),
+            match record.mesh.scale {
+                Some(step) if step != 0.01 => format!(" · packed at {step} mm steps (too long for 0.01 mm)"),
+                _ => String::new(),
+            },
             if record.mass_model == "mesh" {
                 format!("volume {:.2} cm³", record.volume_mm3 / 1000.0)
             } else {
@@ -741,6 +764,63 @@ mod tests {
         assert_eq!(crate::geometry::signed_volume(&m).round(), 6000.0);
         let degenerate = [[[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]];
         assert_eq!(pack(&degenerate).tris, 0);
+    }
+
+    #[test]
+    fn a_mesh_beyond_int16_at_0_01_mm_packs_at_a_coarser_step_and_still_matches_its_box() {
+        // a bracket exported at its assembly position, x 350..420 mm, reaches past the 327.67 mm
+        // int16 holds at 0.01 mm: every x used to be clamped onto 327.67 while the box, the
+        // volume and the centre of mass were of the real part
+        let extents = |m: &MeshData| {
+            let mut lo = [f32::INFINITY; 3];
+            let mut hi = [f32::NEG_INFINITY; 3];
+            for p in &m.positions {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(p[k]);
+                    hi[k] = hi[k].max(p[k]);
+                }
+            }
+            (lo, hi)
+        };
+        let near = |got: [f32; 3], want: [f32; 3]| got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-3);
+        let far = tris_of(&geometry::box_mesh([70.0, 20.0, 10.0], [385.0, 0.0, 0.0]));
+        let rec = pack(&far);
+        assert_eq!(rec.scale, Some(0.1), "ten times coarser, as the Python packer chooses");
+        let (lo, hi) = extents(&rec.decode().unwrap());
+        assert!(near(lo, [350.0, -10.0, -5.0]) && near(hi, [420.0, 10.0, 5.0]), "{lo:?} {hi:?}");
+        let r = record(far);
+        assert_eq!(r.bbox, [[350.0, -10.0, -5.0], [420.0, 10.0, 5.0]]);
+        assert_eq!((r.volume_mm3, r.com), (14000.0, [385.0, 0.0, 0.0]));
+        // the other way too
+        let back = pack(&tris_of(&geometry::box_mesh([10.0, 10.0, 10.0], [-400.0, 0.0, 0.0])));
+        assert_eq!(back.scale, Some(0.1));
+        assert!(near(extents(&back.decode().unwrap()).0, [-405.0, -5.0, -5.0]));
+        // a 0.5 m rail imported with its units in m: the summary says the step
+        let mut imp = Import::new("rail.stl", tris_of(&geometry::box_mesh([0.5, 0.02, 0.02], [0.25, 0.0, 0.0]))).unwrap();
+        imp.units = Units::M;
+        let p = imp.prepare();
+        assert_eq!(p.record.mesh.scale, Some(0.1));
+        assert_eq!(p.record.bbox, [[0.0, -10.0, -10.0], [500.0, 10.0, 10.0]]);
+        let (lo, hi) = extents(&p.record.mesh.decode().unwrap());
+        assert!(near(lo, [0.0, -10.0, -10.0]) && near(hi, [500.0, 10.0, 10.0]), "{lo:?} {hi:?}");
+        assert!(
+            p.summary
+                .contains("500 × 20 × 20 mm · packed at 0.1 mm steps (too long for 0.01 mm) · volume"),
+            "{}",
+            p.summary
+        );
+        // re-centred it fits the fine step again, and then nothing is said of steps
+        imp.origin = Origin::Centre;
+        let p = imp.prepare();
+        assert_eq!(p.record.mesh.scale, Some(0.01));
+        assert!(!p.summary.contains("packed at"), "{}", p.summary);
+        // a corner that is not a number is refused at the door, never packed as something
+        let mut nan = tris_of(&geometry::box_mesh([10.0; 3], [0.0; 3]));
+        nan[0][0][0] = f32::NAN;
+        assert_eq!(
+            Import::new("nan.stl", nan).err().as_deref(),
+            Some("a corner of the mesh is not a finite number")
+        );
     }
 
     #[test]

@@ -14,7 +14,16 @@ from the host (e.g. the URT-2 board's USB port), so a fresh servo
 can be given its bus ID before it ever meets the hub. The hub path
 sends a one-shot program over BLE that does the same scan/re-ID on
 the hub's own servo bus (firmware driver's echo-safe helpers; pins
---tx/--rx, default 14/41).
+--tx/--rx, default 14/41). That program runs the way ``openbricks
+run`` runs a script: staged to a scratch file and executed through
+``launcher.run_program``, so it crosses the same program boundary
+as every other program — the previous program's native serial-bus
+slots are cleared (the bus pump stops transacting on the UART the
+program then opens), its pin claims are released, the stop button
+is armed and the run is logged. The scratch file is deleted
+afterwards; the button's ``/program.*`` is never touched.
+--baudrate, --timeout and -p belong to the adapter path and are
+refused with -n.
 
 The adapter's port is auto-detected when exactly one USB serial
 device is connected (same filter the flash command uses); with the
@@ -47,6 +56,13 @@ _INSTR_WRITE = 0x03
 
 _REG_ID   = 0x05
 _REG_LOCK = 0x37
+
+
+# Adapter-path defaults (the parser uses them too). The hub path's
+# bus runs at the firmware driver's own 1 Mbaud, so -n refuses any
+# other value instead of silently ignoring it.
+DEFAULT_BAUDRATE = 1_000_000
+DEFAULT_TIMEOUT = 0.02
 
 
 class ServoIdError(Exception):
@@ -202,6 +218,28 @@ def _compose_hub_program(new_id, old_id, scan, tx, rx):
     }).encode()
 
 
+# Where the hub program is staged for its run — a scratch file, never
+# the button's /program.* slot.
+_HUB_SCRATCH_PATH = "/servo_id.py"
+
+
+def _compose_hub_exec(program, hub_name):
+    """The raw-paste program that runs ``program`` on the hub: write
+    it to the scratch path, run it through ``launcher.run_program``
+    (the program boundary: native bus slots and pin claims of the
+    previous program wiped, stop button armed, run logged) exactly as
+    ``openbricks run`` does, then delete the scratch file."""
+    from openbricks_dev import run as run_mod
+    return (run_mod._compose_stage_chunk(
+                _HUB_SCRATCH_PATH, program, first=True, hub_name=hub_name)
+            + run_mod._compose_runner(_HUB_SCRATCH_PATH)
+            + ("import os\n"
+               "try:\n"
+               "    os.remove(%r)\n"
+               "except OSError:\n"
+               "    pass\n" % _HUB_SCRATCH_PATH).encode())
+
+
 class _TeeCapture:
     """stdout passthrough that remembers the streamed text, so the
     host can check for the hub program's success sentinel."""
@@ -244,8 +282,8 @@ async def _hub_async(name, program, scan_timeout):
 
 def _run_hub(args):
     import asyncio
-    program = _compose_hub_program(
-        args.new_id, args.old_id, args.scan, args.tx, args.rx)
+    program = _compose_hub_exec(_compose_hub_program(
+        args.new_id, args.old_id, args.scan, args.tx, args.rx), args.name)
     try:
         text = asyncio.run(_hub_async(
             args.name, program, args.scan_timeout))
@@ -274,6 +312,13 @@ def run(args):
             raise ServoIdError(
                 "pass either -n (through the hub) or -p (through the "
                 "USB adapter), not both")
+        if (args.baudrate != DEFAULT_BAUDRATE
+                or args.timeout != DEFAULT_TIMEOUT):
+            raise ServoIdError(
+                "--baudrate and --timeout apply to the USB adapter "
+                "only; the hub path (-n) runs the bus at the firmware "
+                "driver's %d baud — drop them, or use the adapter (-p)"
+                % DEFAULT_BAUDRATE)
         return _run_hub(args)
 
     port = args.port

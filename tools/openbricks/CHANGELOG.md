@@ -3,6 +3,162 @@
 Versions the unified `openbricks` PyPI package (CLI + MuJoCo sim).
 Firmware versions are tracked separately on the `v*` tag namespace.
 
+## 4.36.0 — the two-month review: 92 defects fixed across the sim, the firmware and the CLI
+
+A review of every change since 2026-08-07 (177 commits), each finding
+verified twice before it counted. Every fix below ships with a test
+that fails on the old code. The behaviour changes a user will notice
+are listed first; the rest are defects nobody had hit yet.
+
+**Behaviour that changes.**
+- On the hub, `DriveBase.reset()` on encoder servos now raises while a
+  move is active (as 1.93.0 promised), and with the gyro on and an
+  ICM-45686 it zeroes `imu.heading()`; a BNO055 keeps its absolute
+  heading and the docs say so.
+- A QTR array's pin claims last one program: a rewired array, or any
+  driver on GPIO 1-10, works on the next run without a power cycle.
+- `openbricks flash` onto a hub already running openbricks asks before
+  flashing a `firmware.bin` whose name carries no version; `--yes`
+  skips the question, a script without it stops with the usual
+  "re-run with --yes".
+- `openbricks servo-id -n NAME` runs its program through the launcher
+  like `openbricks run`: the bus slots and pin claims are reset, the
+  stop button is armed, a run log is written. Its help names both
+  transports; `--baudrate`/`--timeout` with `-n` are refused instead
+  of ignored.
+- `openbricks sim robot.assembly.json`, `openbricks sim --bricks FILE`,
+  `--bin` and `--no-download` work as the docs always said; a named
+  file or bundle that will not open ends the launch with
+  `error: could not open …` (exit 2) instead of opening the example or
+  a stale draft, and `openbricks-sim --help` exits 0.
+- The sim raises `TypeError` on `run_angle(…, then='hold')` or
+  `Stop.NONE` exactly as the hub does, and every sim run ends with the
+  motors it drove coasted and its gyro turned off — a previous run's
+  wheels no longer drive the next program's chassis off, and the next
+  run does not steer on a frozen heading. A drive-base move takes a
+  wheel back from an open-loop `dc()` as the hub does.
+- `bricks fetch` refuses an inventory number the library ships under
+  another ("41250 is in the library already as 22119 …"); a fetched
+  copy keyed by such an alias is left out of the library and said.
+- The Map tab orbits the same way as the Workbench; `⌘Z` after Open,
+  Example or Save gives the previous build back under its own file;
+  the red refusal banner goes when anything else is said; a map import
+  waits for a running program; "Save changes" writes the map actually
+  shown.
+- An `openbricks-route/2` file with a backward straight or curve, or a
+  full 360° curve, is refused by action number (it was always placed
+  wrong); an `openbricks-route/3` curve lacking a numeric `radius_mm`
+  is refused instead of becoming a semicircle; a curve of any format
+  whose end is exactly straight behind its start is refused by number
+  instead of loading with nothing to drive. A curve end clicked or
+  dragged within 2° of straight behind its start is refused with a
+  message instead of becoming a multi-metre circle; a 358° loop in a
+  file still loads and runs as written. Picking a map in the Simulate
+  picker makes it the route's map, even when a stand-in for a map this
+  machine lacks was already showing it.
+- A map saved as the user's own carries their name in `map.json`
+  (an export of a map saved before this release keeps the shipped
+  name until re-saved); importing a bare `map.json` or an incomplete
+  export is refused by name with nothing left behind; a refused export
+  leaves the file already at that path as it was.
+- The rolling `latest` firmware release publishes again on every main
+  push (it had not since 4.2.0: `sim-rs` skipped with the host job it
+  depended on), and both the versioned release and the PyPI upload now
+  wait for every test job.
+- An STL longer than ±327 mm (or exported at its assembly position)
+  imports at 0.1 mm steps and the summary says so; it was silently
+  squashed onto a plane while its box, volume and mass read true. A
+  corner that is not a finite number is refused. An assembly whose
+  cylinder `axis` is not x, y or z lists an error in the sim and fails
+  `openbricks sim run`; it was drawn and weighed as z.
+
+**Firmware C cores.** A move armed against faster opposite motion
+(`straight()` after an opposite `drive()`) ended short and snapped at
+expiry: the entry ramp's distance is now signed. A carry segment
+(`then=Stop.NONE`) shorter than its ramp overshot and snapped back: it
+now hands over at the speed it can reach, the acceleration never
+raised. `curve(radius=0)` after a brake inherited the stop rule and
+reported done while blocked short: it clears `stopping` like every
+other move. A start press confirming after the arm and held past the
+chatter cooldown released unprotected and its re-contact killed the
+run: the marker is kept until the real release.
+
+**Firmware Python.** The latch-stop run-log note always read
+`edges N->N`; `_brake_to_rest`'s 2 s budget and the clean-exit marker
+subtracted raw `ticks_ms()` values and broke across the 12.4-day wrap;
+`straight()`'s docstring still promised the `"stop"` string alias
+3.0.0 removed.
+
+**The MuJoCo runtime.** Adopting 88 mm wheels lifted the live pose but
+not the reset pose, so any reset buried the wheels 14 mm in the floor.
+`uninstall()` left the run's bus and motor ticks on the runtime. A
+coast or yield-only stop after a brake ramp left the stop pending, so
+`reset()` stalled 1.5 s and landed a stale brake. A task motor built
+before the `DriveBase` left its last torque on the wheel slot it had
+held. Open-loop `Servo.run(power)` under the shim raised
+`AttributeError` (a leftover of 1.13.0). Lowering the speed slider
+mid-run froze the sim until the old wall-clock lead was paid back. A
+JSON command line that is not an object crashed the run server. An
+empty or malformed `.ldr` prop failed with a bare `ValueError` naming
+neither prop nor file. A map export truncated the previous export to
+0 bytes when it then failed; `pack`/`unpack` now check every file a
+map names; one unconvertible legacy `world.xml` folder no longer hides
+every other user map (it is listed as unreadable, with the reason, in
+the sim's picker too); a malformed export no longer leaves an orphan
+`worlds/<alias>/` folder or a raw `binascii.Error`. The native
+binding's `settle_stats` docstrings now name the firmware's five fields.
+
+**The brick library.** Tube primitives that run into a part were
+recorded as studs sticking out of its underside; an axle hole's arm
+ends were taken for a pin hole on top of it; the 24-tooth gear 3648
+shipped with no axle hole (its hole is drawn from plain walls — the
+converter finds such holes on the mesh now). The shipped library is
+rebuilt: 32123, 32269, 32270, 32474 and 33299 lose the phantom pin
+holes, 3648 gains its axle hole, nothing else changes. A part longer
+than ±327 mm crashed conversion: it packs at 0.1 mm and says so.
+`complete.zip` members and downloaded subfile references naming paths
+outside the cache are refused before anything is written. A failed
+download no longer leaves `complete.zip.part`; a fetched record that
+is not an object is a named note instead of a crash. On the web page,
+a file that fails validation is refused out loud instead of swapped
+for the browser's draft, a library that did not load is said and its
+bricks weigh nothing, a draft the browser will not keep (storage
+quota) is said, and `⌘R`/`⌘F`/`⌘S` reach the browser again.
+
+**The desktop sim.** Undo points carry the file path and the unsaved
+flag; `ungroup`'s rename no longer rewrites roles on a sibling of the
+same name; one `⌘Z` undoes a magnet-seated drop; an add's seat passes
+over overlapping seats; the drag-time magnet pull no longer changes a
+brick's height for good; a short mesh record, a component inside
+itself and a file whose root names no component are listed as errors
+instead of drawn as nothing, rolled up silently or crashing the app;
+Import… lists a file's problems. The robot's name, spawn pose and
+weighed mass are drafted; drafts land 2 s after the last change, not
+mid-drag, and an undo back to the saved build drops its draft; an
+unreadable draft note is said instead of "kept 20000+ days ago"; the window title's star clears after Save; the greyed
+"Use the workbench's build" button says why; a Map-tab zoom no longer
+runs one frame ahead of the picks. Typed route Definitions are drafted
+and undoable; a map this machine does not have is said and the route
+keeps its name; a refused add no longer auto-selects a prop on the
+next scene; "saved as"/"imported as" stay visible; the run-server
+reader no longer dies on a long line in another alphabet or a byte
+that is not UTF-8, and always reports the stream over; a frame body that is not seven numbers is an
+error; rebuilt maps free the previous generation's GPU meshes.
+
+**The CLI.** A lock file left by another account in a shared temp dir
+no longer blocks every later run/upload; a remembered pre-1.92.0 hub
+version is probed again so an upgraded hub gets compiled code; the
+dangling "openbricks: idle. " fragment and the internal `fwv=` line
+are gone from `upload`'s output (`--path` uploads also refresh the hub
+cache now). In the desktop sim, a fetched-parts directory that cannot
+be listed is named at launch instead of read as "nothing fetched", a
+`fetched` event short of a field is a failure instead of a nameless
+part, and a fetched part keyed by a shipped record's alias is left out
+with both numbers named, as the runtime does.
+
+**Tests that could not fail** were made to: the Simulate tab's
+no-Python placeholder, and `servo-id`'s restore-on-death case.
+
 ## 4.35.0 — zoom toward the pointer; the Simulate tab always shows the whole map
 
 **The wheel zooms toward the pointer.** On the Workbench and the Map

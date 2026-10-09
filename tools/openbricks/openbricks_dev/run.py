@@ -30,7 +30,8 @@ import time
 from openbricks_dev import mpycompile
 from openbricks_dev import _hubcache
 from openbricks_dev._nus import NUSLink, NUSError
-from openbricks_dev._uplock import UploadLock, UploadInProgress
+from openbricks_dev._uplock import (
+    UploadLock, UploadInProgress, UploadLockError)
 
 
 class RunError(Exception):
@@ -721,7 +722,7 @@ async def _run_async(name, script_path, scan_timeout, debug=False, command=None)
     upload_lock = UploadLock(name)
     try:
         upload_lock.acquire()
-    except UploadInProgress as e:
+    except (UploadInProgress, UploadLockError) as e:
         raise RunError(str(e))
 
     print("connecting to %r ..." % name, file=sys.stderr)
@@ -790,13 +791,17 @@ async def _pick_staging(blink, link, name, mpy_target=_MPY_TARGET_PATH,
                         src_target=_TARGET_PATH):
     """The staging plan ``(target_path, use_mpy, remove_stale)`` for a
     hub: from what the CLI remembers of its firmware when it has met
-    the hub before (no round trip), else by probing it now. Firmware
-    >= 1.92.0 gets the host-compiled ``.mpy``; anything older gets
-    source, announced — never silently. The staged program prints its
-    version first either way, so a remembered hub that was re-flashed
+    the hub before on firmware >= 1.92.0 (no round trip), else by
+    probing it now. Firmware >= 1.92.0 gets the host-compiled
+    ``.mpy``; anything older gets source, announced — never silently.
+    Both directions of a re-flash are caught: a remembered version
+    too old for ``.mpy`` is probed again rather than trusted (the
+    round trip is paid only by hubs that would get source anyway, and
+    a hub upgraded since gets the ``.mpy`` at once), and the staged
+    program prints its version first, so a remembered hub re-flashed
     to something older is caught in-session (``_read_version_line``)."""
     fw = _hubcache.firmware_version(name)
-    if fw is None:
+    if fw is None or fw < _MIN_MPY_FIRMWARE:
         out = await _exec_step(blink, link, _PROBE_VERSION_PROGRAM,
                                "probing firmware version")
         fw = _parse_fw_version(out.decode("utf-8", "replace"))

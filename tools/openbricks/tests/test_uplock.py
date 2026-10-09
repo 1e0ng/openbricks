@@ -87,6 +87,44 @@ class UploadLockTests(unittest.TestCase):
         with _uplock.UploadLock("ls"):        # the close freed it
             pass
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX permissions")
+    def test_a_read_only_lock_file_still_guards(self):
+        # Another account's lock file (an older CLI created it 0644 in
+        # the shared /tmp) is not writable for us: the lock is taken
+        # through a read-only descriptor and still refuses a second
+        # holder — never a bare PermissionError.
+        path = _uplock.lock_path("ls")
+        with open(path, "w"):
+            pass
+        os.chmod(path, 0o444)
+        if os.access(path, os.W_OK):
+            self.skipTest("running as root: permissions not enforced")
+        with _uplock.UploadLock("ls"):
+            with self.assertRaises(_uplock.UploadInProgress):
+                _uplock.UploadLock("ls").acquire()
+        with _uplock.UploadLock("ls"):
+            pass
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX permissions")
+    def test_a_fresh_lock_file_is_writable_by_every_account(self):
+        old = os.umask(0o077)
+        try:
+            with _uplock.UploadLock("ls") as lock:
+                mode = os.stat(lock.path).st_mode & 0o777
+        finally:
+            os.umask(old)
+        self.assertEqual(mode, 0o666)
+
+    def test_an_unopenable_lock_file_is_a_typed_error_naming_it(self):
+        missing = os.path.join(self.dir, "no-such-dir")
+        with patch.object(_uplock, "LOCK_DIR", missing):
+            lock = _uplock.UploadLock("ls")
+            with self.assertRaises(_uplock.UploadLockError) as cm:
+                lock.acquire()
+        self.assertIn(lock.path, str(cm.exception))
+        self.assertIn("upload lock", str(cm.exception))
+        self.assertIsNone(lock._fd)
+
     def _fake_msvcrt(self, refuse_lock=False, unlock_raises=False):
         calls = []
 

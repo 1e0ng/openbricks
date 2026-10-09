@@ -100,6 +100,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from openbricks.parameters import Stop, DriveMode  # noqa: E402
+# The firmware's parameter check too, so the shim motors reject what
+# the hub rejects (a string ``then=``, ``Stop.NONE``) with the same
+# TypeError. Reload-stable: it compares enum members by name.
+from openbricks import parameters as _parameters  # noqa: E402
 # Pure-Python reflectance-array driver: the shim subclasses it (the
 # geometry / mode / edge maths are the firmware's, only the analog
 # read is simulated), so it must resolve at class-body time too.
@@ -109,8 +113,9 @@ from openbricks.drivers.qtr import (  # noqa: E402
 # The firmware's pin registry — the SAME module object the QTR driver
 # above claims its ADC pins in (both imported before any install, so
 # uninstall's eviction of ``openbricks.*`` never splits them). A run's
-# claims are handed back at ``uninstall()``: on the hub they die with
-# the boot, and the next ``install()`` is the next boot.
+# claims are handed back at ``uninstall()``: on the hub the launcher
+# releases a program's claims at the next program's start, and the next
+# ``install()`` is the next program.
 from openbricks import pins as _pins  # noqa: E402
 # The colour driver too: the shim subclasses it so rgb()/ambient()
 # are the firmware's own arithmetic over a synthesised raw() read.
@@ -143,6 +148,16 @@ class _ShimState:
         # Pins already claimed in the firmware registry when the shim
         # went in; anything claimed after that belongs to this run.
         self.prev_pin_claims: set = set()
+        # The runtime's tick list when the shim went in; every tick
+        # registered after that belongs to this run and leaves with
+        # it (the hub's program-boundary motor stop).
+        self.prev_ticks: list = []
+        # The encoder-path adapters this run built (ShimServo's
+        # SimMotor, ShimDriveBase's SimDriveBase): an open-loop
+        # ``Servo.run()`` writes its actuator with NO tick registered,
+        # so they are coasted by name at uninstall, not found by tick.
+        self.encoder_adapters: list = []
+        self.sim_drivebases: list = []
 
 
 # ---------------------------------------------------------------------
@@ -385,6 +400,7 @@ class ShimServo:
             counts_per_rev=int(counts_per_rev),
             kp=float(kp),
             invert=bool(invert))
+        _INSTALLED.encoder_adapters.append(self._adapter)
 
     # Closed-loop entry points — the firmware's drivers call these.
     def run_speed(self, dps):
@@ -416,19 +432,17 @@ class ShimServo:
 
     # Open-loop bypass + brake / coast.
     def run(self, power):
-        # Mirror SimMotor.brake's "detach + write ctrl directly":
-        # firmware Servo.run() detaches from the scheduler and writes
-        # the bridge with a raw power value.
-        self._adapter._detach()
-        adapter = self._adapter
-        scale   = adapter._ctrl_scale
-        rt      = adapter.runtime
-        p       = float(power)
-        if p >  100.0: p =  100.0
-        if p < -100.0: p = -100.0
-        if adapter.invert:
-            p = -p
-        rt.data.ctrl[adapter._actuator_id] = p * scale
+        # Firmware Servo.run(power) (servo.c servo_run, the driver's
+        # dc()): leave the scheduler, clamp to +/-100 and drive the
+        # bridge at that raw power, sign = direction. The sim's
+        # bridge is the DC-motor model, so the raw power is a duty
+        # reapplied every tick (SimMotor.dc): a one-shot ctrl write
+        # would be a constant torque, not a duty, because the model's
+        # back-EMF term reads the live wheel speed. dc() clamps and
+        # applies invert in its tick, as the firmware core does. This
+        # used to scale a ``_ctrl_scale`` attribute SimMotor lost
+        # with the DC model in 1.13.0, so every open-loop run raised.
+        self._adapter.dc(float(power))
 
     def brake(self):
         self._adapter.brake()
@@ -672,6 +686,13 @@ class _SimStBus:
         # loop closed all the way down (3.2.0) — hold anchoring where
         # the robot actually stops.
         self._raw.stop()
+        # Every stop drops a brake/hold still on its ramp (firmware
+        # st_db_ws_clear_locked, run by every sb_db_stop): a coast or
+        # a yield-only stop after a brake used to leave the flag set,
+        # so the engine's reset() waited its 1.5 s bound and then
+        # landed the stop onto wheels the program had just coasted.
+        self._ws_active = False
+        self._stop_pending = 0
         if mode == 1 or mode == 2:
             for slot in self._wheels:
                 self._move(slot).stop()
@@ -705,7 +726,10 @@ class _SimStBus:
         self._raw.set_use_gyro(bool(enable))
 
     def db_settle_stats(self):
-        # (expiry_residual_wheel_deg, landings) — firmware parity.
+        # (res_sum_wheel_deg, res_diff_wheel_deg, landings,
+        # integ_sum_dps, integ_diff_dps) for the last move, captured
+        # at profile expiry — firmware parity (st_bus.c
+        # sb_db_settle_stats returns the same five).
         return self._raw.settle_stats()
 
     def db_gyro_in_use(self):
@@ -823,6 +847,8 @@ class _SimStBus:
     def reset_runtime(self):
         self._active = False
         self._db_writing = False
+        self._ws_active = False
+        self._stop_pending = 0
         self._raw = None
         for m in self._moves.values():
             m.stop()
@@ -830,6 +856,8 @@ class _SimStBus:
     def torque_off_all(self):
         self._active = False
         self._db_writing = False
+        self._ws_active = False
+        self._stop_pending = 0
         for m in self._moves.values():
             m.stop()
         for w in self._wheels.values():
@@ -1004,6 +1032,17 @@ class ShimST3215Motor:
         exactly like the bench robot's gripper motors need for the
         script to run end-to-end.
         """
+        # Leaving a physical slot: the actuator keeps the last torque
+        # this motor wrote until something writes it again, and the
+        # slot's new owner only writes once it is commanded — a task
+        # motor homed before ``DriveBase()`` was built kept the wheel
+        # it had held spinning (the chassis drifted 128 mm and 37
+        # degrees in 2 s with no drive command). Zero it before the
+        # plumbing is replaced. Mode and tick are left alone: a
+        # running task motor keeps running on its kinematic shaft,
+        # as the bench servo keeps its command.
+        if getattr(self, "_plumb", None) is not None:
+            self._rt.data.ctrl[self._actuator_id] = 0.0
         self._slot = slot
         # Kinematic integrator state — used only on a task-motor
         # shaft; defined always so the tick can branch on _plumb.
@@ -1232,9 +1271,17 @@ class ShimST3215Motor:
     def run_angle(self, deg_per_s, target_angle, wait=True,
                   tolerance_deg=0.5, then=Stop.COAST, **_ignored):
         """Rotate by ``target_angle`` (relative, unbounded) at up to
-        ``deg_per_s``, ending within ``tolerance_deg``. Firmware
-        tuning knobs (``kp``, ``poll_ms``, ``debug``) are accepted
-        and ignored — the shim's velocity loop handles tracking."""
+        ``deg_per_s``, ending within ``tolerance_deg``. ``then`` is
+        checked exactly as the firmware driver checks it: a string
+        or ``Stop.NONE`` raises the same ``TypeError`` before any
+        state changes. Firmware tuning knobs (``kp``, ``poll_ms``,
+        ``debug``) are accepted and ignored — the shim's velocity
+        loop handles tracking."""
+        # The firmware driver's check (st3215.py run_angle), first:
+        # a pre-3.0.0 ``then='hold'`` used to run green here and
+        # coast the shaft, then die on the hub.
+        _parameters.check(Stop, then, "then",
+                          allowed=(Stop.COAST, Stop.BRAKE, Stop.HOLD))
         delta = float(target_angle)
         self._move = {
             "target":    self.angle() + delta,
@@ -1614,6 +1661,7 @@ class ShimDriveBase:
             axle_track_mm=float(axle_track_mm),
             kp_sum=kp_sum,
             kp_diff=kp_diff)
+        _INSTALLED.sim_drivebases.append(self._db)
         self._left     = left
         self._right    = right
         self._imu      = imu
@@ -1798,6 +1846,7 @@ def install(runtime: SimRuntime) -> None:
     state = _ShimState()
     state.runtime = runtime
     state.prev_pin_claims = set(_pins._claims)
+    state.prev_ticks = list(runtime._ticks)
 
     # 1. machine + _openbricks_native fakes.
     for name, factory in [
@@ -1933,6 +1982,47 @@ def uninstall() -> None:
     for pin in [p for p in list(_pins._claims)
                 if p not in state.prev_pin_claims]:
         _pins.release(pin)
+
+    # 6. The run's ticks and the commands they left on the physics.
+    # The server keeps ONE runtime across runs, and MuJoCo keeps
+    # applying the last ctrl written, so a program stopped mid-move
+    # used to leave its bus + wheel ticks registered and its torque
+    # on the actuators: the next program's chassis drove off before
+    # it had commanded anything (534 mm in 2 s, measured). The hub's
+    # equivalent is the program-boundary motor stop (1.82.0). Every
+    # owner coasts through its OWN verb so its ``_attached`` flag
+    # can't strand True and refuse a later re-attach; ticks that
+    # predate the install (the server's pacing tick, a SimRobot's
+    # own) stay registered.
+    runtime = state.runtime
+    for bus in list(_sim_st_buses):
+        bus.torque_off_all()          # coasts (detaches + zeroes) its wheels
+        runtime.remove_tick(bus._tick)
+    del _sim_st_buses[:]
+    for motor in state.serial_by_id.values():
+        motor.coast()
+    for db in state.sim_drivebases:
+        db.stop()                     # halts the core + detaches its tick
+        db.set_use_gyro(False)        # detaches the IMU tick AND the gyro
+    for adapter in state.encoder_adapters:
+        adapter.coast()               # detaches + zeroes its actuator
+    # Whatever else the run registered — a SimRobot's own motors and
+    # drivebase driven through the script globals the server hands
+    # out — stops the same way, through its owner, so it drives
+    # again next run.
+    for fn in [t for t in list(runtime._ticks) if t not in state.prev_ticks]:
+        owner = getattr(fn, "__self__", None)
+        if isinstance(owner, SimDriveBase):
+            owner.stop()
+            # Gyro off with the feed, not just the feed: the server
+            # hands the SAME drive base to the next run, and a core
+            # still steering by the gyro with no IMU tick steered on
+            # a frozen heading (turn(90) ran past 118 degrees). The
+            # next run's set_use_gyro(True) re-attaches + re-baselines.
+            owner.set_use_gyro(False)
+        elif isinstance(owner, SimMotor):
+            owner.coast()
+        runtime.remove_tick(fn)
 
     _INSTALLED = None
 

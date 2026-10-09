@@ -396,7 +396,10 @@ def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
       the wheel-radius change so the resized wheels land on the
       floor instead of inside it (a wheel grown 14 mm into the floor
       rides on penetration-recovery forces — the issue #234 failure
-      mode, reintroduced at adoption time).
+      mode, reintroduced at adoption time). The model's reset pose
+      (``qpos0``) is lifted the same way whether or not ``data`` is
+      given, so a later ``mj_resetData`` / ``SimRobot.reset()`` /
+      ``set_pose()`` lands the resized wheels on the floor too.
     """
     import mujoco
     wheel_radius   = wheel_diameter_mm / 2000.0   # mm → m, diameter → radius
@@ -458,13 +461,18 @@ def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
     if caster_bid >= 0:
         model.body_pos[caster_bid, 2] = spec.caster_radius - chassis_z
 
-    # Refresh derived fields (e.g. cached spatial transforms) on the
-    # compiled model. ``mj_setConst`` recomputes constants like
-    # body_invweight0 from the new positions; without it the next
-    # ``mj_step`` would use stale derivations.
-    mujoco.mj_setConst(model, mujoco.MjData(model))
-
-    if data is not None and old_radius is not None:
+    # A free-jointed body takes its pose from the free joint, not from
+    # body_pos: the compiled reset pose (``model.qpos0`` — what
+    # ``mj_resetData``, a fresh ``MjData``, ``SimRobot.reset()`` /
+    # ``set_pose()`` and the server's place restore) still held the
+    # OLD ride height, so any reset after an adoption put a grown
+    # wheel back into the floor by the radius change (14 mm for 88 mm
+    # wheels), and the next adoption with the same dims found
+    # ``old_radius == wheel_radius`` and nothing left to lift. Shift
+    # it by the same delta, data or not, before ``mj_setConst`` so the
+    # derived constants are computed at the lifted pose.
+    lift = 0.0
+    if old_radius is not None:
         jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT,
                                 name + "_free")
         if jid < 0:
@@ -472,7 +480,17 @@ def apply_drivebase_dims_to_model(model, name: str = "chassis", *,
                 "model has no joint named %r — cannot lift a chassis "
                 "that has no free joint" % (name + "_free"))
         qadr = int(model.jnt_qposadr[jid])
-        data.qpos[qadr + 2] += wheel_radius - old_radius
+        lift = wheel_radius - old_radius
+        model.qpos0[qadr + 2] += lift
+
+    # Refresh derived fields (e.g. cached spatial transforms) on the
+    # compiled model. ``mj_setConst`` recomputes constants like
+    # body_invweight0 from the new positions; without it the next
+    # ``mj_step`` would use stale derivations.
+    mujoco.mj_setConst(model, mujoco.MjData(model))
+
+    if data is not None and old_radius is not None:
+        data.qpos[qadr + 2] += lift
         data.qvel[:] = 0.0
         mujoco.mj_forward(model, data)
 

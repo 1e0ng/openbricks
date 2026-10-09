@@ -33,7 +33,11 @@ matches the installed version into `~/.cache/openbricks/sim`; it is
 checked against the same project key that signs firmware images before
 it runs. `OPENBRICKS_SIM_BIN` points at a build of your own
 (`cargo build --release` in `tools/sim`). `openbricks sim app` is the
-explicit form.
+explicit form. A file named on the command line opens, or stops the
+launch: one that cannot be read, is not JSON or is not an assembly is
+refused with the reason, as is a `--bricks` bundle that will not load
+— nothing opens on the example, or on a draft of some other session,
+in its place. (The binary's own `--help` prints its usage and exits 0.)
 
 ```console
 $ openbricks sim workbench [robot.assembly.json] [--bricks more.json] [--port N] [--no-browser]
@@ -115,17 +119,26 @@ Double-click a component to edit its definition in place; every use
 follows. Open and save `robot.assembly.json` from the toolbar.
 **Import…** brings a saved build's components and bricks into this
 library, to add from: what is here already, the same, is left, and a
-clash comes in under a new id. A component's **save** in the library
+clash comes in under a new id; what the file has wrong (a brick whose
+number this library does not carry) is listed as it is on Open, and a
+build with a component inside itself is refused. A component's **save** in the library
 (or **Save as build…** on its page) writes it as a build of its own —
 a file whose robot is that component, with the bricks and components
 it needs — to open, import or put on a map elsewhere.
-Unsaved work is kept: a couple of seconds after a change settles, the
+Unsaved work is kept: a couple of seconds after a change settles (a
+drag, a run of nudges or of typing in the route's **Definitions** box,
+an undo, once it ends — never part way through), the
 build and the route are written as drafts under the data directory
 (`~/.local/share/openbricks/drafts`, or `$OPENBRICKS_DATA_DIR`), and
 the next `openbricks sim` started without a file brings them back —
 the status line says so, and Save writes the build to the file it came
-from. Saving drops the draft. (The map editor's props are saved by
-**Save map** and are not drafted.)
+from. Saving drops the draft. A draft whose note (the file it belongs
+to, when it was kept) cannot be read comes back all the same, and the
+status line says so, naming the file, rather than guess. A route (a
+draft's, or one opened) planned on a map this machine has not is shown
+on the first shipped map, the status line naming both; the route keeps
+its own map's name until you pick a map. (The map editor's props are
+saved by **Save map** and are not drafted.)
 
 **Simulate** runs your program on a map with the chassis you
 assembled. Pick the map (a shipped world, or one you saved from the
@@ -155,7 +168,10 @@ angle); a curve takes its start and its end — it enters the way the
 robot arrives at its start and is the one arc from there through its
 end, one `curve` command, so the heading it ends facing follows from
 the geometry (an end dead ahead is a straight run; one straight
-behind cannot be reached by an arc and is not drawn); as the first
+behind, or within 2° of it — where the one arc would loop nearly the
+whole circle on a radius of metres — is not drawn, and a click or a
+handle drag there is refused: "no single arc reaches a point straight
+behind the start, or within 2° of it: click elsewhere"); as the first
 action of a route, a curve also takes a point to face at its start
 between the two, the way the robot starts; a turn takes where it
 turns and a point to face; a stop or a
@@ -204,7 +220,16 @@ or `$OPENBRICKS_DATA_DIR`), not in the route file, and come back
 whenever that map loads.
 
 Routes save and load as `*.route.json` (the map, the start pose, the
-actions and the definitions); **▶ Run route** writes the route as a
+actions and the definitions). Older route formats are converted on
+load; a move that has no place in the current one is refused with its
+action number rather than placed as a different move: a backward
+straight or a backward curve (a negative `mm` or radius) from an
+`openbricks-route/2` file, a full-circle curve from one (it ends where
+it starts), an `openbricks-route/3` curve without a numeric
+`radius_mm`, and a curve of any format whose end lies exactly
+straight behind its start. The 2° band is for clicks and drags only:
+a curve in a file that loops 358° loads and runs as written.
+**▶ Run route** writes the route as a
 hub-style program (`ST3032Motor` wheels and a `DriveBase` sized from
 the chassis; edit the motor lines for other wiring) and runs it from
 the route's start — the chassis is put there first, so a second run
@@ -302,10 +327,11 @@ the tab switches to the new map, and its markers come along; saving
 again under the same name replaces it, and a shipped map's name is
 refused so it is never shadowed. Routes remember the map they were
 planned on by that name. On a map of your own the panel also offers
-**Save changes**, which writes the map in place under its own name —
-its artwork and models stay, only `map.json` is rewritten. A shipped
-map has no such button: its layout is kept as shipped, and your
-changes go into a map of your own.
+**Save changes**, which writes the map shown (the one the view and the
+props list are of — never a map picked whose load was refused) in
+place under its own name — its artwork and models stay, only
+`map.json` is rewritten. A shipped map has no such button: its layout
+is kept as shipped, and your changes go into a map of your own.
 
 **Share a map.** **Export map…** writes the map as it stands — every
 prop where it is, the ones added included — to one JSON file you name,
@@ -313,7 +339,14 @@ with everything it needs inside: the mat's artwork and meshes (as
 base64), the props' LDraw models (as text) and builds (as JSON).
 **Import map…** takes such a file and makes it a map of your own under
 its name (the next free `-2`, `-3`… when that name is a shipped map's
-or taken), listed with the rest and shown at once. Components travel
+or taken), listed with the rest and shown at once, the status line
+saying so ("imported as …", as a save says "saved as …"); like saving
+and exporting, importing waits for a running program to be stopped. A
+file that is not
+a whole export — a bare `map.json`, or one lacking a file its map
+names — is refused by name, and nothing is left behind; an export the
+sim refuses (a model gone since it was added) leaves the file already
+at that path as it was. Components travel
 the same way on the Workbench: a component's **save** writes it as a
 build of its own, and **Import…** brings a build's components in.
 
@@ -329,7 +362,12 @@ and any of them may carry a `note`; a prop is
 XML or its own binary), so the sim makes the model from `map.json` in
 memory as it loads the map; no XML is ever written. A map of your own
 saved before 4.32.0 (a `world.xml`) becomes `map.json` the first time
-the sim lists your maps; the old file is left where it was.
+the sim lists your maps; the old file is left where it was. One that
+cannot be converted (its `world.xml` truncated, or not a map's MJCF)
+is listed all the same — its row in the map picker cannot be chosen,
+and shows the file and the reason when hovered — never hides the maps
+beside it, and is refused by name, with the reason, should a route or
+a draft name it.
 
 ## The Assembly Workbench
 
@@ -370,9 +408,18 @@ robot as a tree of components:
   from a terminal, and a fetched part is in the MuJoCo runtime's
   library too, so a fetched wheel drives.
   Servos, boards and wheels are recorded as boxes, cylinders and
-  spheres, and any part you have as a mesh comes in through
+  spheres (a cylinder runs along `x`, `y` or `z` — z when the file
+  leaves `axis` out; any other value is listed with the file's errors,
+  naming the brick, and the MuJoCo runtime refuses the file the same
+  way), and any part you have as a mesh comes in through
   **Import a part from an STL file** (binary or ASCII; mm, cm, inch
-  or m; a weighed mass or a density such as PLA 1.24 g/cm³).
+  or m; a weighed mass or a density such as PLA 1.24 g/cm³). A mesh
+  that reaches beyond 327.67 mm from its origin — more than the
+  library's 0.01 mm steps hold — is packed at 0.1 mm (ten times
+  coarser for every ten it is over), the record carries the step and
+  the import summary says so; choose the bounding-box-centre origin to
+  bring a part exported at its assembly position back to the fine
+  step. A corner of the mesh that is not a number is refused.
 - **Components** are lists of bricks and other components, each
   placed by a position and a roll / pitch / yaw. Drag bricks from the
   library into the view, move and rotate them with the gizmos, select
@@ -396,7 +443,9 @@ robot as a tree of components:
   LDraw parts, and 4.8 mm bores are recognised as pin holes on every
   mesh, imported STL files included; a pin LDraw draws from plain
   cylinders (the WRO set's "Type 2" pins) is recognised on its mesh the
-  same way. Let go of a part near a hole and
+  same way, and so is an axle hole drawn from plain walls (the 24-tooth
+  gear 3648's); the rounded ends of an axle hole's four arms are not
+  taken for a pin hole. Let go of a part near a hole and
   it snaps: the pin axis aligns to the hole, a pin half centres in its
   module, an axle keeps its position along the hole. Bricks and plates
   stack: under every stud a part has a socket, and a tile, which has
@@ -427,7 +476,8 @@ robot as a tree of components:
   pose where its material would pass through a neighbour's is put back
   where it was, and a red banner across the top of the view names both
   (the status line too), a brick inside a component by its path
-  (`aa/lego_2`), until the next change is kept — while it is dragged
+  (`aa/lego_2`), until the next change is kept or the status line says
+  something else — while it is dragged
   it flushes red wherever it would overlap, and Escape abandons the
   drag. Touching is not overlapping, and at a joint — a feature seated
   in the other part's (a pin all the way in its hole, a plate down on
@@ -467,7 +517,9 @@ recorded facts only: bricks, poses, roles, spawn pose. Everything
 computed is recomputed on load. Open one with `openbricks sim
 robot.assembly.json` (or `openbricks sim workbench
 robot.assembly.json` in the browser, which also keeps your last draft
-between visits).
+between visits while it fits the browser's storage, and says so on the
+page when it does not; a file it is given that does not validate is
+not opened, and the page says why rather than open the draft instead).
 
 ## The brick library
 
@@ -492,10 +544,19 @@ part needs that ldraw.org has not is an error naming the part and the
 file, never a part with a hole in it; every pause ldraw.org asks for
 (sixty requests a minute; a part of two hundred files takes a few) is
 waited out, a connection that stalls for thirty seconds is an error,
-and a page served in place of a file is refused. A number the library
-ships is refused — the shipped record, weighed and in its sets, wins
-over a fetched copy, and one left under the data directory by an
-earlier fetch is ignored and noted at launch. `--force` fetches a
+and a page served in place of a file is refused, as is a file name
+that is not one of the library's (a `..`, an absolute path) before
+anything is asked for. A part too long for 0.01 mm steps (a 47-stud
+hose) is packed at 0.1 mm, and the fetch says so. A number the library
+ships is refused, and so is an inventory number it ships under
+LDraw's (41250, the WRO inventory's 52 mm ball, is the library's
+22119) — the shipped record, weighed and in its sets, wins over a
+fetched copy, and one left under the data directory by an earlier
+fetch is ignored and noted at launch, by both numbers, by the sim and
+the runtime alike. A `bricks` directory that is there but cannot be
+listed (a plain file in its place, a permission lost) is noted at the
+sim's launch too, naming it and the reason, rather than taken for
+nothing fetched. `--force` fetches a
 part's files (its own and its subparts, not the primitives) and
 Rebrickable's tables again; `--dest` is the LDraw cache for both
 forms. The whole

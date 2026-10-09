@@ -19,6 +19,15 @@ crashed or was killed mid-transfer never leaves a stale lock behind —
 the kernel releases it with the process. The file itself persists and
 carries the holder's PID for a curious human; the lock, not the
 content, is the guard.
+
+The lock is per MACHINE, not per account: the BLE link is shared by
+every process on the host whatever its user. On Linux the temp
+directory is the shared, sticky ``/tmp``, so the file is created
+world-writable (0666, umask cleared), and a file another account made
+read-only for us (an older CLI created it 0644) is locked through a
+read-only descriptor — ``flock`` needs no write access, so the guard
+is the same and only the PID note is lost. A lock file that cannot be
+opened at all raises :class:`UploadLockError` naming its path.
 """
 import os
 import re
@@ -45,6 +54,42 @@ class UploadInProgress(Exception):
         super().__init__(
             "%s (another openbricks run/upload is transferring to %r; "
             "wait for it to finish)" % (MESSAGE, name))
+
+
+class UploadLockError(Exception):
+    """The per-hub lock file cannot be opened, so the transfer cannot
+    be guarded."""
+
+    def __init__(self, path, err):
+        self.path = path
+        super().__init__(
+            "cannot open the per-hub upload lock %s (%s) — remove the "
+            "file (it may need its owner or root) and retry"
+            % (path, err.strerror or err))
+
+
+def _open_lock_file(path):
+    """A descriptor on the lock file, created world-writable so any
+    account on this machine can lock it later."""
+    if _WINDOWS:
+        try:
+            return os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
+        except OSError as e:
+            raise UploadLockError(path, e)
+    old_umask = os.umask(0)
+    try:
+        return os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
+    except PermissionError:
+        # Another account's file we may not write: flock takes an
+        # exclusive lock through a read-only descriptor just the same.
+        try:
+            return os.open(path, os.O_RDONLY)
+        except OSError as e:
+            raise UploadLockError(path, e)
+    except OSError as e:
+        raise UploadLockError(path, e)
+    finally:
+        os.umask(old_umask)
 
 
 def lock_path(name):
@@ -90,8 +135,10 @@ def _unlock(fd):
 
 class UploadLock:
     """Hold the hub's transfer lock: ``acquire()`` raises
-    :class:`UploadInProgress` at once when another process holds it;
-    ``release()`` is idempotent. Usable as a context manager."""
+    :class:`UploadInProgress` at once when another process holds it
+    (and :class:`UploadLockError` when the lock file cannot be
+    opened); ``release()`` is idempotent. Usable as a context
+    manager."""
 
     def __init__(self, name):
         self.name = name
@@ -101,7 +148,7 @@ class UploadLock:
     def acquire(self):
         if self._fd is not None:
             return
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = _open_lock_file(self.path)
         if not _try_lock(fd):
             os.close(fd)
             raise UploadInProgress(self.name)

@@ -90,6 +90,26 @@ class FetchTests(unittest.TestCase):
             self.assertNotIn("Traceback", err.getvalue())
             self.assertEqual([c[0] for c in calls[-2:]], ["2458", "3005"])
 
+    def test_fetch_refuses_an_inventory_number_the_library_ships_under_another(self):
+        from openbricks_sim.bricks import fetch
+
+        calls = []
+
+        def fake(number, root=None, say=None, colors=True, force=False):
+            calls.append(number)
+            return {"format": "openbricks-brick-bundle/1", "files": 1, "parts": {number: {"name": "Part " + number}}}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"OPENBRICKS_DATA_DIR": tmp}), \
+                mock.patch.object(fetch, "fetch_part", fake):
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(["bricks", "fetch", "41250", "3005", "78c18"]), 1)
+            self.assertIn("41250 is in the library already as 22119 (Ball 52mm Diameter", err.getvalue())
+            self.assertIn("78c18 is in the library already as 72039 (", err.getvalue())
+            self.assertEqual(calls, ["3005"], "the aliases are not fetched, the others are")
+            self.assertFalse(os.path.exists(os.path.join(tmp, "bricks", "41250.json")))
+            self.assertTrue(os.path.exists(os.path.join(tmp, "bricks", "3005.json")))
+
     def test_fetch_by_number_without_numpy_points_at_the_extra(self):
         import builtins
         real_import = builtins.__import__

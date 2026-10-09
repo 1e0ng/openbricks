@@ -215,6 +215,27 @@ class DeriveTests(unittest.TestCase):
         sph = {"name": "s", "mass_g": 1.0, "shapes": [{"type": "sphere", "radius": 3}]}
         self.assertAlmostEqual(assembly.part_props(sph, self.bundle)[2][1][1], 0.4 * 9)
 
+    def test_a_cylinder_axis_outside_x_y_z_is_refused_by_name(self):
+        # a wheel whose axis a hand edit wrote as "Y" measured and weighed as if along z with
+        # nothing said, so the sim run agreed with the wrong picture; left out, the axis is z
+        def cyl(axis):
+            return {"name": "wheel", "mass_g": 2.0, "shapes": [{"type": "cylinder", "radius": 5, "length": 10, "axis": axis}]}
+        for bad in ("Y", "up", "y ", ""):
+            with self.assertRaises(assembly.AssemblyError) as cm:
+                assembly.part_props(cyl(bad), self.bundle)
+            self.assertEqual(str(cm.exception), "brick 'wheel': cylinder axis must be x, y or z, got %r" % bad)
+        m, com, i, bbox = assembly.part_props(cyl("z"), self.bundle)
+        self.assertEqual(bbox, ([-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]))
+        self.assertAlmostEqual(i[2][2], 2 * 25 / 2)
+        without = {"name": "wheel", "mass_g": 2.0, "shapes": [{"type": "cylinder", "radius": 5, "length": 10}]}
+        self.assertEqual(assembly.part_props(without, self.bundle), (m, com, i, bbox))
+        # the whole derivation fails on it, naming the wheel
+        doc = copy.deepcopy(self.doc)
+        doc["parts"]["wheel_86"]["shapes"][0]["axis"] = "Y"
+        with self.assertRaises(assembly.AssemblyError) as cm:
+            assembly.derive(doc, self.bundle)
+        self.assertEqual(str(cm.exception), "brick 'Drive wheel ⌀86.4 mm': cylinder axis must be x, y or z, got 'Y'")
+
 
 @unittest.skipIf(mujoco is None, "mujoco (the [sim] extra) is required")
 class ModelTests(unittest.TestCase):

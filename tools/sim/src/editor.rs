@@ -50,7 +50,7 @@ pub struct Editor {
     pub editing: String,
     pub crumbs: Vec<String>,
     pub selection: Vec<String>,
-    undo: Vec<Document>,
+    undo: Vec<Snapshot>,
     pub dirty: bool,
     pub snap_mm: f64,
     pub magnet: bool,
@@ -77,8 +77,13 @@ pub struct Editor {
     pending: Option<Pending>,
     /// Whether the build was unsaved when the last undo point was taken.
     dirty_before: bool,
-    /// Whether the status line holds a refusal (cleared by the next change kept).
-    refused: bool,
+    /// The refusal the status line holds, while it holds it: it stands
+    /// until something else is said or a change is kept.
+    refusal: Option<String>,
+    /// Each dragged item's height during a plane drag: what every frame
+    /// puts it back to before the magnet has its say, so a pull onto a
+    /// lower seat lets go again as the pointer moves on (a lift moves it).
+    drag_z: HashMap<String, f64>,
     /// The new overlaps the change in progress would make: the bricks to
     /// tint and the note for the status line.
     /// What the change in progress would overlap: the moved instance, the
@@ -110,6 +115,16 @@ struct Pending {
     before: BTreeMap<(String, String), f64>,
 }
 
+/// An undo point: the document, whose file it was and whether it was
+/// unsaved, so that an undo across an Open, a Save or Example gives the
+/// build back under its own file (it came back under the opened file's
+/// path, clean, and a Save then wrote it over that file).
+struct Snapshot {
+    doc: Document,
+    path: Option<PathBuf>,
+    dirty: bool,
+}
+
 /// Where new instances ended up when moved clear of the others.
 enum Room {
     /// Where they were put: nothing was in the way.
@@ -130,8 +145,24 @@ pub fn mesh_key(part_id: &str, part: &Part) -> String {
 
 impl Editor {
     pub fn new(bundle: Bundle, doc: Option<(PathBuf, Document)>) -> Self {
+        // a file that is no assembly is refused here as at the other doors (Open, a draft, an
+        // import): the example opens and the status says so — the roll-up used to panic on a
+        // root that names no component
+        let mut status = String::new();
         let (path, doc) = match doc {
-            Some((p, d)) => (Some(p), d),
+            Some((p, d)) => {
+                let errs = assembly::validate(&d, &bundle);
+                if assembly::not_an_assembly(&errs) {
+                    status = format!(
+                        "Not an assembly file: {} ({}); the example is open instead",
+                        p.display(),
+                        errs.join("; ")
+                    );
+                    (None, assembly::example())
+                } else {
+                    (Some(p), d)
+                }
+            }
             None => (None, assembly::example()),
         };
         let editing = doc.robot.root.clone();
@@ -146,7 +177,7 @@ impl Editor {
             dirty: false,
             snap_mm: GRID_MM,
             magnet: true,
-            status: String::new(),
+            status,
             errors: vec![],
             notes: vec![],
             fit_pending: true,
@@ -165,7 +196,8 @@ impl Editor {
             shapes: HashMap::new(),
             pending: None,
             dirty_before: false,
-            refused: false,
+            refusal: None,
+            drag_z: HashMap::new(),
             overlapping: vec![],
         };
         ed.errors = assembly::validate(&ed.doc, &ed.bundle);
@@ -211,7 +243,7 @@ impl Editor {
     /// belonging where it did. Nothing happens without one; a draft that
     /// is not an assembly is left and said so.
     pub fn restore_draft(&mut self, now_ms: i64) -> bool {
-        let Some((text, note)) = drafts::take(&self.draft_dir, drafts::BUILD) else {
+        let Some((text, note)) = drafts::kept(&self.draft_dir, drafts::BUILD) else {
             return false;
         };
         let at = self.draft_dir.join(drafts::BUILD);
@@ -223,7 +255,7 @@ impl Editor {
             }
         };
         let errs = assembly::validate(&doc, &self.bundle);
-        if errs.iter().any(|e| e.starts_with("format") || e.starts_with("robot.root")) {
+        if assembly::not_an_assembly(&errs) {
             self.status = format!("Ignored a draft that is not an assembly at {}: {}", at.display(), errs.join("; "));
             return false;
         }
@@ -231,7 +263,9 @@ impl Editor {
         self.doc = doc;
         self.shapes.clear();
         self.pending = None;
-        self.path = note.path.clone();
+        // the draft is the work; without its note, when it was kept and the file it belongs to
+        // are unknown, which is said rather than guessed
+        self.path = note.as_ref().ok().and_then(|n| n.path.clone());
         self.editing = self.doc.robot.root.clone();
         self.crumbs = vec![self.editing.clone()];
         self.selection.clear();
@@ -240,15 +274,21 @@ impl Editor {
         self.fit_pending = true;
         self.recompute();
         self.keeper.kept(self.edits);
-        self.status = format!(
-            "Restored the unsaved draft kept {}{}{}",
-            drafts::ago(note.kept_ms, now_ms),
-            match &note.path {
-                Some(p) => format!(" of {}: Save writes it there", p.display()),
-                None => ": Save as… gives it a file".to_string(),
-            },
-            self.overlap_report()
-        );
+        self.status = match note {
+            Ok(note) => format!(
+                "Restored the unsaved draft kept {}{}{}",
+                drafts::ago(note.kept_ms, now_ms),
+                match &note.path {
+                    Some(p) => format!(" of {}: Save writes it there", p.display()),
+                    None => ": Save as… gives it a file".to_string(),
+                },
+                self.overlap_report()
+            ),
+            Err(why) => format!(
+                "Restored the unsaved draft; its note could not be read ({why}), so when it was kept and the file it belongs to are unknown: Save as… gives it a file{}",
+                self.overlap_report()
+            ),
+        };
         true
     }
 
@@ -393,7 +433,7 @@ impl Editor {
             .collect();
         self.pending = Some(Pending {
             names: names.to_vec(),
-            doc: self.undo.last().cloned().unwrap_or_else(|| self.doc.clone()),
+            doc: self.undo.last().map(|s| s.doc.clone()).unwrap_or_else(|| self.doc.clone()),
             dirty: self.dirty_before,
             undo_len: self.undo.len(),
             before,
@@ -431,24 +471,24 @@ impl Editor {
         let Some(p) = self.pending.take() else { return false };
         let Some((a, _, o, leaf)) = new.first().cloned() else {
             // a refusal's note does not outlive the next change that is kept
-            if self.refused {
+            if self.refusal.take().is_some_and(|r| r == self.status) {
                 self.status.clear();
-                self.refused = false;
             }
             return false;
         };
-        self.refused = true;
         self.undo.truncate(p.undo_len.saturating_sub(1));
         self.doc = p.doc;
         self.dirty = p.dirty;
         self.recompute();
         self.status = format!("{a} {what}: it would {}", o.phrase(&leaf));
+        self.refusal = Some(self.status.clone());
         true
     }
 
     /// The change in progress abandoned (Escape during a drag): the
     /// document goes back to before it.
     pub fn cancel_change(&mut self) {
+        self.drag_z.clear();
         self.overlapping.clear();
         if let Some(p) = self.pending.take() {
             self.undo.truncate(p.undo_len.saturating_sub(1));
@@ -457,15 +497,16 @@ impl Editor {
             self.recompute();
             self.status = format!("{} put back", p.names.join(", "));
             // abandoned, not refused: no banner over the view
-            self.refused = false;
+            self.refusal = None;
         }
     }
 
-    /// The status, when it says a change was refused (it stands until the
-    /// next change that is kept): shown over the view as well as on the
-    /// status line, which is easy to miss.
+    /// The status, while it says a change was refused: it stands until
+    /// something else is said or a change is kept (whatever was said next
+    /// — Undone, Opened, Added — used to be shown as the refusal). Shown
+    /// over the view as well as on the status line, which is easy to miss.
     pub fn refusal(&self) -> Option<&str> {
-        self.refused.then_some(self.status.as_str())
+        self.refusal.as_deref().filter(|r| *r == self.status)
     }
 
     /// What the change in progress would overlap, for the status line.
@@ -535,6 +576,13 @@ impl Editor {
         self.leaves = assembly::flatten(&self.doc, &editing);
         let names: HashSet<String> = self.doc.components[&editing].children.iter().map(|c| c.name.clone()).collect();
         self.selection.retain(|n| names.contains(n));
+        // what the roll-up finds wrong is listed too (it was computed and dropped): the check on
+        // the way in names every case in the same words, so nothing is listed twice
+        for e in errs {
+            if !self.errors.contains(&e) {
+                self.errors.push(e);
+            }
+        }
     }
 
     /// Mass properties of the component being edited.
@@ -544,12 +592,21 @@ impl Editor {
         assembly::component_props(&self.doc, &self.bundle, &editing, &mut self.memo, &mut vec![], &mut errs)
     }
 
-    pub fn push_undo(&mut self) {
-        self.dirty_before = self.dirty;
-        self.undo.push(self.doc.clone());
+    /// An undo point of `doc`, as the build stands: under its file, unsaved or not.
+    fn push_snapshot(&mut self, doc: Document) {
+        self.undo.push(Snapshot {
+            doc,
+            path: self.path.clone(),
+            dirty: self.dirty,
+        });
         if self.undo.len() > UNDO_DEPTH {
             self.undo.remove(0);
         }
+    }
+
+    pub fn push_undo(&mut self) {
+        self.dirty_before = self.dirty;
+        self.push_snapshot(self.doc.clone());
         self.dirty = true;
     }
 
@@ -561,9 +618,20 @@ impl Editor {
     pub fn undo(&mut self) {
         self.overlapping.clear();
         self.pending = None;
-        if let Some(d) = self.undo.pop() {
-            self.doc = d;
+        if let Some(s) = self.undo.pop() {
+            // a point from before an Open, Example or an import may define a part differently
+            if s.doc.parts != self.doc.parts {
+                self.shapes.clear();
+            }
+            self.doc = s.doc;
+            self.path = s.path;
+            self.dirty = s.dirty;
+            self.errors = assembly::validate(&self.doc, &self.bundle);
             self.recompute();
+            // back on what is saved, a draft of the undone change would bring it back next launch
+            if !self.dirty {
+                self.drop_draft();
+            }
             self.status = "Undone".into();
         } else {
             self.status = "Nothing to undo".into();
@@ -699,7 +767,11 @@ impl Editor {
         self.selection = vec![name.clone()];
         self.recompute();
         if self.magnet {
+            // the seat belongs to the add: one undo point, and no refusal of its own (a seat
+            // that overlaps is moved clear with the rest, below)
+            self.note_before(std::slice::from_ref(&name));
             self.snap_selection(false);
+            self.pending = None;
         }
         let room = self.clear_of_others(std::slice::from_ref(&name), [MODULE_MM, 0.0, 0.0]);
         self.status = format!(
@@ -1017,19 +1089,15 @@ impl Editor {
             return;
         }
         // a change of its own (the S key, the Snap button) is judged like any other; within a
-        // drag or an add it belongs to that change
+        // drag or an add it belongs to that change, undo point and all (a seat taken on a drop
+        // used to be a point of its own, so one undo landed the brick at the raw drop pose)
         let own = self.pending.is_none();
         if own {
             self.push_undo();
             self.note_before(&names);
         }
-        let before = self.doc.clone();
         match self.snap_fitting(&names, assembly::SNAP_MM) {
             Some(path) => {
-                if !own {
-                    self.undo.push(before);
-                    self.dirty = true;
-                }
                 self.recompute();
                 if own && self.settle("stays") {
                     return;
@@ -1054,7 +1122,7 @@ impl Editor {
         let names = self.selection.clone();
         match assembly::group(&mut self.doc, &self.editing, &names, new_id) {
             Ok(inst) => {
-                self.undo.push(before);
+                self.push_snapshot(before);
                 self.dirty = true;
                 self.status = format!("{} is now in the library", assembly::slug(new_id));
                 self.selection = vec![inst];
@@ -1077,7 +1145,7 @@ impl Editor {
         let name = self.selection[0].clone();
         match assembly::ungroup(&mut self.doc, &self.editing, &name) {
             Ok(names) => {
-                self.undo.push(before);
+                self.push_snapshot(before);
                 self.dirty = true;
                 self.status = format!("Ungrouped {name}; the component stays in the library");
                 self.selection = names;
@@ -1096,7 +1164,7 @@ impl Editor {
         let before = self.doc.clone();
         match assembly::new_component(&mut self.doc, name) {
             Ok(id) => {
-                self.undo.push(before);
+                self.push_snapshot(before);
                 self.dirty = true;
                 self.open_component(&id, true);
                 self.status = format!("{id} is in the library, empty: add bricks to it, then use it from the library");
@@ -1133,7 +1201,8 @@ impl Editor {
         let continuing = self.undo.last().is_some_and(|top| {
             let mut now = self.doc.clone();
             let was = |name: &str| {
-                top.components
+                top.doc
+                    .components
                     .get(&editing)
                     .and_then(|c| c.children.iter().find(|i| i.name == name))
                     .and_then(|i| i.color)
@@ -1143,7 +1212,7 @@ impl Editor {
                     i.color = was(&i.name);
                 }
             }
-            now == *top
+            now == top.doc
         });
         if continuing {
             self.dirty = true;
@@ -1382,7 +1451,7 @@ impl Editor {
             self.status = format!("Nothing pasted: {refused} would put a component inside itself or lack a definition");
             return 0;
         }
-        self.undo.push(before);
+        self.push_snapshot(before);
         self.dirty = true;
         self.selection = made.clone();
         self.recompute();
@@ -1415,7 +1484,7 @@ impl Editor {
         {
             Ok(doc) => {
                 let errs = assembly::validate(&doc, &self.bundle);
-                if errs.iter().any(|e| e.starts_with("format") || e.starts_with("robot.root")) {
+                if assembly::not_an_assembly(&errs) {
                     self.status = format!("Not an assembly file: {}", errs.join("; "));
                     return;
                 }
@@ -1476,8 +1545,14 @@ impl Editor {
             }
         };
         let errs = assembly::validate(&doc, &self.bundle);
-        if errs.iter().any(|e| e.starts_with("format") || e.starts_with("robot.root")) {
+        if assembly::not_an_assembly(&errs) {
             self.status = format!("Not an assembly file: {}", errs.join("; "));
+            return false;
+        }
+        // a component inside itself would be in the library for good: nothing takes one out
+        let cycles = assembly::component_cycles(&doc);
+        if !cycles.is_empty() {
+            self.status = format!("Not imported: {}", cycles.join("; "));
             return false;
         }
         let name = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
@@ -1488,8 +1563,11 @@ impl Editor {
             self.status = format!("Nothing new in {name}: its components and bricks are here already");
             return false;
         }
-        self.undo.push(before);
+        self.push_snapshot(before);
         self.dirty = true;
+        // the problems listed are the merged document's (a brick that needs a number this
+        // library lacks came in and was listed nowhere)
+        self.errors = assembly::validate(&self.doc, &self.bundle);
         self.recompute();
         let renamed = if got.renamed.is_empty() {
             String::new()
@@ -1503,8 +1581,13 @@ impl Editor {
                     .join(", ")
             )
         };
+        let problems = if errs.is_empty() {
+            String::new()
+        } else {
+            format!("; the file has problems: {}", errs.join("; "))
+        };
         self.status = format!(
-            "Imported {} component{} and {} brick{} from {name}{renamed}",
+            "Imported {} component{} and {} brick{} from {name}{renamed}{problems}",
             got.components.len(),
             if got.components.len() == 1 { "" } else { "s" },
             got.parts.len(),
@@ -1519,6 +1602,12 @@ impl Editor {
             .and_then(|t| std::fs::write(path, t).map_err(|e| e.to_string()))
         {
             Ok(()) => {
+                // the undo points under this file no longer hold what it holds
+                for s in &mut self.undo {
+                    if s.path.as_deref() == Some(path) {
+                        s.dirty = true;
+                    }
+                }
                 self.path = Some(path.to_path_buf());
                 self.dirty = false;
                 self.drop_draft();
@@ -1549,6 +1638,7 @@ impl Editor {
             .filter(|i| !i.locked)
             .map(|i| (i.name.clone(), i.pos))
             .collect();
+        self.drag_z = starts.iter().map(|(n, p)| (n.clone(), p[2])).collect();
         if starts.is_empty() {
             self.movable();
         } else {
@@ -1568,9 +1658,14 @@ impl Editor {
         for (name, p0) in starts {
             let nx = self.snap(p0[0] as f32 + dx);
             let ny = self.snap(p0[1] as f32 + dy);
+            // the height too, back from wherever the last frame's pull put it
+            let z = self.drag_z.get(name).copied();
             self.set_instance(name, |i| {
                 i.pos[0] = nx;
                 i.pos[1] = ny;
+                if let Some(z) = z {
+                    i.pos[2] = z;
+                }
             });
         }
         self.recompute();
@@ -1585,7 +1680,16 @@ impl Editor {
     /// the drag ends).
     pub fn lift_by(&mut self, starts: &[(String, [f64; 3])], dz: f64) {
         for (name, _) in starts {
-            self.set_instance(name, |i| i.pos[2] = assembly::round3(i.pos[2] + dz));
+            // from the drag's own height, not where the magnet's pull put it this frame
+            let own = self.drag_z.get(name).copied();
+            let mut lifted = None;
+            self.set_instance(name, |i| {
+                i.pos[2] = assembly::round3(own.unwrap_or(i.pos[2]) + dz);
+                lifted = Some(i.pos[2]);
+            });
+            if let Some(z) = lifted {
+                self.drag_z.insert(name.clone(), z);
+            }
         }
         self.recompute();
         self.watch();
@@ -1595,6 +1699,7 @@ impl Editor {
     /// the magnet; then, if the drag made the bricks overlap others, it
     /// is taken back.
     pub fn end_move(&mut self) {
+        self.drag_z.clear();
         if self.snap_mm > 0.0 {
             for name in self.unlocked_selection() {
                 self.set_instance(&name, |i| i.pos[2] = assembly::round3((i.pos[2] / HEIGHT_MM).round() * HEIGHT_MM));
@@ -1736,7 +1841,7 @@ mod tests {
         ed.add_instance(Some(id), None, [100.0, 0.0, 0.0]);
         assert_eq!(ed.children().len(), n + 2);
         assert_ne!(ed.selection[0], "lego_32278");
-        assert_eq!(ed.undo_depth(), 2 + usize::from(ed.status.starts_with("Snapped")));
+        assert_eq!(ed.undo_depth(), 2, "one point per add, seated or not");
     }
 
     #[test]
@@ -2075,9 +2180,16 @@ mod tests {
         ed.undo();
         assert_eq!(ed.status, "Nothing to undo");
         ed.doc.robot.name = "changed".into();
+        ed.path = Some(PathBuf::from("mine.assembly.json"));
+        ed.dirty = false;
         ed.reset_to_example();
         assert_eq!(ed.doc.robot.name, assembly::example().robot.name);
-        assert!(ed.fit_pending && ed.path.is_none());
+        assert!(ed.fit_pending && ed.path.is_none() && ed.dirty);
+        // undone, the build is back under its own file
+        ed.undo();
+        assert_eq!(ed.doc.robot.name, "changed");
+        assert_eq!(ed.path.as_deref(), Some(Path::new("mine.assembly.json")));
+        assert!(!ed.dirty);
     }
 
     #[test]
@@ -2180,6 +2292,43 @@ mod tests {
         .unwrap();
         assert!(!third.import_build(dir.join("bad.json")));
         assert!(third.status.starts_with("Not an assembly file"), "{}", third.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_undo_back_to_the_saved_build_drops_its_draft() {
+        use std::time::{Duration, Instant};
+        let dir = std::env::temp_dir().join(format!("ob-editor-undo-draft-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ed = editor();
+        ed.draft_dir = dir.join("drafts");
+        let file = dir.join("a.assembly.json");
+        ed.save_to(&file);
+        assert!(!ed.dirty);
+        // a nudge settles into a draft
+        ed.selection = vec!["imu".to_string()];
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        let t0 = Instant::now();
+        ed.autosave(t0, 1_000);
+        ed.autosave(t0 + Duration::from_secs(3), 3_000);
+        assert!(drafts::kept(&ed.draft_dir, drafts::BUILD).is_some(), "drafted");
+        // ⌘Z lands on the saved build: the draft goes, and the next launch has nothing to restore
+        ed.undo();
+        assert!(!ed.dirty);
+        ed.autosave(t0 + Duration::from_secs(10), 10_000);
+        assert!(drafts::kept(&ed.draft_dir, drafts::BUILD).is_none(), "the draft went");
+        let mut next = editor();
+        next.draft_dir = ed.draft_dir.clone();
+        assert!(!next.restore_draft(20_000), "{}", next.status);
+        // an undo that stays unsaved keeps drafting
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        ed.undo();
+        assert!(ed.dirty);
+        ed.autosave(t0 + Duration::from_secs(11), 11_000);
+        ed.autosave(t0 + Duration::from_secs(14), 14_000);
+        assert!(drafts::kept(&ed.draft_dir, drafts::BUILD).is_some(), "still unsaved: drafted");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3729,5 +3878,376 @@ mod tests {
         assert_eq!(ed.selected_instances()[0].rot[2], 85.0);
         ed.end_handle();
         assert_eq!(ed.selected_instances().len(), 2);
+    }
+
+    #[test]
+    fn undo_across_an_open_or_a_save_gives_the_build_back_under_its_own_file() {
+        // Open B over A, ⌘Z, Save: A came back under B's path, clean, and Save wrote A over B
+        let dir = std::env::temp_dir().join(format!("ob-undo-files-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b) = (dir.join("a.assembly.json"), dir.join("b.assembly.json"));
+        let mut ed = editor();
+        ed.save_to(&a);
+        let mut other = editor();
+        other.doc.robot.name = "other".into();
+        other.save_to(&b);
+        let read = |p: &Path| serde_json::from_str::<Document>(&std::fs::read_to_string(p).unwrap()).unwrap();
+        let mut ed = editor();
+        ed.load_path(a.clone());
+        ed.load_path(b.clone());
+        assert_eq!(ed.doc.robot.name, "other");
+        ed.undo();
+        assert_eq!(ed.status, "Undone");
+        assert_eq!(ed.path.as_deref(), Some(a.as_path()), "A is back under its own file");
+        assert!(!ed.dirty, "and is what that file holds");
+        assert_eq!(ed.doc.robot.name, assembly::example().robot.name);
+        ed.save_to(&ed.path.clone().unwrap());
+        assert_eq!(read(&b).robot.name, "other", "B keeps B");
+        assert_eq!(read(&a).robot.name, assembly::example().robot.name);
+        // an unsaved build, then Open: undo gives it back unsaved and belonging nowhere, so Save asks
+        let mut ed = editor();
+        ed.selection = vec!["imu".into()];
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        let nudged = ed.selected_instances()[0].pos;
+        assert!(ed.dirty && ed.path.is_none());
+        ed.load_path(b.clone());
+        assert!(!ed.dirty && ed.path.as_deref() == Some(b.as_path()));
+        ed.undo();
+        assert!(ed.dirty && ed.path.is_none(), "{:?}", ed.path);
+        assert_eq!(ed.children().iter().find(|c| c.name == "imu").unwrap().pos, nudged);
+        // save, change, save, undo: the undone build is not what its file holds, so it is unsaved
+        // and drafted (it used to come back clean, and quitting lost the undo)
+        ed.save_to(&a);
+        ed.selection = vec!["imu".into()];
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        assert!(ed.dirty, "{}", ed.status);
+        ed.save_to(&a);
+        assert!(!ed.dirty);
+        ed.undo();
+        assert_eq!(ed.path.as_deref(), Some(a.as_path()));
+        assert!(ed.dirty, "the file holds the nudge the undo took back");
+        ed.draft_dir = dir.clone();
+        let t0 = std::time::Instant::now();
+        ed.autosave(t0, 1_000);
+        ed.autosave(t0 + std::time::Duration::from_secs(3), 3_000);
+        let (_, note) = drafts::take(&dir, drafts::BUILD).expect("drafted");
+        assert_eq!(note.path.as_deref(), Some(a.as_path()));
+        // an undo within one file leaves it clean when it is back to what the file holds
+        ed.load_path(a.clone());
+        ed.selection = vec!["imu".into()];
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        assert!(ed.dirty, "{}", ed.status);
+        ed.undo();
+        assert!(!ed.dirty && ed.path.as_deref() == Some(a.as_path()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_refusal_goes_when_something_else_is_said() {
+        // the refusal's banner stayed over the view, and turned red whatever was said next:
+        // "⚠ Undone", "⚠ Opened …", "⚠ Added …"
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id.clone()), None, [0.0; 3]);
+        let b = ed.selection[0].clone();
+        // (b a module clear of a, kept: what the undo below takes back)
+        ed.nudge_selection([8.0, 0.0, 0.0]);
+        assert_eq!(ed.selected_instances()[0].pos, [40.0, 0.0, 0.0], "{}", ed.status);
+        let refuse = |ed: &mut Editor| {
+            ed.selection = vec![b.clone()];
+            ed.nudge_selection([-16.0, 0.0, 0.0]);
+            assert_eq!(ed.refusal(), Some(format!("{b} stays: it would overlap {a}").as_str()));
+        };
+        refuse(&mut ed);
+        ed.select(&a, false);
+        assert!(ed.refusal().is_some(), "a click says nothing: the refusal stands");
+        ed.undo();
+        assert_eq!(ed.status, "Undone");
+        assert_eq!(ed.children().iter().find(|i| i.name == b).unwrap().pos, [32.0, 0.0, 0.0]);
+        assert!(ed.refusal().is_none(), "{:?}", ed.refusal());
+        refuse(&mut ed);
+        ed.select_all();
+        assert!(ed.refusal().is_none(), "{:?}", ed.refusal());
+        refuse(&mut ed);
+        ed.remove_selection();
+        assert!(ed.status.starts_with("Removed"), "{}", ed.status);
+        assert!(ed.refusal().is_none(), "{:?}", ed.refusal());
+        ed.undo();
+        refuse(&mut ed);
+        let dir = std::env::temp_dir().join(format!("ob-refusal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("robot.assembly.json");
+        ed.save_to(&path);
+        assert!(ed.refusal().is_none(), "{:?}", ed.refusal());
+        refuse(&mut ed);
+        ed.load_path(path);
+        assert!(ed.status.starts_with("Opened"), "{}", ed.status);
+        assert!(ed.refusal().is_none(), "{:?}", ed.refusal());
+        let _ = std::fs::remove_dir_all(&dir);
+        // an add whose every seat overlaps (a plate over a brick at 45°) lands beside what is
+        // there, and says so as an add, not a refusal
+        let (mut ed, _) = solo("3001");
+        ed.selection.clear();
+        let brick = ed.children()[0].name.clone();
+        ed.set_instance(&brick, |i| i.rot = [0.0, 0.0, 45.0]);
+        ed.recompute();
+        ed.magnet = true;
+        let plate = ed.ensure_ldraw_part("3022").unwrap();
+        ed.add_instance(Some(plate), None, [0.0, 0.0, 9.6]);
+        assert!(ed.status.starts_with("Added lego_3022"), "{}", ed.status);
+        assert!(ed.refusal().is_none(), "{:?}", ed.refusal());
+        assert_eq!(ed.overlap_count(), 0);
+    }
+
+    #[test]
+    fn a_magnet_seat_taken_on_a_drop_or_an_add_is_one_undo_point() {
+        // the seat the magnet took on a drop was an undo point of its own: one ⌘Z landed the
+        // brick at the raw drop pose, into the studs, and a second was needed to get back
+        let (mut ed, a) = solo("3001");
+        let id = ed.ensure_ldraw_part("3001").unwrap();
+        ed.add_instance(Some(id), None, [8.0, 0.0, 9.6]);
+        let b = ed.selection[0].clone();
+        assert_eq!(ed.selected_instances()[0].pos, [8.0, 0.0, 9.6], "{}", ed.status);
+        assert_eq!(ed.overlap_count(), 0);
+        ed.magnet = true;
+        let pos = |ed: &Editor| ed.children().iter().find(|i| i.name == b).unwrap().pos;
+        // a lift 2 mm into the studs, let go: seated, one point, one undo back
+        let depth = ed.undo_depth();
+        let starts = ed.begin_move();
+        ed.lift_by(&starts, -2.0);
+        ed.end_move();
+        assert_eq!(pos(&ed), [8.0, 0.0, 9.6], "{}", ed.status);
+        assert!(ed.status.starts_with(&format!("Snapped {b} into {a}")), "{}", ed.status);
+        assert_eq!(ed.undo_depth(), depth + 1);
+        ed.undo();
+        assert_eq!(pos(&ed), [8.0, 0.0, 9.6]);
+        assert_eq!(ed.overlap_count(), 0);
+        assert_eq!(ed.undo_depth(), depth);
+        // a plane drop within the pull, already pulled live
+        ed.snap_mm = 0.0;
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 2.0, 0.5);
+        assert_eq!(pos(&ed), [8.0, 0.0, 9.6], "pulled on");
+        ed.end_move();
+        assert_eq!(ed.undo_depth(), depth + 1, "{}", ed.status);
+        ed.undo();
+        assert_eq!((pos(&ed), ed.undo_depth()), ([8.0, 0.0, 9.6], depth));
+        // a handle drag 5 mm along x, let go: seated back
+        let starts = ed.begin_handle();
+        ed.drag_handle(Handle::Axis(0), 5.0, DVec3::ZERO, &starts, true);
+        assert_eq!(pos(&ed), [13.0, 0.0, 9.6]);
+        ed.end_handle();
+        assert_eq!(pos(&ed), [8.0, 0.0, 9.6], "{}", ed.status);
+        assert_eq!(ed.undo_depth(), depth + 1);
+        ed.undo();
+        assert_eq!((pos(&ed), ed.undo_depth()), ([8.0, 0.0, 9.6], depth));
+        // an add the magnet seats (a plate let go a touch off, into b, lands on b's studs): one
+        // point, and one undo removes the brick
+        let n = ed.children().len();
+        let plate = ed.ensure_ldraw_part("3022").unwrap();
+        ed.add_instance(Some(plate), None, [1.0, 0.5, 9.6]);
+        assert_eq!(ed.selected_instances()[0].pos, [0.0, 0.0, 12.8], "{}", ed.status);
+        assert_eq!(ed.status, "Added lego_3022 to robot");
+        assert_eq!(ed.undo_depth(), depth + 1);
+        ed.undo();
+        assert_eq!(ed.children().len(), n);
+    }
+
+    #[test]
+    fn a_file_whose_root_names_no_component_opens_as_the_example_and_says_so() {
+        // given on the command line, such a file reached the roll-up and panicked there
+        let mut doc = assembly::example();
+        doc.robot.root = "chasis".into();
+        let ed = Editor::new(real_bundle(), Some((PathBuf::from("x.assembly.json"), doc)));
+        assert!(ed.path.is_none());
+        assert_eq!(ed.doc.robot.root, assembly::example().robot.root);
+        assert!(ed.status.starts_with("Not an assembly file: x.assembly.json"), "{}", ed.status);
+        assert!(ed.status.contains("robot.root must name a component"), "{}", ed.status);
+        // a build with problems short of that still opens, with them listed
+        let mut doc = assembly::example();
+        doc.parts.insert(
+            "ghost".into(),
+            Part {
+                name: "Ghost".into(),
+                category: "lego".into(),
+                mass_g: 1.0,
+                source: String::new(),
+                source_note: String::new(),
+                ldraw: Some("0000".into()),
+                shapes: vec![],
+                extra: Default::default(),
+            },
+        );
+        let ed = Editor::new(real_bundle(), Some((PathBuf::from("x.assembly.json"), doc)));
+        assert_eq!(ed.path.as_deref(), Some(Path::new("x.assembly.json")));
+        assert!(ed.errors.iter().any(|e| e.contains("0000")), "{:?}", ed.errors);
+        assert!(ed.status.is_empty(), "{}", ed.status);
+    }
+
+    #[test]
+    fn an_import_lists_the_files_problems_and_refuses_a_component_inside_itself() {
+        let dir = std::env::temp_dir().join(format!("ob-import-problems-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ghost_part = Part {
+            name: "Ghost".into(),
+            category: "lego".into(),
+            mass_g: 1.0,
+            source: String::new(),
+            source_note: String::new(),
+            ldraw: Some("99999".into()),
+            shapes: vec![],
+            extra: Default::default(),
+        };
+        let child = |name: &str, part: Option<&str>, component: Option<&str>| Instance {
+            name: name.into(),
+            part: part.map(String::from),
+            component: component.map(String::from),
+            pos: [0.0; 3],
+            rot: [0.0; 3],
+            locked: false,
+            color: None,
+        };
+        // a build of one component holding one brick, which needs a number no library has
+        let mut doc = assembly::subset(&assembly::example(), &assembly::example().robot.root).unwrap();
+        doc.parts.clear();
+        doc.components.clear();
+        doc.parts.insert("ghost".into(), ghost_part);
+        doc.components.insert(
+            "thing".into(),
+            Component {
+                note: String::new(),
+                children: vec![child("ghost", Some("ghost"), None)],
+            },
+        );
+        doc.robot.root = "thing".into();
+        let file = dir.join("ghost.assembly.json");
+        std::fs::write(&file, serde_json::to_string(&doc).unwrap()).unwrap();
+        let bare = || {
+            let mut ed = Editor::new(real_bundle(), None);
+            ed.doc.parts.clear();
+            ed.doc.components.retain(|k, _| *k == ed.doc.robot.root);
+            ed.doc.components.get_mut(&ed.doc.robot.root).unwrap().children.clear();
+            ed.doc.robot.roles.clear();
+            ed.recompute();
+            ed
+        };
+        let mut ed = bare();
+        assert!(ed.import_build(file.clone()), "{}", ed.status);
+        let problem = "brick ghost needs LDraw part 99999, which this library does not carry";
+        assert!(ed.status.starts_with("Imported 1 component"), "{}", ed.status);
+        assert!(ed.status.contains(problem), "said: {}", ed.status);
+        assert!(ed.errors.iter().any(|e| e == problem), "listed: {:?}", ed.errors);
+        let mut other = editor();
+        other.load_path(file.clone());
+        assert!(other.errors.iter().any(|e| e == problem), "Open lists the same: {:?}", other.errors);
+        // undone, the import's problems go with it
+        ed.undo();
+        assert!(ed.errors.is_empty(), "{:?}", ed.errors);
+        // a component inside itself would be in the library for good: refused
+        let mut cyclic = assembly::subset(&assembly::example(), &assembly::example().robot.root).unwrap();
+        cyclic.components.insert(
+            "a".into(),
+            Component {
+                note: String::new(),
+                children: vec![child("b1", None, Some("b"))],
+            },
+        );
+        cyclic.components.insert(
+            "b".into(),
+            Component {
+                note: String::new(),
+                children: vec![child("a2", None, Some("a"))],
+            },
+        );
+        let loop_file = dir.join("loop.assembly.json");
+        std::fs::write(&loop_file, serde_json::to_string(&cyclic).unwrap()).unwrap();
+        let mut ed = bare();
+        assert!(!ed.import_build(loop_file.clone()), "{}", ed.status);
+        assert_eq!(ed.status, "Not imported: component a contains itself through b");
+        assert!(!ed.doc.components.contains_key("a"));
+        // opened, it is listed, and the roll-up ends
+        let mut other = editor();
+        other.load_path(loop_file);
+        assert!(other.status.starts_with("Opened"), "{}", other.status);
+        assert!(
+            other.errors.iter().any(|e| e == "component a contains itself through b"),
+            "{:?}",
+            other.errors
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn what_the_roll_up_finds_wrong_is_listed() {
+        // the roll-up's errors were computed and dropped
+        let (mut ed, a) = solo("3001");
+        assert!(ed.errors.is_empty());
+        ed.set_instance(&a, |i| i.part = Some("no-such-part".into()));
+        ed.recompute();
+        assert!(
+            ed.errors
+                .iter()
+                .any(|e| e == "component robot: brick no-such-part is not in the library"),
+            "{:?}",
+            ed.errors
+        );
+        ed.recompute();
+        assert_eq!(ed.errors.len(), 1, "once: {:?}", ed.errors);
+        // a part that carries a record left short is named on the way in
+        let mut doc = assembly::example();
+        let mut short = doc.parts.values().next().unwrap().clone();
+        short.ldraw = Some("9999".into());
+        short.extra.insert(
+            "mesh".into(),
+            serde_json::json!({"verts": 0, "tris": 0, "pos": "", "nrm": "", "idx": ""}),
+        );
+        doc.parts.insert("short".into(), short);
+        let ed = Editor::new(real_bundle(), Some((PathBuf::from("x.assembly.json"), doc)));
+        assert!(
+            ed.errors.iter().any(|e| e == "brick short's mesh record lacks bbox"),
+            "{:?}",
+            ed.errors
+        );
+    }
+
+    #[test]
+    fn the_plane_drag_keeps_its_height_between_pulls() {
+        // a plate dragged over a brick was pulled down onto its studs and stayed down after the
+        // pointer moved on: the pull wrote the height, and the next frame put back x and y only
+        let (mut ed, _) = solo("3001");
+        let plate = ed.ensure_ldraw_part("3022").unwrap();
+        ed.add_instance(Some(plate), None, [0.0, 0.0, 4.8]);
+        let p = ed.selection[0].clone();
+        assert_eq!(ed.selected_instances()[0].pos, [0.0, 0.0, 4.8], "{}", ed.status);
+        ed.magnet = true;
+        ed.snap_mm = 0.0;
+        let pos = |ed: &Editor| ed.children().iter().find(|i| i.name == p).unwrap().pos;
+        let starts = ed.begin_move();
+        ed.move_by(&starts, 2.0, 0.0);
+        assert_eq!(pos(&ed), [0.0, 0.0, 3.2], "pulled down onto the studs");
+        ed.move_by(&starts, 30.0, 0.0);
+        assert_eq!(pos(&ed), [30.0, 0.0, 4.8], "free of the magnet, at the drag's own height");
+        ed.move_by(&starts, 2.0, 0.0);
+        assert_eq!(pos(&ed), [0.0, 0.0, 3.2], "and pulled again on the way back");
+        // Shift held while the magnet pulls: the lift is from the drag's own height, so the
+        // pulled height does not stick — a frame of no lift, then a lift, each dragged clear
+        ed.lift_by(&starts, 0.0);
+        ed.move_by(&starts, 30.0, 0.0);
+        assert_eq!(pos(&ed), [30.0, 0.0, 4.8], "a lift of nothing changed nothing");
+        ed.move_by(&starts, 2.0, 0.0);
+        assert_eq!(pos(&ed), [0.0, 0.0, 3.2], "pulled");
+        ed.lift_by(&starts, 1.6);
+        ed.move_by(&starts, 30.0, 0.0);
+        assert_eq!(pos(&ed), [30.0, 0.0, 6.4], "free: the drag's height plus the lift");
+        ed.lift_by(&starts, -1.6);
+        assert_eq!(pos(&ed), [30.0, 0.0, 4.8]);
+        // a lift holds through the plane frames that follow it
+        ed.move_by(&starts, 30.0, 0.0);
+        ed.lift_by(&starts, 3.2);
+        assert_eq!(pos(&ed), [30.0, 0.0, 8.0]);
+        ed.move_by(&starts, 31.0, 0.0);
+        assert_eq!(pos(&ed), [31.0, 0.0, 8.0]);
+        ed.end_move();
+        assert_eq!(pos(&ed), [31.0, 0.0, 8.0], "{}", ed.status);
     }
 }

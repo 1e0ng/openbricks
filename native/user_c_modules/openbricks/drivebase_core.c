@@ -328,6 +328,7 @@ void ob_drivebase_curve(ob_drivebase_t *db,
         }
         db->done          = false;
         db->settling = false;
+        db->stopping = false;
         db_move_state_reset(db);
         return;
     }

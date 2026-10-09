@@ -29,7 +29,9 @@ struct Args {
     python: Option<String>,
 }
 
-fn parse_args(argv: &[String]) -> Result<Args, String> {
+/// The command line: the arguments, or None for a request for help
+/// (which is no error).
+fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
     let mut args = Args {
         bricks: vec![],
         file: None,
@@ -47,7 +49,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                 i += 1;
                 args.python = Some(argv.get(i).ok_or("--python needs an interpreter path")?.clone());
             }
-            "-h" | "--help" => return Err("usage: openbricks-sim [--python PYTHON] [--bricks BUNDLE]... [robot.assembly.json]".into()),
+            "-h" | "--help" => return Ok(None),
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             s => {
                 if args.file.is_some() {
@@ -58,18 +60,15 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         }
         i += 1;
     }
-    Ok(args)
+    Ok(Some(args))
 }
 
-fn main() -> eframe::Result {
-    let argv: Vec<String> = std::env::args().skip(1).collect();
-    let args = match parse_args(&argv) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(2);
-        }
-    };
+const USAGE: &str = "usage: openbricks-sim [--python PYTHON] [--bricks BUNDLE]... [robot.assembly.json]";
+
+/// The brick library: every bundle named, merged. A bundle that will
+/// not load is an error: the library would be missing what the user
+/// (or `openbricks sim`, with the shipped bundle) asked for.
+fn load_bundles(paths: &[PathBuf]) -> Result<bundle::Bundle, String> {
     let mut bundle = bundle::Bundle {
         format: String::new(),
         source: String::new(),
@@ -78,30 +77,61 @@ fn main() -> eframe::Result {
         sets: Default::default(),
         colors: Default::default(),
     };
-    let mut notes = Vec::new();
-    for p in &args.bricks {
-        match bundle::load_bundle(p) {
-            Ok(b) => bundle.merge(b),
-            Err(e) => eprintln!("warning: {e}"),
-        }
+    for p in paths {
+        bundle.merge(bundle::load_bundle(p)?);
     }
+    Ok(bundle)
+}
+
+/// The assembly file named on the command line, read and checked: one
+/// that cannot be read, is not JSON or is not an assembly is an error
+/// naming it, so nothing else opens in its place.
+fn open_named(p: PathBuf, bundle: &bundle::Bundle) -> Result<(PathBuf, assembly::Document), String> {
+    let text = std::fs::read_to_string(&p).map_err(|e| format!("could not open {}: {e}", p.display()))?;
+    let doc: assembly::Document =
+        serde_json::from_str(&text).map_err(|e| format!("could not open {}: not an assembly file ({e})", p.display()))?;
+    let errs = assembly::validate(&doc, bundle);
+    if assembly::not_an_assembly(&errs) {
+        return Err(format!("could not open {}: not an assembly file: {}", p.display(), errs.join("; ")));
+    }
+    Ok((p, doc))
+}
+
+fn main() -> eframe::Result {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let args = match parse_args(&argv) {
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            println!("{USAGE}");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+    };
+    // what the user named must open, or the launch stops with the reason: a window on the
+    // example, or on a draft of some other session, in place of the file asked for would hide it
+    let mut bundle = match load_bundles(&args.bricks) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    };
+    let mut notes = Vec::new();
     // the parts fetched by number, kept under the data directory (the library's own win)
     for note in bundle::merge_user_bricks(&mut bundle, &markers::data_dir().join("bricks")) {
         eprintln!("warning: {note}");
         notes.push(note);
     }
-    let doc = args.file.and_then(|p| {
-        match std::fs::read_to_string(&p)
-            .map_err(|e| e.to_string())
-            .and_then(|t| serde_json::from_str::<assembly::Document>(&t).map_err(|e| e.to_string()))
-        {
-            Ok(d) => Some((p, d)),
-            Err(e) => {
-                eprintln!("warning: could not open {}: {e}", p.display());
-                None
-            }
+    let doc = match args.file.map(|p| open_named(p, &bundle)).transpose() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
         }
-    });
+    };
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: eframe::egui::ViewportBuilder::default()
@@ -131,6 +161,7 @@ mod tests {
             "b.json".into(),
             "r.json".into(),
         ])
+        .unwrap()
         .unwrap();
         assert_eq!(a.bricks.len(), 2);
         assert_eq!(a.python.as_deref(), Some("/usr/bin/python3"));
@@ -139,6 +170,53 @@ mod tests {
         assert!(parse_args(&["--bricks".into()]).is_err());
         assert!(parse_args(&["--nope".into()]).is_err());
         assert!(parse_args(&["a".into(), "b".into()]).is_err());
-        assert!(parse_args(&["--help".into()]).unwrap_err().starts_with("usage"));
+    }
+
+    #[test]
+    fn help_is_asked_for_not_an_error() {
+        // help is its own outcome (usage on stdout, exit 0), apart from a bad command line
+        assert!(matches!(parse_args(&["--help".into()]), Ok(None)));
+        assert!(matches!(parse_args(&["-h".into()]), Ok(None)));
+        assert!(matches!(parse_args(&[]), Ok(Some(Args { file: None, .. }))));
+        assert_eq!(parse_args(&["--nope".into()]).unwrap_err(), "unknown option --nope");
+        assert!(USAGE.starts_with("usage: openbricks-sim"));
+    }
+
+    #[test]
+    fn a_named_file_that_will_not_open_is_refused_by_name() {
+        let dir = std::env::temp_dir().join(format!("ob-main-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bundle = load_bundles(&[]).unwrap();
+        let missing = dir.join("robto.assembly.json");
+        let e = open_named(missing.clone(), &bundle).unwrap_err();
+        assert!(e.starts_with(&format!("could not open {}", missing.display())), "{e}");
+        let text = dir.join("notes.json");
+        std::fs::write(&text, "{\"a\": 1}").unwrap();
+        let e = open_named(text.clone(), &bundle).unwrap_err();
+        assert!(
+            e.starts_with(&format!("could not open {}: not an assembly file", text.display())),
+            "{e}"
+        );
+        let wrong = dir.join("map.assembly.json");
+        std::fs::write(
+            &wrong,
+            r#"{"format": "x/9", "parts": {}, "components": {"x": {}}, "robot": {"root": "y"}}"#,
+        )
+        .unwrap();
+        let e = open_named(wrong.clone(), &bundle).unwrap_err();
+        assert!(
+            e.contains("not an assembly file: format must be") && e.contains("robot.root"),
+            "{e}"
+        );
+        // a good one opens, under its path
+        let good = dir.join("robot.assembly.json");
+        std::fs::write(&good, serde_json::to_string(&assembly::example()).unwrap()).unwrap();
+        let (p, doc) = open_named(good.clone(), &bundle).unwrap();
+        assert_eq!((p, doc.robot.root.as_str()), (good, assembly::example().robot.root.as_str()));
+        // a bundle that will not load stops the library, by name
+        let e = load_bundles(&[dir.join("none.json")]).unwrap_err();
+        assert!(e.contains("none.json"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

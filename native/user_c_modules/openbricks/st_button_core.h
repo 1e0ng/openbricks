@@ -120,9 +120,10 @@ ob_button_event_t ob_button_tick(ob_button_t *b);
 // tick gap 140 ms). Call ob_button_arm_transition at every
 // disarm->arm edge: it marks any press in flight (stable-down OR
 // mid-debounce window) as stale. ob_button_event_is_stale then
-// consumes exactly that press's late edge; a release — or the
-// window decaying without ever confirming — ends the staleness, so
-// the NEXT press stops normally.
+// consumes exactly that press's late edge; its release — or the
+// window decaying without ever confirming — ends the staleness and
+// starts the release-chatter cooldown, so the NEXT press after it
+// stops normally.
 void ob_button_arm_transition(ob_button_t *b);
 
 // Clear the stale marker (call on disarm — a fresh arm re-derives it).

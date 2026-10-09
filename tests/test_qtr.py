@@ -9,6 +9,7 @@ RIGHT, and a positive position means the line is RIGHT of centre.
 
 import tests._fakes  # noqa: F401
 
+import os
 import unittest
 
 from machine import ADC
@@ -779,6 +780,44 @@ class TwoArrayTests(unittest.TestCase):
         ADC.reads = {p: _MAT for p in range(1, 11)}
         QTRLineSensor()
         QTRLineSensor()
+
+    def test_program_boundary_releases_the_array_pins(self):
+        # The hub keeps one interpreter across runs: a program that
+        # built the ten-channel window must not keep GPIO 1-10 claimed
+        # for the next program, which rewires them as the 8-channel
+        # window plus a rear pair. The boot claims stay.
+        from openbricks import launcher
+        _pins.claim(39, "program button")
+        ADC.reads = {p: _MAT for p in range(1, 11)}
+        prog = "/tmp/_openbricks_qtr_boundary_prog.py"
+        try:
+            with open(prog, "w") as f:
+                f.write("from openbricks.drivers.qtr import QTRLineSensor\n"
+                        "QTRLineSensor()\n")
+            launcher._exec_program_raw(prog, origin="test")
+            self.assertEqual(_pins._claims[9][0],
+                             "QTR array on GPIO 1,2,3,4,5,6,7,8,9,10")
+            with open(prog, "w") as f:
+                f.write("from openbricks.drivers.qtr import "
+                        "QTRArray, QTRLineSensor\n"
+                        "QTRLineSensor(channels=8)\n"
+                        "QTRArray(pins=(9, 10), pitch_mm=8.0)\n")
+            launcher._exec_program_raw(prog, origin="test")
+            self.assertEqual(_pins._claims[1][0],
+                             "QTR array on GPIO 1,2,3,4,5,6,7,8")
+            self.assertEqual(_pins._claims[9][0], "QTR array on GPIO 9,10")
+            with open(prog, "w") as f:
+                f.write("from openbricks.drivers.qtr import QTRChannel\n"
+                        "QTRChannel(pin=9)\n")
+            launcher._exec_program_raw(prog, origin="test")
+            self.assertEqual(_pins._claims[9][0], "QTR array on GPIO 9")
+            self.assertFalse(1 in _pins._claims, _pins._claims)
+        finally:
+            try:
+                os.remove(prog)
+            except OSError:
+                pass
+        self.assertEqual(_pins._claims[39], ("program button", ""))
 
     def test_each_array_keeps_its_own_calibration_file(self):
         ADC.reads = {p: _swing() for p in range(1, 11)}

@@ -72,13 +72,12 @@ impl PartFetch {
                 let _ = tx_err.send(Line::Stderr(line));
             }
         });
-        let own = out.to_path_buf();
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if line.trim().is_empty() {
                     continue;
                 }
-                let msg = match parse(&line, &own) {
+                let msg = match parse(&line) {
                     Ok(l) => l,
                     Err(e) => Line::Error(format!("{e}: {}", head(&line, 200))),
                 };
@@ -156,24 +155,46 @@ fn head(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
-fn parse(line: &str, out: &Path) -> Result<Line, String> {
+/// One line of the fetcher's: the fields an event always carries are
+/// required, so a line short of one (a fetcher of another version, a
+/// name that came out null) is an error naming the field, never a part
+/// with no name, no files and the sim's own guess of its path. Only
+/// `note` is optional: the fetcher sends it when Rebrickable lists no
+/// colours.
+fn parse(line: &str) -> Result<Line, String> {
     let v: serde_json::Value = serde_json::from_str(line).map_err(|e| format!("{e}"))?;
-    let s = |k: &str| v.get(k).and_then(serde_json::Value::as_str).unwrap_or("").to_string();
-    let n = |k: &str| v.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0);
-    match s("ev").as_str() {
-        "log" => Ok(Line::Log(s("text"))),
-        "error" => Ok(Line::Error(s("text"))),
-        "fetched" => Ok(Line::Fetched(Outcome::Fetched {
-            name: s("name"),
-            files: n("files"),
-            colors: n("colors"),
-            note: Some(s("note")).filter(|t| !t.is_empty()),
-            out: if s("out").is_empty() {
-                out.to_path_buf()
-            } else {
-                PathBuf::from(s("out"))
-            },
-        })),
+    let ev = v.get("ev").and_then(serde_json::Value::as_str).ok_or("event without ev")?;
+    let s = |k: &str| {
+        v.get(k)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| format!("{ev} event without {k}"))
+    };
+    let n = |k: &str| {
+        v.get(k)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| format!("{ev} event without {k}"))
+    };
+    match ev {
+        "log" => Ok(Line::Log(s("text")?)),
+        "error" => Ok(Line::Error(s("text")?)),
+        "fetched" => {
+            let out = s("out")?;
+            if out.is_empty() {
+                return Err("fetched event with an empty out".into());
+            }
+            Ok(Line::Fetched(Outcome::Fetched {
+                name: s("name")?,
+                files: n("files")?,
+                colors: n("colors")?,
+                note: v
+                    .get("note")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string),
+                out: PathBuf::from(out),
+            }))
+        }
         other => Err(format!("unknown event {other:?}")),
     }
 }
@@ -269,5 +290,69 @@ mod tests {
         }
         assert!(PartFetch::start("/no/such/python", &[], "1", &out).is_err());
         let _ = std::fs::remove_dir_all(&fake.dir);
+    }
+
+    #[test]
+    fn a_fetched_event_short_of_a_field_is_refused_not_taken_for_a_nameless_part() {
+        // a fetcher of another version (a renamed key, a name that came out null) used to be a
+        // success with name "", 0 files, 0 colours and the sim's own guess of the file; the
+        // stdout reader turns the error into the failure's text with the line's head
+        let err = |line: &str| match parse(line) {
+            Err(e) => e,
+            Ok(_) => panic!("{line} parsed"),
+        };
+        assert_eq!(err(r#"{"ev":"fetched"}"#), "fetched event without out");
+        assert_eq!(
+            err(r#"{"ev":"fetched","part":"2458","files":19,"colors":15,"out":"/x/2458.json"}"#),
+            "fetched event without name"
+        );
+        assert_eq!(
+            err(r#"{"ev":"fetched","name":null,"files":19,"colors":15,"out":"/x/2458.json"}"#),
+            "fetched event without name"
+        );
+        assert_eq!(
+            err(r#"{"ev":"fetched","name":"P","files":19,"colors":15,"out":""}"#),
+            "fetched event with an empty out"
+        );
+        assert_eq!(
+            err(r#"{"ev":"fetched","name":"P","colors":15,"out":"/x/2458.json"}"#),
+            "fetched event without files"
+        );
+        assert_eq!(
+            err(r#"{"ev":"fetched","name":"P","files":"19","colors":15,"out":"/x/2458.json"}"#),
+            "fetched event without files"
+        );
+        assert_eq!(
+            err(r#"{"ev":"fetched","name":"P","files":19,"out":"/x/2458.json"}"#),
+            "fetched event without colors"
+        );
+        assert_eq!(err(r#"{"ev":"log"}"#), "log event without text");
+        assert_eq!(err(r#"{"ev":"error","message":"boom"}"#), "error event without text");
+        assert_eq!(err(r#"{"text":"no event"}"#), "event without ev");
+        assert_eq!(err(r#"{"ev":"weird"}"#), "unknown event \"weird\"");
+        // whole, with colours at zero and no note, it is a part; the note rides when it is there
+        match parse(r#"{"ev":"fetched","name":"P","files":19,"colors":0,"out":"/x/2458.json"}"#) {
+            Ok(Line::Fetched(Outcome::Fetched {
+                name,
+                files,
+                colors,
+                note,
+                out,
+            })) => {
+                assert_eq!(
+                    (name.as_str(), files, colors, note, out),
+                    ("P", 19, 0, None, PathBuf::from("/x/2458.json"))
+                );
+            }
+            _ => panic!("a whole fetched event is the part"),
+        }
+        match parse(r#"{"ev":"fetched","name":"P","files":19,"colors":0,"note":"Rebrickable lists no colours for 2458","out":"/x"}"#) {
+            Ok(Line::Fetched(Outcome::Fetched { note, .. })) => assert_eq!(note.as_deref(), Some("Rebrickable lists no colours for 2458")),
+            _ => panic!("the note rides along"),
+        }
+        match parse(r#"{"ev":"log","text":"fetched parts/2458.dat"}"#) {
+            Ok(Line::Log(t)) => assert_eq!(t, "fetched parts/2458.dat"),
+            _ => panic!("a log line"),
+        }
     }
 }
